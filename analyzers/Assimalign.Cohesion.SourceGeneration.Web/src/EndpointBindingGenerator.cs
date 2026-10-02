@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -7,6 +8,7 @@ using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Text;
 
 using Assimalign.Cohesion.SourceGeneration.Web.Internal;
@@ -19,9 +21,10 @@ namespace Assimalign.Cohesion.SourceGeneration.Web;
 /// <c>Assimalign.Cohesion.Web.RouterGroupBuilderEndpointExtensions</c> (route groups). Each typed call site — for
 /// example <c>app.MapGet("/users/{id}", (int id, IHttpContext context) =&gt; ...)</c> — is intercepted
 /// with a C# interceptor that casts the handler back to its concrete delegate type, binds each
-/// parameter from the request (route / query / header / body / form, plus direct injections), and
-/// invokes the handler directly. No reflection and no expression compilation happen at run time.
-/// Call sites the generator cannot model are left untouched, so the placeholder overload throws.
+/// parameter from the request (route / query / header / body / form, plus direct injections), invokes
+/// the handler directly, and writes the value it returns, if any. No reflection and no expression
+/// compilation happen at run time. A call site whose handler cannot be modeled is reported as a
+/// <c>COHWEB</c> compile-time error instead of being left to the placeholder overload, which throws.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class EndpointBindingGenerator : IIncrementalGenerator
@@ -34,6 +37,15 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     // name it, so an application without the package is unaffected.
     private const string antiforgeryMetadataTypeName = "Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata";
     private const string antiforgeryRequirement = ".WithMetadata(global::" + antiforgeryMetadataTypeName + ".Required)";
+
+    // The Web.Serialization entry points the emitted code calls to read a body and to write a returned
+    // value. The generator does not reference the package either; a call site that needs one reports
+    // COHWEB0007 when the consuming compilation cannot name it.
+    private const string requestSerializationTypeName = "Assimalign.Cohesion.Web.Serialization.HttpRequestSerializationExtensions";
+    private const string contentNegotiationTypeName = "Assimalign.Cohesion.Web.Serialization.HttpContentNegotiationExtensions";
+
+    // Generated code invokes a handler through its Func<...>/Action<...> type, which takes at most 16 parameters.
+    private const int maxHandlerParameters = 16;
 
     private static readonly SymbolDisplayFormat _fullyQualified = new(
         globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Included,
@@ -51,11 +63,23 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var endpoints = context.SyntaxProvider.CreateSyntaxProvider(
+        IncrementalValuesProvider<EndpointAnalysis> analyses = context.SyntaxProvider.CreateSyntaxProvider(
                 predicate: static (node, _) => IsCandidate(node),
-                transform: static (ctx, ct) => Transform(ctx, ct))
-            .Where(static model => model is not null)
-            .Select(static (model, _) => model!.Value)
+                transform: static (ctx, ct) => Analyze(ctx, ct))
+            .Where(static analysis => analysis is not null)
+            .Select(static (analysis, _) => analysis!.Value);
+
+        // Diagnostics go through RegisterSourceOutput so the IDE reports them while the code is typed; the
+        // interceptors themselves are implementation-only output.
+        context.RegisterSourceOutput(
+            analyses
+                .Where(static analysis => analysis.Diagnostics.Count > 0)
+                .Select(static (analysis, _) => analysis.Diagnostics),
+            static (spc, diagnostics) => Report(spc, diagnostics));
+
+        IncrementalValueProvider<ImmutableArray<EndpointBinding>> endpoints = analyses
+            .Where(static analysis => analysis.Binding is not null)
+            .Select(static (analysis, _) => analysis.Binding!.Value)
             .Collect();
 
         context.RegisterImplementationSourceOutput(endpoints, static (spc, models) => Emit(spc, models));
@@ -69,88 +93,84 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         }
         && _verbs.Contains(memberAccess.Name.Identifier.Text);
 
-    private static EndpointBinding? Transform(GeneratorSyntaxContext ctx, CancellationToken ct)
+    // ---------------------------------------------------------------------
+    // Analysis
+    // ---------------------------------------------------------------------
+
+    private static EndpointAnalysis? Analyze(GeneratorSyntaxContext ctx, CancellationToken ct)
     {
         var invocation = (InvocationExpressionSyntax)ctx.Node;
         SemanticModel model = ctx.SemanticModel;
         Compilation compilation = model.Compilation;
 
-        if (model.GetSymbolInfo(invocation, ct).Symbol is not IMethodSymbol method)
+        // The operation tree identifies the handler, not the symbol API: a method group converted to
+        // System.Delegate reports no symbol (only a candidate), while its operation carries the delegate
+        // creation, the target method, and the delegate type the compiler inferred.
+        if (model.GetOperation(invocation, ct) is not IInvocationOperation operation)
         {
             return null;
         }
+
+        IMethodSymbol method = operation.TargetMethod;
 
         if (!_verbs.Contains(method.Name))
         {
             return null;
         }
 
-        // Identify the typed (System.Delegate) overload; the WebApplicationMiddleware overloads are
-        // registered verbatim and are not our concern.
-        int delegateParameterIndex = -1;
-        int patternParameterIndex = -1;
+        // The extension symbol should be the Web.Api mapping helper.
+        if (method.ContainingNamespace?.ToDisplayString() is { } containingNamespace
+            && !containingNamespace.StartsWith(WebNamespace, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        // Identify the typed (System.Delegate) overload by the parameters its arguments bind to, so named
+        // arguments in any order resolve; the WebApplicationMiddleware overloads are registered verbatim
+        // and are not our concern.
+        INamedTypeSymbol? httpMethodType = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.HttpMethod");
+        IArgumentOperation? handlerArgument = null;
+        IArgumentOperation? patternArgument = null;
         bool hasMethodParameter = false;
 
-        INamedTypeSymbol? httpMethodType = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.HttpMethod");
-
-        for (int i = 0; i < method.Parameters.Length; i++)
+        foreach (IArgumentOperation argument in operation.Arguments)
         {
-            ITypeSymbol parameterType = method.Parameters[i].Type;
+            if (argument.Parameter is not { } parameter)
+            {
+                continue;
+            }
 
-            if (parameterType.ToDisplayString() == "System.Delegate")
+            if (parameter.Type.ToDisplayString() == "System.Delegate")
             {
-                delegateParameterIndex = i;
+                handlerArgument = argument;
             }
-            else if (parameterType.SpecialType == SpecialType.System_String)
+            else if (parameter.Type.SpecialType == SpecialType.System_String)
             {
-                patternParameterIndex = i;
+                patternArgument = argument;
             }
-            else if (httpMethodType is not null && SymbolEqualityComparer.Default.Equals(parameterType, httpMethodType))
+            else if (httpMethodType is not null && SymbolEqualityComparer.Default.Equals(parameter.Type, httpMethodType))
             {
                 hasMethodParameter = true;
             }
         }
 
-        if (delegateParameterIndex < 0 || patternParameterIndex < 0)
+        if (handlerArgument?.Syntax is not ArgumentSyntax handlerSyntax
+            || patternArgument?.Syntax is not ArgumentSyntax patternSyntax)
         {
             return null;
         }
 
-        // The extension symbol should be the Web.Api mapping helper.
-        if (method.ContainingNamespace?.ToDisplayString() is { } containingNamespace
-            && !containingNamespace.StartsWith(WebNamespace, System.StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        SeparatedSyntaxList<ArgumentSyntax> arguments = invocation.ArgumentList.Arguments;
-
-        if (delegateParameterIndex >= arguments.Count || patternParameterIndex >= arguments.Count)
-        {
-            return null;
-        }
-
-        // The handler lambda / method group.
-        ExpressionSyntax handlerExpression = arguments[delegateParameterIndex].Expression;
-
-        if (model.GetSymbolInfo(handlerExpression, ct).Symbol is not IMethodSymbol handler)
-        {
-            return null;
-        }
-
-        // Return shape (middleware-first: no result types).
-        if (!TryGetReturnKind(handler.ReturnType, compilation, out ReturnKind returnKind))
-        {
-            return null;
-        }
-
-        // Route tokens from a literal pattern power name-based route inference.
-        HashSet<string> routeTokens = new(System.StringComparer.OrdinalIgnoreCase);
+        // Route tokens from a literal pattern power name-based route inference; the pattern also names the
+        // endpoint in diagnostics.
+        HashSet<string> routeTokens = new(StringComparer.OrdinalIgnoreCase);
         bool literalPattern = false;
-        if (arguments[patternParameterIndex].Expression is LiteralExpressionSyntax { Token.Value: string patternText })
+        string endpoint = method.Name;
+
+        if (patternSyntax.Expression is LiteralExpressionSyntax { Token.Value: string patternText } patternLiteral)
         {
             CollectRouteTokens(patternText, routeTokens);
             literalPattern = true;
+            endpoint = method.Name + "(" + patternLiteral.Token.Text + ")";
         }
 
         if (invocation.Expression is not MemberAccessExpressionSyntax receiverAccess
@@ -168,54 +188,254 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             || (groupType is not null
                 && (SymbolEqualityComparer.Default.Equals(receiverType, groupType) || ImplementsInterface(receiverType, groupType)));
 
+        // The handler: a lambda or a method group the compiler turned into a delegate.
+        ExpressionSyntax handlerExpression = handlerSyntax.Expression;
+        Location handlerLocation = GetHandlerLocation(handlerExpression);
+
+        IOperation handlerValue = handlerArgument.Value;
+        while (handlerValue is IConversionOperation conversion)
+        {
+            handlerValue = conversion.Operand;
+        }
+
+        if (handlerValue is not IDelegateCreationOperation creation)
+        {
+            // A value the compiler cannot type is already an error of its own.
+            if (handlerValue is IInvalidOperation || handlerValue.Type is null || handlerValue.Type.TypeKind == TypeKind.Error)
+            {
+                return null;
+            }
+
+            return Fail(DiagnosticInfo.Create(EndpointBindingDiagnostics.HandlerNotLambdaOrMethodGroup, handlerLocation, endpoint));
+        }
+
+        IMethodSymbol? handler = creation.Target switch
+        {
+            IAnonymousFunctionOperation lambda => lambda.Symbol,
+            IMethodReferenceOperation reference => reference.Method,
+            _ => null
+        };
+
+        if (handler is null || creation.Type is not INamedTypeSymbol { DelegateInvokeMethod: { } invoke } delegateType)
+        {
+            return null;
+        }
+
+        // An extension method group is bound to its receiver: its first parameter is not the handler's.
+        ImmutableArray<IParameterSymbol> handlerParameters = handler.Parameters;
+        if (handler.IsExtensionMethod && handlerParameters.Length == invoke.Parameters.Length + 1)
+        {
+            handlerParameters = handlerParameters.RemoveAt(0);
+        }
+
+        if (handlerParameters.Length != invoke.Parameters.Length)
+        {
+            return null;
+        }
+
+        // A handler whose signature needs default values, a params array, by-ref parameters or more than
+        // sixteen parameters gets a compiler-generated delegate type that generated code cannot name.
+        bool anonymousDelegate = delegateType.IsAnonymousType;
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+
+        // Return shape: nothing, an awaited Task/ValueTask, or a value written as the response.
+        if (!TryAnalyzeReturn(handler, invoke, compilation, out ReturnKind returnKind, out ITypeSymbol? resultType, out string? returnProblem))
+        {
+            return null; // an unresolved type: the compiler reports it
+        }
+
+        if (returnProblem is not null)
+        {
+            diagnostics.Add(DiagnosticInfo.Create(
+                EndpointBindingDiagnostics.UnsupportedReturnType,
+                handlerLocation,
+                endpoint,
+                invoke.ReturnType.ToDisplayString(HandlerTypeRules.MessageFormat),
+                returnProblem));
+        }
+
         INamedTypeSymbol? parsableType = compilation.GetTypeByMetadataName("System.IParsable`1");
         INamedTypeSymbol? contextType = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpContext");
         INamedTypeSymbol? cancellationType = compilation.GetTypeByMetadataName("System.Threading.CancellationToken");
         INamedTypeSymbol? featureType = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpFeature");
 
-        var parameters = ImmutableArray.CreateBuilder<ParameterBinding>(handler.Parameters.Length);
+        var parameters = ImmutableArray.CreateBuilder<ParameterBinding>(handlerParameters.Length);
         int bodyParameterIndex = -1;
-        bool usesForm = false;
+        int formParameterIndex = -1;
 
-        for (int i = 0; i < handler.Parameters.Length; i++)
+        for (int i = 0; i < handlerParameters.Length; i++)
         {
-            if (!TryClassify(
-                    handler.Parameters[i],
+            IParameterSymbol parameter = handlerParameters[i];
+            ITypeSymbol parameterType = invoke.Parameters[i].Type;
+            Location parameterLocation = GetParameterLocation(parameter, handlerExpression, handlerLocation);
+
+            string? problem = DescribeSignatureProblem(parameter, anonymousDelegate);
+            if (problem is null)
+            {
+                problem = HandlerTypeRules.DescribeParameterTypeProblem(parameterType, compilation, out bool isErrorType);
+                if (isErrorType)
+                {
+                    return null; // an unresolved type: the compiler reports it
+                }
+            }
+
+            ParameterBinding binding = default;
+            if (problem is null)
+            {
+                problem = Classify(
+                    parameter,
+                    parameterType,
                     routeTokens,
                     partialTemplate,
                     parsableType,
                     contextType,
                     cancellationType,
                     featureType,
-                    out ParameterBinding binding))
+                    out binding);
+            }
+
+            if (problem is not null)
             {
-                return null;
+                diagnostics.Add(DiagnosticInfo.Create(
+                    EndpointBindingDiagnostics.UnsupportedParameter,
+                    parameterLocation,
+                    parameter.Name,
+                    endpoint,
+                    problem));
+                continue;
             }
 
             if (binding.Source == BindingSource.Body)
             {
                 if (bodyParameterIndex >= 0)
                 {
-                    return null; // at most one body parameter
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        EndpointBindingDiagnostics.MultipleBodyParameters,
+                        parameterLocation,
+                        endpoint,
+                        handlerParameters[bodyParameterIndex].Name,
+                        parameter.Name));
+                    continue;
                 }
 
                 bodyParameterIndex = i;
             }
-            else if (binding.Source == BindingSource.Form)
+            else if (binding.Source == BindingSource.Form && formParameterIndex < 0)
             {
-                usesForm = true;
+                formParameterIndex = i;
             }
 
             parameters.Add(binding);
         }
 
-        if (bodyParameterIndex >= 0 && usesForm)
+        // Body and form both read the one request body.
+        if (bodyParameterIndex >= 0 && formParameterIndex >= 0)
         {
-            return null; // body and form are mutually exclusive
+            IParameterSymbol later = handlerParameters[Math.Max(bodyParameterIndex, formParameterIndex)];
+            diagnostics.Add(DiagnosticInfo.Create(
+                EndpointBindingDiagnostics.BodyAndFormParameters,
+                GetParameterLocation(later, handlerExpression, handlerLocation),
+                endpoint,
+                handlerParameters[bodyParameterIndex].Name,
+                handlerParameters[formParameterIndex].Name));
+        }
+
+        if (anonymousDelegate)
+        {
+            if (handlerParameters.Length > maxHandlerParameters)
+            {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    EndpointBindingDiagnostics.UnnameableDelegateType,
+                    handlerLocation,
+                    endpoint,
+                    $"it declares {handlerParameters.Length} parameters, but generated code invokes a handler as Func<...> or Action<...>, which take at most {maxHandlerParameters}; group request values into a [FromBody] model"));
+            }
+            else if (diagnostics.Count == 0)
+            {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    EndpointBindingDiagnostics.UnnameableDelegateType,
+                    handlerLocation,
+                    endpoint,
+                    "the compiler gives it an anonymous delegate type, which generated code cannot name; give it parameters and a return type that fit Func<...> or Action<...>"));
+            }
+        }
+        else if (diagnostics.Count == 0)
+        {
+            string? delegateProblem = HandlerTypeRules.DescribeDelegateTypeProblem(delegateType, compilation, out bool isErrorType);
+            if (isErrorType)
+            {
+                return null;
+            }
+
+            if (delegateProblem is not null)
+            {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    EndpointBindingDiagnostics.UnnameableDelegateType,
+                    handlerLocation,
+                    endpoint,
+                    delegateProblem));
+            }
+        }
+
+        if (diagnostics.Count > 0)
+        {
+            return Fail(diagnostics);
+        }
+
+        // How the returned value is written: text for a string, the negotiated serializer for anything else.
+        ResponseKind response = ResponseKind.None;
+        ResultNullCheck nullCheck = ResultNullCheck.None;
+        string resultTypeName = string.Empty;
+        string writtenTypeName = string.Empty;
+
+        if (resultType is not null)
+        {
+            ITypeSymbol writtenType = resultType;
+
+            if (resultType is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
+            {
+                nullCheck = ResultNullCheck.NullableValue;
+                writtenType = nullable.TypeArguments[0];
+            }
+            else if (resultType.IsReferenceType)
+            {
+                nullCheck = ResultNullCheck.Reference;
+                writtenType = resultType.WithNullableAnnotation(NullableAnnotation.NotAnnotated);
+            }
+
+            response = writtenType.SpecialType == SpecialType.System_String ? ResponseKind.Text : ResponseKind.Serialized;
+            resultTypeName = resultType.ToDisplayString(_fullyQualified);
+            writtenTypeName = writtenType.ToDisplayString(_fullyQualified);
+        }
+
+        // Reading a body and writing a negotiated value both need the content-serialization registry.
+        if (bodyParameterIndex >= 0 && !CanName(compilation, requestSerializationTypeName))
+        {
+            IParameterSymbol body = handlerParameters[bodyParameterIndex];
+            diagnostics.Add(DiagnosticInfo.Create(
+                EndpointBindingDiagnostics.SerializationNotReferenced,
+                GetParameterLocation(body, handlerExpression, handlerLocation),
+                endpoint,
+                $"binds '{body.Name}' from the request body"));
+        }
+
+        if (response == ResponseKind.Serialized && !CanName(compilation, contentNegotiationTypeName))
+        {
+            diagnostics.Add(DiagnosticInfo.Create(
+                EndpointBindingDiagnostics.SerializationNotReferenced,
+                handlerLocation,
+                endpoint,
+                $"returns '{invoke.ReturnType.ToDisplayString(HandlerTypeRules.MessageFormat)}', which is written through content negotiation"));
+        }
+
+        if (diagnostics.Count > 0)
+        {
+            return Fail(diagnostics);
         }
 
         // A form post is the request a cross-site page can forge, so a form-bound endpoint requires
         // antiforgery validation whenever the application can express the requirement.
+        bool usesForm = formParameterIndex >= 0;
         bool requiresAntiforgery = usesForm && CanRequireAntiforgery(compilation);
 
         InterceptableLocation? location = model.GetInterceptableLocation(invocation, ct);
@@ -228,20 +448,35 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             ? "method"
             : "global::Assimalign.Cohesion.Http.HttpMethod." + VerbToMethod(method.Name);
 
-        string delegateType = BuildDelegateType(parameters, returnKind);
-
-        return new EndpointBinding(
+        var endpointBinding = new EndpointBinding(
             location.GetInterceptsLocationAttributeSyntax(),
             receiverType.ToDisplayString(_fullyQualified),
             hasMethodParameter,
             methodExpression,
-            delegateType,
+            delegateType.ToDisplayString(_fullyQualified),
             returnKind,
+            resultTypeName,
+            response,
+            writtenTypeName,
+            nullCheck,
             new EquatableArray<ParameterBinding>(parameters.ToImmutable()),
             bodyParameterIndex,
             usesForm,
             requiresAntiforgery);
+
+        return new EndpointAnalysis(endpointBinding, EquatableArray<DiagnosticInfo>.Empty);
     }
+
+    private static EndpointAnalysis Fail(DiagnosticInfo diagnostic)
+        => new(null, new EquatableArray<DiagnosticInfo>(ImmutableArray.Create(diagnostic)));
+
+    private static EndpointAnalysis Fail(ImmutableArray<DiagnosticInfo>.Builder diagnostics)
+        => new(null, new EquatableArray<DiagnosticInfo>(diagnostics.ToImmutable()));
+
+    // True when the consuming compilation can name the type: it resolves and is accessible.
+    private static bool CanName(Compilation compilation, string metadataName)
+        => compilation.GetTypeByMetadataName(metadataName) is INamedTypeSymbol type
+        && compilation.IsSymbolAccessibleWithin(type, compilation.Assembly);
 
     // True when the consuming compilation references Web.Antiforgery: its metadata type resolves, is
     // accessible, and exposes the static Required instance the emitted code attaches. Without the package
@@ -265,8 +500,120 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         return false;
     }
 
-    private static bool TryClassify(
+    // Classifies the handler's return: false only when a type does not resolve (the compiler reports it).
+    // A supported shape sets the kind and, for a value, the result type; an unsupported one sets the
+    // reason a COHWEB0002 diagnostic embeds.
+    private static bool TryAnalyzeReturn(
+        IMethodSymbol handler,
+        IMethodSymbol invoke,
+        Compilation compilation,
+        out ReturnKind kind,
+        out ITypeSymbol? resultType,
+        out string? problem)
+    {
+        kind = ReturnKind.Void;
+        resultType = null;
+        problem = null;
+
+        ITypeSymbol returnType = invoke.ReturnType;
+
+        if (invoke.ReturnsByRef || invoke.ReturnsByRefReadonly)
+        {
+            problem = "it returns by reference; return the value itself";
+            return true;
+        }
+
+        if (returnType.SpecialType == SpecialType.System_Void)
+        {
+            if (handler.IsAsync)
+            {
+                problem = "an async void handler is not awaited, so the response would complete before the handler finishes and an exception it throws would crash the process; declare it async Task";
+            }
+
+            return true;
+        }
+
+        if (returnType.TypeKind == TypeKind.Error)
+        {
+            return false;
+        }
+
+        INamedTypeSymbol? task = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task");
+        INamedTypeSymbol? valueTask = compilation.GetTypeByMetadataName("System.Threading.Tasks.ValueTask");
+        INamedTypeSymbol? taskOfT = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task`1");
+        INamedTypeSymbol? valueTaskOfT = compilation.GetTypeByMetadataName("System.Threading.Tasks.ValueTask`1");
+
+        if (task is not null && SymbolEqualityComparer.Default.Equals(returnType, task))
+        {
+            kind = ReturnKind.Task;
+            return true;
+        }
+
+        if (valueTask is not null && SymbolEqualityComparer.Default.Equals(returnType, valueTask))
+        {
+            kind = ReturnKind.ValueTask;
+            return true;
+        }
+
+        ITypeSymbol value = returnType;
+        kind = ReturnKind.Value;
+
+        if (returnType is INamedTypeSymbol { IsGenericType: true } named)
+        {
+            if (taskOfT is not null && SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, taskOfT))
+            {
+                kind = ReturnKind.TaskOfValue;
+                value = named.TypeArguments[0];
+            }
+            else if (valueTaskOfT is not null && SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, valueTaskOfT))
+            {
+                kind = ReturnKind.ValueTaskOfValue;
+                value = named.TypeArguments[0];
+            }
+        }
+
+        problem = HandlerTypeRules.DescribeResultProblem(value, compilation, isAwaitedValue: kind != ReturnKind.Value, out bool isErrorType);
+        if (isErrorType)
+        {
+            return false;
+        }
+
+        resultType = value;
+        return true;
+    }
+
+    // Parameter modifiers an endpoint cannot honor. Default values and params arrays only matter when
+    // they forced a compiler-generated delegate type; on an explicitly created Func they are inert.
+    private static string? DescribeSignatureProblem(IParameterSymbol parameter, bool anonymousDelegate)
+    {
+        if (parameter.RefKind != RefKind.None)
+        {
+            return "it is passed by reference (ref, out or in), but endpoint parameters are bound by value; remove the modifier";
+        }
+
+        if (!anonymousDelegate)
+        {
+            return null;
+        }
+
+        if (parameter.IsParams)
+        {
+            return "it is a params parameter, which gives the handler a compiler-generated delegate type that generated code cannot name; remove the params modifier";
+        }
+
+        if (parameter.HasExplicitDefaultValue)
+        {
+            return "it declares a default value, which gives the handler a compiler-generated delegate type that generated code cannot name; make it nullable (for example int? page) and apply the default inside the handler";
+        }
+
+        return null;
+    }
+
+    // Classifies one handler parameter: where it binds from and how its value converts. Returns the
+    // reason a COHWEB0003 diagnostic embeds when the parameter cannot be bound, or null when it can.
+    private static string? Classify(
         IParameterSymbol parameter,
+        ITypeSymbol type,
         HashSet<string> routeTokens,
         bool partialTemplate,
         INamedTypeSymbol? parsableType,
@@ -276,26 +623,25 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         out ParameterBinding binding)
     {
         binding = default;
-        ITypeSymbol type = parameter.Type;
         string declaredType = type.ToDisplayString(_fullyQualified);
 
         // Direct injections take precedence over any binding source.
         if (contextType is not null && SymbolEqualityComparer.Default.Equals(type, contextType))
         {
             binding = new ParameterBinding(declaredType, "", "", BindingSource.Context, ConversionKind.Injection, "", false);
-            return true;
+            return null;
         }
 
         if (cancellationType is not null && SymbolEqualityComparer.Default.Equals(type, cancellationType))
         {
             binding = new ParameterBinding(declaredType, "", "", BindingSource.Cancellation, ConversionKind.Injection, "", false);
-            return true;
+            return null;
         }
 
         if (featureType is not null && ImplementsInterface(type, featureType))
         {
             binding = new ParameterBinding(declaredType, "", declaredType, BindingSource.Feature, ConversionKind.Injection, "", false);
-            return true;
+            return null;
         }
 
         (ConversionKind conversion, string coreType, bool required) = ClassifyConversion(type, parsableType);
@@ -332,12 +678,22 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         }
         else if (conversion == ConversionKind.Complex)
         {
-            return false; // e.g. [FromQuery] on a complex type
+            // e.g. [FromQuery] on a complex type
+            return $"'{type.ToDisplayString(HandlerTypeRules.MessageFormat)}' cannot be read from a single {DescribeSource(source)} value: route values, query strings, headers and form fields bind string, IParsable<T> types, enums and their nullable forms; bind it from the request body with [FromBody], or change its type";
         }
 
         binding = new ParameterBinding(declaredType, coreType, "", source, conversion, key, required);
-        return true;
+        return null;
     }
+
+    private static string DescribeSource(BindingSource source) => source switch
+    {
+        BindingSource.Route => "route",
+        BindingSource.Query => "query string",
+        BindingSource.Header => "header",
+        BindingSource.Form => "form field",
+        _ => "route or query string"
+    };
 
     private static (ConversionKind Conversion, string CoreType, bool Required) ClassifyConversion(ITypeSymbol type, INamedTypeSymbol? parsableType)
     {
@@ -419,58 +775,46 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         return null;
     }
 
-    private static bool TryGetReturnKind(ITypeSymbol returnType, Compilation compilation, out ReturnKind kind)
+    // A lambda's diagnostics point at its head (parameters and arrow) rather than its whole body; any
+    // other handler expression is reported whole.
+    private static Location GetHandlerLocation(ExpressionSyntax handler)
     {
-        if (returnType.SpecialType == SpecialType.System_Void)
+        if (handler is LambdaExpressionSyntax lambda)
         {
-            kind = ReturnKind.Void;
-            return true;
+            return Location.Create(lambda.SyntaxTree, TextSpan.FromBounds(lambda.SpanStart, lambda.ArrowToken.Span.End));
         }
 
-        INamedTypeSymbol? task = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task");
-        INamedTypeSymbol? valueTask = compilation.GetTypeByMetadataName("System.Threading.Tasks.ValueTask");
-
-        if (task is not null && SymbolEqualityComparer.Default.Equals(returnType, task))
-        {
-            kind = ReturnKind.Task;
-            return true;
-        }
-
-        if (valueTask is not null && SymbolEqualityComparer.Default.Equals(returnType, valueTask))
-        {
-            kind = ReturnKind.ValueTask;
-            return true;
-        }
-
-        kind = default;
-        return false; // Task<T>/ValueTask<T> and other returns are out of scope (no result types)
+        return handler.GetLocation();
     }
 
-    private static string BuildDelegateType(IReadOnlyList<ParameterBinding> parameters, ReturnKind returnKind)
+    // A lambda's parameter is reported where it is declared. A method group's parameters are declared
+    // away from the call site (another file, or metadata), so those are reported at the handler argument.
+    private static Location GetParameterLocation(IParameterSymbol parameter, ExpressionSyntax handler, Location fallback)
     {
-        var typeArguments = new List<string>(parameters.Count + 1);
-        foreach (ParameterBinding parameter in parameters)
+        foreach (Location location in parameter.Locations)
         {
-            typeArguments.Add(parameter.DeclaredType);
+            if (location.IsInSource
+                && location.SourceTree == handler.SyntaxTree
+                && handler.Span.Contains(location.SourceSpan))
+            {
+                return location;
+            }
         }
 
-        if (returnKind == ReturnKind.Void)
-        {
-            return typeArguments.Count == 0
-                ? "global::System.Action"
-                : "global::System.Action<" + string.Join(", ", typeArguments) + ">";
-        }
-
-        typeArguments.Add(returnKind == ReturnKind.Task
-            ? "global::System.Threading.Tasks.Task"
-            : "global::System.Threading.Tasks.ValueTask");
-
-        return "global::System.Func<" + string.Join(", ", typeArguments) + ">";
+        return fallback;
     }
 
     // ---------------------------------------------------------------------
     // Emit
     // ---------------------------------------------------------------------
+
+    private static void Report(SourceProductionContext context, EquatableArray<DiagnosticInfo> diagnostics)
+    {
+        foreach (DiagnosticInfo info in diagnostics)
+        {
+            context.ReportDiagnostic(info.ToDiagnostic(EndpointBindingDiagnostics.GetDescriptor(info.DescriptorId)));
+        }
+    }
 
     private static void Emit(SourceProductionContext spc, ImmutableArray<EndpointBinding> models)
     {
@@ -479,7 +823,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             return;
         }
 
-        bool anyBody = models.Any(static model => model.BodyParameterIndex >= 0);
+        bool usesSerialization = models.Any(static model => model.BodyParameterIndex >= 0 || model.Response == ResponseKind.Serialized);
 
         var builder = new StringBuilder();
 
@@ -494,7 +838,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         builder.AppendLine("using Assimalign.Cohesion.Http;");
         builder.AppendLine("using Assimalign.Cohesion.Web;");
         builder.AppendLine("using Assimalign.Cohesion.Web.Routing;");
-        if (anyBody)
+        if (usesSerialization)
         {
             builder.AppendLine("using Assimalign.Cohesion.Web.Serialization;");
         }
@@ -585,9 +929,69 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         }
 
         string arguments = string.Join(", ", Enumerable.Range(0, parameters.Count).Select(static i => "__arg" + i));
-        string awaitKeyword = model.Return == ReturnKind.Void ? string.Empty : "await ";
+        string invocation = "__handler(" + arguments + ")";
 
-        builder.Append(indent).Append(awaitKeyword).Append("__handler(").Append(arguments).AppendLine(");");
+        switch (model.Return)
+        {
+            case ReturnKind.Void:
+                builder.Append(indent).Append(invocation).AppendLine(";");
+                return;
+
+            case ReturnKind.Task:
+            case ReturnKind.ValueTask:
+                builder.Append(indent).Append("await ").Append(invocation).AppendLine(";");
+                return;
+
+            case ReturnKind.Value:
+                builder.Append(indent).Append(model.ResultType).Append(" __result = ").Append(invocation).AppendLine(";");
+                break;
+
+            default:
+                builder.Append(indent).Append(model.ResultType).Append(" __result = await ").Append(invocation).AppendLine(";");
+                break;
+        }
+
+        EmitResponse(builder, model, indent);
+    }
+
+    // Writes the value the handler returned. The status is left as the handler (or the response default,
+    // 200) set it, except that a null value — the absence of a representation — answers 204 No Content
+    // when the handler kept the default, with no body and no serializer consulted.
+    private static void EmitResponse(StringBuilder builder, EndpointBinding model, string indent)
+    {
+        if (model.NullCheck != ResultNullCheck.None)
+        {
+            builder.Append(indent).AppendLine("if (__result is null)");
+            builder.Append(indent).AppendLine("{");
+            builder.Append(indent).AppendLine("    if (context.Response.StatusCode.Equals(global::Assimalign.Cohesion.Http.HttpStatusCode.Ok))");
+            builder.Append(indent).AppendLine("    {");
+            builder.Append(indent).AppendLine("        context.Response.StatusCode = global::Assimalign.Cohesion.Http.HttpStatusCode.NoContent;");
+            builder.Append(indent).AppendLine("    }");
+            builder.Append(indent).AppendLine();
+            builder.Append(indent).AppendLine("    return;");
+            builder.Append(indent).AppendLine("}");
+        }
+
+        string value = model.NullCheck == ResultNullCheck.NullableValue ? "__result.Value" : "__result";
+
+        if (model.Response == ResponseKind.Text)
+        {
+            // A string is text, not a serialized JSON string: written as UTF-8 under the handler's own
+            // Content-Type when it set one, text/plain otherwise, without negotiation.
+            builder.Append(indent).AppendLine("if (!context.Response.Headers.TryGetValue(global::Assimalign.Cohesion.Http.HttpHeaderKey.ContentType, out global::Assimalign.Cohesion.Http.HttpHeaderValue __contentType) || __contentType.IsEmpty)");
+            builder.Append(indent).AppendLine("{");
+            builder.Append(indent).AppendLine("    context.Response.Headers[global::Assimalign.Cohesion.Http.HttpHeaderKey.ContentType] = \"text/plain; charset=utf-8\";");
+            builder.Append(indent).AppendLine("}");
+            builder.Append(indent).Append("await context.Response.Body.WriteAsync(global::System.Text.Encoding.UTF8.GetBytes(")
+                .Append(value).AppendLine("), context.RequestCancelled);");
+            return;
+        }
+
+        // Any other value goes through the content-serialization registry with Accept negotiation
+        // (RFC 9110 §12.5.1): the negotiated writer serializes it, or nothing is acceptable and the
+        // response becomes a bodyless 406.
+        builder.Append(indent).Append("await context.WriteNegotiatedContentAsync<").Append(model.WrittenType).Append(">(")
+            .Append(value).AppendLine(", context.RequestCancelled);");
     }
 
     private static void EmitParameter(StringBuilder builder, ParameterBinding parameter, int index, string indent)

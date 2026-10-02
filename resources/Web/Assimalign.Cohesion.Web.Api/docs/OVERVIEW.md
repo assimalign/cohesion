@@ -10,18 +10,17 @@ typed-delegate parameter binding.
 app.AddRouting();          // builder time
 app.UseRouting();          // pipeline time
 
-app.MapGet("/users/{id}", async (int id, IHttpContext context) =>
-{
-    // `id` is bound from the matched route value; `context` is injected.
-    await context.Response.WriteContentAsync(await store.FindAsync(id), context.RequestCancelled);
-});
+// `id` is bound from the matched route value; the returned user is written as the response.
+app.MapGet("/users/{id}", (int id) => store.FindAsync(id));
 
 app.MapPost("/orders", async (Order order, IHttpContext context) =>
 {
-    // `order` is deserialized from the request body via the serialization registry.
+    // `order` is deserialized from the request body via the serialization registry; `context` is injected.
     context.Response.StatusCode = HttpStatusCode.Created;
 });
 ```
+
+A handler can be a lambda or a method group (`app.MapGet("/users/{id}", GetUser)`).
 
 Parameters bind from the request by convention or by explicit attribute:
 
@@ -38,6 +37,35 @@ Parameters bind from the request by convention or by explicit attribute:
 
 Unparseable or missing-required scalars produce a 400 problem+json (with an `errors` extension naming
 the parameter); an unsupported body Content-Type produces 415; a malformed body produces 400.
+
+## Return Values
+
+A handler that returns a value — directly, or through `Task<T>` or `ValueTask<T>` — has it written as
+the response. There are no result types: a handler that needs control of the response sets it on
+`IHttpContext`.
+
+| The handler returns | The response |
+| --- | --- |
+| Nothing (`void`, `Task`, `ValueTask`) | Whatever the handler wrote |
+| A `string` | The text as UTF-8, `text/plain; charset=utf-8` unless the handler set a `Content-Type` |
+| `null` | No body; `204 No Content` unless the handler set another status |
+| Any other value | Serialized through the content-serialization registry for the request's `Accept`, with `Vary: Accept`; `406` when nothing registered is acceptable |
+
+The status is 200 unless the handler set one: `context.Response.StatusCode = HttpStatusCode.Created;
+return order;` answers 201 with the order. A serialized type needs a contract in the registered
+resolver (`[JsonSerializable(typeof(Order))]` on the application's `JsonSerializerContext`); a missing
+contract or registry throws `HttpContentSerializationException` to the exception boundary (a 500), never
+a reflection fallback.
+
+## Compile-Time Diagnostics
+
+A handler the source generator cannot bind fails the build with a `COHWEB` error that says what to
+write instead, rather than throwing when the endpoint is mapped: a delegate instance in place of a
+lambda (COHWEB0001), a return type an endpoint cannot write such as a `Stream` or `async void`
+(COHWEB0002), a parameter that cannot be bound (COHWEB0003), two request bodies (COHWEB0004), a body
+with form fields (COHWEB0005), a delegate type generated code cannot name (COHWEB0006), and a body or
+serialized return without `Web.Serialization` referenced (COHWEB0007). The table is in
+[DESIGN.md](DESIGN.md#compile-time-diagnostics-1059).
 
 ## Endpoint Metadata and Groups
 
@@ -64,8 +92,9 @@ group prefix supplies `tenant` above), then from the query string.
   (automatic for Sdk.Web consumers).
 - Allow-list the generated namespace:
   `<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>`.
-- Body binding needs `Web.Serialization` (`AddJsonSerialization(...)`); form binding needs
-  `Http.Forms`. Both are carried by the `App.Web` shared framework.
+- Body binding and serialized return values need `Web.Serialization` (`AddJsonSerialization(...)` with
+  the application's source-generated `JsonSerializerContext`); form binding needs `Http.Forms`. Both
+  are carried by the `App.Web` shared framework.
 - Form-bound endpoints require antiforgery when the application references
   `Assimalign.Cohesion.Web.Antiforgery` (every `Sdk.Web` application does): register
   `AddAntiforgery(...)` and `UseAntiforgery()` after `UseRouting()`, or opt an endpoint out with

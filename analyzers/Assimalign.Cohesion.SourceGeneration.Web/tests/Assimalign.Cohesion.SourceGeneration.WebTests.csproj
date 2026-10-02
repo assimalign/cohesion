@@ -34,5 +34,8 @@
 		<!-- The antiforgery requirement a form-bound endpoint carries; cases add or withhold it to model an
 		     application with or without the package. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Antiforgery" />
+		<!-- The content-serialization registry that body binding and returned values use; cases withhold it
+		     to model an application without the package (COHWEB0007). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
 	</ItemGroup>
 </Project>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 
@@ -14,7 +15,8 @@ namespace Assimalign.Cohesion.SourceGeneration.Web.Tests;
 
 /// <summary>
 /// GeneratorDriver-level coverage for <see cref="EndpointBindingGenerator"/>: each typed <c>Map*</c>
-/// call site is run through the generator and the emitted interceptor is asserted for shape.
+/// call site is run through the generator and the emitted interceptor, or the reported diagnostic, is
+/// asserted for shape.
 /// </summary>
 public class EndpointBindingGeneratorTests
 {
@@ -31,18 +33,43 @@ public class EndpointBindingGeneratorTests
     // references Web.Antiforgery.
     private const string antiforgeryRequirement = ".WithMetadata(global::Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata.Required);";
 
-    private static string Run(string body, bool referenceAntiforgery = false)
-        => Generate(body, referenceAntiforgery, out _);
-
-    private static string Generate(string body, bool referenceAntiforgery, out Compilation output)
+    /// <summary>The outcome of one generator run over a test source.</summary>
+    /// <param name="Source">The test source the generator ran over.</param>
+    /// <param name="Generated">The emitted interceptor source, or empty when nothing was emitted.</param>
+    /// <param name="Diagnostics">The diagnostics the generator reported.</param>
+    /// <param name="Output">The compilation with the generated source added.</param>
+    private sealed record GeneratorRun(string Source, string Generated, ImmutableArray<Diagnostic> Diagnostics, Compilation Output)
     {
-        string source = Preamble + "\n\npublic static class Endpoints\n{\n    public static void Configure(WebApplication app)\n    {\n" + body + "\n    }\n}\n";
+        /// <summary>Gets the compile errors of the output compilation, generated code included.</summary>
+        public Diagnostic[] CompileErrors => Output.GetDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+
+        /// <summary>Gets the reported diagnostics with the given id.</summary>
+        public Diagnostic[] WithId(string id) => Diagnostics.Where(diagnostic => diagnostic.Id == id).ToArray();
+
+        /// <summary>Gets the source text a diagnostic's location covers.</summary>
+        public string TextAt(Diagnostic diagnostic) => Source.Substring(diagnostic.Location.SourceSpan.Start, diagnostic.Location.SourceSpan.Length);
+    }
+
+    private static string Run(string body, bool referenceAntiforgery = false)
+        => Generate(body, referenceAntiforgery: referenceAntiforgery).Generated;
+
+    private static GeneratorRun Generate(
+        string body,
+        bool referenceAntiforgery = false,
+        bool referenceSerialization = true,
+        string members = "",
+        string types = "")
+    {
+        string source = Preamble + "\n" + types + "\n\npublic static class Endpoints\n{\n" + members + "\n    public static void Configure(WebApplication app)\n    {\n" + body + "\n    }\n}\n";
 
         string antiforgeryAssembly = typeof(Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata).Assembly.Location;
+        string serializationAssembly = typeof(Assimalign.Cohesion.Web.Serialization.IHttpContentSerializationFeature).Assembly.Location;
 
         // The test host's trusted platform assemblies include every assembly this project references,
-        // Web.Antiforgery among them. Exclude it unless the case models an application that references
-        // it, and add every Cohesion assembly once.
+        // Web.Antiforgery and Web.Serialization among them. Exclude each unless the case models an
+        // application that references it, and add every Cohesion assembly once.
         List<string> paths = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
             .Where(path => path.Length > 0)
@@ -52,7 +79,9 @@ public class EndpointBindingGeneratorTests
             .Append(typeof(Assimalign.Cohesion.Web.Hosting.WebApplication).Assembly.Location)
             .Append(typeof(Assimalign.Cohesion.Web.Routing.RouteValueDictionary).Assembly.Location)
             .Where(path => referenceAntiforgery || !IsSameFile(path, antiforgeryAssembly))
+            .Where(path => referenceSerialization || !IsSameFile(path, serializationAssembly))
             .Append(referenceAntiforgery ? antiforgeryAssembly : string.Empty)
+            .Append(referenceSerialization ? serializationAssembly : string.Empty)
             .Where(path => path.Length > 0)
             .DistinctBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -66,7 +95,7 @@ public class EndpointBindingGeneratorTests
 
         CSharpCompilation compilation = CSharpCompilation.Create(
             "EndpointBindingGeneratorTests",
-            new[] { CSharpSyntaxTree.ParseText(source, parseOptions) },
+            new[] { CSharpSyntaxTree.ParseText(source, parseOptions, path: "Endpoints.cs") },
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
 
@@ -74,15 +103,19 @@ public class EndpointBindingGeneratorTests
             new[] { new EndpointBindingGenerator().AsSourceGenerator() },
             parseOptions: parseOptions);
 
-        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out output, out _);
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out Compilation output, out ImmutableArray<Diagnostic> diagnostics);
 
         GeneratorDriverRunResult runResult = driver.GetRunResult();
+        string generated = runResult.GeneratedTrees.Length > 0 ? runResult.GeneratedTrees[0].ToString() : string.Empty;
 
-        return runResult.GeneratedTrees.Length > 0 ? runResult.GeneratedTrees[0].ToString() : string.Empty;
+        return new GeneratorRun(source, generated, diagnostics, output);
     }
 
     private static bool IsSameFile(string path, string other)
         => string.Equals(Path.GetFileName(path), Path.GetFileName(other), StringComparison.OrdinalIgnoreCase);
+
+    private static string Describe(IEnumerable<Diagnostic> diagnostics)
+        => string.Join(Environment.NewLine, diagnostics.Select(diagnostic => diagnostic.ToString()));
 
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: route parameter emits an interceptor")]
     public void Generator_RouteParameter_EmitsInterceptor()
@@ -260,18 +293,406 @@ public class EndpointBindingGeneratorTests
     public void Generator_FormEndpointWithAntiforgeryReferenced_GeneratedCodeCompiles()
     {
         // Act — the caller's own opt-out chains after the generated requirement.
-        string generated = Generate(
+        GeneratorRun run = Generate(
             """app.MapPost("/orders", async ([FromForm] string title, IHttpContext context) => { await Task.CompletedTask; }).WithMetadata(Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata.Disabled);""",
-            referenceAntiforgery: true,
-            out Compilation output);
+            referenceAntiforgery: true);
 
         // Assert — the interceptor (requirement included) is part of a compilation with no errors.
-        Diagnostic[] errors = output.GetDiagnostics()
-            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-            .ToArray();
+        run.Generated.ShouldContain(antiforgeryRequirement, Case.Sensitive);
+        run.Output.SyntaxTrees.Count().ShouldBe(2);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
 
-        generated.ShouldContain(antiforgeryRequirement, Case.Sensitive);
-        output.SyntaxTrees.Count().ShouldBe(2);
-        errors.ShouldBeEmpty(string.Join(Environment.NewLine, errors.Select(error => error.ToString())));
+    // ---------------------------------------------------------------------
+    // Returned values (#1059)
+    // ---------------------------------------------------------------------
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a returned value is written through content negotiation")]
+    public void Generator_ValueReturn_WritesNegotiatedContent()
+    {
+        // Act
+        string generated = Run("""app.MapGet("/widgets/{id}", (int id) => new Widget());""");
+
+        // Assert — invoked as its natural Func type, null answers 204, anything else is negotiated.
+        generated.ShouldContain("(global::System.Func<global::System.Int32, global::Widget>)handler", Case.Sensitive);
+        generated.ShouldContain("global::Widget __result = __handler(__arg0);", Case.Sensitive);
+        generated.ShouldContain("if (__result is null)", Case.Sensitive);
+        generated.ShouldContain("context.Response.StatusCode.Equals(global::Assimalign.Cohesion.Http.HttpStatusCode.Ok)", Case.Sensitive);
+        generated.ShouldContain("context.Response.StatusCode = global::Assimalign.Cohesion.Http.HttpStatusCode.NoContent;", Case.Sensitive);
+        generated.ShouldContain("await context.WriteNegotiatedContentAsync<global::Widget>(__result, context.RequestCancelled);", Case.Sensitive);
+        generated.ShouldContain("using Assimalign.Cohesion.Web.Serialization;", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a Task<T> handler's value is awaited, then written")]
+    public void Generator_TaskOfValueReturn_AwaitsThenWrites()
+    {
+        // Act
+        string generated = Run("""app.MapGet("/widgets/{id}", async (int id) => { await Task.Yield(); return new Widget(); });""");
+
+        // Assert
+        generated.ShouldContain("(global::System.Func<global::System.Int32, global::System.Threading.Tasks.Task<global::Widget>>)handler", Case.Sensitive);
+        generated.ShouldContain("global::Widget __result = await __handler(__arg0);", Case.Sensitive);
+        generated.ShouldContain("await context.WriteNegotiatedContentAsync<global::Widget>(__result, context.RequestCancelled);", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a ValueTask<T> handler's value is awaited, then written")]
+    public void Generator_ValueTaskOfValueReturn_AwaitsThenWrites()
+    {
+        // Act
+        string generated = Run("""app.MapGet("/widgets/{id}", (int id) => ValueTask.FromResult(new Widget()));""");
+
+        // Assert
+        generated.ShouldContain("(global::System.Func<global::System.Int32, global::System.Threading.Tasks.ValueTask<global::Widget>>)handler", Case.Sensitive);
+        generated.ShouldContain("global::Widget __result = await __handler(__arg0);", Case.Sensitive);
+        generated.ShouldContain("await context.WriteNegotiatedContentAsync<global::Widget>(__result, context.RequestCancelled);", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a returned string is written as text/plain without the serializer")]
+    public void Generator_StringReturn_WritesTextPlain()
+    {
+        // Act — the application does not reference Web.Serialization, which text does not need.
+        GeneratorRun run = Generate("""app.MapGet("/ping", () => "pong");""", referenceSerialization: false);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("global::System.String __result = __handler();", Case.Sensitive);
+        run.Generated.ShouldContain("if (__result is null)", Case.Sensitive);
+        run.Generated.ShouldContain("context.Response.Headers[global::Assimalign.Cohesion.Http.HttpHeaderKey.ContentType] = \"text/plain; charset=utf-8\";", Case.Sensitive);
+        run.Generated.ShouldContain("await context.Response.Body.WriteAsync(global::System.Text.Encoding.UTF8.GetBytes(__result), context.RequestCancelled);", Case.Sensitive);
+        run.Generated.ShouldNotContain("WriteNegotiatedContentAsync", Case.Sensitive);
+        run.Generated.ShouldNotContain("using Assimalign.Cohesion.Web.Serialization;", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a value-type result is written without a null check")]
+    public void Generator_ValueTypeReturn_WritesWithoutNullCheck()
+    {
+        // Act
+        string generated = Run("""app.MapGet("/count", () => 42);""");
+
+        // Assert
+        generated.ShouldContain("global::System.Int32 __result = __handler();", Case.Sensitive);
+        generated.ShouldNotContain("__result is null", Case.Sensitive);
+        generated.ShouldContain("await context.WriteNegotiatedContentAsync<global::System.Int32>(__result, context.RequestCancelled);", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a Nullable<T> result is null-checked and written as its underlying value")]
+    public void Generator_NullableValueTypeReturn_WritesUnderlyingValue()
+    {
+        // Act
+        string generated = Run("""app.MapGet("/limit", (int? limit) => limit);""");
+
+        // Assert
+        generated.ShouldContain("global::System.Int32? __result = __handler(__arg0);", Case.Sensitive);
+        generated.ShouldContain("if (__result is null)", Case.Sensitive);
+        generated.ShouldContain("await context.WriteNegotiatedContentAsync<global::System.Int32>(__result.Value, context.RequestCancelled);", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a nullable reference result is written as its non-nullable type")]
+    public void Generator_NullableReferenceReturn_WritesNonNullableTypeArgument()
+    {
+        // Act — an explicit return type keeps the annotation on the handler's delegate type.
+        string generated = Run("""app.MapGet("/widgets/{id}", Widget? (int id) => id > 0 ? new Widget() : null);""");
+
+        // Assert
+        generated.ShouldContain("(global::System.Func<global::System.Int32, global::Widget?>)handler", Case.Sensitive);
+        generated.ShouldContain("global::Widget? __result = __handler(__arg0);", Case.Sensitive);
+        generated.ShouldContain("if (__result is null)", Case.Sensitive);
+        generated.ShouldContain("await context.WriteNegotiatedContentAsync<global::Widget>(__result, context.RequestCancelled);", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: every supported return shape compiles with no errors")]
+    public void Generator_SupportedReturnShapes_GeneratedCodeCompiles()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """
+            app.MapGet("/a/{id}", (int id) => new Widget());
+            app.MapGet("/b/{id}", async (int id) => { await Task.Yield(); return new Widget(); });
+            app.MapGet("/c/{id}", (int id) => ValueTask.FromResult(new Widget()));
+            app.MapGet("/d", () => "text");
+            app.MapGet("/e", async () => { await Task.Yield(); return (string?)null; });
+            app.MapGet("/f", () => 42);
+            app.MapGet("/g", (int? limit) => limit);
+            app.MapGet("/h/{id}", (int id) => id > 0 ? new Widget() : null);
+            app.MapPost("/i", (Widget widget) => widget);
+            app.MapGet("/j", () => { });
+            app.MapGet("/k", () => Task.CompletedTask);
+            app.MapGet("/l/{id}", GetWidget);
+            """,
+            members: "    private static Task<Widget?> GetWidget(int id) => Task.FromResult<Widget?>(null);");
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("Intercept_11(", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a method-group handler is intercepted like a lambda")]
+    public void Generator_MethodGroupHandler_IsIntercepted()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """app.MapGet("/widgets/{id}", GetWidget);""",
+            members: "    private static Widget GetWidget(int id) => new Widget();");
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("(global::System.Func<global::System.Int32, global::Widget>)handler", Case.Sensitive);
+        run.Generated.ShouldContain("__routeValues0.TryGetValue(\"id\"", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: named arguments in any order are intercepted")]
+    public void Generator_NamedArgumentsOutOfOrder_AreIntercepted()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapGet(handler: (int id) => id, pattern: "/items/{id}");""");
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("__routeValues0.TryGetValue(\"id\"", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    // ---------------------------------------------------------------------
+    // Diagnostics (#1059)
+    // ---------------------------------------------------------------------
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: a delegate instance handler reports COHWEB0001")]
+    public void Generator_DelegateInstanceHandler_ReportsCohweb0001()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """
+            System.Func<int, Task> handler = id => Task.CompletedTask;
+            app.MapGet("/items/{id}", handler);
+            """);
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0001").ShouldHaveSingleItem();
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        run.TextAt(diagnostic).ShouldBe("handler");
+        diagnostic.GetMessage().ShouldContain("MapGet(\"/items/{id}\")", Case.Sensitive);
+        diagnostic.GetMessage().ShouldContain("pass a lambda expression or a method group", Case.Sensitive);
+        run.Generated.ShouldNotContain("Intercept_", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: a returned stream reports COHWEB0002")]
+    public void Generator_StreamReturn_ReportsCohweb0002()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapGet("/download", () => new System.IO.MemoryStream());""");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0002").ShouldHaveSingleItem();
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        run.TextAt(diagnostic).ShouldBe("() =>");
+        diagnostic.GetMessage().ShouldContain("returns 'MemoryStream'", Case.Sensitive);
+        diagnostic.GetMessage().ShouldContain("copy it to context.Response.Body", Case.Sensitive);
+        run.Generated.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: an async void method group reports COHWEB0002")]
+    public void Generator_AsyncVoidMethodGroup_ReportsCohweb0002()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """app.MapPost("/fire/{id}", Fire);""",
+            members: "    private static async void Fire(int id) { await Task.Yield(); }");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0002").ShouldHaveSingleItem();
+        run.TextAt(diagnostic).ShouldBe("Fire");
+        diagnostic.GetMessage().ShouldContain("async void", Case.Sensitive);
+        diagnostic.GetMessage().ShouldContain("declare it async Task", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: an anonymous-type result reports COHWEB0002")]
+    public void Generator_AnonymousTypeReturn_ReportsCohweb0002()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapGet("/anonymous", () => new { Id = 1 });""");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0002").ShouldHaveSingleItem();
+        diagnostic.GetMessage().ShouldContain("anonymous types cannot be named", Case.Sensitive);
+        diagnostic.GetMessage().ShouldContain("use a named record or class", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: an awaited value that is itself awaitable reports COHWEB0002")]
+    public void Generator_NestedAwaitableReturn_ReportsCohweb0002()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapGet("/nested", async () => { await Task.Yield(); return Task.FromResult(1); });""");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0002").ShouldHaveSingleItem();
+        diagnostic.GetMessage().ShouldContain("the awaited value 'Task<int>' is itself awaitable", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: a complex type read from the query string reports COHWEB0003 at the parameter")]
+    public void Generator_ComplexQueryParameter_ReportsCohweb0003()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapGet("/search", ([FromQuery] Widget filter) => "ok");""");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0003").ShouldHaveSingleItem();
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        run.TextAt(diagnostic).ShouldBe("filter");
+        diagnostic.GetMessage().ShouldContain("Parameter 'filter'", Case.Sensitive);
+        diagnostic.GetMessage().ShouldContain("cannot be read from a single query string value", Case.Sensitive);
+        diagnostic.GetMessage().ShouldContain("[FromBody]", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: a parameter default value reports COHWEB0003")]
+    public void Generator_DefaultParameterValue_ReportsCohweb0003()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapGet("/paged", (int page = 1) => page);""");
+
+        // Assert — the default is the cause, so no generic delegate-type diagnostic is added.
+        Diagnostic diagnostic = run.WithId("COHWEB0003").ShouldHaveSingleItem();
+        run.TextAt(diagnostic).ShouldBe("page");
+        diagnostic.GetMessage().ShouldContain("declares a default value", Case.Sensitive);
+        diagnostic.GetMessage().ShouldContain("int? page", Case.Sensitive);
+        run.WithId("COHWEB0006").ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: a ref struct parameter reports COHWEB0003")]
+    public void Generator_RefStructParameter_ReportsCohweb0003()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapGet("/span", (System.ReadOnlySpan<char> q) => "ok");""");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0003").ShouldHaveSingleItem();
+        diagnostic.GetMessage().ShouldContain("is a ref struct", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: a by-reference parameter reports COHWEB0003")]
+    public void Generator_ByReferenceParameter_ReportsCohweb0003()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapGet("/ref", (ref int id) => "ok");""");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0003").ShouldHaveSingleItem();
+        diagnostic.GetMessage().ShouldContain("passed by reference", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: a private parameter type reports COHWEB0003")]
+    public void Generator_PrivateParameterType_ReportsCohweb0003()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """app.MapPost("/secrets", (Secret secret) => "ok");""",
+            members: "    private sealed class Secret { public string Value { get; set; } = \"\"; }");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0003").ShouldHaveSingleItem();
+        diagnostic.GetMessage().ShouldContain("'Endpoints.Secret' is not accessible to generated code", Case.Sensitive);
+        diagnostic.GetMessage().ShouldContain("make it internal or public", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: two request-body parameters report COHWEB0004")]
+    public void Generator_TwoBodyParameters_ReportsCohweb0004()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapPost("/pair", (Widget first, Widget second) => "ok");""");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0004").ShouldHaveSingleItem();
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        run.TextAt(diagnostic).ShouldBe("second");
+        diagnostic.GetMessage().ShouldContain("binds both 'first' and 'second' from the request body", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: a request body with form fields reports COHWEB0005")]
+    public void Generator_BodyAndFormParameters_ReportsCohweb0005()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapPost("/mixed", (Widget widget, [FromForm] string title) => "ok");""");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0005").ShouldHaveSingleItem();
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        run.TextAt(diagnostic).ShouldBe("title");
+        diagnostic.GetMessage().ShouldContain("binds 'widget' from the request body and 'title' from form fields", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: seventeen parameters report COHWEB0006")]
+    public void Generator_SeventeenParameters_ReportsCohweb0006()
+    {
+        // Arrange
+        string parameters = string.Join(", ", Enumerable.Range(1, 17).Select(index => "int p" + index));
+
+        // Act
+        GeneratorRun run = Generate("app.MapGet(\"/wide\", (" + parameters + ") => \"ok\");");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0006").ShouldHaveSingleItem();
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        diagnostic.GetMessage().ShouldContain("declares 17 parameters", Case.Sensitive);
+        diagnostic.GetMessage().ShouldContain("group request values into a [FromBody] model", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: a private delegate type reports COHWEB0006")]
+    public void Generator_PrivateDelegateType_ReportsCohweb0006()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """app.MapGet("/items/{id}", new ItemHandler((int id) => "ok"));""",
+            members: "    private delegate string ItemHandler(int id);");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0006").ShouldHaveSingleItem();
+        diagnostic.GetMessage().ShouldContain("its delegate type 'Endpoints.ItemHandler' cannot be named", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: a serialized result without Web.Serialization reports COHWEB0007")]
+    public void Generator_ValueReturnWithoutSerialization_ReportsCohweb0007()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapGet("/widgets/{id}", (int id) => new Widget());""", referenceSerialization: false);
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0007").ShouldHaveSingleItem();
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        diagnostic.GetMessage().ShouldContain("returns 'Widget', which is written through content negotiation", Case.Sensitive);
+        diagnostic.GetMessage().ShouldContain("Assimalign.Cohesion.Web.Serialization", Case.Sensitive);
+        run.Generated.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: a request body without Web.Serialization reports COHWEB0007")]
+    public void Generator_BodyWithoutSerialization_ReportsCohweb0007()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """app.MapPost("/widgets", (Widget widget, IHttpContext context) => Task.CompletedTask);""",
+            referenceSerialization: false);
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0007").ShouldHaveSingleItem();
+        run.TextAt(diagnostic).ShouldBe("widget");
+        diagnostic.GetMessage().ShouldContain("binds 'widget' from the request body", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Diagnostics: an unsupported call site leaves the others intercepted")]
+    public void Generator_UnsupportedCallSite_LeavesOtherEndpointsIntercepted()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """
+            app.MapGet("/good/{id}", (int id) => new Widget());
+            app.MapGet("/bad", () => new System.IO.MemoryStream());
+            """);
+
+        // Assert — one diagnostic, one interceptor, and the interceptor still compiles.
+        run.Diagnostics.ShouldHaveSingleItem().Id.ShouldBe("COHWEB0002");
+        run.Generated.ShouldContain("Intercept_0(", Case.Sensitive);
+        run.Generated.ShouldNotContain("Intercept_1(", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
     }
 }

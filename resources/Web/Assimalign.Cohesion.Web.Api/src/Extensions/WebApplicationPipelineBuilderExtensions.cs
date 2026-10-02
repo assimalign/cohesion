@@ -19,11 +19,14 @@ using Assimalign.Cohesion.Web.Routing;
 /// parameter binding takes place.
 /// </item>
 /// <item>
-/// The <see cref="Delegate"/> overloads accept a typed handler lambda (for example
-/// <c>(int id, IHttpContext context) =&gt; ...</c>). They are placeholders: the Cohesion Web source
-/// generator (<c>Assimalign.Cohesion.SourceGeneration.Web</c>) intercepts the call site and
-/// substitutes an AOT-safe binding thunk. Their bodies throw, so reaching one at run time signals
-/// the generator was not wired in.
+/// The <see cref="Delegate"/> overloads accept a typed handler — a lambda such as
+/// <c>(long id) =&gt; orders.Get(id)</c>, or a method group. They are placeholders: the Cohesion Web
+/// source generator (<c>Assimalign.Cohesion.SourceGeneration.Web</c>) intercepts the call site and
+/// substitutes an AOT-safe thunk that binds the handler's parameters, invokes it, and writes the value
+/// it returns, if any: a <see cref="string"/> as <c>text/plain</c>, <see langword="null"/> as
+/// <c>204 No Content</c>, and any other value through the content-serialization registry with
+/// <c>Accept</c> negotiation. A handler the generator cannot bind is a <c>COHWEB</c> compile-time error;
+/// the placeholder bodies throw only when the generator was not wired in at all.
 /// </item>
 /// </list>
 /// <para>
@@ -138,7 +141,7 @@ public static class WebApplicationPipelineBuilderExtensions
         /// </summary>
         /// <param name="method">The HTTP method the route matches.</param>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder Map(HttpMethod method, string pattern, Delegate handler)
@@ -149,7 +152,7 @@ public static class WebApplicationPipelineBuilderExtensions
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder MapGet(string pattern, Delegate handler)
@@ -160,7 +163,7 @@ public static class WebApplicationPipelineBuilderExtensions
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder MapPost(string pattern, Delegate handler)
@@ -171,7 +174,7 @@ public static class WebApplicationPipelineBuilderExtensions
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder MapPut(string pattern, Delegate handler)
@@ -182,7 +185,7 @@ public static class WebApplicationPipelineBuilderExtensions
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder MapPatch(string pattern, Delegate handler)
@@ -193,7 +196,7 @@ public static class WebApplicationPipelineBuilderExtensions
         /// Cohesion Web source generator intercepts this call and substitutes an AOT-safe binding thunk.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder MapDelete(string pattern, Delegate handler)

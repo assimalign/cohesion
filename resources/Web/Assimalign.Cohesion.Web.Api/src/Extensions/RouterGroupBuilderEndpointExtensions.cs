@@ -14,7 +14,8 @@ using Assimalign.Cohesion.Web.Routing;
 /// <remarks>
 /// The <see cref="Delegate"/> overloads are placeholders the Cohesion Web source generator
 /// (<c>Assimalign.Cohesion.SourceGeneration.Web</c>) intercepts, exactly as on the application, so a group
-/// holds typed endpoints: <c>api.MapGet("orders/{id:int}", (int id, IHttpContext context) =&gt; ...)</c>.
+/// holds typed endpoints that bind their parameters and write the value they return:
+/// <c>api.MapGet("orders/{id:int}", (int id) =&gt; orders.Get(id))</c>.
 /// </remarks>
 public static class RouterGroupBuilderEndpointExtensions
 {
@@ -56,7 +57,7 @@ public static class RouterGroupBuilderEndpointExtensions
         /// </summary>
         /// <param name="method">The HTTP method the route matches.</param>
         /// <param name="pattern">The route pattern, relative to the group prefix.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder Map(HttpMethod method, string pattern, Delegate handler)
@@ -67,7 +68,7 @@ public static class RouterGroupBuilderEndpointExtensions
         /// generator intercepts this call.
         /// </summary>
         /// <param name="pattern">The route pattern, relative to the group prefix.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder MapGet(string pattern, Delegate handler)
@@ -78,7 +79,7 @@ public static class RouterGroupBuilderEndpointExtensions
         /// generator intercepts this call.
         /// </summary>
         /// <param name="pattern">The route pattern, relative to the group prefix.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder MapPost(string pattern, Delegate handler)
@@ -89,7 +90,7 @@ public static class RouterGroupBuilderEndpointExtensions
         /// generator intercepts this call.
         /// </summary>
         /// <param name="pattern">The route pattern, relative to the group prefix.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder MapPut(string pattern, Delegate handler)
@@ -100,7 +101,7 @@ public static class RouterGroupBuilderEndpointExtensions
         /// generator intercepts this call.
         /// </summary>
         /// <param name="pattern">The route pattern, relative to the group prefix.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder MapPatch(string pattern, Delegate handler)
@@ -111,7 +112,7 @@ public static class RouterGroupBuilderEndpointExtensions
         /// source generator intercepts this call.
         /// </summary>
         /// <param name="pattern">The route pattern, relative to the group prefix.</param>
-        /// <param name="handler">The typed handler lambda whose parameters are bound from the request.</param>
+        /// <param name="handler">The typed handler, a lambda or method group: its parameters are bound from the request and the value it returns, if any, is written as the response.</param>
         /// <returns>The mapped route's builder, for attaching endpoint metadata.</returns>
         /// <exception cref="NotSupportedException">Always thrown when the source generator did not rewrite the call site.</exception>
         public IRouterRouteBuilder MapDelete(string pattern, Delegate handler)
