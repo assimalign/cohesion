@@ -153,8 +153,8 @@ public class GqlQueryParserTests
     /// An AND chain is one n-ary node, as Neo4j's Ands: a group that opens the chain merges into it,
     /// a group in a later position stays nested, and a single comparison is not wrapped.
     /// </summary>
-    [Fact]
-    public void PredicateAst_FlattensAndChainsIntoOneNode()
+    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Predicates: an AND chain is one n-ary node")]
+    public void Parse_AndChain_ShouldBuildOneLogicalNode()
     {
         // Act
         var chain = Parse("MATCH (a) WHERE a.x = 1 AND a.x = 2 AND a.x = 3 AND a.x = 4 RETURN a").GqlExpression.Predicate;
@@ -214,8 +214,8 @@ public class GqlQueryParserTests
     /// limit (#1139 follow-up): a 10,000-comparison AND chain is one node, and parentheses nest
     /// as deep as the stack allows (GqlLabelChainParserTests covers the stack).
     /// </summary>
-    [Fact]
-    public void LongPredicateAndLongPath_OnlyThePathIsBounded()
+    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Bounds: only the 64-relationship path is bounded")]
+    public void Parse_LongPredicateAndLongPath_ShouldBoundOnlyThePath()
     {
         Parse("MATCH (a)" + string.Concat(Enumerable.Repeat("-[]->()", 65)) + " RETURN a")
             .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");

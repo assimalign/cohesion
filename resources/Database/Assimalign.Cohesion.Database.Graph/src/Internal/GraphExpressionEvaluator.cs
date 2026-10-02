@@ -53,7 +53,8 @@ internal static class GraphExpressionEvaluator
     }
 
     // ISO <labeled predicate>: true or false for a bound element. A variable with no binding (a
-    // null optional match, once that clause exists) is UNKNOWN, which AND and WHERE treat as false.
+    // null optional match, once that clause exists) is UNKNOWN; AND propagates UNKNOWN unless an
+    // operand is false, and WHERE keeps only true.
     private static object? Labeled(GqlLabeledPredicate labeled, IReadOnlyDictionary<string, object> bindings)
     {
         if (!bindings.TryGetValue(labeled.Variable, out var entity) || entity is null) { return null; }

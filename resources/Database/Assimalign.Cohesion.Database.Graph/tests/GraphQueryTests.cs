@@ -269,8 +269,8 @@ public sealed class GraphQueryTests
         }
     }
 
-    [Fact]
-    public async Task DirectAst_CannotBypassPatternDirectionOrShapeRules()
+    [Fact(DisplayName = "Cohesion Test [Graph] - Direct AST: direction and shape rules cannot be bypassed")]
+    public async Task Execute_DirectAst_ShouldEnforceDirectionAndShapeRules()
     {
         await using var engine = GraphDatabaseEngine.Create(new());
         var database = (IGraphDatabase)await engine.CreateDatabaseAsync("ast-bounds");
