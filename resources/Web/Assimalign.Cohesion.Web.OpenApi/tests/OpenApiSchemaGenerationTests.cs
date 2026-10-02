@@ -193,4 +193,54 @@ public class OpenApiSchemaGenerationTests
         kind.Const.ShouldBeNull();
         kind.Enum.ShouldHaveSingleItem();
     }
+
+    [Fact(DisplayName = "Cohesion Test [Web.OpenApi] - Schemas: a body type no registered reader covers fails the document naming the endpoint")]
+    public async Task Schemas_UnregisteredBodyType_ShouldFailNamingTheEndpoint()
+    {
+        // Arrange — the same composition error faults the endpoint itself at run time.
+        using CancellationTokenSource cancellation = new(OpenApiTestApplication.Timeout);
+        await using WebApplicationTestFactory factory = OpenApiTestApplication.CreateFactory();
+        factory.Application.UseRouting();
+        factory.Application.MapGet("/count", () => 42);
+        factory.Application.MapPost("/unregistered", (Unregistered value) => "stored");
+
+        // Starting the application builds the router, closing the route table.
+        using HttpClient client = factory.CreateClient();
+        using HttpResponseMessage response = await client.GetAsync("/count", cancellation.Token);
+
+        // Act
+        Action act = () => factory.Application.GetOpenApiDescriptionProvider().GetDocument(OpenApiSpecVersion.V3_1);
+
+        // Assert
+        response.IsSuccessStatusCode.ShouldBeTrue();
+        InvalidOperationException exception = act.ShouldThrow<InvalidOperationException>();
+        exception.Message.ShouldContain("POST /unregistered", Case.Sensitive);
+        exception.Message.ShouldContain("no registered content reader", Case.Sensitive);
+        exception.Message.ShouldContain("[JsonSerializable(typeof(Unregistered))]", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.OpenApi] - Schemas: a result type no registered writer covers fails the document naming the endpoint")]
+    public async Task Schemas_UnregisteredResultType_ShouldFailNamingTheEndpoint()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(OpenApiTestApplication.Timeout);
+        await using WebApplicationTestFactory factory = OpenApiTestApplication.CreateFactory();
+        factory.Application.UseRouting();
+        factory.Application.MapGet("/count", () => 42);
+        factory.Application.MapGet("/unregistered", () => new Unregistered("value"));
+
+        // Starting the application builds the router, closing the route table.
+        using HttpClient client = factory.CreateClient();
+        using HttpResponseMessage response = await client.GetAsync("/count", cancellation.Token);
+
+        // Act
+        Action act = () => factory.Application.GetOpenApiDescriptionProvider().GetDocument(OpenApiSpecVersion.V3_1);
+
+        // Assert
+        response.IsSuccessStatusCode.ShouldBeTrue();
+        InvalidOperationException exception = act.ShouldThrow<InvalidOperationException>();
+        exception.Message.ShouldContain("GET /unregistered", Case.Sensitive);
+        exception.Message.ShouldContain("no registered content writer", Case.Sensitive);
+        exception.Message.ShouldContain("[JsonSerializable(typeof(Unregistered))]", Case.Sensitive);
+    }
 }
