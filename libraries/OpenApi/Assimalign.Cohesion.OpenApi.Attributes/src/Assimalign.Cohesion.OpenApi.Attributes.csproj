@@ -5,5 +5,16 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+		<!--
+			The source generator discovers these attributes at compile time and emits their
+			metadata as static data, so the attribute path needs no runtime reflection. This
+			reference runs it here (it finds nothing to emit) and packs the DLL into this
+			package at analyzers/dotnet/cs/, the ObjectMapping and Core precedent. This package
+			carries it because every compilation that applies the attributes references it, and
+			the emitted code compiles against its metadata records. Decision and rejected
+			alternatives: analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md,
+			"Delivery".
+		-->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />
 	</ItemGroup>
 </Project>

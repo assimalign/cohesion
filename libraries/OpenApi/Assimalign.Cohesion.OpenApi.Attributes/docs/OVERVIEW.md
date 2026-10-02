@@ -16,6 +16,12 @@ metadata the attributes map to and a mapper that applies the mapping rules with 
 
 - `Assimalign.Cohesion.OpenApi` (for `OperationType`, `ParameterLocation`, `SchemaType`,
   `SecuritySchemeType`). No serialization or validation dependency.
+- Carries the `Assimalign.Cohesion.OpenApi.SourceGeneration` analyzer under `analyzers/dotnet/cs/`.
+  It runs at build time and is not a package dependency: a project that references this package,
+  directly or through `OpenApi.Generation` or `OpenApi.Integration`, gets an `OpenApiMetadataRegistry`
+  generated for its own annotated code. A project inside this repository references the package by
+  project, which carries no analyzer, so it adds
+  `<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />` itself.
 
 ## Usage
 

@@ -2,7 +2,9 @@
 
 An attribute model for describing OpenApi metadata in application code, the flat intermediate metadata
 those attributes map to, and a mapper that applies the mapping rules with diagnostics. The metadata is
-the contract the AOT-safe source generator emits and the generation pipeline consumes.
+the contract the AOT-safe source generator emits and the generation pipeline consumes. This package
+carries that generator under `analyzers/dotnet/cs/`, so referencing it is enough to get a compile-time
+`OpenApiMetadataRegistry` for your own annotated code.
 
 - [docs/OVERVIEW.md](./docs/OVERVIEW.md) — purpose, scope, and usage
 - [docs/AUTHORING.md](./docs/AUTHORING.md) — how to annotate code and the mapping rules

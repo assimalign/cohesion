@@ -13,6 +13,10 @@ attribute mapper — into a version-targeted `OpenApiDocument`.
 ## Dependencies
 
 - `Assimalign.Cohesion.OpenApi` (model) and `Assimalign.Cohesion.OpenApi.Attributes` (metadata types).
+- The source generator that emits `OpenApiMetadataRegistry` ships inside the Attributes package, so a
+  project that references this package gets it through that dependency. A project inside this
+  repository adds `<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />`,
+  because a project reference carries no analyzer.
 
 ## Usage
 

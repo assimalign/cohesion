@@ -65,6 +65,17 @@ The mapper corrects or flags these combinations (codes in `OpenApiMetadataDiagno
 only reflection in the test suite (reading attributes off a sample type) is test-only. Runtime
 discovery in an application is the source generator's job (feature .06).
 
+## The package carries the source generator
+
+The project declares `CohesionAnalyzerReference` for `Assimalign.Cohesion.OpenApi.SourceGeneration`,
+so the generator DLL ships in this package at `analyzers/dotnet/cs/` and runs in every project that
+references the package, directly or through `OpenApi.Generation` or `OpenApi.Integration`. Shipping the
+two together means the generator and the metadata records its output compiles against cannot version
+apart: renaming or reshaping a metadata member is a change to the generator's emitted code in the same
+package. Why this package is the carrier, and the alternatives rejected, are recorded in the
+generator's [DESIGN.md](../../../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
+("Delivery").
+
 ## Non-goals
 
 - Runtime reflection-based discovery of attributes across an assembly — that is deliberately the source
