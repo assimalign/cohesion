@@ -19,6 +19,9 @@ ceremony — reflection-free under NativeAOT.
   format from the request's `Accept` header (over the same registry, reusing the #771 negotiation
   primitive), stamps `Vary: Accept`, and composes a bodyless `406` when nothing is acceptable;
   `feature.TryNegotiate(acceptHeader, out mediaType)` is the underlying non-throwing seam.
+- **Contract lookup** — `feature.TryGetJsonTypeInfo(type, out typeInfo)` returns the
+  System.Text.Json contract the built-in JSON writer serializes a type with, read-only, for
+  components that describe payloads rather than serialize them (the OpenAPI adapter).
 
 ## Usage
 

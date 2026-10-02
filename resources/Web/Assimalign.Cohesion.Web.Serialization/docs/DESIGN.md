@@ -129,6 +129,37 @@ write, or compose the `406`).
   client-facing outcome. The pure `TryNegotiate` seam is non-throwing throughout (an unacceptable
   request is `false`, never an exception).
 
+## Contract lookup (#152)
+
+A component that *describes* the application's payloads, rather than serializing them, has to see the
+contracts the JSON writer uses: the same property names (camelCase under the web defaults), nullability,
+converters and number handling, or the description drifts from the wire. The first such component is
+the OpenAPI adapter (`Assimalign.Cohesion.Web.OpenApi`), which turns those contracts into JSON Schema
+with System.Text.Json's `JsonSchemaExporter`. The options live inside the built-in JSON pair, so the
+package exposes one read-only seam:
+
+```csharp
+bool IHttpContentSerializationFeature.TryGetJsonTypeInfo(Type type, out JsonTypeInfo? typeInfo)
+```
+
+- **Which contract.** The writer the registry selects for `application/json` (`GetWriter`: most specific
+  range, then the earliest registration). When that is the built-in JSON writer, the result is
+  `TryGetTypeInfo` on its frozen options. The reader `AddJson` registers alongside it shares those
+  options, so the same contract describes request bodies.
+- **When there is none.** `false` when `application/json` resolves to no writer or to a writer of the
+  application's own, or when the registered resolver has no contract for the type. Nothing throws: like
+  `GetReader`/`GetWriter`, this is a lookup a caller branches on.
+- **What stays internal.** The options, the reader and the writer. A `JsonTypeInfo` from a frozen
+  options instance is itself read-only, so the seam cannot change how anything serializes.
+- **AOT.** The lookup asks the registered resolver, exactly as `CanWrite` does; no reflection fallback
+  exists to reach.
+
+Rejected alternatives, recorded with the adapter that drove the decision: the describer taking the
+`JsonSerializerContext` a second time (two registrations that can drift, and a context alone lacks the
+web defaults and the `configure` callback's changes); exposing `JsonSerializerOptions` (a wider seam than
+the question being asked); and a public interface on the internal writer (a type added for one
+consumer). The adapter's own DESIGN carries the full reasoning.
+
 ## Error model
 
 `HttpContentSerializationException` (sealed, this package's root) covers exactly the
