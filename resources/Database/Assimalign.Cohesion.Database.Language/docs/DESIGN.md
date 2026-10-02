@@ -67,7 +67,9 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   owns the OQL `MERGE` pin, so oql-upsert does not re-pin it. Each of these items depends on #1101
   and flips its own pins, corpus cases included, in its own change: oql-limit-offset (OQL `LIMIT`
   and `OFFSET`), oql-upsert (`UPSERT`), oql-arrays (`UNNEST` and `EVERY ... SATISFIES`), and
-  gql-label-direction (label-expression operators and `IS`).
+  gql-label-direction (label-expression operators and `IS`). gql-label-direction (#1139) has
+  flipped its pins and added one: the GQL tilde edge, `UNDIRECTED EDGE`, stays `COHDBL001` until
+  the graph engine stores undirected relationships.
 - **A stray character is `TokenType.Unrecognized`.** The lexer reports a character outside every
   language as `Unrecognized`, never as `Identifier`. Examples are `?`, `#`, `^`, `§`, a
   backtick, or a zero-width space. A surrogate pair is one token. Only ASCII digits make a numeric
@@ -84,9 +86,9 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   like any other here; the message that names the supported parameter forms is
   shared-parameters'.
 - **`--` stays a line comment in every language.** It is SQL's comment and ISO/IEC 39075's
-  `<simple comment>`, so there is no per-language lexer switch. A GQL abbreviated edge written
-  with `--` directly after `)` or `]` reads as a comment; the coded GQL diagnostic for that case
-  belongs to gql-label-direction. Where the comment ends is the next section's rule.
+  `<simple comment>`, so there is no per-language lexer switch. A Cypher arrow written with `--`
+  directly after a GQL node's `)` or edge's `]` reads as a comment; the GQL parser reports it as
+  `GQL0008` (#1139) without any lexer change. Where the comment ends is the next section's rule.
 
 ## Line terminators and line comments (#1150)
 
@@ -126,14 +128,12 @@ needs the same boundary calls `IsLineTerminator` instead of keeping its own list
 - **Consistency with #1101 and gql-label-direction (#1139).** Every terminator is whitespace to
   `char.IsWhiteSpace`, so outside a comment it separates tokens and is never `Unrecognized`; the
   stray-character rule is unchanged. The rule moves where a comment ends, never where it starts,
-  so the coded diagnostic #1139 will add, keyed on a `--` comment beginning exactly where a node's
-  `)` or an edge's `]` ends, holds whichever terminator ends the comment. Until it lands,
-  `(a)-->(b)` followed by any line terminator reads as `(a)` plus a comment. Before #1150 a CR,
-  NEL, LS or PS ending made such a GQL statement fail with `GQL0002`, because the comment swallowed
-  the rest of the text; it now truncates silently, as an LF ending already did, so
-  `MATCH (a:Person)-->(b:Person)<CR>DETACH DELETE a` deletes every Person
-  (`Graph.Language/docs/DESIGN.md`, "Comment boundary"). #1139's cases must run at every
-  terminator.
+  so `GQL0008` (#1139), keyed on a `--` comment beginning exactly where a node's `)` or an edge's
+  `]` ends, holds whichever terminator ends the comment. Between #1150 and #1139,
+  `(a)-->(b)` followed by any line terminator read as `(a)` plus a comment, so
+  `MATCH (a:Person)-->(b:Person)<CR>DETACH DELETE a` deleted every Person; it now fails with
+  `GQL0008`, pinned at every terminator (`Graph.Language/docs/DESIGN.md`, "Label expressions and
+  edge directions").
 - **Tests.** `TokenLexerLineCommentTests` pins each terminator, CR LF, a comment at the end of
   the input, terminator escapes in literals and comments, and terminators inside string literals,
   quoted identifiers and block comments. Each language pins the boundary in its parser

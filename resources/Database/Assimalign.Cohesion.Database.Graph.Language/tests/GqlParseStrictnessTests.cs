@@ -9,8 +9,9 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 /// <summary>
 /// Parse strictness (#1101): a stray character is one GQL0002 that binds nothing, an ISO
 /// construct outside the subset is one COHDBL001 at its own span, and every statement form
-/// still rejects leftover text. Nothing here asserts on <c>--</c> or <c>~</c> edge spellings,
-/// which gql-label-direction owns.
+/// still rejects leftover text. #1139 flipped the label-expression and <c>IS</c> pins to
+/// supported cases (<c>GqlLabelExpressionParserTests</c>) and added the tilde-edge pins;
+/// <c>GqlCypherArrowTests</c> owns <c>--</c> after a pattern element.
 /// </summary>
 public sealed class GqlParseStrictnessTests
 {
@@ -52,20 +53,18 @@ public sealed class GqlParseStrictnessTests
     /// <param name="marked">The statement; the reported span sits between '«' and '»'.</param>
     /// <param name="construct">The construct the message names.</param>
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Strictness: ISO constructs report one COHDBL001 at their span and no GQL0002")]
-    // Label expressions (gql-label-direction flips these)
-    [InlineData("MATCH (n:A«|»B) RETURN n", "LABEL DISJUNCTION")]
-    [InlineData("MATCH (n:A«&»B) RETURN n", "LABEL CONJUNCTION")]
-    [InlineData("MATCH (n:«!»A) RETURN n", "LABEL NEGATION")]
-    [InlineData("MATCH (n:«%») RETURN n", "WILDCARD LABEL")]
-    [InlineData("MATCH (n «IS» A) RETURN n", "IS LABEL EXPRESSION")]
-    [InlineData("MATCH (n:A«|»B|C) RETURN n", "LABEL DISJUNCTION")]
-    [InlineData("MATCH (n «IS» A|B) RETURN n", "IS LABEL EXPRESSION")]
-    // IS before a token that cannot start a label is not a label expression; the IS that
-    // RETURN names is the one construct, as before #1101.
+    // IS outside a labeled predicate stays unsupported; the IS that RETURN names is the one
+    // construct, as before #1101.
     [InlineData("MATCH (is) RETURN «is»", "IS")]
-    [InlineData("MATCH (a)-[r:A«|»B]->(b) RETURN r", "LABEL DISJUNCTION")]
-    [InlineData("MATCH (n:A«&»B {name: 'x'}) RETURN n", "LABEL CONJUNCTION")]
-    [InlineData("MATCH (a)-[:A«|»:B|:C]->(b) RETURN a", "LABEL DISJUNCTION")]
+    // Undirected (tilde) edges (#1139 pins): the engine stores only directed relationships.
+    [InlineData("MATCH (a)«~[r]~»(b) RETURN a", "UNDIRECTED EDGE")]
+    [InlineData("MATCH (a)«<~[r:T]~»(b) RETURN a", "UNDIRECTED EDGE")]
+    [InlineData("MATCH (a)«~[r {k: 1}]~>»(b) RETURN a", "UNDIRECTED EDGE")]
+    [InlineData("MATCH (a)«~»(b) RETURN a", "UNDIRECTED EDGE")]
+    [InlineData("MATCH (a)«<~»(b) RETURN a", "UNDIRECTED EDGE")]
+    [InlineData("MATCH (a)«~>»(b) RETURN a", "UNDIRECTED EDGE")]
+    [InlineData("INSERT (a:P)«~>»(b:P)", "UNDIRECTED EDGE")]
+    [InlineData("MATCH (a)-[r]->(b)«~»(c) RETURN a", "UNDIRECTED EDGE")]
     // Path mode prefixes (pins)
     [InlineData("MATCH «TRAIL» (a)-[]->(b)", "TRAIL PATH MODE")]
     [InlineData("MATCH p = «ACYCLIC» (a)-[]->(b)", "ACYCLIC PATH MODE")]

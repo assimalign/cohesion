@@ -285,6 +285,66 @@ public sealed class GraphQueryTests
         var deep = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], predicate, [], [], false, [new GqlProjection("a")]));
         var bounded = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(deep)));
         bounded.Message.ShouldContain("COHDBG001");
+
+        // Label expressions (#1139): a null operand or name, nesting past 128 levels, a labeled
+        // predicate without an expression, and Labels or Type that disagree with the expression.
+        await session.ExecuteAsync("INSERT (:A {k: 1})-[:T]->(:B)");
+        GqlLabelExpression nested = new GqlLabelName("A");
+        for (int i = 0; i < 128; i++) { nested = new GqlLabelNegation(nested); }
+        var empty = new Dictionary<string, object?>();
+        GqlNodePattern[] nodes =
+        [
+            new("a", [], empty) { LabelExpression = new GqlLabelNegation(null!) },
+            new("a", [], empty) { LabelExpression = new GqlLabelDisjunction(new GqlLabelName("A"), null!) },
+            new("a", [], empty) { LabelExpression = new GqlLabelName(null!) },
+            new("a", [], empty) { LabelExpression = nested },
+            new("a", ["B"], empty) { LabelExpression = new GqlLabelName("A") },
+            new("a", ["A"], empty) { LabelExpression = new GqlLabelDisjunction(new GqlLabelName("A"), new GqlLabelName("B")) },
+        ];
+        foreach (var badNode in nodes)
+        {
+            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([badNode], [])], null, [], [], false, [new GqlProjection("a")]));
+            (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
+                .Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        }
+        GqlRelationshipPattern[] edges =
+        [
+            new("r", null, GqlPatternDirection.Outgoing, empty) { LabelExpression = new GqlLabelConjunction(null!, new GqlLabelName("T")) },
+            new("r", null, GqlPatternDirection.Outgoing, empty) { LabelExpression = nested },
+            new("r", "U", GqlPatternDirection.Outgoing, empty) { LabelExpression = new GqlLabelName("T") },
+            new("r", "T", GqlPatternDirection.Outgoing, empty) { LabelExpression = new GqlLabelNegation(new GqlLabelName("T")) },
+            new("r", null, (GqlPatternDirection)4, empty),
+        ];
+        foreach (var badEdge in edges)
+        {
+            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node, new("b", [], empty)], [badEdge])], null, [], [], false, [new GqlProjection("a")]));
+            (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
+                .Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        }
+        GqlExpression[] predicates =
+        [
+            new GqlLabeledPredicate("a", null!),
+            new GqlLabeledPredicate(null!, new GqlLabelName("A")),
+            new GqlLabeledPredicate("a", nested),
+        ];
+        foreach (var badPredicate in predicates)
+        {
+            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], badPredicate, [], [], false, [new GqlProjection("a")]));
+            (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
+                .Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        }
+
+        // A hand-built pattern with Labels alone keeps its meaning, and a consistent pair agrees.
+        GqlNodePattern legacy = new("a", ["A"], empty);
+        GqlNodePattern paired = new("a", ["A"], empty) { LabelExpression = new GqlLabelName("A") };
+        foreach (var pattern in new[] { legacy, paired })
+        {
+            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([pattern], [])], null, [], [], false, [new GqlProjection("a", "k")]));
+            await using var result = (QueryResultSet)await session.ExecuteAsync(new GraphQueryRequest(statement));
+            var values = new List<object?>();
+            await foreach (var row in result.GetRowsAsync()) { values.Add(row.GetValue(0)); }
+            values.ShouldBe([1L]);
+        }
     }
 
     private static async Task<List<QueryRow>> Rows(IDatabaseSession session, string query)

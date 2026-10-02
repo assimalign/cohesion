@@ -144,8 +144,10 @@ internal static class GraphPlanExecutor
             foreach (var edge in await database.Store.GetIncidentAsync(from, operation.Context.Snapshot, token).ConfigureAwait(false))
             {
                 budget.Consume();
-                if (used.Contains(edge.Id) || pattern.Type is { } type && edge.Type != type) { continue; }
+                if (used.Contains(edge.Id) || !GraphLabelEvaluator.Accepts(pattern, edge.Type)) { continue; }
                 // A leftward expansion reverses the pattern direction, not the stored edge.
+                // Undirected and LeftOrRight constrain neither end: storage holds only directed
+                // relationships, so -[]- and <-[]-> both match an edge in either orientation.
                 bool forward = current.To > current.From;
                 bool outgoing = pattern.Direction == GqlPatternDirection.Outgoing && forward || pattern.Direction == GqlPatternDirection.Incoming && !forward;
                 bool incoming = pattern.Direction == GqlPatternDirection.Incoming && forward || pattern.Direction == GqlPatternDirection.Outgoing && !forward;
@@ -179,7 +181,7 @@ internal static class GraphPlanExecutor
     }
 
     private static bool AcceptNode(GqlNodePattern pattern, GraphNode node, Dictionary<string, object> bindings)
-        => pattern.Labels.All(node.Labels.Contains) && PropertiesMatch(pattern.Properties, node.Properties) && Accept(pattern.Variable, node, bindings);
+        => GraphLabelEvaluator.Accepts(pattern, node.Labels) && PropertiesMatch(pattern.Properties, node.Properties) && Accept(pattern.Variable, node, bindings);
     private static bool Accept(string? variable, object entity, Dictionary<string, object> bindings)
     {
         if (variable is null) { return true; }
@@ -209,7 +211,7 @@ internal static class GraphPlanExecutor
             }
             else
             {
-                nodes[i] = await database.CreateNodeCoreAsync(operation, pattern.Labels, pattern.Properties, token).ConfigureAwait(false);
+                nodes[i] = await database.CreateNodeCoreAsync(operation, GraphLabelEvaluator.InsertLabels(pattern), pattern.Properties, token).ConfigureAwait(false);
                 Accept(pattern.Variable, nodes[i], bindings);
                 affected++;
             }
@@ -219,9 +221,10 @@ internal static class GraphPlanExecutor
             var pattern = path.Relationships[i];
             if (pattern.Variable is { } variable && bindings.ContainsKey(variable))
             { throw new DatabaseException("COHDBG001: An inserted relationship variable must be new."); }
+            // The planner admits only Outgoing and Incoming here.
             bool outgoing = pattern.Direction == GqlPatternDirection.Outgoing;
             var relationship = await database.CreateRelationshipCoreAsync(operation, nodes[outgoing ? i : i + 1].Id,
-                nodes[outgoing ? i + 1 : i].Id, pattern.Type!, pattern.Properties, token).ConfigureAwait(false);
+                nodes[outgoing ? i + 1 : i].Id, GraphLabelEvaluator.InsertType(pattern), pattern.Properties, token).ConfigureAwait(false);
             Accept(pattern.Variable, relationship, bindings);
             affected++;
         }

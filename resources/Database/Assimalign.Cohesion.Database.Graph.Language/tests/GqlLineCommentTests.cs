@@ -11,8 +11,9 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 /// after a lone CR was comment text and
 /// <c>MATCH (a) -- c&lt;CR&gt;WHERE a.name = 'x'&lt;LF&gt;DETACH DELETE a</c> deleted every node
 /// (#1150). With <c>DETACH DELETE</c> on the CR line too, the comment swallowed it as well and the
-/// statement failed instead. Diagnostic lines break at the same terminators. Nothing here asserts
-/// on <c>--</c> directly after <c>)</c> or <c>]</c>, which gql-label-direction (#1139) owns.
+/// statement failed instead. Diagnostic lines break at the same terminators. <c>--</c> directly
+/// after <c>)</c> or <c>]</c> is <c>GQL0008</c> (#1139), pinned at every terminator in
+/// <c>GqlCypherArrowTests</c>.
 /// </summary>
 public sealed class GqlLineCommentTests
 {

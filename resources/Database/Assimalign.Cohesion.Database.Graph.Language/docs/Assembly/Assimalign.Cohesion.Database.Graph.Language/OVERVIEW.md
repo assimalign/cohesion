@@ -6,8 +6,12 @@ only executable clauses. `GqlClauses` names lexical capability keys, including d
 
 `GqlQueryExpression` groups finite match paths, a predicate, insertions, deletion variables and
 projections. `GqlPathPattern` holds ordered nodes and relationships; their immutable metadata
-captures labels, direction, type and scalar properties. `GqlProjection` selects a bound element
-or property with an optional alias. Literal, property and binary expression classes describe the
-bounded comparison grammar. Programmatically constructed ASTs receive planner validation too.
+captures labels, direction, type and scalar properties. Each pattern's `LabelExpression` is a
+`GqlLabelExpression` tree (`GqlLabelName`, `GqlLabelWildcard`, `GqlLabelNegation`,
+`GqlLabelConjunction`, `GqlLabelDisjunction`), and `GqlPatternDirection.LeftOrRight` is the ISO
+`<-[]->` / `<->` direction. `GqlProjection` selects a bound element or property with an optional
+alias. Literal, property, binary and labeled-predicate (`GqlLabeledPredicate`) expression classes
+describe the bounded predicate grammar. Programmatically constructed ASTs receive planner
+validation too.
 
 See [DESIGN.md](../../DESIGN.md) for ISO scope, source locations, diagnostic codes and conformance.

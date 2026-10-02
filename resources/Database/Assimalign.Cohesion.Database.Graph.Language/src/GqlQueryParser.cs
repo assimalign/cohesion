@@ -13,10 +13,14 @@ public sealed partial class GqlQueryParser : QueryParser
     private readonly object _gate = new();
     private readonly List<Lexeme> _tokens = [];
     private readonly List<Diagnostic> _diagnostics = [];
+    // Each '--' comment by its start offset, so a pattern element can tell whether one begins
+    // exactly where its ')' or ']' ends (GQL0008).
+    private readonly Dictionary<int, Lexeme> _lineComments = new();
     private string _source = string.Empty;
     private int _position;
     private int _depth;
     private int _comparisons;
+    private int _labelNesting;
 
     /// <summary>Initializes a GQL parser.</summary>
     /// <param name="options">Optional shared analyzer configuration.</param>
@@ -40,9 +44,11 @@ public sealed partial class GqlQueryParser : QueryParser
     {
         _tokens.Clear();
         _diagnostics.Clear();
+        _lineComments.Clear();
         _position = 0;
         _depth = 0;
         _comparisons = 0;
+        _labelNesting = 0;
         int line = 1;
         int scanned = 0;
         while (lexer.MoveNext())
@@ -57,6 +63,7 @@ public sealed partial class GqlQueryParser : QueryParser
             if (token.Type == TokenType.Comment)
             {
                 if (!IsCompleteComment(lexeme.Text)) { Error("GQL0003", "Unterminated block comment.", lexeme); }
+                else if (lexeme.Text.StartsWith("--", StringComparison.Ordinal)) { _lineComments[lexeme.Start] = lexeme; }
             }
             else
             {
@@ -118,52 +125,50 @@ public sealed partial class GqlQueryParser : QueryParser
     /// Finds every recognized construct outside the executable profile, using the
     /// recognized-unsupported table (<see cref="GqlUnsupportedVocabulary"/>). Each construct is
     /// reported once at its own span: a statement whose first word is unsupported reports that
-    /// word only, a label expression reports its first operator, and multi-word prefixes such
-    /// as <c>ALL SHORTEST</c> and <c>NODETACH DELETE</c> are one construct.
+    /// word only, a tilde edge reports its whole edge, and multi-word prefixes such as
+    /// <c>ALL SHORTEST</c> and <c>NODETACH DELETE</c> are one construct. Label names, in a
+    /// pattern or in a <c>WHERE</c> label expression, are never looked up as words.
     /// </summary>
     private void FindUnsupported()
     {
         int patternDepth = 0;
-        int propertyDepth = 0;
         bool inPredicateOrReturn = false;
-        bool inLabelExpression = false;
-        bool labelReported = false;
+        bool inPredicate = false;
         bool sawCall = false;
+        var label = LabelScan.None;
+        int labelParens = 0;
         for (int i = 0; i < _tokens.Count; i++)
         {
             var token = _tokens[i];
             if (token.Type == TokenType.Semicolon) { break; }
-            if (token.Type == TokenType.LeftBrace && i > 0 && _tokens[i - 1].Type is
-                TokenType.RightArrow or TokenType.LeftArrow or TokenType.Minus or TokenType.RightParen)
+            if (token.Type == TokenType.LeftBrace && StartsQuantifier(i, patternDepth))
             {
                 Unsupported("QUANTIFIED PATTERN", token);
             }
             if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace) { patternDepth++; }
             if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace) { patternDepth--; }
-            if (token.Type == TokenType.LeftBrace) { propertyDepth++; }
-            if (token.Type == TokenType.RightBrace) { propertyDepth--; }
 
-            // A label expression runs from the ':' of a node or edge pattern to its property map
-            // or closing bracket. Its first operator names it; the rest belong to it.
-            bool inElementPattern = patternDepth > 0 && propertyDepth == 0 && !inPredicateOrReturn;
-            if (token.Type is TokenType.LeftBrace or TokenType.RightParen or TokenType.RightBracket)
+            // A WHERE label expression (n:A|B, n IS [NOT] LABELED A|B) holds label names exactly
+            // as a pattern does, so n:A|Order names a label, not ORDER BY.
+            if (label != LabelScan.None)
             {
-                inLabelExpression = false;
+                if (ContinuesLabelExpression(token.Type, ref label, ref labelParens)) { continue; }
+                label = LabelScan.None;
+                labelParens = 0;
             }
-            if (token.Type == TokenType.Colon && inElementPattern)
+            if (token.Type == TokenType.Colon && inPredicate && i > 0 &&
+                _tokens[i - 1].Type is TokenType.Identifier or TokenType.QuotedIdentifier)
             {
-                // A ':' inside a label expression (:A|:B) continues it; only a new one resets.
-                if (!inLabelExpression) { labelReported = false; }
-                inLabelExpression = true;
+                label = LabelScan.ExpectPrimary;
+                continue;
             }
-            if (token.Type is TokenType.Pipe or TokenType.Ampersand or TokenType.Bang or TokenType.Percent &&
-                inLabelExpression)
+
+            // A tilde edge right after a node pattern is undirected, which the engine cannot
+            // store: ~[]~, <~[]~, ~[]~>, ~, <~ and ~> each name one construct.
+            if (token.Type == TokenType.RightParen && patternDepth == 0 && !inPredicateOrReturn &&
+                TryFindUndirectedEdge(i + 1, out int edgeEnd))
             {
-                if (!labelReported && GqlUnsupportedVocabulary.TryFind(token.Text, out var operation))
-                {
-                    UnsupportedConstruct(operation.Construct, token, token);
-                }
-                labelReported = true;
+                UnsupportedConstruct(GqlUnsupportedVocabulary.UndirectedEdge, _tokens[i + 1], _tokens[edgeEnd]);
                 continue;
             }
 
@@ -183,20 +188,29 @@ public sealed partial class GqlQueryParser : QueryParser
             string value = token.Text.ToUpperInvariant();
             if (patternDepth == 0 && value is "WHERE" or "RETURN") { inPredicateOrReturn = true; }
             if (patternDepth == 0 && value is "MATCH" or "CREATE" or "INSERT" or "DELETE") { inPredicateOrReturn = false; }
+            if (patternDepth == 0 && value is "WHERE" or "RETURN" or "MATCH" or "CREATE" or "INSERT" or "DELETE")
+            {
+                inPredicate = value == "WHERE";
+            }
+
+            // n IS [NOT] LABELED A in WHERE is ISO's <labeled predicate>; IS NULL and the truth
+            // tests stay unsupported (gql-where-expr), and so does any IS in RETURN, whose subset
+            // has no expressions. In a pattern, (n IS A) is a label expression and needs no case
+            // here: words inside a pattern are names.
+            if (value == "IS" && inPredicate)
+            {
+                int labeled = IsWordAt(i + 1, "NOT") ? i + 2 : i + 1;
+                if (IsWordAt(labeled, GqlLabelVocabulary.Labeled))
+                {
+                    i = labeled;
+                    label = LabelScan.ExpectPrimary;
+                    continue;
+                }
+            }
             if (inPredicateOrReturn && i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen &&
                 value is not ("WHERE" or "AND" or "RETURN"))
             {
                 Unsupported($"FUNCTION {token.Text}", token);
-                continue;
-            }
-
-            // (n IS A) is ISO's <is label expression>, not a name. IS followed by a token that
-            // cannot start a label, as in (is), is a variable named is.
-            if (value == "IS" && inElementPattern && StartsLabelExpression(i + 1))
-            {
-                UnsupportedConstruct(GqlUnsupportedVocabulary.IsLabelExpression, token, token);
-                inLabelExpression = true;
-                labelReported = true;
                 continue;
             }
             if (patternDepth != 0 && !inPredicateOrReturn) { continue; }
@@ -215,7 +229,7 @@ public sealed partial class GqlQueryParser : QueryParser
                     if (!IsWordAt(i + 1, "DELETE")) { continue; }
                     end = _tokens[i + 1];
                     break;
-                case GqlWordPosition.LabelExpression:
+                case GqlWordPosition.EdgePattern:
                     continue;
                 default:
                     if (value is "ALL" or "ANY" or "SHORTEST" && !inPredicateOrReturn &&
@@ -300,10 +314,136 @@ public sealed partial class GqlQueryParser : QueryParser
         return next < _tokens.Count && _tokens[next].Type == TokenType.LeftParen;
     }
 
-    /// <summary>Whether the token at <paramref name="index"/> can start a label expression.</summary>
-    private bool StartsLabelExpression(int index) => index < _tokens.Count && _tokens[index].Type is
-        TokenType.Identifier or TokenType.Keyword or TokenType.Function or TokenType.QuotedIdentifier or
-        TokenType.Bang or TokenType.Percent or TokenType.LeftParen;
+    /// <summary>
+    /// Whether the <c>{</c> at <paramref name="index"/> opens an ISO quantifier (<c>{m,n}</c>,
+    /// <c>{m}</c>, <c>{,n}</c>) after an edge or a node pattern. A quantifier starts with a bound
+    /// or a comma. A property map starts with a key, as in <c>(n:(A|B) {k: 1})</c> or the
+    /// malformed abbreviated edge <c>-{k: 1}-&gt;</c>, and is left to the parser.
+    /// </summary>
+    /// <param name="index">The index of the <c>{</c>.</param>
+    /// <param name="patternDepth">The nesting depth before the <c>{</c>.</param>
+    private bool StartsQuantifier(int index, int patternDepth)
+    {
+        if (index == 0 || index + 1 >= _tokens.Count ||
+            _tokens[index + 1].Type is not (TokenType.Integer or TokenType.Comma))
+        {
+            return false;
+        }
+
+        return _tokens[index - 1].Type switch
+        {
+            TokenType.RightArrow or TokenType.LeftArrow or TokenType.Minus => true,
+            // A ')' inside an element closes a label group, not the node pattern.
+            TokenType.RightParen => patternDepth == 0,
+            // The '>' of '<->'.
+            TokenType.GreaterThan => index >= 2 && _tokens[index - 2].Type == TokenType.LeftArrow && Adjacent(index - 2, index - 1),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Reads an ISO/IEC 39075 tilde edge starting at <paramref name="index"/>, directly after a
+    /// node pattern: <c>~</c> or <c>&lt;~</c> (no space inside), through a bracketed form's
+    /// closing <c>~</c> or <c>~&gt;</c>, or the abbreviated <c>~&gt;</c>.
+    /// </summary>
+    /// <param name="index">The index after the node pattern's <c>)</c>.</param>
+    /// <param name="last">
+    /// The index of the edge's last token: its closing tilde, or its opening tilde when a
+    /// bracketed form does not close with one.
+    /// </param>
+    /// <returns><see langword="true"/> when a tilde edge starts at <paramref name="index"/>.</returns>
+    private bool TryFindUndirectedEdge(int index, out int last)
+    {
+        last = index;
+        if (index >= _tokens.Count) { return false; }
+        int tilde = index;
+        if (_tokens[index].Type == TokenType.LessThan)
+        {
+            tilde = index + 1;
+            if (!Adjacent(index, tilde) || _tokens[tilde].Type != TokenType.Tilde) { return false; }
+        }
+        else if (_tokens[index].Type != TokenType.Tilde) { return false; }
+
+        last = tilde;
+        int next = tilde + 1;
+        if (next < _tokens.Count && _tokens[next].Type == TokenType.LeftBracket)
+        {
+            int depth = 0;
+            for (int j = next; j < _tokens.Count && _tokens[j].Type is not (TokenType.Semicolon or TokenType.Eof); j++)
+            {
+                if (_tokens[j].Type == TokenType.LeftBracket) { depth++; }
+                else if (_tokens[j].Type == TokenType.RightBracket && --depth == 0)
+                {
+                    if (j + 1 < _tokens.Count && _tokens[j + 1].Type == TokenType.Tilde)
+                    {
+                        last = Adjacent(j + 1, j + 2) && _tokens[j + 2].Type == TokenType.GreaterThan ? j + 2 : j + 1;
+                    }
+                    break;
+                }
+            }
+        }
+        else if (Adjacent(tilde, next) && _tokens[next].Type == TokenType.GreaterThan)
+        {
+            last = next;
+        }
+        return true;
+    }
+
+    /// <summary>Whether two tokens touch, with no whitespace or comment between them.</summary>
+    private bool Adjacent(int left, int right) =>
+        right < _tokens.Count && _tokens[left].End == _tokens[right].Start;
+
+    /// <summary>
+    /// Advances the capability scan through a <c>WHERE</c> label expression: primaries (a name,
+    /// <c>%</c> or a parenthesized expression), each optionally negated, joined by <c>|</c> or
+    /// <c>&amp;</c>.
+    /// </summary>
+    /// <param name="type">The token's type.</param>
+    /// <param name="state">The scan's position in the expression.</param>
+    /// <param name="parens">The open label parentheses.</param>
+    /// <returns><see langword="true"/> while the token belongs to the expression.</returns>
+    private static bool ContinuesLabelExpression(TokenType type, ref LabelScan state, ref int parens)
+    {
+        if (state == LabelScan.ExpectPrimary)
+        {
+            switch (type)
+            {
+                case TokenType.Identifier or TokenType.Keyword or TokenType.Function or TokenType.QuotedIdentifier or TokenType.Percent:
+                    state = LabelScan.AfterPrimary;
+                    return true;
+                case TokenType.Bang:
+                    return true;
+                case TokenType.LeftParen:
+                    parens++;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        switch (type)
+        {
+            case TokenType.Pipe or TokenType.Ampersand:
+                state = LabelScan.ExpectPrimary;
+                return true;
+            case TokenType.RightParen when parens > 0:
+                parens--;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Where the capability scan is inside a <c>WHERE</c> label expression.</summary>
+    private enum LabelScan
+    {
+        /// <summary>Outside a label expression.</summary>
+        None,
+        /// <summary>After <c>:</c>, <c>LABELED</c>, an operator, <c>!</c> or <c>(</c>.</summary>
+        ExpectPrimary,
+        /// <summary>After a name, <c>%</c> or a closing <c>)</c>.</summary>
+        AfterPrimary,
+    }
 
     private bool IsWordAt(int index, string word) => index < _tokens.Count &&
         _tokens[index].Type is TokenType.Keyword or TokenType.Identifier or TokenType.Function &&

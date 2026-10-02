@@ -12,8 +12,23 @@ internal static class GraphExpressionEvaluator
         GqlLiteralExpression literal => literal.Value,
         GqlPropertyExpression property => Property(bindings[property.Variable], property.Property),
         GqlBinaryExpression binary => Binary(binary, bindings),
+        GqlLabeledPredicate labeled => Labeled(labeled, bindings),
         _ => throw new DatabaseException("COHDBG001: Unsupported graph expression."),
     };
+
+    // ISO <labeled predicate>: true or false for a bound element. A variable with no binding (a
+    // null optional match, once that clause exists) is UNKNOWN, which AND and WHERE treat as false.
+    private static object? Labeled(GqlLabeledPredicate labeled, IReadOnlyDictionary<string, object> bindings)
+    {
+        if (!bindings.TryGetValue(labeled.Variable, out var entity) || entity is null) { return null; }
+        bool matches = entity switch
+        {
+            GraphNode node => GraphLabelEvaluator.Matches(labeled.LabelExpression, node.Labels),
+            GraphRelationship relationship => GraphLabelEvaluator.Matches(labeled.LabelExpression, relationship.Type),
+            _ => throw new DatabaseException("COHDBG003: A labeled predicate requires a node or relationship."),
+        };
+        return matches != labeled.IsNegated;
+    }
     internal static object? Property(object entity, string name) => entity switch
     {
         GraphNode node => node.Properties.TryGetValue(name, out var value) ? value : null,
