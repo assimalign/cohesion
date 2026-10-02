@@ -21,11 +21,11 @@ internal sealed partial class GraphDatabaseInstance
             session?.Track(operation);
             return operation;
         }
-        catch
+        catch (Exception error)
         {
             if (operation is not null)
             {
-                await operation.AbortAsync().ConfigureAwait(false);
+                await operation.AbortAsync(error).ConfigureAwait(false);
             }
             throw;
         }
@@ -46,14 +46,23 @@ internal sealed partial class GraphDatabaseInstance
         }
         catch (Exception error)
         {
-            await operation.AbortAsync().ConfigureAwait(false);
-            if (error is TransactionDeadlockException) { throw new DatabaseTransactionDeadlockException(error.Message, error); }
-            if (error is TransactionAbortedException) { throw new DatabaseTransactionAbortedException(error.Message, error); }
-            if (error is StorageException) { throw new DatabaseException("COHDBG006: " + error.Message, error); }
-            if (error is InvalidOperationException) { throw new DatabaseException("COHDBG003: " + error.Message, error); }
-            throw;
+            // An explicit transaction records the error its caller sees as the cause of its abort.
+            var reported = Translate(error);
+            await operation.AbortAsync(reported).ConfigureAwait(false);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
         }
     }
+
+    // Child-root failures cross the engine boundary as the area root's exceptions.
+    private static Exception Translate(Exception error) => error switch
+    {
+        TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
+        TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
+        StorageException => new DatabaseException("COHDBG006: " + error.Message, error),
+        InvalidOperationException => new DatabaseException("COHDBG003: " + error.Message, error),
+        _ => error,
+    };
 
     // One database writer at a time is deliberately conservative. The shared
     // lock manager owns waits and releases; readers remain snapshot based.

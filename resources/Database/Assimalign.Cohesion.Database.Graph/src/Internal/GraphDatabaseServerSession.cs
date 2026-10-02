@@ -30,7 +30,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
     private ProtocolChannel? _channel;
     private IProtocolFrameReader? _reader;
     private IProtocolFrameWriter? _writer;
-    private IDatabaseSession? _databaseSession;
+    private GraphDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
 
     internal GraphDatabaseServerSession(
@@ -227,7 +227,14 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             return false;
         }
 
-        _databaseSession = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
+        // The server fronts one GraphDatabaseEngine, whose databases create graph sessions.
+        IDatabaseSession session = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
+        if (session is not GraphDatabaseSession graphSession)
+        {
+            await session.DisposeAsync().ConfigureAwait(false);
+            throw new InvalidOperationException($"Database '{database.Name}' did not create a graph session.");
+        }
+        _databaseSession = graphSession;
         Principal = startup.Principal;
 
         await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
@@ -322,10 +329,12 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             {
                 throw new DatabaseParseException("A graph statement must not be empty.");
             }
+            // The engine session parses and validates the statement, so a statement that fails
+            // here aborts an explicit transaction exactly as one that fails in process (#1188).
             if (frame.Type == (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths)
             {
-                var request = GraphPathsQueryRequest.FromGql(message.Statement, parameters);
-                var result = await _databaseSession!.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+                var result = await _databaseSession!.ExecuteStatementAsync(
+                    () => GraphPathsQueryRequest.FromGql(message.Statement, parameters), cancellationToken).ConfigureAwait(false);
                 if (result is not GraphPathsQueryResult paths)
                 {
                     throw new DatabaseException("A path request did not produce a graph path result.");
@@ -340,15 +349,8 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             }
             else
             {
-                var request = GraphQueryRequest.FromGql(message.Statement, parameters);
-                foreach (var projection in request.Statement.GqlExpression.Projections)
-                {
-                    if (projection.Property is null)
-                    {
-                        throw new DatabaseException("Execute accepts scalar property projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.");
-                    }
-                }
-                var result = await _databaseSession!.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+                var result = await _databaseSession!.ExecuteStatementAsync(
+                    () => ParseScalarRequest(message.Statement, parameters), cancellationToken).ConfigureAwait(false);
                 await WriteResultAsync(result, rowWriter, cancellationToken).ConfigureAwait(false);
             }
         }
@@ -367,6 +369,20 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
         {
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, exception.Message, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    // The Execute exchange carries scalar rows only; entity and path projections use ExecutePaths.
+    private static GraphQueryRequest ParseScalarRequest(string statement, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        var request = GraphQueryRequest.FromGql(statement, parameters);
+        foreach (var projection in request.Statement.GqlExpression.Projections)
+        {
+            if (projection.Property is null)
+            {
+                throw new DatabaseException("Execute accepts scalar property projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.");
+            }
+        }
+        return request;
     }
 
     private async Task WriteResultAsync(QueryResult result, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)

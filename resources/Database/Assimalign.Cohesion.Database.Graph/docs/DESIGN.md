@@ -115,8 +115,11 @@ creation writes its record and both adjacency entries in one physical bracket. D
 with `DETACH DELETE` tombstones its incident relationships, adjacency and property entries with
 the node atomically. Plain GQL `DELETE` refuses a still-connected node. `DELETE r,a` first deletes
 explicitly selected relationships, then checks the nodes. The frozen typed `DeleteNodeAsync`
-contract explicitly cascades and is implemented that way. Any mutation failure rolls back the
-owning logical transaction, including an explicit session transaction, as in Documents.
+contract explicitly cascades and is implemented that way. Any statement failure rolls back the
+owning logical transaction. An autocommit statement's transaction is its own; an explicit session
+transaction is aborted as a whole and stays aborted until the caller rolls it back, as
+[Failed statements in explicit transactions](#failed-statements-in-explicit-transactions-1188)
+describes.
 
 Snapshot and ReadCommitted isolation are supported. ReadCommitted captures and pins a statement
 snapshot, so metadata and each hop of a traversal share a visibility horizon. Serializable is
@@ -132,6 +135,70 @@ plan, and checkpoints last. The process fixture exits after committed graph/inde
 after uncommitted detach/insertion page write-back, without disposal. Restart must recover the
 committed path and index, remove partial nodes/types/edges, and undo partial tombstones; it then
 reopens a second time to verify the recovery checkpoint.
+
+### Failed statements in explicit transactions (#1188)
+
+A statement that fails inside an explicit transaction aborts the whole transaction. Graph storage
+cannot undo one statement: a statement writes catalog definitions, records and index entries
+through separate physical brackets, and `Database.Transactions` undoes a writer only as a whole
+transaction, with no savepoints. The SQL session's contract, where the failed statement writes
+nothing and the transaction stays active, is therefore unavailable, and the session follows Neo4j:
+
+1. The failure rolls the transaction's work back at once and releases its locks, so the aborted
+   transaction blocks no other writer while it waits for the caller.
+2. The transaction stays the session's `CurrentTransaction` and reports `TransactionState.Faulted`.
+   Every later statement on the session fails with `COHDBG007`: GQL text or requests, typed
+   `IGraphDatabase` operations, traversals and `GraphSchema` calls. `BeginTransactionAsync` fails
+   with `COHDBG007` too. The error names the original failure in its message (`Cause: ...`) and
+   carries it as `InnerException`. A refused statement does not change the transaction, and an
+   aborted transaction refuses text before parsing it.
+3. `RollbackAsync` succeeds, leaves none of the transaction's writes, and returns the session to
+   autocommit. It may be repeated, so a catch-block rollback after a failed commit raises nothing.
+   Disposing the transaction or the session ends it the same way.
+4. `CommitAsync` fails with `COHDBG007`, commits nothing, and ends the transaction (`RolledBack`).
+5. Every statement failure counts: parse diagnostics, planning and execution errors
+   (`COHDBG001`–`COHDBG006`), ownership refusals, kernel aborts such as conflicts and deadlocks,
+   and cancellation. Argument validation (null or whitespace text), a non-GQL request and the
+   refusal of a second concurrent operation on the session never start a statement and leave the
+   transaction unchanged.
+6. Autocommit statements are unaffected: a failure ends only its own statement transaction.
+
+The session's explicit-transaction lifecycle, where Faulted is the new state:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Idle: autocommit statement succeeds or fails
+    Idle --> Active: BeginTransactionAsync
+    Active --> Active: statement succeeds
+    Active --> Faulted: statement fails and its transaction's work is rolled back
+    Faulted --> Faulted: statement or BEGIN refused with COHDBG007
+    Active --> Idle: CommitAsync or RollbackAsync
+    Faulted --> Idle: RollbackAsync, DisposeAsync, or CommitAsync failing with COHDBG007
+```
+
+The reference engines agree on the failure and the refusal; they differ only on COMMIT. Citations
+are to Neo4j commit `54a7dcf7c25` and PostgreSQL commit `85f55534e80`, under each repository's
+`community/` and `src/` trees respectively.
+
+| Behavior | Neo4j (followed) | PostgreSQL | Graph |
+| --- | --- | --- | --- |
+| A statement fails | Any failure, compilation included, marks the transaction for termination (`cypher/cypher/.../ExecutionEngine.scala:232-245`); every error classification rolls back (`common/.../Status.java:983-1005`); Bolt marks the transaction failed (`bolt/.../tx/TransactionImpl.java:130-145`) | Any error aborts the block into `TBLOCK_ABORT`, "failed xact, awaiting ROLLBACK" (`backend/access/transam/xact.c:171`) | Aborted; its work is rolled back at once |
+| Later statements | Refused as terminated (`kernel/.../coreapi/TransactionImpl.java:529-535`, `fabric/query-router/.../RouterTransactionImpl.java:478-486`); Bolt answers every request but RESET with IGNORED or FAILURE (`bolt/.../fsm/StateMachineImpl.java:143-153`) | Rejected with SQLSTATE 25P02 before parse analysis (`backend/tcop/postgres.c:1150-1164`) | `COHDBG007`, checked before parsing |
+| BEGIN | Refused with the rest in Bolt's failed state | 25P02: BEGIN is no transaction exit statement (`backend/tcop/postgres.c:2945-2958`) | `COHDBG007` |
+| ROLLBACK | Succeeds, repeatably (`kernel/.../KernelTransactionImplementation.java:1184-1194`, `RouterTransactionImpl.java:268-275`) | Ends the block; abort processing is already done (`xact.c:4272-4280`) | Succeeds, repeatably |
+| COMMIT | Rolls back and throws `Terminated` (`KernelTransactionImplementation.java:1206-1210`, `1291-1303`; `RouterTransactionImpl.java:219-225`) | Ends the block and reports the tag ROLLBACK without an error (`xact.c:4133-4139`, `backend/tcop/utility.c:636-641`) | `COHDBG007`; nothing commits; the transaction ends |
+
+COMMIT follows Neo4j: a caller awaiting `CommitAsync` must not see success when nothing committed.
+A Bolt driver sends RESET after a failure; `RollbackAsync` plays that part here.
+
+The graph protocol has no transaction control, so a wire session runs inside an explicit
+transaction only when its host opens one on the server session's engine session
+(`IDatabaseServerSession.DatabaseSession`). The server hands parsing and request validation to
+that engine session, so a parse failure or an entity projection on `Execute` aborts the
+transaction exactly as the same failure does in process. An empty statement is rejected before it
+reaches the session and changes nothing. Each refusal is an `ExecutionFailure` whose message
+starts with `COHDBG007`, on `Execute` and `ExecutePaths` alike, and the session stays ready.
 
 ## Planning, execution and bounds
 
@@ -282,6 +349,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG004` | Path materialization or candidate-expansion limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
 | `COHDBG006` | Storage failure translated at the engine boundary |
+| `COHDBG007` | The session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until the caller rolls back; the message and `InnerException` name the original failure |
 
 Planner/data errors use stable code prefixes on `DatabaseException`. Kernel aborts cross the engine
 boundary as `DatabaseTransactionAbortedException`; deadlocks retain their specialized subtype.
