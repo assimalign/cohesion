@@ -9,7 +9,8 @@ rather than from runtime reflection, so the same document is produced under Nati
   table: paths from route templates, parameters and responses from the source-generated endpoint
   descriptions, request and response schemas from the application's source-generated System.Text.Json
   contracts, tags, summaries and exclusion from the Web.Api description verbs, and security requirements
-  from Web.Authorization metadata.
+  from each endpoint's effective Web.Authorization policy, the one `UseAuthorization` applies (the
+  fallback policy and named policies included).
 - **`AddOpenApi(options => ...)`** registers the document: title, API version, description, the OpenAPI
   line (3.1 by default; 3.0 and 3.2 as well), declared security schemes and tags, extra endpoint sources,
   and document transformers.
@@ -20,7 +21,8 @@ rather than from runtime reflection, so the same document is produced under Nati
 ## Dependencies
 
 - Web: the root, `Web.Api` (endpoint descriptions and the description verbs), `Web.Routing`,
-  `Web.Serialization` (the JSON writer's contracts), `Web.Authorization`/`Web.Authentication`,
+  `Web.Serialization` (the JSON writer's contracts), `Web.Authorization` (the registered options and each
+  endpoint's effective policy), `Web.Authentication` (the default authenticate scheme),
   `Web.ProblemDetails`.
 - OpenApi: `OpenApi.Integration` (contract, provider, exporter), `OpenApi.Attributes` (metadata),
   and through them the model, generation, serialization, versioning and validation.

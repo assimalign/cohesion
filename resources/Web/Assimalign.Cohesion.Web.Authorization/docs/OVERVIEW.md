@@ -24,6 +24,10 @@ with a challenge or a forbid through `Web.Authentication`. It evaluates over the
 - **Fail closed.** An endpoint that requires authorization fails at dispatch with
   `InvalidOperationException` when `UseAuthorization` is missing or registered ahead of `UseRouting`,
   instead of running unauthorized.
+- **Read access for describers.** `TryGetAuthorizationOptions` on the application context returns the
+  registered, read-only options; `AuthorizationOptions.TryGetPolicy` resolves a named policy; and
+  `AuthorizationOptions.GetEffectivePolicy` returns the policy `UseAuthorization` applies to an endpoint
+  (the computation the middleware itself runs). Web.OpenApi documents security requirements from it.
 
 ## Dependencies
 
@@ -91,5 +95,17 @@ Register `UseAuthorization` after `UseRouting` (which publishes the endpoint) an
 `UseAuthentication` (which establishes `context.User`), and ahead of middleware that serves or caches
 responses, such as `UseOutputCache`. A CORS middleware goes ahead of it.
 
+A component that describes endpoints rather than serving them reads what the middleware will enforce:
+
+```csharp
+if (app.Context.TryGetAuthorizationOptions(out AuthorizationOptions? authorization))
+{
+    // null: the endpoint is open. Otherwise the policy's AuthenticationSchemes are the schemes it
+    // authenticates and challenges through (none: the default authenticate scheme).
+    AuthorizationPolicy? policy = authorization.GetEffectivePolicy(route.Metadata);
+}
+```
+
 See `docs/DESIGN.md` for the evaluation flow, the combination rules, the fail-closed carrier design,
-scheme selection, the fallback policy's reach, and the IdentityModel adapter planned for #828.
+scheme selection, the fallback policy's reach, reading the options back, and the IdentityModel adapter
+planned for #828.

@@ -11,8 +11,9 @@ authentication schemes of `Web.Authentication` establish the principal and answe
 
 The package owns one interface (`IAuthorizationRequirement`), one sealed policy and its builder, one
 evaluation context, one options type, one sealed metadata carrier, and two extension containers
-(`AddAuthorization`/`UseAuthorization`, and the endpoint verbs). Request-time work is a cached policy
-lookup, a requirement loop, and, for a policy that names schemes, one authentication per scheme.
+(`AddAuthorization`/`UseAuthorization` with the `TryGetAuthorizationOptions` read accessor, and the
+endpoint verbs). Request-time work is a cached policy lookup, a requirement loop, and, for a policy that
+names schemes, one authentication per scheme.
 
 ## The claim model: `ClaimsPrincipal`
 
@@ -90,9 +91,49 @@ to read the options from concurrent requests without locks.
 
 `AddAuthorization` (on `IWebApplicationBuilder`) captures the options as a typed application feature
 (`builder.AddFeature`), the only channel between the builder and the pipeline. `UseAuthorization` uses
-the context-aware `Use` overload to resolve that feature once, when the pipeline is composed: a missing
-`AddAuthorization` fails application start rather than a request, and nothing is looked up per request.
-A second `AddAuthorization` replaces the first, matching the per-request feature slot.
+the context-aware `Use` overload to read the options once, through `TryGetAuthorizationOptions`, when the
+pipeline is composed: a missing `AddAuthorization` fails application start rather than a request, and
+nothing is looked up per request. A second `AddAuthorization` replaces the first, matching the
+per-request feature slot.
+
+### Reading the options back
+
+A component that describes the application's endpoints rather than serving them, such as Web.OpenApi's
+document generator, has to know what `UseAuthorization` will enforce on each endpoint, or its description
+goes wrong in the direction that matters: an endpoint protected only by the fallback policy described as
+open (#1205). Three public members answer that, and none of them can change what is enforced:
+
+| Member | Answers |
+| --- | --- |
+| `TryGetAuthorizationOptions(out options)` on `IWebApplicationContext` | The options `AddAuthorization` registered, resolved the way `UseAuthorization` resolves them (the last registration wins); `false` without `AddAuthorization` |
+| `AuthorizationOptions.TryGetPolicy(name, out policy)` | A named policy, with its requirements and its `AuthenticationSchemes` |
+| `AuthorizationOptions.GetEffectivePolicy(metadata)` | The policy the middleware applies to an endpoint: its items combined (see "Combination rules"), the fallback policy when it has none, or `null` when the middleware authorizes it without evaluation |
+
+`DefaultPolicy` and `FallbackPolicy` were readable already. The accessor hands out the registered,
+read-only instance: every mutator throws `InvalidOperationException`, so a reader cannot change the
+policies the middleware evaluates, and concurrent reads need no lock.
+
+`GetEffectivePolicy` is the middleware's combination, moved onto the options it reads; the middleware
+keeps only its per-endpoint cache. A describer therefore runs the same code as the enforcement and cannot
+drift from it: a change to the combination rules lands in both at once. An unregistered policy name
+throws from it, which the middleware turns into a failed request and a describer into a failed
+description.
+
+*Rejected: `InternalsVisibleTo` for the describer.* The repository forbids grants between shipped
+libraries, and a grant would hide which internals the describer depends on.
+
+*Rejected: a public `AuthorizationFeature`.* The feature is the registration channel. Making it public and
+constructible would let any component register options that bypass `AddAuthorization`'s read-only
+snapshot, and it would publish the transport rather than the data.
+
+*Rejected: a read-only interface over the options.* It would add a type whose only job is to hide setters
+that already throw on the registered instance, and a name such as `IAuthorizationPolicyProvider` suggests
+ASP.NET Core's dynamic, request-time policy provider, which is a non-goal here.
+
+*Rejected: every describer re-deriving the combination.* Web.OpenApi first mirrored the `AllowAnonymous`
+rule itself. A second copy of a security rule drifts from the first, and the copy could not see the
+default, fallback or named policies at all, which is how the fallback-protected endpoint came to be
+documented as open.
 
 ## Endpoint metadata
 
@@ -285,8 +326,9 @@ free of scheme work and its principal predictable.
 
 ## Caching and lifetime
 
-The effective policy of an endpoint is computed on its first request and cached in a
-`ConditionalWeakTable` keyed by the endpoint's metadata collection, one stable instance per route.
+The effective policy of an endpoint is computed on its first request (by
+`AuthorizationOptions.GetEffectivePolicy`) and cached in a `ConditionalWeakTable` keyed by the
+endpoint's metadata collection, one stable instance per route.
 Endpoint metadata is fixed once the route table is built and the options are read-only, so the result
 cannot go stale; weak keys keep the cache from holding a route alive. An unregistered policy name throws
 and is not cached, so every request to that endpoint fails, not only the first. Policies, requirements
@@ -304,7 +346,7 @@ caller expects, at the earliest point it can be detected; an authorization failu
 | Options changed after `AddAuthorization` | at registration | `InvalidOperationException` |
 | `UseAuthorization` without `AddAuthorization` | when the pipeline is composed, at start | `InvalidOperationException` |
 | A protected endpoint `UseAuthorization` never processed | at dispatch | `InvalidOperationException` from routing |
-| An unregistered policy name | on each request to the endpoint | `InvalidOperationException` |
+| An unregistered policy name | on each request to the endpoint, and wherever `GetEffectivePolicy` resolves it (a describer such as Web.OpenApi) | `InvalidOperationException` |
 | No authentication registered, an unregistered scheme, or no default challenge or forbid scheme | on a request that needs it | `InvalidOperationException` from `Web.Authentication` |
 
 ## The IdentityModel adapter (#828, future work)
@@ -330,8 +372,9 @@ the two claim models meet only in the Bearer handler's mapper, which projects a 
 
 No reflection, no attribute discovery, no type activation, no runtime code generation. Requirements
 are objects and delegates captured at builder time; endpoint metadata is read with `is`-test scans.
-LINQ's `OfType` runs once, when the pipeline is composed. The package is `IsAotCompatible`, and the
-trim and AOT analyzers run on its build.
+LINQ's `OfType` runs when the options are read from the application context: once when the pipeline is
+composed, and once per read by a describer. The package is `IsAotCompatible`, and the trim and AOT
+analyzers run on its build.
 
 ## Non-goals
 
@@ -352,9 +395,14 @@ trim and AOT analyzers run on its build.
 `tests/AuthorizationPolicyTests.cs` covers the policy model directly: each built-in requirement,
 synchronous and asynchronous assertions, custom requirements, in-order evaluation that stops at the
 first failure (including after an asynchronous requirement), and the builder's validation and
-immutability. `tests/AuthorizationOptionsTests.cs` covers the defaults, named policies, registration,
-and the read-only snapshot; `tests/AuthorizationMetadataTests.cs` covers the carrier, including that
-the allow-anonymous marker shares the requirement's runtime type.
+immutability. `tests/AuthorizationOptionsTests.cs` covers the defaults, named policies and their
+ordinal lookup, registration, the read-only snapshot, and reading it back from the application context
+(a stub context and the hosted one, without `AddAuthorization`, and with two registrations);
+`tests/AuthorizationMetadataTests.cs` covers the carrier, including that the allow-anonymous marker
+shares the requirement's runtime type. `tests/AuthorizationEffectivePolicyTests.cs` reads
+`GetEffectivePolicy` directly, as a describer does: the fallback policy, named and default policies with
+their schemes, group and route items combined in order, `AllowAnonymous` in both positions, and an
+unregistered name, applying or cleared.
 
 `tests/AuthorizationEndToEndTests.cs` drives the real pipeline over `WebApplicationTestFactory` with two
 header-driven test schemes (`tests/TestObjects/TestAuthenticationHandler.cs`): challenge and forbid, role,

@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
@@ -12,11 +11,11 @@ using Assimalign.Cohesion.Web.Routing;
 namespace Assimalign.Cohesion.Web.Authorization.Internal;
 
 /// <summary>
-/// The authorization middleware: computes the effective policy of the request (the endpoint's
-/// authorization metadata combined, or the fallback policy), establishes the principal through the
-/// policy's authentication schemes, evaluates the policy, and either calls <c>next</c> or answers the
-/// request with a challenge (no authenticated principal) or a forbid (an authenticated principal the
-/// policy rejects) through Web.Authentication.
+/// The authorization middleware: resolves the effective policy of the request (the endpoint's
+/// authorization metadata combined by <see cref="AuthorizationOptions.GetEffectivePolicy"/>, or the
+/// fallback policy), establishes the principal through the policy's authentication schemes, evaluates
+/// the policy, and either calls <c>next</c> or answers the request with a challenge (no authenticated
+/// principal) or a forbid (an authenticated principal the policy rejects) through Web.Authentication.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -124,6 +123,9 @@ internal sealed class AuthorizationMiddleware : IWebApplicationMiddleware
         await ContinueAsync(context, endpoint, next).ConfigureAwait(false);
     }
 
+    // The combination itself is AuthorizationOptions.GetEffectivePolicy, shared with components that
+    // describe endpoints (Web.OpenApi), so a description cannot disagree with what this middleware enforces.
+    // The middleware adds only the per-endpoint cache.
     private AuthorizationPolicy? GetEndpointPolicy(IRouterRouteMetadataCollection metadata)
     {
         if (_endpointPolicies.TryGetValue(metadata, out AuthorizationPolicy? policy))
@@ -134,88 +136,10 @@ internal sealed class AuthorizationMiddleware : IWebApplicationMiddleware
         // Concurrent first requests may both compute; the results are equivalent, and the last write wins.
         // A configuration error (an unknown policy name) throws and is not cached, so every request to
         // the endpoint fails rather than one.
-        policy = ComputeEndpointPolicy(metadata);
+        policy = _options.GetEffectivePolicy(metadata);
         _endpointPolicies.AddOrUpdate(metadata, policy);
 
         return policy;
-    }
-
-    // Combines the endpoint's authorization items, outer group first, starting after the most specific
-    // AllowAnonymous. An AllowAnonymous clears every requirement declared before it (by the groups above
-    // it, or earlier on its own builder); a requirement declared after it still applies, so a route that
-    // requires authorization inside an anonymous group stays protected. Each applying item contributes its
-    // named policy, inline policy and roles (or the default policy when it names none of those) and its
-    // schemes, and the request must satisfy all of them. When the last item is AllowAnonymous, nothing
-    // applies, the fallback policy included.
-    private AuthorizationPolicy? ComputeEndpointPolicy(IRouterRouteMetadataCollection metadata)
-    {
-        IReadOnlyList<AuthorizationMetadata> items = metadata.GetOrderedMetadata<AuthorizationMetadata>();
-
-        if (items.Count == 0)
-        {
-            return _options.FallbackPolicy;
-        }
-
-        int first = 0;
-
-        for (int i = items.Count - 1; i >= 0; i--)
-        {
-            if (items[i].AllowsAnonymous)
-            {
-                first = i + 1;
-                break;
-            }
-        }
-
-        if (first == items.Count)
-        {
-            return null;
-        }
-
-        AuthorizationPolicyBuilder builder = new();
-
-        for (int i = first; i < items.Count; i++)
-        {
-            AuthorizationMetadata item = items[i];
-            bool requiresDefaultPolicy = true;
-
-            if (item.PolicyName is { } policyName)
-            {
-                if (!_options.TryGetPolicy(policyName, out AuthorizationPolicy? named))
-                {
-                    throw new InvalidOperationException(
-                        $"No authorization policy named '{policyName}' has been registered. " +
-                        "Register it with options.AddPolicy(name, policy) in AddAuthorization.");
-                }
-
-                builder.Combine(named);
-                requiresDefaultPolicy = false;
-            }
-
-            if (item.Policy is { } inline)
-            {
-                builder.Combine(inline);
-                requiresDefaultPolicy = false;
-            }
-
-            if (item.Roles.Count > 0)
-            {
-                builder.RequireRole(item.Roles);
-                requiresDefaultPolicy = false;
-            }
-
-            if (requiresDefaultPolicy)
-            {
-                builder.Combine(_options.DefaultPolicy);
-            }
-
-            if (item.AuthenticationSchemes.Count > 0)
-            {
-                builder.AddAuthenticationSchemes([.. item.AuthenticationSchemes]);
-            }
-        }
-
-        return builder.Build();
     }
 
     // Authenticates the request with each of the policy's schemes and combines the principals that

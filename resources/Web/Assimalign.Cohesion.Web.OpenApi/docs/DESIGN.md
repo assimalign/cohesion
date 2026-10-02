@@ -18,7 +18,9 @@ Three inputs feed it, all produced elsewhere at build or composition time:
   serializes a type with comes from the application's source-generated `JsonSerializerContext`;
   `JsonSchemaExporter` turns it into JSON Schema.
 - **Policy metadata on the routes.** Tags, summaries, descriptions and exclusion from the Web.Api
-  description verbs; security requirements from Web.Authorization's `AuthorizationMetadata`.
+  description verbs; security requirements from each route's effective authorization policy, which
+  Web.Authorization computes from the route's `AuthorizationMetadata` and the application's registered
+  `AuthorizationOptions`.
 
 ## Family position
 
@@ -44,7 +46,7 @@ flowchart LR
 | `Assimalign.Cohesion.Web.Api` | Endpoint descriptions (parameters, responses) and the description verbs (`WithTags`, `WithSummary`, `WithDescription`, `ExcludeFromDescription`) |
 | `Assimalign.Cohesion.Web.Routing` | The route table (`IRouterFeature.Router`), route patterns, route names, the convention-builder contract |
 | `Assimalign.Cohesion.Web.Serialization` | The registered readers and writers, and `TryGetJsonTypeInfo`, the read-only seam to the JSON writer's contracts |
-| `Assimalign.Cohesion.Web.Authorization` / `.Authentication` | `AuthorizationMetadata` for security requirements; the default authenticate scheme |
+| `Assimalign.Cohesion.Web.Authorization` / `.Authentication` | The registered `AuthorizationOptions` and each route's effective policy (`TryGetAuthorizationOptions`, `GetEffectivePolicy`) for security requirements; the default authenticate scheme |
 | `Assimalign.Cohesion.Web.ProblemDetails` | The RFC 9457 type the binding failures are written as |
 | `Assimalign.Cohesion.OpenApi.Integration` | `IOpenApiEndpointSource`, the description provider, the JSON/YAML exporter |
 | `Assimalign.Cohesion.OpenApi.Attributes` / `OpenApi` | The intermediate metadata records and the document model |
@@ -112,7 +114,7 @@ differ only in constraints (`{id:int}` beside `{id}`) or host share one OpenAPI 
 | Responses | `EndpointResponseMetadata` | One per status, the last item for a status winning (group, generated, then the endpoint's own); description the RFC 9110 reason phrase; no type means no content; a fixed media type as given (`text/plain` strings get `type: string`); a negotiated value under the media type of the first registered writer that can write it |
 | Binding outcomes | The thunk's failure semantics | Added unless the endpoint describes the status: `400` problem+json when the endpoint binds any input, `415` problem+json when it reads a body, a bodyless `406` when it writes a negotiated value; a `200` when nothing else is described |
 | Schemas | JSON contracts | See the next section |
-| Security | `AuthorizationMetadata` | See "Security requirements" |
+| Security | The effective authorization policy: `AuthorizationMetadata` against the registered `AuthorizationOptions` | See "Security requirements" |
 | Security schemes | `OpenApiOptions.AddSecurityScheme` | As declared |
 
 The binding outcomes are the ones Web.Api's DESIGN leaves to "an adapter … by policy": they are what the
@@ -218,6 +220,33 @@ the wire.
 frozen) widens the seam to everything the options touch; a public interface for the internal writer adds
 a type for one consumer. The extension answers exactly the question a describer asks.
 
+## The Web.Authorization seam
+
+Web.Authorization keeps its registration internal, so it gained a read-only seam for describers (#1205):
+
+```csharp
+bool IWebApplicationContext.TryGetAuthorizationOptions(out AuthorizationOptions? options)
+bool AuthorizationOptions.TryGetPolicy(string name, out AuthorizationPolicy? policy)    // was internal
+AuthorizationPolicy? AuthorizationOptions.GetEffectivePolicy(IRouterRouteMetadataCollection metadata)
+```
+
+The accessor returns the options `AddAuthorization` registered, which are read-only, resolved the way
+`UseAuthorization` resolves them. `GetEffectivePolicy` is the middleware's own combination, moved onto the
+options so that the middleware and this adapter run the same code; the middleware keeps only its
+per-endpoint cache. The adapter needs only the accessor and `GetEffectivePolicy`. Web.Authorization's
+DESIGN ("Reading the options back") records why the seam has this shape.
+
+Unlike the Web.Serialization seam, this one hands out the options: they hold policies, the very thing a
+describer reads, and they are already immutable once registered, so there is no wider surface behind
+them to protect.
+
+*Rejected: `InternalsVisibleTo`.* The repository forbids grants between shipped libraries.
+
+*Rejected: interpret the metadata here.* The first version of the adapter mirrored the `AllowAnonymous`
+rule itself and could not see the options, so the fallback policy, named policies' schemes and a
+reconfigured default policy were invisible: an endpoint protected only by the fallback policy was
+documented as open. Two copies of a security rule drift; one shared computation cannot.
+
 ## The description verbs live in Web.Api
 
 `WithTags`, `WithSummary`, `WithDescription` and `ExcludeFromDescription`, and their sealed carriers, ship
@@ -260,26 +289,58 @@ because the model is mutable and a shared instance would let one caller change w
 
 ## Security requirements
 
-The adapter reads an endpoint's `AuthorizationMetadata` the way `UseAuthorization` does: every item
-applies, outer group first, and the most specific `AllowAnonymous` clears the items declared before it.
-When requirements remain:
+The adapter does not interpret authorization metadata itself. For each described route it asks
+Web.Authorization for the effective policy (`GetEffectivePolicy`, see "The Web.Authorization seam"), the
+computation `UseAuthorization` runs: every item applies, outer group first; the most specific
+`AllowAnonymous` clears the items declared before it; a named policy resolves against the registered
+ones; an item that names no policy and no roles gets the default policy; and a route without items gets
+the fallback policy. Then:
 
-1. The schemes are the union of the items' `AuthenticationSchemes` and their inline policies'
-   `AuthenticationSchemes`, in order.
-2. With none named, the requirement evaluates `context.User`, which the default authenticate scheme
+1. No effective policy means no security requirement: the route's last authorization item is
+   `AllowAnonymous`, or it has no items and the application has no fallback policy.
+2. The schemes are the policy's `AuthenticationSchemes`: the union, in order, of the schemes of every
+   policy that contributed (named, inline, default or fallback) and of the items' own.
+3. With none named, the policy evaluates `context.User`, which the default authenticate scheme
    establishes, so that scheme is used (`IAuthenticationService.DefaultAuthenticateScheme`); without a
    default, every declared scheme.
-3. Each scheme the document declares (`OpenApiOptions.AddSecurityScheme`, matched by name) becomes one
+4. Each scheme the document declares (`OpenApiOptions.AddSecurityScheme`, matched by name) becomes one
    requirement object with no scopes, the objects being alternatives as the policy's schemes are.
 
-Limits, by design of the inputs: a named policy (`RequireAuthorization("admins")`) and the fallback
-policy live in `AuthorizationOptions`, which `Web.Authorization` keeps internal, so their schemes are not
-visible, and an endpoint protected only by the fallback policy is described as open. Roles are not
-written into the scope arrays: OAS 3.0 requires them empty for non-OAuth schemes, and Web.Authorization's
-roles mean "any of", where a requirement's array means "all of". `OpenApiSecuritySchemeMetadata` has no
-OAuth2 flows, so an OAuth2 scheme needs a document transformer; OpenID Connect, HTTP and API-key schemes
-are declared directly. A scheme an endpoint uses but the document does not declare cannot be referenced
-and is left out.
+With `Bearer` as the default authenticate scheme and a `partners` policy that selects `ApiKey`:
+
+| Route | Described |
+| --- | --- |
+| no authorization metadata, no fallback policy | open |
+| no authorization metadata, `FallbackPolicy = DefaultPolicy` | `Bearer` |
+| `RequireAuthorization("partners")` | `ApiKey` only |
+| `RequireAuthorization()` with a default policy that selects `ApiKey` | `ApiKey` only |
+| group `RequireAuthorization("partners")`, route `AllowAnonymous()` | open |
+| group `AllowAnonymous()`, route `RequireAuthorization("partners")` | `ApiKey` |
+
+**An application without `AddAuthorization`** is described with the defaults `AddAuthorization()` would
+register: no fallback policy, so a route without items is open, and `RequireAuthorization()` means an
+authenticated user through the default authenticate scheme. A route that declares a requirement is
+therefore never described as open, even though, with no middleware to authorize it, it fails at dispatch
+instead of running.
+
+**An unregistered policy name** fails the document with an `InvalidOperationException` that names the
+endpoint and the policy, as a type without a serializer does: the same error fails every request to the
+endpoint, and describing it as open, or as protected through a guessed scheme, would be wrong either way.
+The policy is resolved whether or not the document declares security schemes, so the failure does not
+depend on the document's options.
+
+Limits: roles are not written into the scope arrays: OAS 3.0 requires them empty for non-OAuth schemes,
+and Web.Authorization's roles mean "any of", where a requirement's array means "all of".
+`OpenApiSecuritySchemeMetadata` has no OAuth2 flows, so an OAuth2 scheme needs a document transformer;
+OpenID Connect, HTTP and API-key schemes are declared directly. A scheme an endpoint uses but the document
+does not declare cannot be referenced and is left out. The fallback policy also covers requests no route
+matches, which have no operation to describe. The document describes the registered policies, not the
+pipeline: an application that sets a fallback policy but never registers `UseAuthorization` serves its
+unannotated endpoints unauthorized (Web.Authorization's DESIGN, "Fail closed", explains why nothing
+catches that), while the document lists the fallback policy's requirement. An open operation is written
+without a `security` field rather than as `security: []`, because the OpenApi model does not distinguish
+the two; the adapter declares no document-wide requirement, so they mean the same, but a transformer
+that adds one makes every open operation inherit it.
 
 ## Error model
 
@@ -288,8 +349,10 @@ Composition errors are `InvalidOperationException`, as elsewhere in the Web area
 endpoint that cannot be described. The last names the endpoint (`GET /orders/{id}`) and the type, and
 says to add it to the application's `JsonSerializerContext`; it is raised when a body or result type has
 no registered reader or writer, which is the same composition error that faults the endpoint itself at
-run time. Options mutators throw `InvalidOperationException` once read-only, and argument validation
-throws the usual `ArgumentException` family.
+run time. It is raised the same way, with Web.Authorization's message naming the policy, when an
+endpoint's authorization names a policy that is not registered. Options mutators throw
+`InvalidOperationException` once read-only, and argument validation throws the usual `ArgumentException`
+family.
 
 ## AOT posture
 
@@ -297,8 +360,9 @@ throws the usual `ArgumentException` family.
 `JsonSchemaExporter` over source-generated `JsonTypeInfo`; parameter schemas come from a fixed type table
 and `Enum.GetNames(Type)`; type names come from `Type.Name` and `Type.GetGenericArguments()`, which need
 no reflection metadata beyond the type itself. JSON nodes are built with non-generic `JsonNode` members
-only (the generic `JsonArray.Add<T>` is `RequiresDynamicCode`). The document is serialized by
-`OpenApi.Serialization`'s explicit writers.
+only (the generic `JsonArray.Add<T>` is `RequiresDynamicCode`). Security requirements come from
+Web.Authorization's `GetEffectivePolicy`, which reads endpoint metadata with `is` tests and policies that
+are plain objects. The document is serialized by `OpenApi.Serialization`'s explicit writers.
 
 Evidence beyond the analyzers: a `PublishAot` probe application (typed endpoints over route, query
 and body inputs, a nullable reference, a recursive type, collections, dictionaries, string and numeric

@@ -22,11 +22,13 @@ namespace Assimalign.Cohesion.Web.OpenApi.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Everything comes from metadata already on the routes; nothing is discovered by reflection. A route is
-/// described when Web.Api's source generator described it (<see cref="EndpointParameterMetadata"/>,
-/// <see cref="EndpointResponseMetadata"/>) or the application did (tags, a summary, a description), and it
-/// carries no <see cref="ExcludeFromDescriptionMetadata"/>. Raw middleware endpoints the application did
-/// not describe stay out: nothing records their inputs or outputs.
+/// Everything comes from metadata already on the routes and from the application's registrations (its
+/// serializers, its default authenticate scheme, and its authorization options); nothing is discovered by
+/// reflection. A route is described when Web.Api's source generator described it
+/// (<see cref="EndpointParameterMetadata"/>, <see cref="EndpointResponseMetadata"/>) or the application
+/// did (tags, a summary, a description), and it carries no <see cref="ExcludeFromDescriptionMetadata"/>.
+/// Raw middleware endpoints the application did not describe stay out: nothing records their inputs or
+/// outputs.
 /// </para>
 /// <para>
 /// One source is built per document build and targets one OpenAPI line, because the schemas it hands
@@ -42,6 +44,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
     private readonly IHttpContentSerializationFeature? _serialization;
     private readonly OpenApiSchemaGenerator _schemas;
     private readonly List<string> _declaredSchemes = [];
+    private readonly AuthorizationOptions _authorization;
     private readonly string? _defaultAuthenticationScheme;
 
     /// <summary>
@@ -50,21 +53,28 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
     /// <param name="router">The application's built router.</param>
     /// <param name="options">The document options: declared security schemes and tags.</param>
     /// <param name="serialization">The application's content-serialization registry, or <see langword="null"/>.</param>
+    /// <param name="authorization">
+    /// The application's read-only authorization options, which each route's effective policy is resolved
+    /// against; the defaults when the application registered none.
+    /// </param>
     /// <param name="defaultAuthenticationScheme">The application's default authenticate scheme, or <see langword="null"/>.</param>
     /// <param name="version">The OpenAPI line the schemas are written for.</param>
     /// <exception cref="InvalidOperationException">
     /// An endpoint cannot be described: it reads or returns a type no registered reader or writer covers,
-    /// or the exporter rejects its serialization contract. The message names the endpoint.
+    /// the exporter rejects its serialization contract, or its authorization names a policy that is not
+    /// registered. The message names the endpoint.
     /// </exception>
     public WebOpenApiEndpointSource(
         IRouter router,
         OpenApiOptions options,
         IHttpContentSerializationFeature? serialization,
+        AuthorizationOptions authorization,
         string? defaultAuthenticationScheme,
         OpenApiSpecVersion version)
     {
         _serialization = serialization;
         _schemas = new OpenApiSchemaGenerator(serialization, version);
+        _authorization = authorization;
         _defaultAuthenticationScheme = defaultAuthenticationScheme;
 
         foreach (OpenApiSecuritySchemeMetadata scheme in options.SecuritySchemes)
@@ -540,55 +550,26 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
         return tags;
     }
 
-    // Mirrors UseAuthorization: every authorization item applies, and the most specific AllowAnonymous
-    // clears the items declared before it. Each scheme the remaining items authenticate with is one
-    // alternative requirement, when the document declares it.
+    // The effective policy is the one UseAuthorization applies, computed by Web.Authorization itself
+    // (AuthorizationOptions.GetEffectivePolicy): the endpoint's items after the most specific AllowAnonymous
+    // combined with the registered default and named policies, or the fallback policy when the endpoint has
+    // no items. Sharing the computation is what keeps the document from describing as open an endpoint the
+    // middleware protects. An unregistered policy name throws, and the caller names the endpoint. Each scheme
+    // the policy authenticates with is one alternative requirement, when the document declares it.
     private IReadOnlyList<OpenApiSecurityRequirementMetadata> DescribeSecurity(IRouterRouteMetadataCollection metadata)
     {
-        List<AuthorizationMetadata> requirements = [];
+        AuthorizationPolicy? policy = _authorization.GetEffectivePolicy(metadata);
 
-        foreach (AuthorizationMetadata item in metadata.GetOrderedMetadata<AuthorizationMetadata>())
-        {
-            if (item.AllowsAnonymous)
-            {
-                requirements.Clear();
-            }
-            else
-            {
-                requirements.Add(item);
-            }
-        }
-
-        if (requirements.Count == 0 || _declaredSchemes.Count == 0)
+        if (policy is null || _declaredSchemes.Count == 0)
         {
             return [];
         }
 
-        List<string> schemes = [];
-
-        foreach (AuthorizationMetadata item in requirements)
-        {
-            AddSchemes(schemes, item.AuthenticationSchemes);
-
-            if (item.Policy is { } policy)
-            {
-                AddSchemes(schemes, policy.AuthenticationSchemes);
-            }
-        }
-
-        if (schemes.Count == 0)
-        {
-            // The requirement evaluates context.User, which the default authenticate scheme establishes;
-            // without one, any declared scheme may be the one the application authenticates with.
-            if (_defaultAuthenticationScheme is { } defaultScheme)
-            {
-                schemes.Add(defaultScheme);
-            }
-            else
-            {
-                AddSchemes(schemes, _declaredSchemes);
-            }
-        }
+        // A policy that names no scheme evaluates context.User, which the default authenticate scheme
+        // establishes; without one, any declared scheme may be the one the application authenticates with.
+        IReadOnlyList<string> schemes = policy.AuthenticationSchemes.Count > 0
+            ? policy.AuthenticationSchemes
+            : _defaultAuthenticationScheme is { } defaultScheme ? [defaultScheme] : _declaredSchemes;
 
         List<OpenApiSecurityRequirementMetadata> security = [];
 
@@ -601,17 +582,6 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
         }
 
         return security;
-    }
-
-    private static void AddSchemes(List<string> schemes, IReadOnlyList<string> source)
-    {
-        foreach (string scheme in source)
-        {
-            if (!schemes.Contains(scheme))
-            {
-                schemes.Add(scheme);
-            }
-        }
     }
 
     private static IReadOnlyList<OpenApiTagMetadata> CreateDocumentTags(IReadOnlyList<OpenApiTagMetadata> declared, List<string> used)

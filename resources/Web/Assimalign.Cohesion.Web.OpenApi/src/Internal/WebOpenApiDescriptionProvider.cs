@@ -5,6 +5,7 @@ using System.Linq;
 using Assimalign.Cohesion.OpenApi;
 using Assimalign.Cohesion.OpenApi.Integration;
 using Assimalign.Cohesion.Web.Authentication;
+using Assimalign.Cohesion.Web.Authorization;
 using Assimalign.Cohesion.Web.Routing;
 using Assimalign.Cohesion.Web.Serialization;
 
@@ -19,9 +20,9 @@ namespace Assimalign.Cohesion.Web.OpenApi.Internal;
 /// <remarks>
 /// Every call builds a new document: the result is an ordinary mutable model, and handing out one shared
 /// instance would let a caller change what another sees. The document endpoint caches the serialized form
-/// of its own build instead. The application's router, serialization registry and authentication service
-/// are read when a document is built, never earlier, because reading the router builds it and closes the
-/// route table.
+/// of its own build instead. The application's router, serialization registry, authentication service and
+/// authorization options are read when a document is built, never earlier, because reading the router
+/// builds it and closes the route table.
 /// </remarks>
 internal sealed class WebOpenApiDescriptionProvider : IOpenApiDescriptionProvider
 {
@@ -46,10 +47,20 @@ internal sealed class WebOpenApiDescriptionProvider : IOpenApiDescriptionProvide
             ?? throw new InvalidOperationException(
                 "Routing has not been registered. Call AddRouting() on the web application builder: the OpenAPI document describes the routes it maps.");
 
+        if (!_application.TryGetAuthorizationOptions(out AuthorizationOptions? authorization))
+        {
+            // Without AddAuthorization the application is described with the defaults AddAuthorization()
+            // registers: no fallback policy, so an endpoint without authorization metadata is open, and
+            // RequireAuthorization() means an authenticated user. An endpoint that declares a requirement is
+            // therefore never described as open; without the middleware it fails at dispatch instead of running.
+            authorization = new AuthorizationOptions();
+        }
+
         WebOpenApiEndpointSource routes = new(
             routing.Router,
             _options,
             _application.Features.OfType<IHttpContentSerializationFeature>().LastOrDefault(),
+            authorization,
             _application.Features.OfType<IAuthenticationService>().LastOrDefault()?.DefaultAuthenticateScheme,
             version);
 

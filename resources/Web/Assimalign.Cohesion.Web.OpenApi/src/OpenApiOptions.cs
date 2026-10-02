@@ -23,8 +23,10 @@ namespace Assimalign.Cohesion.Web.OpenApi;
 /// </para>
 /// <para>
 /// Security schemes are matched to endpoints by name: declare each authentication scheme an endpoint's
-/// authorization uses (for example <c>Bearer</c>) under the same name, and every endpoint that requires
-/// authorization through it lists it as a security requirement.
+/// authorization uses (for example <c>Bearer</c>) under the same name, and every endpoint whose effective
+/// authorization policy authenticates through it, a fallback or named policy included, lists it as a
+/// security requirement. A policy that names no scheme authenticates through the application's default
+/// authenticate scheme.
 /// </para>
 /// </remarks>
 public sealed class OpenApiOptions

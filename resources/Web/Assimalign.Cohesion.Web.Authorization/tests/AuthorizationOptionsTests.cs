@@ -7,12 +7,14 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Web.Authorization.Tests.TestObjects;
+using Assimalign.Cohesion.Web.Testing;
 
 namespace Assimalign.Cohesion.Web.Authorization.Tests;
 
 /// <summary>
 /// The builder-time options and their registration: the default and fallback policies, named policies,
-/// and the read-only snapshot <c>AddAuthorization</c> hands to the pipeline.
+/// the read-only snapshot <c>AddAuthorization</c> hands to the pipeline, and reading that snapshot back
+/// from the application context.
 /// </summary>
 public class AuthorizationOptionsTests
 {
@@ -141,6 +143,147 @@ public class AuthorizationOptionsTests
 
         // Act
         Action act = () => builder.UseAuthorization();
+
+        // Assert
+        act.ShouldThrow<ArgumentNullException>();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Options: A registered policy should be resolvable by its exact name")]
+    public void TryGetPolicy_RegisteredName_ShouldReturnThePolicy()
+    {
+        // Arrange
+        AuthorizationPolicy admins = new AuthorizationPolicyBuilder().AddAuthenticationSchemes("Bearer").RequireRole("admin").Build();
+        AuthorizationOptions options = new();
+        options.AddPolicy("admins", admins);
+
+        // Act
+        bool found = options.TryGetPolicy("admins", out AuthorizationPolicy? policy);
+
+        // Assert
+        found.ShouldBeTrue();
+        policy.ShouldNotBeNull().ShouldBeSameAs(admins);
+        policy.AuthenticationSchemes.ShouldBe(new[] { "Bearer" });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Options: An unregistered or differently cased name should not resolve")]
+    public void TryGetPolicy_UnregisteredOrDifferentlyCasedName_ShouldReturnFalse()
+    {
+        // Arrange — names compare ordinal, so a casing slip does not resolve to another policy.
+        AuthorizationOptions options = new();
+        options.AddPolicy("admins", policy => policy.RequireRole("admin"));
+
+        // Act
+        bool unregistered = options.TryGetPolicy("auditors", out AuthorizationPolicy? unregisteredPolicy);
+        bool differentCase = options.TryGetPolicy("Admins", out AuthorizationPolicy? differentCasePolicy);
+
+        // Assert
+        unregistered.ShouldBeFalse();
+        unregisteredPolicy.ShouldBeNull();
+        differentCase.ShouldBeFalse();
+        differentCasePolicy.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Options: Resolving a null policy name should throw")]
+    public void TryGetPolicy_NullName_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        AuthorizationOptions options = new();
+
+        // Act
+        Action act = () => options.TryGetPolicy(null!, out _);
+
+        // Assert
+        act.ShouldThrow<ArgumentNullException>();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Read access: The application context should hand back the read-only registered options")]
+    public void TryGetAuthorizationOptions_AfterAddAuthorization_ShouldReturnTheReadOnlyRegistration()
+    {
+        // Arrange
+        StubWebApplicationBuilder builder = new();
+        AuthorizationOptions? configured = null;
+        builder.AddAuthorization(options =>
+        {
+            options.AddPolicy("admins", policy => policy.RequireRole("admin"));
+            options.FallbackPolicy = options.DefaultPolicy;
+            configured = options;
+        });
+
+        IWebApplicationContext context = new StubWebApplicationContext(builder.Features);
+
+        // Act
+        bool found = context.TryGetAuthorizationOptions(out AuthorizationOptions? registered);
+        Action clearFallback = () => registered!.FallbackPolicy = null;
+        Action addPolicy = () => registered!.AddPolicy("late", policy => policy.RequireRole("late"));
+
+        // Assert — the very instance the callback configured, and still read-only.
+        found.ShouldBeTrue();
+        registered.ShouldNotBeNull().ShouldBeSameAs(configured);
+        registered.FallbackPolicy.ShouldBeSameAs(registered.DefaultPolicy);
+        registered.TryGetPolicy("admins", out _).ShouldBeTrue();
+        clearFallback.ShouldThrow<InvalidOperationException>();
+        addPolicy.ShouldThrow<InvalidOperationException>();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Read access: An application without AddAuthorization should report no options")]
+    public void TryGetAuthorizationOptions_WithoutAddAuthorization_ShouldReturnFalse()
+    {
+        // Arrange
+        IWebApplicationContext context = new StubWebApplicationContext([]);
+
+        // Act
+        bool found = context.TryGetAuthorizationOptions(out AuthorizationOptions? options);
+
+        // Assert
+        found.ShouldBeFalse();
+        options.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Read access: The last AddAuthorization should be the one read back, as UseAuthorization reads it")]
+    public void TryGetAuthorizationOptions_RegisteredTwice_ShouldReturnTheLastRegistration()
+    {
+        // Arrange
+        StubWebApplicationBuilder builder = new();
+        builder.AddAuthorization(options => options.AddPolicy("first", policy => policy.RequireRole("first")));
+        builder.AddAuthorization(options => options.AddPolicy("second", policy => policy.RequireRole("second")));
+
+        IWebApplicationContext context = new StubWebApplicationContext(builder.Features);
+
+        // Act
+        context.TryGetAuthorizationOptions(out AuthorizationOptions? options);
+
+        // Assert
+        options.ShouldNotBeNull();
+        options.TryGetPolicy("second", out _).ShouldBeTrue();
+        options.TryGetPolicy("first", out _).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Read access: The hosted application context should expose the registered options")]
+    public async Task TryGetAuthorizationOptions_HostedApplication_ShouldReturnTheRegistration()
+    {
+        // Arrange — the real Web.Hosting context, whose features come from its service provider.
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")));
+
+        IWebApplicationContext context = ((IWebApplication)factory.Application).Context;
+
+        // Act
+        bool found = context.TryGetAuthorizationOptions(out AuthorizationOptions? options);
+
+        // Assert
+        found.ShouldBeTrue();
+        options.ShouldNotBeNull().TryGetPolicy("admins", out AuthorizationPolicy? admins).ShouldBeTrue();
+        admins.ShouldNotBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - Read access: Reading options from a null context should throw")]
+    public void TryGetAuthorizationOptions_NullContext_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        IWebApplicationContext context = null!;
+
+        // Act
+        Action act = () => context.TryGetAuthorizationOptions(out _);
 
         // Assert
         act.ShouldThrow<ArgumentNullException>();

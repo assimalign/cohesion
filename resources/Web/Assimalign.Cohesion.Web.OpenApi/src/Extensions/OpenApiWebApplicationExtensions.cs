@@ -19,8 +19,10 @@ namespace Assimalign.Cohesion.Web.OpenApi;
 /// metadata they carry: the source-generated parameter and response descriptions of typed endpoints, the
 /// description verbs (<c>WithTags</c>, <c>WithSummary</c>, <c>WithDescription</c>,
 /// <c>ExcludeFromDescription</c>), request and response schemas from the application's source-generated
-/// System.Text.Json contracts, and security requirements from authorization metadata. Nothing is
-/// discovered by reflection, so the document is generated the same way under NativeAOT.
+/// System.Text.Json contracts, and security requirements from each endpoint's effective authorization
+/// policy: the one <c>UseAuthorization</c> applies, computed by Web.Authorization from the endpoint's
+/// authorization metadata and the application's registered default, fallback and named policies. Nothing
+/// is discovered by reflection, so the document is generated the same way under NativeAOT.
 /// </para>
 /// <para>
 /// Composition is dependency-free: no service container, no configuration binding, no hosting reference.

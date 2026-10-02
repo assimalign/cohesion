@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 
+using Assimalign.Cohesion.Web.Routing;
+
 namespace Assimalign.Cohesion.Web.Authorization;
 
 /// <summary>
@@ -22,6 +24,14 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// Policy names are compared ordinal (case-sensitive), as the sibling rate-limiting policy map does:
 /// a name is a developer-chosen key, so an exact match is the least surprising rule, and a mistyped
 /// name fails the request instead of resolving to a different policy.
+/// </para>
+/// <para>
+/// The registered options can be read back from the application context with
+/// <see cref="AuthorizationWebApplicationExtensions.TryGetAuthorizationOptions(IWebApplicationContext, out AuthorizationOptions)"/>.
+/// A component that describes endpoints rather than serving them, such as an OpenAPI document
+/// generator, resolves an endpoint's authorization through <see cref="GetEffectivePolicy"/>, the
+/// computation <c>UseAuthorization</c> itself runs, so the description and the enforcement cannot
+/// disagree.
 /// </para>
 /// </remarks>
 public sealed class AuthorizationOptions
@@ -128,11 +138,127 @@ public sealed class AuthorizationOptions
     /// <summary>
     /// Resolves a policy registered with <see cref="AddPolicy(string, AuthorizationPolicy)"/>.
     /// </summary>
-    /// <param name="name">The policy name.</param>
-    /// <param name="policy">The policy, when registered.</param>
+    /// <remarks>
+    /// This is the lookup <c>RequireAuthorization(policyName)</c> resolves through. Reading is safe from
+    /// any number of threads once <c>AddAuthorization</c> has made the options read-only.
+    /// </remarks>
+    /// <param name="name">The policy name, compared ordinal (case-sensitive).</param>
+    /// <param name="policy">The policy, when one is registered under <paramref name="name"/>; otherwise <see langword="null"/>.</param>
     /// <returns><see langword="true"/> when a policy with the name is registered.</returns>
-    internal bool TryGetPolicy(string name, [NotNullWhen(true)] out AuthorizationPolicy? policy)
-        => _policies.TryGetValue(name, out policy);
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+    public bool TryGetPolicy(string name, [NotNullWhen(true)] out AuthorizationPolicy? policy)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        return _policies.TryGetValue(name, out policy);
+    }
+
+    /// <summary>
+    /// Gets the effective policy <c>UseAuthorization</c> applies to an endpoint: the endpoint's
+    /// <see cref="AuthorizationMetadata"/> items combined against these options, or
+    /// <see cref="FallbackPolicy"/> when the endpoint carries none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The items are read outer group first, as routing composes them. The most specific
+    /// <see cref="AuthorizationMetadata.AllowAnonymous"/> clears every item declared before it, by the
+    /// groups above it or earlier on its own builder, and a requirement declared after it still applies.
+    /// Each remaining item contributes its named policy (<see cref="TryGetPolicy"/>), its inline policy
+    /// and its roles, or <see cref="DefaultPolicy"/> when it names none of those, plus its authentication
+    /// schemes. The result requires all of them, and its <see cref="AuthorizationPolicy.AuthenticationSchemes"/>
+    /// are the schemes the middleware authenticates and challenges through: the union, in order, of every
+    /// contributing policy's schemes and the items' own.
+    /// </para>
+    /// <para>
+    /// This is the computation the middleware runs, exposed so that a component that describes endpoints
+    /// instead of serving them reaches the answer the middleware enforces. When items apply, every call
+    /// builds a new policy; the middleware computes it once per endpoint and caches it. A request that
+    /// matched no endpoint is not covered: the middleware gives it <see cref="FallbackPolicy"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="metadata">The endpoint's metadata collection, as routing composed it (outer group first).</param>
+    /// <returns>
+    /// The effective policy, or <see langword="null"/> when the middleware authorizes the endpoint without
+    /// evaluation: its last authorization item is <see cref="AuthorizationMetadata.AllowAnonymous"/>, or it
+    /// carries no authorization item and <see cref="FallbackPolicy"/> is <see langword="null"/>.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="metadata"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// An applying item names a policy that is not registered. The middleware fails every request to such
+    /// an endpoint with the same exception.
+    /// </exception>
+    public AuthorizationPolicy? GetEffectivePolicy(IRouterRouteMetadataCollection metadata)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        IReadOnlyList<AuthorizationMetadata> items = metadata.GetOrderedMetadata<AuthorizationMetadata>();
+
+        if (items.Count == 0)
+        {
+            return _fallbackPolicy;
+        }
+
+        int first = 0;
+
+        for (int i = items.Count - 1; i >= 0; i--)
+        {
+            if (items[i].AllowsAnonymous)
+            {
+                first = i + 1;
+                break;
+            }
+        }
+
+        if (first == items.Count)
+        {
+            return null;
+        }
+
+        AuthorizationPolicyBuilder builder = new();
+
+        for (int i = first; i < items.Count; i++)
+        {
+            AuthorizationMetadata item = items[i];
+            bool requiresDefaultPolicy = true;
+
+            if (item.PolicyName is { } policyName)
+            {
+                if (!_policies.TryGetValue(policyName, out AuthorizationPolicy? named))
+                {
+                    throw new InvalidOperationException(
+                        $"No authorization policy named '{policyName}' has been registered. " +
+                        "Register it with options.AddPolicy(name, policy) in AddAuthorization.");
+                }
+
+                builder.Combine(named);
+                requiresDefaultPolicy = false;
+            }
+
+            if (item.Policy is { } inline)
+            {
+                builder.Combine(inline);
+                requiresDefaultPolicy = false;
+            }
+
+            if (item.Roles.Count > 0)
+            {
+                builder.RequireRole(item.Roles);
+                requiresDefaultPolicy = false;
+            }
+
+            if (requiresDefaultPolicy)
+            {
+                builder.Combine(_defaultPolicy);
+            }
+
+            if (item.AuthenticationSchemes.Count > 0)
+            {
+                builder.AddAuthenticationSchemes([.. item.AuthenticationSchemes]);
+            }
+        }
+
+        return builder.Build();
+    }
 
     /// <summary>
     /// Makes the options read-only. <c>AddAuthorization</c> calls this once its callback returns; reads

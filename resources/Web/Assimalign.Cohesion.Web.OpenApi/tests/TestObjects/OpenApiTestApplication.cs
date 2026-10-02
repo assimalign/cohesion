@@ -33,20 +33,43 @@ internal static class OpenApiTestApplication
         BearerFormat = "JWT"
     };
 
+    /// <summary>
+    /// An API-key scheme in a header: an authentication scheme other than the default one, which a
+    /// policy has to name to be documented.
+    /// </summary>
+    public static OpenApiSecuritySchemeMetadata ApiKeyScheme { get; } = new()
+    {
+        Name = "ApiKey",
+        Type = SecuritySchemeType.ApiKey,
+        In = ParameterLocation.Header,
+        ParameterName = "X-Api-Key"
+    };
+
     // A method-group handler whose declared result admits null: the generator describes 200 and 204.
     private static Task<Order?> FindOrder(long id) => Task.FromResult<Order?>(null);
 
     /// <summary>
     /// Creates a factory with routing, the JSON contracts, authentication defaulting to the
-    /// <c>Bearer</c> scheme, authorization, and OpenAPI registered.
+    /// <c>Bearer</c> scheme, authorization (configured by <paramref name="authorization"/>), and OpenAPI
+    /// registered.
     /// </summary>
-    public static WebApplicationTestFactory CreateFactory(Action<OpenApiOptions>? configure = null)
+    public static WebApplicationTestFactory CreateFactory(Action<OpenApiOptions>? configure = null, Action<AuthorizationOptions>? authorization = null)
+    {
+        WebApplicationTestFactory factory = CreateFactoryWithoutAuthorization(configure);
+        factory.Builder.AddAuthorization(authorization);
+        return factory;
+    }
+
+    /// <summary>
+    /// Creates a factory like <see cref="CreateFactory"/> for an application that never calls
+    /// <c>AddAuthorization</c>.
+    /// </summary>
+    public static WebApplicationTestFactory CreateFactoryWithoutAuthorization(Action<OpenApiOptions>? configure = null)
     {
         WebApplicationTestFactory factory = new();
         factory.Builder.AddRouting();
         factory.Builder.AddJsonSerialization(OpenApiTestJsonContext.Default);
         factory.Builder.AddAuthentication(BearerScheme.Name);
-        factory.Builder.AddAuthorization();
         factory.Builder.AddOpenApi(configure);
         return factory;
     }

@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// while a requirement declared after it still applies. A route's <see cref="AllowAnonymous"/> therefore
 /// opens that route inside a protected group, and a route's requirement inside an anonymous group stays
 /// in force. When the last item is <see cref="AllowAnonymous"/>, the endpoint is not authorized at all.
+/// <see cref="AuthorizationOptions.GetEffectivePolicy"/> performs this combination for the middleware and
+/// for any component that describes endpoints.
 /// </para>
 /// <para>
 /// <b>Fail closed.</b> Authorization applies only when <c>UseAuthorization</c> runs between
