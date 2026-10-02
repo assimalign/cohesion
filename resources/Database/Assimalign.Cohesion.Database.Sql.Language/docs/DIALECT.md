@@ -611,11 +611,14 @@ a scan therefore return the same rows for every predicate.
 
 **Indexes written before this rule.** The rule changes the on-disk key format:
 data-storage format 3 (written through 10.0.0-preview.1) stored the kind and
-the offset inside index keys, and format 4 does not. The engine has no upgrade
-path. It refuses to open a database on any format but 4 — older or newer — with
-an error that names the database, the format it found and the format it
-supports. The check reads only the database's catalog and runs before the
-engine opens the data files, so a refused open never touches them. A cleanly
+the offset inside index keys, and format 4 does not. Format 5 (#1194) keeps
+format 4's rows and key encoding but stores index trees in B-tree page format 2,
+whose entries are ordered by key, entry reference and writer, so a format-4
+database is refused too. The engine has no upgrade path (#1152). It refuses to
+open a database on any format but 5 — older or newer — with an error that names
+the database, the format it found and the format it supports. The check reads
+only the database's catalog and runs before the engine opens the data files, so
+a refused open never touches them. A cleanly
 closed database is left byte-identical. A crashed one keeps its journals: the
 catalog files get only the storage layer's own crash recovery, which does not
 depend on the format. To move an older database to the current engine, export
@@ -623,7 +626,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases are created on format 4.
+is tracked by #1152. New databases are created on format 5.
 
 From format 4 on, the catalog stores the format marker in a record that engines
 before format 4 do not recognize, so those engines refuse to open a format-4

@@ -246,7 +246,10 @@ checkpoint deferred, scrubs uncommitted record writers and index changes, and th
 completes the recovery checkpoint. Before the scrub it checks every index tree's
 B-tree page format (`DocumentCatalog.EnsureIndexFormat`, #1194): a database whose
 indexes an engine before #1194 wrote is refused with "Database 'x' cannot be
-opened. COHDBI001: …" and left byte-identical. Both synchronous and grouped durability
+opened. COHDBI001: …". A cleanly closed database is left byte-identical. A
+crashed one has already had the storage layer's format-agnostic journal redo and
+undo when the check runs, but keeps its journal (the open-time checkpoint is
+deferred), so the engine that wrote it still recovers it. Both synchronous and grouped durability
 acknowledge commits only after the journal is durable. Memory-backed databases
 use the identical storage/transaction implementation over in-memory streams.
 

@@ -158,8 +158,12 @@ recovery scrub, so `DocumentCatalog.EnsureIndexFormat(storage)` makes the same c
 reading only the registration records (which carry no MVCC stamps, so the scrub does not change
 them) and each root page. The Documents engine calls it before recovery and refuses a database
 whose indexes an engine before #1194 wrote with "Database 'x' cannot be opened. COHDBI001: …",
-the `IndexFormatException` as its inner exception, leaving the files byte-identical. There is no
-upgrade path (owner decision of 2026-10-02; #1152). Former raw, unstamped DocumentStorage stub files are unsupported
+the `IndexFormatException` as its inner exception. A cleanly closed database is left
+byte-identical; a crashed one has had only the storage layer's format-agnostic journal redo and
+undo, and keeps its journal for the engine that wrote it. There is no upgrade path (owner decision
+of 2026-10-02; #1152). The fence runs one way only: engines before #1194 check neither the page
+format nor anything this catalog changed, so they cannot detect a database this engine wrote and
+must not open one (owner review of #1194). Former raw, unstamped DocumentStorage stub files are unsupported
 as engine databases. Catalog format failures raise `DocumentCatalogException`; shared storage
 corruption remains a storage exception. Invalid JSON/numeric-domain input is rejected by the
 validated storage write helper before publication. Public package APIs require no reflection,

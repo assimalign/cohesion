@@ -157,8 +157,8 @@ knows:
 |---|---|---|
 | Insert, build path (`InsertVersionAsync`) | `(key, reference, writer)` | one descent |
 | Erase (logical undo of an insert) | `(key, reference, writer)` | one descent |
-| Delete — the live version the snapshot sees | `(key, reference, -inf)` | one descent, then the reference's versions under the key: one, unless its slot was reused |
-| Clear-deleter (logical undo of a tombstone) | `(key, reference, -inf)` | the same |
+| Delete — the live version the snapshot sees | `(key, reference, +inf)`, read backward | one descent: the reference's newest version |
+| Clear-deleter (logical undo of a tombstone) | `(key, reference, +inf)`, read backward | one descent: the reference's newest version |
 | Equality and inclusive range seek | `(key, -inf)` | one descent, then the range's entries |
 | Exclusive range start | `(key, +inf)` | one descent, then the range's entries |
 | Unique check | `(key, -inf)` | one descent, then the key's entries until a live one |
@@ -170,6 +170,27 @@ lookup walks forward only while entries share the position's prefix
 of their start key and return every visible entry in range, now in entry-reference
 order within a key; #1159's randomized seek = scan = model tests pass unchanged.
 
+**Delete and clear-deleter read a reference's versions newest first**
+(`TryFindNewestEntry`). They know the key and the reference but not the writer, and
+a reference can have many versions under one key: a record slot reused after the
+version purge reclaimed its previous version leaves that version's dead entry behind
+until dead versions are pruned (#1195). But a slot holds one version at a time, and
+it is reused only once the previous version's deleter committed below every active
+transaction, so every version of a reference except the newest carries a committed
+deleter. The newest is therefore the only one that can be live, and the only one an
+in-flight or aborting deleter can have stamped. The lookup descends to the position
+after the reference's last version — `(key, reference + 1, -inf)`, which no entry
+lies between, or `(key, +inf)` for the largest reference — and reads backward along
+the previous-leaf links, across leaves an undo emptied, until an entry leaves the
+reference. It stops at the first match, so the targeted lookup is one descent
+however many dead versions the slot left behind (measured below: 4,000 dead versions
+cost what 10 do, about 26 µs, where reading them oldest first cost 290 µs). When the
+newest does not match — a stale or replayed undo, which is a no-op — the walk reads
+the older versions too, so the result never depends on the invariant, only the cost
+does. Splits and root growth always maintained the previous-leaf links, but no
+lookup followed them before; the randomized and recovery suites now check, page by
+page, that they mirror the next-leaf links.
+
 The unique check is the one lookup still linear in a key's history. It must prove
 no live version exists among the key's versions, and a live version can sit
 anywhere among the dead ones, so it reads the key's run from `(key, -inf)` until it
@@ -178,8 +199,36 @@ consecutive leaves, the cheapest walk the semantics allow. PostgreSQL's
 `_bt_check_unique` walks the same way (`nbtinsert.c:440-449`). Pruning dead versions
 (#1195) bounds it.
 
+**Known limit until #1195: a row updated many times under a UNIQUE index.** Every
+UPDATE of a row leaves its old version's entry under the same key, so the unique
+check of the next UPDATE reads one more dead entry. `UPDATE t SET v = v + 1 WHERE
+id = 2`, repeated 20,000 times on a table whose primary key is the unique index,
+costs 0.40 ms per update over the first 2,500 updates, 3.67 ms over updates
+10,001–12,500 and 5.98 ms over the last 2,500 (Release; before #1194, 0.55, 4.19
+and 8.29 ms). #1194 makes the tombstone half of each UPDATE one descent, but the
+unique check still grows with the row's history; these numbers are #1195's
+baseline.
+
 ### Splits
 
+- **Inserts into a duplicate run keep append locality only while references grow
+  with insertion order.** An entry now goes to its reference's place in the run,
+  not to the run's end, so inserts whose references arrive out of order land on
+  different leaves of the run. Each leaf a transaction writes for the first time
+  costs the storage layer's 8 KiB before-image (about 25 µs), and a run larger than
+  the buffer pool also reloads pages. Measured with 100,000 inserts over 10 INT keys
+  in 1,000-insert transactions (Release, see "Measurements"): references in
+  insertion order are unaffected; references ascending within shuffled 200-reference
+  blocks (pages a table reuses) insert about 1.5–2× slower; fully random references
+  about 8× slower with the whole tree cached and about 20× slower with the engines'
+  default 128-page pool. In exchange the run packs denser (leaf fill 50% → 69–76%,
+  540–590 leaves instead of 816), and every targeted lookup is one descent.
+  PostgreSQL makes the same trade, heap TID order within a key. The SQL engine
+  appends new row versions to a table's current write page and takes its next page
+  from the free-space map, so its row locations ascend within a page and follow
+  page allocation across pages, close to the block pattern above. The before-image
+  cost is the storage follow-up named under "Measurements"; #1196 addresses fill,
+  not locality.
 - **A split attaches its new node by position.** The insert's descent records the
   child slot it took at every level, and the new right half goes directly after the
   node that split, so the child order always equals the leaf chain. (With unique
@@ -270,20 +319,36 @@ drop and recreate remedy and #1152), or says the root is no B-tree page at all.
 `BTreeIndexManager.EnsureFormat(storage, registrations)` makes the same check alone,
 writing nothing, for a model whose open recovers its record space before it attaches
 its trees. Every node read after attach also checks the magic and version, like
-PostgreSQL's `_bt_checkpage` (`nbtpage.c:782`); a page that fails is damage, and the
-operation fails with an `IndexException` coded `COHDBI002`. There is no upgrade path
-(owner decision of 2026-10-02; upgrades are #1152). How each model surfaces the
-refusal:
+PostgreSQL's `_bt_checkpage` (`nbtpage.c:782-811`); a page that fails is damage, and
+the operation fails with `IndexCorruptionException` (`COHDBI002`, PostgreSQL's
+`ERRCODE_INDEX_CORRUPTED`). There is no upgrade path (owner decision of 2026-10-02;
+upgrades are #1152). How each model surfaces the refusal:
 
 | Model | Where its open checks | Error |
 |---|---|---|
 | SQL | Its catalog's data-storage format marker, bumped from 4 to 5, before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 5"; a marker that does not describe its trees, the attach check's `COHDBI001` |
-| Key-value | The attach check, before recovery (its entry-space format, which describes entry records, is unchanged) | `DatabaseException` "Database 'x' cannot be opened. COHDBI001: …" |
-| Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | the same |
+| Key-value | Its catalog's entry-space format marker, bumped from 1 to 2, before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 2"; a marker that does not describe its tree, "Database 'x' cannot be opened. COHDBI001: …" |
+| Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | "Database 'x' cannot be opened. COHDBI001: …" |
 | Graph | `GraphStore.EnsureIndexFormat`, before the recovery scrub; the attach check again in the store's open | the same |
 
-Every refusal comes before recovery writes anything, so a refused database is left
-byte-identical for the engine that wrote it (each model's test pins it).
+Every refusal comes before the model's own recovery — its scrub, index purge and
+checkpoint — writes anything. A cleanly closed database is therefore left
+byte-identical. A crashed one has already had the storage layer's physical redo
+and undo when an attach check refuses it (the storage open replays its journal
+before any model code runs; SQL's marker gate alone runs before the data files
+open), but that replay is format-agnostic, and the journal is kept because the
+open-time checkpoint is deferred, so the engine that wrote the database still
+recovers it. Each model's test pins the clean case.
+
+**The fence against older engines is the model markers.** An engine before #1194
+reads neither the page stamp nor the format-2 layout, so it can be stopped only by
+something it already checks. SQL's format-4 engines require their marker to equal
+4, and key-value engines before #1194 reject an entry-space marker newer than 1, so
+both refuse a database this engine wrote before they attach a tree. Documents and
+Graph engines before #1194 check nothing that #1194 changed, so they cannot detect
+a database this engine wrote and must not open one: they would misread its trees.
+Nothing has shipped (owner decision of 2026-10-02), so this is recorded for owner
+review rather than fenced with a new Documents or Graph marker.
 
 ### Concurrency and recovery
 
@@ -296,8 +361,15 @@ byte-identical for the engine that wrote it (each model's test pins it).
   lands on, not when it holds the latch: `TryFindEntry`'s descent, its forward walk
   and the caller's tombstone, clear or removal at the returned position all happen in
   one write-latch hold, so no split or removal can move the entry in between, and a
-  cursor never sees a split half done. Concurrent transactions that touch the same
-  leaf are serialized by the storage layer's page write locks, as before.
+  cursor never sees a split half done. The newest-first lookup of delete and
+  clear-deleter reads leftward along the previous-leaf links inside the same hold,
+  and so does every structural change that rewrites those links (a split, a root
+  growth), so the leftward walk sees the same chain the rightward one does. Physical
+  page writes of different transactions never interleave on a leaf: engines apply
+  statements one bracket at a time through the transaction coordinator's apply gate,
+  and a storage page write lock held by another bracket fails fast
+  (`StorageTransactionException`) instead of waiting, so no wait-for cycle can form
+  with the tree latch.
 - **Recovery replays pages, so it is order-agnostic.** The journal carries before-
   and after-images of whole pages: a crash mid-split reverts to the pre-transaction
   tree, and committed inserts, deletes and splits replay byte for byte in the order
@@ -307,15 +379,19 @@ byte-identical for the engine that wrote it (each model's test pins it).
   VACUUM has since removed (`README:34-38`).
 - **Rollback and undo find the exact entry.** A statement's physical rollback
   restores page images; the logical undo after a multi-statement ROLLBACK erases by
-  full identity and clears tombstones by reference, both stamp-checked, so a stale
-  or repeated ledger entry is a no-op. `BTreeEntryOrderTests` covers a crash with a
-  committed duplicate run and an in-flight one, and the undo pair over 600 versions
-  of one reference that span seventeen leaves.
+  full identity and clears tombstones from the reference's newest version back,
+  both stamp-checked, so a stale or repeated ledger entry is a no-op.
+  `BTreeEntryOrderTests` covers a crash with a committed duplicate run and an
+  in-flight one, the undo pair over 600 versions of one reference that span
+  seventeen leaves, and the newest-first lookups across leaves an erase emptied.
 
 ### Measurements (2026-10-02)
 
-Release builds on one developer machine; the index harness storage has a 64-page
-buffer pool unless noted. Before is the integration branch at `d987d7f1`.
+Release builds on one developer machine (12 logical cores, shared with other
+workloads); the index harness storage has a 64-page buffer pool unless noted.
+Before is the integration branch at `d987d7f1`. Rows marked *pinned* ran each
+build in its own process on four reserved cores at high priority, alternating
+builds, and report the median over every round.
 
 | Workload | Before | After |
 |---|---|---|
@@ -325,24 +401,44 @@ buffer pool unless noted. Before is the integration branch at `d987d7f1`.
 | A 400-entry block from the middle of a 2,500- and a 40,000-entry run of one tree, per operation: delete | 12.1 / 6,163 µs | 4.9 / 5.7 µs |
 | the same: erase | 19.9 / 6,414 µs | 1.2 / 1.3 µs |
 | the same: clear-deleter | 20.9 / 6,644 µs | 1.5 / 1.2 µs |
-| SQL `ON DELETE CASCADE`, 2,000 / 8,000 / 16,000 children, separate databases | 264 / 734 / 6,176 ms | 83 / 476 / 426 ms |
+| Delete of a reference's live version behind V dead versions of it (a reused slot), with 2,000 other references under the key, 4,096-page pool, median of nine deletes each in its own transaction (first write to the leaf included): V = 10 / 100 / 1,000 / 4,000 | 95–134 / 96–108 / 134–150 / 290–395 µs | 26 / 26 / 26 / 26 µs (five runs; single runs 25.6–42.3 µs) |
+| the same: clear-deleter of the newest version's tombstone | 94–135 / 96–108 / 152–154 / 303–408 µs | 26 / 26 / 26 / 26 µs (single runs 25.3–42.7 µs) |
+| SQL `ON DELETE CASCADE`, 2,000 / 8,000 / 16,000 children, separate databases | 264 / 734 / 6,176 ms; pinned rerun 134–145 / 378–496 / 2,997–3,089 ms | 83 / 476 / 426 ms; pinned rerun 36–52 / 199–281 / 222–304 ms |
 | the same, 32,000 / 64,000 children | — | 966 / 1,582 ms |
 | SQL cascade of 4,000 and of 16,000 children in one table, per child | 39.1 / 391.0 µs | 23.0 / 22.5 µs |
 | Unique-index insert and seek, 100,000 INT keys in random order (median of three) | 10,883 inserts/s, 29,061 seeks/s | 10,818 / 28,969 (−0.6%, −0.3%) |
-| `SqlCascadeDeleteDepthTests`' 100,000-row self-referencing cascade (Debug, whole test) | 86 s | 77 s |
+| the same, pinned, 18 rounds | 18,241 inserts/s, 52,135 seeks/s | 17,451 / 50,397 (−4.3%, −3.3%) |
+| Unique-index insert and seek, 300,000 INT keys in ascending order, pinned, 18 rounds | 639,637 inserts/s, 1,983,214 seeks/s | 638,314 / 1,981,246 (−0.2%, −0.1%) |
+| Inserts into duplicate runs: 100,000 rows over 10 INT keys, 1,000 per transaction, the engines' default 128-page pool; references in insertion order / ascending in shuffled 200-reference blocks / random | 203k–392k / 504k–524k / 411k–525k inserts/s; 816 leaves, 50% full | 198k–384k / 229k–247k / 22k–23k inserts/s; 816 / 590 / 540 leaves, 50% / 69% / 76% full |
+| the same with a 4,096-page pool | 490k–503k / 387k–516k / 418k–537k inserts/s | 322k–610k / 239k–339k / 55k–58k inserts/s |
+| SQL hot row: `UPDATE t SET v = v + 1 WHERE id = 2` 20,000 times under the primary key's unique index, per update in updates 1–2,500 / 7,501–10,000 / 10,001–12,500 / 17,501–20,000 | 0.55 / 1.07 / 4.19 / 8.29 ms | 0.40 / 0.97 / 3.67 / 5.98 ms |
+| `SqlCascadeDeleteDepthTests`' 100,000-row self-referencing cascade (Debug, whole test, builds alternating) | 41 s, 41 s | 41 s, 42 s (unchanged) |
 
 The issue's own measurements of the same baseline (#1194: 124 µs and 7.2 ms per
 delete; 76 ms, 442 ms and 4,526 ms per cascade) were taken on the same kind of
-build. The random-delete rows still grow with the run because the storage layer
-journals an 8 KiB before-image the first time a transaction writes a page (about
-50 µs), and random deletes in a longer run touch more distinct leaves; the block
-rows hold the leaves touched constant and show the descent itself does not grow.
-The 100,000-row chain has one entry per key, so #1194 does not change its
-asymptotics. The timing guards — `BTreeEntryTimingTests` (delete, erase and
-clear-deleter in a 40,000-entry run against a 2,500-entry run of the same tree,
-allowed growth 4×; the baseline measured 317–510×) and `SqlCascadeFanOutTests`
-(16,000 children against 4,000, allowed growth 2×; the baseline measured 10×) —
-compare growth ratios, not absolute times, so CI speed and load cancel out.
+build; the rows above vary with the machine's other load by up to 2×, which is why
+the timing guards compare ratios. The random-delete rows still grow with the run
+because the storage layer journals an 8 KiB before-image the first time a
+transaction writes a page (25–50 µs), and random deletes in a longer run touch
+more distinct leaves; the block rows hold the leaves touched constant and show the
+descent itself does not grow. That before-image is also what the versions rows'
+flat 26 µs is: one first write per delete. With the entry order but a reference's
+versions read oldest first (#1194's first commit, `f2f9a7f2`), the same versions
+deletes cost 27 / 37 / 139–141 / 289–371 µs, linear in V. The duplicate-run insert rows
+are the cost described under "Splits"; the hot-row row is the unique check's known
+limit (#1195). The 100,000-row chain has one entry per key, so #1194 does not
+change its asymptotics. The timing guards compare growth ratios, not absolute
+times, so CI speed and load cancel out:
+
+- `BTreeEntryTimingTests`, delete, erase and clear-deleter in a 40,000-entry run
+  against a 2,500-entry run of the same tree: allowed growth 4×; the baseline
+  measured 317–510×, the entry order 0.8–1.2×.
+- `BTreeEntryTimingTests`, delete and clear-deleter of 16 references with 2,048
+  versions each against 16 with 16 versions each, every newest version on its own
+  leaf: allowed growth 2.5×; the oldest-first walk measured 12.6–14.3×, the
+  newest-first lookup 0.87–1.21× (Release and Debug).
+- `SqlCascadeFanOutTests`, 16,000 children against 4,000: allowed growth 2×; the
+  baseline measured 10×.
 
 ## Transactional binding
 
@@ -365,7 +461,8 @@ transaction context — they run where no statement bracket exists:
   remove an aborted writer's insert; clear an aborted writer's tombstone. Both
   verify the recorded stamp before acting, so replays and stale ledgers no-op.
   Erase knows the entry's full identity and descends to it; clear-deleter knows the
-  key and reference and descends to the reference's versions. Physical removal
+  key and reference, descends past the reference's last version and reads its
+  versions newest first. Physical removal
   drops only the directory slot; the entry bytes stay orphaned in the node until a
   rebuild reclaims them (bounded space for a rare path). An insert that finds a leaf
   full rebuilds it in place when the orphaned bytes are what stands between it and
@@ -411,10 +508,16 @@ area root rolls up (2026-07-13 inversion), so it must stay independently
 consumable. `IndexUniqueViolationException : IndexException` is the typed
 unique-violation surface. `IndexFormatException : IndexException` is the typed
 page-format refusal at attach (`COHDBI001`, with the index, its object, its root
-page and the format found); a damaged page reached inside an attached tree raises
-`IndexException` coded `COHDBI002`. Model engines that expose index failures on
-the area's error surface translate at their own boundary and keep the code and the
-original exception as the inner exception.
+page and the format found). `IndexCorruptionException : IndexException` is the
+typed damage surface (`COHDBI002`, with the index, the page and the format the page
+claims): a page reached inside an attached tree that is not a node of the current
+format, PostgreSQL's `ERRCODE_INDEX_CORRUPTED` from `_bt_checkpage`, and the
+counterpart of the storage child root's `StorageCorruptionException`. Each code
+is a constant on its exception type (`ErrorCode`) and leads its message. An insert
+whose `(key, reference, writer)` identity is already present is a caller defect and
+fails with a plain `IndexException` before it changes anything. Model engines that
+expose index failures on the area's error surface translate at their own boundary
+and keep the code and the original exception as the inner exception.
 
 ## Relationship to `Database.Storage`
 

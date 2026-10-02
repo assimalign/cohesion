@@ -111,8 +111,11 @@ page when the store attaches it. The store opens after the coordinator's recover
 (zero-stamped, so the scrub never changes them) and the root pages, writing nothing. The Graph
 engine calls it before recovery and refuses a database whose indexes an engine before #1194 wrote
 with "Database 'x' cannot be opened. COHDBI001: …" (the `IndexFormatException` as its inner
-exception), leaving the files byte-identical. There is no upgrade path (owner decision of
-2026-10-02; #1152).
+exception). A cleanly closed database is left byte-identical; a crashed one has had only the
+storage layer's format-agnostic journal redo and undo, and keeps its journal for the engine that
+wrote it. There is no upgrade path (owner decision of 2026-10-02; #1152). The fence runs one way
+only: engines before #1194 check neither the page format nor anything this store changed, so they
+cannot detect a database this engine wrote and must not open one (owner review of #1194).
 
 Physical references use the high 48 bits for the page ID and low 16 bits for the slot.
 Readers check page allocation, data-page owner, record identity and writer stamp before
