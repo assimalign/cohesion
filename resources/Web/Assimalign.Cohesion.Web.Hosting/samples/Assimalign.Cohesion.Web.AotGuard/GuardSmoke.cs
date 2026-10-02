@@ -89,6 +89,30 @@ internal static class GuardSmoke
             return response.StatusCode == HttpStatusCode.NoContent;
         });
 
+        failures += await CheckAsync("the OpenAPI document describes the typed endpoints", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("openapi/v1.json", cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK
+                && response.Content.Headers.ContentType?.MediaType == "application/json"
+                && body.Contains("\"/items/{id}\"", StringComparison.Ordinal)
+                && body.Contains("\"GuardItem\"", StringComparison.Ordinal)
+                && response.Headers.ETag is not null;
+        });
+
+        failures += await CheckAsync("the OpenAPI document answers a matching ETag with 304", async () =>
+        {
+            using HttpResponseMessage first = await client.GetAsync("openapi/v1.json", cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "openapi/v1.json");
+            if (first.Headers.ETag is { } entityTag)
+            {
+                request.Headers.IfNoneMatch.Add(entityTag);
+            }
+
+            using HttpResponseMessage second = await client.SendAsync(request, cancellationToken);
+            return first.Headers.ETag is not null && second.StatusCode == HttpStatusCode.NotModified;
+        });
+
         failures += await CheckAsync("CORS answers a JSON preflight from its candidate endpoint's policy", async () =>
         {
             using var request = new HttpRequestMessage(HttpMethod.Options, "items");

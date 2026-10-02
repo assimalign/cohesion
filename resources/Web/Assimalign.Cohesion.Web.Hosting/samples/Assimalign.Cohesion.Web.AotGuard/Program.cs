@@ -18,6 +18,7 @@ using Assimalign.Cohesion.Web.CookiePolicy;
 using Assimalign.Cohesion.Web.Cors;
 using Assimalign.Cohesion.Web.ErrorHandling;
 using Assimalign.Cohesion.Web.Hosting;
+using Assimalign.Cohesion.Web.OpenApi;
 using Assimalign.Cohesion.Web.RateLimiting;
 using Assimalign.Cohesion.Web.RequestTimeouts;
 using Assimalign.Cohesion.Web.Routing;
@@ -50,6 +51,7 @@ builder.AddAuthentication(options => options.DefaultScheme = JwtBearerDefaults.A
     });
 builder.AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")));
 builder.AddAntiforgery();
+builder.AddOpenApi(options => options.Title = "Cohesion Web AOT guard");
 
 await using WebApplication application = builder.Build();
 
@@ -181,6 +183,10 @@ application.MapGet("/cookies", (IHttpContext context) =>
     context.Response.StatusCode = HttpStatusCode.NoContent;
     return Task.CompletedTask;
 });
+
+// The OpenAPI document (#152): built once from the typed endpoints' metadata and the source-generated
+// JSON contracts, then served with an ETag.
+application.MapOpenApi();
 
 // A single-page application's client routes; a path that names a file is never answered with it.
 application.MapFallbackToFile("index.html");

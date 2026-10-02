@@ -91,10 +91,11 @@ jobs:
   # NativeAOT guard (#1052): a representative Web application — routing (groups, branching, the
   # static-file fallback), source-generated typed binding and JSON, error handling, Cookie + JWT
   # Bearer, authorization, antiforgery, cookie policy, security headers, static files, compression,
-  # CORS, rate limiting and request timeouts — published with PublishAot. The guard promotes the
-  # trim/AOT analyzer diagnostics and ILC's per-assembly summaries (IL2104/IL3053) to errors, so a
-  # trim or AOT warning in any Web library it reaches fails the publish; the smoke run then
-  # exercises every feature over real HTTP and fails the job on the first failed check.
+  # CORS, rate limiting, request timeouts, handler return values and the OpenAPI document — published
+  # with PublishAot. The guard promotes the trim/AOT analyzer diagnostics and ILC's per-assembly
+  # summaries (IL2104/IL3053) to errors, so a trim or AOT warning in any Web library it reaches fails
+  # the publish; the smoke run then exercises every feature over real HTTP and fails the job on the
+  # first failed check.
   aot-guard:
     name: "Web NativeAOT guard [ubuntu-latest]"
     runs-on: ubuntu-latest
