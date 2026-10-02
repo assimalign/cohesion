@@ -1183,6 +1183,17 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web/tests/Assimalign.Cohesion.Web.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Antiforgery/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Antiforgery/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Antiforgery/src/Assimalign.Cohesion.Web.Antiforgery.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Antiforgery/tests/Assimalign.Cohesion.Web.Antiforgery.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Api/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Api/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Api/src/Assimalign.Cohesion.Web.Api.csproj" />
@@ -1253,6 +1264,10 @@
 		<Project Path="Web/Assimalign.Cohesion.Web.CookiePolicy/tests/Assimalign.Cohesion.Web.CookiePolicy.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Cors/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Cors/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Cors/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Cors/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Cors/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Cors/src/Assimalign.Cohesion.Web.Cors.csproj" />
 	</Folder>
@@ -1334,11 +1349,39 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/Hosting1.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/samples/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/src/Assimalign.Cohesion.Web.Hosting.csproj" />
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/tests/Assimalign.Cohesion.Web.Hosting.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.OpenApi/">
+		<File Path="Web/Assimalign.Cohesion.Web.OpenApi/README.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.OpenApi/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.OpenApi/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.OpenApi/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.OpenApi/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.OpenApi/src/Assimalign.Cohesion.Web.OpenApi.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.OpenApi/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.OpenApi/tests/Assimalign.Cohesion.Web.OpenApi.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.HttpsPolicy/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.HttpsPolicy/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.HttpsPolicy/src/Assimalign.Cohesion.Web.HttpsPolicy.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.HttpsPolicy/tests/Assimalign.Cohesion.Web.HttpsPolicy.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.ProblemDetails/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.ProblemDetails/docs/">
@@ -1643,6 +1686,17 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Routing/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Routing/tests/Assimalign.Cohesion.Web.Routing.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/src/Assimalign.Cohesion.Web.SecurityHeaders.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/tests/Assimalign.Cohesion.Web.SecurityHeaders.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Serialization/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Serialization/docs/">
 		<File Path="Web/Assimalign.Cohesion.Web.Serialization/docs/DESIGN.md" />
@@ -1685,6 +1739,17 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Testing/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Testing/tests/Assimalign.Cohesion.Web.Testing.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Validation/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Validation/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Validation/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Validation/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Validation/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Validation/src/Assimalign.Cohesion.Web.Validation.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Validation/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Validation/tests/Assimalign.Cohesion.Web.Validation.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/refs/" >
 		<Project Path="../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
@@ -1705,6 +1770,7 @@
 		<Project Path="../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Cookies/src/Assimalign.Cohesion.Http.Cookies.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Forms/src/Assimalign.Cohesion.Http.Forms.csproj" />
+		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Antiforgery/src/Assimalign.Cohesion.Http.Antiforgery.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Forwarded/src/Assimalign.Cohesion.Http.Forwarded.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.RequestLimits/src/Assimalign.Cohesion.Http.RequestLimits.csproj" />
 		<Project Path="../libraries/Connections/Assimalign.Cohesion.Connections.Quic/src/Assimalign.Cohesion.Connections.Quic.csproj" />
@@ -1712,6 +1778,7 @@
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Streaming/src/Assimalign.Cohesion.Http.Streaming.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Sessions/src/Assimalign.Cohesion.Http.Sessions.csproj" />
 		<Project Path="../libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/Assimalign.Cohesion.FileSystem.InMemory.csproj" />
+		<Project Path="../libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/src/Assimalign.Cohesion.ObjectValidation.csproj" />
 	</Folder>
 	<Folder Name="/resources/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/">
 		<File Path="ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/README.md" />

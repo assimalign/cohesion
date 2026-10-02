@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+
+using Shouldly;
+
 using Assimalign.Cohesion.FileSystem;
 
 namespace Assimalign.Cohesion.FileSystem.Tests;
@@ -131,6 +134,21 @@ public class FileSystemExceptionTests
         Assert.Contains("read-only", exception.Message);
     }
 
+    [Fact(DisplayName = "Cohesion Test [FileSystem] - ThrowPathOutsideRoot: should produce PathOutsideRoot naming only the caller's path")]
+    public void ThrowPathOutsideRoot_CallerPath_ShouldMapToPathOutsideRoot()
+    {
+        // Arrange
+        FileSystemPath path = "../secret.txt";
+
+        // Act
+        var exception = Should.Throw<FileSystemException>(() => FileSystemException.ThrowPathOutsideRoot(path));
+
+        // Assert
+        exception.Code.ShouldBe(FileSystemErrorCode.PathOutsideRoot);
+        exception.Message.ShouldContain("../secret.txt", Case.Sensitive);
+        exception.InnerException.ShouldBeNull();
+    }
+
     [Theory(DisplayName = "Cohesion Test [FileSystem] - FileSystemErrorCode: ordinal values are stable")]
     [InlineData(FileSystemErrorCode.Other, 0)]
     [InlineData(FileSystemErrorCode.NotFound, 1)]
@@ -140,6 +158,7 @@ public class FileSystemExceptionTests
     [InlineData(FileSystemErrorCode.AccessDenied, 5)]
     [InlineData(FileSystemErrorCode.PathInUse, 6)]
     [InlineData(FileSystemErrorCode.ReadOnly, 7)]
+    [InlineData(FileSystemErrorCode.PathOutsideRoot, 8)]
     public void ErrorCode_OrdinalStable(FileSystemErrorCode code, int ordinal)
     {
         Assert.Equal(ordinal, (int)code);

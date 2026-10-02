@@ -167,6 +167,123 @@ public class Http3RoundTripTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should stream a request body larger than the QUIC stream window to the handler over real QUIC")]
+    public async Task Http3_OnPostWithLargeBody_ShouldStreamBodyToHandler()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — 1 MiB is far past the QUIC stream's receive window, so the upload completes only if
+        // the request is dispatched before its body and the handler's reads extend flow-control credit.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        byte[] upload = new byte[1024 * 1024];
+        for (int index = 0; index < upload.Length; index++)
+        {
+            upload[index] = (byte)(index % 251);
+        }
+
+        await using Http3LoopbackServer server = await Http3LoopbackServer.StartAsync(async exchange =>
+        {
+            using MemoryStream received = new();
+            await exchange.Request.Body.CopyToAsync(received, cancellationToken);
+
+            exchange.Response.StatusCode = HttpStatusCode.Ok;
+            exchange.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes(
+                $"{received.Length}:{(received.ToArray().AsSpan().SequenceEqual(upload) ? "match" : "mismatch")}"));
+        }, cancellationToken);
+
+        // Act
+        using HttpClient client = CreateHttp3Client();
+        using HttpResponseMessage response = await PostExactHttp3Async(client, new Uri(server.BaseUri, "/upload"), upload, cancellationToken);
+        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        // Assert
+        ((int)response.StatusCode).ShouldBe(200);
+        body.ShouldBe($"{upload.Length}:match");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should answer 413 over real QUIC when the request body exceeds MaxRequestBodySize")]
+    public async Task Http3_OnBodyOverMaxRequestBodySize_ShouldAnswer413()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — a 1 KiB cap; the handler reads the body and lets the transport answer the rejection.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using Http3LoopbackServer server = await Http3LoopbackServer.StartAsync(
+            async exchange =>
+            {
+                try
+                {
+                    await exchange.Request.Body.CopyToAsync(Stream.Null, cancellationToken);
+                }
+                catch (IOException)
+                {
+                    // The body was rejected for its size; the send path answers 413.
+                }
+            },
+            http3 => http3.Limits.MaxRequestBodySize = 1024,
+            cancellationToken);
+
+        // Act
+        using HttpClient client = CreateHttp3Client();
+        using HttpResponseMessage response = await PostExactHttp3Async(client, new Uri(server.BaseUri, "/upload"), new byte[64 * 1024], cancellationToken);
+
+        // Assert
+        ((int)response.StatusCode).ShouldBe(413);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should deliver the response when the handler never reads the request body over real QUIC")]
+    public async Task Http3_OnUnreadRequestBody_ShouldStillDeliverResponse()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — the handler answers without touching a 32 KiB body; the server drains it before ending
+        // the response, so the client's upload completes normally. (A remainder beyond the drain budget is
+        // stopped instead, and the QUIC driver can only signal that with its default stream error code —
+        // which the .NET client reports as a failed request; see docs/DESIGN.md.)
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using Http3LoopbackServer server = await Http3LoopbackServer.StartAsync(exchange =>
+        {
+            exchange.Response.StatusCode = HttpStatusCode.Ok;
+            exchange.Response.Body = new MemoryStream(Encoding.ASCII.GetBytes("ignored"));
+            return Task.CompletedTask;
+        }, cancellationToken);
+
+        // Act
+        using HttpClient client = CreateHttp3Client();
+        using HttpResponseMessage response = await PostExactHttp3Async(client, new Uri(server.BaseUri, "/ignore"), new byte[32 * 1024], cancellationToken);
+        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        // Assert
+        ((int)response.StatusCode).ShouldBe(200);
+        body.ShouldBe("ignored");
+    }
+
+    private static async Task<HttpResponseMessage> PostExactHttp3Async(HttpClient client, Uri uri, byte[] content, CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage request = new(ClientHttpMethod.Post, uri)
+        {
+            Version = NetHttpVersion.Version30,
+            VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+            Content = new ByteArrayContent(content)
+        };
+
+        return await client.SendAsync(request, cancellationToken);
+    }
+
     private static HttpClient CreateHttp3Client()
     {
         HttpClientHandler handler = new()

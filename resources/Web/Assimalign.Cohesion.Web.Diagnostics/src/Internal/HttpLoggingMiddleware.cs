@@ -20,6 +20,14 @@ using Assimalign.Cohesion.Web.Routing;
 /// (<see cref="HttpLoggingSnapshot"/>); the middleware performs no service location and no
 /// reflection.
 /// </summary>
+/// <remarks>
+/// The scheme, host, and client address it logs are the <em>effective</em> values from
+/// <see cref="HttpContextForwardedExtensions"/>: what a trusted proxy chain vouched for when the
+/// forwarded-headers middleware ran, otherwise the transport's. They are read when the entry is
+/// emitted, after the pipeline unwinds, so the forwarded identity is logged even though this
+/// middleware is registered ahead of <c>UseForwardedHeaders</c>. When the logged client differs from
+/// the transport peer, the peer (the nearest proxy) is logged beside it.
+/// </remarks>
 internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
 {
     private const HttpLoggingFields CaptureFields =
@@ -141,13 +149,19 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
 
     /// <summary>
     /// Resolves the field set for the completed exchange: the configured fields unless the
-    /// matched endpoint carries an <see cref="HttpLoggingMetadata"/> override (last-wins via the
-    /// endpoint metadata bag). Capture fields can only narrow — they were armed (or not) before
-    /// routing decided the endpoint.
+    /// endpoint that handled it carries an <see cref="HttpLoggingMetadata"/> override (last-wins
+    /// via the endpoint metadata bag). The endpoint <c>UseRouting</c> published is still on the
+    /// exchange after the pipeline unwinds, so this works with logging registered ahead of routing.
+    /// A CORS preflight's candidate endpoint never handles the preflight, so its override does not
+    /// apply to it. Capture fields can only narrow — they were armed (or not) from the configured
+    /// fields before the downstream pipeline ran.
     /// </summary>
     private static HttpLoggingFields ResolveEffectiveFields(IHttpContext context, HttpLoggingFields configured)
     {
-        HttpLoggingMetadata? metadata = context.GetEndpointMetadata<HttpLoggingMetadata>();
+        HttpLoggingMetadata? metadata = context.GetRouteMatch() is { IsPreflight: false } endpoint
+            ? endpoint.Metadata.GetMetadata<HttpLoggingMetadata>()
+            : null;
+
         if (metadata is null)
         {
             return configured;
@@ -206,14 +220,25 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
             attributes[HttpLoggingAttributes.RequestMethod] = request.Method.Value;
         }
 
-        if ((fields & HttpLoggingFields.RequestScheme) != 0 && request.Scheme != HttpScheme.None)
+        // Scheme and host are the effective values: the client-facing ones a trusted proxy forwarded,
+        // otherwise the wire values. The wire values behind a proxy describe the internal hop, which is
+        // deployment configuration rather than per-exchange evidence, so only the client view is logged.
+        if ((fields & HttpLoggingFields.RequestScheme) != 0)
         {
-            attributes[HttpLoggingAttributes.RequestScheme] = request.Scheme == HttpScheme.Https ? "https" : "http";
+            HttpScheme scheme = context.EffectiveScheme;
+            if (scheme != HttpScheme.None)
+            {
+                attributes[HttpLoggingAttributes.RequestScheme] = scheme == HttpScheme.Https ? "https" : "http";
+            }
         }
 
-        if ((fields & HttpLoggingFields.RequestHost) != 0 && !string.IsNullOrEmpty(request.Host.Value))
+        if ((fields & HttpLoggingFields.RequestHost) != 0)
         {
-            attributes[HttpLoggingAttributes.RequestHost] = request.Host.Value;
+            string host = context.EffectiveHost.Value;
+            if (!string.IsNullOrEmpty(host))
+            {
+                attributes[HttpLoggingAttributes.RequestHost] = host;
+            }
         }
 
         if ((fields & HttpLoggingFields.RequestPath) != 0)
@@ -276,15 +301,7 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
 
         if ((fields & HttpLoggingFields.ClientAddress) != 0)
         {
-            if (ResolveClientAddress(context) is { } address)
-            {
-                attributes[HttpLoggingAttributes.ClientAddress] = address.ToString();
-            }
-
-            if (context.ConnectionInfo.RemotePort > 0)
-            {
-                attributes[HttpLoggingAttributes.ClientPort] = context.ConnectionInfo.RemotePort;
-            }
+            AddClientAttributes(attributes, context);
         }
 
         if ((fields & HttpLoggingFields.TraceContext) != 0
@@ -319,6 +336,41 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         }
     }
 
+    /// <summary>
+    /// Adds the client attributes: the effective client address and port, and — when the transport
+    /// peer is not that client — the peer's address and port, so the hop that delivered the exchange
+    /// stays auditable behind a proxy.
+    /// </summary>
+    private void AddClientAttributes(Dictionary<string, object?> attributes, IHttpContext context)
+    {
+        IPAddress? client = ResolveClientAddress(context);
+        if (client is not null)
+        {
+            attributes[HttpLoggingAttributes.ClientAddress] = client.ToString();
+        }
+
+        // The client port is the effective endpoint's: the forwarded node's port when a trusted hop
+        // resolved one (0 when it carried none), otherwise the transport's.
+        IHttpForwardedFeature? forwarded = context.Features.Get<IHttpForwardedFeature>();
+        int clientPort = forwarded is null ? context.ConnectionInfo.RemotePort : forwarded.RemotePort;
+        if (clientPort > 0)
+        {
+            attributes[HttpLoggingAttributes.ClientPort] = clientPort;
+        }
+
+        IPAddress? peer = context.ConnectionInfo.RemoteIp;
+        if (peer is not null && !peer.Equals(client))
+        {
+            attributes[HttpLoggingAttributes.PeerAddress] = peer.ToString();
+
+            int peerPort = context.ConnectionInfo.RemotePort;
+            if (peerPort > 0)
+            {
+                attributes[HttpLoggingAttributes.PeerPort] = peerPort;
+            }
+        }
+    }
+
     private IPAddress? ResolveClientAddress(IHttpContext context)
     {
         if (_snapshot.ClientAddressResolver is { } resolver)
@@ -329,11 +381,13 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
             }
             catch
             {
-                // A faulting resolver must not fail the exchange; fall back to the socket peer.
+                // A faulting resolver must not fail the exchange; fall back to the effective client.
             }
         }
 
-        return context.ConnectionInfo.RemoteIp;
+        // The client a trusted proxy chain vouched for when the forwarded-headers middleware ran,
+        // otherwise the transport peer. Forwarding headers are never parsed here.
+        return context.EffectiveRemoteIp;
     }
 
     private static string BuildMessage(

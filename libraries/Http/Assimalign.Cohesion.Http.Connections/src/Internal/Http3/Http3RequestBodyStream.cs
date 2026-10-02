@@ -1,0 +1,779 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.ExceptionServices;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Connections;
+
+namespace Assimalign.Cohesion.Http.Connections.Internal;
+
+/// <summary>
+/// The lazy, forward-only HTTP/3 request-body stream. The request is dispatched as soon as its HEADERS
+/// frame decodes; this stream then decodes the rest of the request stream on demand (RFC 9114 §4.1) —
+/// DATA payloads copied straight into the reader's buffer, a trailing HEADERS frame surfaced as the
+/// request's trailers, frames of unknown or reserved type skipped (RFC 9114 §9) — while enforcing the
+/// per-request body-size cap (413) and the Content-Length rule (RFC 9114 §4.1.2).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Backpressure.</b> Nothing is read until the application reads. Octets it has not asked for stay in
+/// the QUIC stream's receive buffer, so the peer is paced by QUIC flow control (RFC 9000 §4); beyond what
+/// the application consumed, the server holds at most one read buffer of the stream's input pipe.
+/// </para>
+/// <para>
+/// <b>Body-size cap.</b> The cap freezes at the first read, exactly as on HTTP/1.1: the shared
+/// interceptor pipeline hands this stream the request's parse context
+/// (<see cref="IHttpLazyRequestBody"/>) instead of freezing the knob after the head hooks, so request
+/// hooks, middleware, and endpoints may raise or lower it until the body is first read. A
+/// Content-Length over the frozen cap is rejected before a DATA octet is read; otherwise each DATA frame
+/// is checked when its header arrives, before any of its octets are delivered. A rejection is recorded
+/// (<see cref="RejectedStatusCode"/>) and thrown as <see cref="Http3LimitExceededException"/>; the
+/// send path answers 413 when the response head has not been committed and then stops reading.
+/// </para>
+/// <para>
+/// <b>Errors.</b> A malformed request detected in the body (a Content-Length the DATA frames contradict,
+/// a malformed trailer section) is an <c>H3_MESSAGE_ERROR</c> stream error (RFC 9114 §4.1.2); an
+/// oversized trailer section an <c>H3_FRAME_ERROR</c> stream error; either resets the request stream
+/// (<see cref="IsReset"/>). A truncated frame or an invalid frame sequence is a connection error
+/// (RFC 9114 §7.1 / §4.1) signalled to the connection context. The first failure is recorded and
+/// rethrown by every later read. All failures surface as <see cref="IOException"/> subtypes, so an
+/// application observes them as ordinary body-read failures.
+/// </para>
+/// <para>
+/// <b>Ownership.</b> The stream does not own the request stream; disposal only bars further reads. In
+/// particular it never completes the input pipe — on the QUIC driver that would dispose the whole QUIC
+/// stream, response direction included. Reading is stopped by the send path once the complete response
+/// is on the wire (<see cref="StopReading"/>).
+/// </para>
+/// <para>
+/// <b>CONNECT.</b> For a CONNECT request the DATA frames carry tunnel octets rather than a message body
+/// (RFC 9110 §9.3.6, RFC 9114 §4.4), so neither the body-size cap nor the Content-Length rule applies,
+/// and a HEADERS frame after the request head is an invalid frame sequence.
+/// </para>
+/// </remarks>
+internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
+{
+    private readonly Http3ConnectionContext _connection;
+    private readonly Http3RequestStreamReader _reader;
+    private readonly IConnection _streamConnection;
+    private readonly long _streamId;
+    private readonly HttpTrailerCollection _trailers;
+    private readonly long? _declaredContentLength;
+    private readonly bool _isTunnel;
+    private readonly long? _fallbackCap;
+    private readonly int _maxFieldSectionSize;
+    private readonly Lock _gate = new();
+
+    private HttpExchangeInterceptorRequestContext? _interception;
+    private CancellationToken _requestAborted;
+    private bool _started;
+    private long? _cap;
+    private long _received;
+
+    // Frame progress lives in fields, not locals, so a read cancelled mid-frame resumes exactly where it
+    // stopped: _dataRemaining counts the current DATA frame's undelivered octets, _skipRemaining an
+    // ignored frame's undiscarded octets.
+    private long _dataRemaining;
+    private long _skipRemaining;
+    private bool _trailersReceived;
+    private bool _endDelivered;
+    private ExceptionDispatchInfo? _failure;
+
+    // Guarded by _gate. _reading marks an in-flight read (the application's or the drain's); _closed bars
+    // any further application read (a drain started, reading was stopped, or the stream was reset);
+    // _stopRequested asks for the input pipe to be completed as soon as no read is in flight; and
+    // _inputReleased records that it has been — by this stream, or by the reset that aborted it.
+    private bool _reading;
+    private bool _closed;
+    private bool _stopRequested;
+    private bool _inputReleased;
+    private bool _disposed;
+
+    /// <summary>
+    /// Initializes the request body for one request stream, positioned just after its HEADERS frame.
+    /// </summary>
+    /// <param name="connection">The owning connection context (trailer decoding, stream and connection errors).</param>
+    /// <param name="reader">The request stream's frame reader, positioned after the request head.</param>
+    /// <param name="streamConnection">The request stream.</param>
+    /// <param name="streamId">The request stream's wire ID (keys QPACK decoder instructions).</param>
+    /// <param name="trailers">The supported, initially empty trailer collection surfaced on the request.</param>
+    /// <param name="declaredContentLength">The request's Content-Length, or <see langword="null"/> when absent.</param>
+    /// <param name="isTunnel">Whether the request is a CONNECT, whose DATA frames carry tunnel octets.</param>
+    /// <param name="fallbackCap">The registration's body-size cap, used when no parse context is attached.</param>
+    /// <param name="maxFieldSectionSize">The largest trailer HEADERS payload, in octets, the server buffers.</param>
+    /// <param name="requestAborted">
+    /// The token that cancels reads before the exchange exists (connection teardown during the request
+    /// head); replaced by the exchange's <see cref="HttpContext.RequestCancelled"/> once attached.
+    /// </param>
+    public Http3RequestBodyStream(
+        Http3ConnectionContext connection,
+        Http3RequestStreamReader reader,
+        IConnection streamConnection,
+        long streamId,
+        HttpTrailerCollection trailers,
+        long? declaredContentLength,
+        bool isTunnel,
+        long? fallbackCap,
+        int maxFieldSectionSize,
+        CancellationToken requestAborted)
+    {
+        _connection = connection;
+        _reader = reader;
+        _streamConnection = streamConnection;
+        _streamId = streamId;
+        _trailers = trailers;
+        _declaredContentLength = declaredContentLength;
+        _isTunnel = isTunnel;
+        _fallbackCap = fallbackCap;
+        _maxFieldSectionSize = maxFieldSectionSize;
+        _requestAborted = requestAborted;
+    }
+
+    /// <summary>
+    /// Gets the status the exchange is answered with because the request body was rejected — 413 when it
+    /// exceeded the body-size cap — or <see langword="null"/> when it was not rejected.
+    /// </summary>
+    public HttpStatusCode? RejectedStatusCode { get; private set; }
+
+    /// <summary>
+    /// Gets a value indicating whether the transport has reset this request stream — a stream error found
+    /// while reading the body, a cancelled exchange, or a request that was never dispatched — so no
+    /// response can be written on it.
+    /// </summary>
+    public bool IsReset { get; private set; }
+
+    /// <summary>
+    /// Gets a value indicating whether the request stream ended cleanly: the peer's FIN was read, so the
+    /// whole body (and any trailer section) has been read or drained.
+    /// </summary>
+    public bool IsCompleted => _reader.IsCompleted;
+
+    /// <inheritdoc />
+    public override bool CanRead => !_disposed;
+
+    /// <inheritdoc />
+    public override bool CanSeek => false;
+
+    /// <inheritdoc />
+    public override bool CanWrite => false;
+
+    /// <inheritdoc />
+    public override long Length => throw new NotSupportedException("The HTTP/3 request body length is not known in advance.");
+
+    /// <inheritdoc />
+    public override long Position
+    {
+        get => throw new NotSupportedException("The HTTP/3 request body stream is not seekable.");
+        set => throw new NotSupportedException("The HTTP/3 request body stream is not seekable.");
+    }
+
+    /// <inheritdoc />
+    public void AttachInterception(HttpExchangeInterceptorRequestContext interception)
+    {
+        _interception = interception;
+    }
+
+    /// <summary>
+    /// Attaches the exchange this body belongs to, so a read in flight is cancelled with the exchange
+    /// (<see cref="HttpContext.RequestCancelled"/>). Called once, when the exchange is constructed.
+    /// </summary>
+    /// <param name="owner">The owning exchange.</param>
+    public void AttachOwner(Http3Context owner)
+    {
+        _requestAborted = owner.RequestCancelled;
+    }
+
+    /// <inheritdoc />
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        lock (_gate)
+        {
+            if (_reading)
+            {
+                throw new InvalidOperationException("The HTTP/3 request body does not support concurrent reads.");
+            }
+
+            _reading = true;
+        }
+
+        try
+        {
+            return await ReadCoreAsync(buffer, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            EndRead();
+        }
+    }
+
+    /// <inheritdoc />
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+    }
+
+    /// <inheritdoc />
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        return ReadAsync(buffer.AsMemory(offset, count), CancellationToken.None).AsTask().GetAwaiter().GetResult();
+    }
+
+    /// <inheritdoc />
+    public override void Flush()
+    {
+        // A request body is read-only; there is nothing to flush.
+    }
+
+    /// <inheritdoc />
+    public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <inheritdoc />
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException("The HTTP/3 request body stream is not seekable.");
+
+    /// <inheritdoc />
+    public override void SetLength(long value) => throw new NotSupportedException("The HTTP/3 request body stream is read-only.");
+
+    /// <inheritdoc />
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException("The HTTP/3 request body stream is read-only.");
+
+    /// <summary>
+    /// Reads and discards what remains of the request stream before the response ends, so a peer whose
+    /// upload is nearly done finishes it normally instead of being stopped: at most
+    /// <paramref name="budget"/> octets of frame payload, within <paramref name="timeout"/>. DATA frames
+    /// (including the unread payload of a frame rejected for the body-size cap) and frames of unknown type
+    /// are discarded; a trailer section or a prohibited frame ends the drain. Nothing is validated or
+    /// surfaced — the exchange's response is already written. A CONNECT tunnel is never drained.
+    /// </summary>
+    /// <remarks>
+    /// The drain exists because stopping a stream is not free on today's connection contract: RFC 9114
+    /// §4.1 asks for <c>STOP_SENDING(H3_NO_ERROR)</c>, but the contract cannot carry an application error
+    /// code, so the QUIC driver signals its configured default instead — which some clients treat as a
+    /// failed request even after a complete response. Reaching the peer's FIN first avoids the signal
+    /// entirely (see docs/DESIGN.md).
+    /// </remarks>
+    /// <param name="budget">The most frame-payload octets to discard.</param>
+    /// <param name="timeout">How long to wait for the peer to send the rest.</param>
+    /// <returns>
+    /// <see langword="true"/> when the stream's end (the peer's FIN) was reached; otherwise
+    /// <see langword="false"/>, and the caller stops reading instead.
+    /// </returns>
+    public async ValueTask<bool> TryDrainAsync(long budget, TimeSpan timeout)
+    {
+        if (_reader.IsCompleted)
+        {
+            return true;
+        }
+
+        if (_isTunnel || IsReset || (_declaredContentLength is { } declared && declared - _received > budget))
+        {
+            // A tunnel is not a body to drain, a reset stream has nothing left, and a declared remainder
+            // beyond the budget cannot be drained within it.
+            return false;
+        }
+
+        lock (_gate)
+        {
+            if (_reading || _closed)
+            {
+                return false;
+            }
+
+            if (_failure is not null && RejectedStatusCode is null)
+            {
+                // Only a body-size rejection stops reading at a frame boundary this stream tracks. Any
+                // other failed read (one cancelled inside the trailer section, a failed stream) leaves the
+                // stream at no known position, so what follows cannot be parsed as frames. Checked under
+                // the gate, where a read that has just ended has already recorded its failure.
+                return false;
+            }
+
+            // What the drain discards is never delivered, so no application read may follow it.
+            _reading = true;
+            _closed = true;
+        }
+
+        try
+        {
+            // The drain gives up when the peer is too slow or the connection goes away.
+            using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(_connection.ConnectionClosed);
+            deadline.CancelAfter(timeout);
+            long remainingBudget = budget;
+
+            while (true)
+            {
+                long pending = _dataRemaining + _skipRemaining;
+
+                if (pending > 0)
+                {
+                    if (pending > remainingBudget)
+                    {
+                        return false;
+                    }
+
+                    remainingBudget -= pending;
+
+                    while (pending > 0)
+                    {
+                        pending -= await _reader.SkipAvailableAsync(pending, deadline.Token).ConfigureAwait(false);
+                    }
+
+                    _dataRemaining = 0;
+                    _skipRemaining = 0;
+                    continue;
+                }
+
+                if (await _reader.ReadFrameHeaderAsync(deadline.Token).ConfigureAwait(false) is not { } frame)
+                {
+                    return true;
+                }
+
+                if (frame.Type == (long)Http3FrameType.Headers || Http3RequestStreamReader.IsProhibitedOnRequestStream(frame.Type))
+                {
+                    return false;
+                }
+
+                if (frame.Type == (long)Http3FrameType.Data)
+                {
+                    _dataRemaining = frame.Length;
+                }
+                else
+                {
+                    _skipRemaining = frame.Length;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or IOException or ConnectionException or InvalidOperationException)
+        {
+            // The deadline passed, the stream ended inside a frame, or the stream failed underneath: the
+            // caller stops reading instead.
+            return false;
+        }
+        finally
+        {
+            EndRead();
+        }
+    }
+
+    /// <summary>
+    /// Stops reading the request stream once the complete response is on the wire. When the body was not
+    /// read to its end, the input completes with an <c>H3_NO_ERROR</c> <see cref="Http3StreamException"/>
+    /// — the <c>STOP_SENDING</c> RFC 9114 §4.1 asks for when a server no longer needs the rest of a
+    /// request it has fully answered; otherwise it completes cleanly. A read still in flight (a handler
+    /// that leaked its reader past the response) completes the input itself when it returns, so the pipe
+    /// is never completed underneath an active read. Idempotent.
+    /// </summary>
+    public void StopReading()
+    {
+        bool release;
+
+        lock (_gate)
+        {
+            if (_stopRequested)
+            {
+                return;
+            }
+
+            _closed = true;
+            _stopRequested = true;
+            release = !_reading && !_inputReleased;
+            _inputReleased |= release;
+        }
+
+        if (release)
+        {
+            CompleteInput();
+        }
+    }
+
+    /// <summary>
+    /// Records that the send path reset this request stream (the exchange was cancelled, or the request
+    /// was never dispatched), so no later read touches the aborted pipe.
+    /// </summary>
+    public void MarkReset()
+    {
+        Fail(new IOException("The HTTP/3 request stream was reset before its body was read."));
+
+        lock (_gate)
+        {
+            // The reset aborts the stream, which completes the input pipe underneath this body.
+            _closed = true;
+            _stopRequested = true;
+            _inputReleased = true;
+        }
+
+        IsReset = true;
+    }
+
+    /// <inheritdoc />
+    protected override void Dispose(bool disposing)
+    {
+        // The request stream belongs to the exchange, not to this body: disposal only bars further reads
+        // and must never complete the input pipe (on the QUIC driver that disposes the whole QUIC stream,
+        // response direction included). The send path stops reading once the response is complete.
+        _disposed = true;
+        base.Dispose(disposing);
+    }
+
+    private async ValueTask<int> ReadCoreAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    {
+        _failure?.Throw();
+
+        if (_endDelivered)
+        {
+            return 0;
+        }
+
+        if (Volatile.Read(ref _closed))
+        {
+            // The send path stopped reading (or drained and discarded the rest) once the response was
+            // complete: the body's remainder was never delivered, so this is not an end of body.
+            throw new IOException("The HTTP/3 request body is no longer readable: the server stopped reading the request stream after the response completed.");
+        }
+
+        EnsureStarted();
+
+        if (buffer.IsEmpty)
+        {
+            return 0;
+        }
+
+        (CancellationToken readToken, CancellationTokenSource? linked) = LinkAbort(cancellationToken);
+
+        try
+        {
+            while (true)
+            {
+                if (_dataRemaining > 0)
+                {
+                    int toRead = (int)Math.Min(buffer.Length, _dataRemaining);
+                    int read = await _reader.ReadDataAsync(buffer[..toRead], readToken).ConfigureAwait(false);
+                    _dataRemaining -= read;
+                    _received += read;
+                    return read;
+                }
+
+                if (_skipRemaining > 0)
+                {
+                    _skipRemaining -= await _reader.SkipAvailableAsync(_skipRemaining, readToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (await _reader.ReadFrameHeaderAsync(readToken).ConfigureAwait(false) is not { } frame)
+                {
+                    EnsureContentLengthSatisfied();
+                    _endDelivered = true;
+                    return 0;
+                }
+
+                await ProcessFrameAsync(frame, readToken).ConfigureAwait(false);
+            }
+        }
+        catch (Http3StreamException exception)
+        {
+            // RFC 9114 §4.1.2 / §7.1 — a malformed request (or an oversized trailer section) found in the
+            // body is a stream error: reset this request stream; the connection keeps serving.
+            ResetStream(exception);
+            throw;
+        }
+        catch (Http3ConnectionException exception)
+        {
+            Fail(exception);
+            _connection.AbortConnection(exception);
+            throw;
+        }
+        catch (QPackException exception)
+        {
+            // RFC 9204 §2.2 — a trailer section that cannot be decompressed corrupts the shared decoder
+            // state: a connection error.
+            Http3ConnectionException error = new(exception.ErrorCode, exception.Message, exception);
+            Fail(error);
+            _connection.AbortConnection(error);
+            throw error;
+        }
+        catch (Http3LimitExceededException)
+        {
+            // Recorded by Reject; the send path answers 413 and stops reading.
+            throw;
+        }
+        catch (OperationCanceledException) when (_connection.ConnectionClosed.IsCancellationRequested
+            && !cancellationToken.IsCancellationRequested
+            && !_requestAborted.IsCancellationRequested)
+        {
+            // The QUIC connection closed or aborted underneath the read — possibly long after the receive
+            // enumeration ended. That is a stream failure, not a cancellation anyone asked for.
+            IOException failure = new("The HTTP/3 connection closed while the request body was being read.");
+            Fail(failure);
+            throw failure;
+        }
+        catch (OperationCanceledException)
+        {
+            // The caller, or the exchange, cancelled the read. Nothing was consumed past a frame boundary
+            // the stream has already accounted for, so the body stays readable.
+            throw;
+        }
+        catch (Exception exception) when (IsStreamFailure(exception))
+        {
+            // The request stream itself failed — reset by the peer, or torn down with its connection.
+            IOException failure = exception as IOException
+                ?? new IOException("The HTTP/3 request stream failed while the request body was being read.", exception);
+            Fail(failure);
+
+            if (ReferenceEquals(failure, exception))
+            {
+                throw;
+            }
+
+            throw failure;
+        }
+        finally
+        {
+            linked?.Dispose();
+        }
+    }
+
+    private async ValueTask ProcessFrameAsync(Http3FrameHeader frame, CancellationToken cancellationToken)
+    {
+        switch (frame.Type)
+        {
+            case (long)Http3FrameType.Data:
+                if (_trailersReceived)
+                {
+                    throw new Http3ConnectionException(
+                        Http3ErrorCode.UnexpectedFrame,
+                        "An HTTP/3 request stream carried a DATA frame after its trailer section (RFC 9114 §4.1).");
+                }
+
+                // The frame header is consumed, so its payload is next on the stream whether or not it is
+                // delivered; a rejected frame's payload stays accounted for the drain (TryDrainAsync).
+                _dataRemaining = frame.Length;
+
+                if (!_isTunnel)
+                {
+                    long total = _received + frame.Length;
+
+                    if (_declaredContentLength is { } declared && total > declared)
+                    {
+                        throw new Http3StreamException(
+                            Http3ErrorCode.MessageError,
+                            $"The request's DATA frames exceed its Content-Length of {declared} octets (RFC 9114 §4.1.2).");
+                    }
+
+                    if (_cap is { } cap && total > cap)
+                    {
+                        // RFC 9110 §15.5.14 — reject before a single octet of the offending frame is delivered.
+                        throw Reject($"The request body exceeds the configured maximum request body size ({cap} octets) at a DATA frame of {frame.Length} octets after {_received} octets.");
+                    }
+                }
+
+                return;
+
+            case (long)Http3FrameType.Headers:
+                if (_isTunnel || _trailersReceived)
+                {
+                    // RFC 9114 §4.1 — at most one trailing HEADERS frame; §4.4 — a CONNECT stream carries
+                    // only DATA after the request head.
+                    throw new Http3ConnectionException(
+                        Http3ErrorCode.UnexpectedFrame,
+                        "An HTTP/3 request stream carried a HEADERS frame where none is permitted (RFC 9114 §4.1 / §4.4).");
+                }
+
+                await ReadTrailerSectionAsync(frame, cancellationToken).ConfigureAwait(false);
+                return;
+
+            default:
+                if (Http3RequestStreamReader.IsProhibitedOnRequestStream(frame.Type))
+                {
+                    throw new Http3ConnectionException(
+                        Http3ErrorCode.UnexpectedFrame,
+                        $"Frame type 0x{frame.Type:x} is not permitted on an HTTP/3 request stream (RFC 9114 §7.2).");
+                }
+
+                // RFC 9114 §9 — frames of unknown or reserved type are ignored wherever they appear. The
+                // payload is discarded incrementally by the read loop, never buffered.
+                _skipRemaining = frame.Length;
+                return;
+        }
+    }
+
+    private async ValueTask ReadTrailerSectionAsync(Http3FrameHeader frame, CancellationToken cancellationToken)
+    {
+        List<(string Name, string Value)> fields;
+
+        try
+        {
+            byte[] fieldSection = await _reader.ReadFieldSectionAsync(frame, _maxFieldSectionSize, cancellationToken).ConfigureAwait(false);
+            fields = await _connection.DecodeFieldSectionAsync(fieldSection, _streamId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception)
+        {
+            // The trailing HEADERS frame's header is already consumed, so a read cancelled inside its field
+            // section cannot resume: every later read reports the body as unreadable.
+            Fail(new IOException("A read was cancelled inside the request's trailer section; the request body can no longer be read.", exception));
+            throw;
+        }
+
+        try
+        {
+            Http3HeaderCodec.AddTrailers(fields, _trailers);
+        }
+        catch (InvalidDataException exception)
+        {
+            throw new Http3StreamException(Http3ErrorCode.MessageError, exception.Message, exception);
+        }
+
+        _trailersReceived = true;
+    }
+
+    private void EnsureStarted()
+    {
+        if (_started)
+        {
+            return;
+        }
+
+        _started = true;
+
+        // The transport is now consuming the body: freeze the per-request cap (idempotent) and resolve the
+        // value enforced for the rest of the exchange — the HTTP/1.1 freeze-at-first-read contract.
+        _interception?.FreezeMaxRequestBodySize();
+
+        if (_isTunnel)
+        {
+            // RFC 9110 §9.3.6 — a CONNECT's DATA frames are tunnel traffic, not a message body.
+            return;
+        }
+
+        _cap = _interception is not null ? _interception.MaxRequestBodySize : _fallbackCap;
+
+        if (_cap is { } cap && _declaredContentLength is { } declared && declared > cap)
+        {
+            throw Reject($"Content-Length value '{declared}' exceeds the configured maximum request body size ({cap} octets).");
+        }
+    }
+
+    private void EnsureContentLengthSatisfied()
+    {
+        if (!_isTunnel && _declaredContentLength is { } declared && _received != declared)
+        {
+            throw new Http3StreamException(
+                Http3ErrorCode.MessageError,
+                $"The request stream ended after {_received} of the {declared} octets its Content-Length declared (RFC 9114 §4.1.2).");
+        }
+    }
+
+    private Http3LimitExceededException Reject(string message)
+    {
+        Http3LimitExceededException rejection = new(HttpStatusCode.RequestEntityTooLarge, message);
+        RejectedStatusCode = HttpStatusCode.RequestEntityTooLarge;
+        Fail(rejection);
+        return rejection;
+    }
+
+    private void ResetStream(Http3StreamException error)
+    {
+        Fail(error);
+
+        lock (_gate)
+        {
+            // The reset aborts the stream, which completes the input pipe underneath this body.
+            _closed = true;
+            _stopRequested = true;
+            _inputReleased = true;
+        }
+
+        IsReset = true;
+        _connection.ResetRequestStream(_streamConnection, _streamId, error, abandonsReading: !_reader.IsCompleted);
+    }
+
+    private void Fail(Exception failure)
+    {
+        _failure ??= ExceptionDispatchInfo.Capture(failure);
+    }
+
+    private void EndRead()
+    {
+        bool release;
+
+        lock (_gate)
+        {
+            _reading = false;
+            release = _stopRequested && !_inputReleased;
+            _inputReleased |= release;
+        }
+
+        if (release)
+        {
+            CompleteInput();
+        }
+    }
+
+    private void CompleteInput()
+    {
+        // RFC 9114 §4.1 — H3_NO_ERROR asks the peer to stop sending the rest of a request the server has
+        // fully answered. A body read to its end needs no signal.
+        Exception? reason = _reader.IsCompleted
+            ? null
+            : new Http3StreamException(
+                Http3ErrorCode.NoError,
+                "The server stopped reading the request stream after sending a complete response (RFC 9114 §4.1).");
+
+        try
+        {
+            _reader.Input.Complete(reason);
+        }
+        catch (InvalidOperationException)
+        {
+            // ObjectDisposedException derives from InvalidOperationException: the stream was already
+            // released underneath (connection teardown) — there is nothing left to stop.
+        }
+        catch (IOException)
+        {
+            // Completing the QUIC driver's reader disposes the QUIC stream, which raises a QuicException
+            // (an IOException) when the stream or its connection is already gone.
+        }
+    }
+
+    /// <summary>
+    /// Combines the caller's token with the exchange's abort token and the connection's closure, so a
+    /// read ends when any of them fires — the connection's closure included, since a body read may
+    /// outlive the receive enumeration. Links only when more than one of them can fire.
+    /// </summary>
+    private (CancellationToken Token, CancellationTokenSource? Linked) LinkAbort(CancellationToken cancellationToken)
+    {
+        CancellationToken connectionClosed = _connection.ConnectionClosed;
+
+        if (!cancellationToken.CanBeCanceled && !_requestAborted.CanBeCanceled)
+        {
+            return (connectionClosed, null);
+        }
+
+        if (!connectionClosed.CanBeCanceled && !_requestAborted.CanBeCanceled)
+        {
+            return (cancellationToken, null);
+        }
+
+        if (!connectionClosed.CanBeCanceled && !cancellationToken.CanBeCanceled)
+        {
+            return (_requestAborted, null);
+        }
+
+        CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _requestAborted, connectionClosed);
+        return (linked.Token, linked);
+    }
+
+    private static bool IsStreamFailure(Exception exception)
+    {
+        // IOException covers QuicException (the QUIC driver) and EndOfStreamException; ConnectionException
+        // is the in-memory driver's peer abort; InvalidOperationException (ObjectDisposedException
+        // included) is a pipe completed or disposed underneath by a reset or connection teardown.
+        return exception is IOException
+            or ConnectionException
+            or InvalidOperationException;
+    }
+}

@@ -13,24 +13,36 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Internal;
 /// observes, so it trips on expiry <em>and</em> on a genuine request cancellation.
 /// </summary>
 /// <remarks>
-/// The timeout source is created unarmed (an infinite due time) so a per-endpoint policy or a
-/// handler's <see cref="SetTimeout"/> can arm it even when no global default exists. Re-arming
-/// after the source has fired is inherently a no-op (<see cref="CancellationTokenSource.CancelAfter(TimeSpan)"/>
-/// cannot un-cancel), which is exactly the documented race semantic of <see cref="Disable"/>.
+/// The timeout source is created unarmed (an infinite due time) with the composed
+/// <see cref="TimeProvider"/>, which binds every later <see cref="CancellationTokenSource.CancelAfter(TimeSpan)"/>
+/// to that provider, and is then armed once with the effective policy's interval. A handler's
+/// <see cref="SetTimeout"/> can arm it even when no policy exists. Re-arming after the source has
+/// fired is inherently a no-op (<see cref="CancellationTokenSource.CancelAfter(TimeSpan)"/> cannot
+/// un-cancel), which is exactly the documented race semantic of <see cref="Disable"/>.
 /// </remarks>
 internal sealed class RequestTimeoutFeature : IRequestTimeoutFeature, IDisposable
 {
     private readonly CancellationTokenSource _timeoutSource;
     private readonly CancellationTokenSource _linkedSource;
-    private RequestTimeoutPolicy? _policy;
+    private readonly RequestTimeoutPolicy? _policy;
 
-    public RequestTimeoutFeature(IHttpContext context, RequestTimeoutOptions options)
+    /// <summary>
+    /// Creates the timeout engine for one exchange and arms it with <paramref name="policy"/>.
+    /// </summary>
+    /// <param name="context">The exchange whose request token the linked token follows.</param>
+    /// <param name="policy">
+    /// The effective policy: the published endpoint's policy when it carries one (which replaces the
+    /// global default outright, a disabled policy included), otherwise the global default;
+    /// <see langword="null"/> when neither exists.
+    /// </param>
+    /// <param name="timeProvider">The time source the timer measures against.</param>
+    public RequestTimeoutFeature(IHttpContext context, RequestTimeoutPolicy? policy, TimeProvider timeProvider)
     {
-        _timeoutSource = new CancellationTokenSource(Timeout.InfiniteTimeSpan, options.TimeProvider);
+        _timeoutSource = new CancellationTokenSource(Timeout.InfiniteTimeSpan, timeProvider);
         _linkedSource = CancellationTokenSource.CreateLinkedTokenSource(context.RequestCancelled, _timeoutSource.Token);
-        _policy = options.DefaultPolicy;
+        _policy = policy;
 
-        if (_policy?.Timeout is { } timeout)
+        if (policy?.Timeout is { } timeout)
         {
             _timeoutSource.CancelAfter(timeout);
         }
@@ -41,8 +53,8 @@ internal sealed class RequestTimeoutFeature : IRequestTimeoutFeature, IDisposabl
     public CancellationToken Token => _linkedSource.Token;
 
     /// <summary>
-    /// The policy in effect for the exchange: the endpoint policy once one has been applied,
-    /// otherwise the global default; <see langword="null"/> when neither exists.
+    /// The policy in effect for the exchange: the endpoint policy when the published endpoint carries
+    /// one, otherwise the global default; <see langword="null"/> when neither exists.
     /// </summary>
     public RequestTimeoutPolicy? EffectivePolicy => _policy;
 
@@ -67,27 +79,6 @@ internal sealed class RequestTimeoutFeature : IRequestTimeoutFeature, IDisposabl
         }
 
         _timeoutSource.CancelAfter(timeout);
-    }
-
-    /// <summary>
-    /// Applies the matched endpoint's policy, replacing the global default: re-arms the timer to
-    /// the endpoint's interval (measured from the match) or disarms it for a disabled policy.
-    /// Invoked by the middleware's feature-collection decorator at the moment the router publishes
-    /// the route match — before the endpoint's handler runs.
-    /// </summary>
-    /// <param name="metadata">The endpoint's timeout metadata.</param>
-    public void ApplyEndpointPolicy(RequestTimeoutMetadata metadata)
-    {
-        _policy = metadata.Policy;
-
-        if (metadata.Policy.Timeout is { } timeout)
-        {
-            _timeoutSource.CancelAfter(timeout);
-        }
-        else
-        {
-            _timeoutSource.CancelAfter(Timeout.InfiniteTimeSpan);
-        }
     }
 
     public void Dispose()

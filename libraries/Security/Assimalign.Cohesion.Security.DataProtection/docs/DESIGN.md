@@ -108,12 +108,15 @@ concurrent reader never sees a partial document.
 ## Composition happens elsewhere
 
 This library ships **no** DI, logging, configuration, or hosted-service integration. A consumer
-wires it at builder time in its `*.Hosting` project: choose a repository, set the discriminator
-and rotation policy, construct the provider, and adapt the resulting `IDataProtector` to
-whatever seam the consumer exposes. For antiforgery that seam is
-`IHttpAntiforgeryProtector` on `HttpAntiforgeryOptions`; the Antiforgery package takes **no**
-dependency on this library, and the composition root supplies the ~5-line adapter. This keeps
-request-path code free of service location and keeps each library's dependency tree lean.
+wires it at builder time: choose a repository, set the discriminator and rotation policy,
+construct the provider, and adapt the resulting `IDataProtector` to whatever seam the consumer
+exposes. For antiforgery that seam is `IHttpAntiforgeryProtector` on `HttpAntiforgeryOptions`;
+the `Http.Antiforgery` package takes **no** dependency on this library, and the adapter ships
+in the Web composition layer: `AddAntiforgery(dataProtectionProvider)` in
+`Assimalign.Cohesion.Web.Antiforgery` derives a protector for the purpose chain
+`("Assimalign.Cohesion.Web.Antiforgery", "v1")` and maps `DataProtectionException` to an
+invalid token. This keeps request-path code free of service location and keeps each library's
+dependency tree lean.
 
 ## AOT posture
 
@@ -147,7 +150,8 @@ inherited from the libraries build props.
 ## Relationships
 
 - **`Assimalign.Cohesion.Http.Antiforgery`** is the first consumer, via its
-  `IHttpAntiforgeryProtector` seam. It does not reference this library; a `*.Hosting` project
-  adapts a protector to the seam.
+  `IHttpAntiforgeryProtector` seam. It does not reference this library;
+  `Assimalign.Cohesion.Web.Antiforgery` does, and adapts a purpose-bound protector to the seam
+  when the application passes a provider to `AddAntiforgery`.
 - Future consumers: auth cookie handlers (#790), sessions (#785), and any TempData-equivalent —
   each asks the provider for its own purpose instead of hand-rolling key handling.

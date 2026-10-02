@@ -28,6 +28,22 @@ live in the compiled-in `DuplexPipePair` and never surface on the connection con
 pool block size, IO-queue schedulers, read/write buffer thresholds) comes from
 `SocketPipeOptionsFactory` and is shared per listener across its connections.
 
+### Socket operations are their own value-task sources
+
+The pump loops await reusable socket operations (`SocketPipeAsyncArgs`, the receiver and the pooled
+senders) that implement `IValueTaskSource` themselves, so a steady-state receive or send allocates
+nothing. The awaiter and the socket completion race: either can run first, and both can run at once.
+The awaiter publishes its continuation's state and then the continuation itself through a
+compare-exchange; the completion path reads the state only after it has observed the continuation,
+with acquire reads. A continuation is therefore always scheduled with its own state and exactly once.
+
+The opposite order (#1093) read the state before the continuation. A completion that read a null
+state and then lost the race to a registration scheduled that continuation with null. An async
+method's continuation is the runtime's state-machine callback, which rejects any other state with "An
+unexpected state object was encountered" on a thread-pool thread, where the exception ends the process.
+`SocketPipeAsyncArgsTests` races the two paths 50,000 times; before the fix about one in seven
+thousand continuations received the wrong state.
+
 ## Endpoint Handling (the bind switch)
 
 `TcpConnectionListener.BindAsync` acquires the endpoint explicitly and is idempotent while the listener
@@ -103,6 +119,15 @@ transport security) are identical for both families — only the protocol identi
 - The listener tracks live accepted connections and disposes them on `DisposeAsync`, then disposes its
   per-IO-queue pipe options. Disposal also releases the listening endpoint and is terminal; restart uses
   a newly constructed listener.
+- **No client is left connected to nothing when the listener stops.** On Windows an accept is an
+  `AcceptEx` into a socket created before the call, and the OS can attach an incoming client to that
+  socket before the accept completes. If the accept is cancelled, or the listening socket closes, at that
+  moment, .NET reports the failure without closing the socket it created, and the client waits on a
+  connection nobody owns until a finalizer runs. A request sent while a host shut down waited out its
+  whole timeout this way (#1093). On Windows the listener therefore accepts into a socket it creates
+  itself and disposes it on every path that does not return it; Unix accepts with `accept(2)` after the
+  connection is queued, so nothing is attached early. The regression test races 100 cancelled accepts
+  against connecting clients; before the fix about 40 of them were left open.
 
 ## Diagnostics
 

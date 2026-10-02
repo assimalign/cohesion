@@ -54,6 +54,26 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         }
     }
 
+    /// <summary>
+    /// Resolves the application's servers, and with them its request pipeline, before any
+    /// lifecycle service starts.
+    /// </summary>
+    /// <remarks>
+    /// Resolving the servers builds the request pipeline the default server captures, which runs
+    /// every middleware factory; routing builds its route table there. Doing it ahead of every
+    /// service start makes a composition failure, such as an invalid route table, fail the start
+    /// with nothing started and nothing to roll back, and leaves the host
+    /// <see cref="HostState.Failed"/>.
+    /// </remarks>
+    /// <param name="cancellationToken">Aborts the startup if signaled.</param>
+    /// <returns>A task that completes when the hook has finished.</returns>
+    protected override Task OnStartingAsync(CancellationToken cancellationToken = default)
+    {
+        _ = _context.Servers;
+
+        return base.OnStartingAsync(cancellationToken);
+    }
+
     public WebApplication Use(Func<IHttpContext, WebApplicationMiddleware, Task> middleware)
     {
         ArgumentNullException.ThrowIfNull(middleware);
@@ -69,7 +89,7 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The web host is already built.");
 
-        var middleware = new WebApplicationMiddleware(TerminalAsync);
+        var middleware = new WebApplicationMiddleware(WebApplicationTerminal.InvokeAsync);
 
         for (int i = _middleware.Count - 1; i >= 0; i--)
         {
@@ -102,34 +122,6 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         return new WebApplicationPipeline(middleware);
     }
 
-    /// <summary>
-    /// The pipeline terminal. Reaching it means every registered middleware chained to <c>next</c>
-    /// and none produced a terminal response, so the request went unhandled — set a bodyless
-    /// <c>404 Not Found</c> rather than completing silently, which would hand the transport an empty
-    /// <c>200</c>. A middleware that already chose a non-<c>200</c> status, set a redirect
-    /// <c>Location</c>, or wrote a body/content type is left untouched.
-    /// </summary>
-    /// <remarks>
-    /// The 404 is deliberately payload-free. The resource hosting-isolation rule (COHRES002) forbids
-    /// this runtime module from referencing the Web feature libraries — including
-    /// <c>Web.ProblemDetails</c> — so the terminal cannot render problem+json here. The opt-in
-    /// status-code-pages middleware (<c>UseStatusCodePages</c> in <c>Web.ErrorHandling</c>) is what
-    /// upgrades a bodyless <c>4xx</c>/<c>5xx</c> into an RFC 9457 problem+json body.
-    /// </remarks>
-    private static Task TerminalAsync(IHttpContext context)
-    {
-        IHttpResponse response = context.Response;
-
-        if (response.StatusCode.Value == HttpStatusCode.Ok.Value &&
-            !response.Headers.ContainsKey(HttpHeaderKey.Location) &&
-            !response.Headers.ContainsKey(HttpHeaderKey.ContentType) &&
-            !(response.Body.CanSeek && response.Body.Length > 0))
-        {
-            response.StatusCode = HttpStatusCode.NotFound;
-        }
-
-        return Task.CompletedTask;
-    }
     IWebApplicationPipelineBuilder IWebApplicationPipelineBuilder.Use(Func<IWebApplicationContext, WebApplicationMiddleware, WebApplicationMiddleware> middleware)
     {
         return ((IWebApplicationPipelineBuilder)this).Use((WebApplicationMiddleware next) =>

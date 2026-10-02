@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -13,10 +14,13 @@ using Assimalign.Cohesion.OpenApi.SourceGeneration.Internal;
 namespace Assimalign.Cohesion.OpenApi.SourceGeneration;
 
 /// <summary>
-/// Discovers the OpenApi authoring attributes at compile time and emits an
-/// <c>OpenApiMetadataRegistry</c> class carrying the flat intermediate metadata, so document generation
-/// needs no runtime reflection. Invalid attribute combinations are reported as compiler diagnostics
-/// whose ids match the runtime mapper's diagnostic codes.
+/// Discovers the OpenApi authoring attributes at compile time and emits their flat intermediate
+/// metadata, so document generation needs no runtime reflection. An annotated assembly gets a public
+/// provider class with an assembly-unique name, advertised to referencing compilations by
+/// <c>[assembly: OpenApiMetadataProvider]</c>. Every compilation that has metadata of its own or
+/// references an advertised provider gets an internal <c>OpenApiMetadataRegistry</c> that composes all of
+/// them. Invalid attribute combinations are reported as compiler diagnostics whose ids match the runtime
+/// mapper's diagnostic codes.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class OpenApiMetadataGenerator : IIncrementalGenerator
@@ -43,8 +47,12 @@ public sealed class OpenApiMetadataGenerator : IIncrementalGenerator
 
         var docLevel = context.CompilationProvider.Select(static (compilation, ct) => TransformDocLevel(compilation, ct));
 
-        var combined = operations.Combine(schemas).Combine(docLevel);
-        context.RegisterSourceOutput(combined, static (spc, data) => Emit(spc, data.Left.Left, data.Left.Right, data.Right));
+        // Assembly attributes on referenced binaries are metadata, not syntax, so the advertised
+        // providers are read from the compilation's assembly symbols rather than a syntax provider.
+        var providers = context.CompilationProvider.Select(static (compilation, ct) => TransformProviders(compilation, ct));
+
+        var combined = operations.Combine(schemas).Combine(docLevel).Combine(providers);
+        context.RegisterSourceOutput(combined, static (spc, data) => Emit(spc, data.Left.Left.Left, data.Left.Left.Right, data.Left.Right, data.Right));
     }
 
     // ---------------------------------------------------------------- operations
@@ -274,9 +282,194 @@ public sealed class OpenApiMetadataGenerator : IIncrementalGenerator
             + $"OpenIdConnectUrl = {Literals.String(NamedString(attribute, "OpenIdConnectUrl"))} }}";
     }
 
+    // ---------------------------------------------------------------- providers
+
+    private static ProvidersItem TransformProviders(Compilation compilation, CancellationToken cancellationToken)
+    {
+        var assemblyName = compilation.AssemblyName ?? string.Empty;
+        var providerAttribute = compilation.GetTypeByMetadataName(MetadataProviderNames.AttributeMetadataName);
+        var providerInterface = compilation.GetTypeByMetadataName(MetadataProviderNames.InterfaceMetadataName);
+        if (providerAttribute is null || providerInterface is null)
+        {
+            return new ProvidersItem(assemblyName, EquatableArray<ProviderReference>.Empty, EquatableArray<ProviderReference>.Empty, EquatableArray<DiagnosticInfo>.Empty);
+        }
+
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+
+        // A hand-written provider this compilation advertises joins its own registry too; the generated
+        // provider is not visible here, because a generator never sees its own output.
+        var own = new List<ProviderReference>();
+        CollectProviders(compilation.Assembly, providerAttribute, providerInterface, own, diagnostics);
+
+        var referenced = new List<ProviderReference>();
+        foreach (var assembly in compilation.SourceModule.ReferencedAssemblySymbols)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (CouldAdvertiseProviders(assembly))
+            {
+                CollectProviders(assembly, providerAttribute, providerInterface, referenced, diagnostics);
+            }
+        }
+
+        return new ProvidersItem(
+            assemblyName,
+            Order(own),
+            Order(referenced),
+            new EquatableArray<DiagnosticInfo>(diagnostics.ToImmutable()));
+    }
+
+    private static void CollectProviders(
+        IAssemblySymbol assembly,
+        INamedTypeSymbol providerAttribute,
+        INamedTypeSymbol providerInterface,
+        List<ProviderReference> providers,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics)
+    {
+        foreach (var attribute in assembly.GetAttributes())
+        {
+            if (!SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, providerAttribute))
+            {
+                continue;
+            }
+
+            if (TryResolveProvider(attribute, assembly, providerInterface, out var typeName, out var problem))
+            {
+                providers.Add(new ProviderReference(assembly.Identity.Name, typeName));
+                continue;
+            }
+
+            // A referenced assembly's attribute has no syntax, so only this compilation's own
+            // declarations carry a source location.
+            var syntax = attribute.ApplicationSyntaxReference;
+            var location = syntax is null ? null : Location.Create(syntax.SyntaxTree, syntax.Span);
+            diagnostics.Add(DiagnosticInfo.Create(OpenApiGeneratorDiagnostics.UnusableProvider, location, problem));
+        }
+    }
+
+    private static bool TryResolveProvider(
+        AttributeData attribute,
+        IAssemblySymbol assembly,
+        INamedTypeSymbol providerInterface,
+        out string typeName,
+        out string problem)
+    {
+        typeName = string.Empty;
+        var assemblyName = assembly.Identity.Name;
+
+        if (attribute.ConstructorArguments.Length != 1
+            || attribute.ConstructorArguments[0] is not { Kind: TypedConstantKind.Type, Value: INamedTypeSymbol type }
+            || type.TypeKind == TypeKind.Error)
+        {
+            problem = $"An [OpenApiMetadataProvider] on assembly '{assemblyName}' was skipped because it does not name a resolvable provider type.";
+            return false;
+        }
+
+        var reason = ProviderShapeProblem(type, assembly, providerInterface);
+        if (reason is not null)
+        {
+            problem = $"The OpenApi metadata provider '{type.ToDisplayString()}' advertised by assembly '{assemblyName}' was skipped because {reason}.";
+            return false;
+        }
+
+        typeName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        problem = string.Empty;
+        return true;
+    }
+
+    private static string? ProviderShapeProblem(INamedTypeSymbol type, IAssemblySymbol assembly, INamedTypeSymbol providerInterface)
+    {
+        if (!SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, assembly))
+        {
+            return "it is declared in another assembly; an assembly advertises only its own providers";
+        }
+
+        if (type.TypeKind != TypeKind.Class || type.IsAbstract || type.IsStatic)
+        {
+            return "it is not a non-abstract class";
+        }
+
+        if (IsOpenGeneric(type))
+        {
+            return "it is an open generic type";
+        }
+
+        if (!IsExternallyVisible(type))
+        {
+            return "it is not public, so a referencing assembly cannot construct it";
+        }
+
+        if (!type.AllInterfaces.Any(candidate => SymbolEqualityComparer.Default.Equals(candidate, providerInterface)))
+        {
+            return "it does not implement IOpenApiMetadataProvider";
+        }
+
+        if (!type.InstanceConstructors.Any(static constructor => constructor.DeclaredAccessibility == Accessibility.Public && constructor.Parameters.Length == 0))
+        {
+            return "it has no public parameterless constructor";
+        }
+
+        return null;
+    }
+
+    private static bool CouldAdvertiseProviders(IAssemblySymbol assembly)
+    {
+        // The attribute type lives in Attributes, so only an assembly that references Attributes can
+        // carry it. Checking the reference list first skips decoding every framework assembly's attributes.
+        if (assembly.Identity.Name == MetadataProviderNames.AttributesAssemblyName)
+        {
+            return false;
+        }
+
+        foreach (var module in assembly.Modules)
+        {
+            foreach (var identity in module.ReferencedAssemblies)
+            {
+                if (identity.Name == MetadataProviderNames.AttributesAssemblyName)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsExternallyVisible(INamedTypeSymbol type)
+    {
+        for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
+        {
+            if (current.DeclaredAccessibility != Accessibility.Public)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsOpenGeneric(INamedTypeSymbol type)
+    {
+        for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
+        {
+            if (current.IsUnboundGenericType || current.TypeArguments.Any(static argument => argument.TypeKind == TypeKind.TypeParameter))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static EquatableArray<ProviderReference> Order(List<ProviderReference> providers) =>
+        new(providers
+            .Distinct()
+            .OrderBy(static provider => provider.AssemblyName, StringComparer.Ordinal)
+            .ThenBy(static provider => provider.TypeName, StringComparer.Ordinal)
+            .ToImmutableArray());
+
     // ------------------------------------------------------------------- emit
 
-    private static void Emit(SourceProductionContext context, ImmutableArray<GeneratedItem> operations, ImmutableArray<GeneratedItem> schemas, DocLevelItem docLevel)
+    private static void Emit(SourceProductionContext context, ImmutableArray<GeneratedItem> operations, ImmutableArray<GeneratedItem> schemas, DocLevelItem docLevel, ProvidersItem providers)
     {
         foreach (var operation in operations)
         {
@@ -289,38 +482,85 @@ public sealed class OpenApiMetadataGenerator : IIncrementalGenerator
         }
 
         ReportAll(context, docLevel.Diagnostics);
+        ReportAll(context, providers.Diagnostics);
 
-        if (operations.IsEmpty && schemas.IsEmpty && docLevel.Tags.Count == 0 && docLevel.SecuritySchemes.Count == 0)
+        var hasOwnMetadata = !operations.IsEmpty || !schemas.IsEmpty || docLevel.Tags.Count > 0 || docLevel.SecuritySchemes.Count > 0;
+        if (!hasOwnMetadata && providers.Own.Count == 0 && providers.Referenced.Count == 0)
         {
             return;
         }
 
+        var ownProvider = MetadataProviderNames.TypeName(providers.AssemblyName);
+        var ownProviderReference = $"global::{MetadataProviderNames.Namespace}.{ownProvider}";
+
         var builder = new StringBuilder();
         builder.AppendLine("// <auto-generated/>");
         builder.AppendLine("#nullable enable");
-        builder.AppendLine("namespace Assimalign.Cohesion.OpenApi.Generated");
+        builder.AppendLine();
+
+        if (hasOwnMetadata)
+        {
+            builder.AppendLine($"[assembly: {Literals.MetadataNamespace}.OpenApiMetadataProviderAttribute(typeof({ownProviderReference}))]");
+            builder.AppendLine();
+        }
+
+        builder.AppendLine($"namespace {MetadataProviderNames.Namespace}");
         builder.AppendLine("{");
-        builder.AppendLine("    /// <summary>The OpenApi metadata discovered from attributes at compile time.</summary>");
-        builder.AppendLine("    public static class OpenApiMetadataRegistry");
-        builder.AppendLine("    {");
-        AppendCollection(builder, "OpenApiOperationMetadata", "Operations", operations.Select(o => o.Initializer));
-        AppendCollection(builder, "OpenApiSchemaMetadata", "Schemas", schemas.Select(s => s.Initializer));
-        AppendCollection(builder, "OpenApiTagMetadata", "Tags", docLevel.Tags);
-        AppendCollection(builder, "OpenApiSecuritySchemeMetadata", "SecuritySchemes", docLevel.SecuritySchemes);
-        builder.AppendLine("    }");
+
+        if (hasOwnMetadata)
+        {
+            AppendProvider(builder, providers.AssemblyName, ownProvider, operations, schemas, docLevel);
+            builder.AppendLine();
+        }
+
+        var composed = new List<(string TypeName, string AssemblyName)>();
+        composed.AddRange(providers.Referenced.Select(static provider => (provider.TypeName, provider.AssemblyName)));
+        composed.AddRange(providers.Own.Select(static provider => (provider.TypeName, provider.AssemblyName)));
+        if (hasOwnMetadata)
+        {
+            composed.Add((ownProviderReference, providers.AssemblyName));
+        }
+
+        AppendRegistry(builder, composed);
         builder.AppendLine("}");
 
         context.AddSource("OpenApiMetadataRegistry.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
     }
 
-    private static void AppendCollection(StringBuilder builder, string metadataType, string propertyName, IEnumerable<string> initializers)
+    private static void AppendProvider(StringBuilder builder, string assemblyName, string typeName, ImmutableArray<GeneratedItem> operations, ImmutableArray<GeneratedItem> schemas, DocLevelItem docLevel)
+    {
+        builder.AppendLine("    /// <summary>");
+        builder.AppendLine($"    /// The OpenApi metadata the <c>{EscapeXml(assemblyName)}</c> assembly declares through attributes, discovered at compile time.");
+        builder.AppendLine("    /// </summary>");
+        builder.AppendLine("    /// <remarks>");
+        builder.AppendLine("    /// Generated and advertised by <c>[assembly: OpenApiMetadataProvider]</c>, so a referencing compilation composes it");
+        builder.AppendLine("    /// into its own <c>OpenApiMetadataRegistry</c>. Code in this assembly reads the composed registry, not this type.");
+        builder.AppendLine("    /// </remarks>");
+        builder.AppendLine("    [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
+        builder.AppendLine($"    public sealed class {typeName} : {Literals.MetadataNamespace}.IOpenApiMetadataProvider");
+        builder.AppendLine("    {");
+        AppendArrayField(builder, "OpenApiOperationMetadata", "_operations", operations.Select(static operation => operation.Initializer));
+        AppendArrayField(builder, "OpenApiSchemaMetadata", "_schemas", schemas.Select(static schema => schema.Initializer));
+        AppendArrayField(builder, "OpenApiTagMetadata", "_tags", docLevel.Tags);
+        AppendArrayField(builder, "OpenApiSecuritySchemeMetadata", "_securitySchemes", docLevel.SecuritySchemes);
+        AppendProviderProperty(builder, "OpenApiOperationMetadata", "Operations", "_operations");
+        builder.AppendLine();
+        AppendProviderProperty(builder, "OpenApiSchemaMetadata", "Schemas", "_schemas");
+        builder.AppendLine();
+        AppendProviderProperty(builder, "OpenApiTagMetadata", "Tags", "_tags");
+        builder.AppendLine();
+        AppendProviderProperty(builder, "OpenApiSecuritySchemeMetadata", "SecuritySchemes", "_securitySchemes");
+        builder.AppendLine("    }");
+    }
+
+    private static void AppendArrayField(StringBuilder builder, string metadataType, string fieldName, IEnumerable<string> initializers)
     {
         var items = initializers.ToList();
-        builder.AppendLine($"        /// <summary>The discovered {propertyName.ToLowerInvariant()}.</summary>");
-        builder.Append($"        public static global::System.Collections.Generic.IReadOnlyList<{Literals.MetadataNamespace}.{metadataType}> {propertyName} {{ get; }} = ");
+        builder.Append($"        private static readonly {Literals.MetadataNamespace}.{metadataType}[] {fieldName} = ");
         if (items.Count == 0)
         {
             builder.AppendLine($"global::System.Array.Empty<{Literals.MetadataNamespace}.{metadataType}>();");
+            builder.AppendLine();
             return;
         }
 
@@ -332,6 +572,87 @@ public sealed class OpenApiMetadataGenerator : IIncrementalGenerator
         }
 
         builder.AppendLine("        };");
+        builder.AppendLine();
+    }
+
+    private static void AppendProviderProperty(StringBuilder builder, string metadataType, string propertyName, string fieldName)
+    {
+        builder.AppendLine("        /// <inheritdoc/>");
+        builder.AppendLine($"        public global::System.Collections.Generic.IReadOnlyList<{Literals.MetadataNamespace}.{metadataType}> {propertyName} => {fieldName};");
+    }
+
+    private static void AppendRegistry(StringBuilder builder, List<(string TypeName, string AssemblyName)> composed)
+    {
+        var provider = $"{Literals.MetadataNamespace}.IOpenApiMetadataProvider";
+
+        builder.AppendLine("    /// <summary>");
+        builder.AppendLine("    /// The OpenApi metadata of this compilation: every provider a referenced assembly advertises, ordered by");
+        builder.AppendLine("    /// assembly name, followed by this assembly's own. Each assembly composes its own internal registry.");
+        builder.AppendLine("    /// </summary>");
+        builder.AppendLine("    internal static class OpenApiMetadataRegistry");
+        builder.AppendLine("    {");
+        builder.AppendLine($"        private static readonly {provider}[] _providers = new {provider}[]");
+        builder.AppendLine("        {");
+        foreach (var (typeName, assemblyName) in composed)
+        {
+            builder.AppendLine($"            new {typeName}(), // {CommentText(assemblyName)}");
+        }
+
+        builder.AppendLine("        };");
+        builder.AppendLine();
+        builder.AppendLine("        /// <summary>Gets the composed providers, in composition order.</summary>");
+        builder.AppendLine($"        public static global::System.Collections.Generic.IReadOnlyList<{provider}> Providers => _providers;");
+        builder.AppendLine();
+        AppendRegistryProperty(builder, "OpenApiOperationMetadata", "Operations");
+        AppendRegistryProperty(builder, "OpenApiSchemaMetadata", "Schemas");
+        AppendRegistryProperty(builder, "OpenApiTagMetadata", "Tags");
+        AppendRegistryProperty(builder, "OpenApiSecuritySchemeMetadata", "SecuritySchemes");
+        builder.AppendLine($"        private static T[] Combine<T>(global::System.Func<{provider}, global::System.Collections.Generic.IReadOnlyList<T>> select)");
+        builder.AppendLine("        {");
+        builder.AppendLine("            var items = new global::System.Collections.Generic.List<T>();");
+        builder.AppendLine("            foreach (var provider in _providers)");
+        builder.AppendLine("            {");
+        builder.AppendLine("                items.AddRange(select(provider));");
+        builder.AppendLine("            }");
+        builder.AppendLine();
+        builder.AppendLine("            return items.ToArray();");
+        builder.AppendLine("        }");
+        builder.AppendLine("    }");
+    }
+
+    private static void AppendRegistryProperty(StringBuilder builder, string metadataType, string propertyName)
+    {
+        builder.AppendLine($"        /// <summary>Gets the {Describe(propertyName)} of every composed provider, in provider order.</summary>");
+        builder.AppendLine($"        public static global::System.Collections.Generic.IReadOnlyList<{Literals.MetadataNamespace}.{metadataType}> {propertyName} {{ get; }} = Combine(provider => provider.{propertyName});");
+        builder.AppendLine();
+    }
+
+    private static string Describe(string propertyName) => propertyName switch
+    {
+        "SecuritySchemes" => "security schemes",
+        "Schemas" => "schema components",
+        _ => propertyName.ToLowerInvariant()
+    };
+
+    private static string EscapeXml(string value) => CommentText(value)
+        .Replace("&", "&amp;")
+        .Replace("<", "&lt;")
+        .Replace(">", "&gt;");
+
+    /// <summary>
+    /// Makes an assembly name safe inside a single-line comment: a control character, or a line or
+    /// paragraph separator that C# treats as a new line, would end the comment early.
+    /// </summary>
+    private static string CommentText(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in value)
+        {
+            // 0x2028 and 0x2029 are the Unicode line and paragraph separators.
+            builder.Append(char.IsControl(character) || character == (char)0x2028 || character == (char)0x2029 ? '?' : character);
+        }
+
+        return builder.ToString();
     }
 
     private static void ReportAll(SourceProductionContext context, EquatableArray<DiagnosticInfo> diagnostics)
@@ -544,4 +865,17 @@ public sealed class OpenApiMetadataGenerator : IIncrementalGenerator
     private readonly record struct GeneratedItem(string Initializer, EquatableArray<DiagnosticInfo> Diagnostics);
 
     private readonly record struct DocLevelItem(EquatableArray<string> Tags, EquatableArray<string> SecuritySchemes, EquatableArray<DiagnosticInfo> Diagnostics);
+
+    /// <summary>
+    /// The providers a compilation composes: <see cref="Own"/> holds the hand-written providers this
+    /// assembly advertises, <see cref="Referenced"/> those its references advertise, each ordered by
+    /// assembly name and then fully qualified type name.
+    /// </summary>
+    private readonly record struct ProvidersItem(
+        string AssemblyName,
+        EquatableArray<ProviderReference> Own,
+        EquatableArray<ProviderReference> Referenced,
+        EquatableArray<DiagnosticInfo> Diagnostics);
+
+    private readonly record struct ProviderReference(string AssemblyName, string TypeName);
 }

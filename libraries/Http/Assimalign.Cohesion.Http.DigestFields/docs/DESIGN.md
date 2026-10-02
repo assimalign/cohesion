@@ -103,23 +103,30 @@ reflection" mandate literally:
 
 ### Two verification modes, chosen by where the verdict is affordable
 
-**Eager buffer-and-replay (HTTP/1.1, HTTP/3).** The hook reads the body in full, verifies against
-every supported digest with constant-time comparison (`CryptographicOperations.FixedTimeEquals`),
-and either rejects a mismatch with `HttpRequestRejectedException(400)` or returns a replay stream
+**Eager buffer-and-replay (HTTP/1.1).** The hook reads the body in full, verifies against every
+supported digest with constant-time comparison (`CryptographicOperations.FixedTimeEquals`), and
+either rejects a mismatch with `HttpRequestRejectedException(400)` or returns a replay stream
 (`HttpDigestReplayStream`) so the application still observes the body. The rejection happens
-**before the application runs**, so the transport answers a real, deterministic `400` (h1) or
-resets the request stream (h3) with no application involvement. The in-hook full read is free
-exactly there: h3 hands the hook a fully received body (drained before header decode), and the h1
-parse path is its own body reader — the post-#810 streamed body is pulled from the wire by the
-same logical flow that runs the hook, and the peer needs nothing from the server to keep sending
-(the `Expect: 100-continue` solicitation is emitted by the body stream's own first read). The cost
-is one transient extra copy of the body, bounded by the request-limits cap on h1.
+**before the application runs**, so the transport answers a real, deterministic `400` with no
+application involvement. The in-hook full read is free there: the h1 parse path is its own body
+reader — the post-#810 streamed body is pulled from the wire by the same logical flow that runs
+the hook, the peer needs nothing from the server to keep sending (the `Expect: 100-continue`
+solicitation is emitted by the body stream's own first read), and the minimum request-body data
+rate bounds how long a slow sender can hold the read. The cost is one transient extra copy of the
+body, bounded by the request-limits cap.
 
-**Lazy verify-on-read (HTTP/2 — and, defensively, any version not proven eager-safe).** On h2 the
-parse hooks run on the connection's **single frame pump** and the body is a live
+HTTP/3 was eager until #1066. Its transport used to drain each request stream to FIN before
+decoding the header section, so the hook was handed a fully received body. Since #1066 the h3
+body is read lazily off the QUIC stream after the request's HEADERS frame, and HTTP/3 has no
+minimum data rate. An in-hook full read would hold a thread-pool thread for as long as the peer
+takes to send, so a slow sender could exhaust the pool. HTTP/3 therefore moved to the lazy path.
+
+**Lazy verify-on-read (HTTP/2, HTTP/3, and, defensively, any version not proven eager-safe).** On
+h2 the parse hooks run on the connection's **single frame pump** and the body is a live
 `Http2RequestBodyStream` that may still be arriving under flow-control backpressure (#750): an
 in-hook read would wait for DATA frames only the blocked pump can deliver, deadlocking every
-multiplexed stream on the connection. So the hook stays CPU-only — it wraps the body in
+multiplexed stream on the connection. On h3 the body is a live `Http3RequestBodyStream` reading
+off the QUIC stream (above). So the hook stays CPU-only — it wraps the body in
 `HttpDigestVerifyingStream` and reads nothing. The wrapper feeds every octet the application reads
 into one BCL `IncrementalHash` per supported digest entry (zero double-buffering; the only copy of
 the body is the flow-control-bounded pipe the transport already owns) and resolves the verdict on
@@ -130,7 +137,7 @@ the **terminal read** — the read that observes end-of-body:
   failing algorithm in field order), and every subsequent read rethrows it — the failure is
   sticky, so a consumer that swallows it once cannot go on treating the stream as verified.
 
-The mode switch is deliberately an allow-list (`Http11`/`Http30` eager, everything else lazy):
+The mode switch is deliberately an allow-list (`Http11` eager, everything else lazy):
 eager is an *optimization* that must be proven safe per protocol, while lazy is safe everywhere
 because the hook performs no I/O. An unknown future version therefore degrades to correctness,
 not to a deadlock.
@@ -148,13 +155,14 @@ act):
 - The application (or the hosting layer that installed the verifier) must treat the body as
   corrupt, discard anything derived from it, and abort the exchange via `IHttpContext.Cancel`.
   The transport answers the abort with its per-exchange reset — on h2, `RST_STREAM(CANCEL)` from
-  the exchange abort path — instead of writing a response. There is deliberately no
+  the exchange abort path; on h3, a request-stream reset with `H3_REQUEST_CANCELLED` — instead of
+  writing a response. There is deliberately no
   transport-automatic abort: the seam has no abort verb, and the application may prefer to answer
   (e.g. `422`) rather than reset.
 - **A body the application never drains is never verified.** Lazy verification can only cover
   what is consumed; a handler that responds without reading to end-of-body has waived
   verification for the unread remainder. Operators who need an unconditional verdict must drain
-  the body (h2) or rely on the eager protocols.
+  the body (h2, h3) or rely on the eager protocol (h1).
 
 Both wrapper streams own the body they replace and dispose it when the exchange disposes the
 stream chain, honoring the seam's "a wrapper owns the stream it wraps" contract

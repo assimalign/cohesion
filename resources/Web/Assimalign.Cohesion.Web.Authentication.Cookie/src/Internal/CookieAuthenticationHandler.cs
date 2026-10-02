@@ -16,6 +16,14 @@ namespace Assimalign.Cohesion.Web.Authentication.Cookie.Internal;
 /// applies sliding-expiration renewal, and drives login/logout/access-denied behavior — redirects
 /// for interactive endpoints, bare <c>401</c>/<c>403</c> for API endpoints.
 /// </summary>
+/// <remarks>
+/// Proxy posture: the only transport fact the handler consults is the effective scheme
+/// (<see cref="HttpContextForwardedExtensions.EffectiveScheme"/>), which puts a <c>Secure</c> floor
+/// under every cookie it emits over HTTPS — including HTTPS terminated at a trusted proxy. Redirect
+/// <c>Location</c> values are relative references (the configured path plus the request path as the
+/// return URL), which the user agent resolves against the URL it actually requested, so they need no
+/// host or scheme and stay correct behind a proxy.
+/// </remarks>
 internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
 {
     private readonly CookieAuthenticationOptions _options;
@@ -135,11 +143,10 @@ internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
     /// <inheritdoc />
     public Task SignOutAsync(AuthenticationProperties? properties, CancellationToken cancellationToken = default)
     {
-        HttpCookieOptions deletionOptions = new(_options.Cookie)
-        {
-            Expires = DateTimeOffset.UnixEpoch,
-            MaxAge = TimeSpan.Zero,
-        };
+        // The deletion cookie carries the same attributes as the issued one, Secure floor included.
+        HttpCookieOptions deletionOptions = CreateCookieOptions();
+        deletionOptions.Expires = DateTimeOffset.UnixEpoch;
+        deletionOptions.MaxAge = TimeSpan.Zero;
 
         SetResponseCookie(new HttpCookie(_options.CookieName, string.Empty, deletionOptions));
         _cachedResult = AuthenticateResult.NoResult();
@@ -217,7 +224,7 @@ internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
         string encoded = Base64Url.EncodeToString(protectedBytes);
 
         bool persistent = ticket.Properties.IsPersistent ?? false;
-        HttpCookieOptions cookieOptions = new(_options.Cookie);
+        HttpCookieOptions cookieOptions = CreateCookieOptions();
 
         if (persistent && ticket.Properties.ExpiresUtc is DateTimeOffset expires)
         {
@@ -233,6 +240,24 @@ internal sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
         }
 
         SetResponseCookie(new HttpCookie(_options.CookieName, encoded, cookieOptions));
+    }
+
+    /// <summary>
+    /// Copies the configured cookie template and applies the transport-security floor: whenever the
+    /// client reached the application over HTTPS the cookie is marked <c>Secure</c>, whatever the
+    /// template says. "Over HTTPS" is the effective scheme, so a trusted TLS-terminating proxy
+    /// resolved by the forwarded-headers middleware counts; without that middleware it is the
+    /// transport-derived scheme. A template with <c>Secure = true</c> stays Secure on every request.
+    /// </summary>
+    private HttpCookieOptions CreateCookieOptions()
+    {
+        HttpCookieOptions cookieOptions = new(_options.Cookie);
+        if (_context.EffectiveScheme == HttpScheme.Https)
+        {
+            cookieOptions.Secure = true;
+        }
+
+        return cookieOptions;
     }
 
     private string? ReadRequestCookie(string name)

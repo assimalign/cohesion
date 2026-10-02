@@ -22,13 +22,15 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// and same-urgency incremental streams are served round-robin by stream id.
 /// </para>
 /// <para>
-/// Because a response is buffered and written as one contiguous
-/// HEADERS+DATA unit while the gate is held (the streaming write path is a
-/// separate concern), the scheduler orders <em>which stream's queued response
-/// proceeds next</em> under write contention — the point at which HTTP/2's
-/// single connection write path is actually contended. The pure ordering policy
-/// lives in <see cref="SelectNextWaiterIndex"/> so it can be unit-tested in
-/// isolation.
+/// Because a buffered response is written as one contiguous HEADERS+DATA unit
+/// while the gate is held — for as long as the peer's flow-control windows cover
+/// it; a writer whose credit runs out releases the gate before it waits for a
+/// <c>WINDOW_UPDATE</c> and re-queues for the rest — the scheduler orders
+/// <em>which stream's queued response proceeds next</em> under write contention,
+/// the point at which HTTP/2's single connection write path is actually
+/// contended. (The streaming write path queues per DATA frame.) The pure ordering
+/// policy lives in <see cref="SelectNextWaiterIndex"/> so it can be unit-tested
+/// in isolation.
 /// </para>
 /// </remarks>
 internal sealed class Http2WriteScheduler : IDisposable

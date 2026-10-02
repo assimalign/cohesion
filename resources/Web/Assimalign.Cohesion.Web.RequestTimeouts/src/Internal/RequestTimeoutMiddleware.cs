@@ -5,17 +5,27 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Routing;
 
 namespace Assimalign.Cohesion.Web.RequestTimeouts.Internal;
 
 /// <summary>
-/// The request-timeout middleware: arms a per-exchange timer (global default policy, overridden
-/// by the matched endpoint's <see cref="RequestTimeoutMetadata"/>), hands downstream a context
+/// The request-timeout middleware: arms a per-exchange timer (the global default policy, replaced
+/// by the published endpoint's <see cref="RequestTimeoutMetadata"/>), hands downstream a context
 /// whose <see cref="IHttpContext.RequestCancelled"/> is the timeout-linked token, and translates
 /// an expiry-attributable unwind into the configured timeout response — or a clean protocol-level
 /// abort when the response has already started.
 /// </summary>
 /// <remarks>
+/// <para>
+/// The endpoint policy comes from the route match <c>UseRouting</c> publishes before this middleware
+/// runs, so the middleware belongs after <c>UseRouting</c>. It acknowledges every non-preflight
+/// endpoint it processes, including while suspended for a debugger (enforcement is suspended there, not
+/// missing). Registered ahead of <c>UseRouting</c> it sees no endpoint: the global default governs every
+/// request, and routing's dispatch fails an endpoint whose metadata carries a timeout rather than
+/// running it unbounded (<see cref="IRouteMiddlewareMetadata"/>). The candidate endpoint of a CORS
+/// preflight never runs for the preflight, so its policy is neither applied nor acknowledged.
+/// </para>
 /// <para>
 /// Expiry attribution: a downstream <see cref="OperationCanceledException"/> is converted only
 /// when the timeout timer fired <em>and</em> the transport's own
@@ -35,8 +45,14 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Internal;
 /// </remarks>
 internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
 {
+    /// <summary>
+    /// The pipeline verb the middleware acknowledges on the endpoint, and the one
+    /// <see cref="RequestTimeoutMetadata.RequiredMiddleware"/> names.
+    /// </summary>
+    internal const string Verb = "UseRequestTimeouts";
+
     // The status source when a timeout fires with no configured policy — possible only when a
-    // handler armed the timer itself through IHttpRequestTimeoutFeature.SetTimeout.
+    // handler armed the timer itself through IRequestTimeoutFeature.SetTimeout.
     private static readonly RequestTimeoutPolicy _fallbackPolicy = new();
 
     private readonly RequestTimeoutOptions _options;
@@ -48,18 +64,28 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
 
     public async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
     {
+        // The endpoint UseRouting published ahead of this middleware; null when routing selected none
+        // (404, 405), when routing runs later in the pipeline, or for a CORS preflight, whose candidate
+        // endpoint never runs.
+        IRouteMatchFeature? endpoint = context.GetRouteMatch() is { IsPreflight: false } match ? match : null;
+
         // Mirrors ASP.NET: a paused debug session must not cancel the request under inspection.
         if (_options.SuspendWhenDebuggerAttached && Debugger.IsAttached)
         {
+            // Suspended, not missing: acknowledge so an endpoint with a timeout still runs.
+            Acknowledge(context, endpoint);
             await next.Invoke(context).ConfigureAwait(false);
             return;
         }
 
-        RequestTimeoutFeature feature = new(context, _options);
+        // An endpoint policy replaces the global default outright, a disabled one included.
+        RequestTimeoutPolicy? policy = endpoint?.Metadata.GetMetadata<RequestTimeoutMetadata>()?.Policy ?? _options.DefaultPolicy;
+        RequestTimeoutFeature feature = new(context, policy, _options.TimeProvider);
 
         try
         {
             context.Features.Set<IRequestTimeoutFeature>(feature);
+            Acknowledge(context, endpoint);
 
             try
             {
@@ -76,6 +102,17 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
             // cancellation sources have been released.
             context.Features.Set<IRequestTimeoutFeature>(null);
             feature.Dispose();
+        }
+    }
+
+    // Records that this middleware processed the endpoint, with or without a policy of its own: routing
+    // checks every metadata item that names this middleware, including a group-level timeout an
+    // endpoint-level override replaced.
+    private static void Acknowledge(IHttpContext context, IRouteMatchFeature? endpoint)
+    {
+        if (endpoint is not null)
+        {
+            context.AcknowledgeEndpointMiddleware(Verb);
         }
     }
 

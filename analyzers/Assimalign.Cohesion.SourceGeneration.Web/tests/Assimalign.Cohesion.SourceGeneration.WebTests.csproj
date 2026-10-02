@@ -31,5 +31,14 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<!-- The antiforgery requirement a form-bound endpoint carries; cases add or withhold it to model an
+		     application with or without the package. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Antiforgery" />
+		<!-- The content-serialization registry that body binding and returned values use; cases withhold it
+		     to model an application without the package (COHWEB0007). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
+		<!-- The request-validation entry point a bound body model is validated through; cases add it to
+		     model an application that references the package. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Validation" />
 	</ItemGroup>
 </Project>

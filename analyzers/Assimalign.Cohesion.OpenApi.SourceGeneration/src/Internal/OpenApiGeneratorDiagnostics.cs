@@ -51,6 +51,18 @@ internal static class OpenApiGeneratorDiagnostics
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    /// <summary>
+    /// An <c>[assembly: OpenApiMetadataProvider]</c> names a type the generated registry cannot construct.
+    /// The id is outside the <c>OPENAPIATTR</c> range because the runtime mapper has no counterpart rule.
+    /// </summary>
+    internal static readonly DiagnosticDescriptor UnusableProvider = new(
+        "OPENAPIGEN0001",
+        "OpenApi metadata provider cannot be composed",
+        "{0}",
+        Category,
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     /// <summary>Resolves a descriptor by its id for reporting a captured <see cref="DiagnosticInfo"/>.</summary>
     /// <param name="id">The diagnostic id.</param>
     /// <returns>The matching descriptor, or the missing-path descriptor as a fallback.</returns>
@@ -60,6 +72,7 @@ internal static class OpenApiGeneratorDiagnostics
         "OPENAPIATTR0003" => PathParameterRequired,
         "OPENAPIATTR0004" => AmbiguousExample,
         "OPENAPIATTR0006" => IncompleteApiKey,
+        "OPENAPIGEN0001" => UnusableProvider,
         _ => MissingPath
     };
 }

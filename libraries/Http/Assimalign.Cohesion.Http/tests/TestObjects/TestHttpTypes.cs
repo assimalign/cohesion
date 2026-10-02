@@ -8,7 +8,10 @@ namespace Assimalign.Cohesion.Http.Tests.TestObjects;
 
 internal sealed class TestHttpRequest : HttpRequest
 {
-    private HttpContext? _httpContext;
+    public TestHttpRequest(HttpContext context)
+    {
+        HttpContext = context;
+    }
 
     public override HttpHost Host { get; set; } = HttpHost.Empty;
 
@@ -22,60 +25,43 @@ internal sealed class TestHttpRequest : HttpRequest
 
     public override HttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
 
-    public override HttpContext HttpContext => _httpContext
-        ?? throw new InvalidOperationException(
-            "The HttpContext back-reference has not been attached. Construct the TestHttpRequest through a TestHttpContext.");
+    public override HttpContext HttpContext { get; }
 
     public override Stream Body { get; set; } = Stream.Null;
-
-    internal void AttachContext(HttpContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        _httpContext ??= context;
-    }
 }
 
 internal sealed class TestHttpResponse : HttpResponse
 {
-    private HttpContext? _httpContext;
+    public TestHttpResponse(HttpContext context)
+    {
+        HttpContext = context;
+    }
 
     public override HttpStatusCode StatusCode { get; set; } = HttpStatusCode.Ok;
 
     public override HttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
 
-    public override HttpContext HttpContext => _httpContext
-        ?? throw new InvalidOperationException(
-            "The HttpContext back-reference has not been attached. Construct the TestHttpResponse through a TestHttpContext.");
+    public override HttpContext HttpContext { get; }
 
     public override Stream Body { get; set; } = new MemoryStream();
-
-    internal void AttachContext(HttpContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        _httpContext ??= context;
-    }
 }
 
 internal sealed class TestHttpContext : HttpContext
 {
     public TestHttpContext(
         HttpVersion version,
-        TestHttpRequest request,
-        TestHttpResponse response,
         HttpConnectionInfo? connectionInfo = null,
         CancellationToken requestAborted = default)
     {
         Version = version;
-        Request = request;
-        Response = response;
+        // The context constructs its request and response and passes itself to each, so the
+        // back-references are fixed at construction (the HttpRequest.HttpContext contract).
+        Request = new TestHttpRequest(this);
+        Response = new TestHttpResponse(this);
         ConnectionInfo = connectionInfo ?? HttpConnectionInfo.Empty;
         Features = new HttpFeatureCollection();
         Items = new Dictionary<string, object?>(StringComparer.Ordinal);
         RequestCancelled = requestAborted;
-
-        // Wire the back-references so request.HttpContext / response.HttpContext resolve to this context.
-        request.AttachContext(this);
-        response.AttachContext(this);
     }
 
     public override HttpVersion Version { get; }

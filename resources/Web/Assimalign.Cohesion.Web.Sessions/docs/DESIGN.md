@@ -91,12 +91,36 @@ The session-id cookie is built through the hardened `Http.Cookies` model with se
 
 - **`HttpOnly`** — from `HttpSessionOptions.CookieHttpOnly` (default `true`).
 - **`SameSite=Lax`** — a fixed secure default (CSRF-resistant while surviving top-level navigation).
-- **`Secure`** — set only when the request scheme is HTTPS (the transport-derived typed scheme, not a
-  header or string), so the cookie round-trips over the plaintext in-memory test transport yet is
-  Secure in production HTTPS.
+- **`Secure`** — set when the *effective* scheme is HTTPS (see "Behind a proxy" below), so the cookie
+  round-trips over the plaintext in-memory test transport yet is Secure in production HTTPS, including
+  behind a TLS-terminating proxy.
 - **Session-scoped** — no `Max-Age`/`Expires`; the cookie clears when the browser session ends, and
   server-side idle timeout governs true expiry.
 - **Name / Path** — from `HttpSessionOptions.CookieName` / `CookiePath`.
+- **Not essential by default** — `HttpSessionOptions.CookieIsEssential` (default `false`) marks the
+  cookie for a cookie-consent policy (Web.CookiePolicy). Under a consent requirement a non-essential
+  session cookie is dropped until the user consents, because a session usually holds state that needs
+  consent; an application that cannot work without its session (a cart, a multi-step form) sets it to
+  `true`.
+
+### Behind a proxy — the `Secure` decision reads the effective scheme
+
+The `Secure` flag answers "did the client reach us over HTTPS?", and behind a TLS-terminating proxy the
+transport cannot answer that: the app-facing hop is plaintext, so a wire-scheme check would issue the
+session id without `Secure` on every proxied HTTPS request, and the browser would later send it over any
+plaintext request to the same host (#1050, defect D7). The cookie therefore reads
+`context.EffectiveScheme` from `Assimalign.Cohesion.Http.Forwarded` — owner decision 3 in
+`docs/programs/HTTP_WEB_PROGRAM_PLAN.md` §7.4: consumers read the effective values; nothing rewrites the
+request.
+
+- **With `UseForwardedHeaders`** registered ahead of the first session access, a trusted proxy's
+  `https` (RFC 7239 `proto` or `X-Forwarded-Proto`) marks the cookie `Secure`.
+- **Without it** — or from a peer outside the forwarded-headers trust model — the effective scheme is the
+  transport-derived scheme, so a client that sends `X-Forwarded-Proto: https` itself changes nothing.
+
+The package never parses forwarding headers; which proxy is believed is `Web.ForwardedHeaders`' trust
+model. The decision is taken when the cookie is established (first access or regeneration), so the
+forwarded-headers middleware must have run by then — registering it first satisfies that.
 
 ## Error model
 
@@ -139,3 +163,9 @@ Unit tests drive `SessionMiddleware` over an in-memory `IHttpContext` double (co
 guard, and the not-enabled / no-session error paths). End-to-end tests over `WebApplicationTestFactory`
 (in-memory HTTP/1.1) prove a session round-trips across requests through the session-id cookie, that an
 untouched request sets no cookie, and that a cookie-less client starts an independent session.
+
+`tests/SessionForwardedTests.cs` covers the proxy behavior with the real forwarded-headers middleware
+(the test project references `Web.ForwardedHeaders`): end to end, with the factory's in-memory peer
+trusted as a local transport, a forwarded `https` yields a `Secure` session cookie and a spoofed
+`X-Forwarded-Proto` without the middleware does not; at the unit level, a plaintext request from a
+trusted proxy address (the double's connection) and from an untrusted one pin the trust dependency.

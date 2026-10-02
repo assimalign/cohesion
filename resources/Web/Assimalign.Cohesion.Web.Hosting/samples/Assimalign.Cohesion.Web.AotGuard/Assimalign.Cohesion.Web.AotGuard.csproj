@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Web.AotGuard</RootNamespace>
+    <!--
+        NativeAOT guard for the Web area (#1052). A representative application composes routing
+        (route groups, endpoint policy verbs, the static-file fallback), pipeline branching,
+        source-generated typed binding, source-generated JSON, error handling, Cookie and JWT Bearer
+        authentication, authorization, antiforgery, cookie policy, security headers, static files,
+        response compression, request decompression, CORS, rate limiting, request timeouts, handler
+        return values, request validation, file uploads and the OpenAPI document. Two layers:
+
+        (1) build: the trim/AOT analyzer diagnostics are errors for this project's own code;
+        (2) publish: ILC's per-assembly summaries (IL2104 trim, IL3053 AOT) are errors too, so a
+            trim or AOT warning in ANY Web library the guard reaches fails the publish.
+
+        resource-web.yml publishes it with PublishAot for linux-x64 and runs the published binary
+        with its smoke switch (Program.cs), which serves on a free loopback port and exercises
+        every feature over real HTTP; the process exit code is the verdict. See the job for the
+        exact publish and run commands. On LongPathsEnabled=0 machines publish from a short path:
+        ILC intermediate paths are long.
+    -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <PublishAot>true</PublishAot>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>
+    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL2087;IL3050;IL3051;IL2104;IL3053</WarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Antiforgery" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Compression" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.CookiePolicy" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Cors" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.ErrorHandling" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.OpenApi" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.RateLimiting" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.RequestTimeouts" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.SecurityHeaders" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.StaticFiles" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Validation" />
+    <CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

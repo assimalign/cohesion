@@ -7,9 +7,11 @@ given an inbound `IHttpContext`, which handler (if any) should run, and — when
 should — whether that is a *no route* (404) or a *wrong method* (405) situation. It also
 carries the **endpoint metadata** each route declares and surfaces the **route-match
 result** to the rest of the pipeline as a typed feature. It is a foundation primitive: the
-API, function, controller, and metadata programming models (issues #149, #151, #787, #788,
-#796) all build on the matcher, the typed route values, and the metadata seam defined here, so
-their behavior must be predictable, standards-aware, and reflection-free before those layers are added.
+typed-endpoint binding, content negotiation, named routes, host matching and metadata consumers
+(issues #149, #787, #788, #796) all build on the matcher, the typed route values, and the metadata
+seam defined here, so their behavior must be predictable, standards-aware, and reflection-free.
+(The controller and function programming models, #151, were set aside on 2026-07-10 when the Web
+area went middleware-first.)
 
 Scope of this library:
 
@@ -381,21 +383,69 @@ Because the prefix segments are part of the composed `RoutePattern`,
 outranks a parameter at the same depth regardless of which was registered first or whether either
 came from a group. No group-aware code exists in `Router` or `RoutePrecedence`.
 
-### Deterministic sharing: snapshot at creation, freeze at first child
+### Deterministic sharing: policies freeze, metadata composes at build (#1055)
 
-A group's shared state is a **snapshot**: a nested group copies its parent's policy map
-(`RouteParameterPolicyMap`'s copy constructor) and metadata list at creation, so siblings and
-parents stay isolated. A root group starts from `RouteParameterPolicyMap.CreateDefault()`.
+The two kinds of shared state follow different rules, because they are consumed at different
+times.
 
-Shared configuration is declared first, children second — enforced, not conventional: once a
-group registers its first child route **or** nested group, its shared configuration **freezes**
-and later `WithMetadata`/`WithParameterPolicy` calls throw `InvalidOperationException`. This is
-the deliberate divergence from ASP.NET's `RouteGroupBuilder`, which defers convention application
-to endpoint-build time so late-added conventions still reach earlier children. Deferral needs a
-build-time flush hook and mutable pending state on the builder; the freeze rule gets the same
-guarantee — *shared values apply to every child* — with immediate composition, immutable routes,
-and an order-independent result. The failure mode it prevents is silent: without it, metadata
-added after the third of five children would apply to only the last two.
+**Parameter policies are a snapshot that freezes.** A child resolves its inline policies when its
+template is parsed, at registration. A nested group copies its parent's policy map
+(`RouteParameterPolicyMap`'s copy constructor) at creation, so siblings and parents stay isolated;
+a root group starts from `RouteParameterPolicyMap.CreateDefault()`. Once a group registers its first
+child route **or** nested group, its policies freeze and later `WithParameterPolicy` calls throw
+`InvalidOperationException`. Without the freeze, a policy registered after the third of five
+children would silently apply only to the last two.
+
+**Metadata is composed when the route table is built.** Before #1055, metadata froze the same way,
+which was the deliberate divergence from ASP.NET's `RouteGroupBuilder`. #1055 reverses that. With
+typed endpoints returning a convention builder, and feature verbs (`RequireRateLimiting`,
+`CacheOutput`) attaching metadata to groups and routes alike, a freeze would force every policy
+declaration to precede every `Map`, which is the ordering hazard conventions exist to remove. Each
+grouped route carries a `DeferredRouteMetadata` that holds the route's own items and a reference to
+its group, and `RouterBuilder.Build` resolves it once, at startup. Resolution walks the group chain
+through parent references rather than snapshots, so metadata added to a parent after nesting still
+reaches the nested group's routes. The result is order-independent:
+
+- a group's metadata reaches children mapped before and after the call;
+- a route's metadata can be attached after it is mapped (`app.MapGet(...).WithName("x")`);
+- metadata attached after the build throws, because it could no longer apply.
+
+The cost the original design avoided is a build-time flush plus mutable pending state. Both are
+contained in one internal type, and routes stay immutable once built.
+
+### Endpoint convention builders (#1055)
+
+Every `Map` that maps a route from a template returns an `IRouterRouteBuilder`:
+`IRouterBuilder.Map(method, template, handler)` (a `RouterBuilderExtensions` member), every group
+`Map` overload, and Web.Api's raw and source-generated `Map*`. Groups and route builders share one
+contract, `IRouterConventionBuilder.WithMetadata`, so a feature ships its policy verb once, as a
+generic extension member that works for routes and groups and keeps the receiver's builder type
+for chaining:
+
+```csharp
+extension<TBuilder>(TBuilder builder) where TBuilder : IRouterConventionBuilder
+{
+    public TBuilder RequireRateLimiting(string policyName)
+    {
+        builder.WithMetadata(new RateLimitingMetadata(policyName));
+        return builder;
+    }
+}
+```
+
+Routing ships its own two verbs the same way: `WithName` (a `RouteNameMetadata`, route builders
+only) and `RequireHost` (a `RouteHostMetadata`, routes and groups). A verb is plain metadata
+composition, and ordering follows the rules above. `IRouterBuilder.Map(IRouterRoute)` still maps a
+finished route whose metadata is fixed; it returns the router builder, as before.
+
+Feature packages ship theirs over the same contract: `RequireRateLimiting`/`DisableRateLimiting`
+(Web.RateLimiting), `WithRequestTimeout`/`DisableRequestTimeout` (Web.RequestTimeouts),
+`CacheOutput`/`DisableOutputCache` (Web.Caching), and `WithHttpLogging` (Web.Diagnostics).
+
+**Why not a mutable route.** `Route` stays immutable and receives its metadata collection at
+construction. The deferred collection is the only mutable piece, and it becomes immutable at build.
+Anything that reads metadata before the build (a test constructing a `Router` directly) resolves it
+at that read, so a route never observes two different metadata sets.
 
 ### Override rules (child over group, always)
 
@@ -418,23 +468,128 @@ added after the third of five children would apply to only the last two.
 
 ## Pipeline integration (`UseRouting`)
 
-The `UseRouting` middleware resolves the `IRouterFeature`, calls `router.Match(context)` once,
-and dispatches on the result:
+When the pipeline is built, the `UseRouting` middleware factory builds the application's router
+(see "Router lifecycle" below). For each request the middleware **selects** the endpoint and calls
+`next`. It never runs the endpoint and never short-circuits (#1054). The pipeline's terminal runs
+whatever was selected, through the root's `IWebEndpointFeature`.
 
-- `Matched` → store the match on the context (`SetRouteMatch`) and invoke the handler
-  (terminal; downstream middleware does not run).
-- `MethodNotAllowed` → set `405` and the `Allow` header, then **short-circuit** (do not fall
-  through to the terminal 404 pipeline).
-- `NoMatch` → call `next`, letting the rest of the pipeline (and any terminal 404) handle it.
+```mermaid
+flowchart TD
+    Earlier["Middleware before UseRouting: no endpoint known"] --> Routing["UseRouting: match and publish, then next"]
+    Routing --> Later["Middleware after UseRouting: endpoint and metadata known"]
+    Later --> Terminal["Pipeline terminal"]
+    Terminal --> Run["Run the selected endpoint"]
+    Terminal --> NotFound["No endpoint selected: bodyless 404"]
+```
 
-`IRouter.RouteAsync` performs the same dispatch for callers that use the router directly without
-the middleware, so a direct `RouteAsync` also produces a correct 405 with `Allow`.
+The middleware calls `router.Match(context)` once and publishes the result:
+
+- `Matched` → `SetRouteMatch` publishes the route as an `IRouteMatchFeature`, which is also the
+  exchange's `IWebEndpointFeature`. The terminal invokes the handler with the request's
+  `RequestCancelled` token.
+- `MethodNotAllowed` → a 405 endpoint is published. It is an `IWebEndpointFeature` only, not a route
+  match, so metadata consumers see no endpoint. The terminal sets `405` and the `Allow` header.
+- A **CORS preflight** to a path that no route accepts `OPTIONS` on → routing matches again with the
+  method named in `Access-Control-Request-Method` (`IRouter.Match(context, method)`). A candidate
+  is published as an `IRouteMatchFeature` with `IsPreflight` set, so CORS can read its metadata.
+  The candidate never runs for the preflight: if no middleware answers it, the terminal answers
+  the plain `OPTIONS` request with `405` and `Allow`. A path with an explicit `OPTIONS` route handles
+  the request itself, with no preflight flag.
+- `NoMatch` → any endpoint an earlier selection published is cleared, so the request reaches the
+  terminal's 404 rather than a stale endpoint.
+
+`HEAD` keeps being served by a `GET` route (the matcher's rule, unchanged).
+
+`IRouter.RouteAsync` still matches **and** dispatches in one call for callers that use the router
+directly without the middleware, so a direct `RouteAsync` also produces a correct 405 with `Allow`.
+
+### Fallback routes (#1056)
+
+`MapFallback(handler)` maps `{**path:nonfile}` for `GET` (and `HEAD` through the `GET` rule), marked
+with an internal `RouteFallbackMetadata`. The router treats the marker two ways:
+
+- **Evaluated last.** Fallback candidates sort after every other route, ahead of precedence. A
+  fallback registered first still loses to an application catch-all at the same precedence.
+  Fallbacks rank among themselves by ordinary precedence, so `MapFallback("admin/{**path:nonfile}", …)`
+  wins for `/admin/*` over the site-wide fallback.
+- **Never part of a 405.** A request whose path only a fallback matched, with a method the fallback
+  does not accept, is a 404. Otherwise every `POST` to an unknown path would become a `405 Allow: GET,
+  HEAD`. A real route's 405 is unaffected.
+
+The `nonfile` built-in policy keeps a fallback from answering a request for a missing asset. It rejects
+a value whose last segment has a file extension (`/app.js`, `/v1.2/readme.md`), accepts the directory
+form (`/v1.2/`, the site root), and so leaves missing files to the 404. `Web.StaticFiles` builds
+`MapFallbackToFile("index.html")` on `MapFallback`; `Web.Api` adds `app.MapFallback(middleware)`.
+
+**Omitted catch-alls match.** The site root reaches the fallback because an omitted catch-all captures
+no value, as "Parameter policies" and the link generator's collapsing rule already stated. The inbound
+matcher used to reject an empty catch-all, so `/files/{**path}` did not match the `/files` URL the link
+generator produces for it. That inconsistency is fixed with #1056.
+
+### Why dispatch is implicit, at the pipeline terminal
+
+The endpoint runs at the pipeline's terminal; there is no `UseEndpoints` step. An explicit dispatch
+middleware would silently turn every existing application into a 404 server: its routes would match
+and publish, and nothing would run them. The terminal belongs to the pipeline builder
+(`WebApplication` in Web.Hosting), and COHRES002 forbids Web.Hosting from referencing Web.Routing.
+So the selected endpoint reaches the terminal through a root seam, `IWebEndpointFeature`, which
+carries only the delegate to run. The route, its values and its metadata stay in Web.Routing's
+`IRouteMatchFeature`. `RouteMatchFeature` implements both contracts.
+
+### Endpoint metadata consumers and ordering
+
+Middleware that applies endpoint policies reads the published endpoint through
+`context.GetEndpointMetadata<T>()`. It must therefore be registered **after** `UseRouting`. The
+supported order is:
+
+```
+UseRouting → UseCors → UseAuthorization → UseRequestTimeouts → UseRateLimiting → UseAntiforgery
+           → UseOutputCache → (endpoint)
+```
+
+The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) places these and the middleware ahead of `UseRouting`.
+
+Before #1054, routing was terminal, and these consumers intercepted `Features.Set(IRouteMatchFeature)`
+through a feature-collection wrapper (or, for output caching, matched a second time). That only
+allowed synchronous policies and was invisible in the pipeline order. Those workarounds are removed.
+
+**Fail closed on a missing policy middleware.** Metadata whose silent absence would weaken a safety
+property implements `IRouteMiddlewareMetadata` and names the middleware that honors it, for example
+`UseRateLimiting`. That middleware calls `context.AcknowledgeEndpointMiddleware(name)` once it has
+applied the endpoint's policy. When the terminal dispatches the endpoint, any such metadata the
+request never acknowledged throws `InvalidOperationException` naming the endpoint and the missing
+middleware. The endpoint is not run without its policy. This catches both a missing middleware and
+one registered ahead of `UseRouting`, which silently disabled endpoint rate limits in an application
+migrated from terminal routing. Metadata that only tunes optional behavior (output caching, access
+logging) does not implement the interface.
+
+The check follows the same last-wins read as the consumers: among items of one runtime type, only
+the last places a requirement. A group that requires a rate limit and a route that disables it
+therefore run without `UseRateLimiting`, and the reverse still fails closed. Checking every item
+would reject exactly the group-plus-override shape the convention verbs make routine.
+
+### Migration from terminal routing (#1054)
+
+- **Middleware registered after `UseRouting` now runs for matched requests.** Before, it ran only
+  for requests no route matched. A middleware placed after `UseRouting` as a "not found" fallback
+  should check `context.GetRouteMatch()`, or move ahead of `UseRouting`.
+- **405 is answered at the terminal.** Middleware registered after `UseRouting` also runs for it.
+- **Policy middleware moves after `UseRouting`.** `UseRateLimiting`, `UseRequestTimeouts` and
+  `UseOutputCache` read the published endpoint. Registered ahead of `UseRouting`, an endpoint's rate
+  limit or timeout fails its requests at dispatch. Output caching keeps only its base policy there:
+  it never stores a response from an endpoint that carries `OutputCacheMetadata`, so an opt-out still
+  holds but an opt-in has no effect.
+- **Compression follows the cache.** `UseResponseCompression` must sit inside `UseOutputCache`, so in
+  an application that caches it moves after `UseRouting` too (Web.Caching DESIGN, "Ordering").
+- **Custom pipeline builders** must honor `IWebEndpointFeature` at their terminal: run the endpoint
+  when present, and apply their unhandled-request behavior otherwise.
 
 ### Per-application router state (the isolation rule) (#789)
 
 **Routing state is per application, never process-wide.** Each web application owns exactly one
 `IRouterFeature` (the `internal RouterFeature`), which holds that application's `IRouterBuilder` and
-the immutable `IRouter` lazily built from it. The wiring guarantees a single builder per app:
+the immutable `IRouter` built from it once, at startup. The wiring guarantees a single builder per
+app:
 
 - `AddRouting()` (builder time) registers the per-application `RouterFeature` as an `IHttpFeature`.
   Because it is one DI singleton per application, two applications get two distinct features.
@@ -442,9 +597,10 @@ the immutable `IRouter` lazily built from it. The wiring guarantees a single bui
   (`builder.Context.Features`) and returns its `Builder`. `MapGet`/`Map` (in `Web.Api`) resolve the
   same feature the same way. So `AddRouting`, `UseRouting`, and `MapGet` all map into and match
   against one per-application builder. `UseRouting` throws if `AddRouting` was not called first.
-- At request time the middleware resolves the router from the per-request feature collection
-  (`context.Features.Get<IRouterFeature>()`), which is seeded from the application's features — the
-  same instance whose `Builder` was mapped into.
+- When the pipeline is built, the middleware factory takes the router from that same feature and
+  its request delegate closes over it, so requests match against exactly the table the application
+  mapped into. The host still seeds the feature onto every request's `context.Features`, which is
+  where request-time readers such as `GetLinkGenerator()` find it.
 
 This replaces the original defect: `UseRouting()` returned a process-wide `static
 RouterBuilder.Shared` while `AddRouting()` registered a *different* per-app builder. Routes mapped
@@ -452,6 +608,82 @@ through `UseRouting()` therefore landed in a static that every application in th
 breaking Cohesion's multi-service in-process hosting, where several `WebApplication`s must keep
 isolated route tables. The static is deleted; there is no shared builder anywhere in the library.
 `PerApplicationRouterStateTests` proves two applications in one process serve only their own routes.
+
+### Router lifecycle: built once, at startup (#1051)
+
+An application's router is built exactly once, when its request pipeline is built at startup, and
+its route table is closed from then on. Before #1051 the router was built lazily, and without
+synchronization, on the first request: a route-table error (a duplicate route name, a named route
+without a pattern) failed every request instead of the start, and a route mapped after the first
+request was silently ignored — contradicting the build-time guarantee in "Uniqueness fails at build
+time" below.
+
+The sequence below shows the three steps, all of which run before the first request:
+`UseRouting` registers a middleware factory, `Program.cs` maps routes, and the host's pipeline
+build invokes the factory, which builds the router and closes the route table.
+
+```mermaid
+sequenceDiagram
+    participant App as Program.cs
+    participant Routing as UseRouting
+    participant Pipeline as Pipeline builder
+    participant Builder as RouterBuilder
+    App->>Routing: UseRouting()
+    Routing->>Pipeline: Use(factory)
+    App->>Builder: Map / MapGet / MapGroup
+    App->>Pipeline: host start builds the pipeline
+    Pipeline->>Routing: factory(next)
+    Routing->>Builder: Build()
+    Builder-->>Routing: router, route table closed
+    Note over App,Builder: A later Map throws InvalidOperationException
+```
+
+- **The trigger is the pipeline builder, not the host.** `UseRouting` registers its middleware
+  through the component-factory overload of `IWebApplicationPipelineBuilder.Use`. The pipeline
+  builder invokes that factory once, when it composes the pipeline — the Web host does that at
+  startup, when it resolves the servers that serve the pipeline — and the factory reads
+  `IRouterFeature.Router`, which builds the router. The request delegate the factory returns closes
+  over that router, so a request never builds, locks, or looks up the router feature.
+- **Building closes the route table.** `RouterBuilder.Build()` builds one router: the first call
+  closes the builder and builds, later calls return the same router, and `Map` afterwards throws
+  `InvalidOperationException` naming the route. `Build` and `Map` share one lock, so concurrent
+  first calls build once and a `Map` racing the build is either in the table or rejected. A failed
+  build keeps the table closed and fails the same way on every later call; the exception is not
+  cached.
+- **Errors surface as a failed start.** A duplicate route name throws from the pipeline build, so
+  the host's `StartAsync` fails. `WebApplication` resolves its servers, whose default server builds
+  the pipeline, before it starts any service, so the host ends `Failed` with nothing to roll back.
+  An invalid template fails earlier still: `Route` parses its template when it is constructed,
+  which is during `Map`.
+- **Request-time readers** of `IRouterFeature.Router` (`GetLinkGenerator()`, output caching) get the
+  router built at startup. In an application without `UseRouting`, the first such read builds it,
+  still exactly once.
+
+**Why this seam.** Three alternatives were rejected:
+
+- *Web.Hosting calls into routing at startup.* Web.Hosting may not reference feature libraries
+  (COHRES002), and Web.Routing may reference neither Web.Hosting nor any `Hosting*` library
+  (COHRES001, COHRES004).
+- *A new root lifecycle contract*, such as a freeze or application-starting hook on
+  `IWebApplication` or on a feature. It adds public surface for something the root contract already
+  provides: the component-factory `Use` overload is a composition-time callback that runs exactly
+  when the pipeline is composed. The root's XML docs now state that contract.
+- *Lazy construction made thread-safe.* It fixes the race but not the failure mode, because errors
+  would still surface on the first request.
+
+### Cancellation (#1051)
+
+`UseRouting` hands a matched route's handler the request's own `IHttpContext.RequestCancelled`
+token, and `IRouter.RouteAsync` passes its caller's token through. `UseRouting` used to allocate a
+linked `CancellationTokenSource` per request that added nothing over the request token; it is gone.
+Passing the context's token, rather than one captured elsewhere, matters when middleware decorates
+the context: request timeouts wrap it so that `RequestCancelled` is the timeout-linked token, and
+that is the token the handler sees.
+
+`RouterRouteHandler` adapts a `WebApplicationMiddleware`, which takes no token, so it honors its
+token at the boundary: an already-cancelled token returns a cancelled task without starting the
+middleware, and a running middleware observes cancellation through `RequestCancelled`. The Web
+host's pipeline treats its own `ExecuteAsync` token the same way.
 
 ## Parameter policies (constraints)
 
@@ -537,9 +769,10 @@ guarantees the validated, immutable name its build-time index snapshots.
 Route names are **unique per router, compared case-insensitively**. The name index is built inside
 `RouterLinkGenerator`, which the `Router` constructor creates eagerly — so a duplicate name (or a
 named route that exposes no pattern) throws `InvalidOperationException` when the route table is
-built (`RouterBuilder.Build()` / `Router` construction), never at request time. Per-application
-isolation (#789) scopes uniqueness naturally: two applications in one process can both have a
-route named `user`.
+built (`RouterBuilder.Build()` / `Router` construction), never at request time. For an application
+that is its start: `UseRouting` builds the router when the pipeline is built (#1051; see "Router
+lifecycle" above). Per-application isolation (#789) scopes uniqueness naturally: two applications
+in one process can both have a route named `user`.
 
 ### The `ILinkGenerator` surface
 
@@ -603,6 +836,38 @@ configuration error and throws at build time). This was chosen over type-testing
 `Route` inside the generator, which would have silently dropped wrapped/decorated routes (the shape
 #786 groups may produce) out of link generation.
 
+## Error model: template errors name the problem (#1051)
+
+Every invalid template throws `RoutePatternException`. Its `Pattern` is the template, and its
+message names the template, the part of it that is wrong, and the fix:
+
+> The route template '/orders/{id' is invalid. The parameter '{id' is not closed: the template ends
+> before its closing '}'. End the parameter with '}'.
+
+Each error path records its specific reason where the problem is found, quoting the offending
+segment, parameter, or literal, and `RoutePatternParser.Parse` prefixes the template. Before #1051
+every path produced an empty message: nineteen recorded an empty reason, with the intended wording
+left commented out, and two threw an empty message directly. The classes of error, each pinned by a
+row in `RoutePatternParserTests`:
+
+| Class | Example |
+|---|---|
+| Empty segment | `api//status` |
+| Unmatched `{` or `}` | `api/{`, `orders}`, `ord}ers` |
+| Unescaped `{` inside a parameter | `{id:regex(^\d{3}$)}` |
+| Parameter not closed | `{id:int`, `{id{` |
+| Empty parameter, or a parameter with no name | `{}`, `{*}` |
+| Invalid or repeated parameter name | `{a*b}`, `{id}/{ID}` |
+| Optional catch-all, or optional with a default | `{*path?}`, `{id=5?}` |
+| Catch-all not last, or sharing its segment | `{**path}/extra`, `x{*path}` |
+| Optional parameter misplaced in a multi-part segment | `{name}{ext?}`, `{name}-{ext?}`, `{name?}.{ext}` |
+| Adjacent parameters | `{name}{ext}` |
+| `?` in literal text | `orders?page=1` |
+| `~` not followed by `/` | `~orders` |
+
+Route groups re-parse the composed template (see "Route groups"), so a conflict between a prefix
+and a child, such as a repeated parameter name, reports through the same messages.
+
 ## AOT posture
 
 - No reflection, no runtime code generation, no dynamic activation anywhere in the match path or the
@@ -627,6 +892,9 @@ configuration error and throws at build time). This was chosen over type-testing
 - `Router` snapshots its routes into an immutable list and precomputes the precedence-ordered
   evaluation array in its constructor. A router instance is therefore safe to share across
   concurrent requests; there is no per-request mutable router state.
+- `RouterBuilder` builds one router. The first `Build()` closes the route table; later calls return
+  the same router, and `Map` afterwards throws `InvalidOperationException` (#1051, "Router
+  lifecycle" above).
 - `RouteMatch` is an immutable value; the only mutable per-request outputs are the
   `RouteValueDictionary` and the installed `IRouteMatchFeature`.
 - Metadata construction throws `ArgumentException` on a `null` item so a malformed metadata list fails
@@ -659,6 +927,8 @@ The endpoint-metadata seam (#150) is consumed by:
 - **#787 Named routes + link generation** — see the outbound URL generation section above.
   `OutboundPrecedence` is live code now; route names ride the #150 metadata seam and duplicate
   names fail when the route table is built.
+- **#1051 Startup router build, template error messages, cancellation** — see "Router lifecycle",
+  "Cancellation", and the error-model section above.
 
 ## Non-goals (delivered elsewhere in the routing epic #28)
 

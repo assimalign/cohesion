@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -12,7 +13,9 @@ using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
 
-// Disambiguate from System.Net.HttpVersion, pulled in by the System.Net using for EndPoint.
+// Disambiguate from System.Net.HttpVersion / HttpStatusCode, pulled in by the System.Net using for
+// EndPoint.
+using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 using HttpVersion = Assimalign.Cohesion.Http.HttpVersion;
 
 namespace Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
@@ -147,7 +150,9 @@ internal sealed class FakeHttpConnection : IHttpConnection
 /// </summary>
 /// <remarks>
 /// Implements <see cref="IAsyncDisposable"/> even though <see cref="IHttpConnectionContext"/> does
-/// not, so a test can assert the server disposes the opened context directly.
+/// not, so a test can assert the server disposes the opened context directly. Like the real
+/// transports, it yields the next exchange only when the server asks for it, so
+/// <see cref="OnReceiving"/> observes exactly when the server's receive loop moved on.
 /// </remarks>
 internal sealed class FakeHttpConnectionContext : IHttpConnectionContext, IAsyncDisposable
 {
@@ -174,6 +179,11 @@ internal sealed class FakeHttpConnectionContext : IHttpConnectionContext, IAsync
 
     public Func<IHttpContext, CancellationToken, ValueTask>? SendHandler { get; init; }
 
+    /// <summary>
+    /// Invoked with each exchange immediately before it is yielded to the server.
+    /// </summary>
+    public Action<IHttpContext>? OnReceiving { get; init; }
+
     public EndPoint? LocalEndPoint => null;
 
     public EndPoint? RemoteEndPoint => null;
@@ -184,6 +194,7 @@ internal sealed class FakeHttpConnectionContext : IHttpConnectionContext, IAsync
         foreach (IHttpContext exchange in _exchanges)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            OnReceiving?.Invoke(exchange);
             yield return exchange;
         }
 
@@ -219,21 +230,46 @@ internal sealed class FakeHttpConnectionContext : IHttpConnectionContext, IAsync
 }
 
 /// <summary>
-/// A minimal <see cref="IHttpContext"/> exchange double. Only the members the server touches
-/// (disposal) are implemented; the rest throw to prove the server never reads request/response
-/// state during dispatch.
+/// A minimal <see cref="IHttpContext"/> exchange double. Only the members the server touches are
+/// implemented: the protocol version (which selects sequential or concurrent dispatch), the
+/// cancellation surface, and disposal. <see cref="Response"/> exists only when a test supplies one —
+/// the server reshapes a response solely to answer a faulted exchange with a 500 — and the rest
+/// throw to prove the server never reads request state during dispatch.
 /// </summary>
 internal sealed class FakeHttpContext : IHttpContext
 {
+    private readonly IHttpResponse? _response;
+
     private int _disposeCount;
+    private int _cancelCount;
+
+    public FakeHttpContext(
+        HttpVersion version = HttpVersion.Http11,
+        IHttpResponse? response = null,
+        CancellationToken requestCancelled = default)
+    {
+        Version = version;
+        _response = response;
+        RequestCancelled = requestCancelled;
+    }
 
     public int DisposeCount => Volatile.Read(ref _disposeCount);
 
-    public HttpVersion Version => HttpVersion.Http11;
+    /// <summary>
+    /// Gets how many times the exchange was cancelled — the server's request to reset it.
+    /// </summary>
+    public int CancelCount => Volatile.Read(ref _cancelCount);
+
+    /// <summary>
+    /// Invoked as the exchange is disposed, before its disposal count is incremented.
+    /// </summary>
+    public Action? OnDisposing { get; init; }
+
+    public HttpVersion Version { get; }
 
     public IHttpRequest Request => throw new NotSupportedException();
 
-    public IHttpResponse Response => throw new NotSupportedException();
+    public IHttpResponse Response => _response ?? throw new NotSupportedException();
 
     public IHttpConnectionInfo ConnectionInfo => throw new NotSupportedException();
 
@@ -241,22 +277,40 @@ internal sealed class FakeHttpContext : IHttpContext
 
     public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
 
-    public CancellationToken RequestCancelled => CancellationToken.None;
+    public CancellationToken RequestCancelled { get; }
 
     public void Cancel()
     {
+        Interlocked.Increment(ref _cancelCount);
     }
 
     public Task CancelAsync()
     {
+        Interlocked.Increment(ref _cancelCount);
         return Task.CompletedTask;
     }
 
     public ValueTask DisposeAsync()
     {
+        OnDisposing?.Invoke();
         Interlocked.Increment(ref _disposeCount);
         return ValueTask.CompletedTask;
     }
+}
+
+/// <summary>
+/// A buffered response double: a mutable status, header collection, and body, so a test can stage
+/// a partial response and observe how the server reshapes it.
+/// </summary>
+internal sealed class FakeHttpResponse : IHttpResponse
+{
+    public HttpStatusCode StatusCode { get; set; } = HttpStatusCode.Ok;
+
+    public IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
+
+    public IHttpContext HttpContext => throw new NotSupportedException();
+
+    public Stream Body { get; set; } = new MemoryStream();
 }
 
 /// <summary>

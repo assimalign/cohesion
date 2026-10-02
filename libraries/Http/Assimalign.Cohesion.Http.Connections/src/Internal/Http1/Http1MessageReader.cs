@@ -267,7 +267,7 @@ internal static class Http1MessageReader
 
             HttpQueryCollection queryCollection = new HttpQuery(target.Query.Value).Parse();
 
-            Http1Request request = new(
+            TransportHttpRequestHead requestHead = new(
                 host,
                 requestPath,
                 method,
@@ -276,13 +276,11 @@ internal static class Http1MessageReader
                 headers,
                 bodyStream,
                 trailers);
-            Http1Response response = new();
 
             bool keepAlive = !HeaderContainsToken(headers, HttpHeaderKey.Connection, "close");
 
             return new Http1Context(
-                request,
-                response,
+                requestHead,
                 connectionInfo,
                 connectionToken,
                 keepAlive,

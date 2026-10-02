@@ -60,6 +60,7 @@ public class SessionMiddlewareTests
         cookie.Options.Path.ShouldBe("/");
         cookie.Options.Expires.ShouldBeNull();         // session-scoped
         cookie.Options.MaxAge.ShouldBeNull();
+        cookie.Options.IsEssential.ShouldBeFalse();    // a consent policy gates it by default
 
         // The state round-trips through the store under the cookie's id.
         (await ReadStoredStringAsync(store, cookie.Value, "user")).ShouldBe("alice");
@@ -284,6 +285,24 @@ public class SessionMiddlewareTests
         // Act / Assert
         await Should.ThrowAsync<InvalidOperationException>(async () =>
             await context.LoadSessionAsync());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Sessions] - Middleware: An essential session cookie is marked so a consent policy emits it")]
+    public async Task Invoke_EssentialSessionCookie_ShouldMarkCookieEssential()
+    {
+        // Arrange
+        SessionTestContext context = new(HttpScheme.Http);
+        InMemoryHttpSessionStore store = new();
+
+        // Act
+        await RunAsync(context, store, async c =>
+        {
+            IHttpSession session = await c.LoadSessionAsync();
+            session.SetString("cart", "1");
+        }, options => options.CookieIsEssential = true);
+
+        // Assert
+        context.Response.Cookies.ShouldHaveSingleItem().Options.IsEssential.ShouldBeTrue();
     }
 
     private static async Task RunAsync(

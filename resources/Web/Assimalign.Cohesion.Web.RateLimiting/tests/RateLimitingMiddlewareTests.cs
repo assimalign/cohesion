@@ -18,9 +18,10 @@ namespace Assimalign.Cohesion.Web.RateLimiting.Tests;
 
 /// <summary>
 /// Middleware-level coverage for <c>UseRateLimiting</c> over the pipeline harness: the global gate
-/// (admit / 429 / Retry-After / OnRejected / OnDecision / custom status), the per-endpoint gate at the
-/// route-match seam (named / inline / disabled / unknown policy), forwarded-composing client-address
-/// partitioning, the started-response abort, and the request-lifetime permit hold.
+/// (admit / 429 / Retry-After / OnRejected / OnDecision / custom status), the endpoint gate over the
+/// endpoint published ahead of the middleware (named / inline / disabled / unknown policy, queueing
+/// and cancellation, CORS-preflight skip), forwarded-composing client-address partitioning, the
+/// started-response abort, and the request-lifetime permit hold.
 /// </summary>
 public class RateLimitingMiddlewareTests
 {
@@ -250,18 +251,20 @@ public class RateLimitingMiddlewareTests
         directClientAgain.Response.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - InvokeAsync: A named per-endpoint policy should gate the matched endpoint")]
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - InvokeAsync: A named per-endpoint policy should gate the published endpoint and not run it on rejection")]
     public async Task InvokeAsync_EndpointPolicyByName_ShouldGateMatchedEndpoint()
     {
         // Arrange
+        int endpointInvocations = 0;
         IWebApplicationPipeline pipeline = BuildPipeline(
             options => options.AddPolicy("expensive", TestPolicies.FixedWindowSingle("expensive")),
             ctx =>
             {
-                ctx.Features.Set<IRouteMatchFeature>(new FakeRouteMatchFeature(new RateLimitingMetadata("expensive")));
+                endpointInvocations++;
                 ctx.Response.StatusCode = HttpStatusCode.Ok;
                 return Task.CompletedTask;
-            });
+            },
+            endpoint: new FakeRouteMatchFeature(new RateLimitingMetadata("expensive")));
 
         // Act
         await using RateLimitTestContext first = new();
@@ -273,9 +276,10 @@ public class RateLimitingMiddlewareTests
         // Assert
         first.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
         second.Response.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+        endpointInvocations.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - InvokeAsync: An inline per-endpoint policy should gate the matched endpoint")]
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - InvokeAsync: An inline per-endpoint policy should gate the published endpoint")]
     public async Task InvokeAsync_EndpointPolicyInline_ShouldGateMatchedEndpoint()
     {
         // Arrange — one metadata instance carries one policy, so both requests hit the same limiter.
@@ -284,10 +288,10 @@ public class RateLimitingMiddlewareTests
             configure: null,
             ctx =>
             {
-                ctx.Features.Set<IRouteMatchFeature>(new FakeRouteMatchFeature(metadata));
                 ctx.Response.StatusCode = HttpStatusCode.Ok;
                 return Task.CompletedTask;
-            });
+            },
+            endpoint: new FakeRouteMatchFeature(metadata));
 
         // Act
         await using RateLimitTestContext first = new();
@@ -315,10 +319,10 @@ public class RateLimitingMiddlewareTests
             options => options.AddPolicy("ep", exhausted),
             ctx =>
             {
-                ctx.Features.Set<IRouteMatchFeature>(new FakeRouteMatchFeature(RateLimitingMetadata.Disabled));
                 ctx.Response.StatusCode = HttpStatusCode.Ok;
                 return Task.CompletedTask;
-            });
+            },
+            endpoint: new FakeRouteMatchFeature(RateLimitingMetadata.Disabled));
 
         await using RateLimitTestContext context = new();
 
@@ -335,11 +339,8 @@ public class RateLimitingMiddlewareTests
         // Arrange
         IWebApplicationPipeline pipeline = BuildPipeline(
             configure: null,
-            ctx =>
-            {
-                ctx.Features.Set<IRouteMatchFeature>(new FakeRouteMatchFeature(new RateLimitingMetadata("missing")));
-                return Task.CompletedTask;
-            });
+            ctx => Task.CompletedTask,
+            endpoint: new FakeRouteMatchFeature(new RateLimitingMetadata("missing")));
 
         await using RateLimitTestContext context = new();
 
@@ -360,14 +361,15 @@ public class RateLimitingMiddlewareTests
             options => options.AddPolicy("ep", exhausted),
             ctx =>
             {
-                // The head is already on the wire before the endpoint gate rejects.
-                ctx.Features.Set<IHttpResponseStreamingFeature>(new FakeResponseStreamingFeature(hasStarted: true));
-                ctx.Features.Set<IRouteMatchFeature>(new FakeRouteMatchFeature(new RateLimitingMetadata("ep")));
                 ctx.Response.StatusCode = HttpStatusCode.Ok;
                 return Task.CompletedTask;
-            });
+            },
+            endpoint: new FakeRouteMatchFeature(new RateLimitingMetadata("ep")));
 
         await using RateLimitTestContext context = new();
+
+        // A middleware ahead of rate limiting already put the head on the wire before the endpoint gate rejects.
+        context.Features.Set<IHttpResponseStreamingFeature>(new FakeResponseStreamingFeature(hasStarted: true));
 
         // Act
         await ExecuteAsync(pipeline, context);
@@ -411,11 +413,193 @@ public class RateLimitingMiddlewareTests
         first.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - InvokeAsync: A queueing endpoint policy should hold a concurrent request and admit it once the permit is released")]
+    public async Task InvokeAsync_QueueingEndpointPolicy_ShouldAdmitQueuedRequestAfterRelease()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testBudget);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        RateLimitingPolicy policy = TestPolicies.ConcurrencyQueued("queued");
+        TaskCompletionSource firstEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseFirst = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int endpointInvocations = 0;
+
+        IWebApplicationPipeline pipeline = BuildPipeline(
+            configure: null,
+            async ctx =>
+            {
+                if (Interlocked.Increment(ref endpointInvocations) == 1)
+                {
+                    firstEntered.SetResult();
+                    await releaseFirst.Task;
+                }
+
+                ctx.Response.StatusCode = HttpStatusCode.Ok;
+            },
+            endpoint: new FakeRouteMatchFeature(new RateLimitingMetadata(policy)));
+
+        await using RateLimitTestContext first = new();
+        await using RateLimitTestContext second = new();
+
+        // Act — request one reaches the endpoint holding the only permit.
+        Task firstRequest = ExecuteAsync(pipeline, first);
+        await firstEntered.Task.WaitAsync(cancellationToken);
+
+        // Request two queues for the permit instead of being rejected.
+        Task secondRequest = ExecuteAsync(pipeline, second);
+        await WaitForQueuedRequestAsync(policy, second, cancellationToken);
+        bool secondCompletedWhileQueued = secondRequest.IsCompleted;
+        int invocationsWhileQueued = Volatile.Read(ref endpointInvocations);
+
+        // Request one completes, which releases its permit to request two.
+        releaseFirst.SetResult();
+        await Task.WhenAll(firstRequest, secondRequest).WaitAsync(cancellationToken);
+
+        // Assert
+        secondCompletedWhileQueued.ShouldBeFalse();
+        invocationsWhileQueued.ShouldBe(1);
+        first.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        second.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        endpointInvocations.ShouldBe(2);
+        policy.Limiter.GetStatistics(first)!.CurrentAvailablePermits.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - InvokeAsync: A request cancelled while queued for an endpoint policy should stop waiting and never run the endpoint")]
+    public async Task InvokeAsync_QueuedRequestCancelled_ShouldStopWaitingAndSkipEndpoint()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testBudget);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        RateLimitingPolicy policy = TestPolicies.ConcurrencyQueued("queued");
+        TaskCompletionSource firstEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseFirst = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int endpointInvocations = 0;
+
+        IWebApplicationPipeline pipeline = BuildPipeline(
+            configure: null,
+            async ctx =>
+            {
+                Interlocked.Increment(ref endpointInvocations);
+                firstEntered.TrySetResult();
+                await releaseFirst.Task;
+                ctx.Response.StatusCode = HttpStatusCode.Ok;
+            },
+            endpoint: new FakeRouteMatchFeature(new RateLimitingMetadata(policy)));
+
+        await using RateLimitTestContext first = new();
+        await using RateLimitTestContext second = new();
+
+        Task firstRequest = ExecuteAsync(pipeline, first);
+        await firstEntered.Task.WaitAsync(cancellationToken);
+
+        Task secondRequest = ExecuteAsync(pipeline, second);
+        await WaitForQueuedRequestAsync(policy, second, cancellationToken);
+
+        // Act — the client of request two goes away while it waits in the limiter's queue.
+        second.Cancel();
+
+        // Assert
+        await Should.ThrowAsync<OperationCanceledException>(secondRequest.WaitAsync(cancellationToken));
+
+        releaseFirst.SetResult();
+        await firstRequest.WaitAsync(cancellationToken);
+
+        endpointInvocations.ShouldBe(1);
+        first.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        policy.Limiter.GetStatistics(first)!.CurrentAvailablePermits.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - InvokeAsync: A CORS preflight should skip its candidate endpoint's policy")]
+    public async Task InvokeAsync_PreflightCandidate_ShouldSkipEndpointPolicy()
+    {
+        // Arrange — the candidate's policy is exhausted, so applying it would reject the preflight.
+        RateLimitingPolicy exhausted = TestPolicies.FixedWindowSingle("ep");
+        using (exhausted.Limiter.AttemptAcquire(new RateLimitTestContext(), permitCount: 1))
+        {
+        }
+
+        List<RateLimitingDecision> decisions = new();
+        bool continued = false;
+
+        IWebApplicationPipeline pipeline = BuildPipeline(
+            options =>
+            {
+                options.AddPolicy("ep", exhausted);
+                options.OnDecision = decisions.Add;
+            },
+            ctx =>
+            {
+                continued = true;
+                return Task.CompletedTask;
+            },
+            endpoint: new FakeRouteMatchFeature(new RateLimitingMetadata("ep")) { IsPreflight = true });
+
+        await using RateLimitTestContext context = new();
+
+        // Act
+        await ExecuteAsync(pipeline, context);
+
+        // Assert — the preflight continues down the pipeline untouched by the endpoint's limiter.
+        continued.ShouldBeTrue();
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        decisions.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - InvokeAsync: The global limiter and the endpoint policy should both decide, global first")]
+    public async Task InvokeAsync_GlobalAndEndpointPolicies_ShouldDecideGlobalThenEndpoint()
+    {
+        // Arrange
+        List<RateLimitingDecision> decisions = new();
+        string? policyNameSeenByEndpoint = null;
+
+        IWebApplicationPipeline pipeline = BuildPipeline(
+            options =>
+            {
+                options.GlobalPolicy = TestPolicies.FixedWindowSingle("global");
+                options.AddPolicy("ep", TestPolicies.FixedWindowSingle("ep"));
+                options.OnDecision = decisions.Add;
+            },
+            ctx =>
+            {
+                policyNameSeenByEndpoint = ctx.Features.Get<IRateLimitingFeature>()?.PolicyName;
+                ctx.Response.StatusCode = HttpStatusCode.Ok;
+                return Task.CompletedTask;
+            },
+            endpoint: new FakeRouteMatchFeature(new RateLimitingMetadata("ep")));
+
+        await using RateLimitTestContext context = new();
+
+        // Act
+        await ExecuteAsync(pipeline, context);
+
+        // Assert
+        decisions.Count.ShouldBe(2);
+        decisions[0].PolicyName.ShouldBeNull();
+        decisions[0].IsAcquired.ShouldBeTrue();
+        decisions[1].PolicyName.ShouldBe("ep");
+        decisions[1].IsAcquired.ShouldBeTrue();
+        policyNameSeenByEndpoint.ShouldBe("ep");
+    }
+
     private static IWebApplicationPipeline BuildPipeline(
         Action<RateLimitingOptions>? configure,
-        WebApplicationMiddleware terminal)
+        WebApplicationMiddleware terminal,
+        IRouteMatchFeature? endpoint = null)
     {
         TestPipelineBuilder builder = new();
+
+        if (endpoint is not null)
+        {
+            // What UseRouting does ahead of the middleware: publish the request's endpoint, then call next.
+            builder.Use(next => context =>
+            {
+                context.Features.Set<IRouteMatchFeature>(endpoint);
+                return next.Invoke(context);
+            });
+        }
+
         builder.UseRateLimiting(configure);
         builder.Use(next => context => terminal.Invoke(context));
 
@@ -426,5 +610,14 @@ public class RateLimitingMiddlewareTests
     {
         using CancellationTokenSource cancellation = new(_testBudget);
         await pipeline.ExecuteAsync(context, cancellation.Token);
+    }
+
+    // Waits until the request is parked in the policy's queue, so a test can act while it is queued.
+    private static async Task WaitForQueuedRequestAsync(RateLimitingPolicy policy, RateLimitTestContext context, CancellationToken cancellationToken)
+    {
+        while (policy.Limiter.GetStatistics(context)?.CurrentQueuedCount is not > 0)
+        {
+            await Task.Delay(10, cancellationToken);
+        }
     }
 }

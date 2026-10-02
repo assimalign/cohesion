@@ -6,18 +6,26 @@ using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web;
 
 /// <summary>
-/// The allowed-hosts guard: rejects a request whose transport-resolved host (HTTP/1.1
-/// request-target/<c>Host</c> precedence, HTTP/2 / HTTP/3 <c>:authority</c>) does not match
-/// the configured allowlist, answering <c>400 Bad Request</c> with an empty body and never
+/// The allowed-hosts guard: rejects a request whose effective host does not match the
+/// configured allowlist, answering <c>400 Bad Request</c> with an empty body and never
 /// invoking the rest of the pipeline.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The middleware performs no parsing of its own at request time: the transports already
-/// resolve the effective host with the correct per-version precedence onto
-/// <c>IHttpRequest.Host</c>, and the allowlist is precompiled into an
-/// <see cref="HttpHostMatcher"/> when <c>UseHostFiltering</c> registers this middleware. Each
-/// request costs one component split and a handful of span comparisons.
+/// The host validated is <see cref="HttpContextForwardedExtensions.EffectiveHost"/>: the host
+/// a trusted proxy forwarded when the forwarded-headers middleware ran first and accepted a
+/// hop, otherwise the transport-resolved <c>IHttpRequest.Host</c> (HTTP/1.1
+/// request-target/<c>Host</c> precedence, HTTP/2 / HTTP/3 <c>:authority</c>). That is the host
+/// every downstream consumer — redirects, absolute-URL generation, cache keys — reads, so it is
+/// the one the allowlist must bound. Forwarding headers are never read here: a forwarded host
+/// is only believed through the forwarded-headers trust model.
+/// </para>
+/// <para>
+/// The middleware performs no parsing of its own at request time: the transports (or the
+/// forwarded-headers resolution) already produce a typed <see cref="HttpHost"/>, and the
+/// allowlist is precompiled into an <see cref="HttpHostMatcher"/> when <c>UseHostFiltering</c>
+/// registers this middleware. Each request costs one feature lookup, one component split, and a
+/// handful of span comparisons.
 /// </para>
 /// <para>
 /// This middleware <em>validates</em> the request host; it does not <em>select</em> behavior
@@ -39,7 +47,10 @@ internal sealed class HostFilteringMiddleware : IWebApplicationMiddleware
 
     public Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
     {
-        HttpHost host = context.Request.Host;
+        // The effective host: forwarded by a trusted proxy when UseForwardedHeaders ran first,
+        // otherwise the transport-resolved host. Without the forwarded-headers middleware the two
+        // are the same value.
+        HttpHost host = context.EffectiveHost;
 
         if (string.IsNullOrWhiteSpace(host.Value))
         {

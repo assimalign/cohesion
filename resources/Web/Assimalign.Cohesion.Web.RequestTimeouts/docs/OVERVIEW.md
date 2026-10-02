@@ -10,17 +10,18 @@ package is the policy layer that arms it.
 - **Global default policy** — configured at builder time on `UseRequestTimeouts`, applied to
   every request the middleware sees.
 - **Per-endpoint policies** — a sealed `RequestTimeoutMetadata` carrier attached to a route's
-  endpoint-metadata bag (the #150 seam) overrides the default, resolved last-wins. An endpoint
-  can also opt out entirely via `RequestTimeoutMetadata.Disabled`.
+  endpoint-metadata bag (the #150 seam) overrides the default, resolved last-wins from the
+  endpoint `UseRouting` publishes. An endpoint can also opt out entirely via
+  `RequestTimeoutMetadata.Disabled`.
 - **Expiry → cancellation** — the middleware hands downstream a context whose
-  `RequestCancelled` is a linked token that trips on expiry, so handlers, the router's
-  per-dispatch token, and anything else awaiting the request token unwind cooperatively.
+  `RequestCancelled` is a linked token that trips on expiry, so handlers, the endpoint the
+  pipeline terminal runs, and anything else awaiting the request token unwind cooperatively.
 - **Expiry → response** — when the response has not started, the timed-out request is answered
   imperatively with the policy's status (504 `Gateway Timeout` by default), optionally an
   RFC 9457 `application/problem+json` payload (via `Web.ProblemDetails`), or a fully custom
   `WriteResponse` handler. When the response *has* started (streamed head already committed),
   the exchange is aborted cleanly at the protocol layer instead (`IHttpContext.CancelAsync`).
-- **Per-exchange control** — an `IHttpRequestTimeoutFeature` on the feature collection lets a
+- **Per-exchange control** — an `IRequestTimeoutFeature` on the feature collection lets a
   handler `Disable()` or re-arm (`SetTimeout`) its own exchange, mirroring ASP.NET's
   `DisableRequestTimeout`.
 - **Debugger suspension** — enforcement is suspended while a debugger is attached (mirrors
@@ -31,6 +32,9 @@ package is the policy layer that arms it.
 ## Usage
 
 ```csharp
+IRouterBuilder routes = application.UseRouting();
+
+// Register AFTER UseRouting, so the middleware reads the published endpoint's policy.
 // Global default: every request gets 30 seconds.
 application.UseRequestTimeouts(TimeSpan.FromSeconds(30));
 
@@ -41,31 +45,34 @@ application.UseRequestTimeouts(options => options.DefaultPolicy = new RequestTim
     WriteProblemDetails = true,
 });
 
-// Register BEFORE UseRouting so routed endpoints are governed and per-endpoint
-// metadata is observed.
-IRouterBuilder routes = application.UseRouting();
+// Per-endpoint override / disable where the endpoint is mapped (a route group takes the same verbs).
+application.MapGet("/report", handler).WithRequestTimeout(TimeSpan.FromMinutes(2));
+application.MapGet("/stream", streamHandler).DisableRequestTimeout();
 
-// Per-endpoint override / disable via the endpoint metadata bag.
-routes.Map(new Route(HttpMethod.Get, "/report", handler,
-    new RouterRouteMetadataCollection(new RequestTimeoutMetadata(TimeSpan.FromMinutes(2)))));
-routes.Map(new Route(HttpMethod.Get, "/stream", streamHandler,
-    new RouterRouteMetadataCollection(RequestTimeoutMetadata.Disabled)));
+// The verbs append RequestTimeoutMetadata; attaching it through the route's metadata is equivalent.
+routes.Map(new Route(HttpMethod.Get, "/export", exportHandler,
+    new RouterRouteMetadataCollection(new RequestTimeoutMetadata(TimeSpan.FromMinutes(5)))));
 ```
+
+Registered ahead of `UseRouting`, the global default still governs every request, but no endpoint
+is known when the middleware runs: an endpoint whose metadata carries a timeout fails with
+`InvalidOperationException` when it is dispatched, instead of running unbounded.
 
 ## Public surface
 
 | Type | Role |
 | --- | --- |
 | `RequestTimeoutPolicy` | The policy value: `Timeout` (null = disabled), `StatusCode` (default 504), `WriteProblemDetails`, `WriteResponse` |
-| `RequestTimeoutMetadata` | Sealed endpoint-metadata carrier for a policy; `Disabled` opts an endpoint out |
+| `RequestTimeoutMetadata` | Sealed endpoint-metadata carrier for a policy; `Disabled` opts an endpoint out. Names `UseRequestTimeouts` as required middleware (`IRouteMiddlewareMetadata`) when it carries a timeout |
 | `RequestTimeoutOptions` | Middleware options: `DefaultPolicy`, `TimeProvider`, `SuspendWhenDebuggerAttached` |
-| `IHttpRequestTimeoutFeature` | Per-exchange feature: `Token`, `Disable()`, `SetTimeout(TimeSpan)` |
+| `IRequestTimeoutFeature` | Per-exchange feature: `Token`, `Disable()`, `SetTimeout(TimeSpan)` |
 | `WebApplicationExtensions` | `UseRequestTimeouts(...)` pipeline verbs |
+| `RequestTimeoutRouteConventionExtensions` | `WithRequestTimeout(TimeSpan)`, `WithRequestTimeout(RequestTimeoutPolicy)` and `DisableRequestTimeout()` on a mapped route or a route group |
 
 ## Dependencies
 
-`Assimalign.Cohesion.Web` (pipeline seams) · `Assimalign.Cohesion.Web.Routing` (route-match
-feature + endpoint metadata) · `Assimalign.Cohesion.Web.ProblemDetails` (timeout payload) ·
+`Assimalign.Cohesion.Web` (pipeline seams) · `Assimalign.Cohesion.Web.Routing` (published route
+match, endpoint metadata, dispatch acknowledgement) · `Assimalign.Cohesion.Web.ProblemDetails` (timeout payload) ·
 `Assimalign.Cohesion.Http.Streaming` (response-started probe). Per the Web-area dependency rule
 it references no hosting module, holds no DI/configuration/logging state, and is delivered to
 applications through the `App.Web` shared framework.

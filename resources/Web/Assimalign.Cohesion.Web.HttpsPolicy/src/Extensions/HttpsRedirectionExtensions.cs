@@ -38,9 +38,15 @@ public static class HttpsRedirectionExtensions
         /// <c>Location</c>).
         /// </para>
         /// <para>
-        /// Connection security is the transport-derived typed scheme (from the listener's transport
-        /// security capability, #763); there is no scheme-string sniffing. The status and port are
-        /// validated here, at builder time, never per request.
+        /// Connection security is the effective typed scheme
+        /// (<see cref="HttpContextForwardedExtensions.EffectiveScheme"/>): the scheme a trusted proxy
+        /// asserted when the forwarded-headers middleware resolved one, otherwise the transport-derived
+        /// scheme (from the listener's transport security capability, #763). Behind a TLS-terminating
+        /// proxy, register <c>UseForwardedHeaders</c> <em>before</em> this verb so the proxy's
+        /// <c>https</c> is recognized and requests are not redirected in a loop; the redirect
+        /// <c>Location</c> then targets the effective host the client addressed. There is no
+        /// scheme-string or header sniffing here. The status and port are validated here, at builder
+        /// time, never per request.
         /// </para>
         /// </remarks>
         public IWebApplicationPipelineBuilder UseHttpsRedirection(Action<HttpsRedirectionOptions>? configure = null)

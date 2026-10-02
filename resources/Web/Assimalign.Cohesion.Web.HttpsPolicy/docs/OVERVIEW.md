@@ -4,8 +4,9 @@ HTTPS policy for the Cohesion Web pipeline: the natural pair of HTTP-to-HTTPS
 redirection and HTTP Strict Transport Security (HSTS), delivered as one lean
 feature package. Both are table-stakes for an enterprise-facing web server, and
 both hinge on the same question — *is this connection secure?* — answered from
-the transport-derived typed scheme the Web TLS surface (#763) resolves onto
-every request.
+the effective typed scheme: the scheme a trusted proxy asserted when
+`UseForwardedHeaders` resolved one, otherwise the transport-derived scheme the
+Web TLS surface (#763) resolves onto every request.
 
 ## What it provides
 
@@ -32,7 +33,12 @@ excluded-host pattern throws at registration, never per request.
 WebApplicationBuilder builder = WebApplication.CreateBuilder();
 WebApplication app = builder.Build();
 
-// Earliest: upgrade insecure requests before anything else runs.
+// Behind a TLS-terminating proxy only: resolve the client-facing scheme and host first,
+// so redirection recognizes the proxy's https instead of redirecting in a loop.
+app.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+
+// Next, after UseHostFiltering when that is registered: upgrade insecure requests before
+// anything else runs.
 app.UseHttpsRedirection(options =>
 {
     options.HttpsPort = 8443;                       // default 443 (omitted from Location)
@@ -53,9 +59,12 @@ app.UseErrorHandling();
 ## Dependencies
 
 - `Assimalign.Cohesion.Web` — the pipeline abstractions the verbs extend.
-- `Assimalign.Cohesion.Http` — `HttpScheme` (the transport-derived security
-  signal), `HttpHost`/`HttpHostMatcher` (excluded-host matching), `HttpHeaderKey`
-  (the RFC 6797 `Strict-Transport-Security` key), and the redirect status codes.
+- `Assimalign.Cohesion.Http` — `HttpScheme` (the typed security signal),
+  `HttpHost`/`HttpHostMatcher` (excluded-host matching), `HttpHeaderKey` (the
+  RFC 6797 `Strict-Transport-Security` key), and the redirect status codes.
+- `Assimalign.Cohesion.Http.Forwarded` — the `EffectiveScheme`/`EffectiveHost`
+  reads, which fall back to the wire values when no forwarded-headers middleware
+  ran.
 
 No DI, configuration, or logging dependency — the verbs capture values at builder
 time and the middleware resolves nothing per request. Delivered to applications

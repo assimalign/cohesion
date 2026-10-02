@@ -1,19 +1,22 @@
 ﻿namespace Assimalign.Cohesion.ObjectValidation;
 
 /// <summary>
-/// Specifies whether the validator should continue or stop on a validation failure.
-/// <see cref="ValidationMode"/> is specific to an item being validate it 
-/// does not indicate how many rules will run.
+/// Specifies whether the validator continues to the next validation item after an item fails, or stops.
 /// </summary>
+/// <remarks>
+/// The mode decides between items (members), not how many of one item's chained rules run: that is
+/// <see cref="IValidationContext.ContinueThroughValidationChain"/>.
+/// </remarks>
 public enum ValidationMode
 {
     /// <summary>
-    /// Tells the validator to continue through all <see cref="IValidationItem"/> failures.
+    /// Evaluates every <see cref="IValidationItem"/> and reports each one that fails. The default.
     /// </summary>
     Cascade = 0,
 
     /// <summary>
-    /// Tells the validator to stop validation after first failure.
+    /// Evaluates no further <see cref="IValidationItem"/> once one has failed, so only the first failing
+    /// item is reported.
     /// </summary>
     Stop = 1
 }

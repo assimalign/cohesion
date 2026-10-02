@@ -10,11 +10,12 @@ public static class HttpDigestFields
 {
     /// <summary>
     /// Creates the stateless <see cref="IHttpExchangeInterceptor"/> that verifies an inbound
-    /// <c>Content-Digest</c> against the request body. On HTTP/1.1 and HTTP/3 verification is
-    /// eager and a mismatch (or a malformed field) is rejected with <c>400 Bad Request</c> before
-    /// the request is dispatched; on HTTP/2 the body is verified lazily as the application reads
-    /// it, and a mismatch surfaces as <see cref="HttpContentDigestMismatchException"/> from the
-    /// terminal body read (the malformed-field <c>400</c> stays pre-dispatch there too).
+    /// <c>Content-Digest</c> against the request body. On HTTP/1.1 verification is eager and a
+    /// mismatch (or a malformed field) is rejected with <c>400 Bad Request</c> before the request is
+    /// dispatched; on HTTP/2 and HTTP/3, whose bodies stream in after dispatch, the body is verified
+    /// lazily as the application reads it, and a mismatch surfaces as
+    /// <see cref="HttpContentDigestMismatchException"/> from the terminal body read (the
+    /// malformed-field <c>400</c> stays pre-dispatch there too).
     /// </summary>
     /// <remarks>
     /// Register it <em>before</em> any content-decoding interceptor, because <c>Content-Digest</c>

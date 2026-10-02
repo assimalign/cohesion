@@ -17,19 +17,25 @@ namespace Assimalign.Cohesion.Web.HttpsPolicy.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Connection security is read from <see cref="IHttpRequest.Scheme"/> — the transport-derived typed
-/// scheme the Web TLS surface (#763) resolves from the listener's transport-security capability. There
-/// is no header inspection and no scheme-string sniffing: an <c>http</c> scheme is treated as insecure,
-/// an <c>https</c> scheme as secure.
+/// Connection security is the <em>effective</em> typed scheme
+/// (<see cref="HttpContextForwardedExtensions.EffectiveScheme"/>): the scheme the client used on the
+/// outermost trusted hop when the forwarded-headers middleware resolved one, otherwise
+/// <see cref="IHttpRequest.Scheme"/> — the transport-derived scheme the Web TLS surface (#763) resolves
+/// from the listener's transport-security capability. Behind a TLS-terminating proxy the app-facing hop
+/// is plaintext, so reading the wire scheme would redirect every request and loop; reading the effective
+/// scheme lets a trusted proxy's <c>https</c> through. There is no header inspection and no
+/// scheme-string sniffing here: forwarding headers are believed only by the forwarded-headers trust
+/// model, and without it the effective scheme is exactly the wire scheme.
 /// </para>
 /// <para>
-/// The <c>Location</c> is rebuilt from the request itself: the request host with its inbound (plaintext)
-/// port replaced by the HTTPS port (the default <c>443</c> is omitted), the request path preserved
-/// verbatim, and the query reconstructed from the parsed query collection — the raw query string is not
-/// carried on <see cref="IHttpRequest"/>, so the reconstruction re-encodes each key/value and follows
-/// the parsed collection's enumeration order (see the package <c>docs/DESIGN.md</c>). The response is
-/// status + <c>Location</c> only; being a <c>3xx</c>, it is below the <c>4xx</c>/<c>5xx</c> range the
-/// status-code-pages middleware acts on, so no body is ever added.
+/// The <c>Location</c> is rebuilt from the request itself: the effective host (the host the client
+/// addressed, not the proxy's upstream authority) with its inbound port replaced by the HTTPS port (the
+/// default <c>443</c> is omitted), the request path preserved verbatim, and the query reconstructed from
+/// the parsed query collection — the raw query string is not carried on <see cref="IHttpRequest"/>, so
+/// the reconstruction re-encodes each key/value and follows the parsed collection's enumeration order
+/// (see the package <c>docs/DESIGN.md</c>). The response is status + <c>Location</c> only; being a
+/// <c>3xx</c>, it is below the <c>4xx</c>/<c>5xx</c> range the status-code-pages middleware acts on, so
+/// no body is ever added.
 /// </para>
 /// </remarks>
 internal sealed class HttpsRedirectionMiddleware : IWebApplicationMiddleware
@@ -51,8 +57,9 @@ internal sealed class HttpsRedirectionMiddleware : IWebApplicationMiddleware
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
 
-        // Already secure: nothing to do. The scheme is transport-derived, not sniffed.
-        if (context.Request.Scheme == HttpScheme.Https)
+        // Already secure: nothing to do. The scheme is the effective one — a trusted TLS-terminating
+        // proxy's https counts, which is what keeps a proxied deployment from redirecting in a loop.
+        if (context.EffectiveScheme == HttpScheme.Https)
         {
             return next.Invoke(context);
         }
@@ -62,15 +69,17 @@ internal sealed class HttpsRedirectionMiddleware : IWebApplicationMiddleware
         // that is about to be thrown away.
         IHttpResponse response = context.Response;
         response.StatusCode = _statusCode;
-        response.Headers[HttpHeaderKey.Location] = BuildLocation(context.Request, _httpsPort);
+        response.Headers[HttpHeaderKey.Location] = BuildLocation(context, _httpsPort);
 
         return Task.CompletedTask;
     }
 
-    private static string BuildLocation(IHttpRequest request, int httpsPort)
+    private static string BuildLocation(IHttpContext context, int httpsPort)
     {
-        string authority = BuildAuthority(request.Host, httpsPort);
-        string pathAndQuery = BuildPathAndQuery(request);
+        // The effective host is the authority the client addressed; behind a proxy the wire host is the
+        // proxy's upstream authority, which the client cannot reach.
+        string authority = BuildAuthority(context.EffectiveHost, httpsPort);
+        string pathAndQuery = BuildPathAndQuery(context.Request);
 
         return string.Concat("https://", authority, pathAndQuery);
     }

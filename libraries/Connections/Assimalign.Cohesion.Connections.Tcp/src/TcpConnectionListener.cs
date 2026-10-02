@@ -135,7 +135,7 @@ public sealed class TcpConnectionListener : ConnectionListener
                     listenerSocket = _socket!;
                 }
 
-                Socket socket = await listenerSocket.AcceptAsync(cancellationToken);
+                Socket socket = await AcceptSocketAsync(listenerSocket, cancellationToken).ConfigureAwait(false);
                 TcpConnection? connection = null;
 
                 lock (_gate)
@@ -187,6 +187,38 @@ public sealed class TcpConnectionListener : ConnectionListener
         }
 
         throw new OperationCanceledException(cancellationToken);
+    }
+
+    // On Windows an accept is an AcceptEx into a socket created before the call, and the OS can attach
+    // an incoming client to that socket before the accept completes. When the accept is cancelled, or
+    // the listening socket closes, at that moment, .NET reports the failure without closing the socket
+    // it created, so the client stays connected to a socket nobody owns until a finalizer runs (#1093:
+    // a request sent during host shutdown waited out its whole timeout). Accepting into a socket this
+    // listener owns lets it close that socket on every path that does not hand it back. Unix accepts
+    // with accept(2) after the connection is queued, so nothing is attached early there.
+    private static async ValueTask<Socket> AcceptSocketAsync(Socket listenerSocket, CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return await listenerSocket.AcceptAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        Socket acceptSocket = new(listenerSocket.AddressFamily, listenerSocket.SocketType, listenerSocket.ProtocolType);
+        bool accepted = false;
+
+        try
+        {
+            Socket socket = await listenerSocket.AcceptAsync(acceptSocket, cancellationToken).ConfigureAwait(false);
+            accepted = true;
+            return socket;
+        }
+        finally
+        {
+            if (!accepted)
+            {
+                acceptSocket.Dispose();
+            }
+        }
     }
 
     /// <inheritdoc />

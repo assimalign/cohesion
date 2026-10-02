@@ -15,6 +15,13 @@ against. It is contracts-first and feature-free by design.
   `IWebApplicationPipelineBuilder`, `IWebApplicationMiddleware`, the
   `WebApplicationMiddleware` delegate, and the inline `Use(...)` adapter sugar in
   `WebApplicationExtensions`.
+- **Endpoint selection** — `IWebEndpointFeature` is the endpoint a selecting middleware
+  (`UseRouting`) published for the exchange. The pipeline's terminal
+  (`WebApplicationTerminal`) runs it after every middleware registered behind the selector,
+  or answers a bodyless 404 (#1054).
+- **Branching** — `Map(path, branch)`, `MapWhen`, `UseWhen` and `Run` over
+  `IWebApplicationPipelineBuilder` (#1056). A path branch publishes `IWebPathBaseFeature`
+  (`context.GetPathBase()`, `context.GetEffectivePath()`) instead of rewriting the request.
 
 Feature libraries (`Assimalign.Cohesion.Web.<Feature>`) reference this root and ship
 their own `Add<Feature>`/`Use<Feature>` verbs against these seams; the runtime module

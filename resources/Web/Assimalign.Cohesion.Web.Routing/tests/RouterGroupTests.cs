@@ -137,10 +137,9 @@ public class RouterGroupTests
         RouterBuilder builder = new();
         TestMetadata shared = new("group");
 
-        builder.MapGroup("api")
-            .WithMetadata(shared)
-            .Map(HttpMethod.Get, "orders", new RecordingRouterRouteHandler())
-            .Map(HttpMethod.Get, "customers", new RecordingRouterRouteHandler());
+        IRouterGroupBuilder group = builder.MapGroup("api").WithMetadata(shared);
+        group.Map(HttpMethod.Get, "orders", new RecordingRouterRouteHandler());
+        group.Map(HttpMethod.Get, "customers", new RecordingRouterRouteHandler());
 
         IRouter router = builder.Build();
 
@@ -204,30 +203,71 @@ public class RouterGroupTests
         match.Route!.Metadata.GetMetadata<TestMetadata>().ShouldBeSameAs(routeLevel);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Routing] - WithMetadata: Throws after a child route is registered")]
-    public void WithMetadata_AfterChildRouteMapped_ShouldThrow()
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - WithMetadata: Applies to a child route mapped before the call")]
+    public void WithMetadata_AfterChildRouteMapped_ShouldStillApplyToIt()
     {
-        // Arrange
+        // Arrange — metadata is composed when the route table is built, so call order is irrelevant (#1055).
         RouterBuilder builder = new();
         IRouterGroupBuilder group = builder.MapGroup("api");
         group.Map(HttpMethod.Get, "orders", new RecordingRouterRouteHandler());
+        TestMetadata late = new("late");
 
-        // Act & Assert — shared configuration is frozen once the group has produced a child.
-        Should.Throw<InvalidOperationException>(() => group.WithMetadata(new TestMetadata("late")));
-        Should.Throw<InvalidOperationException>(() =>
-            group.WithParameterPolicy("late", new ExactValueRouteParameterPolicy("x")));
+        // Act
+        group.WithMetadata(late);
+        IRouter router = builder.Build();
+
+        // Assert
+        RouteMatch match = router.Match(TestHttpContext.Create(HttpMethod.Get, "/api/orders"));
+        match.Route!.Metadata.GetMetadata<TestMetadata>().ShouldBeSameAs(late);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Routing] - WithMetadata: Throws after a nested group is created")]
-    public void WithMetadata_AfterNestedGroupCreated_ShouldThrow()
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - WithMetadata: Parent metadata attached after nesting reaches the nested group's routes")]
+    public void WithMetadata_AfterNestedGroupCreated_ShouldReachNestedRoutes()
     {
         // Arrange
         RouterBuilder builder = new();
         IRouterGroupBuilder group = builder.MapGroup("api");
-        group.MapGroup("v1");
+        group.MapGroup("v1").Map(HttpMethod.Get, "orders", new RecordingRouterRouteHandler());
+        TestMetadata late = new("late");
 
-        // Act & Assert — the nested group snapshotted the parent's configuration, so the parent freezes.
+        // Act
+        group.WithMetadata(late);
+        IRouter router = builder.Build();
+
+        // Assert
+        RouteMatch match = router.Match(TestHttpContext.Create(HttpMethod.Get, "/api/v1/orders"));
+        match.Route!.Metadata.GetMetadata<TestMetadata>().ShouldBeSameAs(late);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - WithParameterPolicy: Throws after a child route or nested group is registered")]
+    public void WithParameterPolicy_AfterChildOrNestedGroup_ShouldThrow()
+    {
+        // Arrange — children resolve inline policies when their template is parsed, so policies freeze.
+        RouterBuilder builder = new();
+        IRouterGroupBuilder withChild = builder.MapGroup("a");
+        withChild.Map(HttpMethod.Get, "orders", new RecordingRouterRouteHandler());
+        IRouterGroupBuilder withNested = builder.MapGroup("b");
+        withNested.MapGroup("v1");
+
+        // Act & Assert
+        Should.Throw<InvalidOperationException>(() =>
+            withChild.WithParameterPolicy("late", new ExactValueRouteParameterPolicy("x")));
+        Should.Throw<InvalidOperationException>(() =>
+            withNested.WithParameterPolicy("late", new ExactValueRouteParameterPolicy("x")));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - WithMetadata: Throws once the route table is built")]
+    public void WithMetadata_AfterRouteTableBuilt_ShouldThrow()
+    {
+        // Arrange
+        RouterBuilder builder = new();
+        IRouterGroupBuilder group = builder.MapGroup("api");
+        IRouterRouteBuilder route = group.Map(HttpMethod.Get, "orders", new RecordingRouterRouteHandler());
+        builder.Build();
+
+        // Act & Assert — metadata attached now could no longer apply.
         Should.Throw<InvalidOperationException>(() => group.WithMetadata(new TestMetadata("late")));
+        Should.Throw<InvalidOperationException>(() => route.WithMetadata(new TestMetadata("late")));
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - WithParameterPolicy: Group policies apply to child routes")]
@@ -260,15 +300,15 @@ public class RouterGroupTests
         RecordingRouterRouteHandler overriddenHandler = new();
         RecordingRouterRouteHandler inheritedHandler = new();
 
-        builder.MapGroup("api")
-            .WithParameterPolicy("flavor", new ExactValueRouteParameterPolicy("vanilla"))
-            .Map(
-                new[] { HttpMethod.Get },
-                "custom/{value:flavor}",
-                overriddenHandler,
-                metadata: null,
-                policies: map => map.Add("flavor", new ExactValueRouteParameterPolicy("chocolate")))
-            .Map(HttpMethod.Get, "shared/{value:flavor}", inheritedHandler);
+        IRouterGroupBuilder group = builder.MapGroup("api")
+            .WithParameterPolicy("flavor", new ExactValueRouteParameterPolicy("vanilla"));
+        group.Map(
+            new[] { HttpMethod.Get },
+            "custom/{value:flavor}",
+            overriddenHandler,
+            metadata: null,
+            policies: map => map.Add("flavor", new ExactValueRouteParameterPolicy("chocolate")));
+        group.Map(HttpMethod.Get, "shared/{value:flavor}", inheritedHandler);
 
         IRouter router = builder.Build();
 

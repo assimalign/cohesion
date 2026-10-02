@@ -33,15 +33,30 @@ public sealed class CookieAuthenticationOptions
     /// ticket lifetime and persistence, so any value set here for those is overwritten.
     /// </summary>
     /// <remarks>
-    /// Defaults to <c>HttpOnly=true</c>, <c>SameSite=Lax</c>, <c>Path=/</c>. Production
-    /// deployments served over HTTPS should set <see cref="HttpCookieOptions.Secure"/> to
-    /// <see langword="true"/>.
+    /// <para>
+    /// Defaults to <c>HttpOnly=true</c>, <c>SameSite=Lax</c>, <c>Path=/</c>, and
+    /// <see cref="HttpCookieOptions.IsEssential"/> = <see langword="true"/>. Whenever the effective
+    /// request scheme is HTTPS — a direct TLS connection, or TLS terminated at a trusted proxy that
+    /// the forwarded-headers middleware (<c>UseForwardedHeaders</c>) resolved — the emitted cookie is
+    /// marked <c>Secure</c> regardless of this template. Set <see cref="HttpCookieOptions.Secure"/> to
+    /// <see langword="true"/> to mark it <c>Secure</c> on every request, including ones the
+    /// application cannot recognize as HTTPS (for example behind a TLS-terminating proxy without
+    /// forwarded-headers resolution).
+    /// </para>
+    /// <para>
+    /// The cookie is essential by default because signing in is something the user asked for: under a
+    /// cookie policy that requires consent (<c>UseCookiePolicy</c> with <c>CheckConsentNeeded</c>), a
+    /// non-essential sign-in cookie would be dropped and the user could never stay signed in. Set
+    /// <see cref="HttpCookieOptions.IsEssential"/> to <see langword="false"/> only if the application
+    /// collects consent before it offers sign-in.
+    /// </para>
     /// </remarks>
     public HttpCookieOptions Cookie { get; } = new()
     {
         HttpOnly = true,
         SameSite = HttpCookieSameSiteMode.Lax,
         Path = "/",
+        IsEssential = true,
     };
 
     /// <summary>

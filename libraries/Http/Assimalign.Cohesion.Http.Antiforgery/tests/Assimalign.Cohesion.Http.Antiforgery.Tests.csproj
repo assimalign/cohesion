@@ -8,6 +8,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Antiforgery" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 		<!-- Test-only: exercises the pluggable protector seam against the real data-protection
 		     key ring. The shipped Antiforgery package takes no dependency on Security. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />

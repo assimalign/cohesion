@@ -44,6 +44,62 @@ extensibility mechanism, which is why the pipeline contracts here stay this smal
 application lambdas onto the core `Use(Func<WebApplicationMiddleware, WebApplicationMiddleware>)`
 registration form.
 
+That core form is a component factory: the pipeline builder invokes it once, when it builds the
+pipeline, and the delegate it returns runs for each request. The factory body is therefore the
+composition-time seam for work that must fail at startup rather than on a request, without a
+dependency on the hosting runtime: `UseRouting` builds the application's route table there (#1051).
+
+## Endpoint selection and the pipeline terminal (#1054)
+
+Selecting an endpoint and running it are separate pipeline steps. A selecting middleware
+(`UseRouting` in `Web.Routing`) publishes an `IWebEndpointFeature` and calls `next`, so every
+middleware registered after it runs with the endpoint known. The pipeline's **terminal** (the
+innermost delegate a pipeline builder composes, reached when every middleware called `next`)
+runs `IWebEndpointFeature.Endpoint` when the feature is present, and otherwise applies the
+builder's unhandled-request behavior (`WebApplication`'s bodyless 404).
+
+The feature is a root seam because the terminal belongs to the pipeline builder, which lives in
+`Web.Hosting`, and COHRES002 forbids that module from referencing `Web.Routing`. It carries only
+the delegate to run. The endpoint's model (its route, values and metadata) stays in the package
+that selected it, so the root does not absorb routing. Every `IWebApplicationPipelineBuilder`
+implementation must honor the contract at its terminal. That includes test doubles, which is
+why the Routing tests' application double runs the published endpoint too.
+
+The terminal itself is the root's `WebApplicationTerminal.InvokeAsync` (#1056): run the published
+endpoint, or set a bodyless `404` on an untouched response. `WebApplication` in Web.Hosting and every
+non-rejoining branch end in it, so there is one definition of "unhandled".
+
+## Pipeline branching (#1056)
+
+`WebApplicationBranchingExtensions` adds four verbs over `IWebApplicationPipelineBuilder`:
+
+| Verb | Runs the branch when | Rejoins the main pipeline |
+|---|---|---|
+| `Map(path, branch)` | the path starts with `path` at a segment boundary (case-insensitive) | no; ends in `WebApplicationTerminal` |
+| `MapWhen(predicate, branch)` | `predicate(context)` is true | no; ends in `WebApplicationTerminal` |
+| `UseWhen(predicate, branch)` | `predicate(context)` is true | yes; the branch's `next` is the rest of the pipeline |
+| `Run(terminal)` | always, where registered | no; nothing after it runs |
+
+A branch is collected by an internal `WebApplicationBranchBuilder` and composed by the containing
+pipeline when that pipeline is built. Every branch registration is kept in the component-factory
+shape that takes the application context, so middleware that needs the context at composition time
+(`UseStaticFiles` reads the web root) composes inside a branch exactly as it does on the application.
+An endpoint selected before a non-rejoining branch still runs at the branch's terminal.
+
+**`Map(path)` does not rewrite the request.** `IHttpRequest.Path` is read-only on the interface, and
+the Web area's model is to publish an effective view rather than mutate the request (owner decision 3,
+the forwarded-headers model; request mutation is the open #782 gate). A path branch publishes
+`IWebPathBaseFeature`: the accumulated `PathBase` (outermost prefix first) and the `Path` below it.
+Middleware that can be mounted in a branch reads `context.GetEffectivePath()`, which `Web.StaticFiles`
+does. Absolute URLs keep using the full `IHttpRequest.Path`, which also keeps a redirect such as
+static files' add-a-slash correct inside a branch. A nested `Map` matches against the effective path, so
+prefixes compose. The view is removed when the branch returns.
+
+**Branches hold middleware, not routes.** Routes belong to the application's router (`app.MapGet`,
+`app.MapGroup`), and per-endpoint behavior is endpoint metadata. The routing verbs require the
+application builder (`TBuilder : IWebApplicationPipelineBuilder, IWebApplication`), so they are not
+available on a branch. A sub-path API is a route group; a sub-path asset mount is a `Map` branch.
+
 ## Application lifecycle services
 
 The concrete `WebApplicationBuilder.AddService` in `Web.Hosting` accepts an
@@ -89,7 +145,8 @@ Middleware ordering is positional. Some features carry hard ordering contracts â
 example `Web.ForwardedHeaders` must be registered before anything that consumes client
 identity â€” and each feature package documents its own. Formal, enforceable ordering
 rules are the open #26/#145 work; the root intentionally ships no enforcement mechanism
-ahead of them.
+ahead of them. The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) merges the packages' contracts into one
+reference order.
 
 ## AOT posture
 

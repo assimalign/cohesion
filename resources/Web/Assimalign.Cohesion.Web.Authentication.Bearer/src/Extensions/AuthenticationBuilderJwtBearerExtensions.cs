@@ -20,7 +20,12 @@ public static class AuthenticationBuilderJwtBearerExtensions
         /// <param name="configure">An optional callback to configure the bearer options.</param>
         /// <returns>The builder, for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="InvalidOperationException">A scheme with the same name is already registered.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// A scheme with the same name is already registered, or the configured options are
+        /// incomplete: no signing key while signed tokens are required, or no accepted issuer or
+        /// audience while that check is on (see <see cref="JwtBearerOptions.ValidateIssuer"/> and
+        /// <see cref="JwtBearerOptions.ValidateAudience"/>).
+        /// </exception>
         public AuthenticationBuilder AddJwtBearer(Action<JwtBearerOptions>? configure = null)
             => builder.AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, configure);
 
@@ -32,7 +37,12 @@ public static class AuthenticationBuilderJwtBearerExtensions
         /// <returns>The builder, for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException"><paramref name="scheme"/> is <see langword="null"/> or whitespace.</exception>
-        /// <exception cref="InvalidOperationException">A scheme with the same name is already registered.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// A scheme with the same name is already registered, or the configured options are
+        /// incomplete: no signing key while signed tokens are required, or no accepted issuer or
+        /// audience while that check is on (see <see cref="JwtBearerOptions.ValidateIssuer"/> and
+        /// <see cref="JwtBearerOptions.ValidateAudience"/>).
+        /// </exception>
         public AuthenticationBuilder AddJwtBearer(string scheme, Action<JwtBearerOptions>? configure = null)
         {
             ArgumentNullException.ThrowIfNull(builder);
@@ -40,6 +50,10 @@ public static class AuthenticationBuilderJwtBearerExtensions
 
             JwtBearerOptions options = new();
             configure?.Invoke(options);
+
+            // Fail at registration, where the misconfiguration is written, not on the first
+            // authenticated request.
+            JwtBearerAuthentication.Validate(options);
 
             return builder.AddScheme(new AuthenticationScheme(
                 scheme,

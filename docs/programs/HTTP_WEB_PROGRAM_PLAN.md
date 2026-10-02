@@ -1,6 +1,6 @@
 # HTTP / Web Program Plan
 
-**Status:** active · **Created:** 2026-07-03 · **Owner:** Chase Crawford · **Scope:** the HTTP protocol stack (`libraries/Http*`), its cross-area foundations (`libraries/Connections`, `libraries/Security`, `libraries/Hosting`), and the Web resource (`resources/Web/*`, GitHub Web Platform epic **#6 / L03.01**).
+**Status:** active — Phase 2 opened 2026-09-30, see §7 · **Created:** 2026-07-03 · **Owner:** Chase Crawford · **Scope:** the HTTP protocol stack (`libraries/Http*`), its cross-area foundations (`libraries/Connections`, `libraries/Security`, `libraries/Hosting`), and the Web resource (`resources/Web/*`, GitHub Web Platform epic **#6 / L03.01**).
 
 > **Why this file exists.** This program spans ~50 GitHub work items across 8 epics and will be implemented by many separate AI coding sessions. No single session holds the whole picture in context. This document is the **durable sequencing index**: it records what depends on what, what is safe to do in parallel, and the protocol each session follows so the work scales out **without losing the order things must happen in**. GitHub issues hold the *what* and *acceptance criteria*; this file holds the *when* and *in-what-order*. It is a living doc — update the Progress Log and check items off as PRs merge.
 
@@ -66,6 +66,12 @@ A **stage** is a gate, not a calendar. Everything in a stage may proceed once th
 | **2 — Build-out** | HTTP protocol features and the first wave of Web middleware + routing, each consuming Stage-1 primitives. | its Stage-1 prerequisites merged |
 | **3 — Composition** | Features that compose multiple Stage-2 pieces (h3 end-to-end, caching, groups/links, health endpoint, WebSockets). | its Stage-2 prerequisites merged |
 | **4 — Surface** | The developer-facing API surface that sits on everything: source-gen binding, auth handlers, controller/function execution. | its Stage-3 prerequisites merged |
+| **5 — Make what ships safe** *(Phase 2)* | Fix security, protocol-conformance and DX defects in delivered code before adding surface (§7.2). | none |
+| **6 — Endpoint-aware pipeline** | Let middleware run between route match and handler; endpoint metadata on typed endpoints; branching. | Stage 5 reviewed |
+| **7 — Security and browser interop** | CORS, authorization, cookie policy, antiforgery, security headers. | #1054, #1055 |
+| **8 — API surface** | Handler return values, validation, files, OpenAPI. | #1055 |
+| **9 — Server and operations** | ALPN multi-protocol endpoints, diagnostics, lame-duck drain, telemetry, mTLS. | #1049 |
+| **10 — Gated** | WebSockets, rewrite, OIDC, trailers/gRPC, distributed stores. | an ADR, a decision, or another program |
 
 **The single most important edge in the whole program:** **#762 (rewrite `WebApplicationServer`) is the gate for nearly all Web middleware.** It is a Stage-1, P001 item. Land it early. Until it merges, the only Web-side work that is safe is the Stage-0 deletions and pure-primitive Http-library items.
 
@@ -177,6 +183,83 @@ Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D
 | #790 | F | Auth scheme model + Cookie/Bearer handlers | #774, #150, IdentityModel #610 |
 | ~~#151~~ | F | ~~Controller/action + function endpoint binding~~ — **set aside 2026-07-10** (niceties; middleware-first direction; `Web.Api.Controllers` + `Web.Functions` projects removed; closed not-planned) | — |
 
+### Phase 2 (opened 2026-09-30)
+
+The audit behind these stages is §7. Within each stage, rows are in the recommended build order. Project #13 fields: Stage 5 = P001/W01, Stages 6–8 = P002/W02–W04, Stage 9 = P003/W05, Stage 10 = W06.
+
+### Stage 5 — Make what ships safe and honest
+
+**Status:** delivered and approved 2026-09-30; the Phase 2 branch was published at `b11b6927`. Commits and follow-ups are in §5.
+
+| Issue | Lane | Title | Blocked by |
+|---|---|---|---|
+| #1045 | E | Serve static files from a web root, never the process working directory (D1) | — |
+| #1046 | E | Make JWT Bearer validation fail closed on issuer, audience and algorithm (D2) | — |
+| #1047 | D | Bind a default listener in plain-mode apps; Sdk.Web content defaults; runnable template tests (D3) | — |
+| #1048 | A | HTTP/2: flow control on buffered responses, HEAD suppression, request-body cap (D5) | — |
+| #1066 | A | HTTP/3: incremental request streams, body cap, HEAD, malformed frames (D6) | — |
+| #1049 | D | Dispatch HTTP/2 and HTTP/3 streams concurrently in `WebApplicationServer` (D4) | #1066 (soft, HTTP/3 half only) |
+| #937 | A | Reject a malformed `:path` per stream on HTTP/2 and HTTP/3 (D10) | — |
+| #1050 | E | Proxy-aware HttpsPolicy, HostFiltering, Sessions, Cookie auth, Compression, Diagnostics (D7) | — |
+| #1051 | F | Build the router at startup; route-template error messages; cancellation (D8) | — |
+| #1052 | D | Representative Web NativeAOT guard published in CI | — |
+| #1053 | B | CI and a release decision for Http.ServerSentEvents, DigestFields and InterimResponses (D11) | — |
+| #699 | B | Replace the AttachContext wire-up with an HttpContext back-reference | serialize with #1048, #1066 and #937 (same transport files) |
+
+### Stage 6 — Endpoint-aware pipeline (fan-out seam)
+
+**Status:** delivered 2026-09-30. The owner published the branch, moved on to Stage 7 and is reviewing Phase 2 as [PR #1094](https://github.com/assimalign/cohesion/pull/1094). Commits, behavior changes and follow-ups are in §5.
+
+| Issue | Lane | Title | Blocked by |
+|---|---|---|---|
+| #1054 | F | Split route matching from endpoint dispatch; preflight-aware matching | — |
+| #1055 | F | Return an endpoint builder from `Map*` so endpoints and groups carry metadata | #1054 |
+| #1056 | D/F | Pipeline branching (`Map`, `MapWhen`, `UseWhen`, `Run`) and fallback routes | #1054 |
+
+### Stage 7 — Security and browser interop
+
+**Status:** delivered 2026-10-01 on the Phase 2 branch and in owner review; the review's two decisions are applied. Commits, behavior changes and follow-ups are in §5.
+
+| Issue | Lane | Title | Blocked by |
+|---|---|---|---|
+| #3 (+#109, #110, #111) | E | CORS policy engine and endpoint integration; one session closes all four | #1054, #1055 |
+| #155 | E | Authorization: requirements, policies, `UseAuthorization`, per-endpoint schemes | #1054, #1055 |
+| #156 | E | Cookie-policy enforcement, including a secure default for Cookie auth | — |
+| #1057 | E | Enforce antiforgery in the Web pipeline | #1054, #1055 |
+| #1058 | E | Security-headers middleware | #1055 (soft) |
+
+### Stage 8 — API surface
+
+**Status:** delivered 2026-10-02 on the Phase 2 branch and in owner review, together with the defects found along the way (#1169, #1172–#1176, #1180, #1187, #1205, #1206). Commits, behavior changes, questions for the review and follow-ups are in §5.
+
+| Issue | Lane | Title | Blocked by |
+|---|---|---|---|
+| #1059 | F | Serialize handler return values; compile-time diagnostics for unsupported handlers | #1055 |
+| #1060 | F | Validate bound parameters; validation problem responses | #1059 |
+| #1061 | F | File binding; file and stream response helpers | #1060; #1057 (soft) |
+| #1062 | C | Onboard the remaining OpenApi packages to CI and the release | — |
+| #152 | F | Web OpenAPI adapter (`IOpenApiEndpointSource`), document endpoint, AOT test | #1055, #1059, #1062 |
+
+### Stage 9 — Server and operations
+
+| Issue | Lane | Title | Blocked by |
+|---|---|---|---|
+| #1063 | D/A | HTTP/1.1 and HTTP/2 on one TLS endpoint via ALPN; complete server config binding (D9) | #1049 (soft) |
+| #147 | D | Hosting diagnostics: startup failures, connection faults, drain timeouts | — |
+| #146 | D | Lame-duck drain | #1049 |
+| #1064 | D/A | Server telemetry (`ActivitySource`, `Meter`, trace context); settles #1039 | — (`http.route` is exact only after #1054) |
+| #1065 | A/C | TLS client certificates and connection TLS metadata (mTLS) | — |
+
+### Stage 10 — Gated
+
+| Issue | Lane | Title | Blocked by |
+|---|---|---|---|
+| #765 | A/E | WebSockets (RFC 6455) | an ADR |
+| #782 | E | `Web.Rewrite` | the request-mutation seam decision |
+| #829, #830 | C | OIDC discovery/JWKS runtime and keyed token crypto in IdentityModel; after those, an OIDC handler and JWT Bearer `Authority` discovery | the IdentityModel program |
+| — | A | HTTP/2 and HTTP/3 trailers | a gRPC ADR |
+| #806–#808 | C | Distributed data-protection key storage; distributed session and output-cache stores get filed alongside | post-v1 |
+
 ### Post-v1 follow-ups (filed, not scheduled)
 Discovered on #774 and deferred out of its v1: **#806** (SecretStore-backed `IKeyRepository` + escrow), **#807** (at-rest key-document encryption), **#808** (cross-service key sharing) — align with SecretStore #99/#277/#278; pull in when the identity/secret-store lanes need them, not before.
 
@@ -200,6 +283,144 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
 - **Batch 4b (2026-07-19): dispatched as a STACKED PR series [#920](https://github.com/assimalign/cohesion/pull/920)→[#927](https://github.com/assimalign/cohesion/pull/927)** — orchestrated in one session (agent sessions + orchestrator review) rather than spun-off chips; one branch per issue, each based on the previous, merge bottom-up in order #881 → #149 → #779 → #780 → #783 → #785 → #795 → #767 (GitHub retargets each PR as its base merges). #796 (source-gen binding, Stage 4) deliberately held for focused follow-up after this stack; standing decision gates #782 (request-mutation seam) and #765 (WebSockets) unchanged. Scope-creep filed: #928 (h3 server control-stream defect — `H3_CLOSED_CRITICAL_STREAM` blocks full h3 round-trips; surfaced by #767's e2e, reproduced against the pre-existing Http.Connections example).
 - **Wave 4b (2026-07-20): all 8 stacked PRs merged** — #881 ([PR #920](https://github.com/assimalign/cohesion/pull/920)), #149 ([#921](https://github.com/assimalign/cohesion/pull/921)), #779 ([#922](https://github.com/assimalign/cohesion/pull/922)), #780 ([#923](https://github.com/assimalign/cohesion/pull/923)), #783 ([#924](https://github.com/assimalign/cohesion/pull/924)), #785 ([#925](https://github.com/assimalign/cohesion/pull/925)), #795 ([#926](https://github.com/assimalign/cohesion/pull/926)), #767 ([#927](https://github.com/assimalign/cohesion/pull/927)). Squash-merge note for future stacks: a stacked branch whose wiring lines sit alphabetically adjacent to a sibling's (Web.Caching next to Web.Compression in App.props/CI/slnx) conflicts on retarget — resolved by merging main into the branch (#926's `303a9b2e`).
 - **Batch 5 (2026-07-20): dispatched as a STACKED PR series [#932](https://github.com/assimalign/cohesion/pull/932)→[#936](https://github.com/assimalign/cohesion/pull/936)** — merge bottom-up in order #928 → #895 → #890 → #796 (PRs #932, #933, #934, #936). #928's root cause was the h3 send path never ending the request stream (FIN), not the control stream; #895 made h1 percent-decode parity uniform (decoded space/control chars are illegal `HttpPath` characters on every transport — widening that set is an owner decision if space-named resources should serve); #796 landed to the middleware-first re-scope (typed-delegate input binding via the interceptor generator + ObjectValidation AOT hardening; no result types). **With #796, §4 is drained except the two decision gates** — #782 (request-mutation seam) and #765 (WebSockets ADR); the plan's retirement clause becomes actionable once they resolve. Scope-creep filed: #937 (graceful h2/h3 malformed-`:path` rejection, from #895).
+- **Batch 5 merged (2026-07-20):** #928 ([PR #932](https://github.com/assimalign/cohesion/pull/932)), #895 ([#933](https://github.com/assimalign/cohesion/pull/933)), #890 ([#934](https://github.com/assimalign/cohesion/pull/934)), #796 ([#936](https://github.com/assimalign/cohesion/pull/936)). §4 drained except the two decision gates (#782, #765).
+- **Project #13 inventory (2026-09-29):** closed #25, #28 and #142–#145 as delivered, #153 as not planned, #154 and #380–#382 as duplicates; added "Scope update" notes to #27, #29, #146, #147, #152 and #155.
+- **Phase 2 opened (2026-09-30):** a code-read audit of `main` found that §4 never scheduled the May-filed security and API items (CORS #3/#109–#111, authorization #155, cookie policy #156, OpenAPI #152, host lifecycle #146/#147), and that shipped code carries security, conformance and DX defects. Snapshot, defects and decisions are in §7. The owner approved the lineup the same day; it was filed as #1045–#1066 and added to §4 as Stages 5–10. By owner instruction, Phase 2 runs on one branch (`claude/http-web-program-inventory-798a2d`) with at least one commit per stage and an owner review before each next stage starts, in place of §1's one-issue-per-branch protocol.
+- **Stage 5 delivered and approved (2026-09-30).** One commit per issue on the Phase 2 branch, published at `b11b6927`:
+  - #1046 `cd47f0d0`, #1045 `656233d3`, #1047 `5da6d7dc`, #1053 `8cfffc11`, #1050 `23a2874c`
+  - #1052 `e190ca7b` (DI call-site factory made AOT-clean) and `f4b509d5` (guard and CI job)
+  - #1048 `10def15e`, #937 `fdd4f232` (HTTP/2) and `7667fb7e` (HTTP/3), #1051 `a4401268`, #1049 `db758492`
+  - #1066 `f45b4e30`, plus `2a2e0afc` (Content-Digest verified lazily on HTTP/3)
+  - #699 `0ebbdc1d`
+  - `2ac5c565` regenerated `docs/DEPENDENCIES.md`; `70f2ad34` fixed the §7.5 docs drift.
+
+  Verification: every touched suite passes, including Http.Connections 520, Http 1231, Web.Hosting 136 and Web.Testing 19. The Web NativeAOT guard publishes and passes 7/7 smoke checks. The `cohesion-web` and `cohesion-spa` template run tests pass against a locally packed SDK.
+
+  CI on `b11b6927`: every workflow passed except Web. There, `Web.Hosting.Resources` timed out on Windows in the control-plane stop handshake (tracked in #1093), and fail-fast cancelled the remaining matrix jobs. The Linux NativeAOT guard job passed.
+
+  #1047 had a second root cause: plain resource executables were framework-dependent on frameworks that ship only as runtime packs. The base SDK now defaults every resource executable to self-contained.
+
+  Behavior changes for the review:
+  - `AddJwtBearer` throws at registration when issuers or audiences are unset.
+  - `UseStaticFiles()` serves only `<content root>/wwwroot`.
+  - Plain entry points bind `Http:Endpoints`, or `127.0.0.1:5000` when none is configured.
+  - HTTP/2 and HTTP/3 enforce the body cap with 413.
+  - Routes mapped after start throw.
+  - A faulting HTTP/2 or HTTP/3 exchange gets a 500 or a stream reset instead of taking down the connection. HTTP/1.1 mid-body limit breaches now surface as 500 (#1071).
+  - A Content-Digest mismatch on HTTP/3 surfaces at the terminal read instead of a pre-dispatch 400.
+
+  Scope-creep filed: #1071–#1076 and #1077–#1085. #1080 records that real-QUIC resets carry the driver's default error code until the Connections contract can carry one.
+- **Stage 6 delivered (2026-09-30).** On the Phase 2 branch:
+  - #1054 `523049c6` (match/dispatch split, preflight candidates, fail-closed endpoint middleware); consumers moved onto the published endpoint in `99732edf` (RateLimiting), `71e11b7e` (RequestTimeouts), `2dce79d5` (Caching) and `2811f201` (Diagnostics); ordering docs `0cf65e02`; last-wins requirement check `e7818dd2`
+  - #1055 `08619d7d` (convention builders, group metadata composed at build, route-or-query binding) and `7b80e2ac` (`RequireRateLimiting`, `WithRequestTimeout`, `CacheOutput`, `WithHttpLogging` and their opt-outs)
+  - #1056 `9ba64fc9`
+  - `85d71c2e` extends the NativeAOT guard to groups, policy verbs, branching and the fallback
+
+  Verification: 27 Web suites and the generator suite pass, 1,236 tests in all (Routing 344, Web.Hosting 136, StaticFiles 94). The Authorization, CookiePolicy and Cors suites are still empty placeholders. The guard publishes NativeAOT locally for win-arm64 with no trim or AOT diagnostics and passes 11/11 smoke checks.
+
+  Behavior changes for the review:
+  - `UseRouting()` publishes the endpoint and calls `next`; the pipeline terminal runs it and answers 405. Middleware after `UseRouting()` now runs for matched requests and for 405s (owner decision 2).
+  - An endpoint whose rate limit or timeout no middleware applied (missing, or registered ahead of `UseRouting()`) fails at dispatch with `InvalidOperationException` instead of running unprotected.
+  - Policy middleware goes after `UseRouting()`: rate limiting, request timeouts and output caching, and response compression in an application that caches. Endpoint rate-limit policies can now queue, and an endpoint timeout starts when `UseRequestTimeouts` runs.
+  - `Map*` returns `IRouterRouteBuilder` instead of the pipeline builder, so `app.MapGet(...).MapGet(...)` chains no longer compile.
+  - Group metadata composes at route-table build in any call order; parameter policies still freeze.
+  - A typed endpoint in a group, or with a non-literal pattern, binds a scalar the pattern does not place from the route, then the query.
+  - An omitted `{**catchAll}` segment now matches.
+  - `Map(path)` publishes an effective path and path base and leaves `IHttpRequest.Path` alone; rewriting waits on #782. Branches hold middleware only, which the compiler enforces.
+  - A CORS preflight publishes its candidate endpoint (`IsPreflight`) without running it; access logging records it with the configured fields.
+
+  Scope-creep filed:
+  - #1092: the `cohesion-spa` template should map `MapFallbackToFile`. Deferred because it needs the packed-SDK template run tests.
+  - #1093 (P001): a pre-existing process crash. A pipe continuation runs with the wrong state on `Connections.Tcp`'s `SocketPipeScheduler`. It aborted `Web.Hosting.Resources` in CI on two branches, and the Web matrix's default `fail-fast` then cancelled every other Web job.
+- **Between Stages 6 and 7 (2026-09-30 to 2026-10-01).** The owner published the branch and opened it for review as [PR #1094](https://github.com/assimalign/cohesion/pull/1094).
+  - `d001aa9e` sets `fail-fast: false` on the Web build and HTTPS-sample matrices, so one failing leg no longer cancels the rest.
+  - `0cdbe27f` merges `main` and re-applies the Stage 5 AOT checks onto #1044's restructured DI `CallSiteFactory`. `01822ceb` corrects two Web.Hosting design statements that Stage 5 made stale.
+  - #1093 is fixed in `6ca7ae2a`. It had two root causes in `Connections.Tcp`. `SocketPipeAsyncArgs` could run a continuation before its state was published, which crashed the process ("An unexpected state object was encountered"). On Windows, a cancelled accept leaked the socket AcceptEx had already connected, so the client hung. Each cause has a regression test that failed before the fix.
+- **Stage 7 delivered (2026-10-01), awaiting owner review.** Five agent sessions built it in parallel; it was integrated on the Phase 2 branch:
+  - #155 `f72af3eb`: Web.Authorization, with policies over `ClaimsPrincipal`, `RequireAuthorization`/`AllowAnonymous`, `UseAuthorization` and per-endpoint schemes.
+  - #1057 `d9d23980`: the new Web.Antiforgery, with `AddAntiforgery` (including a data-protection overload), `UseAntiforgery`, and a requirement the generator adds to `[FromForm]` endpoints.
+  - #3 with #109–#111 `707ee50a`: Web.Cors, with a policy engine, preflights answered from the candidate endpoint, and `RequireCors`/`DisableCors`.
+  - #156:
+    - `51eab54b` makes the Cookie authentication ticket essential by default.
+    - `af650441` makes Web.CookiePolicy enforce consent, attribute floors, cookie prefixes and the 400-day cap.
+    - `6aa7dc7c` corrects the Http.Cookies docs.
+  - #1058:
+    - `08ef6913` adds the header names.
+    - `78c7544a` adds the new Web.SecurityHeaders.
+    - `8fc2e436` makes IdentityHub take its headers from it.
+  - `6c36109e` makes the antiforgery cookie essential by default and lets sessions opt in, so a consent requirement no longer breaks form posts.
+  - NativeAOT guard: `30054f1a` covers authorization, `15cd4e29` CORS, and `34d78dd6` antiforgery, cookie policy and security headers.
+  - `5908d834` adds the area's middleware order (`docs/resources/Web/MIDDLEWARE_ORDER.md`) and fixes six packages whose docs each told the reader to register them first.
+
+  Verification:
+  - The 32 Web suites pass (1,758 tests).
+  - So do nine outside suites (1,491 tests): Http (1,241), Http.Cookies, Http.Antiforgery, Http.Forwarded, Http.Sessions, IdentityHub.Hosting, the endpoint generator, App.Runtime's framework closure tests and Connections.Tcp.
+  - Both App.Web producers pack.
+  - The guard publishes NativeAOT for win-arm64 and passes 20/20 smoke checks.
+  - `CodeFixes.WebTests` does not build, because the project resolves to `netstandard2.0`. That predates the program, and no workflow runs it.
+
+  Behavior changes for the review:
+  - An endpoint that requires authorization, CORS or antiforgery fails at dispatch when that middleware is missing or registered ahead of `UseRouting()`. That includes `DisableCors()`: a `UseCors` registered ahead of routing would apply the default policy to an endpoint that opted out.
+  - Every authorization item on an endpoint applies, outer group first, except the ones declared before the most specific `AllowAnonymous`, which clears them (§7.4, decision 7). Unlike ASP.NET Core, a route that requires authorization inside an `AllowAnonymous` group stays protected. The fallback policy also covers requests that match no endpoint, so an anonymous caller is challenged on an unknown path.
+  - The antiforgery cookie token is `Secure` whenever the request's effective scheme is HTTPS, as the session and authentication cookies already were.
+  - `[FromForm]` typed endpoints require antiforgery. An application with them calls `AddAntiforgery()` and `UseAntiforgery()` after `UseRouting()`, or opts each such endpoint out with `DisableAntiforgery()`.
+  - Http.Antiforgery joins App.Web. Without a data-protection provider its tokens still die on restart.
+  - `UseCookiePolicy` now enforces its policy instead of passing every cookie through, and its namespace is now `Assimalign.Cohesion.Web.CookiePolicy`. The Cookie authentication ticket and the antiforgery cookie are essential by default; the session cookie is not. Under a consent requirement a session therefore starts only after consent, unless `HttpSessionOptions.CookieIsEssential` is set.
+  - IdentityHub sends its strict CSP, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and `nosniff` on every response, not only the approval page.
+
+  Review decisions applied (2026-10-01):
+  - `e451032b`: the most specific `AllowAnonymous` wins (decision 7). Web.Authorization has 69 tests.
+  - `d086cda1`: the antiforgery cookie token is `Secure` whenever the effective scheme is HTTPS, through the same floor Cookie authentication uses. `CookieSecure` still forces the flag on plaintext requests. Http.Antiforgery now references Http.Forwarded and has 31 tests.
+  - The five Stage 7 agent worktrees and their branches were removed.
+
+  Scope-creep filed:
+  - #1153: cookie `Path` and `Domain` values are not validated.
+  - #1154: a `101` upgrade response sends each `Set-Cookie` twice.
+  - #1155: an unknown key id reloads the whole key ring, with no throttle.
+  - #1156: a response-starting hook for the Web pipeline, which would remove the CORS trade-off.
+- **Stage 8 delivered (2026-10-01 to 2026-10-02), awaiting owner review.** Agent sessions built the items in their own worktrees. Each was reviewed, integrated on the Phase 2 branch, verified and pushed to PR #1094 item by item. The integrator's own commits are the guard coverage, the OpenAPI upload mapping, the #1180 thrower move and the doc corrections:
+  - #1062 `4e0fb6da`, `509681a6`: the five remaining OpenApi packages are built, tested and released, and the OpenApi source generator ships inside `OpenApi.Attributes`. Shipping it made a generated-code collision reachable; #1169 `e03cd9f9` composes generated metadata across assemblies through `IOpenApiMetadataProvider`.
+  - #1059 `079e3ef0`, `b62485e8`: typed handlers return `T`, `Task<T>` or `ValueTask<T>`, written with content negotiation (`string` as `text/plain`, `null` as 204, 406 when nothing is acceptable, a 500 fault when no contract covers `T`), and unsupported handler shapes fail the build with `COHWEB0001`–`COHWEB0007`. Every typed endpoint carries `EndpointParameterMetadata` and `EndpointResponseMetadata`.
+  - #1172–#1176 `d0952645`, `439e5197`, `c05248a0`, `1a563bb4`, `dfc81374`: generator defects found during #1059 (escaped binding names, a body with no contract is a fault rather than a 415, generic receivers, conditional-access and static-form calls, injected `IHttpRequest`/`IHttpResponse`).
+  - #1060 `650b2b83`: the new Web.Validation runs a registered validator on a bound body model before the handler and answers 400 problem+json keyed by member path. ObjectValidation composes nested member paths. #1206 `227f49e6`: under default options a member's rule chain stops only on its own failure, so every failing member is reported; it used to stop every later member once any member had failed.
+  - #1061: `60747509` adds `SendFileAsync`/`WriteStreamAsync` with conditional and single-range support on the StaticFiles engine; `6125b9c2` binds uploaded files in typed handlers and answers an over-limit form 413 and a malformed one 400. #1187 `cb2e5903` opens served files for shared reading.
+  - #152 `821168fb`, `b8a12a91`, `2fdf64ae`, `3fd06146`: the new Web.OpenApi, NuGet-only, generates OpenAPI 3.0/3.1/3.2 documents from endpoint metadata and the app's source-generated JSON contracts. #1205 `bb476a67` takes each operation's security from the endpoint's effective authorization policy through a read-only Web.Authorization seam; `b22c4fb1` describes uploads as multipart binary parts and lists a form's 413; `c029accd` pins the missing-serializer error.
+  - #1180 (P001, security) `efda629b`, `e76b4bd4`: `PhysicalFileSystem` and the in-memory provider refuse any path outside their root with `PathOutsideRoot` before touching storage. `../` escapes and sibling-prefix roots were open; StaticFiles had been protected only by its own request-path gate.
+  - NativeAOT guard: `3feae793` return values, `2ba14611` the OpenAPI document, `c9ad011c` validation and uploads, 28 smoke checks.
+  - Housekeeping: `c571c739` and `b8d5a5db` correct statements Stage 7 left stale, `f949d019` an Http cref, `9c774357` lists Web.HttpsPolicy in the resources solution, and `934cdbd2` documents the Web root's application and builder contracts.
+  - Docs site ([cohesion-docs#1](https://github.com/assimalign/cohesion-docs/pull/1)): `09b697a` through `6da9f2b` add the Web.Validation and Web.OpenApi pages and an OpenAPI guide, sync the pages Stage 8 changed, and list DependencyInjection on the 16 hosting pages that omitted it. `405b072f` corrects five cohesion statements the sync found stale.
+
+  Verification, run as each change was integrated and again on the suites the later fixes touched (final tip `227f49e6`):
+  - Web: the endpoint generator (67), Web.Api (71), Web.Validation (35), Web.Antiforgery (63), Web.Forms (2), Web.Serialization (48), Web.Routing (344), Web.OpenApi (50), Web.Authorization (87), Web.StaticFiles (175) and Web.Hosting (136).
+  - Outside the area: ObjectValidation (230), Http.Forms (35), IdentityHub.Hosting (27), App.Runtime (3), Core (232), FileSystem (41), its Physical (209), InMemory (223), Aggregate (96), Globbing (39) and IsolatedStorage (102) providers, Configuration.FileSystem (4), Configuration.Json (3), Database.Storage (96) and Database.Hosting (50).
+  - Both App.Web producers pack, and the release-inventory and dependency-graph checks pass.
+  - The guard publishes NativeAOT for win-arm64 at `227f49e6` with no trim or AOT warnings and passes 28/28 smoke checks.
+
+  Behavior changes for the review:
+  - A typed handler's return value is written instead of throwing at mapping time, and a shape the generator cannot bind fails the build.
+  - A body type no registered serializer covers, or a body read with no serialization registered, is a 500 through the exception boundary instead of a 415 (#1173).
+  - With Web.Validation referenced, an invalid body model is answered 400 before the handler runs. App.Web ships Web.Validation and ObjectValidation.
+  - An ObjectValidation validator with default options reports every failing member, one rule's errors each, instead of the first failing member only.
+  - Uploads bind; an over-limit or malformed form on a typed endpoint is 413 or 400 instead of 500, and an over-limit form read by `UseAntiforgery` is 413 instead of a 400 token rejection. `HttpFormFileCollection` keeps every file of a repeated field.
+  - `PhysicalFileSystem` throws `PathOutsideRoot` for a path outside its root, `Exists` included; `RootDirectory.Parent` is `null`; `FileSystemPath.Merge` throws when `..` climbs past the root and matches prefixes on segment boundaries.
+  - The OpenAPI document lists security for fallback-protected endpoints and named policies' schemes, and an unregistered policy name fails the document as it fails every request to that endpoint.
+
+  Questions for the review:
+  - #1180 was a path-traversal hole in the released 10.0.0-preview.1. Should a security advisory go out for it?
+  - Should validation stay its own package (Web.Validation)? The owner descoped validation from Web.Api on 2026-07-20; the separate package was the integrator's placement.
+  - The OpenAPI document fails on an unregistered authorization policy name, as every request to that endpoint does. The alternative is to describe the endpoint and degrade.
+  - #1221 (P002): putting ObjectValidation's evaluation order right changes which message every chained rule reports.
+  - `IOpenApiMetadataProvider` (#1169) and `IOpenApiEndpointSource` are two seams for contributing operations. Keep both, or fold one into the other?
+  - Two program-level items Stage 8 made visible:
+    - Every Cohesion assembly carries `RequiresPreviewFeatures`, so a consumer on the plain .NET SDK gets CA2252 until it enables preview features.
+    - The release is about 389 packages, above nuget.org's 350-per-hour push ceiling, which `VERSIONING_RELEASE_POLICY.md` says must not be exceeded by one promotion.
+
+  Scope-creep filed:
+  - #1206–#1209: ObjectValidation reporting, shared state, exception errors and error keys (#1206 is fixed in this stage).
+  - #1221 (P002): ObjectValidation evaluates chained rules and members in reverse declaration order, against its FIFO contract. #1222–#1224: README samples, `Stop` with a custom context, `ValidateAsync` cancellation.
+  - #1210, #1211: `UseForms()` failures and repeated multipart fields.
+  - #1212–#1216, #1218: root deletion, aggregate mounts, file watching, an IsolatedStorage flake, `Parse` of `/..`, and isolated-storage containment.
+  - #1217: `security: []` on an operation. #1219: database names escape the data root. #1220: Configuration's trim and AOT warnings.
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
@@ -226,3 +447,133 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
 - **Skills/rules:** coding rules auto-load from `.claude/rules/` · `cohesion-work-items` skill (file scope-creep, emit PR close blocks).
 - **Canonical rules:** `.claude/rules/` (auto-loaded). **Roadmap context:** `docs/programs/DELIVERY_ROADMAP.md`.
 - **This program's north star:** assemble the Web resource by wiring the `libraries/Http` stack into `resources/Web`; once assembled, the next major effort is pulling the new ApplicationModel design together (`libraries/ApplicationModel/DESIGN.md`).
+
+---
+
+## 7. Phase 2 — completeness inventory and lineup (2026-09-30)
+
+**Why this section exists.** §4 drained on 2026-07-20, but §4 was never the whole Web backlog. The May-filed security and API items were never scheduled here: CORS **#3** (tasks #109–#111), authorization **#155** and cookie policy **#156** (under #30), OpenAPI **#152** (under #29), and host lifecycle **#146**/**#147** (under #26). So "drained" meant this plan's list was empty, not that the Web framework was complete.
+
+This section is a code-read audit of `main` at `0e28bf16`. Nothing was built or run, so runtime effects below are inferred from the code. The owner approved the lineup on 2026-09-30. It was filed the same day as #1045–#1066 and moved into §4 as Stages 5–10, which is the authority for order and blockers; the tracking column in §7.3 carries the issue numbers.
+
+### 7.1 What ships today
+
+The Web area is 30 libraries plus the two App.Web framework producers: about 29.6k source lines (XML docs included) and 844 test methods. Test counts are in parentheses.
+
+| Group | Projects | State |
+|---|---|---|
+| Runtime | `Web` (3), `Web.Hosting` (96), `Web.Hosting.Resources` (12), `Web.Hosting.Health` (5), `Web.Testing` (19), `Web.ApplicationModel` (9) | real |
+| Routing and API | `Web.Routing` (176), `Web.Api` (13; placeholder `Map*` overloads the generator replaces), `SourceGeneration.Web` (6), `Web.Serialization` (42), `Web.ErrorHandling` (37), `Web.ProblemDetails` (11), `Web.Query` (28) | real |
+| Middleware | `Web.StaticFiles` (52), `Web.Compression` (22), `Web.Caching` (29), `Web.RateLimiting` (20), `Web.RequestTimeouts` (30), `Web.Diagnostics` (38), `Web.ForwardedHeaders` (39), `Web.HostFiltering` (14), `Web.HttpsPolicy` (29), `Web.Sessions` (17), `Web.Health` (37) | real |
+| Authentication | `Web.Authentication` (35), `.Bearer` (16), `.Cookie` (13) | real; Cookie and JWT Bearer handlers only |
+| Placeholders | `Web.Cors` (0) and `Web.Authorization` (0) are empty assemblies that still ship in App.Web. `Web.CookiePolicy` (0): `UseCookiePolicy` does nothing, and it is also released as its own package. `Web.Forms` (2) is a 45-line `UseForms()` | stub |
+
+What works end to end:
+- **Transport:** HTTP/1.1, HTTP/2 and HTTP/3 over TCP, TLS and QUIC.
+- **Routing:** templates, 17 constraints, precedence, 405, route groups, named routes with link generation, host matching.
+- **Handler binding:** source-generated typed binding from route, query, header, JSON body and form scalars, with 400/415 problem responses.
+- **Responses and errors:** serializer registry with content negotiation, exception boundary and status-code pages, RFC 9457 problem details.
+- **Middleware:**
+  - static files with ETag, single ranges and precompressed files;
+  - Brotli/gzip compression and request decompression;
+  - output cache;
+  - rate limiting (four BCL algorithms, partitioned, per endpoint);
+  - request timeouts;
+  - HTTP and W3C access logging;
+  - forwarded headers, host filtering, HTTPS redirection with HSTS;
+  - sessions (in-memory store);
+  - health endpoints.
+- **Authentication:** Cookie and JWT Bearer handlers.
+- **Testing and orchestration:** in-memory and `FromProgram` test factories, and the orchestration control plane.
+
+### 7.2 Defects in shipped code
+
+| # | Defect | Where | Kind |
+|---|---|---|---|
+| D1 | `UseStaticFiles()` with no arguments serves the process working directory. `IWebApplicationContext.ContentRootPath` is never set, and `.json` is a served content type, so `appsettings*.json` can be downloaded. The options and middleware are also rebuilt on every request. | `Web.StaticFiles/src/Extensions/WebApplicationStaticFilesExtensions.cs:24-53`; `Web.Hosting/src/WebApplicationBuilder.cs:108` | security |
+| D2 | JWT Bearer skips issuer and audience validation when `ValidIssuers`/`ValidAudiences` are empty, and accepts any `alg` when the algorithm list is empty. | `Web.Authentication.Bearer/src/JwtBearerOptions.cs:24-36`; `Internal/JwtBearerHandler.cs:187-204` | security |
+| D3 | A plain (orchestration-disabled) app gets no listener unless it calls `Server.UseServer` or `UseConfiguration`, because the default server is silently inactive. As a result, both default templates (`cohesion-web`, `cohesion-spa`) listen on nothing, and the template tests only build them. `appsettings.json` is also never copied to the output folder, which is where the host reads it from. | `WebApplicationBuilder.cs:110-120`; `WebApplicationServerBuilder.cs:35-41`; `tooling/templates/.../TemplateTests.cs:408-409` | DX, P0 |
+| D4 | The server handles one exchange at a time per connection (`await pipeline`, then `await SendAsync`, then the next). HTTP/2 and HTTP/3 multiplexing therefore gives no concurrency, and one faulting exchange aborts every stream on the connection. | `Web.Hosting/src/Internal/WebApplicationServer.cs:305-345` | correctness |
+| D5 | HTTP/2 buffered responses, the Web default, send DATA frames without acquiring send-window credit, which RFC 9113 §6.9 forbids. They also never debit the window, so the client's WINDOW_UPDATEs overflow it after about 2 GiB on one connection, and the server then raises FLOW_CONTROL_ERROR against a compliant client. HEAD response bodies are not suppressed on HTTP/2 or HTTP/3. | `Http.Connections/src/Internal/Http2/Http2ConnectionContext.cs:1691-1709` vs `:972-990` | conformance |
+| D6 | HTTP/3 reads each request stream to FIN into memory inside the accept loop. That means no body cap, requests on the same connection wait behind each other, and request bodies and tunnels can't be streamed. #365 (incremental HTTP/3 request processing) was closed as completed on 2026-06-02, but this path still buffers. | `Internal/Http3/Http3ConnectionContext.cs:207`, `:1151-1157` | DoS |
+| D7 | `Web.ForwardedHeaders` publishes the effective scheme, host and client IP, but only RateLimiting reads them. HTTPS redirection and HSTS, session `Secure` cookies, the compression BREACH guard, host filtering and access logs all read the raw connection values. Behind a TLS-terminating proxy that means redirect loops and no HSTS header. | `HttpsRedirectionMiddleware.cs:55`, `HstsMiddleware.cs:50`, `WebSessionFeature.cs:215`, `ResponseCompressionMiddleware.cs:53`, `HttpLoggingMiddleware.cs:336` | correctness |
+| D8 | The router is built lazily on the first request. Route-table errors therefore surface on every request, and routes mapped after the first request are ignored. The route-template parser has 19 error paths that set an empty message, and cancellation tokens are dropped. | `Web.Routing/src/Internal/RouterFeature.cs:19`; `Patterns/RoutePatternParser.cs`; `RouterRouteHandler.cs` | correctness |
+| D9 | Each TLS endpoint advertises exactly one ALPN protocol. One HTTPS port can't serve both HTTP/1.1 and HTTP/2, and the ambient orchestration endpoint is HTTP/1.1 only. | `Web.Hosting/src/Extensions/WebHostingExtensions.cs:147,188` | capability |
+| D10 | #937: a malformed `:path` kills the HTTP/2 connection without sending GOAWAY, and on HTTP/3 it aborts the whole QUIC connection. | #937 | robustness |
+| D11 | Unfinished packages reach consumers: the three placeholders in §7.1 (`Web.Cors`, `Web.Authorization`, `Web.CookiePolicy`). `Http.ServerSentEvents` is an App.Web member but is excluded from CI, so its tests never run; the same is true of `Http.DigestFields` and `Http.InterimResponses`. | `Web.Runtime/Directory.Build.props`; `$script:CohesionCiMatrixExclusion` in `CohesionPackaging.psm1` | packaging |
+| D12 | Key-material defaults don't survive real deployments. The antiforgery protector defaults to a per-process random key, so tokens die on restart and don't work across instances. The DataProtection key ring defaults to `AppContext.BaseDirectory/DataProtection-Keys`, which fails in read-only and multi-instance containers. | `Http.Antiforgery/src/HttpAntiforgeryOptions.cs:52`; `Web.Authentication/src/AuthenticationBuilder.cs:69-73` | ops |
+
+**After Stage 5 (2026-09-30):**
+- Fixed: D1–D8, D10, and D11's CI half.
+- Still open:
+  - D9 → Stage 9, #1063.
+  - D12 → Stage 10, #806–#808.
+  - D11's placeholder half: the empty `Web.Cors` and `Web.Authorization` and the no-op `Web.CookiePolicy` still ship in App.Web until Stage 7 fills them (#3, #155, #156).
+
+**After Stage 7 (2026-10-01):**
+- Fixed: D11's placeholder half. `Web.Cors`, `Web.Authorization` and `Web.CookiePolicy` are real.
+- D12, in part: `AddAntiforgery(dataProtectionProvider)` makes antiforgery tokens survive restarts and validate on every instance that shares the key repository. Without a provider the per-process key is still the default, now documented as development-only, and the key ring's default location is unchanged (#806–#808).
+
+### 7.3 Missing capabilities
+
+| Capability | Status | Tracking |
+|---|---|---|
+| Endpoint-aware pipeline (middleware between route match and handler) | Delivered in Stage 6. `UseRouting` publishes the endpoint and the pipeline terminal runs it; RateLimiting, RequestTimeouts, Caching and Diagnostics read the published endpoint, and their workarounds are gone. Every `Map*`, typed ones included, returns a convention builder, and groups compose metadata at route-table build. A CORS preflight publishes its candidate endpoint. | #1054, #1055; unblocks CORS, authorization, antiforgery and OpenAPI |
+| CORS | Delivered in Stage 7 (`Web.Cors`): policies validated at startup, preflights answered from the candidate endpoint's policy, `RequireCors`/`DisableCors` on routes and groups | #3, #109–#111 |
+| Authorization (policies, `RequireAuthorization`, `UseAuthorization`) | Delivered in Stage 7 (`Web.Authorization`): policies over `ClaimsPrincipal`, `RequireAuthorization`/`AllowAnonymous`, a fallback policy, per-endpoint schemes | #155; the #828 adapter later |
+| Cookie-policy enforcement | Delivered in Stage 7 (`Web.CookiePolicy`): consent, `Secure`/`HttpOnly`/`SameSite` floors, the `__Host-` and `__Secure-` prefixes, the 400-day cap | #156 |
+| Antiforgery in the pipeline | Delivered in Stage 7 (`Web.Antiforgery`): enforced per endpoint and automatically on `[FromForm]` endpoints; tokens are sealed with data protection when a provider is passed | #1057 |
+| OpenAPI for Web endpoints | Absent. OpenApi.Attributes, Generation, Integration and Versioning are unreleased and excluded from CI, and the release rule blocks an adapter that depends on them | #152, #1062 |
+| Handler return values (`Task<T>`); generator diagnostics | Only `void`/`Task`/`ValueTask`. Unsupported handler shapes compile and then throw at runtime | #1059 |
+| Validation problem responses | Absent (descoped from #796) | #1060 |
+| File binding (`IHttpFormFile`); file and stream results | Absent | #1061 |
+| Pipeline branching (`Map(path)`, `MapWhen`, `UseWhen`, `Run`); fallback routes (`MapFallbackToFile`) | Delivered in Stage 6. A path branch publishes an effective path and path base instead of rewriting the request, which stays gated on #782 | #1056 |
+| Server telemetry (`ActivitySource`, `Meter`, `traceparent`, request ID) | Absent in both Web and Http | #1064 |
+| Hosting diagnostics; lame-duck drain | Absent | #147; #146 |
+| mTLS (client certificates visible to handlers); multi-protocol ALPN endpoints; config for HTTP/3, limits and the connection cap | Absent | #1065; #1063 |
+| HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Body cap delivered in Stage 5 on both protocols (#1048, #1066). HTTP/3 now surfaces request trailers. HTTP/2 and HTTP/3 timeouts and data rates are still absent. | #1085; HTTP/2 request trailers deferred along with gRPC |
+| Security headers (CSP, nosniff, Referrer-Policy, frame-ancestors) | Delivered in Stage 7 (`Web.SecurityHeaders`): safe defaults on every response; opt-in CSP with per-request nonces, Permissions-Policy and the cross-origin isolation fields; per-endpoint overrides | #1058 |
+| A representative Web app AOT-published in CI | Delivered in Stage 5: `Web.AotGuard` is published NativeAOT and smoke-tested by the `resource-web.yml` `aot-guard` job | #1052 |
+| OIDC handler; JWT Bearer authority/JWKS discovery | Absent | blocked on IdentityModel #829/#830 |
+| WebSockets | Absent. The HTTP/1.1 Upgrade and extended CONNECT bootstrap exist | #765 (needs an ADR) |
+| URL rewrite | Absent | #782 (needs the request-mutation seam decision) |
+
+### 7.4 Owner decisions
+
+Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decision 5 is open.
+
+1. **Which claim model authorization runs on.**
+   - Web: authenticates onto BCL `ClaimsPrincipal` by a recorded decision (`Web.Authentication/docs/DESIGN.md:157-167`).
+   - IdentityModel: its DESIGN makes canonical claims the authorization input and calls an authorization model a non-goal (`IdentityModel/docs/DESIGN.md:1004-1009, 1030-1032`). #828 (an authorization model over canonical claims) is still open.
+   - Recommendation: `Web.Authorization` evaluates over `ClaimsPrincipal`, and #828 later contributes an adapter instead of being a prerequisite.
+2. **How to split routing.** Recommendation: `UseRouting()` becomes non-terminal (match, publish the endpoint, call `next`), and the pipeline's terminal runs the matched endpoint. This is a breaking change: middleware registered after `UseRouting()` would start running for matched requests.
+3. **Forwarded headers: read the effective values, or rewrite the request.** Recommendation: keep the documented model where middleware read the effective values, and make every consumer read them (D7).
+4. **Security-headers middleware in v1?** Recommendation: yes; it is small, P3.
+5. **The Web v1 date.** `DELIVERY_ROADMAP.md` ends L3.1 on 2026-10-15, and Stages 5–7 alone are about 20 items. Either move the date or cut v1 at the end of Stage 7.
+6. **Standing gates, open since July:** the WebSockets ADR (#765) and the request-mutation seam for rewrite (#782).
+7. **How authorization combines `AllowAnonymous` with requirements (raised by Stage 7, adopted 2026-10-01).**
+   - Stage 7 first shipped ASP.NET Core's rule: `AllowAnonymous` anywhere on an endpoint wins. A route that required authorization inside an anonymous group therefore ran anonymously, while routing's last-wins dispatch check still treated it as protected and demanded `UseAuthorization`.
+   - Adopted: the most specific item wins, so `AllowAnonymous` clears only the requirements declared before it. That fails closed for the inner requirement and matches the dispatch check (`e451032b`).
+
+### 7.5 Lineup
+
+Filed on 2026-09-30 as #1045–#1066 and moved into §4 as Stages 5–10, which is now the authority for order and blockers. The plan items map to issues as follows:
+
+| Plan item | Issue | Plan item | Issue | Plan item | Issue |
+|---|---|---|---|---|---|
+| 5.1 | #1045 | 5.7 | #937 | 7.3 | #156 |
+| 5.2 | #1046 | 5.8 | #1050 | 7.4 | #1057 |
+| 5.3 | #1047 | 5.9 | #1051 | 7.5 | #1058 |
+| 5.4 | #1048 | 5.10 | #1052 | 8.1–8.3 | #1059–#1061 |
+| 5.5 | #1066 | 5.11 | #1053 | 8.4, 8.5 | #1062, #152 |
+| 5.6 | #1049 | 5.12 | #699 | 9.1–9.5 | #1063, #147, #146, #1064, #1065 |
+| 6.1–6.3 | #1054–#1056 | 7.1, 7.2 | #3 (+#109–#111), #155 | | |
+
+**Docs drift** to fix alongside the items that touch these files:
+- The area README lists `Web.Cors` as a working library and undercounts `Web.Hosting.Resources` consumers.
+- Routing README and DESIGN still name functions, controllers and results.
+- These notes are stale: ProblemDetails "future `OnError`", Query "future server output cache", Hosting "31f follow-up", Diagnostics "until #778".
+- Authentication docs name `IHttpAuthenticationFeature`; the code type is `IAuthenticationFeature`.
+- The Http.Connections DESIGN cites a `DESIGN_SUGGESTION.md` that doesn't exist.
+- `DEVELOPER_EXPERIENCE_DESIGN.md:720` cites the old `frameworks/` path.
+- The OpenApi README marks five unreleased packages "Implemented".

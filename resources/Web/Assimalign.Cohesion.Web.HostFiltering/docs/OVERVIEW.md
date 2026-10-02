@@ -11,8 +11,12 @@ enabled by default.
 
 - `UseHostFiltering(Action<HostFilteringOptions> configure)` — a pipeline verb
   on `IWebApplicationPipelineBuilder` that registers the validation middleware.
-  **Register it first**: registration order is pipeline order, and a request
-  whose host fails validation should be rejected before anything else sees it.
+  **Register it at the front**: registration order is pipeline order, and a
+  request whose host fails validation should be rejected before anything else
+  does work for it. Behind a proxy it goes directly after `UseForwardedHeaders`,
+  because it validates the effective host. Only `UseHttpLogging` and
+  `UseSecurityHeaders`, which read no client identity on the way in, run ahead
+  of both (the area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md)).
 - `HostFilteringOptions` — the allowlist (`AllowedHosts`) plus the explicit
   RFC 9112 §3.2 empty/missing-Host policy (`AllowEmptyHost`, default
   `false` = reject).
@@ -39,14 +43,24 @@ app.UseHostFiltering(options =>
 // ...the rest of the pipeline...
 ```
 
-A request whose transport-resolved host (HTTP/1.1 request-target/`Host`
-precedence, HTTP/2 / HTTP/3 `:authority`) does not match answers
-`400 Bad Request` with an empty body and short-circuits.
+A request whose effective host does not match answers `400 Bad Request` with an
+empty body and short-circuits. The effective host is the transport-resolved
+host (HTTP/1.1 request-target/`Host` precedence, HTTP/2 / HTTP/3
+`:authority`), unless the application runs behind a trusted proxy and
+registers `UseForwardedHeaders` first — then it is the host the proxy
+forwarded, and the allowlist should name the public hosts:
+
+```csharp
+app.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+app.UseHostFiltering(options => options.AllowedHosts.Add("example.com"));
+```
 
 ## Dependencies
 
 - `Assimalign.Cohesion.Web` — the pipeline abstractions the verb extends.
 - `Assimalign.Cohesion.Http` — `HttpHost` and `HttpHostMatcher`.
+- `Assimalign.Cohesion.Http.Forwarded` — the `EffectiveHost` read, which falls
+  back to the transport-resolved host when no forwarded-headers middleware ran.
 
 Delivered to applications through the `App.Web` shared framework (via
 `Sdk.Web`); no project wiring required. See `docs/DESIGN.md` for the design

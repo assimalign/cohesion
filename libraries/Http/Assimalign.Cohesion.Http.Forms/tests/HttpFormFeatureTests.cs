@@ -273,6 +273,163 @@ public class HttpFormFeatureTests
         viaProperty["k"].Value.ShouldBe("v");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Forms] - Limits: a multipart section over the body limit names the limit as the cause")]
+    public async Task ReadFormAsync_MultipartSectionOverBodyLimit_ShouldThrowWithLimitCause()
+    {
+        // Arrange
+        const string boundary = "B";
+        string body =
+            $"--{boundary}\r\n" +
+            "Content-Disposition: form-data; name=\"upload\"; filename=\"big.bin\"\r\n" +
+            "\r\n" +
+            "0123456789abcdef" +
+            $"\r\n--{boundary}--\r\n";
+
+        IHttpRequest request = new BareHttpRequest
+        {
+            ContentType = $"multipart/form-data; boundary={boundary}",
+            Body = BodyOf(body),
+        };
+        HttpFormFeature feature = new(request, new HttpFormOptions { MultipartBodyLengthLimit = 8 });
+
+        // Act
+        InvalidDataException exception = await Should.ThrowAsync<InvalidDataException>(() => feature.ReadFormAsync());
+
+        // Assert — still an InvalidDataException for existing callers, with the limit as its cause.
+        HttpFormLimitExceededException limit = exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>();
+        limit.Message.ShouldBe(exception.Message);
+        limit.Code.ShouldBe(HttpErrorCode.ReadingError);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Forms] - Limits: too many urlencoded entries names the limit as the cause")]
+    public async Task ReadFormAsync_ValueCountOverLimit_ShouldThrowWithLimitCause()
+    {
+        // Arrange
+        IHttpRequest request = new BareHttpRequest
+        {
+            ContentType = "application/x-www-form-urlencoded",
+            Body = BodyOf("a=1&b=2&c=3"),
+        };
+        HttpFormFeature feature = new(request, new HttpFormOptions { ValueCountLimit = 2 });
+
+        // Act
+        InvalidDataException exception = await Should.ThrowAsync<InvalidDataException>(() => feature.ReadFormAsync());
+
+        // Assert
+        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Forms] - Limits: an overlong boundary names the limit as the cause")]
+    public async Task ReadFormAsync_BoundaryOverLimit_ShouldThrowWithLimitCause()
+    {
+        // Arrange
+        const string boundary = "boundary-that-is-too-long";
+        IHttpRequest request = new BareHttpRequest
+        {
+            ContentType = $"multipart/form-data; boundary={boundary}",
+            Body = BodyOf($"--{boundary}--\r\n"),
+        };
+        HttpFormFeature feature = new(request, new HttpFormOptions { MultipartBoundaryLengthLimit = 8 });
+
+        // Act
+        InvalidDataException exception = await Should.ThrowAsync<InvalidDataException>(() => feature.ReadFormAsync());
+
+        // Assert
+        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Forms] - Limits: a malformed multipart header is not a limit")]
+    public async Task ReadFormAsync_MalformedMultipartHeader_ShouldThrowWithoutLimitCause()
+    {
+        // Arrange — a header line with no colon.
+        const string boundary = "B";
+        string body =
+            $"--{boundary}\r\n" +
+            "this is not a header\r\n" +
+            "\r\n" +
+            "value" +
+            $"\r\n--{boundary}--\r\n";
+
+        IHttpRequest request = new BareHttpRequest
+        {
+            ContentType = $"multipart/form-data; boundary={boundary}",
+            Body = BodyOf(body),
+        };
+
+        // Act
+        InvalidDataException exception = await Should.ThrowAsync<InvalidDataException>(() => new HttpFormFeature(request).ReadFormAsync());
+
+        // Assert
+        exception.InnerException.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Forms] - Limits: a header block that ends exactly at the headers-length limit still parses")]
+    public async Task ReadFormAsync_HeaderBlockAtTheLimit_ShouldParseAndRejectOneMoreLine()
+    {
+        // Arrange — the limit is the length of the one header line, so its CRLF runs the budget two
+        // bytes past the limit: the blank line that ends the block must still be read, and any further
+        // header line is over the limit.
+        const string boundary = "B";
+        const string header = "Content-Disposition: form-data; name=\"k\"";
+
+        string fits = $"--{boundary}\r\n{header}\r\n\r\nv\r\n--{boundary}--\r\n";
+        string over = $"--{boundary}\r\n{header}\r\nContent-Type: text/plain\r\n\r\nv\r\n--{boundary}--\r\n";
+
+        HttpFormOptions options = new() { MultipartHeadersLengthLimit = header.Length };
+        HttpFormFeature fitting = new(new BareHttpRequest { ContentType = $"multipart/form-data; boundary={boundary}", Body = BodyOf(fits) }, options);
+        HttpFormFeature overflowing = new(new BareHttpRequest { ContentType = $"multipart/form-data; boundary={boundary}", Body = BodyOf(over) }, options);
+
+        // Act
+        IHttpFormCollection form = await fitting.ReadFormAsync();
+        InvalidDataException exception = await Should.ThrowAsync<InvalidDataException>(() => overflowing.ReadFormAsync());
+
+        // Assert
+        form["k"].Value.ShouldBe("v");
+        exception.InnerException.ShouldBeOfType<HttpFormLimitExceededException>();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Forms] - Files: every part of a multiple-file field is kept, in order")]
+    public async Task ReadFormAsync_FilesSharingAName_ShouldKeepEveryFile()
+    {
+        // Arrange — RFC 7578 §4.3 sends each file of a multiple-file field as its own part, same name.
+        const string boundary = "B";
+        string body =
+            $"--{boundary}\r\n" +
+            "Content-Disposition: form-data; name=\"photos\"; filename=\"one.png\"\r\n" +
+            "\r\n" +
+            "1" +
+            $"\r\n--{boundary}\r\n" +
+            "Content-Disposition: form-data; name=\"photos\"; filename=\"two.png\"\r\n" +
+            "\r\n" +
+            "22" +
+            $"\r\n--{boundary}\r\n" +
+            "Content-Disposition: form-data; name=\"avatar\"; filename=\"me.png\"\r\n" +
+            "\r\n" +
+            "333" +
+            $"\r\n--{boundary}--\r\n";
+
+        IHttpRequest request = new BareHttpRequest
+        {
+            ContentType = $"multipart/form-data; boundary={boundary}",
+            Body = BodyOf(body),
+        };
+
+        // Act
+        IHttpFormCollection form = await new HttpFormFeature(request).ReadFormAsync();
+
+        // Assert — before, the second photo replaced the first.
+        form.Files.Count.ShouldBe(3);
+        List<string> names = new();
+        foreach (IHttpFormFile file in form.Files)
+        {
+            names.Add(file.FileName);
+        }
+
+        names.ShouldBe(["one.png", "two.png", "me.png"]);
+        form.Files.TryGetValue("PHOTOS", out IHttpFormFile? first).ShouldBeTrue();
+        first!.FileName.ShouldBe("one.png");
+    }
+
     private static MemoryStream BodyOf(string content) => new(Encoding.UTF8.GetBytes(content));
 
     /// <summary>Non-seekable stream that just yields zero bytes up to a configured length.</summary>

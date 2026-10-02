@@ -37,10 +37,11 @@ public sealed class Http2ConnectionListenerOptions
     /// deployment is protected without any explicit configuration. When a limit is exceeded the
     /// connection is terminated with <c>GOAWAY</c> carrying <c>ENHANCE_YOUR_CALM</c>
     /// (RFC 9113 §7, error code <c>0x0b</c>) — the same escalation Kestrel uses — so a
-    /// well-behaved peer can retry its in-flight streams on a fresh connection. The inherited
-    /// shared limits are not yet enforced by the HTTP/2 machinery (request-body buffering is
-    /// bounded by flow-control backpressure; the hard body cap and connection timeouts are
-    /// tracked follow-up work).
+    /// well-behaved peer can retry its in-flight streams on a fresh connection. Of the inherited
+    /// shared limits, the HTTP/2 machinery enforces <see cref="HttpConnectionListenerLimits.MaxRequestBodySize"/>
+    /// (<c>413</c>, per stream — the connection keeps serving its other streams) on top of the
+    /// flow-control backpressure that bounds request-body buffering; the connection timeouts and
+    /// data rates are tracked follow-up work.
     /// </para>
     /// <para>
     /// These limits are consumed entirely by the HTTP/2 frame machinery; there is no DI, logging,

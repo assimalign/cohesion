@@ -36,11 +36,12 @@ public class PerApplicationRouterStateTests
         app2.AddRouting();
         app2.UseRouting().Map(new Route(HttpMethod.Get, "/beta", betaHandler));
 
-        // Track fall-through so a 404 (no leak) is observable.
+        // Track requests that selected no route, so a 404 (no leak) is observable. Routing is non-terminal
+        // (#1054), so downstream middleware runs for every request and reads whether a route matched.
         bool app1FellThrough = false;
         bool app2FellThrough = false;
-        app1.Use((ctx, next) => { app1FellThrough = true; return next.Invoke(ctx); });
-        app2.Use((ctx, next) => { app2FellThrough = true; return next.Invoke(ctx); });
+        app1.Use((ctx, next) => { app1FellThrough = ctx.GetRouteMatch() is null; return next.Invoke(ctx); });
+        app2.Use((ctx, next) => { app2FellThrough = ctx.GetRouteMatch() is null; return next.Invoke(ctx); });
 
         // Act & Assert — app 1 serves /alpha but 404s /beta.
         await app1.ExecuteAsync(TestHttpContext.Create(HttpMethod.Get, "/alpha"));

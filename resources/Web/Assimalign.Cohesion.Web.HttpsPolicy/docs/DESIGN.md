@@ -17,12 +17,16 @@ The typed protocol values it stands on — `HttpScheme`, `HttpHost`,
 `HttpHostMatcher`, `HttpHeaderKey`, the redirect status codes — all live in
 `Assimalign.Cohesion.Http`.
 
-## Connection-security detection — the transport-derived typed scheme
+## Connection-security detection — the effective typed scheme
 
 Both middleware must know, at request time, whether the connection is already
-secure. The decision: **read `IHttpRequest.Scheme` and compare it to
-`HttpScheme.Https`.** This is the typed, AOT-safe security signal #763 delivers,
-and using it is the whole reason this feature was sequenced behind that work.
+secure. The decision: **read the effective scheme (`context.EffectiveScheme`,
+from `Assimalign.Cohesion.Http.Forwarded`) and compare it to
+`HttpScheme.Https`.** Without a trusted proxy in front, the effective scheme *is*
+`IHttpRequest.Scheme` — the typed, AOT-safe security signal #763 delivers, and
+the reason this feature was sequenced behind that work. Behind a trusted proxy it
+is the scheme the client used on the outermost trusted hop (see "Behind a
+TLS-terminating proxy" below).
 
 What #763 actually shipped, traced through the code:
 
@@ -40,33 +44,64 @@ as the transport-derived `HttpScheme` enum on the request — **not** a separate
 `ITlsConnectionFeature` in `IHttpFeatureCollection` (there is none; `IHttpConnectionInfo`
 carries no security field either). Reading the enum is not scheme-string
 sniffing: nothing parses the literal text `"https"`, inspects a header, or
-reflects. It is the same signal `Web.Compression` already gates its BREACH
-protection on (`context.Request.Scheme == HttpScheme.Https`), so this package
-follows an established precedent rather than inventing a detection path.
+reflects. `Web.Compression` gates its BREACH protection on the same effective
+scheme (`context.EffectiveScheme == HttpScheme.Https`), so the two packages agree
+on what "secure" means for any given exchange.
 
 ### Behind a TLS-terminating proxy
 
 `IHttpRequest.Scheme` describes the **immediate hop**. When TLS terminates at a
-proxy and the app-facing hop is plaintext, every request reads as insecure here:
-`UseHttpsRedirection` would loop (the proxy re-delivers the redirect over the
-same plaintext hop) and `UseHsts` would never emit. That is deliberate for now —
-the forwarded-headers feature (#778, `Web.ForwardedHeaders`) intentionally never
-mutates `Request.Scheme`; the proxy-asserted scheme lives on the
-`IHttpForwardedFeature` effective values instead. Teaching this package to
-consult that feature (a legal cross-feature reference) when forwarded trust is
-configured is a recorded follow-up, not silently assumed behavior. Until then:
-do not register `UseHttpsRedirection`/`UseHsts` on a plaintext hop behind a
-TLS-terminating proxy.
+proxy and the app-facing hop is plaintext, the wire scheme reads as insecure on
+every request: reading it, `UseHttpsRedirection` would loop (the proxy re-delivers
+the redirect over the same plaintext hop) and `UseHsts` would never emit (#1050,
+defect D7).
+
+The forwarded-headers middleware (`Web.ForwardedHeaders`) deliberately never
+mutates `Request.Scheme`; it publishes the proxy-asserted scheme and host on
+`IHttpForwardedFeature`, and consumers read them through the `Effective*`
+convention in `Assimalign.Cohesion.Http.Forwarded` (owner decision 3 in
+`docs/programs/HTTP_WEB_PROGRAM_PLAN.md` §7.4: read the effective values, never
+rewrite the request). Both middleware in this package follow that convention:
+
+- **Redirection** treats the request as secure when `EffectiveScheme` is
+  `https`, so a request a trusted proxy received over TLS passes through instead
+  of looping. An insecure request's `Location` is built from `EffectiveHost` —
+  the authority the client addressed — rather than the proxy's upstream
+  authority, which the client cannot reach.
+- **HSTS** emits when `EffectiveScheme` is `https` and matches the excluded hosts
+  against `EffectiveHost`. RFC 6797 §7.2 forbids emission over a non-secure
+  *transport*; the transport that matters is the one the user agent receives the
+  field over, and behind a trusted TLS-terminating proxy that is the proxy's TLS
+  leg. Matching exclusions on the effective host matters for a local proxy that
+  dials `localhost`: matching the wire host would suppress the policy for the
+  public host.
+
+**Trust dependency.** The effective values change only when
+`UseForwardedHeaders` accepted a trusted hop, so a client that sends
+`X-Forwarded-Proto: https` directly is still redirected and never receives HSTS.
+With no forwarded-headers middleware in the pipeline, the effective values are
+exactly the wire values and both middleware behave as before.
+
+**Ordering.** Register `UseForwardedHeaders` before `UseHttpsRedirection`: the
+redirect decision is made before `next`, so the feature must already be on the
+exchange. `UseHsts` reads after `next` returns, so it honors the forwarded
+identity wherever `UseForwardedHeaders` sits.
+
+`HttpsRedirectionOptions.HttpsPort` is the port the *client* should use. Behind a
+TLS-terminating proxy that is the proxy's public HTTPS port, not a port the
+application itself binds.
 
 ## Redirection
 
 ### Location composition
 
 The `Location` is rebuilt from the request itself, never echoed from an
-untrusted header:
+untrusted header (a forwarded host reaches it only after the forwarded-headers
+trust walk accepted the hop and shape-checked the value):
 
 - **Scheme** — always `https`.
-- **Host** — the request's own host, its inbound (plaintext) port stripped via
+- **Host** — the request's effective host (`EffectiveHost`: the host a trusted
+  proxy forwarded, otherwise the request's own host), its inbound port stripped via
   `HttpHost.TryGetComponents` and replaced by the configured HTTPS port. An IPv6
   literal is re-bracketed for URL use, since the component split strips brackets
   (`[::1]:80` and the unbracketed `::1` both compose to `https://[::1]...`). A
@@ -174,6 +209,9 @@ rest of the stack — `localhost:5001` and `[::1]` match the `localhost`/`[::1]`
 defaults. The default excluded set is `localhost`, `127.0.0.1`, `[::1]`: a
 developer commonly serves plaintext on loopback, and a long-lived HSTS policy
 pinned to `localhost` would poison every other local project on that authority.
+The matcher runs against the **effective** host — the authority the policy is
+pinned to in the user agent — so a same-host reverse proxy that dials the app as
+`localhost` does not suppress the policy for the public host it forwards.
 
 One wrinkle drives a small design choice: `HttpHostMatcher.Create` rejects an
 *empty* pattern list (the deny-all-by-mistake guard host filtering wants). HSTS
@@ -195,9 +233,39 @@ static tables already carried the correct lowercase `strict-transport-security`.
 
 ## Ordering / composition summary
 
-- **`UseHttpsRedirection` earliest.** An insecure request short-circuits here
-  before compression, serialization, or any other response work happens on a
-  response that is about to be discarded.
+The pipeline order behind a TLS-terminating proxy, drawn as the exchange it
+produces: the forwarded-headers middleware resolves the client-facing scheme
+first, so redirection sees `https` and passes the request on, and HSTS stamps
+the policy on the way back out.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Proxy as TLS-terminating proxy
+    participant Fwd as UseForwardedHeaders
+    participant Hsts as UseHsts
+    participant Redirect as UseHttpsRedirection
+    participant App as Rest of the pipeline
+    Client->>Proxy: GET https://public.example/page
+    Proxy->>Fwd: GET /page over plaintext, X-Forwarded-Proto https
+    Note over Fwd: trusted peer, so EffectiveScheme is https
+    Fwd->>Hsts: next
+    Hsts->>Redirect: next
+    Redirect->>App: already secure, no redirect
+    App-->>Redirect: 200
+    Redirect-->>Hsts: 200
+    Hsts-->>Fwd: 200 plus Strict-Transport-Security
+    Fwd-->>Proxy: 200 plus Strict-Transport-Security
+    Proxy-->>Client: 200 over TLS
+```
+
+- **`UseForwardedHeaders` before `UseHttpsRedirection`** whenever TLS terminates
+  at a proxy. Redirection decides before `next`, so the effective scheme must
+  already be resolved; registered the other way round, every proxied request is
+  judged by its plaintext wire scheme and redirected.
+- **`UseHttpsRedirection` earliest** after that. An insecure request
+  short-circuits here before compression, serialization, or any other response
+  work happens on a response that is about to be discarded.
 - **`UseHsts` before the exception boundary.** See the emission-point analysis:
   post-`next` from outside the boundary is what lets the policy survive a reset
   error response.
@@ -208,9 +276,9 @@ static tables already carried the correct lowercase `strict-transport-security`.
 ## AOT posture
 
 Options → a captured string and a precompiled matcher at registration;
-request-time work is an enum comparison, an optional matcher hit, and a header
-set. No reflection, no configuration binding, no service location, no runtime
-code generation.
+request-time work is one typed feature lookup (the `Effective*` read), an enum
+comparison, an optional matcher hit, and a header set. No reflection, no
+configuration binding, no service location, no runtime code generation.
 
 ## Non-goals
 
@@ -253,3 +321,12 @@ combination, the loopback exclusions and a custom wildcard exclusion, the
 post-`next` emission point and its survival across a simulated `#881` reset, the
 committed-head skip, and builder-time validation failures. The RFC 6797 key fix
 is covered by round-trip tests in `Assimalign.Cohesion.Http`.
+
+`tests/HttpsPolicyForwardedTests.cs` covers the proxy behavior with the real
+forwarded-headers middleware (the test project references
+`Web.ForwardedHeaders`), captured through the same `TestPipelineBuilder` and run
+in front of the policy middleware. The double's connection reports a plaintext
+request from a trusted proxy address: forwarded `https` passes redirection
+without a loop and receives HSTS, including when the proxy dials `localhost`;
+forwarded `http` redirects to the forwarded host; and forwarding headers are
+ignored both without the middleware and from an untrusted peer.

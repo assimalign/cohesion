@@ -198,6 +198,93 @@ public class HttpAntiforgeryTests
         await Should.NotThrowAsync(async () => await antiforgery.ValidateRequestAsync(post));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: A non-essential cookie token is not marked essential")]
+    public void GetAndStoreTokens_WhenCookieNotEssential_ShouldNotMarkCookieEssential()
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new() { CookieIsEssential = false };
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        bool cookieStored = false;
+        foreach (HttpCookie cookie in context.Response.Cookies)
+        {
+            if (cookie.Name == options.CookieName)
+            {
+                cookie.Options.IsEssential.ShouldBeFalse();
+                cookieStored = true;
+            }
+        }
+
+        cookieStored.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: A plaintext request's cookie token is not marked Secure by default")]
+    public void GetAndStoreTokens_HttpRequestByDefault_ShouldNotMarkCookieSecure()
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new();
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        StoredCookie(context, options.CookieName).Options.Secure.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: An HTTPS request's cookie token is marked Secure by default")]
+    public void GetAndStoreTokens_HttpsRequestByDefault_ShouldMarkCookieSecure()
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new();
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+        context.SetScheme(HttpScheme.Https);
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        StoredCookie(context, options.CookieName).Options.Secure.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: A trusted proxy's forwarded https marks the cookie token Secure")]
+    public void GetAndStoreTokens_ForwardedHttpsOverPlaintextHop_ShouldMarkCookieSecure()
+    {
+        // Arrange — the proxy-to-application hop is plaintext; the forwarded feature carries the client's https.
+        HttpAntiforgeryOptions options = new();
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+        context.Features.Set<IHttpForwardedFeature>(new TestForwardedFeature(HttpScheme.Https));
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        StoredCookie(context, options.CookieName).Options.Secure.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: CookieSecure marks the cookie token Secure on plaintext requests too")]
+    public void GetAndStoreTokens_CookieSecureOnHttpRequest_ShouldMarkCookieSecure()
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new() { CookieSecure = true };
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        StoredCookie(context, options.CookieName).Options.Secure.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: Should set the cookie token and anti-caching headers")]
     public void GetAndStoreTokens_OnNewExchange_ShouldSetCookieAndSecurityHeaders()
     {
@@ -214,6 +301,7 @@ public class HttpAntiforgeryTests
             if (cookie.Name == options.CookieName && cookie.Value == tokens.CookieToken)
             {
                 cookie.Options.HttpOnly.ShouldBeTrue();
+                cookie.Options.IsEssential.ShouldBeTrue(); // a consent policy must not drop it
                 cookieStored = true;
             }
         }
@@ -242,6 +330,19 @@ public class HttpAntiforgeryTests
         TestHttpContext post = new(HttpMethod.Post);
         post.SetRequestCookie(options.CookieName, reused.CookieToken!);
         post.SetRequestHeader(options.HeaderName, reused.RequestToken!);
+    }
+
+    private static HttpCookie StoredCookie(TestHttpContext context, string name)
+    {
+        foreach (HttpCookie cookie in context.Response.Cookies)
+        {
+            if (cookie.Name == name)
+            {
+                return cookie;
+            }
+        }
+
+        throw new ShouldAssertException($"No '{name}' cookie was stored on the response.");
     }
 
     private static string Tamper(string token)

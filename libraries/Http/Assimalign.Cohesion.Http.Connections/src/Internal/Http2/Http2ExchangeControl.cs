@@ -29,7 +29,12 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
     }
 
     /// <inheritdoc />
-    public bool HasResponseStarted => _context.HasFinalResponseStarted;
+    /// <remarks>
+    /// Also <see langword="true"/> once the transport has answered the stream itself — a request body
+    /// that crossed its cap is answered <c>413</c> by the frame pump — since that is the stream's final
+    /// response.
+    /// </remarks>
+    public bool HasResponseStarted => _context.HasFinalResponseStarted || _context.Stream.IsResponseClaimed;
 
     /// <inheritdoc />
     public bool CanWriteInterimResponse => !HasResponseStarted && !_context.CancelRequested;

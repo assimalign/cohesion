@@ -8,7 +8,10 @@ re-validates the caller-supplied token on every request.
 ## What it provides
 
 - `JwtBearerOptions` &mdash; valid issuers / audiences, signing keys,
-  allowed algorithms, clock skew, and the name/role claim types.
+  allowed algorithms, clock skew, and the name/role claim types. Issuer and
+  audience validation are on by default: registering a scheme without at
+  least one issuer and one audience fails unless `ValidateIssuer` or
+  `ValidateAudience` is set to `false` explicitly.
 - `JwtBearerDefaults` &mdash; the default scheme name (`"Bearer"`).
 - `IJwtSignatureVerifier` + `JwtSignatureVerifier.CreateHmac/CreateRsa/CreateEcdsa`
   &mdash; the compatibility seam: HMAC remains Web-local, while the RSA/ECDSA factories
@@ -41,4 +44,5 @@ app.UseAuthentication();
 ```
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the validation order, the
-algorithm-confusion defense, and the JWT&rarr;`ClaimsPrincipal` mapping.
+fail-closed defaults, the algorithm-confusion defense, and the
+JWT&rarr;`ClaimsPrincipal` mapping.

@@ -231,7 +231,8 @@ internal sealed class BufferedReadStream : Stream
 
                 if (collected >= lengthLimit)
                 {
-                    throw new InvalidDataException($"Line length limit {lengthLimit} exceeded.");
+                    string message = $"Line length limit {lengthLimit} exceeded.";
+                    throw new InvalidDataException(message, new HttpFormLimitExceededException(message));
                 }
 
                 if (collected >= rented.Length)

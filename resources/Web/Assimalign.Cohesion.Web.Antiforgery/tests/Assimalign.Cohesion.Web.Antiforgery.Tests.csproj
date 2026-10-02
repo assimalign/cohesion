@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Antiforgery.Tests</RootNamespace>
+		<IsPackable>false</IsPackable>
+		<!-- Allow the Web.Api endpoint-binding generator's interceptors, so the typed form-bound endpoints
+		     under test carry the antiforgery requirement the generator attaches. -->
+		<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Antiforgery" />
+		<!-- Drive the real runtime through the in-memory test factory; test projects are exempt from
+		     the hosting-isolation rule (COHRES001). -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ProblemDetails" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Antiforgery" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
+		<!-- Activate the endpoint-binding generator on this project's typed Map* call sites. -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+</Project>

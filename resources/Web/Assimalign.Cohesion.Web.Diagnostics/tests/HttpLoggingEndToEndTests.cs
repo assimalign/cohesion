@@ -297,6 +297,86 @@ public class HttpLoggingEndToEndTests
         entries[0].Attributes[HttpLoggingAttributes.RequestPath].ShouldBe("/orders");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: WithHttpLogging on a group applies to its routes, and a route override wins")]
+    public async Task WithHttpLogging_OnGroupAndRoute_ShouldApplyMostSpecificFields()
+    {
+        // Arrange — the probes group is silenced through the convention verb (#1055); one probe opts back
+        // in with the request line only.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        RecordingLoggerProvider recorded = new();
+        using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
+
+        RouterRouteHandler ok = new(context =>
+        {
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+            return Task.CompletedTask;
+        });
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        IRouterGroupBuilder probes = routes.MapGroup("/probes").WithHttpLogging(HttpLoggingFields.None);
+        probes.Map(CohesionHttpMethod.Get, "live", ok);
+        probes.Map(CohesionHttpMethod.Get, "ready", ok).WithHttpLogging(HttpLoggingFields.RequestLine);
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act — the silenced probe first, so its entry would precede the other if it were logged.
+        (await client.GetAsync("/probes/live", cancellation.Token)).Dispose();
+        (await client.GetAsync("/probes/ready", cancellation.Token)).Dispose();
+
+        // Assert
+        IReadOnlyList<ILoggerEntry> entries = await WaitForEntriesAsync(recorded, 1, cancellation.Token);
+        entries.Count.ShouldBe(1);
+        entries[0].Attributes[HttpLoggingAttributes.RequestPath].ShouldBe("/probes/ready");
+        entries[0].Attributes.ContainsKey(HttpLoggingAttributes.ResponseStatusCode).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: A CORS preflight is logged even when its candidate endpoint silences logging")]
+    public async Task EndpointMetadata_CorsPreflight_ShouldNotApplyCandidateOverride()
+    {
+        // Arrange — the probe silences the exchanges it handles; a preflight naming it is not one of
+        // them (the candidate never runs, and the terminal answers the plain OPTIONS request).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        RecordingLoggerProvider recorded = new();
+        using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        routes.Map(new Route(
+            CohesionHttpMethod.Get,
+            "/healthz",
+            new RouterRouteHandler(context =>
+            {
+                context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+                return Task.CompletedTask;
+            }),
+            new RouterRouteMetadataCollection(new HttpLoggingMetadata(HttpLoggingFields.None))));
+
+        using HttpClient client = factory.CreateClient();
+        using HttpRequestMessage preflight = new(System.Net.Http.HttpMethod.Options, "/healthz");
+        preflight.Headers.TryAddWithoutValidation("Origin", "https://app.example").ShouldBeTrue();
+        preflight.Headers.TryAddWithoutValidation("Access-Control-Request-Method", "GET").ShouldBeTrue();
+
+        // Act
+        using HttpResponseMessage response = await client.SendAsync(preflight, cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.MethodNotAllowed);
+
+        ILoggerEntry entry = (await WaitForEntriesAsync(recorded, 1, cancellation.Token))[0];
+        entry.Attributes[HttpLoggingAttributes.RequestMethod].ShouldBe("OPTIONS");
+        entry.Attributes[HttpLoggingAttributes.RequestPath].ShouldBe("/healthz");
+        entry.Attributes[HttpLoggingAttributes.ResponseStatusCode].ShouldBe(405);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: Endpoint metadata narrows the emitted field set")]
     public async Task EndpointMetadata_NarrowedFields_ShouldLimitAttributes()
     {
@@ -359,9 +439,10 @@ public class HttpLoggingEndToEndTests
 
         using HttpClient client = factory.CreateClient();
 
-        // Act — the middleware rethrows, so the server's exception-isolation boundary tears the
-        // connection down and the client observes a transport failure.
-        await Should.ThrowAsync<HttpRequestException>(() => client.GetAsync("/kaboom", cancellation.Token));
+        // Act — the middleware rethrows, so the server's exception-isolation boundary answers the
+        // faulted exchange with a bare 500.
+        using HttpResponseMessage response = await client.GetAsync("/kaboom", cancellation.Token);
+        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.InternalServerError);
 
         // Assert
         ILoggerEntry entry = (await WaitForEntriesAsync(recorded, 1, cancellation.Token))[0];
@@ -441,8 +522,8 @@ public class HttpLoggingEndToEndTests
     [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: The client-address resolver seam overrides the socket peer")]
     public async Task ClientAddress_ResolverSeam_ShouldOverrideSocketPeer()
     {
-        // Arrange — until the #778 forwarded middleware merges, the resolver is the seam a
-        // proxy-aware composition plugs in; the default remains the socket peer.
+        // Arrange — the resolver overrides the logged client for a source the forwarded-headers
+        // trust model does not cover; without one the effective client address is logged.
         using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();

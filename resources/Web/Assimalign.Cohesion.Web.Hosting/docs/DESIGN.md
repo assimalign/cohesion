@@ -39,14 +39,17 @@ The server has one job: pull connections off a listener and drive each one
 through the middleware pipeline, forever, without letting any single connection —
 well-behaved or hostile — degrade the others or take down the host.
 
-Three properties fall out of that intent and shape the whole implementation:
+Four properties fall out of that intent and shape the whole implementation:
 
 - **Connections are independent.** One connection's pace, idleness, or failure
   must never be observable by another. This rules out any design that serves
   connections from a shared loop.
+- **Streams are independent.** HTTP/2 and HTTP/3 multiplex many exchanges over
+  one connection; one stream's pace or failure must never be observable by its
+  siblings. This rules out serving a connection's streams from its receive loop.
 - **Application faults are contained.** Middleware is arbitrary user code. A
   throw from it is expected, not exceptional, and must cost exactly one
-  connection — never the accept loop, never the process.
+  exchange — never its siblings, never the accept loop, never the process.
 - **Shutdown is deterministic.** Stopping the server drains what is in flight and
   releases every resource, without leaving an unobserved exception behind.
 
@@ -100,18 +103,22 @@ pipeline with a single value, which the hosted `IWebApplicationPipeline` registe
 
 ## Server dispatch model
 
+The server runs three levels of work: one accept loop, one task per connection, and —
+on a multiplexed connection — one task per stream. Each arrow below hands work to the
+next level without waiting for it; only the drain at the bottom waits.
+
+```mermaid
+flowchart TD
+    Start["StartAsync: await listener.BindAsync"] --> Accept["AcceptLoopAsync — one stored Task"]
+    Accept -->|"one tracked Task per connection"| Serve["ServeConnectionAsync: OpenAsync, then await foreach ReceiveAsync"]
+    Serve -->|"HTTP/1.1: inline, one exchange at a time"| Exchange["ServeExchangeAsync"]
+    Serve -->|"HTTP/2, HTTP/3: one tracked Task per stream"| Exchange
+    Exchange --> Finalize["pipeline, then SendAsync, a 500, or a reset, then completion callbacks and exchange disposal"]
+    Serve -->|"receive loop ended"| Drain["await in-flight streams, dispose context, dispose connection, release slot"]
 ```
-StartAsync ──> await listener.BindAsync ──> AcceptLoopAsync (one stored Task)
-                                             │  (optional) await a concurrency slot
-                                             ├─ await listener.AcceptOrListenAsync
-                                             └─ dispatch ─> ServeConnectionAsync (one tracked Task per connection)
-                                                               await using connection
-                                                                 OpenAsync
-                                                                 await foreach ReceiveAsync
-                                                                   pipeline.ExecuteAsync ─> SendAsync ─> dispose exchange
-                                                                 dispose context
-                                                               (connection disposed by await using)
-```
+
+The accept loop optionally awaits a concurrency slot before each accept, and each
+connection task releases its slot only after its drain completes.
 
 **Bind before Started.** `StartAsync` first awaits the aggregate HTTP listener's
 `BindAsync`. Only after every transport endpoint is bound does it schedule the
@@ -162,6 +169,63 @@ loop and removed by each task as it completes. The map is the drain set
 a degenerate/empty receive sequence) is removed immediately after registration so
 the map never leaks a completed entry.
 
+## Dispatch within a connection (#1049)
+
+A connection's receive loop dispatches by protocol, one exchange at a time for
+HTTP/1.1 and one task per stream for HTTP/2 and HTTP/3.
+
+**HTTP/1.1 stays sequential — the transport requires it.** An HTTP/1.1 connection
+carries one exchange at a time, and its transport does the connection-level work for
+the *next* request inside the receive enumerator's `MoveNextAsync`: it checks the
+finished exchange's keep-alive decision, drains whatever request body the
+application left unread (so the connection realigns on the next request's framing),
+and only then parses the next request head. Asking for the next exchange before the
+previous response is written would race that drain against a handler still reading
+the body and could send responses out of order. So the loop serves an HTTP/1.1
+exchange inline — pipeline, send, completion callbacks, dispose — and asks for the
+next one only afterwards. Pipelined requests are therefore served strictly in order.
+
+**HTTP/2 and HTTP/3 run one task per stream.** Neither transport needs an exchange
+to finish before it can produce the next. The HTTP/2 frame pump dispatches a request
+head the moment its header block completes and keeps feeding bodies, flow-control
+credit, and resets while handlers run, and `SendAsync` is safe to call concurrently
+for different exchanges (the write scheduler serializes frames on the wire). HTTP/3
+carries each request on its own QUIC stream and writes each response to it. So the
+server hands each multiplexed exchange to `MultiplexedExchangeTracker.Start` and goes
+straight back for the next. Before #1049 the loop awaited each exchange's pipeline and
+send before taking the next, so a slow request, a long poll, or a server-sent-events
+stream held up every other stream on its connection. Since #1066 the HTTP/3 transport
+yields each exchange once its request stream's HEADERS frame decodes and streams the
+body afterwards, so a slowly uploading stream no longer delays the streams behind it.
+
+- **How the server tells.** `IHttpContext.Version` is `Http20` or `Http30` for a
+  multiplexed exchange. That is all the dispatch reads about the protocol; everything
+  else about the wire stays below the connection-context contract.
+- **Why `Task.Run`.** A pipeline may run synchronously for as long as it likes before
+  its first `await`. Starting it on the receive loop's thread would hold back every
+  sibling stream for that long, so each stream starts on the thread pool.
+- **Concurrency is bounded by the transport.** The server adds no queue and no work of
+  its own: a stream task exists only for an exchange the transport yielded, and the
+  transport yields only streams it admitted — HTTP/2 refuses a stream beyond
+  `SETTINGS_MAX_CONCURRENT_STREAMS` (`Http2Limits.MaxStreamsPerConnection`, default
+  100) with `RST_STREAM(REFUSED_STREAM)`, and HTTP/3 peers cannot open request
+  streams beyond the QUIC stream credit (`QuicConnectionListenerOptions.MaxBidirectionalStreamCount`,
+  default 100). One gap remains in the HTTP/2 transport: a peer `RST_STREAM` frees the
+  stream's slot immediately (`Http2ConnectionContext.ProcessRstStreamFrameAsync`),
+  while an application that ignores `RequestCancelled` keeps its task running. The
+  rapid-reset flood guard (`MaxResetStreamsPerWindow`) bounds the rate at which such
+  tasks can accumulate; counting a reset stream against the limit until its
+  application task completes, as Kestrel does, is transport work.
+- **The connection waits for its streams.** `MultiplexedExchangeTracker` is a
+  countdown, not a task set: it starts at one (the receive loop's hold), rises as each
+  stream starts, falls as each finishes, and the loop gives up its hold when it stops
+  receiving. Whichever release reaches zero completes the drain, exactly once, with no
+  lock. The connection task awaits that drain before it disposes the connection
+  context — the HTTP/2 context's disposal is the RFC 9113 §6.8 graceful close
+  (`GOAWAY`, then the pump stops and the output completes), which must not run under a
+  stream still writing its response — and before it releases its concurrency slot and
+  leaves the `StopAsync` drain set. An HTTP/1.1 connection never allocates a tracker.
+
 ## Layering boundary — what the server does *not* do
 
 Wire-level failure isolation lives one layer down, in
@@ -175,57 +239,110 @@ The server therefore owns **only** the concerns above that layer:
 
 | Concern | Owner |
 | --- | --- |
-| Wire-protocol conformance, frame parsing, per-stream reset | `Http.Connections` |
+| Wire-protocol conformance, frame parsing, per-stream reset encoding | `Http.Connections` |
 | Wire-level failure isolation (bad frames, peer reset) | `Http.Connections` |
-| Application-exception isolation (middleware throws) | **this server** |
-| Per-connection dispatch / concurrency | **this server** |
-| Connection + context disposal | **this server** |
-| In-flight tracking + graceful drain | **this server** |
-| Optional concurrency cap | **this server** |
+| Stream admission (`SETTINGS_MAX_CONCURRENT_STREAMS`, QUIC stream credit) | `Http.Connections` |
+| Application-exception isolation (middleware throws), per exchange | **this server** |
+| Per-connection and per-stream dispatch | **this server** |
+| Exchange + connection + context disposal | **this server** |
+| In-flight tracking + graceful drain, per connection and per stream | **this server** |
+| Optional connection concurrency cap | **this server** |
 
-The server never inspects a frame, a stream id, or a protocol version. It sees
-`IHttpConnection` → `IHttpConnectionContext` → `IHttpContext` and nothing lower.
+The server never inspects a frame or a stream id. It sees `IHttpConnection` →
+`IHttpConnectionContext` → `IHttpContext` and reads exactly two protocol facts off an
+exchange: whether it is multiplexed (`IHttpContext.Version`), and — only when its
+pipeline faulted — whether its response has started (the transport's
+`HasResponseStarted` probe, below). Every outcome, including a replacement `500` and a
+reset, goes on the wire through `IHttpConnectionContext.SendAsync`, so the wire encoding
+of each stays in the transport.
 
 ## Error model — application-exception isolation
 
-Each connection's receive loop wraps pipeline execution in a boundary that
-catches exceptions by scope:
+The isolation boundary is the **exchange** (`ServeExchangeAsync`), not the
+connection. Every exchange is finalized through the connection context exactly
+once, in one of three ways, chosen by how its pipeline ended:
 
-- **`OperationCanceledException`** — cooperative shutdown or a per-exchange
-  cancellation. Treated as a clean drain, not a fault: the loop unwinds quietly.
-- **Any other `Exception`** — an application fault from the middleware pipeline
-  (or the per-exchange receive/send). The connection is `Abort`-ed so the peer
-  sees it torn down, and the enclosing `await using` disposes it. The accept loop
-  is untouched and keeps serving; a subsequently accepted connection is served
-  normally.
+| Pipeline outcome | Finalization | On the wire |
+| --- | --- | --- |
+| Returned | `SendAsync` | the application's response |
+| Threw, response not started | the staged status, headers, and body are replaced by a bodyless `500`, then `SendAsync` | `500 Internal Server Error` |
+| Threw after the response started, or the exchange was cancelled | `IHttpContext.CancelAsync`, then `SendAsync` | a reset: HTTP/2 `RST_STREAM(CANCEL)`, HTTP/3 stream abort, HTTP/1.1 no further bytes and a connection that ends after the exchange |
 
-Catching bare `Exception` here is a deliberate, documented departure from the
-"catch specific exceptions" rule. This is a **fault-isolation boundary around
-arbitrary user code**, the same pattern the transport's accept loop uses
+- **Cancelled, not faulted.** An `OperationCanceledException` counts as a cancellation
+  only when the server's shutdown token or the exchange's own `RequestCancelled`
+  fired (server stop, peer reset, closed connection, `IHttpContext.Cancel`). An
+  operation cancelled for any other reason — an application timeout — is a fault.
+- **Why "started" decides.** Once the final response head is on the wire (a
+  streamed write or flush through the raw body sink — `Http.Streaming`, server-sent
+  events), a replacement status can no longer reach the peer, and `SendAsync` would
+  *finalize* the started response — `END_STREAM`, or the terminating chunk — handing the
+  client a truncated body as if it were complete. A reset is the honest answer. The
+  server reads the state through `HttpContextTransportExtensions.HasResponseStarted`, a
+  probe `Http.Connections` exposes for exactly this decision; the runtime module takes
+  no dependency on `Http.Streaming`, which would also have to enter every area
+  framework that privately carries this module.
+- **The replacement `500` swaps the body rather than truncating it.** A seekable body
+  the application supplied may be a file it owns, so the staged body is replaced with a
+  fresh empty one and disposed, never `SetLength(0)`-ed. If the response object itself
+  cannot be reshaped, the exchange is reset instead.
+- **A failed send.** On a multiplexed connection it belongs to its stream alone — a
+  response body that throws on read, a lifecycle hook that throws, a write cut off by
+  shutdown — so the server resets that stream (`CancelAsync`, then `SendAsync` once
+  more), which also releases its concurrency slot and the transport's drain
+  accounting. On an HTTP/1.1 connection the response framing on the wire is then
+  unknown, so the failure escapes to the connection loop, which aborts the connection;
+  a send cut off by shutdown is a clean drain instead.
+- **Post-response work is contained.** A throwing response-completion callback or a
+  throwing exchange disposal costs nothing but its own exchange. Completion callbacks
+  run only after the application's own response was sent — never after a replacement
+  `500` or a reset.
+- **The connection-level catch remains** for what is left: a receive-side failure the
+  transport surfaced and an HTTP/1.1 send failure. Either way the connection cannot
+  carry another request, so it is `Abort`-ed and the enclosing `await using` disposes
+  it. The accept loop is untouched and keeps serving.
+
+**Behaviour change for HTTP/1.1 (#1049).** Before #1049 a pipeline fault aborted the
+whole connection, so an HTTP/1.1 client saw a dropped connection instead of a status.
+It now receives a `500` on a connection that stays usable for keep-alive, the same as
+Kestrel. The transport still decides reuse: if the faulted handler left a request body
+that cannot be drained within the limits, the connection closes after the `500`. A
+post-dispatch body-limit violation (`413` or `408` raised from the body read) surfaces
+as an exception whose status only the transport knows, so it is answered with `500`
+until the transport exposes that status.
+
+Catching bare `Exception` at each of these points is a deliberate, documented
+departure from the "catch specific exceptions" rule. This is a **fault-isolation
+boundary around arbitrary user code** — middleware, completion callbacks, application
+bodies and features — the same pattern the transport's accept loop uses
 (`HttpConnectionListener.RunStreamAcceptLoopAsync`). The alternative — letting an
-unknown middleware exception propagate out of a background task — is precisely the
-process-crash hazard this component exists to remove. The catch is annotated in
-source so future readers do not "correct" it back to a narrow catch.
+unknown exception propagate out of a background task — is precisely the process-crash
+hazard this component exists to remove. Each catch is annotated in source so future
+readers do not "correct" it back to a narrow catch. `MultiplexedExchangeTracker`
+observes the outcome of every stream task, so none can surface as an unobserved task
+exception.
 
 ## Disposal contract
 
-When a connection's loop ends — normally, by client disconnect, or by pipeline
-fault — the server disposes, in order:
+When a connection's loop ends — normally, by client disconnect, by shutdown, or by
+a connection-level fault — the server disposes, in order:
 
-1. **Each exchange** (`IHttpContext`) in a `finally` around its pipeline
-   execute/send, so an exchange is released even if the pipeline throws.
+1. **Each exchange** (`IHttpContext`) in a `finally` after its finalization and
+   completion callbacks, on whichever task served it, so an exchange is released
+   even if its pipeline or send throws. A multiplexed connection's exchanges are all
+   disposed before step 2: the loop awaits its stream drain first.
 2. **The connection context** (`IHttpConnectionContext`) in a `finally` after the
-   receive loop.
+   receive loop and the stream drain.
 3. **The connection** (`IHttpConnection`) via `await using`.
 
 `IHttpConnectionContext` is intentionally *not* `IAsyncDisposable`: a context is a
 projection over the connection, and the connection releases the underlying
 transport on its own disposal (see `Http1Connection.DisposeAsync`). The server
 still disposes any context that *does* implement `IAsyncDisposable`/`IDisposable`
-through a type test (no reflection), so a future stateful context is torn down
-deterministically. Today this is a defensive no-op for the real projection
-contexts; it exists so the disposal guarantee holds regardless of a context's
-internal state.
+through a type test (no reflection), so a stateful context is torn down
+deterministically. The HTTP/2 context is one: its disposal is the RFC 9113 §6.8
+graceful close (`GOAWAY`, a bounded wait for dispatched exchanges, then the frame
+pump stops and the output completes), which is why the server drains the
+connection's streams before it disposes the context.
 
 ## Stop semantics
 
@@ -237,11 +354,13 @@ internal state.
    the drain cannot hang on it.
 2. **Wait for the accept loop.** Await the accept-loop task first, so no new
    connection task can be added after the in-flight set is snapshotted.
-3. **Drain in-flight connections.** `await Task.WhenAll` over the tracked
-   connection tasks. Each task is self-contained — it swallows its own
-   cancellation and faults and never rethrows — so the drain completes without
-   surfacing an unobserved `OperationCanceledException` or any other escaped
-   exception.
+3. **Drain in-flight connections and their streams.** `await Task.WhenAll` over the
+   tracked connection tasks. A connection task completes only after every stream it
+   dispatched has finished (see "Dispatch within a connection"), so the drain covers
+   every in-flight exchange on every connection. Each task is self-contained — it
+   swallows its own cancellation and faults and never rethrows — so the drain
+   completes without surfacing an unobserved `OperationCanceledException` or any
+   other escaped exception.
 4. **Dispose the listener**, then the shutdown token source and (if present) the
    concurrency semaphore. Listener disposal runs from a `finally`, including when
    the caller's drain token expires, so `StopAsync` never completes with the port
@@ -259,6 +378,18 @@ observes the same cancellation and unwinds. Letting an in-progress request run t
 completion before closing its connection (lame-duck draining) is a deliberate
 non-goal for this iteration — see below.
 
+What "observes" means depends on the transport's `RequestCancelled` token, and it
+differs by version. HTTP/1.1 and HTTP/3 link it to the server's shutdown token, so a
+handler that honors `RequestCancelled` unwinds as soon as the stop begins. HTTP/2
+links it only to the stream itself (a peer reset, or a request body cut off by
+teardown): `Http2ConnectionContext` passes no connection token when it creates an
+exchange, so a fully received HTTP/2 request keeps running until its handler returns
+or the host's shutdown budget expires. The server waits either way; it does not
+cancel exchanges on its own, which keeps the lame-duck decision (#146) open. Whatever
+an exchange produces after the stop began is not delivered: `SendAsync` observes the
+cancelled shutdown token, and the server falls back to a best-effort reset of the
+stream (an HTTP/1.1 connection simply closes) before the connection's graceful close.
+
 ## Concurrency cap (`MaxConcurrentConnections`)
 
 Optional, configured builder-time via
@@ -273,6 +404,11 @@ additional connections stay in the listener's backlog channel — accepted by th
 transport but not opened or served — applying natural backpressure until an active
 connection completes. A non-positive cap is rejected at construction.
 
+A multiplexed connection's task finishes only after its streams drain, so a
+connection whose peer has stopped sending still holds its slot while any of its
+streams is running. The cap counts connections, not streams; the per-connection
+stream limit is the transport's.
+
 The gate is chosen for AOT-safety: a semaphore, stored `Task`s, and a
 `ConcurrentDictionary` — no reflection, no dynamic code.
 
@@ -280,9 +416,22 @@ The gate is chosen for AOT-safety: a semaphore, stored `Task`s, and a
 
 `IsAotCompatible=true` holds with no special handling. The dispatch machinery is
 `SemaphoreSlim`, `CancellationTokenSource`, `ConcurrentDictionary`, `Interlocked`,
-`Task`, and `await using`/`await foreach` — all trim/AOT-clean. The defensive
-context disposal is a `switch` type test, not a reflection probe. No runtime code
+`TaskCompletionSource`, `Task.Run`, and `await using`/`await foreach` — all
+trim/AOT-clean. The defensive context disposal is a `switch` type test, the
+multiplexing check is an enum comparison, and the response-started probe is a type
+test inside `Http.Connections`; none is a reflection probe. No runtime code
 generation, no `Assembly.LoadFrom`, no reflection-based serialization.
+
+**The Web NativeAOT guard (#1052)** is the evidence for the area as a whole, not just this
+module: `samples/Assimalign.Cohesion.Web.AotGuard` composes a representative application
+(routing, source-generated typed binding and JSON, error handling, Cookie and JWT Bearer
+authentication, static files, response compression, request decompression, rate limiting and
+request timeouts). Its csproj promotes the trim/AOT analyzer diagnostics and ILC's per-assembly
+summaries (IL2104/IL3053) to errors, so a trim or AOT warning in any library it reaches fails the
+publish. `resource-web.yml`'s `aot-guard` job publishes it with `PublishAot` for linux-x64 and runs
+the native binary with `--smoke`, which serves on a free loopback port and checks every feature
+over real HTTP. The first run surfaced four DependencyInjection call-site diagnostics, resolved as
+described in that library's DESIGN ("NativeAOT compatibility checks").
 
 ## Application feature seeding
 
@@ -306,11 +455,27 @@ Two deliberate properties:
   only its own DI-registered features, which is half of the process-wide isolation
   story (#789's per-application router state is the other half).
 
-## The pipeline terminal — bodyless 404 fallback (#881)
+**The pipeline is built before any service starts (#1051).** `WebApplication.OnStartingAsync`
+resolves the servers, and with them the pipeline and every middleware factory, so a composition
+failure such as an invalid route table fails `StartAsync` with nothing to roll back and leaves the
+host `Failed`. `ExecuteAsync` runs no middleware for a token that is already cancelled; middleware
+observe cancellation through `RequestCancelled`.
+
+## The pipeline terminal — endpoint dispatch and the bodyless 404 fallback (#881, #1054)
 
 `WebApplication`'s pipeline `Build()` composes the innermost middleware — the
-terminal reached only when every registered middleware chained to `next` and none
-produced a response. It used to be a silent `Task.CompletedTask`, which handed the
+terminal reached only when every registered middleware chained to `next`.
+
+**Endpoint dispatch (#1054).** When an endpoint-selecting middleware (`UseRouting`)
+published the root's `IWebEndpointFeature`, the terminal runs that endpoint. That is
+where a matched route's handler runs, after every middleware registered behind
+`UseRouting`, and where routing's 405 is written. The terminal reads only the root
+seam; it cannot see `Web.Routing` (COHRES002). The terminal is the root's
+`WebApplicationTerminal.InvokeAsync` (#1056), shared with every non-rejoining pipeline
+branch, so the application and its branches agree on what "unhandled" means.
+
+**The 404 fallback (#881).** With no endpoint selected, the request went unhandled.
+The terminal used to be a silent `Task.CompletedTask`, which handed the
 transport an empty `200` for any unhandled request. It now sets a **bodyless
 `404 Not Found`** when the response arrives untouched (still `200`, no body, no
 `Content-Type`, no `Location`); a response a middleware already shaped — a non-`200`
@@ -349,23 +514,43 @@ for the bodyless-404 terminal), which drives the real server over the in-memory
 transport through `Assimalign.Cohesion.Web.Testing`'s `WebApplicationTestFactory` —
 a real `HttpClient`, real HTTP/1.1 exchanges, no sockets. It covers middleware onion
 ordering and short-circuiting, per-connection dispatch (a parked connection does not
-starve others), application-fault isolation with continued service, the unhandled-
-request 404 fallback, and graceful shutdown draining (in-flight unwind, idle
-keep-alive unblock, post-stop connection refusal).
+starve others), application-fault isolation (a `500` on a connection that keeps
+serving), the unhandled-request 404 fallback, and graceful shutdown draining
+(in-flight unwind, idle keep-alive unblock, post-stop connection refusal). A raw
+in-memory connection pipelines two HTTP/1.1 requests to pin that the second reaches
+the pipeline only after the first's response.
+
+Per-stream dispatch (#1049) is pinned at both levels. The unit suite drives
+multiplexed doubles (`IHttpContext.Version` of HTTP/2) through concurrency (a stream
+that completes only after its sibling's response was sent), fault isolation (`500`,
+reset when the response cannot be replaced, reset on cancellation, reset on a failed
+send), the stop drain (nothing is disposed under a running stream), and slot
+accounting (a connection whose receive loop ended holds its slot until its stream
+finishes); `MultiplexedExchangeTrackerTests` pins the countdown itself.
+`WebApplicationServerHttp2IntegrationTests` repeats the concurrency, `500`, and drain
+properties over prior-knowledge HTTP/2 with a real client and asserts every request
+shared one connection, and adds the case the doubles cannot reach: a stream that
+faults after streaming part of its body is reset, not completed. `WebHttp3HostingIntegrationTests`
+pins concurrency over a real QUIC connection where the platform supports it.
 
 ## Non-goals
 
 - **Lame-duck request draining.** Waiting for in-progress exchanges to finish
   before cancelling on shutdown (versus cancelling them with the drain token) is
   future work; it needs a two-phase signal ("finish the current exchange, accept
-  no new ones on this connection") that this iteration does not implement.
+  no new ones on this connection") that this iteration does not implement (#146).
+- **A server-side per-connection stream cap.** Stream admission is the transport's
+  (`SETTINGS_MAX_CONCURRENT_STREAMS`, QUIC stream credit); a second, server-owned
+  limit would silently disagree with the one advertised to the peer. The remaining
+  HTTP/2 peer-reset gap (see "Dispatch within a connection") belongs in the transport's
+  admission accounting as well.
 - **Per-request service resolution.** DI/logging/config are builder-time only;
   the server resolves nothing per connection or per request.
 - **Re-implementing wire behaviour.** Protocol conformance and wire-level failure
   isolation stay in `Http.Connections` and are never duplicated here.
 - **Host filtering.** Allowed-hosts enforcement ships as the
   `Assimalign.Cohesion.Web.HostFiltering` feature package (`UseHostFiltering`,
-  registered first by the application). The runtime module deliberately has no
+  registered at the front of the application's pipeline). The runtime module deliberately has no
   knowledge of it — the hosting-isolation rule forbids the reference, and
   pipeline composition is the application's, not the host's.
 The Web resource's composition root: the `WebApplicationBuilder` /
@@ -437,9 +622,17 @@ and `Development` selects `appsettings.Development.json`. `Local` denotes a deve
 machine; `Development` denotes a deployable environment. Neither file is an alias for
 the other, and the unset environment default remains `Production`.
 
-The JSON files resolve from the ambient `Hosting.Resources`
-`ResourceContext.ContentRootPath` for an
-enabled resource and from `AppContext.BaseDirectory` otherwise. An in-process
+The JSON files resolve from the content root: `WebApplicationOptions.ContentRootPath` when
+set, otherwise the ambient `Hosting.Resources` `ResourceContext.ContentRootPath` for an
+enabled resource, otherwise `AppContext.BaseDirectory`. The same content root is published on
+`HostEnvironment.ContentRootPath` and `IWebApplicationContext.ContentRootPath`.
+
+The **web root** — the directory `UseStaticFiles()` serves — is resolved against the content
+root: `WebApplicationOptions.WebRootPath` when set (a relative path is combined with the content
+root, and the value is kept even before the directory exists), otherwise `wwwroot` under the
+content root when that directory exists, otherwise none. It is published on
+`IWebApplicationContext.WebRootPath`. The content root itself is never a web root, because it
+holds `appsettings*.json` and the application's binaries. An in-process
 gateway supplies settings directly on that ambient `ResourceContext`, rather than
 mutating process-wide environment variables. The builder folds those settings into
 the deployment-setting layer before the caller's command-line arguments, so the
@@ -521,6 +714,28 @@ HTTP/3 registration and the connection-dispatch rewrite are
 separate concerns (the latter under #762). Data-rate limits are deferred with
 the transport's streaming-body rework.
 
+### Entry-point defaults (#1047)
+
+A **plain entry-point application** — `WebApplication.CreateBuilder(args)` with no generated
+control plane — that configured no listener of its own gets one when it is built:
+
+- the endpoints under `Http:Endpoints`, bound exactly as `UseConfiguration` binds them, from every
+  configuration source the entry point composes (appsettings, `COHESION_CONFIG__*`, command line);
+- otherwise HTTP/1.1 on the **development endpoint**, `127.0.0.1:5000` (loopback only, so an
+  unconfigured application is never exposed beyond the machine), with any configured `Http:Limits`.
+
+"Configured no listener" means no `Server.UseServer`/`UseConfiguration` call and no server
+registered beside the default one (`AddServer`, `Server.UseServer<TServer>`, or a direct
+`IWebApplicationServer` registration), checked in `Build` against the service container. The
+configuration is read when the default server is created at host start, so sources added after
+`CreateBuilder` still apply.
+
+Before 2026-09 the default server was silently inactive in that case, so `dotnet new cohesion-web
+&& dotnet run` started and listened on nothing. Explicit compositions keep that behavior on purpose:
+`CreateBuilder(options)`, a custom-only composition, and tests that build an application without a
+server are left exactly as composed. An orchestrated resource binds its ambient endpoint instead
+(below), and never the development endpoint.
+
 ### AOT posture
 
 No reflection, no codegen, no dynamic activation. The binder is straight-line
@@ -539,12 +754,11 @@ max-request-body-size interceptor, which occupies slot 0 of the interceptor
 order so every request carries the typed `IHttpMaxRequestBodySizeFeature` and
 user-registered interceptors' `AfterRequestHead` hooks can observe it. As of #819 the seam is
 invoked on **all three** parse paths — HTTP/1.1, HTTP/2, and HTTP/3 — so the
-feature is attached uniformly regardless of protocol. Cap *enforcement* (the
-413) is still HTTP/1.1-only: h2 bounds body buffering via flow-control
-backpressure and h3 via QUIC flow control, so a lowered cap changes the
-reported feature value but does not reject the body there yet (the hard cap is
-tracked in the transport's protocol-coverage notes and on
-`HttpConnectionListenerLimits.MaxRequestBodySize`).
+feature is attached uniformly regardless of protocol. The cap is *enforced*
+with 413 on all three: HTTP/1.1 inline in its parser, HTTP/2 against the value
+the interceptor pipeline freezes (#1048), and HTTP/3 in its incrementally read
+body (#1066). Http.RequestLimits' DESIGN, "Protocol coverage (honest gaps)", has the detail;
+the transport-wide default is `HttpConnectionListenerLimits.MaxRequestBodySize`.
 
 ### Why default-on, and why here
 
@@ -750,7 +964,7 @@ handling.
 
 ## HTTPS endpoint certificate contract (31t)
 
-The enabled resource's `http` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. Ambient binding tries http and then https by endpoint name, admitting both URI schemes. Manual Http:Endpoints configuration also accepts Protocol Https/Http1s/Http2s and Certificate as a mount name. Server.UseConfiguration remains opt-in and is not wired by default.
+The enabled resource's `http` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. Ambient binding tries http and then https by endpoint name, admitting both URI schemes. Manual Http:Endpoints configuration also accepts Protocol Https/Http1s/Http2s and Certificate as a mount name. Server.UseConfiguration stays opt-in for explicit compositions; a plain entry-point application with no listener of its own binds `Http:Endpoints` by default (see "Entry-point defaults").
 
 ## Optional telemetry (31b)
 
@@ -760,6 +974,7 @@ The registered resource constructor calls ResourceTelemetry.Configure using the 
 
 The root contracts and feature libraries reference no `Assimalign.Cohesion.Hosting*`
 library. `Web.Hosting.Resources` and `Web.Hosting.Health` own reusable hosting
-integration. They never reference this runtime module. COHRES002 still permits this
-module to reference only the Web root, so its internal control-plane terminal stays
-independent of `Web.Hosting.Resources`; consolidation is the 31f follow-up.
+integration. They never reference this runtime module. COHRES002 permits this
+module to reference the Web root and its own hosting family, and it consumes
+`Web.Hosting.Resources` for the enabled resource's control-plane terminal
+(`Internal/EnabledResourcePipeline.cs`).

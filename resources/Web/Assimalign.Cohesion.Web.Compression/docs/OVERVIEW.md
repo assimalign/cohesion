@@ -27,7 +27,8 @@ verbs over the BCL codecs only — no external dependencies, AOT-safe.
   that streams via the response-streaming feature (that path commits its own head and bypasses
   `IHttpResponse.Body`).
 - **BREACH-cautious:** over an `https` request the middleware does nothing unless
-  `EnableForHttps` is set (default off).
+  `EnableForHttps` is set (default off). "`https`" is the effective scheme, so TLS terminated at a
+  trusted proxy counts once `UseForwardedHeaders` runs ahead of this middleware.
 - A handler can opt its own response out through `IResponseCompressionFeature.Disable()`.
 
 ### Request decompression — `UseRequestDecompression`
@@ -44,7 +45,8 @@ verbs over the BCL codecs only — no external dependencies, AOT-safe.
 ## Usage
 
 ```csharp
-// Response compression — register early so it wraps the responses it should compress.
+// Response compression — register early so it wraps the responses it should compress. With output
+// caching, register it after UseRouting and UseOutputCache instead (Web.Caching DESIGN, "Ordering").
 application.UseResponseCompression(options =>
 {
     options.EnableForHttps = false;              // BREACH: default; enable only when safe
@@ -75,8 +77,8 @@ context.Features.Get<IResponseCompressionFeature>()?.Disable();
 ## Dependencies
 
 `Assimalign.Cohesion.Web` (pipeline seams) · `Assimalign.Cohesion.Http` (headers, status codes,
-negotiation primitives) · `Assimalign.Cohesion.Http.Streaming` (the `HasStarted` probe used on the
-abort path). Per the Web-area dependency rule it references no hosting module, holds no
+negotiation primitives) · `Assimalign.Cohesion.Http.Forwarded` (the `EffectiveScheme` read behind the
+BREACH guard) · `Assimalign.Cohesion.Http.Streaming` (the `HasStarted` probe used on the abort path). Per the Web-area dependency rule it references no hosting module, holds no
 DI/configuration/logging state, and is delivered to applications through the `App.Web` shared
 framework. Compression itself rides the BCL `GZipStream` / `BrotliStream` / `ZLibStream` — no
 external packages.

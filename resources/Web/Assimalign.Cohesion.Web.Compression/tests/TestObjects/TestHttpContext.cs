@@ -11,8 +11,10 @@ namespace Assimalign.Cohesion.Web.Compression.Tests.TestObjects;
 /// <summary>
 /// A minimal in-memory <see cref="IHttpContext"/> for unit tests that need to drive a middleware
 /// directly with a specific request scheme or method — cases the in-memory HTTP/1.1 test factory
-/// cannot express (for example an <c>https</c> request to exercise the BREACH gate). Only the members
-/// the compression middleware touches are functional; the rest are inert.
+/// cannot express (for example an <c>https</c> request to exercise the BREACH gate). The connection is
+/// settable so a test can model a request arriving from a specific peer, such as a trusted proxy the
+/// forwarded-headers middleware evaluates. Only the members the compression middleware touches are
+/// functional; the rest are inert.
 /// </summary>
 internal sealed class TestHttpContext : IHttpContext
 {
@@ -32,7 +34,7 @@ internal sealed class TestHttpContext : IHttpContext
 
     IHttpResponse IHttpContext.Response => Response;
 
-    public IHttpConnectionInfo ConnectionInfo => null!;
+    public IHttpConnectionInfo ConnectionInfo { get; set; } = HttpConnectionInfo.Empty;
 
     public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
 

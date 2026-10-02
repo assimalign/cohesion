@@ -16,6 +16,15 @@ internal class WebApplicationPipeline : IWebApplicationPipeline
 
     public Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
+        // Middleware delegates take no token; they observe cancellation through
+        // context.RequestCancelled, which the transports link to the connection's lifetime. The
+        // caller's token gates the start instead: an execution cancelled before it begins runs no
+        // middleware.
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled(cancellationToken);
+        }
+
         return _middleware.Invoke(context);
     }
 }

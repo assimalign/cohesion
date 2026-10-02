@@ -20,8 +20,10 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Tests;
 
 /// <summary>
 /// Full-pipeline coverage over the <see cref="WebApplicationTestFactory"/> (in-memory HTTP/1.1):
-/// a slow handler is answered with 504 on the wire, per-endpoint metadata overrides the global
-/// default in both directions, and a disabled endpoint runs past the global timeout.
+/// a slow handler is answered with 504 on the wire, per-endpoint metadata read from the endpoint
+/// <c>UseRouting</c> published overrides the global default in both directions, a disabled endpoint
+/// runs past the global timeout, and a middleware registered ahead of <c>UseRouting</c> fails an
+/// endpoint whose timeout it could not apply while placing no requirement on a disabled one.
 /// </summary>
 public class RequestTimeoutEndToEndTests
 {
@@ -97,8 +99,6 @@ public class RequestTimeoutEndToEndTests
         await using WebApplicationTestFactory factory = new();
         factory.Builder.AddRouting();
 
-        factory.Application.UseRequestTimeouts(_neverInTestBudget);
-
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
             CohesionHttpMethod.Get,
@@ -108,6 +108,8 @@ public class RequestTimeoutEndToEndTests
                 await Task.Delay(_neverInTestBudget, context.RequestCancelled);
             }),
             new RouterRouteMetadataCollection(new RequestTimeoutMetadata(_globalTimeout))));
+
+        factory.Application.UseRequestTimeouts(_neverInTestBudget);
 
         using HttpClient client = factory.CreateClient();
 
@@ -128,8 +130,6 @@ public class RequestTimeoutEndToEndTests
         await using WebApplicationTestFactory factory = new();
         factory.Builder.AddRouting();
 
-        factory.Application.UseRequestTimeouts(_globalTimeout);
-
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
             CohesionHttpMethod.Get,
@@ -141,6 +141,8 @@ public class RequestTimeoutEndToEndTests
                 await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes("finished"), context.RequestCancelled);
             }),
             new RouterRouteMetadataCollection(new RequestTimeoutMetadata(_neverInTestBudget))));
+
+        factory.Application.UseRequestTimeouts(_globalTimeout);
 
         using HttpClient client = factory.CreateClient();
 
@@ -162,8 +164,6 @@ public class RequestTimeoutEndToEndTests
         await using WebApplicationTestFactory factory = new();
         factory.Builder.AddRouting();
 
-        factory.Application.UseRequestTimeouts(_globalTimeout);
-
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
             CohesionHttpMethod.Get,
@@ -176,6 +176,8 @@ public class RequestTimeoutEndToEndTests
             }),
             new RouterRouteMetadataCollection(RequestTimeoutMetadata.Disabled)));
 
+        factory.Application.UseRequestTimeouts(_globalTimeout);
+
         using HttpClient client = factory.CreateClient();
 
         // Act
@@ -184,6 +186,91 @@ public class RequestTimeoutEndToEndTests
         // Assert
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
         (await response.Content.ReadAsStringAsync(cancellationToken)).ShouldBe("unhurried");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - E2E: Registered before UseRouting, an endpoint timeout should fail the request at dispatch instead of running unbounded")]
+    public async Task UseRequestTimeouts_RegisteredBeforeRouting_ShouldFailEndpointWithTimeout()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        InvalidOperationException? dispatchFailure = null;
+        int endpointInvocations = 0;
+
+        // Observes the dispatch failure the way an exception boundary would.
+        factory.Application.Use(async (context, next) =>
+        {
+            try
+            {
+                await next.Invoke(context);
+            }
+            catch (InvalidOperationException exception)
+            {
+                dispatchFailure = exception;
+                context.Response.StatusCode = CohesionHttpStatusCode.InternalServerError;
+            }
+        });
+
+        factory.Application.UseRequestTimeouts(_neverInTestBudget);
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        routes.Map(new Route(
+            CohesionHttpMethod.Get,
+            "/bounded",
+            new RouterRouteHandler(context =>
+            {
+                Interlocked.Increment(ref endpointInvocations);
+                context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+                return Task.CompletedTask;
+            }),
+            new RouterRouteMetadataCollection(new RequestTimeoutMetadata(_globalTimeout))));
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/bounded", cancellationToken);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        endpointInvocations.ShouldBe(0);
+        dispatchFailure.ShouldNotBeNull().Message.ShouldContain("UseRequestTimeouts()", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - E2E: Registered before UseRouting, a disabled endpoint should still run because it requires nothing")]
+    public async Task UseRequestTimeouts_RegisteredBeforeRouting_ShouldRunDisabledEndpoint()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        factory.Application.UseRequestTimeouts(_neverInTestBudget);
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        routes.Map(new Route(
+            CohesionHttpMethod.Get,
+            "/stream",
+            new RouterRouteHandler(async context =>
+            {
+                context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+                await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes("streamed"), context.RequestCancelled);
+            }),
+            new RouterRouteMetadataCollection(RequestTimeoutMetadata.Disabled)));
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/stream", cancellationToken);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync(cancellationToken)).ShouldBe("streamed");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - E2E: A client-cancelled request should surface as cancellation, not a timeout response")]

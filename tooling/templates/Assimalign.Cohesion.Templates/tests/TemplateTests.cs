@@ -99,6 +99,15 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
             Directory.GetFiles(Path.Combine(output, "bin"), "index.html", SearchOption.AllDirectories)
                 .ShouldNotBeEmpty("The standalone SPA must carry the page served by Program.cs into its output.");
         }
+
+        if (template is "cohesion-web" or "cohesion-spa")
+        {
+            // The plain templates must answer with no code changes: the self-contained build starts
+            // on a machine without Cohesion shared frameworks installed, and the entry point binds
+            // the configured endpoint without a UseServer call.
+            string body = await _workspace.GetFromBuiltWebApplicationAsync(output, name, "/", cancellationToken);
+            body.ShouldContain(template == "cohesion-web" ? "Hello from" : "<html", Case.Insensitive);
+        }
         foreach (string project in SourceProjects(output))
         {
             XDocument document = XDocument.Load(project);

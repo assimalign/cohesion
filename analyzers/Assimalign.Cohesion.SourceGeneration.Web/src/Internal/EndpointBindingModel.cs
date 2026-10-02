@@ -6,13 +6,34 @@ namespace Assimalign.Cohesion.SourceGeneration.Web.Internal;
 internal enum BindingSource
 {
     Context,
+
+    /// <summary>The exchange's request, <c>context.Request</c>: injected, never read from the body.</summary>
+    Request,
+
+    /// <summary>The exchange's response, <c>context.Response</c>: injected, never read from the body.</summary>
+    Response,
+
     Cancellation,
     Feature,
     Route,
     Query,
     Header,
     Form,
-    Body
+    Body,
+
+    /// <summary>
+    /// A route value when the matched route captured one, otherwise the query string. Used when the call
+    /// site cannot see the whole route template (a route-group endpoint, whose prefix is declared
+    /// elsewhere, or a non-literal pattern), so a parameter the visible template does not name may still
+    /// be a route parameter.
+    /// </summary>
+    RouteOrQuery,
+
+    /// <summary>
+    /// Uploaded files of a <c>multipart/form-data</c> body, read from the same parsed form as
+    /// <see cref="Form"/> fields: one file by field name, the files sent under one field name, or every file.
+    /// </summary>
+    FormFile
 }
 
 /// <summary>How a raw source value is converted to the parameter's type.</summary>
@@ -24,18 +45,66 @@ internal enum ConversionKind
     NullableParsable,
     NullableEnum,
     Complex,
-    Injection
+    Injection,
+
+    /// <summary>The first <c>IHttpFormFile</c> uploaded under the binding key.</summary>
+    File,
+
+    /// <summary>Every <c>IHttpFormFile</c> uploaded under the binding key, as an array.</summary>
+    FileList,
+
+    /// <summary>The <c>IHttpFormFileCollection</c> of every uploaded file, whatever its field name.</summary>
+    FileCollection
 }
 
-/// <summary>The awaitable shape of the handler.</summary>
+/// <summary>The shape of the handler's return: what the thunk awaits, and whether a value comes back.</summary>
 internal enum ReturnKind
 {
     Task,
     ValueTask,
-    Void
+    Void,
+
+    /// <summary>A value returned synchronously (<c>T</c>).</summary>
+    Value,
+
+    /// <summary>A value returned through <c>Task&lt;T&gt;</c>.</summary>
+    TaskOfValue,
+
+    /// <summary>A value returned through <c>ValueTask&lt;T&gt;</c>.</summary>
+    ValueTaskOfValue
+}
+
+/// <summary>How the thunk writes the value the handler returned.</summary>
+internal enum ResponseKind
+{
+    /// <summary>The handler returns no value; it writes the response itself.</summary>
+    None,
+
+    /// <summary>A <c>string</c>, written as <c>text/plain; charset=utf-8</c> without negotiation.</summary>
+    Text,
+
+    /// <summary>Any other value, written through the content-serialization registry with negotiation.</summary>
+    Serialized
+}
+
+/// <summary>Whether the returned value can be <see langword="null"/>, and how the thunk tests it.</summary>
+internal enum ResultNullCheck
+{
+    /// <summary>A non-nullable value type: never <see langword="null"/>.</summary>
+    None,
+
+    /// <summary>A reference type: tested with <c>is null</c>.</summary>
+    Reference,
+
+    /// <summary>A <c>Nullable&lt;T&gt;</c>: tested with <c>is null</c> and written as its underlying value.</summary>
+    NullableValue
 }
 
 /// <summary>A single modeled handler parameter.</summary>
+/// <remarks>
+/// <c>DescribedType</c> is the declared type without nullable reference annotations, the form a
+/// <c>typeof(...)</c> in the endpoint's description metadata accepts.
+/// </remarks>
 internal readonly record struct ParameterBinding(
     string DeclaredType,
     string CoreType,
@@ -43,16 +112,86 @@ internal readonly record struct ParameterBinding(
     BindingSource Source,
     ConversionKind Conversion,
     string Key,
-    bool Required) : IEquatable<ParameterBinding>;
+    bool Required,
+    string DescribedType) : IEquatable<ParameterBinding>;
+
+/// <summary>
+/// The signature an interceptor needs to match the intercepted <c>Map*</c> call's receiver.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <c>ReceiverType</c> is the fully qualified receiver parameter type, written as <c>this ReceiverType builder</c>.
+/// For a receiver generated code can name it is the call site's own receiver type (after type
+/// substitution) and <c>TypeParameters</c> is empty.
+/// </para>
+/// <para>
+/// A receiver generated code cannot name — a type parameter, or an inaccessible type — is matched by a
+/// generic interceptor: <c>TypeParameters</c> repeats the implementation method's type parameter list
+/// (<c>&lt;TBuilder&gt;</c>), <c>ReceiverType</c> is its receiver parameter type in terms of them, and
+/// <c>Constraints</c> holds one where-clause body (<c>TBuilder : A, B</c>) per constrained type
+/// parameter. The compiler constructs the interceptor with the call site's type arguments.
+/// </para>
+/// </remarks>
+internal readonly record struct InterceptorShape(
+    string ReceiverType,
+    string TypeParameters,
+    EquatableArray<string> Constraints) : IEquatable<InterceptorShape>;
 
 /// <summary>A modeled typed <c>Map*</c> call site the generator intercepts.</summary>
+/// <remarks>
+/// <para>
+/// <c>DelegateType</c> is the handler's own delegate type (its natural <c>Func</c>/<c>Action</c> type, or
+/// an explicitly created named delegate type), so the cast in the interceptor always matches the runtime
+/// delegate. <c>ResultType</c> is the declared type of the returned (awaited) value and <c>WrittenType</c>
+/// the type argument the serialized write uses: the result type without its top-level nullable annotation,
+/// and the underlying type of a <c>Nullable&lt;T&gt;</c>. Both are empty when the handler returns no value.
+/// </para>
+/// <para>
+/// <c>DescribedResultType</c> is the written type without nullable reference annotations, for the
+/// <c>typeof(...)</c> in the endpoint's response description, and <c>DescribesNoContent</c> records that
+/// the declared result admits <see langword="null"/>, so the description lists the <c>204</c>.
+/// </para>
+/// <para>
+/// <c>RequiresAntiforgery</c> is set for a form-bound endpoint when the consuming compilation can name
+/// the antiforgery requirement (<c>Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata</c>); the
+/// interceptor then attaches it to the mapped route.
+/// </para>
+/// <para>
+/// <c>ValidatedBodyType</c> is the type argument the thunk validates the bound request-body model as —
+/// its declared type without a top-level nullable annotation, or the underlying type of a
+/// <c>Nullable&lt;T&gt;</c> — when the consuming compilation can name the validation entry point
+/// (<c>Assimalign.Cohesion.Web.Validation.HttpContextValidationExtensions</c>); empty otherwise.
+/// </para>
+/// <para>
+/// <c>ReportsFormLimit</c> is set for a form-bound endpoint when the consuming compilation can name
+/// <c>Assimalign.Cohesion.Http.HttpFormLimitExceededException</c>, the cause a form parse records when the
+/// body exceeds a configured limit; the thunk then answers that failure with <c>413</c>.
+/// </para>
+/// </remarks>
 internal readonly record struct EndpointBinding(
     string InterceptsAttribute,
-    string ReceiverType,
+    InterceptorShape Interceptor,
     bool HasMethodParameter,
     string MethodExpression,
     string DelegateType,
     ReturnKind Return,
+    string ResultType,
+    ResponseKind Response,
+    string WrittenType,
+    ResultNullCheck NullCheck,
+    string DescribedResultType,
+    bool DescribesNoContent,
     EquatableArray<ParameterBinding> Parameters,
     int BodyParameterIndex,
-    bool UsesForm) : IEquatable<EndpointBinding>;
+    bool UsesForm,
+    bool RequiresAntiforgery,
+    string ValidatedBodyType,
+    bool ReportsFormLimit) : IEquatable<EndpointBinding>;
+
+/// <summary>
+/// The outcome of analyzing one typed <c>Map*</c> call site: the binding to emit, or the diagnostics that
+/// explain why the call site cannot be rewritten. Exactly one of the two is populated.
+/// </summary>
+internal readonly record struct EndpointAnalysis(
+    EndpointBinding? Binding,
+    EquatableArray<DiagnosticInfo> Diagnostics) : IEquatable<EndpointAnalysis>;

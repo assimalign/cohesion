@@ -10,16 +10,19 @@ namespace Assimalign.Cohesion.Http;
 /// <remarks>
 /// <para>
 /// The <see cref="Key"/> defaults to a fresh 32-byte cryptographically random
-/// value generated when the options are constructed. That default is suitable
-/// for a single process: tokens minted before a restart will not validate
+/// value generated when the options are constructed. That default is for
+/// development only: tokens minted before a restart will not validate
 /// afterward, and multiple instances behind a load balancer will reject each
 /// other's tokens.
 /// </para>
 /// <para>
-/// Restart-stable and multi-node deployments should set <see cref="Protector"/>
-/// to an implementation backed by a persisted, rotating key ring (see the
-/// migration note on that property) rather than hand-distributing a shared
-/// <see cref="Key"/>. When <see cref="Protector"/> is set, <see cref="Key"/> is ignored.
+/// Deployed applications should set <see cref="Protector"/> to an
+/// implementation backed by a persisted, rotating key ring (see the migration
+/// note on that property) rather than hand-distributing a shared
+/// <see cref="Key"/>. When <see cref="Protector"/> is set, <see cref="Key"/> is
+/// ignored. In a Web application, <c>AddAntiforgery(dataProtectionProvider)</c>
+/// in <c>Assimalign.Cohesion.Web.Antiforgery</c> sets a purpose-bound
+/// data-protection protector for you.
 /// </para>
 /// </remarks>
 public sealed class HttpAntiforgeryOptions
@@ -45,9 +48,10 @@ public sealed class HttpAntiforgeryOptions
 
     /// <summary>
     /// Gets or sets the symmetric key used by the built-in HMAC-SHA256 protector to sign
-    /// tokens. Defaults to a per-process random 32-byte key. Used only when
-    /// <see cref="Protector"/> is <see langword="null"/>; prefer <see cref="Protector"/> over
-    /// hand-distributing this key for multi-instance or restart-stable deployments.
+    /// tokens. Defaults to a per-process random 32-byte key, which is for development only.
+    /// Used only when <see cref="Protector"/> is <see langword="null"/>; prefer
+    /// <see cref="Protector"/> over hand-distributing this key for multi-instance or
+    /// restart-stable deployments.
     /// </summary>
     public byte[] Key { get; set; } = RandomNumberGenerator.GetBytes(32);
 
@@ -57,11 +61,12 @@ public sealed class HttpAntiforgeryOptions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Leave this <see langword="null"/> for the zero-config single-process default (an
+    /// Leave this <see langword="null"/> for the zero-config development default (an
     /// HMAC-SHA256 protector over <see cref="Key"/>). To make tokens survive restarts and
-    /// validate across nodes, set it — typically at builder time in a <c>*.Hosting</c>
-    /// project — to an implementation backed by a persisted, rotating key ring such as the
-    /// Cohesion data-protection provider.
+    /// validate across nodes, set it at composition time to an implementation backed by a
+    /// persisted, rotating key ring such as the Cohesion data-protection provider. A Web
+    /// application does this with <c>AddAntiforgery(dataProtectionProvider)</c> in
+    /// <c>Assimalign.Cohesion.Web.Antiforgery</c>, which ships the adapter.
     /// </para>
     /// <para>
     /// <b>Migration from <see cref="Key"/>.</b> Deployments that previously shared a static
@@ -69,7 +74,7 @@ public sealed class HttpAntiforgeryOptions
     /// repository and assign a ring-backed <see cref="Protector"/>; the ring then handles
     /// persistence, rotation, and grace-period validation, so raw key bytes no longer need to
     /// be copied between nodes. This package takes no dependency on any data-protection
-    /// library — the composition root adapts one to <see cref="IHttpAntiforgeryProtector"/>.
+    /// library — the composition layer adapts one to <see cref="IHttpAntiforgeryProtector"/>.
     /// </para>
     /// </remarks>
     public IHttpAntiforgeryProtector? Protector { get; set; }
@@ -81,10 +86,19 @@ public sealed class HttpAntiforgeryOptions
     public bool CookieHttpOnly { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets whether the cookie token is marked <c>Secure</c>.
-    /// Defaults to <see langword="false"/> so the cookie flows over plain HTTP
-    /// in development; set to <see langword="true"/> in production.
+    /// Gets or sets whether the cookie token is marked <c>Secure</c> on every
+    /// request, plain HTTP included. Defaults to <see langword="false"/>, which
+    /// marks it <c>Secure</c> only when the request's effective scheme is HTTPS.
     /// </summary>
+    /// <remarks>
+    /// The effective scheme is <c>context.EffectiveScheme</c> from
+    /// <c>Assimalign.Cohesion.Http.Forwarded</c>: the scheme a trusted
+    /// TLS-terminating proxy forwarded when the forwarded-headers middleware ran
+    /// before the token was stored, and the transport's scheme otherwise. So the
+    /// default suits development over plain HTTP and production over HTTPS alike;
+    /// set this to <see langword="true"/> only to force the flag where the scheme
+    /// cannot tell, for example behind a proxy the application does not trust.
+    /// </remarks>
     public bool CookieSecure { get; set; }
 
     /// <summary>
@@ -98,4 +112,12 @@ public sealed class HttpAntiforgeryOptions
     /// <c>/</c>.
     /// </summary>
     public string CookiePath { get; set; } = "/";
+
+    /// <summary>
+    /// Gets or sets whether the cookie token is essential to the application, so a cookie-consent
+    /// policy emits it before the user has consented. Defaults to <see langword="true"/>: without the
+    /// cookie no unsafe request can pass validation, so a site that asks for consent would otherwise
+    /// reject every form post from a user who has not answered yet.
+    /// </summary>
+    public bool CookieIsEssential { get; set; } = true;
 }

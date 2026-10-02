@@ -58,14 +58,36 @@ public sealed class AuthenticationCompositionTests : IDisposable
         AuthenticationBuilder auth = builder
             .AddAuthentication(options => options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme, _dataProtection)
             .AddCookie()
-            .AddJwtBearer(options => options.SigningKeys.Add(
-                JwtSignatureVerifier.CreateHmac(Encoding.UTF8.GetBytes("a-256-bit-hmac-signing-key-for-tests!!!!"))));
+            .AddJwtBearer(options =>
+            {
+                options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(Encoding.UTF8.GetBytes("a-256-bit-hmac-signing-key-for-tests!!!!")));
+                options.ValidIssuers.Add("https://issuer.example");
+                options.ValidAudiences.Add("api://default");
+            });
 
         // Assert
         auth.Options.GetScheme(CookieAuthenticationDefaults.AuthenticationScheme).ShouldNotBeNull();
         auth.Options.GetScheme(JwtBearerDefaults.AuthenticationScheme).ShouldNotBeNull();
         auth.Options.ResolveDefaultChallengeScheme().ShouldBe(CookieAuthenticationDefaults.AuthenticationScheme);
         builder.Features.ShouldContain(feature => feature is IAuthenticationService);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication] - AddJwtBearer fails at registration when no issuer or audience is configured")]
+    public void AddJwtBearer_WithoutIssuerOrAudience_ThrowsAtRegistration()
+    {
+        // Arrange
+        StubWebApplicationBuilder builder = new();
+        AuthenticationBuilder auth = builder.AddAuthentication(options => { }, _dataProtection);
+        byte[] key = Encoding.UTF8.GetBytes("a-256-bit-hmac-signing-key-for-tests!!!!");
+
+        // Act + Assert — the misconfiguration surfaces where it is written, not on a request.
+        Should.Throw<InvalidOperationException>(() => auth.AddJwtBearer(options => options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(key))));
+        Should.Throw<InvalidOperationException>(() => auth.AddJwtBearer("audience-only", options =>
+        {
+            options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(key));
+            options.ValidIssuers.Add("https://issuer.example");
+        }));
+        auth.Options.GetScheme(JwtBearerDefaults.AuthenticationScheme).ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Authentication] - AddCookie wires a working ticket protector from the provider")]

@@ -70,7 +70,11 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
 
     IWebApplicationPipeline IWebApplicationPipelineBuilder.Build()
     {
-        WebApplicationMiddleware pipeline = _ => Task.CompletedTask;
+        // The terminal honors the root endpoint contract as WebApplication's does: it runs the endpoint
+        // UseRouting published (IWebEndpointFeature); an unhandled request completes untouched.
+        WebApplicationMiddleware pipeline = context => context.Features.Get<IWebEndpointFeature>() is { } endpoint
+            ? endpoint.Endpoint.Invoke(context)
+            : Task.CompletedTask;
         for (int i = _middleware.Count - 1; i >= 0; i--)
         {
             pipeline = _middleware[i].Invoke(pipeline);
@@ -109,6 +113,8 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
         public TestWebApplicationContext(IEnumerable<IHttpFeature> features) => _features = features;
 
         public FileSystemPath? ContentRootPath => null;
+
+        public FileSystemPath? WebRootPath => null;
 
         public IEnumerable<IWebApplicationMiddleware> Middleware => Array.Empty<IWebApplicationMiddleware>();
 

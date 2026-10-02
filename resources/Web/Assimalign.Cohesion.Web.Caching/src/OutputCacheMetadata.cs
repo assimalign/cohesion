@@ -11,16 +11,23 @@ namespace Assimalign.Cohesion.Web.Caching;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The middleware resolves this metadata with last-wins semantics
-/// (<c>IRouterRouteMetadataCollection.GetMetadata&lt;OutputCacheMetadata&gt;</c>), so an endpoint-level
-/// declaration overrides a broader (for example group-level) one, and an endpoint's declaration overrides
-/// the <see cref="OutputCacheOptions.BasePolicy"/>. <see cref="Disabled"/> suppresses caching for the
-/// endpoint even when a base policy is configured.
+/// The middleware reads this metadata from the endpoint <c>UseRouting</c> publishes, with last-wins
+/// semantics (<c>IRouterRouteMetadataCollection.GetMetadata&lt;OutputCacheMetadata&gt;</c>), so an
+/// endpoint-level declaration overrides a broader (for example group-level) one, and an endpoint's
+/// declaration overrides the <see cref="OutputCacheOptions.BasePolicy"/>. <see cref="Disabled"/>
+/// suppresses caching for the endpoint even when a base policy is configured.
+/// </para>
+/// <para>
+/// Output caching is optional behavior, so this metadata does not require its middleware the way rate
+/// limits and timeouts do (it does not implement <c>IRouteMiddlewareMetadata</c>): an endpoint dispatched
+/// without <c>UseOutputCache</c> simply is not cached. With <c>UseOutputCache</c> registered ahead of
+/// <c>UseRouting</c>, opting in through this metadata has no effect, and a response from an endpoint that
+/// carries it is never stored, so <see cref="Disabled"/> is honored in either position.
 /// </para>
 /// <para>
 /// This sealed carrier <em>is</em> the metadata contract — there is deliberately no
 /// <c>IOutputCacheMetadata</c> interface. Metadata items in the endpoint bag are immutable data carriers,
-/// and the sealed type guarantees the validated decision the middleware reads at the route-match seam.
+/// and the sealed type guarantees the validated decision the middleware reads from the published endpoint.
 /// </para>
 /// </remarks>
 public sealed class OutputCacheMetadata

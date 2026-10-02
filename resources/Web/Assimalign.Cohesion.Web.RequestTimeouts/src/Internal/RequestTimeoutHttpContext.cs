@@ -9,8 +9,9 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Internal;
 /// <summary>
 /// The <see cref="IHttpContext"/> the timeout middleware hands downstream: a pass-through
 /// decorator whose <see cref="RequestCancelled"/> is the timeout-linked token, so everything
-/// below the middleware — including the router's own per-dispatch linked token and any handler
-/// reading <c>context.RequestCancelled</c> — observes the timeout as a request cancellation.
+/// below the middleware — including the endpoint the pipeline terminal runs with
+/// <c>context.RequestCancelled</c> and any handler reading it — observes the timeout as a
+/// request cancellation.
 /// </summary>
 /// <remarks>
 /// The transport's real token cannot be swapped (<see cref="IHttpContext.RequestCancelled"/> is
@@ -19,20 +20,18 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Internal;
 /// sending a response — which would make the configured 504 undeliverable. Decorating the
 /// context keeps cancellation application-level while the exchange stays writable; the
 /// middleware still writes the timeout response on the <em>original</em> context it retained.
-/// <see cref="Features"/> is likewise decorated to observe the route-match publication for
-/// per-endpoint policy.
+/// Every other member, <see cref="Features"/> included, forwards to the original context, so
+/// shared exchange state never forks.
 /// </remarks>
 internal sealed class RequestTimeoutHttpContext : IHttpContext
 {
     private readonly IHttpContext _inner;
     private readonly RequestTimeoutFeature _feature;
-    private readonly RequestTimeoutFeatureCollection _features;
 
     public RequestTimeoutHttpContext(IHttpContext inner, RequestTimeoutFeature feature)
     {
         _inner = inner;
         _feature = feature;
-        _features = new RequestTimeoutFeatureCollection(inner.Features, feature);
     }
 
     public HttpVersion Version => _inner.Version;
@@ -43,7 +42,7 @@ internal sealed class RequestTimeoutHttpContext : IHttpContext
 
     public IHttpConnectionInfo ConnectionInfo => _inner.ConnectionInfo;
 
-    public IHttpFeatureCollection Features => _features;
+    public IHttpFeatureCollection Features => _inner.Features;
 
     public IDictionary<string, object?> Items => _inner.Items;
 

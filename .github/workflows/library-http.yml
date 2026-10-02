@@ -29,7 +29,10 @@ jobs:
             "Assimalign.Cohesion.Http.Cookies",
             "Assimalign.Cohesion.Http.Antiforgery",
             "Assimalign.Cohesion.Http.Forwarded",
-            "Assimalign.Cohesion.Http.Streaming"
+            "Assimalign.Cohesion.Http.Streaming",
+            "Assimalign.Cohesion.Http.DigestFields",
+            "Assimalign.Cohesion.Http.InterimResponses",
+            "Assimalign.Cohesion.Http.ServerSentEvents"
           ]
     steps:
       - uses: actions/checkout@v4

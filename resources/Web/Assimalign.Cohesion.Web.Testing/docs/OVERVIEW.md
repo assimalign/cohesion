@@ -50,6 +50,16 @@ await using WebApplicationTestFactory factory = new(new WebApplicationTestFactor
 });
 ```
 
+Point the application at a content root on disk (its `wwwroot` becomes the web root that
+`UseStaticFiles()` serves; the default is the test assembly's base directory):
+
+```csharp
+await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions
+{
+    ContentRootPath = FileSystemPath.Parse(contentRootDirectory),
+});
+```
+
 Drive the exact Program used in production:
 
 ```csharp

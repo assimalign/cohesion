@@ -37,12 +37,12 @@ The feature is a **write-through view over the parse context**, not a copy:
   the very value the transport enforces. There is no second source of truth.
 - `IsReadOnly` delegates to the context's transport-owned freeze flag
   (`IsMaxRequestBodySizeReadOnly`). The transport freezes the knob when it starts consuming the
-  body. On HTTP/1.1 that is now the **first read of the streamed body** (#810): the request is
-  dispatched at head and the body read lazily, so the writable window spans the head hooks, the
-  `BeforeRequestBody` hooks, *and* every middleware / endpoint that runs before the body is read —
-  which is what makes the middleware-visible pre-read override real. (On HTTP/2 / HTTP/3 the
-  pipeline still freezes before the body is exposed, so their `BeforeRequestBody` hooks observe
-  the frozen value.) Because the feature holds no frozen copy of its own, that per-version timing
+  body. On HTTP/1.1 (#810) and HTTP/3 (#1066) that is the **first read of the streamed body**:
+  the request is dispatched at head and the body read lazily, so the writable window spans the
+  head hooks, the `BeforeRequestBody` hooks, *and* every middleware / endpoint that runs before the
+  body is read — which is what makes the middleware-visible pre-read override real. (On HTTP/2 the
+  pipeline still freezes before the body is exposed, so its `BeforeRequestBody` hooks observe the
+  frozen value.) Because the feature holds no frozen copy of its own, that per-version timing
   is invisible to this package and to feature consumers: the contract ("adjust before the body is
   read; observe any time") is stable while the transport's definition of "read" evolves.
 
@@ -74,8 +74,8 @@ later interceptors' `AfterRequestHead` hooks may then look it up (or simply writ
 knob — same store).
 The web host (`Assimalign.Cohesion.Web.Hosting`) installs it by default so every request carries
 the typed feature — the seam is now invoked on all three parse paths (h1, h2, h3; #819), so the
-feature is attached uniformly regardless of protocol (enforcement of the cap remains h1-only —
-see "Protocol coverage" below). The raw transport remains lean (zero interceptors ⇒ no
+feature is attached uniformly regardless of protocol (the cap is enforced on all three — see
+"Protocol coverage" below). The raw transport remains lean (zero interceptors ⇒ no
 per-request context or feature allocation).
 
 ## Feature identity
@@ -96,13 +96,15 @@ The migration from the original in-core placement is complete; the pieces sit as
    listener is constructed (post-construction registrations are inert — no racing the accept
    loops); each transport builds one `HttpExchangeInterceptorRequestContext` per request (read-only
    `Headers` view via `AsReadOnly()`), runs `AfterRequestHead` hooks after the head is assembled,
-   freezes the knob, runs `BeforeRequestBody` hooks (skipped for CONNECT; on h1 they precede the
+   freezes the knob (h2 right after those hooks; h1 and h3 at the first body read), runs
+   `BeforeRequestBody` hooks (skipped for CONNECT; on h1 they precede the
    automatic `Expect: 100-continue` solicitation), chains `AfterRequestBody` hooks over the
    materialized stream, and flows the hook-populated feature collection into the exchange through
    the context constructors' `features` parameters. On h1 the
    parser does this inline and enforces whatever cap remains (413); on h2/h3 the shared
-   `HttpRequestInterceptorPipeline` does it at the context-construction site (no cap enforcement
-   yet — see "Protocol coverage"). `HttpRequestRejectedException` is caught ahead of the
+   `HttpRequestInterceptorPipeline` does it at the context-construction site: h2 enforces the
+   frozen value the pipeline returns (413), and h3's lazy body enforces the cap the way h1's does
+   (413 — see "Protocol coverage"). `HttpRequestRejectedException` is caught ahead of the
    wire-failure classifier and answered with the protocol-appropriate wire behavior (h1 minimal
    status response + close; h2 `RST_STREAM(CANCEL)`; h3 stream abort). Zero registered interceptors
    keeps the exact pre-seam fast path (no context, no feature, no hook dispatch).
@@ -115,9 +117,10 @@ The migration from the original in-core placement is complete; the pieces sit as
 5. **Tests.** The transport suite exercises the seam with local doubles on all three protocols
    (h1: attach / cap-raise / cap-lower / wrap / reject / freeze / read-only headers / CONNECT skip
    / snapshot inertness; h2 + h3: attach / wrap / reject → RST_STREAM/stream-abort / freeze /
-   read-only headers / CONNECT skip / empty-body / lowered-cap no-reject / fast path); this
-   package's suite covers the feature contract; the h1 limit-rejection suite is unchanged because
-   enforcement never moved.
+   read-only headers / CONNECT skip / empty-body / fast path; h2: cap-lower → 413 and cap-raise;
+   h3: the h1-style freeze-at-first-read, cap-raise, and cap-lower → 413); this package's suite
+   covers the feature contract; the h1 limit-rejection suite is unchanged because h1 enforcement
+   never moved.
 
 ## Protocol coverage (honest gaps)
 
@@ -125,24 +128,26 @@ The migration from the original in-core placement is complete; the pieces sit as
   HTTP/3 (#819) — so this package's `AfterRequestHead` hook attaches the typed
   `IHttpMaxRequestBodySizeFeature` on every request regardless of protocol, and the feature is
   visible from the first middleware onward on h2/h3 exactly as on h1.
-- **Cap *enforcement* remains HTTP/1.1-only.** HTTP/2 dispatches a request at header completion
-  and streams the body under flow-control backpressure (h2: `Http2Stream.CreateContextAsync` runs
-  at the frame pump's END_HEADERS dispatch, so `AfterRequestHead` hooks run before the application
-  observes any body octet); HTTP/3 drains the request stream before header decode, so its
-  `AfterRequestHead` hook runs before the body is *exposed*, not before it is *received*. On both,
-  no hard body-size cap is
-  enforced yet — h2 bounds buffering via flow-control backpressure and h3 via QUIC flow control
-  (see `HttpConnectionListenerLimits.MaxRequestBodySize`; the hard cap is tracked follow-up
-  work). A hook that lowers the cap on h2/h3 therefore changes the value the feature reports
-  without rejecting the body. Nothing in this package should be read as implying h2/h3 body
-  *protection* exists yet — only the typed feature and the hook plumbing do.
-- **The middleware-visible pre-read override window is live on HTTP/1.1 (#810).** The h1 transport
-  now streams the request body and freezes the cap at the first body read, so middleware and
-  endpoints — not just head-hook interceptors — can adjust `MaxRequestBodySize` through this
-  feature before the body is read, and the transport enforces whatever value remains (413). The
-  same window opens on h2/h3 once their body reads gain hard-cap enforcement. Minimum-data-rate
-  limits (`MinRequestBodyDataRate` / `MinResponseDataRate`) also landed with #810, but as
-  transport-owned limits (`HttpConnectionListenerLimits`), not features surfaced by this package.
+- **Cap *enforcement* covers all three protocols.** HTTP/1.1 and HTTP/3 (#1066) dispatch a
+  request at its head and read the body lazily, and their body streams enforce whatever cap the
+  feature holds at the first read (413). HTTP/2 dispatches a request at header completion
+  (`Http2Stream.CreateContextAsync` runs at the frame pump's END_HEADERS dispatch, so
+  `AfterRequestHead` hooks run before the application observes any body octet) and enforces the
+  cap as frozen after those hooks (#1048): a declared `content-length` over it is answered `413`
+  before the request is dispatched, and a body that grows past it is answered on receipt — `413`
+  when the response has not started, a stream reset when it has. A hook that lowers the cap
+  therefore rejects an oversized body on every protocol; one that raises it admits the larger
+  body.
+- **The middleware-visible pre-read override window is live on HTTP/1.1 (#810) and HTTP/3
+  (#1066).** Both transports stream the request body and freeze the cap at the first body read, so
+  middleware and endpoints — not just head-hook interceptors — can adjust `MaxRequestBodySize`
+  through this feature before the body is read, and the transport enforces whatever value remains
+  (413). The h2 pipeline freezes the knob at dispatch, so on HTTP/2 the feature is read-only from
+  the first middleware onward and only head hooks can adjust the cap; opening the same window
+  there is later work. Minimum-data-rate limits (`MinRequestBodyDataRate` /
+  `MinResponseDataRate`) also landed with #810, but as transport-owned limits
+  (`HttpConnectionListenerLimits`) enforced on HTTP/1.1 only, not features surfaced by this
+  package.
 
 ## AOT posture
 
@@ -153,7 +158,8 @@ allocation per request, only when the interceptor is registered.
 ## Non-goals
 
 - **Enforcement.** The wire-level cap and its 413 semantics are transport-owned
-  (the per-registration `Http1Limits`); this package only observes and adjusts the per-request value.
+  (the per-registration `Http1Limits` / `Http2Limits` / `Http3Limits`); this package only observes
+  and adjusts the per-request value.
 - **Other limit knobs (request line, header count/size, timeouts).** Those are connection-wide
   policy on the per-version listener limits with no per-request story; they gain typed features here only if
   a real per-request consumer appears.

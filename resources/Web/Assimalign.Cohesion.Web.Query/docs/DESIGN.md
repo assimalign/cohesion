@@ -110,7 +110,7 @@ Two surfaces, one evaluation path:
   to resolve up front. The `WebQueryResourceValidatorsProvider` returns `null` when validators
   are unknown (pass through, no evaluation). On `Proceed` the middleware stamps
   `ETag`/`Last-Modified` onto the response — app-overridable — so clients can condition their
-  next query; this is also the seam the future server output cache composes with.
+  next query; this is also the seam the server output cache (`Web.Caching`) composes with.
 
 The middleware touches QUERY requests only. Conditional GET/HEAD shaping belongs to the features
 that own those flows (static files, output caching), not to this package.

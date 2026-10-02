@@ -140,8 +140,9 @@ internal sealed class TestHttpResponse : IHttpResponse
 }
 
 /// <summary>
-/// A stand-in for the router's route-match publication: installing it on the (decorated) feature
-/// collection is exactly what <c>UseRouting</c> does between matching and dispatching.
+/// A stand-in for the endpoint <c>UseRouting</c> publishes: installing it on the feature collection
+/// ahead of the timeout middleware is what routing does before calling <c>next</c>. Set
+/// <see cref="IsPreflight"/> to model the candidate endpoint routing publishes for a CORS preflight.
 /// </summary>
 internal sealed class FakeRouteMatchFeature : IRouteMatchFeature
 {
@@ -151,6 +152,7 @@ internal sealed class FakeRouteMatchFeature : IRouteMatchFeature
         => _metadata = new Routing.Metadata.RouterRouteMetadataCollection(metadata);
 
     public string Name => nameof(IRouteMatchFeature);
+    public bool IsPreflight { get; init; }
     public IRouterRoute? Route => null;
     public RouteValueDictionary? Values => null;
     public IRouterRouteMetadataCollection Metadata => _metadata;

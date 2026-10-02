@@ -18,12 +18,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// end (RFC 9114 §4.1): completion flushes the last <c>DATA</c> frame and then ends the request
 /// stream's write side (a graceful FIN via the <see cref="IConnection"/> half-close contract), so a
 /// real HTTP/3 client observes the streamed body terminate rather than waiting on connection
-/// teardown (which it would surface as <c>H3_CLOSED_CRITICAL_STREAM</c>).
+/// teardown (which it would surface as <c>H3_CLOSED_CRITICAL_STREAM</c>). A response to <c>HEAD</c>
+/// commits its HEADERS frame but no DATA frame (RFC 9110 §9.3.2).
 /// </remarks>
 internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
 {
     private readonly Http3Context _context;
     private readonly Stream _stream;
+    private bool _suppressBody;
 
     public Http3ResponseBodyStream(Http3Context context)
         : base(context)
@@ -37,6 +39,10 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
         // RFC 9110 §15.2 — the final (streamed) response head must not carry a 1xx status.
         HttpInterimResponseRules.EnsureFinalStatusCode(_context.Response.StatusCode);
 
+        // RFC 9110 §9.3.2 — a HEAD response carries the header section a GET would but never content,
+        // so every body write after the head is dropped: no DATA frame reaches the wire.
+        _suppressBody = _context.Request.Method == HttpMethod.Head;
+
         byte[] headerBlock = Http3HeaderCodec.EncodeResponseHeaders(_context);
         await WriteFrameAsync(Http3FrameType.Headers, headerBlock, cancellationToken).ConfigureAwait(false);
         await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -44,6 +50,11 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
 
     protected override async ValueTask WriteFramedAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
     {
+        if (_suppressBody)
+        {
+            return;
+        }
+
         await WriteFrameAsync(Http3FrameType.Data, data, cancellationToken).ConfigureAwait(false);
         await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }

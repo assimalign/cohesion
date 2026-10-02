@@ -21,11 +21,12 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// </para>
 /// <para>
 /// Enforcement is per version: the HTTP/1.1 read/write path enforces the body-size cap, the
-/// connection timeouts, and the request-body / response data rates today; HTTP/2 bounds
-/// request-body buffering through flow-control backpressure (a hard body-size cap, the connection
-/// timeouts, and the data rates are tracked follow-up work); HTTP/3's equivalents are delegated to
-/// the QUIC transport. On every version <see cref="MaxRequestBodySize"/> additionally seeds each
-/// request's parse context, so request-parse interceptors observe and adjust the same knob no
+/// connection timeouts, and the request-body / response data rates today; HTTP/2 enforces the
+/// body-size cap and bounds request-body buffering through flow-control backpressure (the
+/// connection timeouts and the data rates are tracked follow-up work); HTTP/3 enforces the
+/// body-size cap in its lazily read request body and paces the peer through QUIC flow control (its
+/// timeouts and data rates are tracked follow-up work). On every version
+/// <see cref="MaxRequestBodySize"/> additionally seeds each request's parse context, so request-parse interceptors observe and adjust the same knob no
 /// matter which protocol served the request. Each property documents where it is enforced so an
 /// operator never has to guess.
 /// </para>
@@ -47,8 +48,11 @@ public abstract class HttpConnectionListenerLimits
     /// <see cref="Assimalign.Cohesion.Http.IHttpExchangeInterceptor"/> may raise or lower the cap
     /// per request before the body is read (the <c>Assimalign.Cohesion.Http.RequestLimits</c>
     /// package surfaces it as a typed <c>IHttpMaxRequestBodySizeFeature</c>). Enforced by the
-    /// HTTP/1.1 read path today; HTTP/2 bounds body buffering via flow-control backpressure, with
-    /// the hard cap tracked as follow-up work.
+    /// HTTP/1.1 and HTTP/3 request-body reads, where the per-request value freezes at the first body
+    /// read (HTTP/3 answers <c>413</c> while the response head is uncommitted), and by HTTP/2, which
+    /// freezes the value when the request is dispatched, rejects a larger declared
+    /// <c>content-length</c> before reading the body, and answers a body that grows past it on
+    /// receipt with <c>413</c> (a stream reset when the response has already started).
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is negative.</exception>
     public long? MaxRequestBodySize

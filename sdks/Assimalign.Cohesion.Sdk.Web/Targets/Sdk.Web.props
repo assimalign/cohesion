@@ -20,4 +20,13 @@
 		<CohesionProbe Include="readiness" Endpoint="http" Http="/readyz" />
 		<CohesionProbe Include="liveness" Endpoint="http" Http="/livez" />
 	</ItemGroup>
+
+	<!--
+		wwwroot is the web root UseStaticFiles() serves, resolved under the content root
+		(AppContext.BaseDirectory for a plain application), so it ships with the build and publish
+		output. A consumer's own None Update in the project body still wins.
+	-->
+	<ItemGroup>
+		<None Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	</ItemGroup>
 </Project>
