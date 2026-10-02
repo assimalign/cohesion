@@ -37,7 +37,7 @@ public sealed class GraphPathsQueryRequest : QueryRequest<GqlQueryStatement>
     /// <exception cref="DatabaseParseException">The statement has an error diagnostic.</exception>
     /// <exception cref="DatabaseException">
     /// The text nests deeper than the calling thread's stack lets the parser follow:
-    /// <c>COHDBG007</c>, statement too complex.
+    /// <c>COHDBG008</c>, statement too complex.
     /// </exception>
     public static GraphPathsQueryRequest FromGql(string gql, IReadOnlyDictionary<string, object?>? parameters = null)
         => new(GraphQueryRequest.FromGql(gql, parameters).Statement, parameters);

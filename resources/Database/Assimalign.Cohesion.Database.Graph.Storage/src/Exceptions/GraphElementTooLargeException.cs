@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 /// </summary>
 /// <remarks>
 /// The failure belongs to the element, not to the store: no record or index entry is written for
-/// the element, and the store stays usable. The Graph engine reports it as <c>COHDBG008</c>.
+/// the element, and the store stays usable. The Graph engine reports it as <c>COHDBG009</c>.
 /// </remarks>
 public sealed class GraphElementTooLargeException : StorageException
 {

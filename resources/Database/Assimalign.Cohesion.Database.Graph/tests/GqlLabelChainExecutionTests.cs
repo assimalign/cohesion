@@ -23,8 +23,8 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 /// decision 2026-10-02: "do what Neo4j does"). 10,000-name chains of every operator plan and run in
 /// node patterns, edge patterns, labeled predicates and insertions; flattening keeps
 /// <c>!</c> &gt; <c>&amp;</c> &gt; <c>|</c>; a statement nested deeper than the executing thread's
-/// stack fails with <c>COHDBG007</c> while the session keeps serving; an element whose labels and
-/// properties outgrow its storage record fails with <c>COHDBG008</c> the same way; and index-anchor
+/// stack fails with <c>COHDBG008</c> while the session keeps serving; an element whose labels and
+/// properties outgrow its storage record fails with <c>COHDBG009</c> the same way; and index-anchor
 /// selection stays linear however many labels, equalities and indexes meet.
 /// </summary>
 public sealed class GqlLabelChainExecutionTests
@@ -238,14 +238,14 @@ public sealed class GqlLabelChainExecutionTests
     }
 
     /// <summary>
-    /// A statement nested deeper than the parsing thread's stack fails with <c>COHDBG007</c>, not a
+    /// A statement nested deeper than the parsing thread's stack fails with <c>COHDBG008</c>, not a
     /// crash and not a parse error (the text is within the language), writes nothing, and leaves
     /// the session, and an explicit transaction it ran in, usable.
     /// </summary>
     /// <param name="template">The statement, with the nested text at <c>{0}</c>.</param>
     /// <param name="open">The text that opens one level.</param>
     /// <param name="leaf">The innermost text.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph] - Label chains: nesting past a small thread's stack is COHDBG007 and the session survives")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Label chains: nesting past a small thread's stack is COHDBG008 and the session survives")]
     [InlineData("MATCH (n:{0}) RETURN n.name", "(", "X")]
     [InlineData("MATCH (n:{0}) RETURN n.name", "!(", "X")]
     [InlineData("MATCH (n) WHERE n IS LABELED {0} RETURN n.name", "(L0|", "X")]
@@ -267,7 +267,7 @@ public sealed class GqlLabelChainExecutionTests
 
         // Assert
         var failure = error.ShouldBeOfType<DatabaseException>();
-        failure.Message.ShouldStartWith("COHDBG007: Statement too complex", Case.Sensitive);
+        failure.Message.ShouldStartWith("COHDBG008: Statement too complex", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<InsufficientExecutionStackException>().Message.ShouldContain("GQL0009", Case.Sensitive);
         await transaction.CommitAsync(CancellationToken.None);
         (await ColumnAsync(session, "MATCH (n:Kept) RETURN n.name")).ShouldBe(["kept"]);
@@ -276,10 +276,10 @@ public sealed class GqlLabelChainExecutionTests
     }
 
     /// <summary>
-    /// A typed request carrying the parser's GQL0009 reports the same COHDBG007 as the text seam,
+    /// A typed request carrying the parser's GQL0009 reports the same COHDBG008 as the text seam,
     /// rather than executing a recovery tree.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Graph] - Label chains: a typed request whose parse ran out of stack is COHDBG007")]
+    [Fact(DisplayName = "Cohesion Test [Graph] - Label chains: a typed request whose parse ran out of stack is COHDBG008")]
     public async Task Execute_TypedRequestOutOfStack_ShouldFailWithCohdbg007Async()
     {
         // Arrange
@@ -299,15 +299,15 @@ public sealed class GqlLabelChainExecutionTests
 
         // Assert
         statement!.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0009");
-        error.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        error.Message.ShouldStartWith("COHDBG008", Case.Sensitive);
         (await ColumnAsync(session, "MATCH (n:X) RETURN n.name")).ShouldBe(["x"]);
     }
 
     /// <summary>
     /// A hand-built tree deeper than any thread's stack validates without recursion and fails in
-    /// evaluation with COHDBG007, which aborts only the statement.
+    /// evaluation with COHDBG008, which aborts only the statement.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Graph] - Label chains: a hand-built tree deeper than the stack is COHDBG007 and the session survives")]
+    [Fact(DisplayName = "Cohesion Test [Graph] - Label chains: a hand-built tree deeper than the stack is COHDBG008 and the session survives")]
     public async Task Execute_HandBuiltTreePastTheStack_ShouldFailWithCohdbg007Async()
     {
         // Arrange
@@ -339,7 +339,7 @@ public sealed class GqlLabelChainExecutionTests
                 await session.ExecuteAsync(new GraphQueryRequest(statement), CancellationToken.None));
 
             // Assert
-            error.Message.ShouldStartWith("COHDBG007: Statement too complex", Case.Sensitive);
+            error.Message.ShouldStartWith("COHDBG008: Statement too complex", Case.Sensitive);
             error.InnerException.ShouldBeOfType<InsufficientExecutionStackException>();
             (await ColumnAsync(session, "MATCH (n:X) RETURN n.name")).ShouldBe(["x"]);
         }
@@ -348,12 +348,12 @@ public sealed class GqlLabelChainExecutionTests
     /// <summary>
     /// With no label cap, a long conjunction can outgrow the one graph record a node's labels and
     /// properties share, as a long property always could. The store refuses the record before it
-    /// writes it, and the engine reports <c>COHDBG008</c>: the statement fails like any other,
+    /// writes it, and the engine reports <c>COHDBG009</c>: the statement fails like any other,
     /// rolling back the explicit transaction it ran in (catalog labels it defined included), and the
     /// session serves the next transaction.
     /// </summary>
     /// <param name="gql">An insertion whose record exceeds 8,092 bytes.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph] - Element size: a record past 8,092 bytes is COHDBG008 and the session survives")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Element size: a record past 8,092 bytes is COHDBG009 and the session survives")]
     [MemberData(nameof(OversizedInsertions))]
     public async Task Execute_OversizedRecord_ShouldFailWithCohdbg008Async(string gql)
     {
@@ -369,7 +369,7 @@ public sealed class GqlLabelChainExecutionTests
             await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Message.ShouldStartWith("COHDBG008: ", Case.Sensitive);
+        error.Message.ShouldStartWith("COHDBG009: ", Case.Sensitive);
         error.Message.ShouldContain("8092 bytes one graph record can hold", Case.Sensitive);
         error.InnerException.ShouldBeOfType<GraphElementTooLargeException>();
         transaction.State.ShouldBe(TransactionState.RolledBack);
@@ -399,9 +399,9 @@ public sealed class GqlLabelChainExecutionTests
 
     /// <summary>
     /// An indexed value past the 1,016-byte index key fails its insertion, and an index build over
-    /// one, with <c>COHDBG008</c>; a search for one matches nothing, since no write can store it.
+    /// one, with <c>COHDBG009</c>; a search for one matches nothing, since no write can store it.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Graph] - Element size: an indexed value past the index key is COHDBG008 to write and matches nothing")]
+    [Fact(DisplayName = "Cohesion Test [Graph] - Element size: an indexed value past the index key is COHDBG009 to write and matches nothing")]
     public async Task Execute_OversizedIndexedValue_ShouldFailToWriteAndMatchNothingAsync()
     {
         // Arrange
@@ -421,9 +421,9 @@ public sealed class GqlLabelChainExecutionTests
         var equality = await ColumnAsync(session, "MATCH (n:X) WHERE n.name = '" + longName + "' RETURN n.name");
 
         // Assert
-        insert.Message.ShouldStartWith("COHDBG008: An indexed property value encodes to ", Case.Sensitive);
+        insert.Message.ShouldStartWith("COHDBG009: An indexed property value encodes to ", Case.Sensitive);
         insert.Message.ShouldContain("1016-byte index key", Case.Sensitive);
-        build.Message.ShouldStartWith("COHDBG008: ", Case.Sensitive);
+        build.Message.ShouldStartWith("COHDBG009: ", Case.Sensitive);
         inline.ShouldBeEmpty();
         equality.ShouldBeEmpty();
         (await ColumnAsync(session, "MATCH (n:X {name: 'x'}) RETURN n.name")).ShouldBe(["x"]);

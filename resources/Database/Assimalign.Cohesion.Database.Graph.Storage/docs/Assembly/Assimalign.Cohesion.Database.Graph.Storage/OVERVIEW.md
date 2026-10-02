@@ -17,6 +17,6 @@ argument exceptions; an element whose record exceeds 8,092 bytes, or whose index
 exceeds the 1,016-byte index key, throws `GraphElementTooLargeException` (a
 `StorageException`) before anything is written; missing endpoints, connected-node
 restrictions and invalid index operations use `InvalidOperationException`. The Graph root
-translates these to its session diagnostics (`COHDBG008` for an element too large). Storage integrity failures retain the kernel's
+translates these to its session diagnostics (`COHDBG009` for an element too large). Storage integrity failures retain the kernel's
 storage exception vocabulary. See [design](../../DESIGN.md) for the full lifecycle
 and on-disk format.

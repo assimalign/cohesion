@@ -35,7 +35,7 @@ public sealed class GraphQueryRequest : QueryRequest<GqlQueryStatement>
     /// <exception cref="DatabaseParseException">The statement has an error diagnostic.</exception>
     /// <exception cref="DatabaseException">
     /// The text nests deeper than the calling thread's stack lets the parser follow:
-    /// <c>COHDBG007</c>, statement too complex. No length or nesting limit applies to label
+    /// <c>COHDBG008</c>, statement too complex. No length or nesting limit applies to label
     /// expressions or predicates, so the same text parses on a thread with more stack.
     /// </exception>
     public static GraphQueryRequest FromGql(string gql, IReadOnlyDictionary<string, object?>? parameters = null)

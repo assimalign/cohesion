@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>
 /// The failure for a statement whose parse, plan or evaluation needs more stack than the executing
-/// thread has left: <c>COHDBG007</c>, statement too complex (ISO SQLSTATE 54001; Neo4j reports the
+/// thread has left: <c>COHDBG008</c>, statement too complex (ISO SQLSTATE 54001; Neo4j reports the
 /// same condition as the transient <c>Neo.TransientError.General.StackOverFlowError</c>, GQLSTATUS
 /// 51N37). GQL has no fixed limit on label-expression or predicate length or nesting, as Neo4j has
 /// none; the parser and every recursive walk check the stack before they descend, so the statement
@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 internal static class GraphStatementTooComplex
 {
     /// <summary>The engine code.</summary>
-    internal const string Code = "COHDBG007";
+    internal const string Code = "COHDBG008";
 
     /// <summary>
     /// The parser's code for text whose nesting the parsing thread's stack cannot hold. The same

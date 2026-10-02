@@ -23,7 +23,7 @@ public sealed partial class GqlQueryParser : QueryParser
     // A statement that nests deeper than the stack the parsing thread has left. The same text
     // parses on a thread with more stack: the statement is within the language, the thread is too
     // small for it, so GraphQueryRequest.FromGql reports it as the engine's statement-too-complex
-    // failure, COHDBG007, not as a parse error.
+    // failure, COHDBG008, not as a parse error.
     private const string statementTooDeepCode = "GQL0009";
 
     /// <summary>Initializes a GQL parser.</summary>

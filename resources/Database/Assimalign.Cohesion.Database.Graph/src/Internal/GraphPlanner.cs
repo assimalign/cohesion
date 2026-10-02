@@ -84,7 +84,7 @@ internal sealed class GraphPlanner
         }
         // Walks the predicate with an explicit stack, in source order: an AND chain of any length
         // and parentheses of any depth validate without recursion, as Neo4j's n-ary Ands carry
-        // any number of predicates. Only evaluation recurses, and it checks the stack (COHDBG007).
+        // any number of predicates. Only evaluation recurses, and it checks the stack (COHDBG008).
         void ValidateExpression(GqlExpression? root)
         {
             if (root is null) { return; }

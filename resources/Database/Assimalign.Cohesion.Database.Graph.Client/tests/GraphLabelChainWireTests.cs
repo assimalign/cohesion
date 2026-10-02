@@ -14,10 +14,10 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 /// Label expressions and predicates have no fixed length or nesting limit (#1139 follow-up, owner
 /// decision 2026-10-02: "do what Neo4j does"), through the production GraphDatabaseServer and
 /// Graph.Client over Connections.InMemory: 10,000-name chains in MATCH, WHERE and INSERT return the
-/// expected rows, and a statement nested deeper than the server thread's stack is a COHDBG007
+/// expected rows, and a statement nested deeper than the server thread's stack is a COHDBG008
 /// execution failure that keeps the pooled session, where Neo4j reports its transient
 /// StackOverFlowError and keeps the connection. An insertion past the 8,092-byte graph record is a
-/// COHDBG008 execution failure that keeps the session the same way.
+/// COHDBG009 execution failure that keeps the session the same way.
 /// </summary>
 public sealed class GraphLabelChainWireTests
 {
@@ -70,11 +70,11 @@ public sealed class GraphLabelChainWireTests
     /// <summary>
     /// With no label cap, a long conjunction can outgrow the one graph record a node's labels and
     /// properties share, as a long property always could. The store refuses the record, and the
-    /// server reports the COHDBG008 execution failure, where the uncoded storage error used to end
+    /// server reports the COHDBG009 execution failure, where the uncoded storage error used to end
     /// the session; the same pooled session serves the next query.
     /// </summary>
     /// <param name="gql">An insertion whose record exceeds 8,092 bytes.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Element size: a record past 8,092 bytes is a COHDBG008 execution failure that keeps the session")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Element size: a record past 8,092 bytes is a COHDBG009 execution failure that keeps the session")]
     [MemberData(nameof(OversizedInsertions))]
     public async Task ExecuteAsync_OversizedRecord_ShouldFailAsCohdbg008AndKeepSession(string gql)
     {
@@ -90,7 +90,7 @@ public sealed class GraphLabelChainWireTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldContain("COHDBG008", Case.Sensitive);
+        error.Message.ShouldContain("COHDBG009", Case.Sensitive);
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (n) RETURN n.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("one");
@@ -133,13 +133,13 @@ public sealed class GraphLabelChainWireTests
 
     /// <summary>
     /// 100,000 nested groups are deeper than any server thread's stack. The parse stops with
-    /// GQL0009, which the server reports as the COHDBG007 execution failure (the text is within the
+    /// GQL0009, which the server reports as the COHDBG008 execution failure (the text is within the
     /// language; the thread is too small for it), and the same pooled session serves the next query.
     /// </summary>
     /// <param name="template">The statement, with the nested text at <c>{0}</c>.</param>
     /// <param name="open">The text that opens one level.</param>
     /// <param name="leaf">The innermost text.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Label chains: nesting past the server's stack is a COHDBG007 execution failure that keeps the session")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Label chains: nesting past the server's stack is a COHDBG008 execution failure that keeps the session")]
     [InlineData("MATCH (n:{0}) RETURN n.name", "!(", "L0")]
     [InlineData("MATCH (n) WHERE n:{0} RETURN n.name", "(L1|", "L0")]
     [InlineData("MATCH (n) WHERE {0} RETURN n.name", "(n.name = 'one' AND ", "n.name = 'one'")]
@@ -161,7 +161,7 @@ public sealed class GraphLabelChainWireTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldContain("COHDBG007", Case.Sensitive);
+        error.Message.ShouldContain("COHDBG008", Case.Sensitive);
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (n:L0|%) RETURN n.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("one");

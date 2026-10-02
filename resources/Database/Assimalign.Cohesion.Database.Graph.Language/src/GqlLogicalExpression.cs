@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// parenthesized chain in a later position stays a nested node, <c>p AND (q AND r)</c>; the meaning
 /// is the same, and merging it would cost a copy of its operands per enclosing group. Nesting
 /// through parentheses is bounded only by the stack: the parser reports <c>GQL0009</c> and the
-/// engine <c>COHDBG007</c> instead of overflowing it.
+/// engine <c>COHDBG008</c> instead of overflowing it.
 /// </para>
 /// <para>
 /// The engine evaluates the operands first to last and stops at the first false one. A hand-built

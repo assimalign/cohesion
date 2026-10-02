@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// Evaluates a validated <c>WHERE</c> predicate against one binding. An <c>AND</c> chain is one
 /// n-ary node evaluated by a loop; the walk recurses only where predicates nest (parentheses and
 /// comparison operands) and checks the stack before each descent, so a predicate deeper than the
-/// executing thread's stack fails its statement with <c>COHDBG007</c> instead of overflowing it.
+/// executing thread's stack fails its statement with <c>COHDBG008</c> instead of overflowing it.
 /// </summary>
 internal static class GraphExpressionEvaluator
 {

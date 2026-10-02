@@ -52,7 +52,7 @@ internal sealed partial class GraphDatabaseInstance
             if (error is TransactionAbortedException) { throw new DatabaseTransactionAbortedException(error.Message, error); }
             // An element whose record or index key outgrows storage fails its statement; the store
             // wrote nothing for it, and the session stays open.
-            if (error is GraphElementTooLargeException) { throw new DatabaseException("COHDBG008: " + error.Message, error); }
+            if (error is GraphElementTooLargeException) { throw new DatabaseException("COHDBG009: " + error.Message, error); }
             if (error is StorageException) { throw new DatabaseException("COHDBG006: " + error.Message, error); }
             if (error is InvalidOperationException) { throw new DatabaseException("COHDBG003: " + error.Message, error); }
             // A label expression or predicate nested deeper than this thread's stack: the walks

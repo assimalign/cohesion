@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// and no count or depth limit applies (as Neo4j). Validation and the name walks use an explicit
 /// stack and hold for a tree of any shape. Evaluation recurses only where the tree nests (a group
 /// inside a chain, or a negation), and checks the stack before each descent: a tree deeper than the
-/// executing thread's stack fails its statement with <c>COHDBG007</c> instead of overflowing it.
+/// executing thread's stack fails its statement with <c>COHDBG008</c> instead of overflowing it.
 /// </para>
 /// <para>
 /// The planner validates every expression before execution, so evaluation sees only the five

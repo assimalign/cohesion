@@ -89,7 +89,7 @@ Unsupported CLR objects, empty or whitespace names and non-finite floating value
 with `ArgumentException`, a caller error, before insertion. An oversized record fails
 with the public `GraphElementTooLargeException`, a `StorageException`, before anything
 is written: the size is the element's, not a store fault, so the Graph engine reports it
-as the statement failure `COHDBG008` and keeps the session. This version does not define
+as the statement failure `COHDBG009` and keeps the session. This version does not define
 arrays, nested objects or overflow chains; Neo4j spills large label sets to dynamic label
 records and long values to property chains, and an overflow-record format is a follow-up. Nodes and
 relationships are immutable versions; the frozen engine surface has create/delete

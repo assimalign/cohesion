@@ -179,7 +179,7 @@ The parser describes only the metadata subject; it never accesses or caches cata
 | `GQL0006` | Duplicate literal property key |
 | `GQL0007` | `Graph catalog introspection is read-only.`: mutation composed with `SHOW` |
 | `GQL0008` | A `--` comment begins exactly where a node pattern's `)` or an edge pattern's `]` ends, in `MATCH`, `INSERT` or `CREATE`: a Cypher arrow (`-->`, `--`) that would hide the rest of the line. Reported at the `--`; the message names `->`, `<-` and `-` |
-| `GQL0009` | The statement nests parentheses (in a label expression or a predicate) deeper than the parsing thread's stack can follow. Reported at the `(` that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG007`, statement too complex, not as a parse error |
+| `GQL0009` | The statement nests parentheses (in a label expression or a predicate) deeper than the parsing thread's stack can follow. Reported at the `(` that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG008`, statement too complex, not as a parse error |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break
@@ -383,7 +383,7 @@ Cohesion now does the same:
 | `p AND q AND ...` in `WHERE` | at most 128 comparisons and labeled predicates (`GQL0005`) | one `GqlLogicalExpression` of any length |
 | Label parentheses and negations | at most 128 levels (`GQL0005`) | as deep as the parsing thread's stack allows; deeper is `GQL0009` |
 | Predicate parentheses | at most 128 levels (`GQL0005`) | as above |
-| Hand-built tree depth | at most 128 label levels or 256 predicate levels (`COHDBG001`) | no limit; a walk out of stack is `COHDBG007` |
+| Hand-built tree depth | at most 128 label levels or 256 predicate levels (`COHDBG001`) | no limit; a walk out of stack is `COHDBG008` |
 
 - **Flattening.** The parser builds each run of `|`, `&`, repeated `:` or `AND` in one list, so a chain
   costs time linear in its length. A parenthesized chain of the same operator that opens a run
@@ -397,7 +397,7 @@ Cohesion now does the same:
   `RuntimeHelpers.TryEnsureSufficientExecutionStack`; on a thread out of stack it reports `GQL0009` at
   that `(` and stops, instead of overflowing. Every recursive engine walk (label evaluation and
   predicate evaluation) calls `RuntimeHelpers.EnsureSufficientExecutionStack`, and the engine reports
-  the exhausted stack as `COHDBG007`. The walks that need no recursion do not recurse: shape
+  the exhausted stack as `COHDBG008`. The walks that need no recursion do not recurse: shape
   validation, name collection, anchor equalities, `ToString`, structural equality and hashing use an
   explicit stack. This is .NET's form of Neo4j's backstop: .NET cannot catch a stack overflow, so the
   check runs before the descent instead of after the overflow.
@@ -407,13 +407,13 @@ Cohesion now does the same:
   first-mention order (`:A&A` labels it `A`). Unlike Neo4j's spill to dynamic label records, a node's
   labels and properties share one graph record of at most 8,092 bytes, so the number of distinct
   labels one node can carry is bounded by their encoded size, not by the language; an insertion past
-  it fails with the engine's `COHDBG008`, element too large, and the session stays open (Graph engine
+  it fails with the engine's `COHDBG009`, element too large, and the session stays open (Graph engine
   design, "Planning, execution and bounds").
 
 `GqlLabelChainParserTests` pins 10,000-name chains of every operator in every position, the merge
 rule, precedence after flattening, the renderer round trip, 10,000 nested groups on a large stack and
 `GQL0009` on a small one. The engine's `GqlLabelChainExecutionTests` and Graph.Client's
-`GraphLabelChainWireTests` pin execution, insertion, `COHDBG007` and `COHDBG008` in process and over
+`GraphLabelChainWireTests` pin execution, insertion, `COHDBG008` and `COHDBG009` in process and over
 the wire.
 
 ## AOT posture and extension discipline

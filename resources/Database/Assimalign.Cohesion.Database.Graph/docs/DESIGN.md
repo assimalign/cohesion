@@ -180,7 +180,7 @@ first, inline properties before `WHERE` equalities. A node carrying more than 16
 through a hash set built once per evaluation. Only label and predicate evaluation recurse, where the
 tree nests, and each descent calls `RuntimeHelpers.EnsureSufficientExecutionStack`. A statement
 whose parse (`GQL0009`), plan or evaluation needs more stack than the executing thread has left
-fails with `COHDBG007`, statement too complex (ISO SQLSTATE 54001; Neo4j's transient
+fails with `COHDBG008`, statement too complex (ISO SQLSTATE 54001; Neo4j's transient
 `StackOverFlowError`, GQLSTATUS 51N37). Through the text seam (`ExecuteAsync(string)`,
 `GraphQueryRequest.FromGql`, the wire), a parse out of stack fails before an operation starts, so an
 explicit transaction is untouched; a typed request whose statement already carries `GQL0009` fails
@@ -196,7 +196,7 @@ and properties, or a relationship's type and properties, share one graph record 
 bytes (`GraphRecordCodec`), so the number of distinct labels one node can carry is bounded by their
 encoded size, and an indexed property value must fit the 1,016-byte index key. Past either limit the
 store throws `GraphElementTooLargeException` before it writes anything for the element, and the
-engine fails the statement with `COHDBG008`, element too large: the operation aborts like any other
+engine fails the statement with `COHDBG009`, element too large: the operation aborts like any other
 statement failure (an explicit transaction rolls back) and the session, in process and over the
 wire, stays open. A search for a value too long for its index matches nothing, since no write can
 store one. Neo4j instead spills labels to dynamic label records and long properties to property
@@ -322,15 +322,15 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design. `GQL0005` is the 64-relationship path bound only |
 | `GQL0007` | Attempt to mutate catalog introspection results |
 | `GQL0008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
-| `GQL0009` | Parentheses nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `COHDBG007` |
+| `GQL0009` | Parentheses nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `COHDBG008` |
 | `COHDBG001` | Invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `COHDBG002` | Unknown label or relationship type |
 | `COHDBG003` | Schema/data mismatch, restricted deletion or invalid graph mutation |
 | `COHDBG004` | Path materialization or candidate-expansion limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
 | `COHDBG006` | Storage failure translated at the engine boundary |
-| `COHDBG007` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; on the wire's `ExecutePaths` seam the client currently closes its connection |
-| `COHDBG008` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
+| `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; on the wire's `ExecutePaths` seam the client currently closes its connection |
+| `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
 
 Planner/data errors use stable code prefixes on `DatabaseException`. Kernel aborts cross the engine
 boundary as `DatabaseTransactionAbortedException`; deadlocks retain their specialized subtype.
