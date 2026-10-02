@@ -235,6 +235,24 @@ public class EndpointBindingGeneratorTests
         generated.ShouldContain("__arg1 = context.RequestCancelled;", Case.Sensitive);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: IHttpRequest and IHttpResponse are injected from the exchange, not bound from the body")]
+    public void Generator_RequestAndResponseParameters_AreInjected()
+    {
+        // Act — no Web.Serialization: a body read would report COHWEB0007.
+        GeneratorRun run = Generate(
+            """app.MapPost("/echo/{id}", async (int id, IHttpRequest request, IHttpResponse? response) => { await Task.CompletedTask; });""",
+            referenceSerialization: false);
+
+        // Assert — injected like IHttpContext, and not described as request inputs.
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("global::Assimalign.Cohesion.Http.IHttpRequest __arg1 = context.Request;", Case.Sensitive);
+        run.Generated.ShouldContain("global::Assimalign.Cohesion.Http.IHttpResponse __arg2 = context.Response;", Case.Sensitive);
+        run.Generated.ShouldNotContain("ReadContentAsync", Case.Sensitive);
+        run.Generated.Split("new global::Assimalign.Cohesion.Web.EndpointParameterMetadata(").Length.ShouldBe(2);
+        run.Generated.ShouldContain("new global::Assimalign.Cohesion.Web.EndpointParameterMetadata(\"id\"", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: single-context handler is left to the middleware overload")]
     public void Generator_SingleContextHandler_IsNotIntercepted()
     {

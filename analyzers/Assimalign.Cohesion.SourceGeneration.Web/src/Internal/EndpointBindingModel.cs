@@ -6,6 +6,13 @@ namespace Assimalign.Cohesion.SourceGeneration.Web.Internal;
 internal enum BindingSource
 {
     Context,
+
+    /// <summary>The exchange's request, <c>context.Request</c>: injected, never read from the body.</summary>
+    Request,
+
+    /// <summary>The exchange's response, <c>context.Response</c>: injected, never read from the body.</summary>
+    Response,
+
     Cancellation,
     Feature,
     Route,

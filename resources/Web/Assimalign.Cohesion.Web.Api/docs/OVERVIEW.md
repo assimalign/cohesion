@@ -32,6 +32,7 @@ Parameters bind from the request by convention or by explicit attribute:
 | Body | `[FromBody]` | Default for complex parameters; one per handler |
 | Form field | `[FromForm]` | Per-field scalars |
 | `IHttpContext` | — | Injected directly |
+| `IHttpRequest` / `IHttpResponse` | — | Injected as `context.Request` / `context.Response` |
 | `CancellationToken` | — | Bound from `RequestCancelled` |
 | `IHttpFeature` types | — | Resolved from `context.Features` |
 

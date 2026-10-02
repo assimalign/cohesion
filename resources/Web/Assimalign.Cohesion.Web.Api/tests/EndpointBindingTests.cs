@@ -510,6 +510,37 @@ public class EndpointBindingTests
         (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("cancellable");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: IHttpRequest and IHttpResponse are injected, not read from the body")]
+    public async Task Binding_RequestAndResponseParameters_ShouldBeInjected()
+    {
+        // Arrange — no serialization registry: had the parameters bound from the body, the read would fault.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        factory.Application.UseRouting();
+
+        factory.Application.MapPost("/echo/{id}", async (int id, IHttpRequest request, IHttpResponse response) =>
+        {
+            IReadOnlyList<EndpointParameterMetadata> described = request.HttpContext.GetEndpointMetadata().GetOrderedMetadata<EndpointParameterMetadata>();
+            string method = request.Method == Assimalign.Cohesion.Http.HttpMethod.Post ? "post" : "other";
+
+            response.StatusCode = CohesionHttpStatusCode.Accepted;
+            await response.Body.WriteAsync(Encoding.UTF8.GetBytes($"{method}:{id}:{described.Count}:{described[0].Name}"), request.HttpContext.RequestCancelled);
+        });
+
+        using HttpClient client = factory.CreateClient();
+        using StringContent content = new("ignored", Encoding.UTF8, "text/plain");
+
+        // Act
+        using HttpResponseMessage response = await client.PostAsync("/echo/9", content, cancellation.Token);
+
+        // Assert — the exchange's own request and response reach the handler, and only the route value
+        // is described as a request input.
+        response.StatusCode.ShouldBe(NetHttpStatusCode.Accepted);
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("post:9:1:id");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: single-context handler uses the middleware overload")]
     public async Task Binding_SingleContextHandler_ShouldUseMiddlewareOverload()
     {

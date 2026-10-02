@@ -56,8 +56,9 @@ interceptors are implementation-only output.
 
 ## Parameter Classification
 
-Per parameter, in order: direct injections (`IHttpContext`, `CancellationToken`, `IHttpFeature`
-implementations) win first; then an explicit `[From*]` attribute; then convention (route-token name
+Per parameter, in order: direct injections (`IHttpContext`, `IHttpRequest`, `IHttpResponse`,
+`CancellationToken`, `IHttpFeature` implementations) win first — the request and response since #1176,
+before which they fell through to the complex-type convention and bound from the body; then an explicit `[From*]` attribute; then convention (route-token name
 match → route, scalar → query, complex → body). When the call site cannot see the whole template, a
 scalar the visible template does not name binds **route-or-query** instead of query (#1055): route
 values first, then the query string. The call site cannot see the whole template when the receiver

@@ -11,7 +11,8 @@ namespace Assimalign.Cohesion.Web;
 /// <para>
 /// The Web endpoint-binding source generator attaches one instance per request-bound parameter, in
 /// handler order, to every typed endpoint it maps. Parameters the request does not supply — the injected
-/// <c>IHttpContext</c>, <c>CancellationToken</c> and <c>IHttpFeature</c> types — are not described. Read
+/// <c>IHttpContext</c>, <c>IHttpRequest</c>, <c>IHttpResponse</c>, <c>CancellationToken</c> and
+/// <c>IHttpFeature</c> types — are not described. Read
 /// the descriptions from a route's metadata with
 /// <c>GetOrderedMetadata&lt;EndpointParameterMetadata&gt;()</c>, either from a built route
 /// (<c>IRouterRoute.Metadata</c>) or, during a request, from <c>context.GetEndpointMetadata()</c>.

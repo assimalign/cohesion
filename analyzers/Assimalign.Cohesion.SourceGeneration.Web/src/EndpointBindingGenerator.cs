@@ -285,11 +285,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
                 returnProblem));
         }
 
-        INamedTypeSymbol? parsableType = compilation.GetTypeByMetadataName("System.IParsable`1");
-        INamedTypeSymbol? contextType = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpContext");
-        INamedTypeSymbol? cancellationType = compilation.GetTypeByMetadataName("System.Threading.CancellationToken");
-        INamedTypeSymbol? featureType = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpFeature");
-
+        var known = new KnownTypes(compilation);
         var parameters = ImmutableArray.CreateBuilder<ParameterBinding>(handlerParameters.Length);
         int bodyParameterIndex = -1;
         int formParameterIndex = -1;
@@ -318,10 +314,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
                     parameterType,
                     routeTokens,
                     partialTemplate,
-                    parsableType,
-                    contextType,
-                    cancellationType,
-                    featureType,
+                    known,
                     out binding);
             }
 
@@ -835,36 +828,35 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         ITypeSymbol type,
         HashSet<string> routeTokens,
         bool partialTemplate,
-        INamedTypeSymbol? parsableType,
-        INamedTypeSymbol? contextType,
-        INamedTypeSymbol? cancellationType,
-        INamedTypeSymbol? featureType,
+        KnownTypes known,
         out ParameterBinding binding)
     {
         binding = default;
         string declaredType = type.ToDisplayString(_fullyQualified);
         string describedType = type.ToDisplayString(_typeOf);
 
-        // Direct injections take precedence over any binding source.
-        if (contextType is not null && SymbolEqualityComparer.Default.Equals(type, contextType))
+        // Direct injections take precedence over any binding source: the exchange and the values it
+        // carries are never read from the request.
+        BindingSource? injected =
+            Is(type, known.Context) ? BindingSource.Context
+            : Is(type, known.Request) ? BindingSource.Request
+            : Is(type, known.Response) ? BindingSource.Response
+            : Is(type, known.Cancellation) ? BindingSource.Cancellation
+            : null;
+
+        if (injected is { } injection)
         {
-            binding = new ParameterBinding(declaredType, "", "", BindingSource.Context, ConversionKind.Injection, "", false, describedType);
+            binding = new ParameterBinding(declaredType, "", "", injection, ConversionKind.Injection, "", false, describedType);
             return null;
         }
 
-        if (cancellationType is not null && SymbolEqualityComparer.Default.Equals(type, cancellationType))
-        {
-            binding = new ParameterBinding(declaredType, "", "", BindingSource.Cancellation, ConversionKind.Injection, "", false, describedType);
-            return null;
-        }
-
-        if (featureType is not null && ImplementsInterface(type, featureType))
+        if (known.Feature is not null && ImplementsInterface(type, known.Feature))
         {
             binding = new ParameterBinding(declaredType, "", declaredType, BindingSource.Feature, ConversionKind.Injection, "", false, describedType);
             return null;
         }
 
-        (ConversionKind conversion, string coreType, bool required) = ClassifyConversion(type, parsableType);
+        (ConversionKind conversion, string coreType, bool required) = ClassifyConversion(type, known.Parsable);
 
         BindingSource? explicitSource = GetExplicitSource(parameter, out string? explicitName);
         string key = string.IsNullOrEmpty(explicitName) ? parameter.Name : explicitName!;
@@ -1295,6 +1287,14 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
                 builder.Append(indent).Append("global::Assimalign.Cohesion.Http.IHttpContext __arg").Append(index).AppendLine(" = context;");
                 return;
 
+            case BindingSource.Request:
+                builder.Append(indent).Append("global::Assimalign.Cohesion.Http.IHttpRequest __arg").Append(index).AppendLine(" = context.Request;");
+                return;
+
+            case BindingSource.Response:
+                builder.Append(indent).Append("global::Assimalign.Cohesion.Http.IHttpResponse __arg").Append(index).AppendLine(" = context.Response;");
+                return;
+
             case BindingSource.Cancellation:
                 builder.Append(indent).Append("global::System.Threading.CancellationToken __arg").Append(index).AppendLine(" = context.RequestCancelled;");
                 return;
@@ -1498,6 +1498,37 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
+
+    // The well-known types a handler parameter is classified against, resolved once per call site from
+    // the consuming compilation. Each is null when the compilation cannot resolve it.
+    private sealed class KnownTypes
+    {
+        public KnownTypes(Compilation compilation)
+        {
+            Parsable = compilation.GetTypeByMetadataName("System.IParsable`1");
+            Context = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpContext");
+            Request = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpRequest");
+            Response = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpResponse");
+            Cancellation = compilation.GetTypeByMetadataName("System.Threading.CancellationToken");
+            Feature = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpFeature");
+        }
+
+        public INamedTypeSymbol? Parsable { get; }
+
+        public INamedTypeSymbol? Context { get; }
+
+        public INamedTypeSymbol? Request { get; }
+
+        public INamedTypeSymbol? Response { get; }
+
+        public INamedTypeSymbol? Cancellation { get; }
+
+        public INamedTypeSymbol? Feature { get; }
+    }
+
+    // True when the parameter type is exactly the known type; nullable annotations do not matter.
+    private static bool Is(ITypeSymbol type, INamedTypeSymbol? known)
+        => known is not null && SymbolEqualityComparer.Default.Equals(type, known);
 
     private static bool ImplementsParsable(ITypeSymbol type, INamedTypeSymbol? parsableType)
     {

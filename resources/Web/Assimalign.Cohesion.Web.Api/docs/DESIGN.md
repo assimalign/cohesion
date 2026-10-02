@@ -89,8 +89,12 @@ consumers via the `CohesionFrameworkAnalyzer` entry in the `App.Web` member list
 
 Each handler parameter is classified once, at compile time:
 
-1. **Direct injections** take precedence: `IHttpContext` → the context; `CancellationToken` →
+1. **Direct injections** take precedence: `IHttpContext` → the context; `IHttpRequest` →
+   `context.Request`; `IHttpResponse` → `context.Response`; `CancellationToken` →
    `context.RequestCancelled`; any type implementing `IHttpFeature` → `context.Features.Get<T>()`.
+   Before #1176 the request and response were classified as complex types and bound from the body,
+   so a handler declaring them compiled and then failed every request with a 415 or a
+   deserialization error.
 2. **Explicit attributes** override the source: `[FromRoute]`, `[FromQuery]`, `[FromHeader]`,
    `[FromBody]`, `[FromForm]` (each with an optional `Name`, except `[FromBody]`).
 3. **Convention** otherwise: a name matching a `{token}` in a literal route pattern → route;
@@ -249,8 +253,8 @@ OpenAPI adapter (#152) first. Every typed endpoint it maps carries, as route-lev
   `Name` when one is given — and the handler parameter's name for a body), its
   `EndpointParameterSource` (`Route`, `RouteOrQuery`, `Query`, `Header`, `Form`, `Body`), its declared
   CLR `Type`, and `IsRequired`, which matches the 400 the thunk answers for a missing value (a body is
-  always required). Injected parameters (`IHttpContext`, `CancellationToken`, features) are not request
-  inputs and are not described.
+  always required). Injected parameters (`IHttpContext`, `IHttpRequest`, `IHttpResponse`,
+  `CancellationToken`, features) are not request inputs and are not described.
 - **`EndpointResponseMetadata` items**: a `200` whose `Type` is the written value's type (the `T` of
   `Task<T>`, `ValueTask<T>` or `Nullable<T>`, or `null` for a handler that writes its own response) and
   whose `ContentType` is `text/plain` for a string, or `null` when the serialization registry negotiates
