@@ -12,10 +12,14 @@ var statement = (GqlQueryStatement)parser.Parse(
 ```
 
 The supported surface is finite `MATCH` paths, including named paths such as
-`MATCH p = (a)-[r:KNOWS]->(b) RETURN p`, scalar comparison/conjunction filters, variable or
+`MATCH p = (a)-[r:KNOWS]->(b) RETURN p`, ISO label expressions such as `(n:(A|B)&!C)`, `(n:%)` and
+`-[r:T|U]->`, every directed ISO edge in full and abbreviated form (`->`, `<-`, `-`, `<->`), scalar
+comparison/conjunction filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`), variable or
 property projection, `INSERT`, `CREATE` as an insertion compatibility extension, and restricted or
-cascading deletion. Unsupported features produce `COHDBL001`; malformed supported syntax produces
-stable `GQL` diagnostics. The parser does not throw for malformed query text.
+cascading deletion. Unsupported features, including the undirected tilde edges, produce
+`COHDBL001`; malformed supported syntax produces stable `GQL` diagnostics, and a Cypher arrow such
+as `(a)-->(b)`, which GQL reads as a comment, produces `GQL0008`. The parser does not throw for
+malformed query text.
 
 Named path assignment is supported only in `MATCH`. The engine's path request API projects one
 bound node, relationship or named path; deleting a path variable or accessing a path property is

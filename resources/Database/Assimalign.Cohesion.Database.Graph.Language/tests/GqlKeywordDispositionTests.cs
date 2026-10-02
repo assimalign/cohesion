@@ -11,10 +11,11 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
 /// <summary>
-/// Keyword disposition (#1101): every word the GQL profile lexes as a keyword, and every
-/// entry of the recognized-unsupported table, either parses inside a supported clause or is
-/// rejected with exactly one <c>COHDBL001</c> naming its construct. A word added to either list
-/// without a case here fails the coverage test.
+/// Keyword disposition (#1101): every word the GQL profile lexes as a keyword, every entry of
+/// the recognized-unsupported table, and every executable label-expression spelling (#1139)
+/// either parses inside a supported clause or is rejected with exactly one <c>COHDBL001</c>
+/// naming its construct. A word added to any of those lists without a case here fails the
+/// coverage test.
 /// </summary>
 public sealed class GqlKeywordDispositionTests
 {
@@ -70,7 +71,8 @@ public sealed class GqlKeywordDispositionTests
         ["STARTS"] = Rejects("MATCH (a) WHERE a.name STARTS WITH 'A' RETURN a", "STARTS WITH"),
         ["ENDS"] = Rejects("MATCH (a) WHERE a.name ENDS WITH 'A' RETURN a", "ENDS WITH"),
         ["CONTAINS"] = Rejects("MATCH (a) WHERE a.name CONTAINS 'A' RETURN a", "CONTAINS"),
-        ["IS"] = Rejects("MATCH (n IS A) RETURN n", GqlUnsupportedVocabulary.IsLabelExpression),
+        // ISO <is label expression> (#1139 flipped the #1101 pin); IS NULL stays with gql-where-expr.
+        ["IS"] = Parses("MATCH (n IS A) RETURN n"),
         ["EXISTS"] = Rejects("MATCH (a) WHERE EXISTS { (a)-[]->(b) } RETURN a", "EXISTS"),
         ["LIKE"] = Rejects("MATCH (a) WHERE a.name LIKE 'A%' RETURN a", "LIKE"),
         ["BETWEEN"] = Rejects("MATCH (a) WHERE a.x BETWEEN 1 AND 2 RETURN a", "BETWEEN"),
@@ -104,16 +106,19 @@ public sealed class GqlKeywordDispositionTests
         ["SCHEMA"] = Rejects("CREATE SCHEMA s", "SCHEMA"),
         ["INDEX"] = Rejects("CREATE INDEX ix", "INDEX"),
         ["CATALOG"] = Rejects("CREATE CATALOG c", "CATALOG"),
-        // ISO/IEC 39075 delete, path and label constructs
+        // ISO/IEC 39075 delete, path and edge constructs
         ["NODETACH"] = Rejects("MATCH (n) NODETACH DELETE n", "NODETACH DELETE"),
         ["WALK"] = Rejects("MATCH WALK (a)-[]->(b) RETURN a", "WALK PATH MODE"),
         ["TRAIL"] = Rejects("MATCH TRAIL (a)-[]->(b) RETURN a", "TRAIL PATH MODE"),
         ["SIMPLE"] = Rejects("MATCH SIMPLE (a)-[]->(b) RETURN a", "SIMPLE PATH MODE"),
         ["ACYCLIC"] = Rejects("MATCH ACYCLIC (a)-[]->(b) RETURN a", "ACYCLIC PATH MODE"),
-        ["|"] = Rejects("MATCH (n:A|B) RETURN n", "LABEL DISJUNCTION"),
-        ["&"] = Rejects("MATCH (n:A&B) RETURN n", "LABEL CONJUNCTION"),
-        ["!"] = Rejects("MATCH (n:!A) RETURN n", "LABEL NEGATION"),
-        ["%"] = Rejects("MATCH (n:%) RETURN n", "WILDCARD LABEL"),
+        ["~"] = Rejects("MATCH (a)~[r]~(b) RETURN a", GqlUnsupportedVocabulary.UndirectedEdge),
+        // ISO/IEC 39075 label expressions (#1139 flipped the #1101 pins)
+        ["|"] = Parses("MATCH (n:A|B) RETURN n"),
+        ["&"] = Parses("MATCH (n:A&B) RETURN n"),
+        ["!"] = Parses("MATCH (n:!A) RETURN n"),
+        ["%"] = Parses("MATCH (n:%) RETURN n"),
+        ["LABELED"] = Parses("MATCH (n) WHERE n IS NOT LABELED A RETURN n"),
     };
 
     private const string CaseExpression = "MATCH (a) RETURN CASE WHEN a.x = 1 THEN 1 ELSE 2 END";
@@ -199,6 +204,7 @@ public sealed class GqlKeywordDispositionTests
     private static string[] Words()
         => GqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(GqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
+            .Concat(GqlLabelVocabulary.Spellings)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

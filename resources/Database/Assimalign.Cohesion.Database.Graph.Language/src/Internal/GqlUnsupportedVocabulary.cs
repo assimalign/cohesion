@@ -1,9 +1,9 @@
 namespace Assimalign.Cohesion.Database.Graph.Language.Internal;
 
 /// <summary>
-/// The GQL recognized-unsupported table (#1101): every word and label-expression operator the
-/// capability scan recognizes but the Graph engine does not run, with the construct its
-/// <c>COHDBL001</c> names.
+/// The GQL recognized-unsupported table (#1101): every word and edge spelling the capability
+/// scan recognizes but the Graph engine does not run, with the construct its <c>COHDBL001</c>
+/// names.
 /// </summary>
 /// <remarks>
 /// Words outside <see cref="GqlLanguageProfile"/>'s keyword list stay identifiers to the
@@ -79,15 +79,17 @@ internal static class GqlUnsupportedVocabulary
         new("TRAIL", "TRAIL PATH MODE", GqlWordPosition.PathMode),
         new("SIMPLE", "SIMPLE PATH MODE", GqlWordPosition.PathMode),
         new("ACYCLIC", "ACYCLIC PATH MODE", GqlWordPosition.PathMode),
-        // ISO/IEC 39075 label expressions. gql-label-direction flips these pins.
-        new("|", "LABEL DISJUNCTION", GqlWordPosition.LabelExpression),
-        new("&", "LABEL CONJUNCTION", GqlWordPosition.LabelExpression),
-        new("!", "LABEL NEGATION", GqlWordPosition.LabelExpression),
-        new("%", "WILDCARD LABEL", GqlWordPosition.LabelExpression),
+        // ISO/IEC 39075 undirected (tilde) edges: the engine stores only directed relationships
+        // (#1139). The label-expression operators #1101 listed here are executable since #1139;
+        // GqlLabelVocabulary lists them.
+        new("~", UndirectedEdge, GqlWordPosition.EdgePattern),
     ];
 
-    /// <summary>The construct an <c>IS</c> inside a node or edge pattern names: <c>(n IS A)</c>.</summary>
-    internal const string IsLabelExpression = "IS LABEL EXPRESSION";
+    /// <summary>
+    /// The construct a tilde edge names: <c>~[]~</c>, <c>&lt;~[]~</c>, <c>~[]~&gt;</c>, <c>~</c>,
+    /// <c>&lt;~</c> or <c>~&gt;</c> directly after a node pattern.
+    /// </summary>
+    internal const string UndirectedEdge = "UNDIRECTED EDGE";
 
     /// <summary>Finds the entry for an unquoted word or operator.</summary>
     /// <param name="spelling">The word upper-cased with the invariant culture, or the operator.</param>
@@ -138,6 +140,10 @@ internal enum GqlWordPosition
     /// </summary>
     PathMode,
 
-    /// <summary>An operator inside a label expression, after <c>:</c> in a node or edge pattern.</summary>
-    LabelExpression,
+    /// <summary>
+    /// An edge's opening spelling directly after a node pattern's <c>)</c>: <c>~</c>, or
+    /// <c>&lt;~</c> written without a space. Elsewhere the character is not GQL and fails with
+    /// <c>GQL0002</c>.
+    /// </summary>
+    EdgePattern,
 }

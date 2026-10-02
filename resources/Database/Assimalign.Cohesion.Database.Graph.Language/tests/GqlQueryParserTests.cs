@@ -15,6 +15,9 @@ public class GqlQueryParserTests
     [InlineData("MATCH ()-[r:KNOWS]->() RETURN r")]
     [InlineData("MATCH (a)<-[r:KNOWS]-(b) RETURN a, r, b")]
     [InlineData("MATCH (a)-[r]-(b) RETURN a, r, b")]
+    [InlineData("MATCH (a)<-[r]->(b) RETURN a")]
+    [InlineData("MATCH (a)->(b)<-(c)-(d)<->(e) RETURN a, e")]
+    [InlineData("MATCH (n:A|B)-[r:T|U]->(m IS !C) WHERE n IS LABELED A AND r:T RETURN n")]
     [InlineData("MATCH (a)-[r]->(b)-[s]->(c) RETURN a, r, b, s, c")]
     [InlineData("MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) INSERT (a)-[r:KNOWS]->(b) RETURN r")]
     [InlineData("MATCH (a) WHERE a.age >= 18 AND a.name <> 'Bob' RETURN a.name AS name")]
@@ -29,6 +32,10 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a)-[r]->(b) DELETE r, a")]
     [InlineData("match (a:Person {\"with space\": 'it''s fine'}) return a.\"with space\";")]
     [InlineData("/* outer /* inner */ */ MATCH (a) -- comment\n RETURN a")]
+    // ISO comments after a pattern keep their meaning when whitespace separates them, and a ')'
+    // that closes a predicate is not a pattern element (#1139).
+    [InlineData("MATCH (a)-[r]->(b) -- note\nRETURN a")]
+    [InlineData("MATCH (a) WHERE (a.age > 1)-- note\nRETURN a")]
     [InlineData("CREATE (a:Person {limit: 2, count: 3, value: 'OPTIONAL MATCH'}) RETURN a.limit")]
     public void SupportedCorpus_ParsesWithoutDiagnostics(string source)
     {
@@ -42,7 +49,9 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a RETURN a", "GQL0002")]
     [InlineData("MATCH a RETURN a", "GQL0002")]
     [InlineData("MATCH (a)-[r->(b) RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)<-[r]->(b) RETURN a", "GQL0002")]
+    [InlineData("MATCH (a)<--(b) RETURN a", "GQL0002")]
+    [InlineData("MATCH (a)<-->(b) RETURN a", "GQL0002")]
+    [InlineData("MATCH (a)-[r]-->(b) RETURN a", "GQL0008")]
     [InlineData("MATCH (a)-[r]-> RETURN a", "GQL0002")]
     [InlineData("MATCH (a)", "GQL0002")]
     [InlineData("MATCH (a) RETURN", "GQL0002")]
@@ -119,6 +128,10 @@ public class GqlQueryParserTests
         path.Relationships[0].Direction.ShouldBe(GqlPatternDirection.Incoming);
         path.Relationships[0].Properties["weight"].ShouldBe(2L);
         path.Relationships[1].Direction.ShouldBe(GqlPatternDirection.Undirected);
+        path.Nodes[0].LabelExpression.ShouldBe(new GqlLabelName("Person"));
+        path.Relationships[0].LabelExpression.ShouldBe(new GqlLabelName("KNOWS"));
+        path.Nodes[1].LabelExpression.ShouldBeNull();
+        path.Relationships[1].LabelExpression.ShouldBeNull();
         query.Projections.ShouldBe([new GqlProjection("a"), new GqlProjection("r"), new GqlProjection("b", "name", "friend")]);
     }
 

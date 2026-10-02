@@ -26,8 +26,10 @@ public sealed class GqlParseStrictnessExecutionTests
     [InlineData("MATCH (a:Person) WHERE a.name = ? DELETE a", "GQL0002")]
     [InlineData("MATCH (a:Person) DETACH DELETE a #", "GQL0002")]
     [InlineData("MATCH (n:Person) NODETACH DELETE n", "COHDBL001")]
-    [InlineData("MATCH (n:Person|Robot) DETACH DELETE n", "COHDBL001")]
-    [InlineData("MATCH (n IS Person) DETACH DELETE n", "COHDBL001")]
+    // #1139 made (n:Person|Robot) and (n IS Person) executable; their places go to the edges it
+    // rejects: an undirected tilde edge and a Cypher arrow that used to truncate the statement.
+    [InlineData("MATCH (n:Person)~(m) DETACH DELETE n", "COHDBL001")]
+    [InlineData("MATCH (n:Person)-->(m)\nDETACH DELETE n", "GQL0008")]
     [InlineData("MATCH TRAIL (a)-[r]->(b) DETACH DELETE a", "COHDBL001")]
     [InlineData("MATCH p = ACYCLIC (a)-[r]->(b) RETURN p", "COHDBL001")]
     [InlineData("MATCH ALL SHORTEST (a)-[r]->(b) DETACH DELETE b", "COHDBL001")]

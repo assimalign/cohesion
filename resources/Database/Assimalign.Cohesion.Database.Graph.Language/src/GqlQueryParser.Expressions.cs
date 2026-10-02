@@ -35,9 +35,11 @@ public sealed partial class GqlQueryParser
         }
         if (++_comparisons > 128)
         {
-            Error("GQL0005", "A predicate cannot exceed 128 scalar comparisons.", start);
+            Error("GQL0005", "A predicate cannot exceed 128 comparisons and labeled predicates.", start);
             return new GqlLiteralExpression(null, Span(start, start));
         }
+        // n:A and n IS [NOT] LABELED A are Boolean primaries, not comparison operands.
+        if (StartsLabeledPredicate()) { return ParseLabeledPredicate(); }
         var left = ParseOperand();
         string op = Current.Text;
         if (Current.Type is not (TokenType.Equals or TokenType.NotEquals or TokenType.LessThan or

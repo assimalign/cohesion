@@ -68,6 +68,28 @@ public sealed class GraphServerProtocolTests
         });
     }
 
+    /// <summary>
+    /// A Cypher arrow is a parse failure that names GQL0008 on either exchange (#1139), and the
+    /// session stays ready: the next Ping gets Pong.
+    /// </summary>
+    /// <param name="paths">Whether the statement goes through ExecutePaths rather than Execute.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Server: a Cypher arrow is a GQL0008 parse failure and keeps the session ready")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_CypherArrow_ShouldReturnGql0008AndKeepSessionReady(bool paths)
+    {
+        await WithServerAsync(async (channel, token) =>
+        {
+            await WriteAsync(channel, (ProtocolMessageType)(paths ? GraphProtocolMessageType.ExecutePaths : GraphProtocolMessageType.Execute),
+                GraphProtocolExecuteMessage.Create("MATCH (a)-->(b) RETURN a").Encode(), token);
+            var error = await ReadErrorAsync(channel, token);
+            error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+            error.Message.ShouldContain("GQL0008", Case.Sensitive);
+            await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
+            (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);
+        });
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Server: malformed parameter components terminate either exchange")]
     [InlineData(false)]
     [InlineData(true)]

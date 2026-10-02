@@ -142,6 +142,24 @@ pattern. It can anchor at the middle or end, expanding right and then left with 
 reversed directions. Bound variables from earlier comma-separated patterns take precedence over
 a fresh scan. Every selected candidate still passes labels, property predicates and bindings.
 
+Label expressions (#1139) follow one anchor rule: only a node's `Labels` can choose a label scan or
+a property index, and the parser fills `Labels` only for a pure conjunction (`:A`, `:A&B`,
+`:A:B`), whose every match carries each listed label. A disjunction (`:A|B`), negation (`:!A`) or
+wildcard (`:%`) leaves `Labels` empty, so `(n:A|B {k: 1})` and `(n:!A {k: 1})` plan an anchor with
+no label and no property and scan every node; anchoring on `A`'s index would silently drop the `B`
+or non-`A` rows. A `WHERE` labeled predicate (`n:A`, `n IS [NOT] LABELED A`) is a Boolean primary,
+never an equality, so `MATCH (n) WHERE n:A AND n.k = 1` also plans no index property. The
+executor evaluates the expression on every candidate node, and a relationship pattern's expression
+on every incident edge's type. `GraphLabelEvaluator` validates each expression before execution:
+an unknown kind, a null operand or name, nesting past 128 levels, or `Labels`/`Type` that
+disagree with the expression are `COHDBG001`, and every name, including those under `!` and `|`,
+must be a catalog label or relationship type (`COHDBG002`). `Undirected` and `LeftOrRight`
+constrain neither end of a stored edge; insertion takes only `Outgoing` and `Incoming`, one type,
+and a label conjunction. Storage cannot hold an empty or all-whitespace label, relationship type or
+property key, and a delimited name such as `(n:" ")` or `{" ": 1}` can spell one, so insertion
+rejects each with `COHDBG001` before anything is written; matching on such a name finds no catalog
+entry (`COHDBG002`) or no row.
+
 GQL patterns are finite chains of at most 64 relationships. Each matched path is a trail: an edge
 identity is used at most once within that path; a node may recur. Separate comma-separated paths
 have separate edge sets and share variable bindings. This makes a three-edge cycle a valid
@@ -172,7 +190,7 @@ existing public interfaces and does not infer paths from scalar rows.
 
 The [supported-clause matrix](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#supported-clause-matrix)
 is the single executable-language inventory: MATCH, WHERE, RETURN, INSERT, CREATE (compatibility
-extension), DELETE, DETACH DELETE and SHOW (catalog extension). Parameters, functions, variable-length paths, aggregations,
+extension), DELETE, DETACH DELETE, SHOW (catalog extension) and LABEL EXPRESSION. Parameters, functions, variable-length paths, aggregations,
 ordering, graph selection and language DDL are not advertised. Label/type/index management is the
 session-bound C# schema API. The ISO decision and conformance corpus are documented alongside the
 parser; this is a bounded ISO subset, not a full conformance claim.
@@ -257,7 +275,8 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBL001` | Unsupported language capability, reported on the parsed statement |
 | `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design |
 | `GQL0007` | Attempt to mutate catalog introspection results |
-| `COHDBG001` | Invalid pattern, variable binding or traversal specification |
+| `GQL0008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
+| `COHDBG001` | Invalid pattern, variable binding, label expression or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge |
 | `COHDBG002` | Unknown label or relationship type |
 | `COHDBG003` | Schema/data mismatch, restricted deletion or invalid graph mutation |
 | `COHDBG004` | Path materialization or candidate-expansion limit exceeded |

@@ -16,7 +16,10 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 public sealed class GqlProfileExecutionTests
 {
     private static readonly Guid _personLabelId = new("13333333-3333-3333-3333-333333333333");
-    private const string seed = "INSERT (a:Person {name: 'Alice', age: 42, active: TRUE})-[r:KNOWS {weight: 2}]->(b:Person {name: 'Bob', age: 17, active: FALSE}), (:Person {name: 'Isolated', age: 30})";
+    private static readonly Guid _robotLabelId = new("24444444-4444-4444-4444-444444444444");
+    // Node identities follow insertion order: Alice, Bob, Isolated, Robo, then the unlabeled Ghost.
+    private const string seed = "INSERT (a:Person {name: 'Alice', age: 42, active: TRUE})-[r:KNOWS {weight: 2}]->(b:Person {name: 'Bob', age: 17, active: FALSE}), " +
+        "(:Person {name: 'Isolated', age: 30}), (:Robot {name: 'Robo'})-[:SERVES]->({name: 'Ghost'})";
 
     // The profile drives execution. A profile addition without data here fails before any query runs.
     private static readonly IReadOnlyDictionary<string, ExecutionCase[]> _cases =
@@ -27,6 +30,12 @@ public sealed class GqlProfileExecutionTests
                 new("MATCH (a:Person {name: 'Alice'})-[r:KNOWS]->(b) RETURN b.name, r.weight", [["Bob", 2L]]),
                 new("MATCH (b:Person {name: 'Bob'})<-[r:KNOWS]-(a) RETURN a.name", [["Alice"]]),
                 new("MATCH (b:Person {name: 'Bob'})-[r:KNOWS]-(a) RETURN a.name", [["Alice"]]),
+                // ISO/IEC 39075 left-or-right and the abbreviated edges (#1139).
+                new("MATCH (b:Person {name: 'Bob'})<-[r:KNOWS]->(a) RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person {name: 'Alice'})->(b) RETURN b.name", [["Bob"]]),
+                new("MATCH (b:Person {name: 'Bob'})<-(a) RETURN a.name", [["Alice"]]),
+                new("MATCH (b:Person {name: 'Bob'})-(a) RETURN a.name", [["Alice"]]),
+                new("MATCH (a:Person {name: 'Alice'})<->(b) RETURN b.name", [["Bob"]]),
             ],
             [GqlClauses.Return] =
             [
@@ -69,7 +78,18 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Show] =
             [
-                new("SHOW LABELS", [["audit", _personLabelId, "Person"]]),
+                new("SHOW LABELS", [["audit", _personLabelId, "Person"], ["audit", _robotLabelId, "Robot"]]),
+            ],
+            [GqlClauses.LabelExpression] =
+            [
+                new("MATCH (n:Person|Robot) RETURN n.name", [["Alice"], ["Bob"], ["Isolated"], ["Robo"]]),
+                new("MATCH (n:!Person) RETURN n.name", [["Robo"], ["Ghost"]]),
+                new("MATCH (n:!%) RETURN n.name", [["Ghost"]]),
+                new("MATCH (n IS %&!Robot {active: TRUE}) RETURN n.name", [["Alice"]]),
+                new("MATCH (a)-[r:KNOWS|SERVES]->(b) RETURN a.name, b.name", [["Alice", "Bob"], ["Robo", "Ghost"]]),
+                new("MATCH (a)-[r:!KNOWS]->(b) RETURN a.name", [["Robo"]]),
+                new("MATCH (n) WHERE n IS LABELED Robot|!% RETURN n.name", [["Robo"], ["Ghost"]]),
+                new("MATCH (n) WHERE n:Person AND n IS NOT LABELED Robot AND n.age > 20 RETURN n.name", [["Alice"], ["Isolated"]]),
             ],
         };
 
@@ -91,6 +111,7 @@ public sealed class GqlProfileExecutionTests
                 var database = (IGraphDatabase)await engine.CreateDatabaseAsync("audit", token);
                 await using var session = await database.CreateSessionAsync(token);
                 await GraphSchema.Open(database, session).SaveLabelAsync(new(_personLabelId, "Person"), token);
+                await GraphSchema.Open(database, session).SaveLabelAsync(new(_robotLabelId, "Robot"), token);
                 await session.ExecuteAsync(seed, cancellationToken: token);
 
                 await ExecuteAndVerifyAsync(session, executionCase, clause, token);
@@ -117,6 +138,8 @@ public sealed class GqlProfileExecutionTests
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]
     [InlineData("SHOW DATABASES")]
+    [InlineData("MATCH (a)~[r]~(b) RETURN a")]
+    [InlineData("MATCH (a)<~(b) RETURN a")]
     public async Task Profile_UnsupportedForms_ReportCapabilityDiagnosticAsync(string source)
     {
         new GqlQueryParser().Parse(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
@@ -147,6 +170,27 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.DetachDelete => query.DeleteVariables.Count != 0 && query.DetachDelete,
         GqlClauses.Where => query.Predicate is not null,
         GqlClauses.Show => query.CatalogSurface is not null,
+        GqlClauses.LabelExpression => query.Matches.Concat(query.Creates).Any(UsesLabelOperators) || HasLabeledPredicate(query.Predicate),
+        _ => false,
+    };
+
+    // A label expression beyond the conjunction :A:B the profile always ran: an operator, the
+    // wildcard or a type alternative on a pattern element.
+    private static bool UsesLabelOperators(GqlPathPattern path)
+        => path.Nodes.Any(node => node.LabelExpression is { } labels && !IsNameConjunction(labels)) ||
+           path.Relationships.Any(edge => edge.LabelExpression is { } labels && labels is not GqlLabelName);
+
+    private static bool IsNameConjunction(GqlLabelExpression expression) => expression switch
+    {
+        GqlLabelName => true,
+        GqlLabelConjunction conjunction => IsNameConjunction(conjunction.Left) && IsNameConjunction(conjunction.Right),
+        _ => false,
+    };
+
+    private static bool HasLabeledPredicate(GqlExpression? expression) => expression switch
+    {
+        GqlLabeledPredicate => true,
+        GqlBinaryExpression binary => HasLabeledPredicate(binary.Left) || HasLabeledPredicate(binary.Right),
         _ => false,
     };
 
