@@ -25,8 +25,11 @@ using Assimalign.Cohesion.Web.Routing;
 /// substitutes an AOT-safe thunk that binds the handler's parameters, invokes it, and writes the value
 /// it returns, if any: a <see cref="string"/> as <c>text/plain</c>, <see langword="null"/> as
 /// <c>204 No Content</c>, and any other value through the content-serialization registry with
-/// <c>Accept</c> negotiation. A handler the generator cannot bind is a <c>COHWEB</c> compile-time error;
-/// the placeholder bodies throw only when the generator was not wired in at all.
+/// <c>Accept</c> negotiation. The generator also describes the endpoint on its route, with an
+/// <see cref="EndpointParameterMetadata"/> per request-bound parameter and its
+/// <see cref="EndpointResponseMetadata"/> responses, for documentation adapters. A handler the generator
+/// cannot bind is a <c>COHWEB</c> compile-time error; the placeholder bodies throw only when the
+/// generator was not wired in at all.
 /// </item>
 /// </list>
 /// <para>

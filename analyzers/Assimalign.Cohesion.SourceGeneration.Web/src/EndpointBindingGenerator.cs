@@ -55,6 +55,11 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers |
             SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
+    // The same, without nullable reference annotations: the form typeof(...) accepts, for the endpoint
+    // description metadata.
+    private static readonly SymbolDisplayFormat _typeOf = _fullyQualified.RemoveMiscellaneousOptions(
+        SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
+
     private static readonly HashSet<string> _verbs = new()
     {
         "Map", "MapGet", "MapPost", "MapPut", "MapPatch", "MapDelete"
@@ -387,6 +392,8 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         ResultNullCheck nullCheck = ResultNullCheck.None;
         string resultTypeName = string.Empty;
         string writtenTypeName = string.Empty;
+        string describedResultTypeName = string.Empty;
+        bool describesNoContent = false;
 
         if (resultType is not null)
         {
@@ -396,16 +403,22 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             {
                 nullCheck = ResultNullCheck.NullableValue;
                 writtenType = nullable.TypeArguments[0];
+                describesNoContent = true;
             }
             else if (resultType.IsReferenceType)
             {
                 nullCheck = ResultNullCheck.Reference;
                 writtenType = resultType.WithNullableAnnotation(NullableAnnotation.NotAnnotated);
+
+                // Every reference result is null-checked at run time, but the description lists the 204
+                // only when the compiler's nullability analysis says the result may be null.
+                describesNoContent = ResultMayBeNull(resultType, handler, creation.Target, model, compilation, ct);
             }
 
             response = writtenType.SpecialType == SpecialType.System_String ? ResponseKind.Text : ResponseKind.Serialized;
             resultTypeName = resultType.ToDisplayString(_fullyQualified);
             writtenTypeName = writtenType.ToDisplayString(_fullyQualified);
+            describedResultTypeName = writtenType.ToDisplayString(_typeOf);
         }
 
         // Reading a body and writing a negotiated value both need the content-serialization registry.
@@ -459,6 +472,8 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             response,
             writtenTypeName,
             nullCheck,
+            describedResultTypeName,
+            describesNoContent,
             new EquatableArray<ParameterBinding>(parameters.ToImmutable()),
             bodyParameterIndex,
             usesForm,
@@ -582,6 +597,79 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         return true;
     }
 
+    // Whether a reference result may be null, for the 204 in the endpoint description. A declared return —
+    // a method group's, or a lambda's explicit return type — carries its annotation. An implicitly typed
+    // lambda's inferred return type carries none (it is nullable-oblivious even where nullable is
+    // enabled), so the null-state of the values the lambda returns decides. Oblivious code lists no 204.
+    private static bool ResultMayBeNull(
+        ITypeSymbol resultType,
+        IMethodSymbol handler,
+        IOperation target,
+        SemanticModel model,
+        Compilation compilation,
+        CancellationToken ct)
+    {
+        if (resultType.NullableAnnotation == NullableAnnotation.Annotated
+            || GetAwaitedResult(handler.ReturnType, compilation).NullableAnnotation == NullableAnnotation.Annotated)
+        {
+            return true;
+        }
+
+        if (target is not IAnonymousFunctionOperation lambda)
+        {
+            return false;
+        }
+
+        foreach (IReturnOperation returned in lambda.Body.Descendants().OfType<IReturnOperation>())
+        {
+            if (returned.ReturnedValue is { } value
+                && ReturnsFrom(returned, lambda)
+                && model.GetTypeInfo(value.Syntax, ct).Nullability.FlowState == NullableFlowState.MaybeNull)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // True when a return statement belongs to the lambda itself, not to a lambda or local function nested in it.
+    private static bool ReturnsFrom(IOperation returned, IAnonymousFunctionOperation lambda)
+    {
+        for (IOperation? current = returned.Parent; current is not null; current = current.Parent)
+        {
+            if (ReferenceEquals(current, lambda))
+            {
+                return true;
+            }
+
+            if (current is IAnonymousFunctionOperation or ILocalFunctionOperation)
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    // The value a return type produces: the T of Task<T> or ValueTask<T>, otherwise the type itself.
+    private static ITypeSymbol GetAwaitedResult(ITypeSymbol returnType, Compilation compilation)
+    {
+        if (returnType is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } named)
+        {
+            INamedTypeSymbol? taskOfT = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task`1");
+            INamedTypeSymbol? valueTaskOfT = compilation.GetTypeByMetadataName("System.Threading.Tasks.ValueTask`1");
+
+            if (SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, taskOfT)
+                || SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, valueTaskOfT))
+            {
+                return named.TypeArguments[0];
+            }
+        }
+
+        return returnType;
+    }
+
     // Parameter modifiers an endpoint cannot honor. Default values and params arrays only matter when
     // they forced a compiler-generated delegate type; on an explicitly created Func they are inert.
     private static string? DescribeSignatureProblem(IParameterSymbol parameter, bool anonymousDelegate)
@@ -624,23 +712,24 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     {
         binding = default;
         string declaredType = type.ToDisplayString(_fullyQualified);
+        string describedType = type.ToDisplayString(_typeOf);
 
         // Direct injections take precedence over any binding source.
         if (contextType is not null && SymbolEqualityComparer.Default.Equals(type, contextType))
         {
-            binding = new ParameterBinding(declaredType, "", "", BindingSource.Context, ConversionKind.Injection, "", false);
+            binding = new ParameterBinding(declaredType, "", "", BindingSource.Context, ConversionKind.Injection, "", false, describedType);
             return null;
         }
 
         if (cancellationType is not null && SymbolEqualityComparer.Default.Equals(type, cancellationType))
         {
-            binding = new ParameterBinding(declaredType, "", "", BindingSource.Cancellation, ConversionKind.Injection, "", false);
+            binding = new ParameterBinding(declaredType, "", "", BindingSource.Cancellation, ConversionKind.Injection, "", false, describedType);
             return null;
         }
 
         if (featureType is not null && ImplementsInterface(type, featureType))
         {
-            binding = new ParameterBinding(declaredType, "", declaredType, BindingSource.Feature, ConversionKind.Injection, "", false);
+            binding = new ParameterBinding(declaredType, "", declaredType, BindingSource.Feature, ConversionKind.Injection, "", false, describedType);
             return null;
         }
 
@@ -682,7 +771,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             return $"'{type.ToDisplayString(HandlerTypeRules.MessageFormat)}' cannot be read from a single {DescribeSource(source)} value: route values, query strings, headers and form fields bind string, IParsable<T> types, enums and their nullable forms; bind it from the request body with [FromBody], or change its type";
         }
 
-        binding = new ParameterBinding(declaredType, coreType, "", source, conversion, key, required);
+        binding = new ParameterBinding(declaredType, coreType, "", source, conversion, key, required, describedType);
         return null;
     }
 
@@ -900,19 +989,85 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
         EmitThunkBody(builder, model, "                ");
 
-        builder.Append("            })");
+        builder.AppendLine("            })");
+
+        EmitDescription(builder, model);
 
         if (model.RequiresAntiforgery)
         {
             // Route-level metadata, attached where the route is mapped: the caller's own chain
             // (.DisableAntiforgery()) comes after it and still wins under last-wins resolution.
-            builder.Append(antiforgeryRequirement);
+            builder.AppendLine();
+            builder.Append("            ").Append(antiforgeryRequirement);
         }
 
         builder.AppendLine(";");
 
         builder.AppendLine("        }");
     }
+
+    // Describes the endpoint for documentation adapters (#152): one EndpointParameterMetadata per
+    // request-bound parameter, in handler order, then the responses — 200 with the written type (none for
+    // a handler that writes its own response), and 204 when the result may be null (ResultMayBeNull).
+    // Only typeof(...) values are emitted, so the description needs no reflection.
+    private static void EmitDescription(StringBuilder builder, EndpointBinding model)
+    {
+        const string indent = "                ";
+        var items = new List<string>();
+
+        foreach (ParameterBinding parameter in model.Parameters)
+        {
+            if (GetDescribedSource(parameter.Source) is not { } source)
+            {
+                continue; // injected, not supplied by the request
+            }
+
+            // A request body is always required: an empty one fails deserialization with 400.
+            bool required = parameter.Source == BindingSource.Body || parameter.Required;
+
+            items.Add("new global::Assimalign.Cohesion.Web.EndpointParameterMetadata("
+                + SymbolDisplay.FormatLiteral(parameter.Key, quote: true)
+                + ", global::Assimalign.Cohesion.Web.EndpointParameterSource." + source
+                + ", typeof(" + parameter.DescribedType + "), "
+                + (required ? "true" : "false") + ")");
+        }
+
+        string responseType = model.Response == ResponseKind.None ? "null" : "typeof(" + model.DescribedResultType + ")";
+        string responseContentType = model.Response == ResponseKind.Text ? "global::Assimalign.Cohesion.Http.HttpMediaType.TextPlain" : "null";
+
+        items.Add("new global::Assimalign.Cohesion.Web.EndpointResponseMetadata(global::Assimalign.Cohesion.Http.HttpStatusCode.Ok, "
+            + responseType + ", " + responseContentType + ")");
+
+        if (model.DescribesNoContent)
+        {
+            items.Add("new global::Assimalign.Cohesion.Web.EndpointResponseMetadata(global::Assimalign.Cohesion.Http.HttpStatusCode.NoContent, null, null)");
+        }
+
+        builder.AppendLine("            .WithMetadata(");
+
+        for (int i = 0; i < items.Count; i++)
+        {
+            builder.Append(indent).Append(items[i]);
+
+            if (i < items.Count - 1)
+            {
+                builder.AppendLine(",");
+            }
+        }
+
+        builder.Append(")");
+    }
+
+    private static string? GetDescribedSource(BindingSource source) => source switch
+    {
+        BindingSource.Route => "Route",
+        BindingSource.RouteOrQuery => "RouteOrQuery",
+        BindingSource.Query => "Query",
+        BindingSource.Header => "Header",
+        BindingSource.Form => "Form",
+        BindingSource.Body => "Body",
+        _ => null
+    };
 
     private static void EmitThunkBody(StringBuilder builder, EndpointBinding model, string indent)
     {

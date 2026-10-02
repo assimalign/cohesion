@@ -61,6 +61,8 @@ non-AOT build component) intercepts each typed `Map*` call site with a C# interc
 3. Emits inline, AOT-safe binding for each parameter, then the failure short-circuits, then the
    direct handler call.
 4. Writes the value the handler returned, if any (see "Return Values").
+5. Attaches the endpoint's description — its request-bound parameters and its responses — to the route
+   it maps (see "Endpoint Description Metadata").
 
 The generator reads the call site through the compiler's operation tree, so a method group
 (`app.MapGet("/orders/{id}", GetOrder)`) binds exactly like a lambda, and named arguments in any order
@@ -213,6 +215,40 @@ A call site with a diagnostic gets no interceptor; every other call site in the 
 rewritten. The rules live in the generator (`Internal/EndpointBindingDiagnostics.cs`) and are
 release-tracked in its `AnalyzerReleases.*.md` files.
 
+## Endpoint Description Metadata (#152)
+
+The generator is the only component that knows a typed endpoint's parameter and result types at
+compile time, so it records them on the route for documentation adapters that must not reflect — the
+OpenAPI adapter (#152) first. Every typed endpoint it maps carries, as route-level metadata:
+
+- **One `EndpointParameterMetadata` per request-bound parameter**, in handler order: the `Name` the
+  request supplies it under (the route parameter, query key, header or form-field name — an attribute's
+  `Name` when one is given — and the handler parameter's name for a body), its
+  `EndpointParameterSource` (`Route`, `RouteOrQuery`, `Query`, `Header`, `Form`, `Body`), its declared
+  CLR `Type`, and `IsRequired`, which matches the 400 the thunk answers for a missing value (a body is
+  always required). Injected parameters (`IHttpContext`, `CancellationToken`, features) are not request
+  inputs and are not described.
+- **`EndpointResponseMetadata` items**: a `200` whose `Type` is the written value's type (the `T` of
+  `Task<T>`, `ValueTask<T>` or `Nullable<T>`, or `null` for a handler that writes its own response) and
+  whose `ContentType` is `text/plain` for a string, or `null` when the serialization registry negotiates
+  it; and a `204` with no type when the result may be `null`.
+
+| Concern | Decision |
+| --- | --- |
+| Home | `Web.Api` (`src/Metadata/`, namespace `Assimalign.Cohesion.Web`), beside the `Map*` verbs that produce it. No OpenApi reference: the adapter maps these onto `OpenApiOperationMetadata` itself, so the dependency arrow stays OpenApi adapter → Web. |
+| Shape | Sealed carriers with no interface, per the Web.Routing endpoint-metadata family rule. One carrier per concept: parameters and responses are read separately and compose separately. |
+| Reading | `route.Metadata.GetOrderedMetadata<EndpointParameterMetadata>()` and `GetOrderedMetadata<EndpointResponseMetadata>()` on a built `IRouterRoute` — an adapter enumerates `IRouter.Routes` — or through `context.GetEndpointMetadata()` during a request. Responses are a set, so read them in order; a last-wins read returns whichever response was attached last. |
+| Types | `typeof(...)` values the generator writes; nothing inspects members. An adapter produces a schema from the application's source-generated `JsonTypeInfo` for the type (System.Text.Json's `JsonSchemaExporter` over the resolver the application registered, which is NativeAOT-safe) and maps scalars such as `long` or `Guid` to primitive schemas. |
+| `RouteOrQuery` | Described when the call site could not see the whole template (a group endpoint, a non-literal pattern). Resolve it against the built route's composed template, `IRouterRoute.Pattern`: a name the template contains is a path parameter, any other a query parameter. |
+| The 204 | Listed when the compiler's nullability analysis says the result may be `null`: an annotated declared return (a method group's, or a lambda's explicit return type such as `Order? (long id) => ...`), a `Nullable<T>`, or — for an implicitly typed lambda, whose inferred return type is nullable-oblivious — a returned value whose null-state is maybe-null. Nullable-oblivious code lists no 204, though the thunk still answers 204 for a `null` at run time. |
+| Not described | The outcomes the thunk produces on its own: 400 and 415 binding problems and the negotiated 406. An adapter adds them by policy (a required parameter can produce 400, a body 415, a negotiated response 406). |
+| Extending | New sources are appended to `EndpointParameterSource` (file uploads arrive with #1061). An application describes further responses with `WithMetadata(new EndpointResponseMetadata(...))` on an endpoint or a group; they compose group items first, then the generated items, then the endpoint's own chain. |
+
+One gap is left to #152: an adapter needs the application's `IJsonTypeInfoResolver` to reach the
+`JsonTypeInfo` for a described type, and `Web.Serialization` keeps the JSON writer's options internal.
+The adapter can take the same `JsonSerializerContext` the application passes to `AddJsonSerialization`,
+or `Web.Serialization` can expose the registered resolver; #152 decides.
+
 ## Antiforgery on form-bound endpoints (#1057)
 
 A typed endpoint with a `[FromForm]` parameter requires antiforgery validation: the generator chains
@@ -249,7 +285,9 @@ body reader and the negotiated writer, and COHWEB0007 reports an application tha
 - Result types or typed result unions of any kind. A returned value is plain data the thunk writes
   (see "Return Values"); a handler that needs control of the response writes it.
 - Filter/interceptor chains around handlers (a natural follow-up seam, not built).
-- OpenApi surfacing (#555 consumes the endpoint metadata later).
+- OpenAPI documents. `Web.Api` describes typed endpoints in neutral metadata (see "Endpoint Description
+  Metadata"); the OpenAPI adapter and document endpoint (#152) build on it, and `Web.Api` takes no
+  OpenApi dependency.
 - Content negotiation beyond `Web.Serialization`'s: returned values use `WriteNegotiatedContentAsync`,
   which negotiates media types only (no `Accept-Charset` or `Accept-Language`).
 - Whole-object binding from form fields (form binding is per-field scalar via `[FromForm]`).

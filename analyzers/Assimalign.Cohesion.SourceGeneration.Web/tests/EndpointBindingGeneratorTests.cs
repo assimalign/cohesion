@@ -218,9 +218,14 @@ public class EndpointBindingGeneratorTests
             """app.MapPost("/orders", async ([FromForm] string title, IHttpContext context) => { await Task.CompletedTask; });""",
             referenceAntiforgery: true);
 
-        // Assert — the requirement is chained onto the route the raw Map overload returns.
+        // Assert — the requirement is chained onto the route the raw Map overload returns, after the
+        // endpoint's description, so the caller's own chain still follows it.
+        int description = generated.IndexOf("new global::Assimalign.Cohesion.Web.EndpointParameterMetadata(\"title\", global::Assimalign.Cohesion.Web.EndpointParameterSource.Form", StringComparison.Ordinal);
+        int requirement = generated.IndexOf("            " + antiforgeryRequirement, StringComparison.Ordinal);
+
         generated.ShouldContain("await context.ReadFormAsync(context.RequestCancelled);", Case.Sensitive);
-        generated.ShouldContain("            })" + antiforgeryRequirement, Case.Sensitive);
+        description.ShouldBeGreaterThan(0);
+        requirement.ShouldBeGreaterThan(description);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a form-bound endpoint carries no antiforgery requirement without Web.Antiforgery")]
@@ -453,6 +458,103 @@ public class EndpointBindingGeneratorTests
         run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
         run.Generated.ShouldContain("__routeValues0.TryGetValue(\"id\"", Case.Sensitive);
         run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    // ---------------------------------------------------------------------
+    // Endpoint description metadata (#152)
+    // ---------------------------------------------------------------------
+
+    private const string parameterMetadata = "new global::Assimalign.Cohesion.Web.EndpointParameterMetadata(";
+    private const string responseMetadata = "new global::Assimalign.Cohesion.Web.EndpointResponseMetadata(";
+    private const string noContentResponse = responseMetadata + "global::Assimalign.Cohesion.Http.HttpStatusCode.NoContent, null, null)";
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Description: request-bound parameters and the response are described with typeof values")]
+    public void Generator_TypedEndpoint_DescribesParametersAndResponse()
+    {
+        // Act
+        string generated = Run("""app.MapGet("/widgets/{id}", (int id, [FromQuery(Name = "q")] string? filter, [FromHeader(Name = "X-Tenant")] string tenant, IHttpContext context) => new Widget());""");
+
+        // Assert — the injected context is not a request input, so three parameters are described.
+        generated.ShouldContain(parameterMetadata + "\"id\", global::Assimalign.Cohesion.Web.EndpointParameterSource.Route, typeof(global::System.Int32), true)", Case.Sensitive);
+        generated.ShouldContain(parameterMetadata + "\"q\", global::Assimalign.Cohesion.Web.EndpointParameterSource.Query, typeof(global::System.String), false)", Case.Sensitive);
+        generated.ShouldContain(parameterMetadata + "\"X-Tenant\", global::Assimalign.Cohesion.Web.EndpointParameterSource.Header, typeof(global::System.String), true)", Case.Sensitive);
+        generated.Split(parameterMetadata).Length.ShouldBe(4);
+        generated.ShouldContain(responseMetadata + "global::Assimalign.Cohesion.Http.HttpStatusCode.Ok, typeof(global::Widget), null)", Case.Sensitive);
+        generated.ShouldNotContain(noContentResponse, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Description: a body and a group parameter describe their sources")]
+    public void Generator_BodyAndGroupParameters_DescribeSources()
+    {
+        // Act
+        string generated = Run("""app.MapGroup("api/{tenant}").MapPost("orders", (string tenant, Widget widget) => "ok");""");
+
+        // Assert — the group prefix is not visible, so tenant is route-or-query; a body is always required.
+        generated.ShouldContain(parameterMetadata + "\"tenant\", global::Assimalign.Cohesion.Web.EndpointParameterSource.RouteOrQuery, typeof(global::System.String), true)", Case.Sensitive);
+        generated.ShouldContain(parameterMetadata + "\"widget\", global::Assimalign.Cohesion.Web.EndpointParameterSource.Body, typeof(global::Widget), true)", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Description: a string result is described as text/plain")]
+    public void Generator_StringResult_DescribesTextPlain()
+    {
+        // Act
+        string generated = Run("""app.MapGet("/ping", () => "pong");""");
+
+        // Assert
+        generated.ShouldContain(responseMetadata + "global::Assimalign.Cohesion.Http.HttpStatusCode.Ok, typeof(global::System.String), global::Assimalign.Cohesion.Http.HttpMediaType.TextPlain)", Case.Sensitive);
+        generated.ShouldNotContain(noContentResponse, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Description: a handler that writes its own response is described without a type")]
+    public void Generator_VoidHandler_DescribesResponseWithoutType()
+    {
+        // Act
+        string generated = Run("""app.MapGet("/users/{id}", async (int id, IHttpContext context) => { await Task.CompletedTask; });""");
+
+        // Assert
+        generated.ShouldContain(responseMetadata + "global::Assimalign.Cohesion.Http.HttpStatusCode.Ok, null, null)", Case.Sensitive);
+        generated.ShouldNotContain(noContentResponse, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Description: a result that may be null also describes 204")]
+    public void Generator_NullableResults_DescribeNoContent()
+    {
+        // Act — an annotated lambda return, a method group returning Task<Widget?>, a Nullable<T>, and two
+        // inferred lambda returns whose null-state is maybe-null.
+        GeneratorRun run = Generate(
+            """
+            app.MapGet("/a/{id}", Widget? (int id) => null);
+            app.MapGet("/b/{id}", FindWidget);
+            app.MapGet("/c", (int? limit) => limit);
+            app.MapGet("/d/{id}", (int id) => id > 0 ? new Widget() : null);
+            app.MapGet("/e/{id}", async (int id) => await FindWidget(id));
+            """,
+            members: "    private static Task<Widget?> FindWidget(int id) => Task.FromResult<Widget?>(null);");
+
+        // Assert — each 200 describes the written type (Int32 for int?), and each endpoint lists the 204.
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.Split(noContentResponse).Length.ShouldBe(6);
+        run.Generated.ShouldContain(responseMetadata + "global::Assimalign.Cohesion.Http.HttpStatusCode.Ok, typeof(global::Widget), null)", Case.Sensitive);
+        run.Generated.ShouldContain(responseMetadata + "global::Assimalign.Cohesion.Http.HttpStatusCode.Ok, typeof(global::System.Int32), null)", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Description: a nested lambda's null return does not describe 204 for the handler")]
+    public void Generator_NestedLambdaNullReturn_DescribesNoNoContent()
+    {
+        // Act — only the outer lambda's returns decide; the nested one's null is its own.
+        string generated = Run(
+            """
+            app.MapGet("/widgets/{id}", (int id) =>
+            {
+                System.Func<Widget?> fallback = () => null;
+                return fallback() ?? new Widget();
+            });
+            """);
+
+        // Assert
+        generated.ShouldContain(responseMetadata + "global::Assimalign.Cohesion.Http.HttpStatusCode.Ok, typeof(global::Widget), null)", Case.Sensitive);
+        generated.ShouldNotContain(noContentResponse, Case.Sensitive);
     }
 
     // ---------------------------------------------------------------------

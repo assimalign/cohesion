@@ -86,6 +86,31 @@ api.RequireHost("api.example.com");        // applies to every endpoint in the g
 A group endpoint binds a parameter its own template does not name from the route value first (the
 group prefix supplies `tenant` above), then from the query string.
 
+## Endpoint Descriptions
+
+Every typed endpoint also describes itself, for documentation adapters such as the OpenAPI adapter:
+an `EndpointParameterMetadata` per request-bound parameter (name, source, CLR type, required) and
+`EndpointResponseMetadata` for its responses (status, the written CLR type, `text/plain` for a string,
+and a `204` when the result may be `null`). Read them from a built route, or from the matched endpoint
+during a request:
+
+```csharp
+foreach (IRouterRoute route in router.Routes)
+{
+    IReadOnlyList<EndpointParameterMetadata> parameters = route.Metadata.GetOrderedMetadata<EndpointParameterMetadata>();
+    IReadOnlyList<EndpointResponseMetadata> responses = route.Metadata.GetOrderedMetadata<EndpointResponseMetadata>();
+    // parameters[0]: Name "id", Source Route, Type typeof(long), IsRequired true
+    // responses[0]:  StatusCode 200, Type typeof(Order), ContentType null (negotiated)
+}
+
+// Describe another response the handler can answer; it composes with the generated ones.
+app.MapGet("/orders/{id}", (long id) => orders.Get(id))
+   .WithMetadata(new EndpointResponseMetadata(HttpStatusCode.NotFound));
+```
+
+The types are `typeof(...)` values written by the source generator, so a schema comes from the
+application's source-generated `JsonTypeInfo`, never from reflection.
+
 ## Wiring
 
 - Reference the generator: `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />`

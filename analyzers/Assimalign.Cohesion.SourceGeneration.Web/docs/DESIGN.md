@@ -71,6 +71,7 @@ Each interceptor:
   (`IHttpContentSerializationFeature` reader probe → 415, `ReadContentAsync<T>` with `JsonException`
   → 400 / `HttpContentSerializationException` → 415), and direct injections.
 - Writes the value the handler returns, if any (see "Returned Values").
+- Chains the endpoint's description onto the mapped route (see "Endpoint Descriptions").
 - Registers the thunk through the raw `Map` overload — which binds to `WebApplicationMiddleware`, not
   the typed overload, so generated registration is never itself intercepted — and returns the raw
   overload's `IRouterRouteBuilder`, the intercepted overload's return type (#1055), so the caller's
@@ -101,6 +102,37 @@ The model records the result type and the written type as display strings plus a
 (`None`, `Text`, `Serialized`) and a `ResultNullCheck`, so the emit phase needs no symbols. The runtime
 contract — why `null` is 204, why `string` is text, what happens without a contract — is the
 `Web.Api` DESIGN's "Return Values" section.
+
+## Endpoint Descriptions (#152 groundwork)
+
+Every interceptor chains one `.WithMetadata(...)` call onto the route it maps, before the antiforgery
+requirement and before the caller's own chain:
+
+```csharp
+})
+.WithMetadata(
+    new global::Assimalign.Cohesion.Web.EndpointParameterMetadata("id", global::Assimalign.Cohesion.Web.EndpointParameterSource.Route, typeof(global::System.Int64), true),
+    new global::Assimalign.Cohesion.Web.EndpointResponseMetadata(global::Assimalign.Cohesion.Http.HttpStatusCode.Ok, typeof(global::Order), null),
+    new global::Assimalign.Cohesion.Web.EndpointResponseMetadata(global::Assimalign.Cohesion.Http.HttpStatusCode.NoContent, null, null))
+```
+
+- **Parameters.** One item per parameter whose `BindingSource` is a request source; injections are
+  skipped. The name is the binding key, emitted with `SymbolDisplay.FormatLiteral`. The type is the
+  declared type in a display format without nullable reference annotations (`ParameterBinding.DescribedType`),
+  because `typeof(string?)` does not compile; `Nullable<T>` keeps its `?`. `IsRequired` is the
+  binding's own required flag, and `true` for a body.
+- **Responses.** A `200` with `typeof(written type)` (`null` for `void`/`Task`/`ValueTask`) and
+  `HttpMediaType.TextPlain` for a string; a `204` when `EndpointBinding.DescribesNoContent` is set.
+- **When the result may be null.** A `Nullable<T>` always lists the 204. For a reference type, the
+  annotation of the delegate's return or the handler's declared return decides when it is `Annotated`.
+  An implicitly typed lambda's inferred return type is nullable-oblivious even in an enabled context,
+  so for a lambda the generator also reads the null-state (`TypeInfo.Nullability.FlowState`) of each
+  value the lambda itself returns — returns inside a nested lambda or local function are skipped — and
+  a maybe-null value lists the 204. Without this, `(long id) => orders.Get(id)` returning `Order?`
+  would describe no 204, and treating "oblivious" as nullable would describe one on every lambda.
+
+The contract the metadata carries for its readers is the `Web.Api` DESIGN's "Endpoint Description
+Metadata" section.
 
 ## Diagnostics (#1059)
 
@@ -187,12 +219,14 @@ or `Web.Serialization` by adding or withholding that assembly from the compilati
 Cases compile the generated code with interceptors enabled (the antiforgery requirement, every
 supported return shape, method groups), and every `COHWEB` diagnostic has a case that asserts its
 severity, message and location. Runtime behavior — real requests through every binding source, the
-400/415 outcomes, injection, and every return shape with its 204/406/fault outcomes — is proven
-end-to-end in `Assimalign.Cohesion.Web.Api/tests` against the in-memory `WebApplicationTestFactory`;
+400/415 outcomes, injection, every return shape with its 204/406/fault outcomes, and the description
+metadata read back from the built route table — is proven end-to-end in
+`Assimalign.Cohesion.Web.Api/tests` against the in-memory `WebApplicationTestFactory`;
 the antiforgery requirement on form-bound endpoints is proven in `Assimalign.Cohesion.Web.Antiforgery/tests`.
 
 ## Non-Goals
 
 Result types, filter chains and OpenApi emission are out of scope for v1 (see `Web.Api/docs/DESIGN.md`).
 A returned value is written as plain data; there is no result abstraction for the generator to
-recognize.
+recognize. The generator emits neutral description metadata, never OpenApi types: the OpenAPI adapter
+(#152) maps the description onto its own model.

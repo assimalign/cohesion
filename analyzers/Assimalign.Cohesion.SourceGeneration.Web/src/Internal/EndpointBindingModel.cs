@@ -79,6 +79,10 @@ internal enum ResultNullCheck
 }
 
 /// <summary>A single modeled handler parameter.</summary>
+/// <remarks>
+/// <c>DescribedType</c> is the declared type without nullable reference annotations, the form a
+/// <c>typeof(...)</c> in the endpoint's description metadata accepts.
+/// </remarks>
 internal readonly record struct ParameterBinding(
     string DeclaredType,
     string CoreType,
@@ -86,7 +90,8 @@ internal readonly record struct ParameterBinding(
     BindingSource Source,
     ConversionKind Conversion,
     string Key,
-    bool Required) : IEquatable<ParameterBinding>;
+    bool Required,
+    string DescribedType) : IEquatable<ParameterBinding>;
 
 /// <summary>A modeled typed <c>Map*</c> call site the generator intercepts.</summary>
 /// <remarks>
@@ -96,6 +101,11 @@ internal readonly record struct ParameterBinding(
 /// delegate. <c>ResultType</c> is the declared type of the returned (awaited) value and <c>WrittenType</c>
 /// the type argument the serialized write uses: the result type without its top-level nullable annotation,
 /// and the underlying type of a <c>Nullable&lt;T&gt;</c>. Both are empty when the handler returns no value.
+/// </para>
+/// <para>
+/// <c>DescribedResultType</c> is the written type without nullable reference annotations, for the
+/// <c>typeof(...)</c> in the endpoint's response description, and <c>DescribesNoContent</c> records that
+/// the declared result admits <see langword="null"/>, so the description lists the <c>204</c>.
 /// </para>
 /// <para>
 /// <c>RequiresAntiforgery</c> is set for a form-bound endpoint when the consuming compilation can name
@@ -114,6 +124,8 @@ internal readonly record struct EndpointBinding(
     ResponseKind Response,
     string WrittenType,
     ResultNullCheck NullCheck,
+    string DescribedResultType,
+    bool DescribesNoContent,
     EquatableArray<ParameterBinding> Parameters,
     int BodyParameterIndex,
     bool UsesForm,
