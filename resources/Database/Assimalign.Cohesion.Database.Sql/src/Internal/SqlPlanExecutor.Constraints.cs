@@ -26,11 +26,13 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private sealed class SqlCascadeFrame
     {
-        public SqlCascadeFrame(SqlCatalogTable table, object?[] values, List<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> incoming)
+        public SqlCascadeFrame(SqlCatalogTable table, object?[] values, List<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> incoming,
+            int lastCascade)
         {
             Table = table;
             Values = values;
             Incoming = incoming;
+            LastCascade = lastCascade;
         }
 
         /// <summary>The table the row belongs to.</summary>
@@ -41,6 +43,13 @@ internal sealed partial class SqlPlanExecutor
 
         /// <summary>The references into <see cref="Table"/>, read once the row was locked.</summary>
         public List<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> Incoming { get; }
+
+        /// <summary>
+        /// The index in <see cref="Incoming"/> of the last reference this row's
+        /// deletion can cascade through (see <see cref="CascadeKeys"/>), or -1 when
+        /// there is none. The references after it are passed over without a lookup.
+        /// </summary>
+        public int LastCascade { get; }
 
         /// <summary>The index in <see cref="Incoming"/> of the reference being walked; -1 before the first.</summary>
         public int Reference { get; set; } = -1;
@@ -53,10 +62,11 @@ internal sealed partial class SqlPlanExecutor
 
         /// <summary>
         /// Whether the walk has handed out every row this frame can descend into:
-        /// it is on its last incoming reference and that reference's matches are
-        /// exhausted.
+        /// it has reached its last cascading reference and that reference's matches
+        /// are exhausted. Any reference after it is a restricting one, or one whose
+        /// key is null in this row, which the walk would pass over without a lookup.
         /// </summary>
-        public bool IsComplete => Matches is null && Reference >= Incoming.Count - 1;
+        public bool IsComplete => Matches is null && Reference >= LastCascade;
     }
 
     /// <summary>
@@ -486,11 +496,13 @@ internal sealed partial class SqlPlanExecutor
     /// locked and added to the deletion set is the recursion's.
     /// <para>
     /// A frame leaves the path as soon as it hands out the last matching row of
-    /// its last incoming reference, before that row's subtree is walked: the
-    /// recursive call had nothing left to do but return once the subtree did. A
-    /// self-referencing chain therefore walks with one frame on the path however
-    /// long it is; the path grows only with the rows that still have matches, or
-    /// references, left to visit.
+    /// its last cascading reference, before that row's subtree is walked: the
+    /// recursive call had nothing left to do but pass over its restricting
+    /// references and return once the subtree did. A self-referencing chain
+    /// therefore walks with one frame on the path however long it is, whatever
+    /// restricting references into its table follow the self-reference; the path
+    /// grows only with the rows that still have matches, or cascading references,
+    /// left to visit.
     /// </para>
     /// </remarks>
     private async Task CollectCascadeDeletesAsync(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, object?[] values,
@@ -508,8 +520,10 @@ internal sealed partial class SqlPlanExecutor
         path.Push(root);
         while (path.TryPeek(out var frame))
         {
-            // A long walk whose rows are all found through an index and whose locks
-            // are all granted at once has no other point that observes cancellation.
+            // Entering a row takes only its locks, which an uncontended grant does
+            // not check for cancellation, and one lookup can hand out any number of
+            // rows (a wide fan-out into a table with no cascading references does no
+            // further lookup). Checking each step makes every step cancellable.
             cancellationToken.ThrowIfCancellationRequested();
             if (!TryNextCascadeRow(frame, deletions, statement, cancellationToken, out var edge, out var match))
             {
@@ -561,7 +575,32 @@ internal sealed partial class SqlPlanExecutor
 
         // The incoming references are read after the row and its table are locked,
         // exactly where the recursive walk read them.
-        return new SqlCascadeFrame(table, values, IncomingReferences(table).ToList());
+        var incoming = IncomingReferences(table).ToList();
+        int lastCascade = incoming.Count - 1;
+        while (lastCascade >= 0 && CascadeKeys(table, values, incoming[lastCascade].Constraint) is null)
+        {
+            lastCascade--;
+        }
+
+        return new SqlCascadeFrame(table, values, incoming, lastCascade);
+    }
+
+    /// <summary>
+    /// Returns the key a row's children are found by through one incoming
+    /// reference, or null when deleting the row cascades nothing through it: the
+    /// reference is <c>ON DELETE RESTRICT</c> (checked against the whole deletion
+    /// set once the walk is done), or the row's key has a null component and so
+    /// matches no child (MATCH SIMPLE).
+    /// </summary>
+    private static object?[]? CascadeKeys(SqlCatalogTable table, object?[] values, SqlCatalogConstraint constraint)
+    {
+        if (constraint.OnDelete == SqlCatalogReferentialAction.Restrict)
+        {
+            return null;
+        }
+
+        var keys = constraint.ReferencedColumns!.Select(column => values[FindColumnOrdinal(table, column)]).ToArray();
+        return keys.Any(value => value is null) ? null : keys;
     }
 
     /// <summary>
@@ -613,8 +652,7 @@ internal sealed partial class SqlPlanExecutor
             }
 
             var (child, constraint) = frame.Incoming[frame.Reference];
-            var keys = constraint.ReferencedColumns!.Select(column => frame.Values[FindColumnOrdinal(frame.Table, column)]).ToArray();
-            if (constraint.OnDelete == SqlCatalogReferentialAction.Restrict || keys.Any(value => value is null))
+            if (CascadeKeys(frame.Table, frame.Values, constraint) is not { } keys)
             {
                 continue;
             }

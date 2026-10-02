@@ -273,6 +273,75 @@ public sealed class SqlCascadeDeleteDepthTests
     }
 
     /// <summary>
+    /// A row leaves the walk's path once it has handed out the children of its last cascading
+    /// reference, which is not always its last reference: here a cascading <c>tag</c> reference and a
+    /// restricting <c>pin</c> reference follow the chain's self-reference, and the <c>tag</c> key is
+    /// null in nine rows of ten. Every row still has each of its cascading references walked, the
+    /// restricting one still rejects the statement, and rows outside the closure are untouched.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Cascade: references after a chain's self-reference are walked or checked for every row")]
+    public async Task Delete_ChainWithTrailingReferences_ShouldWalkEveryCascadingReference()
+    {
+        // Arrange: chain rows 1..2,000 form one chain and rows 2,001..2,010 a separate one. A row's
+        // (code_a, code_b) key is (id, 0) for every tenth row of the long chain and every row of the
+        // short one, and (id, NULL) otherwise; each non-null key has one tag.
+        const int length = 2_000;
+        const int separate = 10;
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE chain (id INT PRIMARY KEY, parent_id INT, code_a INT, code_b INT, " +
+            "CONSTRAINT fk_chain FOREIGN KEY(parent_id) REFERENCES chain(id) ON DELETE CASCADE, CONSTRAINT uq_code UNIQUE(code_a, code_b))");
+        await session.ExecuteAsync("CREATE INDEX chain_parent ON chain(parent_id)");
+        await session.ExecuteAsync("CREATE TABLE tag (id INT PRIMARY KEY, code_a INT, code_b INT, " +
+            "CONSTRAINT fk_tag FOREIGN KEY(code_a, code_b) REFERENCES chain(code_a, code_b) ON DELETE CASCADE)");
+        await session.ExecuteAsync("CREATE TABLE pin (id INT PRIMARY KEY, node INT, CONSTRAINT fk_pin FOREIGN KEY(node) REFERENCES chain(id) ON DELETE RESTRICT)");
+
+        var chainRows = new StringBuilder();
+        var tagRows = new StringBuilder();
+        for (int first = 1; first <= length + separate; first += seedBatch)
+        {
+            chainRows.Clear().Append("INSERT INTO chain VALUES ");
+            tagRows.Clear();
+            int last = Math.Min(length + separate, first + seedBatch - 1);
+            for (int id = first; id <= last; id++)
+            {
+                bool tagged = id > length || id % 10 == 0;
+                string parent = id == 1 || id == length + 1 ? "NULL" : (id - 1).ToString(CultureInfo.InvariantCulture);
+                chainRows.Append(id == first ? "" : ", ").Append(CultureInfo.InvariantCulture, $"({id}, {parent}, {id}, {(tagged ? "0" : "NULL")})");
+                if (tagged)
+                {
+                    tagRows.Append(tagRows.Length == 0 ? "INSERT INTO tag VALUES " : ", ").Append(CultureInfo.InvariantCulture, $"({id}, {id}, 0)");
+                }
+            }
+
+            await session.ExecuteAsync(chainRows.ToString(), cancellationToken: Timeout());
+            await session.ExecuteAsync(tagRows.ToString(), cancellationToken: Timeout());
+        }
+
+        await session.ExecuteAsync($"INSERT INTO pin VALUES (1, {length - 1})");
+
+        // Act
+        var failure = await Should.ThrowAsync<SqlConstraintViolationException>(() =>
+            session.ExecuteAsync("DELETE FROM chain WHERE id = 1", cancellationToken: Timeout()).AsTask());
+        long chainAfterFailure = await CountAsync(session);
+        object? tagsAfterFailure = await ScalarAsync(session, "SELECT COUNT(*) FROM tag");
+        await session.ExecuteAsync("DELETE FROM pin");
+        var result = await session.ExecuteAsync("DELETE FROM chain WHERE id = 1", cancellationToken: Timeout());
+
+        // Assert
+        failure.ConstraintName.ShouldBe("fk_pin");
+        failure.OffendingValue.ShouldBe(length - 1);
+        chainAfterFailure.ShouldBe(length + separate);
+        tagsAfterFailure.ShouldBe((long)(length / 10 + separate));
+        result.AffectedCount.ShouldBe(1);
+        (await CountAsync(session)).ShouldBe(separate);
+        (await ScalarAsync(session, "SELECT MIN(id) FROM chain")).ShouldBe(length + 1);
+        (await ScalarAsync(session, "SELECT COUNT(*) FROM tag")).ShouldBe((long)separate);
+        (await ScalarAsync(session, "SELECT MIN(id) FROM tag")).ShouldBe(length + 1);
+    }
+
+    /// <summary>
     /// Over the wire the deep cascade completes as an ordinary statement: the server stays up, the
     /// connection that sent it stays ready for the next statement, and other connections are
     /// unaffected.
