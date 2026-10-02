@@ -71,6 +71,21 @@ their parsing rules.
 `ResourceContext` and `ResourceRuntime` live in `Assimalign.Cohesion.Hosting.Resources`, not
 Core; they are the in-process carrier delivered by runtime-contract item 12.
 
+## `FileSystemPath.Merge` navigates; it does not confine
+
+`FileSystemPath` (namespace `System.IO`) is the path type of the FileSystem family. Its `Merge`
+joins a relative path onto a base, returns a path that already lies under the base, and applies
+leading `..` segments, which may climb above the base. It is not a containment check, and the
+FileSystem providers do not use it as one: each resolves incoming paths and refuses anything
+outside its root itself (`libraries/FileSystem/Assimalign.Cohesion.FileSystem/docs/DESIGN.md`,
+"Root containment", which records why the check is not a `FileSystemPath` API).
+
+Its rules since #1180: the prefix match is ordinal (ignore-case when asked) and needs a segment
+boundary, so `/srv/public2` is not under `/srv/public`; only an exact `..` segment is a parent
+reference; `..` stops at the base's root — the drive, leading `/`, or UNC share — and throws
+there instead of producing a relative or `//`-prefixed result; and the `CultureInfo` parameter no
+longer takes part in the match, because a culture-aware match cannot decide a segment boundary.
+
 ## AOT posture
 
 Runtime-contract parsing uses direct string, integer, and URI operations. It performs no

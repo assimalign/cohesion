@@ -274,87 +274,118 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
     }
 
     /// <summary>
-    /// Combines the provided path with the current instance. If the provided path 
-    /// partially matches or the path is relative to the current instance then the path is merged.
+    /// Merges <paramref name="other"/> onto the current path by navigation. See
+    /// <see cref="Merge(FileSystemPath, FileSystemPath, CultureInfo, bool)"/> for the rules; the
+    /// prefix match is case-sensitive.
     /// </summary>
-    /// <param name="other"></param>
-    /// <returns></returns>
+    /// <param name="other">The path to merge onto the current path.</param>
+    /// <returns>The merged path.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="other"/> is rooted and does not lie under the current path, or its leading
+    /// <c>..</c> segments climb above the current path's root.
+    /// </exception>
     public FileSystemPath Merge(FileSystemPath other)
     {
         return Merge(this, other, CultureInfo.InvariantCulture, false);
     }
 
     /// <summary>
-    /// Tries to merge the path if 
+    /// Merges <paramref name="other"/> onto the current path by navigation. See
+    /// <see cref="Merge(FileSystemPath, FileSystemPath, CultureInfo, bool)"/> for the rules; the
+    /// prefix match is case-sensitive.
     /// </summary>
-    /// <param name="other"></param>
-    /// <param name="comparison"></param>
-    /// <returns></returns>
-    /// <exception cref="ArgumentException"></exception>
-    /// <exception cref="PathTooLongException"></exception>
+    /// <param name="other">The path to merge onto the current path.</param>
+    /// <param name="cultureInfo">Retained for source compatibility; the prefix match is ordinal.</param>
+    /// <returns>The merged path.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="other"/> is rooted and does not lie under the current path, or its leading
+    /// <c>..</c> segments climb above the current path's root.
+    /// </exception>
     public FileSystemPath Merge(FileSystemPath other, CultureInfo cultureInfo)
     {
         return Merge(this, other, cultureInfo, false);
     }
 
     /// <summary>
-    /// 
+    /// Merges <paramref name="other"/> onto the current path by navigation. See
+    /// <see cref="Merge(FileSystemPath, FileSystemPath, CultureInfo, bool)"/> for the rules.
     /// </summary>
-    /// <param name="other"></param>
-    /// <param name="cultureInfo"></param>
-    /// <param name="ignoreCase"></param>
-    /// <returns></returns>
+    /// <param name="other">The path to merge onto the current path.</param>
+    /// <param name="cultureInfo">Retained for source compatibility; the prefix match is ordinal.</param>
+    /// <param name="ignoreCase"><see langword="true"/> to match the prefix ignoring case.</param>
+    /// <returns>The merged path.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="other"/> is rooted and does not lie under the current path, or its leading
+    /// <c>..</c> segments climb above the current path's root.
+    /// </exception>
     public FileSystemPath Merge(FileSystemPath other, CultureInfo cultureInfo, bool ignoreCase)
     {
         return Merge(this, other, cultureInfo, ignoreCase);
     }
 
     /// <summary>
-    /// Tries to merge the path if 
+    /// Merges <paramref name="right"/> onto <paramref name="left"/> by navigation. See
+    /// <see cref="Merge(FileSystemPath, FileSystemPath, CultureInfo, bool)"/> for the rules; the
+    /// prefix match is case-sensitive.
     /// </summary>
-    /// <param name="left"></param>
-    /// <param name="right"></param>
-    /// <returns></returns>
-    /// <exception cref="ArgumentException"></exception>
-    /// <exception cref="PathTooLongException"></exception>
+    /// <param name="left">The base path.</param>
+    /// <param name="right">The path to merge onto <paramref name="left"/>.</param>
+    /// <returns>The merged path.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="right"/> is rooted and does not lie under <paramref name="left"/>, or its
+    /// leading <c>..</c> segments climb above the root of <paramref name="left"/>.
+    /// </exception>
     public static FileSystemPath Merge(FileSystemPath left, FileSystemPath right)
     {
         return Merge(left, right, CultureInfo.InvariantCulture, false);
     }
 
     /// <summary>
-    /// Tries to merge the path if 
+    /// Merges <paramref name="right"/> onto <paramref name="left"/> by navigation: a path that
+    /// already lies under <paramref name="left"/> on a segment boundary is returned as is, leading
+    /// <c>..</c> segments climb from <paramref name="left"/> toward its root, and any other
+    /// relative path is joined onto <paramref name="left"/>.
     /// </summary>
-    /// <param name="left"></param>
-    /// <param name="right"></param>
-    /// <returns></returns>
-    /// <exception cref="ArgumentException"></exception>
-    /// <exception cref="PathTooLongException"></exception>
+    /// <remarks>
+    /// <para>
+    /// <c>Merge</c> navigates; it does not confine. A <c>..</c> segment may climb above
+    /// <paramref name="left"/> — <c>Merge("/srv/public", "../secret.txt")</c> is
+    /// <c>/srv/secret.txt</c> — and stops only at the root of <paramref name="left"/> (its drive,
+    /// leading separator, or UNC share), where it throws. Code that must keep a path inside a
+    /// directory resolves it and checks the result itself: every Cohesion file-system provider
+    /// does, and refuses a path outside its root with <c>FileSystemErrorCode.PathOutsideRoot</c>.
+    /// </para>
+    /// <para>
+    /// The prefix match is ordinal, or ordinal ignore-case when <paramref name="ignoreCase"/> is
+    /// <see langword="true"/>, and requires a segment boundary: <c>/srv/public2</c> does not lie
+    /// under <c>/srv/public</c>. <paramref name="cultureInfo"/> does not take part in the match. A
+    /// culture-aware prefix match can succeed across ignorable characters with a matched length that
+    /// does not line up with a separator, so it cannot decide a segment boundary; the parameter is
+    /// kept for source compatibility.
+    /// </para>
+    /// <para>
+    /// Only an exact <c>..</c> segment is a parent reference; a name such as <c>..config</c> is an
+    /// ordinary segment. A merged path keeps the root of <paramref name="left"/> exactly, so
+    /// climbing from <c>/srv/public</c> never produces a <c>//srv</c> (UNC-shaped) path.
+    /// </para>
+    /// </remarks>
+    /// <param name="left">The base path.</param>
+    /// <param name="right">The path to merge onto <paramref name="left"/>.</param>
+    /// <param name="cultureInfo">Retained for source compatibility; the prefix match is ordinal.</param>
+    /// <param name="ignoreCase"><see langword="true"/> to match the prefix ignoring case.</param>
+    /// <returns>The merged path.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="right"/> is rooted and does not lie under <paramref name="left"/>, or its
+    /// leading <c>..</c> segments climb above the root of <paramref name="left"/>.
+    /// </exception>
     public static FileSystemPath Merge(FileSystemPath left, FileSystemPath right, CultureInfo cultureInfo, bool ignoreCase)
     {
-        if (right.StartsWith(".."))
+        if (StartsWithParentSegment(right.AsSpan()))
         {
-            var ls = left.GetSegments();
-            var rs = right.GetSegments();
-
-            for (int i = 0; i < rs.Length; i++)
-            {
-                if (rs[i] == "..")
-                {
-                    ArgumentException.ThrowIf(
-                        ls.Length == 0,
-                        "The path cannot be merged. The relative path goes beyond the root of the current path.");
-
-                    ls = ls[..^1];
-                }
-                else
-                {
-                    return string.Join(Separator, [.. ls, .. rs[i..]]);
-                }
-            }
+            return Navigate(left.AsSpan(), right.AsSpan());
         }
 
-        if (right.StartsWith(left, cultureInfo))
+        if (IsUnder(right.AsSpan(), left.AsSpan(), ignoreCase))
         {
             return right;
         }
@@ -816,6 +847,86 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
     private StringComparer GetComparer(CultureInfo cultureInfo, bool ignoreCase)
     {
         return StringComparer.Create(cultureInfo, ignoreCase);
+    }
+
+    private const string mergeAboveRootMessage = "The path cannot be merged. The relative path goes beyond the root of the current path.";
+
+    // True when the path begins with an exact ".." segment. Parse admits ".." only at the start of
+    // a relative path, so these leading segments are the only parent references Merge can meet.
+    private static bool StartsWithParentSegment(ReadOnlySpan<char> path)
+    {
+        return path.Length >= 2
+            && IsDot(path[0])
+            && IsDot(path[1])
+            && (path.Length == 2 || IsPathSeparator(path[2]));
+    }
+
+    // True when path is prefix itself or lies under it on a segment boundary. A prefix that is a
+    // root ending in a separator ("/", "C:/") or a bare drive ("C:") is followed directly by the
+    // next segment, so any path that starts with it lies under it.
+    private static bool IsUnder(ReadOnlySpan<char> path, ReadOnlySpan<char> prefix, bool ignoreCase)
+    {
+        if (prefix.IsEmpty)
+        {
+            return true;
+        }
+
+        if (!path.StartsWith(prefix, ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (path.Length == prefix.Length || IsPathSeparator(prefix[^1]))
+        {
+            return true;
+        }
+
+        if (prefix.Length == 2 && prefix[1] == ':' && IsValidDriveChar(prefix[0]))
+        {
+            return true;
+        }
+
+        return IsPathSeparator(path[prefix.Length]);
+    }
+
+    // Applies the leading ".." segments of right to left, one segment each, never removing the root
+    // of left, then appends what remains of right.
+    private static FileSystemPath Navigate(ReadOnlySpan<char> left, ReadOnlySpan<char> right)
+    {
+        int rootLength = GetRootLength(left);
+        ReadOnlySpan<char> kept = left;
+
+        while (kept.Length > rootLength && IsPathSeparator(kept[^1]))
+        {
+            kept = kept[..^1];
+        }
+
+        while (StartsWithParentSegment(right))
+        {
+            ArgumentException.ThrowIf(kept.Length <= rootLength, mergeAboveRootMessage);
+
+            int separator = kept.LastIndexOfAny('/', '\\');
+            kept = separator < rootLength ? kept[..rootLength] : kept[..separator];
+            right = right.Length > 2 ? right[3..] : ReadOnlySpan<char>.Empty;
+        }
+
+        if (right.IsEmpty)
+        {
+            return Parse(kept);
+        }
+
+        if (kept.IsEmpty)
+        {
+            return Parse(right);
+        }
+
+        // A root that ends in a separator ("/", "C:/") or a bare drive ("C:") takes the next
+        // segment directly; anything else ("/srv", "//server/share") needs a separator first.
+        bool bareRoot = kept.Length == rootLength && (IsPathSeparator(kept[^1]) || kept[^1] == ':');
+
+        return Parse(bareRoot
+            ? string.Concat(kept, right)
+            : string.Concat(kept, "/", right));
     }
 
     internal partial class PathJsonConverter : JsonConverter<FileSystemPath>

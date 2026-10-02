@@ -29,6 +29,13 @@ internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystem
     {
         get
         {
+            // The root has no parent inside the file system. Its host parent lies outside the root,
+            // and enumerating or opening entries through it would bypass containment.
+            if (FileSystem.IsRootDirectory(_directoryInfo.FullName))
+            {
+                return null;
+            }
+
             if (_directoryInfo.Parent is not null)
             {
                 return new PhysicalFileSystemDirectory(FileSystem, _directoryInfo.Parent)

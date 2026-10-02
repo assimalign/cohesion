@@ -169,6 +169,11 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         CheckIfDisposed();
         CheckIfReadOnly(nameof(CopyFile));
 
+        // Resolve both ends before either is touched, so a refused path is refused whatever else
+        // is wrong with the other one.
+        FormatPath(source);
+        FormatPath(destination);
+
         using var manager = new InMemoryFileSystemLockManager();
 
         manager.Lock(this, LockPolicy.Exclusive);
@@ -819,18 +824,115 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
     }
 
+    /// <summary>
+    /// Resolves <paramref name="path"/> to an absolute path in this file system's namespace and
+    /// throws <see cref="FileSystemErrorCode.PathOutsideRoot"/> unless it is the root or lies under
+    /// it on a segment boundary. A relative path is taken from the root; <c>.</c> and <c>..</c>
+    /// segments are resolved before the check, and <c>..</c> at the namespace root stays there, as
+    /// <c>/..</c> is <c>/</c> on every host. The result is rebuilt from the root's own text, so tree
+    /// lookups always start from the stored root.
+    /// </summary>
     private FileSystemPath FormatPath(FileSystemPath path)
     {
-        FileSystemPath parentPath = _root.Path;
+        string root = _root.Path.ToString();
+        string value = path.ToString();
 
-        return parentPath.Merge(path, _cultureInfo, _ignoreCase);
+        if (string.IsNullOrEmpty(value))
+        {
+            return _root.Path;
+        }
+
+        string namespaceRoot;
+        string segments;
+
+        if (path.HasRoot(out string pathRoot))
+        {
+            namespaceRoot = pathRoot;
+            segments = value[pathRoot.Length..];
+        }
+        else
+        {
+            namespaceRoot = _root.Path.HasRoot(out string rootRoot) ? rootRoot : string.Empty;
+            segments = string.Concat(root.AsSpan(namespaceRoot.Length), "/", value);
+        }
+
+        string normalized = Normalize(namespaceRoot, segments);
+
+        if (!IsUnderRoot(normalized, root))
+        {
+            FileSystemException.ThrowPathOutsideRoot(path);
+        }
+
+        return string.Concat(root, normalized.AsSpan(root.Length));
+    }
+
+    // Resolves "." and ".." segments lexically beneath namespaceRoot.
+    private static string Normalize(string namespaceRoot, string path)
+    {
+        var resolved = new List<string>();
+        ReadOnlySpan<char> span = path;
+
+        foreach (Range range in span.SplitAny('/', '\\'))
+        {
+            ReadOnlySpan<char> segment = span[range];
+
+            if (segment.IsEmpty || segment is ".")
+            {
+                continue;
+            }
+
+            if (segment is "..")
+            {
+                if (resolved.Count > 0)
+                {
+                    resolved.RemoveAt(resolved.Count - 1);
+                }
+
+                continue;
+            }
+
+            resolved.Add(segment.ToString());
+        }
+
+        string joined = string.Join('/', resolved);
+
+        if (namespaceRoot.Length == 0 || joined.Length == 0)
+        {
+            return namespaceRoot.Length == 0 ? joined : namespaceRoot;
+        }
+
+        return namespaceRoot.EndsWith('/') ? namespaceRoot + joined : namespaceRoot + "/" + joined;
+    }
+
+    // True when path is root or lies under it on a segment boundary. The match is ordinal (ignoring
+    // case when the file system does): a culture-aware match can succeed across ignorable characters
+    // with a length that does not line up with a separator.
+    private bool IsUnderRoot(string path, string root)
+    {
+        if (!path.StartsWith(root, _ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return path.Length == root.Length
+            || root.EndsWith('/')
+            || path[root.Length] == '/';
     }
 
     private FileSystemPath GetRelativePath(FileSystemPath absolute)
     {
-        FileSystemPath rootPath = _root.Path;
-        // When root is "/" the separator is already included, so don't add +1
-        int offset = rootPath.Equals("/") ? rootPath.Length : rootPath.Length + 1;
+        string rootPath = _root.Path.ToString();
+        string text = absolute.ToString();
+
+        // FormatPath only produces the root or a path under it, so a path no longer than the root
+        // is the root itself.
+        if (text.Length <= rootPath.Length)
+        {
+            return FileSystemPath.Empty;
+        }
+
+        // A root that ends in a separator ("/") is followed directly by the first segment.
+        int offset = rootPath.EndsWith('/') ? rootPath.Length : rootPath.Length + 1;
         return absolute.Subpath(offset);
     }
 
