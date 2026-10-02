@@ -38,6 +38,14 @@ The result is that a generated document is *version-clean*: it passes `document.
 declared line without the serializer having to silently drop fields. This is deliberate — the generator
 owns version targeting for the metadata it emits; broader cross-version transforms are feature .07.
 
+## Pass-through schemas (#152)
+
+A parameter, request body, response or schema component whose metadata carries a complete `Schema`
+(`OpenApi.Attributes` DESIGN, "Pass-through schemas") is placed as it is: the parameter's schema, the
+media type's schema, or the component, with the flat fields beside it ignored. Generation does not copy
+or rewrite it, so a producer that wants a schema in several documents supplies one instance per
+document; the Web OpenAPI adapter builds a fresh source, and fresh schemas, per document build.
+
 ## AOT posture
 
 `<IsAotCompatible>true</IsAotCompatible>` (inherited). The pipeline is plain object construction over
@@ -50,6 +58,7 @@ generated registry through the pipeline.
 
 - Cross-version transforms (3.0↔3.1↔3.2) — feature .07. This pipeline targets a single line per call.
 - Structural schema inference from CLR types — a body schema is referenced by component name; the
-  matching `[OpenApiSchema]` model produces the component. The pipeline does not reflect over types.
+  matching `[OpenApiSchema]` model produces the component, or a producer passes a complete schema
+  through. The pipeline does not reflect over types.
 - A registration/hosting API — how a service invokes generation (an endpoint, a build step) is a
   Web/ApiManager integration concern (feature .10).

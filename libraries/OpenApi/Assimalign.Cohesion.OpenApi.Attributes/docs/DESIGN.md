@@ -20,7 +20,8 @@ Web, ApiManager, or any other consumer can adopt them without dragging in unrela
    requirement. They are pure data carriers with no behavior.
 2. **Metadata** (`src/Metadata/`) — flat, immutable `required`/`init` records
    (`OpenApiOperationMetadata`, `OpenApiSchemaMetadata`, …). Deliberately simpler than the rich model:
-   references are strings, types are enums, nothing nests a model object. This is what a source
+   references are strings, types are enums, nothing nests a model object except the optional
+   pass-through `Schema` runtime producers set (see "Pass-through schemas"). This is what a source
    generator can emit as plain object initializers.
 3. **Mapper** (`OpenApiAttributeMapper`) — maps attribute instances to metadata, applying the rules and
    reporting invalid combinations as `OpenApiMetadataDiagnostic` values.
@@ -33,6 +34,31 @@ mapper or the source generator over Roslyn symbols) and the *emission* side (met
 independently, and the source generator emits simple data rather than reconstructing the full model
 graph in generated code. The metadata is the stable seam #542 asks to "lock down before the source
 generator depends on it."
+
+## Pass-through schemas (#152)
+
+The flat vocabulary is the attributes' vocabulary, and it cannot say what a serialization contract
+says: an array of a component, a dictionary, an enum, a nullable reference, a nested inline object. A
+producer that already holds a complete schema therefore passes it through instead of flattening it:
+`OpenApiParameterMetadata`, `OpenApiRequestBodyMetadata`, `OpenApiResponseMetadata` and
+`OpenApiSchemaMetadata` each have an optional `Schema` (`OpenApiSchema?`). When it is set, generation
+places that model schema as it is and ignores the flat type, format, reference or property fields beside
+it.
+
+This is the one place the metadata holds a model object, and it is deliberately narrow:
+
+- **Only runtime producers set it.** The Web OpenAPI adapter (`Assimalign.Cohesion.Web.OpenApi`) derives
+  schemas from System.Text.Json contracts with `JsonSchemaExporter`. The attribute mapper and the source
+  generator never set it, so their output, and the plain object initializers the generator emits, are
+  unchanged.
+- **It is optional and additive.** Existing producers and consumers compile and behave as before.
+- **It keeps one assembler.** The schema still reaches the document through the description provider
+  and the generator; the producer does not patch a generated document afterwards, which would split
+  document assembly across packages (the alternative the adapter's DESIGN rejects).
+
+A producer that passes schemas through writes them for the line it targets, since the model's writer
+adapts nullability and the 3.1 vocabulary per line but cannot know a producer's intent: the Web adapter
+builds its source per document line.
 
 ## AOT and source-generator friendliness
 
