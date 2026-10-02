@@ -209,6 +209,123 @@ public sealed class SqlIndexDuplicateKeyTests
         }
     }
 
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Indexes: CREATE INDEX over UPDATE and DELETE history seeks exactly what the scan returns")]
+    [InlineData(1159)]
+    [InlineData(20261001)]
+    public async Task CreateIndex_OverDeadVersions_SeeksShouldMatchScanAndModel(int seed)
+    {
+        // Arrange: a low-cardinality column with one hot value and a unique column,
+        // then seeded UPDATEs (of the key and of other columns), DELETEs, and
+        // rolled-back transactions — all before any index exists. The build path
+        // indexes every stored version with its stamps, so each key's run mixes
+        // dead versions with live ones. The version purge is held off so the dead
+        // versions are still stored when the indexes are built.
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        {
+            EngineName = $"dup-build-history-{seed}",
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        });
+        var database = await engine.CreateDatabaseAsync($"dup-build-history-{seed}-db");
+        await using var session = await database.CreateSessionAsync();
+
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, qty INT NOT NULL, code INT NOT NULL, note VARCHAR(40))");
+
+        var random = new Random(seed);
+        const int rows = 2_000;
+        const int domain = 7;
+        const int hotRow = 7;
+        int NextQty() => random.NextDouble() < 0.35 ? 3 : random.Next(domain);
+
+        var model = new Dictionary<int, int>(); // id → qty; code is always id + 100,000
+        var initial = new List<string>();
+        for (int id = 0; id < rows; id++)
+        {
+            int qty = NextQty();
+            model[id] = qty;
+            initial.Add($"({id}, {qty}, {id + 100_000}, 'n')");
+        }
+        await InsertRowsAsync(session, "t", initial);
+
+        // One row updated 300 times: 300 dead versions of its code key, more than
+        // one leaf holds.
+        for (int i = 0; i < 300; i++)
+        {
+            await session.ExecuteAsync($"UPDATE t SET note = 'h{i}' WHERE id = {hotRow}");
+        }
+
+        for (int op = 0; op < 1_000; op++)
+        {
+            var ids = model.Keys.ToList();
+            int id = ids[random.Next(ids.Count)];
+            int choice = random.Next(10);
+
+            bool delete = choice is 7 or 8 && id != hotRow; // the hot row stays live
+
+            if (delete)
+            {
+                await session.ExecuteAsync($"DELETE FROM t WHERE id = {id}");
+                model.Remove(id);
+            }
+            else if (choice is >= 4 and < 7)
+            {
+                int qty = NextQty();
+                await session.ExecuteAsync($"UPDATE t SET qty = {qty} WHERE id = {id}");
+                model[id] = qty;
+            }
+            else if (choice < 9)
+            {
+                await session.ExecuteAsync($"UPDATE t SET note = 'u{op}' WHERE id = {id}");
+            }
+            else
+            {
+                int other = ids[random.Next(ids.Count)];
+                await session.ExecuteAsync("BEGIN");
+                await session.ExecuteAsync($"UPDATE t SET qty = {NextQty()} WHERE id = {id}");
+                await session.ExecuteAsync($"DELETE FROM t WHERE id = {other}");
+                await session.ExecuteAsync("ROLLBACK");
+            }
+        }
+
+        // Act: build both indexes over the history.
+        await session.ExecuteAsync("CREATE INDEX ix_qty ON t(qty)");
+        await session.ExecuteAsync("CREATE UNIQUE INDEX ux_code ON t(code)");
+
+        // Assert: every equality seek and every range shape equals the scan and the model.
+        await VerifyAsync(session, model, domain, random);
+
+        // The unique index finds the hot row's one live version behind its dead
+        // ones, rejects a second live one, and frees a deleted row's code.
+        (await IdsAsync(session, $"SELECT id FROM t WHERE code = {hotRow + 100_000}")).ShouldBe(new[] { hotRow });
+        AccessPathOf(session).ShouldBe("seek:ux_code");
+        var duplicate = await Should.ThrowAsync<SqlConstraintViolationException>(
+            async () => await session.ExecuteAsync($"INSERT INTO t VALUES (90000, 1, {hotRow + 100_000}, 'dup')"));
+        duplicate.ConstraintKind.ShouldBe("UNIQUE");
+
+        int deleted = Enumerable.Range(0, rows).First(id => !model.ContainsKey(id));
+        await session.ExecuteAsync($"INSERT INTO t VALUES (90001, 1, {deleted + 100_000}, 'reused')");
+        model[90_001] = 1;
+
+        // The write path keeps the built runs correct.
+        for (int op = 0; op < 150; op++)
+        {
+            var ids = model.Keys.ToList();
+            int id = ids[random.Next(ids.Count)];
+            if (random.Next(3) == 0 && id != hotRow)
+            {
+                await session.ExecuteAsync($"DELETE FROM t WHERE id = {id}");
+                model.Remove(id);
+            }
+            else
+            {
+                int qty = NextQty();
+                await session.ExecuteAsync($"UPDATE t SET qty = {qty} WHERE id = {id}");
+                model[id] = qty;
+            }
+        }
+
+        await VerifyAsync(session, model, domain, random);
+    }
+
     private static async Task VerifyAsync(IDatabaseSession session, Dictionary<int, int> model, int domain, Random random)
     {
         // The scan: every live row, exactly once.
