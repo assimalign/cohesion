@@ -10,15 +10,22 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// (#1188): the engine rolls its work back at once, and the transaction stays the session's
 /// transaction, reporting <see cref="TransactionState.Faulted"/>, until the caller ends it.
 /// Until then the session refuses every statement with <c>COHDBG007</c>; a rollback ends it, and
-/// a commit ends it with <c>COHDBG007</c> and commits nothing. Graph DESIGN.md, "Failed statements
-/// in explicit transactions", records the contract and the reference engines it follows.
+/// a commit ends it with <c>COHDBG007</c> and commits nothing. A caller's rollback or commit that
+/// does not complete leaves the transaction Faulted in the same way, until a rollback completes.
+/// Graph DESIGN.md, "Failed statements in explicit transactions", records the contract and the
+/// reference engines it follows.
 /// </summary>
 internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
 {
     private readonly TransactionCoordinator _coordinator;
     private readonly ITransactionContext _context;
     private readonly object _sync = new();
+
+    // Serializes every path that ends the context (commit, rollback, dispose, abort), so two of
+    // them never race into the coordinator and each one sees the outcome of the one before it.
+    private readonly SemaphoreSlim _endGate = new(1, 1);
     private Exception? _failure;
+    private Exception? _endFailure;
     private bool _ended;
 
     /// <summary>Initializes a new instance of the <see cref="GraphDatabaseTransaction"/> class.</summary>
@@ -60,18 +67,6 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
         }
     }
 
-    /// <summary>Gets the failure that aborted the transaction, or null when no statement failed in it.</summary>
-    internal Exception? Failure
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _failure;
-            }
-        }
-    }
-
     public TransactionId Id => _context.Id;
 
     public TransactionState State
@@ -81,82 +76,126 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
             lock (_sync)
             {
                 var state = _context.State;
-                // A transaction the engine ended under the caller is Faulted until the caller ends it.
-                return !_ended && (_failure is not null || state != TransactionState.Active) ? TransactionState.Faulted : state;
+                if (state != TransactionState.Active)
+                {
+                    // The kernel ended the context under the caller: Faulted until the caller ends it.
+                    return _ended ? state : TransactionState.Faulted;
+                }
+                // An active context refuses work once a statement failed in it, or once the
+                // caller's commit or rollback did not complete; only a rollback can end it then.
+                // A commit or rollback still in flight reports Active.
+                return _failure is not null || _endFailure is not null ? TransactionState.Faulted : state;
             }
         }
     }
 
     public IsolationLevel IsolationLevel => _context.IsolationLevel;
 
+    /// <summary>
+    /// Commits the transaction, or, when a statement aborted it or a rollback did not complete,
+    /// completes its rollback and fails with <c>COHDBG007</c>. The token is observed only until the
+    /// commit starts; a token canceled by then leaves the transaction as it was.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the commit before it starts.</param>
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
-        Exception? failure;
-        bool aborted;
-        lock (_sync)
+        cancellationToken.ThrowIfCancellationRequested();
+        await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            var state = _context.State;
-            failure = _failure;
-            aborted = failure is not null || !_ended && state != TransactionState.Active;
-            if (!aborted)
+            Exception? failure;
+            bool aborted;
+            lock (_sync)
             {
-                if (_ended || state != TransactionState.Active)
+                var state = _context.State;
+                if (_ended && state != TransactionState.Active)
                 {
-                    throw new DatabaseException(state == TransactionState.Active
-                        ? "The transaction's rollback has not completed."
-                        : $"The transaction is {state}.");
+                    throw new DatabaseException($"The transaction is {state}.");
                 }
-                if (Operations != 0)
+                // Under the end gate an ended transaction whose context is still active is one whose
+                // commit or rollback did not complete, so it carries an end failure and is aborted.
+                failure = _failure ?? _endFailure;
+                aborted = failure is not null || state != TransactionState.Active;
+                if (!aborted && Operations != 0)
                 {
                     throw new DatabaseException("Dispose every graph operation before committing its transaction.");
                 }
+                // COMMIT ends the transaction whatever its outcome, as a failed transaction block's
+                // COMMIT does in PostgreSQL and a terminated transaction's commit does in Neo4j.
+                _ended = true;
             }
-            // COMMIT ends the transaction whatever its outcome, as a failed transaction block's
-            // COMMIT does in PostgreSQL and a terminated transaction's commit does in Neo4j.
-            _ended = true;
+            if (!aborted)
+            {
+                try
+                {
+                    // Like a rollback, a commit that started runs to completion: a cancellation here
+                    // would only turn into a kernel abort of work the caller asked to keep.
+                    await _coordinator.CommitAsync(_context).ConfigureAwait(false);
+                }
+                catch (Exception error)
+                {
+                    // A kernel abort of the commit crosses the engine boundary as the area root's exception.
+                    RecordEndFailure(error);
+                    var translated = GraphDatabaseInstance.TranslateKernelFailure(error);
+                    if (ReferenceEquals(translated, error)) { throw; }
+                    throw translated;
+                }
+                return;
+            }
+            // Only when the rollback at the failure, or the caller's own, did not complete: nothing may commit.
+            await RollbackContextAsync().ConfigureAwait(false);
+            throw CreateAbortedException(failure, commit: true);
         }
-        if (!aborted)
+        finally
         {
-            await _coordinator.CommitAsync(_context, cancellationToken).ConfigureAwait(false);
-            return;
+            _endGate.Release();
         }
-        if (_context.State == TransactionState.Active)
-        {
-            // Only when the rollback at the failure did not complete: nothing may commit.
-            await _coordinator.RollbackAsync(_context, cancellationToken).ConfigureAwait(false);
-        }
-        throw CreateAbortedException(failure, commit: true);
     }
 
+    /// <summary>
+    /// Rolls the transaction back. A transaction that did not commit accepts any number of
+    /// rollbacks, because its work is already undone once one has completed or the kernel aborted
+    /// it; a committed transaction refuses one, because nothing can undo its work. The token is
+    /// observed only until the rollback starts: a rollback that stopped half way would leave the
+    /// transaction holding the database writer lock.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the rollback before it starts.</param>
     public async ValueTask RollbackAsync(CancellationToken cancellationToken = default)
     {
-        lock (_sync)
+        cancellationToken.ThrowIfCancellationRequested();
+        await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            var state = _context.State;
-            // An aborted transaction accepts any number of rollbacks: its work is already undone,
-            // and a caller's catch-block rollback after a failed commit must not raise a second error.
-            bool aborted = _failure is not null || !_ended && state != TransactionState.Active;
-            if (!aborted && state != TransactionState.Active)
+            lock (_sync)
             {
-                throw new DatabaseException($"The transaction is {state}.");
+                if (_context.State == TransactionState.Committed)
+                {
+                    throw new DatabaseException("The transaction is Committed; a committed transaction cannot roll back.");
+                }
+                _ended = true;
             }
-            _ended = true;
+            await RollbackContextAsync().ConfigureAwait(false);
         }
-        if (_context.State == TransactionState.Active)
+        finally
         {
-            await _coordinator.RollbackAsync(_context, cancellationToken).ConfigureAwait(false);
+            _endGate.Release();
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        lock (_sync)
+        await _endGate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            _ended = true;
+            lock (_sync)
+            {
+                _ended = true;
+            }
+            await RollbackContextAsync().ConfigureAwait(false);
         }
-        if (_context.State == TransactionState.Active)
+        finally
         {
-            await _coordinator.RollbackAsync(_context).ConfigureAwait(false);
+            _endGate.Release();
         }
     }
 
@@ -176,9 +215,42 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
                 _failure ??= cause;
             }
         }
-        if (_context.State == TransactionState.Active)
+        await _endGate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            await _coordinator.RollbackAsync(_context).ConfigureAwait(false);
+            await RollbackContextAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _endGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Creates the error for a statement or BEGIN the session refuses because the transaction is
+    /// not usable: <c>COHDBG007</c> when it is aborted, or a plain error while the caller's own
+    /// commit or rollback is still in flight.
+    /// </summary>
+    /// <returns>The refusal.</returns>
+    internal DatabaseException CreateRefusal()
+    {
+        lock (_sync)
+        {
+            if (_failure is not null)
+            {
+                return CreateAbortedException(_failure);
+            }
+            if (_endFailure is not null)
+            {
+                return new DatabaseException(
+                    "COHDBG007: The session's transaction is aborted: its commit or rollback did not complete, and statements are " +
+                    "refused until RollbackAsync completes. Cause: " + _endFailure.Message, _endFailure);
+            }
+            if (_ended && _context.State == TransactionState.Active)
+            {
+                return new DatabaseException("The session's transaction is being committed or rolled back; start the statement after it ends.");
+            }
+            return CreateAbortedException(null);
         }
     }
 
@@ -194,5 +266,39 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
             ? "COHDBG007: The session's transaction is aborted and cannot commit; nothing was committed." + cause
             : "COHDBG007: The session's transaction is aborted; statements are refused until it is rolled back." + cause;
         return new DatabaseException(message, failure);
+    }
+
+    // Runs under the end gate. A rollback that started runs to completion: the caller's token is
+    // not passed on (PostgreSQL holds interrupts through AbortTransaction for the same reason).
+    private async ValueTask RollbackContextAsync()
+    {
+        if (_context.State != TransactionState.Active)
+        {
+            return;
+        }
+        try
+        {
+            await _coordinator.RollbackAsync(_context).ConfigureAwait(false);
+        }
+        catch (Exception error)
+        {
+            RecordEndFailure(error);
+            var translated = GraphDatabaseInstance.TranslateKernelFailure(error);
+            if (ReferenceEquals(translated, error)) { throw; }
+            throw translated;
+        }
+    }
+
+    // A commit or rollback that failed while the context stayed active leaves a transaction that
+    // only a rollback can end; State reports it Faulted and the session refuses statements in it.
+    private void RecordEndFailure(Exception error)
+    {
+        lock (_sync)
+        {
+            if (_context.State == TransactionState.Active)
+            {
+                _endFailure = error;
+            }
+        }
     }
 }

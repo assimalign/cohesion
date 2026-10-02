@@ -55,12 +55,25 @@ internal sealed partial class GraphDatabaseInstance
     }
 
     // Child-root failures cross the engine boundary as the area root's exceptions.
-    private static Exception Translate(Exception error) => error switch
+    private static Exception Translate(Exception error) => TranslateKernelFailure(error) switch
+    {
+        var translated when !ReferenceEquals(translated, error) => translated,
+        _ when error is InvalidOperationException => new DatabaseException("COHDBG003: " + error.Message, error),
+        _ => error,
+    };
+
+    /// <summary>
+    /// Translates a failure of the transaction kernel or the storage child root into the area
+    /// root's exception; any other failure is returned unchanged. Statements and the explicit
+    /// transaction's commit and rollback share it.
+    /// </summary>
+    /// <param name="error">The failure to translate.</param>
+    /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
+    internal static Exception TranslateKernelFailure(Exception error) => error switch
     {
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         StorageException => new DatabaseException("COHDBG006: " + error.Message, error),
-        InvalidOperationException => new DatabaseException("COHDBG003: " + error.Message, error),
         _ => error,
     };
 

@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -89,6 +91,44 @@ public sealed class GraphTransactionFailureWireTests
         faultedState.ShouldBe(TransactionState.Faulted);
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
+    }
+
+    /// <summary>A statement whose result the server cannot encode fails for the client, so it aborts the transaction too.</summary>
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - A result the server cannot encode aborts the explicit transaction")]
+    public async Task QueryAsync_ResultEncodingFailsInsideExplicitTransaction_ShouldAbortTransaction()
+    {
+        // Arrange: the typed API stores a UInt32 property, which the wire value codec cannot encode.
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using (var typed = await harness.Database.CreateSessionAsync(harness.Token))
+        {
+            await harness.Database.CreateNodeAsync(typed, ["Unsigned"], new Dictionary<string, object?> { ["p"] = 7u }, harness.Token);
+        }
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(harness.Token);
+        await connection.ExecuteAsync("CREATE (:Pending)", cancellationToken: harness.Token);
+
+        // Act
+        var failure = await Should.ThrowAsync<GraphClientException>(async () =>
+            await connection.QueryAsync("MATCH (n:Unsigned) RETURN n.p", cancellationToken: harness.Token));
+        var faultedState = transaction.State;
+        var commitError = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(harness.Token));
+
+        // Assert
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        failure.Message.ShouldContain("UInt32", Case.Sensitive);
+        faultedState.ShouldBe(TransactionState.Faulted);
+        commitError.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        commitError.Message.ShouldContain("UInt32", Case.Sensitive);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        await using var observer = await harness.Database.CreateSessionAsync(harness.Token);
+        var labels = new List<string?>();
+        var result = (QueryResultSet)await observer.ExecuteAsync("SHOW LABELS", cancellationToken: harness.Token);
+        await using (result)
+        {
+            await foreach (var row in result.GetRowsAsync(harness.Token)) { labels.Add(row.GetString(2)); }
+        }
+        labels.ShouldBe(["Unsigned"]);
     }
 
     /// <summary>COMMIT of a transaction a wire statement aborted commits nothing; the session returns to autocommit.</summary>

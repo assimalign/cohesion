@@ -54,7 +54,7 @@ internal sealed class GraphDatabaseSession : IDatabaseSession
                 // PostgreSQL's failed transaction block.
                 throw open.IsUsable
                     ? new DatabaseException("A transaction or operation is already active on this session.")
-                    : GraphDatabaseTransaction.CreateAbortedException(open.Failure);
+                    : open.CreateRefusal();
             }
             if (_reserved || _operations.Count != 0)
             {
@@ -142,7 +142,7 @@ internal sealed class GraphDatabaseSession : IDatabaseSession
             var transaction = OpenTransaction;
             if (transaction is { IsUsable: false })
             {
-                throw GraphDatabaseTransaction.CreateAbortedException(transaction.Failure);
+                throw transaction.CreateRefusal();
             }
             _reserved = true;
             return transaction;
@@ -183,14 +183,18 @@ internal sealed class GraphDatabaseSession : IDatabaseSession
     {
         if (OpenTransaction is { IsUsable: false } transaction)
         {
-            throw GraphDatabaseTransaction.CreateAbortedException(transaction.Failure);
+            throw transaction.CreateRefusal();
         }
     }
 
-    // Aborts the explicit transaction for a statement that failed before it reached an operation.
-    // A statement running concurrently on the session (a caller contract violation) owns the
-    // session; its own outcome decides the transaction's.
-    private async ValueTask AbortTransactionAsync(Exception cause)
+    /// <summary>
+    /// Aborts the explicit transaction for a statement that failed outside its operation: before it
+    /// reached one (parsing, request validation) or after its operation completed (the wire server
+    /// encoding or writing its result). A statement running concurrently on the session (a caller
+    /// contract violation) owns the session; its own outcome decides the transaction's.
+    /// </summary>
+    /// <param name="cause">The failure the caller observes.</param>
+    internal async ValueTask AbortTransactionAsync(Exception cause)
     {
         GraphDatabaseTransaction? transaction;
         lock (_sync)

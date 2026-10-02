@@ -323,6 +323,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             }
         }
 
+        bool paths = frame.Type == (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths;
         try
         {
             if (string.IsNullOrWhiteSpace(message.Statement))
@@ -331,27 +332,29 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             }
             // The engine session parses and validates the statement, so a statement that fails
             // here aborts an explicit transaction exactly as one that fails in process (#1188).
-            if (frame.Type == (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths)
-            {
-                var result = await _databaseSession!.ExecuteStatementAsync(
-                    () => GraphPathsQueryRequest.FromGql(message.Statement, parameters), cancellationToken).ConfigureAwait(false);
-                if (result is not GraphPathsQueryResult paths)
-                {
-                    throw new DatabaseException("A path request did not produce a graph path result.");
-                }
-                foreach (GraphPath path in paths.Paths)
-                {
-                    await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.Path,
-                        new GraphProtocolPathMessage(path.Nodes, path.Relationships).Encode(), cancellationToken).ConfigureAwait(false);
-                }
-                await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
-                    new GraphProtocolPathsCompleteMessage(paths.Paths.Count).Encode(), cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                var result = await _databaseSession!.ExecuteStatementAsync(
+            var result = paths
+                ? await _databaseSession!.ExecuteStatementAsync(
+                    () => GraphPathsQueryRequest.FromGql(message.Statement, parameters), cancellationToken).ConfigureAwait(false)
+                : await _databaseSession!.ExecuteStatementAsync(
                     () => ParseScalarRequest(message.Statement, parameters), cancellationToken).ConfigureAwait(false);
-                await WriteResultAsync(result, rowWriter, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (paths)
+                {
+                    await WritePathsAsync(result, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await WriteResultAsync(result, rowWriter, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException)
+            {
+                // The client sees this statement fail, so it aborts an explicit transaction as an
+                // execution failure does, although its operation already completed. Bolt marks the
+                // transaction failed on any failure of the exchange, result streaming included.
+                await _databaseSession!.AbortTransactionAsync(exception).ConfigureAwait(false);
+                throw;
             }
         }
         catch (DatabaseParseException exception)
@@ -383,6 +386,21 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             }
         }
         return request;
+    }
+
+    private async Task WritePathsAsync(QueryResult result, CancellationToken cancellationToken)
+    {
+        if (result is not GraphPathsQueryResult paths)
+        {
+            throw new DatabaseException("A path request did not produce a graph path result.");
+        }
+        foreach (GraphPath path in paths.Paths)
+        {
+            await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.Path,
+                new GraphProtocolPathMessage(path.Nodes, path.Relationships).Encode(), cancellationToken).ConfigureAwait(false);
+        }
+        await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
+            new GraphProtocolPathsCompleteMessage(paths.Paths.Count).Encode(), cancellationToken).ConfigureAwait(false);
     }
 
     private async Task WriteResultAsync(QueryResult result, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)
@@ -424,8 +442,8 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
                 ? $"{diagnostics[0].Code}: {diagnosticMessage}"
                 : $"The statement completed with status {result.Status}.";
 
-            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, detail, cancellationToken).ConfigureAwait(false);
-            return;
+            // Reported as an ExecutionFailure by the caller, which aborts an explicit transaction first.
+            throw new DatabaseException(detail);
         }
 
         await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultComplete, new GraphProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);

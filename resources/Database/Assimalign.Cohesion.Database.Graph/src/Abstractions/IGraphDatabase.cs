@@ -19,6 +19,8 @@ public interface IGraphDatabase : IDatabase
     /// <param name="properties">The node's properties, or null for none.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The created node.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="labels"/> or one of its labels is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when a label is empty or whitespace.</exception>
     ValueTask<GraphNode> CreateNodeAsync(IDatabaseSession session, IReadOnlyList<string> labels, IReadOnlyDictionary<string, object?>? properties = null, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -50,6 +52,8 @@ public interface IGraphDatabase : IDatabase
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The created relationship.</returns>
     /// <exception cref="DatabaseException">Thrown when either endpoint node does not exist.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="type"/> is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="type"/> is empty or whitespace.</exception>
     ValueTask<GraphRelationship> CreateRelationshipAsync(IDatabaseSession session, GraphNodeId from, GraphNodeId to, string type, IReadOnlyDictionary<string, object?>? properties = null, CancellationToken cancellationToken = default);
 
     /// <summary>

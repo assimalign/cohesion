@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -323,6 +324,187 @@ public sealed class GraphTransactionFailureTests
         session.State.ShouldBe(SessionState.Closed);
         await using var observer = await database.CreateSessionAsync();
         (await Rows(observer, "SHOW LABELS")).ShouldBeEmpty();
+    }
+
+    /// <summary>Typed-API argument validation runs before any statement starts, so it leaves the transaction active.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: typed-API argument validation leaves the transaction active")]
+    public async Task TypedOperations_InvalidArgumentsInsideTransaction_ShouldLeaveTransactionActive()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        var seed = await database.CreateNodeAsync(session, ["Keep"]);
+        var transaction = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT (:Pending)");
+
+        // Act
+        var rejections = new List<Exception>
+        {
+            await Should.ThrowAsync<ArgumentNullException>(async () => await database.CreateNodeAsync(session, null!)),
+            await Should.ThrowAsync<ArgumentNullException>(async () => await database.CreateNodeAsync(session, [null!])),
+            await Should.ThrowAsync<ArgumentException>(async () => await database.CreateNodeAsync(session, [" "])),
+            await Should.ThrowAsync<ArgumentNullException>(async () => await database.CreateRelationshipAsync(session, seed.Id, seed.Id, null!)),
+            await Should.ThrowAsync<ArgumentException>(async () => await database.CreateRelationshipAsync(session, seed.Id, seed.Id, "")),
+        };
+        var traversal = await Should.ThrowAsync<DatabaseException>(async () =>
+        {
+            await foreach (var _ in database.TraverseAsync(session, new GraphTraversal(seed.Id, MaxDepth: -1))) { }
+        });
+        var state = transaction.State;
+        await transaction.CommitAsync();
+
+        // Assert
+        rejections.Count.ShouldBe(5);
+        traversal.Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        state.ShouldBe(TransactionState.Active);
+        transaction.State.ShouldBe(TransactionState.Committed);
+        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Keep", "Pending"]);
+    }
+
+    /// <summary>A rollback is idempotent for a transaction that did not commit, and refused for one that did.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: repeated rollback is a no-op; rollback after commit is refused")]
+    public async Task RollbackAsync_AfterEnd_ShouldBeNoOpUnlessCommitted()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        var rolledBack = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT (:Discarded)");
+        await rolledBack.RollbackAsync();
+        var committed = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT (:Kept)");
+        await committed.CommitAsync();
+
+        // Act
+        await rolledBack.RollbackAsync();
+        var refusal = await Should.ThrowAsync<DatabaseException>(async () => await committed.RollbackAsync());
+
+        // Assert
+        refusal.Message.ShouldContain("Committed", Case.Sensitive);
+        rolledBack.State.ShouldBe(TransactionState.RolledBack);
+        committed.State.ShouldBe(TransactionState.Committed);
+        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Kept"]);
+    }
+
+    /// <summary>A token canceled before a commit or rollback starts leaves the transaction exactly as it was.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a canceled token never starts a commit or rollback")]
+    public async Task EndAsync_TokenCanceledBeforeStart_ShouldLeaveTransactionActive()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT (:First)");
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act
+        await Should.ThrowAsync<OperationCanceledException>(async () => await transaction.RollbackAsync(canceled.Token));
+        await Should.ThrowAsync<OperationCanceledException>(async () => await transaction.CommitAsync(canceled.Token));
+        var state = transaction.State;
+        await session.ExecuteAsync("INSERT (:Second)");
+        await transaction.CommitAsync();
+
+        // Assert
+        state.ShouldBe(TransactionState.Active);
+        transaction.State.ShouldBe(TransactionState.Committed);
+        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["First", "Second"]);
+    }
+
+    /// <summary>A rollback that does not complete leaves the transaction faulted and refusing work until a rollback completes.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a rollback that does not complete leaves the transaction faulted")]
+    public async Task RollbackAsync_ThatDoesNotComplete_ShouldLeaveTransactionFaultedUntilRetried()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("INSERT (:Keep)");
+        var transaction = await session.BeginTransactionAsync();
+        (await Rows(session, "SHOW LABELS")).ShouldHaveSingleItem();
+
+        // Act: the abort record is the rollback's only journal write, so failing it fails the rollback.
+        IOException rollbackFailure;
+        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            rollbackFailure = await Should.ThrowAsync<IOException>(async () => await transaction.RollbackAsync());
+        }
+        var faultedState = transaction.State;
+        var currentWhileFaulted = session.CurrentTransaction;
+        var refused = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT (:Late)"));
+        var beginRefused = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
+        await transaction.RollbackAsync();
+
+        // Assert
+        faultedState.ShouldBe(TransactionState.Faulted);
+        currentWhileFaulted.ShouldBeSameAs(transaction);
+        refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        refused.Message.ShouldContain("did not complete", Case.Sensitive);
+        refused.InnerException.ShouldBeSameAs(rollbackFailure);
+        beginRefused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        session.CurrentTransaction.ShouldBeNull();
+        await session.ExecuteAsync("INSERT (:After)");
+        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["After", "Keep"]);
+    }
+
+    /// <summary>COMMIT after a rollback that did not complete fails with COHDBG007, commits nothing, and ends the transaction.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: COMMIT after an incomplete rollback fails and ends the transaction")]
+    public async Task CommitAsync_AfterRollbackThatDidNotComplete_ShouldFailAndEndTransaction()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        (await Rows(session, "SHOW LABELS")).ShouldBeEmpty();
+        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            await Should.ThrowAsync<IOException>(async () => await transaction.RollbackAsync());
+        }
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+
+        // Assert
+        error.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        error.Message.ShouldContain("nothing was committed", Case.Sensitive);
+        error.InnerException.ShouldBeOfType<IOException>();
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        session.CurrentTransaction.ShouldBeNull();
+        await transaction.RollbackAsync();
+    }
+
+    /// <summary>A commit the kernel aborts crosses the boundary translated, and a catch-block rollback afterwards raises nothing.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a kernel-aborted commit is translated and a later rollback is a no-op")]
+    public async Task CommitAsync_KernelAbortsCommit_ShouldTranslateAndAcceptRollback()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT (:Pending)");
+
+        // Act: the commit record is the commit's first journal write; the kernel then aborts the transaction.
+        DatabaseTransactionAbortedException error;
+        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            error = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await transaction.CommitAsync());
+        }
+        var stateAfterCommit = transaction.State;
+        await transaction.RollbackAsync();
+
+        // Assert
+        error.InnerException.ShouldBeOfType<TransactionAbortedException>();
+        stateAfterCommit.ShouldBe(TransactionState.Faulted);
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        session.CurrentTransaction.ShouldBeNull();
+        await session.ExecuteAsync("INSERT (:After)");
+        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["After"]);
     }
 
     private static async Task<List<QueryRow>> Rows(IDatabaseSession session, string gql)

@@ -57,12 +57,21 @@ internal sealed partial class GraphDatabaseInstance : IGraphDatabase
 
     public ValueTask<GraphNode> CreateNodeAsync(IDatabaseSession session, IReadOnlyList<string> labels,
         IReadOnlyDictionary<string, object?>? properties = null, CancellationToken cancellationToken = default)
-        => RunAsync(RequireSession(session), operation => CreateNodeCoreAsync(operation, labels, properties, cancellationToken), cancellationToken);
+    {
+        var graphSession = RequireSession(session);
+        // Argument validation runs before the statement starts, so it never aborts an explicit
+        // transaction. The catalog rejects the same names inside the statement.
+        ArgumentNullException.ThrowIfNull(labels);
+        foreach (string label in labels)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(label, nameof(labels));
+        }
+        return RunAsync(graphSession, operation => CreateNodeCoreAsync(operation, labels, properties, cancellationToken), cancellationToken);
+    }
 
     internal async ValueTask<GraphNode> CreateNodeCoreAsync(GraphOperation operation, IReadOnlyList<string> labels,
         IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
-        ArgumentNullException.ThrowIfNull(labels);
         await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
         foreach (string label in labels)
         {
@@ -92,7 +101,12 @@ internal sealed partial class GraphDatabaseInstance : IGraphDatabase
 
     public ValueTask<GraphRelationship> CreateRelationshipAsync(IDatabaseSession session, GraphNodeId from, GraphNodeId to,
         string type, IReadOnlyDictionary<string, object?>? properties = null, CancellationToken cancellationToken = default)
-        => RunAsync(RequireSession(session), operation => CreateRelationshipCoreAsync(operation, from, to, type, properties, cancellationToken), cancellationToken);
+    {
+        var graphSession = RequireSession(session);
+        // Argument validation runs before the statement starts, so it never aborts an explicit transaction.
+        ArgumentException.ThrowIfNullOrWhiteSpace(type);
+        return RunAsync(graphSession, operation => CreateRelationshipCoreAsync(operation, from, to, type, properties, cancellationToken), cancellationToken);
+    }
 
     internal async ValueTask<GraphRelationship> CreateRelationshipCoreAsync(GraphOperation operation, GraphNodeId from, GraphNodeId to,
         string type, IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
