@@ -141,6 +141,12 @@ internal readonly record struct InterceptorShape(
 /// the antiforgery requirement (<c>Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata</c>); the
 /// interceptor then attaches it to the mapped route.
 /// </para>
+/// <para>
+/// <c>ValidatedBodyType</c> is the type argument the thunk validates the bound request-body model as —
+/// its declared type without a top-level nullable annotation, or the underlying type of a
+/// <c>Nullable&lt;T&gt;</c> — when the consuming compilation can name the validation entry point
+/// (<c>Assimalign.Cohesion.Web.Validation.HttpContextValidationExtensions</c>); empty otherwise.
+/// </para>
 /// </remarks>
 internal readonly record struct EndpointBinding(
     string InterceptsAttribute,
@@ -158,7 +164,8 @@ internal readonly record struct EndpointBinding(
     EquatableArray<ParameterBinding> Parameters,
     int BodyParameterIndex,
     bool UsesForm,
-    bool RequiresAntiforgery) : IEquatable<EndpointBinding>;
+    bool RequiresAntiforgery,
+    string ValidatedBodyType) : IEquatable<EndpointBinding>;
 
 /// <summary>
 /// The outcome of analyzing one typed <c>Map*</c> call site: the binding to emit, or the diagnostics that

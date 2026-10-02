@@ -29,6 +29,32 @@ dynamic-code or reflection-emit path remains, so `IsAotCompatible=true` holds wi
   to the delegate parameter unchanged; only a call site that first materialized an
   `Expression<Func<T, bool>>` variable is a (rare) source break.
 
+## Error Sources
+
+An error's `Source` names what failed. A rule's default source is its member selector's text
+(`p => p.Name`), and a profile can set another through the rule's error callback
+(`NotEmpty(error => error.Source = "name")`), which is kept as written.
+
+**Nested profiles report under their parent member.** `ChildRules` and `UseProfile` validate a member
+with a profile of its own type, whose selectors start from that type (`a => a.City`). The nested
+rule (`ChildValidationRule`) records the parent member's selector and composes each nested error's
+default source under it, so the error reads `p => p.Address.City`; two levels deep it reads
+`p => p.Order.Address.City`. Before this, a nested error carried only the nested selector, and errors
+on equally named members of different nested objects (`Shipping.City`, `Billing.City`) could not be
+told apart. Under `RuleForEach`, nested sources name the collection member (`p => p.Addresses.City`)
+without an element index: the collection item evaluates its rules per element without passing the
+index to them.
+
+Web request validation (`Assimalign.Cohesion.Web.Validation`) reports these sources to clients as the
+member path after the selector parameter (`Address.City`).
+
+```mermaid
+flowchart LR
+    Root["RuleFor(p => p.Address)"] --> Child["ChildValidationRule: ParentSource p => p.Address"]
+    Child --> Nested["RuleFor(a => a.City): source a => a.City"]
+    Nested -->|"composed"| Reported["error source p => p.Address.City"]
+```
+
 ## Layout Example
 
 ```text

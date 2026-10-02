@@ -65,6 +65,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Serialization" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Sessions" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.StaticFiles" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Validation" />
 
         <!-- Supporting libraries the Web family closes over that the base App
              framework does not carry (computed transitive closure). -->
@@ -78,6 +79,9 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forwarded" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Sessions" />
+        <!-- Public, not private: Web.Validation's registration surface takes its IValidator and
+             IValidationProfile<T>, so applications compile against it. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectValidation" />
 
         <!-- App-facing HTTP capabilities delivered deliberately even though no Web
              assembly references them: incremental response streaming, the

@@ -619,6 +619,17 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Testing/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Testing/tests/Assimalign.Cohesion.Web.Testing.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Validation/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Validation/docs/">
+		<File Path="Assimalign.Cohesion.Web.Validation/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Validation/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Validation/src/">
+		<Project Path="Assimalign.Cohesion.Web.Validation/src/Assimalign.Cohesion.Web.Validation.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Validation/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Validation/tests/Assimalign.Cohesion.Web.Validation.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/refs/" >
 		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
@@ -649,6 +660,7 @@
 		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http.Sessions/src/Assimalign.Cohesion.Http.Sessions.csproj" />
 		<Project Path="../../libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/Assimalign.Cohesion.FileSystem.Physical.csproj" />
 		<Project Path="../../libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/Assimalign.Cohesion.FileSystem.InMemory.csproj" />
+		<Project Path="../../libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/src/Assimalign.Cohesion.ObjectValidation.csproj" />
 	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Health/">
 		<File Path="Assimalign.Cohesion.Web.Hosting.Health/README.md" />

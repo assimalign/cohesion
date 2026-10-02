@@ -2654,6 +2654,17 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Testing/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Testing/tests/Assimalign.Cohesion.Web.Testing.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Validation/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Validation/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Validation/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Validation/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Validation/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Validation/src/Assimalign.Cohesion.Web.Validation.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Validation/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Validation/tests/Assimalign.Cohesion.Web.Validation.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/sdks/">
 		<File Path="sdks/Directory.Build.props" />
 		<File Path="sdks/Directory.Build.targets" />

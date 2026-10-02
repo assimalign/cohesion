@@ -17,6 +17,11 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Adds a nested validation profile to be used to validate <typeparamref name="TValue"/>.
     /// </summary>
+    /// <remarks>
+    /// An error the nested profile reports with its default source (its member selector, such as
+    /// <c>a =&gt; a.City</c>) is reported under this member: <c>p =&gt; p.Address.City</c>. A source the
+    /// nested rule set explicitly is kept as written.
+    /// </remarks>
     /// <typeparam name="TValue"></typeparam>
     /// <param name="builder"></param>
     /// <param name="profile"></param>
@@ -35,7 +40,8 @@ public static partial class ValidationExtensions
         {
             Profile = profile,
             Name = $"Validate member with Profile for {builder.ValidationItem}",
-            Error = new ValidationError() { }
+            Error = new ValidationError() { },
+            ParentSource = builder.ValidationItem.ToString()
         };
 
         builder.ValidationItem.ItemRuleStack.Push(rule);
@@ -46,6 +52,11 @@ public static partial class ValidationExtensions
     /// <summary>
     /// Creates a nested validation profile with the described rules in the <paramref name="configure"/> parameter.
     /// </summary>
+    /// <remarks>
+    /// An error a nested rule reports with its default source (its member selector, such as
+    /// <c>a =&gt; a.City</c>) is reported under this member: <c>p =&gt; p.Address.City</c>. A source the
+    /// nested rule set explicitly is kept as written.
+    /// </remarks>
     /// <typeparam name="TValue"></typeparam>
     /// <param name="builder"></param>
     /// <param name="configure">A delegate to configure a custom validation error.</param>
@@ -66,7 +77,8 @@ public static partial class ValidationExtensions
         {
             Profile = profile,
             Name = $"Validate child members of {builder.ValidationItem}",
-            Error = new ValidationError() { }
+            Error = new ValidationError() { },
+            ParentSource = builder.ValidationItem.ToString()
         };
 
         builder.ValidationItem.ItemRuleStack.Push(rule);

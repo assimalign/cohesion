@@ -196,6 +196,9 @@ Binding failures are outcomes the thunk writes imperatively as RFC 9457 `applica
 | Unparseable/missing-required route, query, header, or form scalar | 400 | `errors` extension keyed by the parameter |
 | The request carries no parseable Content-Type, or the registry has no reader for it (an empty registry included) | 415 | problem+json |
 | `System.Text.Json.JsonException` while deserializing the body | 400 | `errors` extension keyed `$body` |
+| The bound body model fails its registered validator (an application with `Web.Validation`, see "Validation") | 400 | `errors` extension keyed by member path |
+
+Validation runs after every parameter is bound, so a binding failure is answered first.
 
 Reading a body and writing a returned value draw the same line between the client's errors and the
 server's (#1173). Both have outcomes the thunk answers and faults it never catches:
@@ -310,14 +313,34 @@ fails at dispatch rather than run unprotected; `.DisableAntiforgery()` on the en
 requirement is route-level metadata, so a group-level opt-out does not reach it. `Web.Api` takes no
 reference to the package: the generator names the type and emits nothing when it does not resolve.
 
-## Validation — descoped (owner decision, 2026-07-20)
+## Validation — in `Web.Validation`, not here (#1060)
 
-An opt-in per-endpoint validation seam (`IValidator`-carrying `Map*` overloads + an
+**History.** An opt-in per-endpoint validation seam (`IValidator`-carrying `Map*` overloads + an
 `EndpointValidationMetadata` carrier threading an `Assimalign.Cohesion.ObjectValidation` validator
-into the thunk) was implemented on the #796 branch and **removed before merge** — the owner descoped
-request validation from this package entirely, so `Web.Api` carries no `ObjectValidation`
-dependency. The `ObjectValidation` AOT hardening done alongside it was kept (it stands on its own).
-A future validation integration is an open design question, not a v1 feature.
+into the thunk) was implemented on the #796 branch and **removed before merge**: the owner descoped
+request validation from this package on 2026-07-20, so `Web.Api` carries no `ObjectValidation`
+dependency. The `ObjectValidation` AOT hardening done alongside it was kept. The owner then approved
+#1060 in the HTTP/Web Phase 2 lineup, which brings validation back.
+
+**Arrangement.** Validation lives in a separate feature package, `Assimalign.Cohesion.Web.Validation`,
+and `Web.Api` still references neither it nor ObjectValidation. Placing it there rather than in
+`Web.Api` is the integrator's recommendation, pending owner review: it keeps the 2026-07-20 decision
+for this package intact, and keeps the engine out of the closure of every endpoint-mapping consumer.
+
+- **Registration** is the package's: `AddValidation(options => options.AddProfile(new CustomerProfile()))`
+  keys a validator per model type by `typeof(T)`, with a global `Enabled` switch, and
+  `DisableValidation()`/`RequireValidation()` turn it off or on per endpoint and per group
+  (`ValidationMetadata`, most specific wins).
+- **The call** is the generator's, and only when the application can name the package: like the
+  antiforgery requirement, the generator resolves `Assimalign.Cohesion.Web.Validation.HttpContextValidationExtensions`
+  by metadata name and, when it resolves, emits a `ValidateAsync<T>` call for the bound request-body
+  model after every parameter is bound and before the handler runs. Without the package nothing is
+  emitted.
+- **The failure** is a `400 application/problem+json` with an `errors` map, the shape binding failures
+  use, keyed by member path (`Name`, `Address.City`).
+
+Form models are not validated because they do not exist: `[FromForm]` binds scalars (see Non-Goals).
+The package's DESIGN records the decision order, the key format and the AOT posture.
 
 ## Homing Rationale
 
@@ -331,7 +354,7 @@ body reader and the negotiated writer, and COHWEB0007 reports an application tha
 
 ## Non-Goals (v1)
 
-- Request validation (descoped by owner decision — see the section above).
+- Request validation in this package (it lives in `Web.Validation` — see the section above).
 - Result types or typed result unions of any kind. A returned value is plain data the thunk writes
   (see "Return Values"); a handler that needs control of the response writes it.
 - Filter/interceptor chains around handlers (a natural follow-up seam, not built).

@@ -83,6 +83,8 @@ Each interceptor:
   `HttpContentSerializationException` from the read is not caught (#1173): after the probe it can only
   mean no registry at all or a reader with no contract for the type, a composition fault that reaches
   the exception boundary exactly as it does when a returned value is written.
+- Validates the bound request-body model when the application references `Web.Validation` (see
+  "Validation of Bound Models").
 - Writes the value the handler returns, if any (see "Returned Values").
 - Chains the endpoint's description onto the mapped route (see "Endpoint Descriptions").
 - Registers the thunk through the raw `Map` overload — which binds to `WebApplicationMiddleware`, not
@@ -228,6 +230,36 @@ routing fails the endpoint at dispatch when the middleware did not process it.
   and a safe-method request passes the middleware anyway. A future form-file binding source that sets
   `UsesForm` inherits the requirement.
 
+## Validation of Bound Models (#1060)
+
+A call site that binds a request-body model validates it through `Web.Validation`, resolved by
+metadata name exactly as the antiforgery requirement is. The transform records
+`EndpointBinding.ValidatedBodyType` only when the consuming compilation resolves
+`Assimalign.Cohesion.Web.Validation.HttpContextValidationExtensions`, it is accessible, and it exposes a
+public static generic `ValidateAsync`; without the package nothing is emitted and the application is
+unaffected. The emitter then writes, after every parameter is bound and before the handler call:
+
+```csharp
+if (__arg0 is { } __validated0 && !await global::Assimalign.Cohesion.Web.Validation.HttpContextValidationExtensions.ValidateAsync<global::Customer>(context, __validated0, context.RequestCancelled))
+{
+    return;
+}
+```
+
+- **Placement.** After binding, so a binding failure is answered first; before invocation, so an invalid
+  model never reaches the handler.
+- **Type argument.** The body's declared type without its top-level nullable annotation, or the
+  underlying type of a `Nullable<T>`; the pattern test unwraps the value and skips `null`.
+- **Bodies only.** A body bound as a string, a primitive or `object` (`SpecialType != None`) is not a
+  model and is not validated, and scalars from the route, query, headers or form have their own binding
+  rules. There is no form-model binding to validate.
+- **Static form.** The call names the extension member's static implementation, fully qualified, so the
+  generated file needs no `using` and the generator does not depend on the package's namespace layout.
+
+Whether a given request is validated — the application's default, the endpoint's `ValidationMetadata`,
+a validator registered for the type — is `Web.Validation`'s decision at run time, as is the `400` it
+writes; see its DESIGN.
+
 ## Delivery
 
 The generator is consumed exactly like the base `SourceGeneration` generator:
@@ -246,8 +278,9 @@ Consumers must allow-list the generated namespace with
 ## Testing
 
 `tests/` drives the generator with a hand-rolled `CSharpGeneratorDriver` and asserts on the emitted
-source and the reported diagnostics. A case models an application with or without `Web.Antiforgery`
-or `Web.Serialization` by adding or withholding that assembly from the compilation's references.
+source and the reported diagnostics. A case models an application with or without `Web.Antiforgery`,
+`Web.Serialization` or `Web.Validation` by adding or withholding that assembly from the compilation's
+references.
 Cases compile the generated code with interceptors enabled (the antiforgery requirement, every
 supported return shape, method groups), and every `COHWEB` diagnostic has a case that asserts its
 severity, message and location. The call-shape cases (generic, conditional-access and static-form

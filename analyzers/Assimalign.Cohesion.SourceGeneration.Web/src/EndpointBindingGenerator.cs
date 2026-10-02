@@ -44,6 +44,12 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     private const string requestSerializationTypeName = "Assimalign.Cohesion.Web.Serialization.HttpRequestSerializationExtensions";
     private const string contentNegotiationTypeName = "Assimalign.Cohesion.Web.Serialization.HttpContentNegotiationExtensions";
 
+    // The request-validation entry point in Web.Validation, which the generator does not reference either:
+    // a bound request-body model is validated only when the consuming compilation can name it, so an
+    // application without the package is unaffected (#1060).
+    private const string validationTypeName = "Assimalign.Cohesion.Web.Validation.HttpContextValidationExtensions";
+    private const string validationMethodName = "ValidateAsync";
+
     // Generated code invokes a handler through its Func<...>/Action<...> type, which takes at most 16 parameters.
     private const int maxHandlerParameters = 16;
 
@@ -470,6 +476,12 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         bool usesForm = formParameterIndex >= 0;
         bool requiresAntiforgery = usesForm && CanRequireAntiforgery(compilation);
 
+        // A bound request-body model is validated before the handler runs whenever the application
+        // references Web.Validation; whether it is validated for a given request is decided at run time.
+        string validatedBodyType = bodyParameterIndex >= 0 && CanValidate(compilation)
+            ? GetValidatedType(invoke.Parameters[bodyParameterIndex].Type)
+            : string.Empty;
+
         InterceptableLocation? location = model.GetInterceptableLocation(invocation, ct);
         if (location is null)
         {
@@ -496,7 +508,8 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             new EquatableArray<ParameterBinding>(parameters.ToImmutable()),
             bodyParameterIndex,
             usesForm,
-            requiresAntiforgery);
+            requiresAntiforgery,
+            validatedBodyType);
 
         return new EndpointAnalysis(endpointBinding, EquatableArray<DiagnosticInfo>.Empty);
     }
@@ -637,6 +650,41 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         }
 
         return false;
+    }
+
+    // True when the consuming compilation references Web.Validation: its entry point resolves, is
+    // accessible, and exposes the public static ValidateAsync the emitted code calls in static form.
+    private static bool CanValidate(Compilation compilation)
+    {
+        if (compilation.GetTypeByMetadataName(validationTypeName) is not INamedTypeSymbol validationType
+            || !compilation.IsSymbolAccessibleWithin(validationType, compilation.Assembly))
+        {
+            return false;
+        }
+
+        foreach (ISymbol member in validationType.GetMembers(validationMethodName))
+        {
+            if (member is IMethodSymbol { IsStatic: true, DeclaredAccessibility: Accessibility.Public, IsGenericMethod: true })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // The type argument a bound request-body model is validated as: the underlying type of a Nullable<T>
+    // (the thunk validates the value only when there is one), otherwise the declared type without its
+    // top-level nullable annotation. Empty for a string, a primitive or object, which no profile describes.
+    private static string GetValidatedType(ITypeSymbol bodyType)
+    {
+        ITypeSymbol validated = bodyType is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
+            ? nullable.TypeArguments[0]
+            : bodyType.WithNullableAnnotation(NullableAnnotation.NotAnnotated);
+
+        return validated.SpecialType == SpecialType.None
+            ? validated.ToDisplayString(_fullyQualified)
+            : string.Empty;
     }
 
     // Classifies the handler's return: false only when a type does not resolve (the compiler reports it).
@@ -1213,6 +1261,8 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             EmitParameter(builder, parameters[i], i, indent);
         }
 
+        EmitValidation(builder, model, indent);
+
         string arguments = string.Join(", ", Enumerable.Range(0, parameters.Count).Select(static i => "__arg" + i));
         string invocation = "__handler(" + arguments + ")";
 
@@ -1237,6 +1287,28 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         }
 
         EmitResponse(builder, model, indent);
+    }
+
+    // Validates the bound request-body model after every parameter is bound, so a binding failure is
+    // answered first, and before the handler runs. A null body is not validated. Web.Validation decides
+    // at run time whether this endpoint and this type are validated, and writes the 400 itself when the
+    // model is invalid; the thunk then returns without invoking the handler.
+    private static void EmitValidation(StringBuilder builder, EndpointBinding model, string indent)
+    {
+        if (model.ValidatedBodyType.Length == 0)
+        {
+            return;
+        }
+
+        int index = model.BodyParameterIndex;
+
+        builder.Append(indent).Append("if (__arg").Append(index).Append(" is { } __validated").Append(index)
+            .Append(" && !await global::").Append(validationTypeName).Append('.').Append(validationMethodName)
+            .Append('<').Append(model.ValidatedBodyType).Append(">(context, __validated").Append(index)
+            .AppendLine(", context.RequestCancelled))");
+        builder.Append(indent).AppendLine("{");
+        builder.Append(indent).AppendLine("    return;");
+        builder.Append(indent).AppendLine("}");
     }
 
     // Writes the value the handler returned. The status is left as the handler (or the response default,

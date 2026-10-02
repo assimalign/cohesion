@@ -62,16 +62,18 @@ public class EndpointBindingGeneratorTests
         bool referenceAntiforgery = false,
         bool referenceSerialization = true,
         string members = "",
-        string types = "")
+        string types = "",
+        bool referenceValidation = false)
     {
         string source = Preamble + "\n" + types + "\n\npublic static class Endpoints\n{\n" + members + "\n    public static void Configure(WebApplication app)\n    {\n" + body + "\n    }\n}\n";
 
         string antiforgeryAssembly = typeof(Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata).Assembly.Location;
         string serializationAssembly = typeof(Assimalign.Cohesion.Web.Serialization.IHttpContentSerializationFeature).Assembly.Location;
+        string validationAssembly = typeof(Assimalign.Cohesion.Web.Validation.ValidationMetadata).Assembly.Location;
 
         // The test host's trusted platform assemblies include every assembly this project references,
-        // Web.Antiforgery and Web.Serialization among them. Exclude each unless the case models an
-        // application that references it, and add every Cohesion assembly once.
+        // Web.Antiforgery, Web.Serialization and Web.Validation among them. Exclude each unless the case
+        // models an application that references it, and add every Cohesion assembly once.
         List<string> paths = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
             .Where(path => path.Length > 0)
@@ -82,8 +84,10 @@ public class EndpointBindingGeneratorTests
             .Append(typeof(Assimalign.Cohesion.Web.Routing.RouteValueDictionary).Assembly.Location)
             .Where(path => referenceAntiforgery || !IsSameFile(path, antiforgeryAssembly))
             .Where(path => referenceSerialization || !IsSameFile(path, serializationAssembly))
+            .Where(path => referenceValidation || !IsSameFile(path, validationAssembly))
             .Append(referenceAntiforgery ? antiforgeryAssembly : string.Empty)
             .Append(referenceSerialization ? serializationAssembly : string.Empty)
+            .Append(referenceValidation ? validationAssembly : string.Empty)
             .Where(path => path.Length > 0)
             .DistinctBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -389,6 +393,84 @@ public class EndpointBindingGeneratorTests
         // Assert — the interceptor (requirement included) is part of a compilation with no errors.
         run.Generated.ShouldContain(antiforgeryRequirement, Case.Sensitive);
         run.Output.SyntaxTrees.Count().ShouldBe(2);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    // ---------------------------------------------------------------------
+    // Validation (#1060)
+    // ---------------------------------------------------------------------
+
+    private const string validationCall = "global::Assimalign.Cohesion.Web.Validation.HttpContextValidationExtensions.ValidateAsync<";
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Validation: a bound body model is validated when the application references Web.Validation")]
+    public void Generator_BodyWithValidationReferenced_ValidatesAfterBindingBeforeInvoking()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """app.MapPost("/widgets", (Widget widget, int page) => widget);""",
+            referenceValidation: true);
+
+        // Assert — after every parameter is bound (the query value too) and before the handler runs.
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        string validation = "if (__arg0 is { } __validated0 && !await " + validationCall + "global::Widget>(context, __validated0, context.RequestCancelled))";
+        run.Generated.ShouldContain(validation, Case.Sensitive);
+
+        int bindPage = run.Generated.IndexOf("context.Request.Query.TryGetValue(\"page\"", StringComparison.Ordinal);
+        int validate = run.Generated.IndexOf(validation, StringComparison.Ordinal);
+        int invoke = run.Generated.IndexOf("__handler(__arg0, __arg1)", StringComparison.Ordinal);
+        bindPage.ShouldBeGreaterThan(0);
+        validate.ShouldBeGreaterThan(bindPage);
+        invoke.ShouldBeGreaterThan(validate);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Validation: nothing is validated without Web.Validation")]
+    public void Generator_BodyWithoutValidationReferenced_EmitsNoValidation()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapPost("/widgets", (Widget widget) => widget);""");
+
+        // Assert
+        run.Generated.ShouldContain("Intercept_0", Case.Sensitive);
+        run.Generated.ShouldNotContain("Validation", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Validation: only a model bound from the body is validated")]
+    public void Generator_EndpointsWithoutModelBody_EmitNoValidation()
+    {
+        // Act — scalars, a form field, and a body bound as a primitive or a string.
+        GeneratorRun run = Generate(
+            """
+            app.MapGet("/widgets/{id}", (int id, string? q) => "ok");
+            app.MapPost("/forms", ([FromForm] string title) => "ok");
+            app.MapPost("/count", ([FromBody] int count) => "ok");
+            app.MapPost("/text", ([FromBody] string text) => "ok");
+            """,
+            referenceValidation: true);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("Intercept_3", Case.Sensitive);
+        run.Generated.ShouldNotContain(validationCall, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Validation: a nullable body is validated as its underlying type, and a reference type without its annotation")]
+    public void Generator_NullableBodies_ValidateAsUnderlyingType()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """
+            app.MapPost("/points", (Point? point) => "ok");
+            app.MapPost("/widgets", (Widget? widget) => "ok");
+            """,
+            referenceValidation: true,
+            types: "public struct Point { public int X { get; set; } }");
+
+        // Assert — the pattern test unwraps the value, so the type argument is the underlying type.
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain(validationCall + "global::Point>(context, __validated0, context.RequestCancelled)", Case.Sensitive);
+        run.Generated.ShouldContain(validationCall + "global::Widget>(context, __validated0, context.RequestCancelled)", Case.Sensitive);
         run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
     }
 

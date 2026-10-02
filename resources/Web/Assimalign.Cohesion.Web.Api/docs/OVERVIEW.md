@@ -42,6 +42,14 @@ type the registered resolver has no contract for, or an application with no seri
 is the server's fault, not the client's: `HttpContentSerializationException` reaches the exception
 boundary (a 500), as it does for a returned value.
 
+## Validation
+
+When the application references `Assimalign.Cohesion.Web.Validation` (every `Sdk.Web` application does,
+through `App.Web`) and registers validators with `AddValidation`, a typed endpoint validates the
+request-body model it binds before the handler runs, and answers an invalid one with 400
+problem+json and an `errors` map keyed by member path. `DisableValidation()` opts an endpoint or a
+group out. `Web.Api` itself takes no validation dependency; see that package's OVERVIEW.
+
 ## Return Values
 
 A handler that returns a value — directly, or through `Task<T>` or `ValueTask<T>` — has it written as

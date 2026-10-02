@@ -60,7 +60,8 @@ jobs:
             'Assimalign.Cohesion.Web.Serialization',
             'Assimalign.Cohesion.Web.Sessions',
             'Assimalign.Cohesion.Web.StaticFiles',
-            'Assimalign.Cohesion.Web.Testing'
+            'Assimalign.Cohesion.Web.Testing',
+            'Assimalign.Cohesion.Web.Validation'
         ]
     steps:
       - uses: actions/checkout@v4
