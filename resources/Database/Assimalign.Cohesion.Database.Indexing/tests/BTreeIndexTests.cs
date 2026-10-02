@@ -45,9 +45,13 @@ public class BTreeIndexTests
         return results;
     }
 
+    /// <summary>
+    /// Decodes the order-preserving value in a key's last eight bytes: the whole of an
+    /// <see cref="IndexKey.FromInt64"/> key, and the tail of a <see cref="WideKey"/>.
+    /// </summary>
     private static long DecodeInt64(IndexKey key)
     {
-        ulong folded = System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(key.Encoded.Span);
+        ulong folded = System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(key.Encoded.Span[^8..]);
         return (long)(folded ^ 0x8000_0000_0000_0000UL);
     }
 
@@ -409,14 +413,16 @@ public class BTreeIndexTests
     }
 
     /// <summary>
-    /// A 508-byte key: about fifteen entries fit on a leaf and fifteen separators on an
-    /// internal node, so a few thousand inserts grow the tree several levels.
+    /// A 508-byte key: a 500-byte constant prefix, then the order-preserving value. About
+    /// fifteen entries fit on a leaf, and since adjacent keys first differ past the
+    /// prefix, suffix truncation keeps separators over 500 bytes long: about fifteen fit
+    /// on an internal node too, so a few thousand inserts grow the tree several levels.
     /// </summary>
     private static IndexKey WideKey(long value)
     {
         var bytes = new byte[508];
-        System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(bytes, (ulong)value ^ 0x8000_0000_0000_0000UL);
-        bytes.AsSpan(8).Fill(0x2E);
+        bytes.AsSpan(0, 500).Fill(0x2E);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(bytes.AsSpan(500), (ulong)value ^ 0x8000_0000_0000_0000UL);
         return new IndexKey(bytes);
     }
 
@@ -514,17 +520,21 @@ public class BTreeIndexTests
         keys.ShouldBe(keys.Order().ToList());
     }
 
-    // Offsets from BTreeNode's documented body layout (kind at 0, entry count at 1,
-    // directory at 29; an internal entry is [u16 keyLen][key][i64 child]). The
-    // corruption test below writes a node directly, which needs exactly these.
-    private const int NodeKindOffset = 0;
-    private const int NodeCountOffset = 1;
-    private const int NodeDirectoryOffset = 29;
+    // Offsets from BTreeNode's documented body layout, page format 2 (kind at 3, entry
+    // count at 4, directory at 32; an internal entry is [u16 keyLen | tiebreaker << 14]
+    // [key][tiebreaker attributes][i64 child]). The corruption test below writes a
+    // node directly, which needs exactly these.
+    private const int NodeKindOffset = 3;
+    private const int NodeCountOffset = 4;
+    private const int NodeDirectoryOffset = 32;
     private const byte InternalNodeKind = 2;
 
     /// <summary>
-    /// Overwrites the only separator of the internal node on <paramref name="pageId"/>
-    /// with <paramref name="replacement"/> (same length), committed in its own bracket.
+    /// Overwrites the key bytes of the only separator of the internal node on
+    /// <paramref name="pageId"/> with the same number of leading bytes of
+    /// <paramref name="replacement"/>, committed in its own bracket. The separator
+    /// must keep no tiebreaker (its neighbours' keys differ), so its key bytes alone
+    /// decide its order.
     /// </summary>
     private static void OverwriteOnlySeparator(IStorage storage, long pageId, IndexKey replacement)
     {
@@ -536,8 +546,11 @@ public class BTreeIndexTests
             BinaryPrimitives.ReadUInt16LittleEndian(body[NodeCountOffset..]).ShouldBe((ushort)1);
 
             int entry = BinaryPrimitives.ReadUInt16LittleEndian(body[NodeDirectoryOffset..]);
-            BinaryPrimitives.ReadUInt16LittleEndian(body[entry..]).ShouldBe((ushort)replacement.Length);
-            replacement.Encoded.Span.CopyTo(body[(entry + 2)..]);
+            int field = BinaryPrimitives.ReadUInt16LittleEndian(body[entry..]);
+            (field >> 14).ShouldBe(0, "the separator keeps no tiebreaker");
+            int length = field & 0x3FFF;
+            length.ShouldBeLessThanOrEqualTo(replacement.Length);
+            replacement.Encoded.Span[..length].CopyTo(body[(entry + 2)..]);
             handle.MarkDirty();
         }
 

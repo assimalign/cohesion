@@ -46,60 +46,9 @@ entries and splits stay correct.
 - **Concurrency (MVP): a tree-level reader/writer latch.** Writers exclusive;
   cursors materialize their range's visible entries under the read latch, so no
   latch is held across awaits and readers never see a torn structure. Lock
-  coupling / latch-per-node is a measured-need follow-up.
-- **Duplicate keys span splits (#1159).** Keys are not unique — a secondary index
-  repeats a value per row and every MVCC version adds an entry — so a run of equal
-  keys splits like any other, and a key equal to a separator can sit on either
-  side of it: child `i` holds keys in the *closed* range `[separator i,
-  separator i+1]`, and equal separators are normal. Three rules keep that sound:
-  - *Lookups start at the first leaf that can hold the key.* Seeks with an
-    inclusive start, tombstone deletes, the undo pair, and the unique check
-    descend to the child left of the first separator **≥** the key, then walk
-    right along the leaf chain until they pass it. Inserts (and scans that start
-    strictly after a key) descend to the child of the last separator **≤** the
-    key — nothing to its left is greater, and any child whose range admits the
-    key keeps the tree ordered.
-  - *A split attaches its new node by position, not by value.* The insert's
-    descent records the child slot it took at every level; the new right half
-    goes directly after the node that split. Equal separators cannot be told
-    apart by value, and a value-positioned child can land left of its sibling —
-    the child order then disagrees with the leaf chain and later inserts break
-    the chain's sort order. With position-based attachment the two orders are
-    always the same.
-  - *Internal nodes split by bytes.* Separators range from a few bytes to
-    `MaxKeyLength`; the promoted separator is the first at which the entries
-    before it would exceed half the node, so both halves keep room for a
-    maximum-length separator (a count-balanced split could not guarantee it).
-    Leaves still split by count — the insert loop re-splits until the entry fits.
-  - *Separator order is checked in every build.* Before a split writes a
-    separator into its parent, it checks the separator against both neighbours
-    and throws `IndexException` if it would invert them; the caller's storage
-    bracket then rolls the half-done split back. A misordered separator that
-    reached disk would misroute lookups permanently (there is no repair path,
-    #1152), and the check costs two key comparisons per split.
-- **Known limit: work inside a duplicate run is linear in the run.** The tree
-  orders entries by key alone, so it cannot descend to one particular entry of a
-  key. Every lookup that targets an entry or proves a key absent — tombstone
-  deletes, the undo pair, the unique check — walks the key's run until it finds
-  its entry, and an inclusive-start seek reads every entry of its start key, dead
-  versions included. Runs only grow until vacuum exists: every SQL or key-value
-  UPDATE retires one entry and adds another under each of the row's index keys,
-  and nothing prunes the dead ones. Two workloads go quadratic: repeated
-  updates of one row under a UNIQUE index (the unique check must walk every
-  dead version to prove no live one exists), and deleting or updating many rows
-  that share a secondary key (an FK cascade, `DELETE … WHERE status = x`).
-  Measured on 2026-10-01 (Release build, one developer machine): `UPDATE … WHERE
-  id = 2` repeated on one row cost 0.48 ms per update over the first 5,000 and
-  10.5 ms per update between 15,000 and 20,000; an `ON DELETE CASCADE` through a
-  secondary index took 76 ms for 2,000 children, 442 ms for 8,000 and 4.5 s for
-  16,000. The descent before #1159 was faster here only because it skipped
-  entries and returned wrong results. The fix is an entry tiebreaker — physical
-  order `(key, entry reference, writer)`, with separators carrying the reference
-  so a lookup descends straight to its entry — plus version pruning to bound the
-  unique check on hot keys. Both change the page format, which is cheapest
-  before the first release because #1152 provides no on-disk upgrade path.
-  Leaves in a run also sit about half full: inserts reach the run's last leaf,
-  and leaves split at the middle, so a run spans about twice the pages it needs.
+  coupling / latch-per-node is a measured-need follow-up. The argument that the
+  entry order below keeps this protocol correct is under "Concurrency and
+  recovery".
 - **The root page never moves.** A root split copies the root's contents to a new
   page and rewrites the root in place as an internal node over that page and the
   new sibling (SQLite's balance-deeper). The root id a catalog registered when the
@@ -108,7 +57,7 @@ entries and splits stay correct.
   split and the catalog's next persistence point loses nothing. (A moving root
   left the in-memory root pointing at an unallocated page after a statement
   bracket rolled a root split back, and a persisted registration one checkpoint
-  stale.)
+  stale.) The fixed root is also where the tree's page format is checked (below).
 - **Directory persistence belongs to the catalog.** The manager keeps an in-memory
   directory and exports `BTreeIndexRegistration`s (`IIndexRegistry`); the model
   catalog persists them and re-attaches on open (`ExistingIndexes`). Since the
@@ -117,9 +66,287 @@ entries and splits stay correct.
   normally finds nothing to write. Dropping an index is a directory operation;
   its pages await vacuum.
 
+### Entry order: `(key, entry reference, writer)` (#1194)
+
+Keys are not unique — a secondary index repeats a value per row, and every MVCC
+version adds an entry — but entries are, so the tree orders entries by their
+identity: the key, then the entry reference, then the writer stamp. Attributes
+compare one at a time: the key as unsigned bytes, the reference and the writer as
+unsigned integers. This is PostgreSQL's heap-key-space design: nbtree makes every
+key unique by treating the heap TID as a tiebreaker key attribute
+(`src/backend/access/nbtree/README:42-49`), so every entry has one place in the
+tree and a lookup that knows it descends straight to it. Before #1194 the order
+was the key alone, and every lookup that targeted one entry walked the key's
+duplicate run; the measurements below show what that cost.
+
+- **Why the identity is unique.** Every model's entry reference is the location
+  of one record version (SQL `SqlRecordLocation`, key-value
+  `KeyValueRecordLocation`, document and graph `PackLocation`): a slot holds one
+  version at a time, and every UPDATE writes its new version to a new slot. A slot
+  is reused under the same key only after the version purge reclaims it, which
+  needs the old version's deleter committed below every active transaction, so the
+  reusing writer is newer than the old one — the writer is the second tiebreaker for
+  exactly that case. A failed statement reverts its index pages with its record
+  pages (one bracket), so a slot it reuses cannot meet its own earlier entry. An
+  insert whose identity is already present is therefore a defect, and the tree
+  refuses it with `IndexException` instead of placing an entry no separator could
+  distinguish — PostgreSQL treats a duplicate heap TID the same way, as index
+  corruption (`nbtsearch.c:558-574`).
+- **The deleter is not part of the order.** Tombstoning, clearing a tombstone and
+  the open-time purge change or remove entries in place and never move one, so no
+  MVCC transition reorders a leaf.
+- **One comparer.** `BTreeEntryOrder` decides every position: the insert and
+  build-path (`InsertVersionAsync`) position, separators, descents, seeks, delete,
+  erase, clear-deleter, the live-version match, the unique check, leaf compaction
+  and splits. Engines pass the reference they already store; there is no ordering
+  logic outside this package.
+
+### Separators keep the tiebreaker they need (suffix truncation)
+
+A leaf split builds its separator from the last entry that stays left and the
+first entry that moves right, and keeps only what separates them (`BuildSeparator`):
+
+| The two entries differ in | The separator keeps | Tiebreaker bits |
+|---|---|---|
+| their keys | the right key's bytes up to and including the first byte that differs | 0 |
+| their references only | the key and the right entry's reference | 1 |
+| their writers only (a reused slot) | the key, the reference and the right entry's writer | 2 |
+
+An attribute the separator does not keep reads as minus infinity, so the separator
+`s` satisfies `lastLeft < s <= firstRight`: a strict upper bound of everything left
+of it and a lower bound of its child. PostgreSQL keeps the mirror-image bound, a
+non-strict upper bound for the left page built from lastleft's TID
+(`nbtutils.c:771-778`, `:783-798`); this tree keeps the right-hand bound its
+separators always had. Attribute truncation follows `_bt_truncate` and
+`_bt_keep_natts` (`nbtutils.c:692-760`, `:837-898`). PostgreSQL truncates whole
+attributes only, and its README notes that truncating inside a variable-length
+attribute "would be straightforward" (`README:839-856`): an `IndexKey` is one
+unsigned byte string whose earlier bytes always decide, the "prefix property"
+Bayer and Unterauer's simple prefix B-tree needs, so the key is truncated by byte.
+Separators are unique on their level, so the order check on every split is now
+strict.
+
+**Decision, with evidence: truncate.** Measured on the trees below (2026-10-02,
+Release; "separator" is the average internal entry with its directory slot):
+
+| Workload | Baseline (format 1) | Full key + reference + writer always | Tiebreaker truncation only (PostgreSQL) | Tiebreaker and key bytes (shipped) |
+|---|---|---|---|---|
+| 100,000 distinct INT keys, random order | fan-out 187, 17 B, height 3 | 112.6, 33 B, 3 | 187, 17 B, 3 | 186, 17 B, 3 |
+| 100,000 rows over 997 INT keys | 182.3, 17 B, 3 | 109.8, 33 B, 3 | 182.3, 24.3 B, 3 | 182.3, 24.3 B, 3 |
+| 100,000 rows over 10 INT keys | 272.7, 17 B, 3 | 164.0, 33 B, 3 | 164.0, 25 B, 3 | 164.0, 25 B, 3 |
+| 50,000 distinct 64-byte keys, random order | 82.8, 76 B, 3 | 49.1, 92 B, 3 | 82.8, 76 B, 3 | 166.8, 20 B, 3 |
+| 5,000 equal 1,024-byte keys | 4.0, 1,036 B, 6 | 4.0, 1,052 B, 6 | 4.0, 1,044 B, 6 | 4.0, 1,044 B, 6 |
+
+Keeping the tiebreaker everywhere would cost 40% of the fan-out of every index with
+short distinct keys; truncating it costs nothing there, and only separators inside
+a duplicate run pay the 8-byte reference (the 10-key row). Byte truncation doubles
+the fan-out of long distinct keys. Heights are equal at these sizes; at 10 million
+INT keys (about 56,000 leaves) a fan-out of 187 needs three internal levels and one
+of 113 still three, but long keys and larger trees reach the next level sooner
+without truncation.
+
+### Lookups descend to their entry
+
+Every descent takes, at each internal node, the child of the last separator not
+greater than the search position (`FindChildSlot`) — PostgreSQL's `_bt_binsrch` over
+pivots, with `_bt_compare` reading truncated attributes as minus infinity
+(`nbtsearch.c:346-420`, `:795-860`). A search names as much of the identity as it
+knows:
+
+| Operation | Search position | Work |
+|---|---|---|
+| Insert, build path (`InsertVersionAsync`) | `(key, reference, writer)` | one descent |
+| Erase (logical undo of an insert) | `(key, reference, writer)` | one descent |
+| Delete — the live version the snapshot sees | `(key, reference, -inf)` | one descent, then the reference's versions under the key: one, unless its slot was reused |
+| Clear-deleter (logical undo of a tombstone) | `(key, reference, -inf)` | the same |
+| Equality and inclusive range seek | `(key, -inf)` | one descent, then the range's entries |
+| Exclusive range start | `(key, +inf)` | one descent, then the range's entries |
+| Unique check | `(key, -inf)` | one descent, then the key's entries until a live one |
+
+A full identity lands on the leaf that holds it. A partial position lands on the
+leaf where its entries begin — or end, when they begin on the next leaf — and the
+lookup walks forward only while entries share the position's prefix
+(`TryFindEntry`). Seeks keep their semantics exactly: they start before every entry
+of their start key and return every visible entry in range, now in entry-reference
+order within a key; #1159's randomized seek = scan = model tests pass unchanged.
+
+The unique check is the one lookup still linear in a key's history. It must prove
+no live version exists among the key's versions, and a live version can sit
+anywhere among the dead ones, so it reads the key's run from `(key, -inf)` until it
+finds a live entry or passes the key — one descent and a forward walk over
+consecutive leaves, the cheapest walk the semantics allow. PostgreSQL's
+`_bt_check_unique` walks the same way (`nbtinsert.c:440-449`). Pruning dead versions
+(#1195) bounds it.
+
+### Splits
+
+- **A split attaches its new node by position.** The insert's descent records the
+  child slot it took at every level, and the new right half goes directly after the
+  node that split, so the child order always equals the leaf chain. (With unique
+  separators the slot always agrees with the separator's value; the order check
+  confirms it.)
+- **Internal nodes split by bytes.** Internal entries range from 11 bytes (a
+  separator truncated to one key byte) to 1,050 bytes (a 1,024-byte key with both
+  tiebreaker attributes); the promoted separator is the
+  first at which the entries before it would exceed half the node, so both halves
+  keep room for the largest separator.
+- **The leaf split point is one function, `ChooseLeafSplit`** — currently the middle
+  of the leaf, which any split point in `[1, count - 1]` may replace, since adjacent
+  entries always differ. #1196 replaces it with PostgreSQL's strategy for rightmost
+  and single-value splits (`nbtsplitloc.c:130`, `_bt_strategy` `:935`). Measured
+  for 5,000 equal 1,024-byte keys inserted in reference order, before and after this
+  change alike: 1,666 leaves holding 3.0 of a possible 7 entries (39.2% full),
+  height 6, internal fan-out 4.0 — every insert reaches the rightmost leaf, and a
+  middle split leaves the left half half-empty for good.
+- **Order is checked in every build.** A leaf split fails unless its separator
+  falls strictly after the last entry kept left and at or before the first entry
+  moved right, and every separator written into a parent must be strictly between
+  its neighbours; `IndexException` then leaves the caller's storage bracket to roll
+  the half-done split back. A misordered separator that reached disk would misroute
+  lookups permanently (there is no repair path, #1152), and the checks cost four
+  comparisons per split.
+
+### Page format 2 and the format gate
+
+The node layout of every index page (offsets relative to the page body, after the
+storage layer's 96-byte page header):
+
+| Offset | Field |
+|---|---|
+| 0 | `u16` magic `"BT"` (`0x5442`) |
+| 2 | `u8` page format version, `2` |
+| 3 | `u8` kind: 1 leaf, 2 internal |
+| 4 | `u16` entry count |
+| 6 | `u16` data start: entry data grows down from the body end |
+| 8 / 16 | `i64` next / previous leaf (`-1` for none) |
+| 24 | `i64` leftmost child (internal nodes) |
+| 32 | `u16` directory of entry offsets, in entry order |
+
+A leaf entry is `[u16 key length][key][u64 reference][u64 writer][u64 deleter]`. An
+internal entry is `[u16 key length | tiebreaker << 14][key][u64 reference]?[u64
+writer]?[i64 child]`: the top two bits of the length field count the tiebreaker
+attributes the separator keeps (the key length never exceeds 1,024, so they are
+free), as PostgreSQL stores a pivot's attribute count in spare bits of its tuple
+header (`src/include/access/nbtree.h:409-418`). Format 1 — every engine before
+#1194 — had no magic and no version: its first byte was the kind (1 or 2), which
+can never read as the magic, its directory began at offset 29, and its entries
+were ordered by key alone.
+
+The tree that a separator and its children form, for a key `'k'` whose run spans
+three leaves — one separator per truncation level:
+
+```mermaid
+flowchart TD
+    Root["internal root: 'c' · ('k', ref 40) · ('k', ref 40, writer 12)"]
+    L1["leaf: ('a', 5, w3) … ('b', 9, w3)"]
+    L2["leaf: ('c', 1, w4) … ('k', 31, w7)"]
+    L3["leaf: ('k', 40, w3) ('k', 40, w9)"]
+    L4["leaf: ('k', 40, w12) ('k', 77, w2) …"]
+    Root -->|"leftmost"| L1
+    Root -->|"'c', no tiebreaker"| L2
+    Root -->|"('k', 40), reference"| L3
+    Root -->|"('k', 40, 12), writer"| L4
+    L1 -->|"next leaf"| L2
+    L2 -->|"next leaf"| L3
+    L3 -->|"next leaf"| L4
+```
+
+The root holds three separators. `'c'` keeps one key byte and no tiebreaker,
+because the entries either side of it differ in their keys; `('k', ref 40)` keeps the
+reference, because its neighbours share the key `'k'`; `('k', ref 40, writer 12)`
+keeps the writer, because its neighbours are two versions of the same reference.
+Each separator points at the leaf whose entries start at or after it, and the leaves
+link left to right.
+
+**This package owns the format and checks it once per tree, at attach** —
+PostgreSQL's metapage test (`btm_magic` and `btm_version`, `nbtpage.c:155-168`;
+`BTREE_MAGIC`/`BTREE_VERSION`, `nbtree.h:150-151`) moved onto the root page, which
+never moves and from which one engine wrote the whole tree. `BTreeIndexManager.Create`
+reads every registered root before it attaches any tree, and a root in any other
+format refuses the attach with `IndexFormatException`, whose message starts with
+`COHDBI001` and names the index, the format found and the one supported ("uses
+B-tree page format 1, but this engine supports only format 2", with the export,
+drop and recreate remedy and #1152), or says the root is no B-tree page at all.
+`BTreeIndexManager.EnsureFormat(storage, registrations)` makes the same check alone,
+writing nothing, for a model whose open recovers its record space before it attaches
+its trees. Every node read after attach also checks the magic and version, like
+PostgreSQL's `_bt_checkpage` (`nbtpage.c:782`); a page that fails is damage, and the
+operation fails with an `IndexException` coded `COHDBI002`. There is no upgrade path
+(owner decision of 2026-10-02; upgrades are #1152). How each model surfaces the
+refusal:
+
+| Model | Where its open checks | Error |
+|---|---|---|
+| SQL | Its catalog's data-storage format marker, bumped from 4 to 5, before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 5"; a marker that does not describe its trees, the attach check's `COHDBI001` |
+| Key-value | The attach check, before recovery (its entry-space format, which describes entry records, is unchanged) | `DatabaseException` "Database 'x' cannot be opened. COHDBI001: …" |
+| Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | the same |
+| Graph | `GraphStore.EnsureIndexFormat`, before the recovery scrub; the attach check again in the store's open | the same |
+
+Every refusal comes before recovery writes anything, so a refused database is left
+byte-identical for the engine that wrote it (each model's test pins it).
+
+### Concurrency and recovery
+
+- **The latch protocol is unchanged, and the new order does not weaken it.** Every
+  mutation — insert, delete, erase, clear-deleter, the build path and the purge —
+  holds the tree's write latch from its descent until its page change is done, and a
+  cursor holds the read latch while it materializes its range. The unique key lock
+  is acquired before the latch, never while holding it, so the order key lock → tree
+  latch → storage page lock stays acyclic. The order change moves which leaf a lookup
+  lands on, not when it holds the latch: `TryFindEntry`'s descent, its forward walk
+  and the caller's tombstone, clear or removal at the returned position all happen in
+  one write-latch hold, so no split or removal can move the entry in between, and a
+  cursor never sees a split half done. Concurrent transactions that touch the same
+  leaf are serialized by the storage layer's page write locks, as before.
+- **Recovery replays pages, so it is order-agnostic.** The journal carries before-
+  and after-images of whole pages: a crash mid-split reverts to the pre-transaction
+  tree, and committed inserts, deletes and splits replay byte for byte in the order
+  they were written. The open-time purge removes and restores entries in place and
+  never reorders a leaf; a separator stays a valid bound after the entries it was
+  copied from are gone, as PostgreSQL's pivot tuples may hold values of tuples
+  VACUUM has since removed (`README:34-38`).
+- **Rollback and undo find the exact entry.** A statement's physical rollback
+  restores page images; the logical undo after a multi-statement ROLLBACK erases by
+  full identity and clears tombstones by reference, both stamp-checked, so a stale
+  or repeated ledger entry is a no-op. `BTreeEntryOrderTests` covers a crash with a
+  committed duplicate run and an in-flight one, and the undo pair over 600 versions
+  of one reference that span seventeen leaves.
+
+### Measurements (2026-10-02)
+
+Release builds on one developer machine; the index harness storage has a 64-page
+buffer pool unless noted. Before is the integration branch at `d987d7f1`.
+
+| Workload | Before | After |
+|---|---|---|
+| `DeleteAsync` of 300 random entries of one key, 2,500-entry run (median) | 136.8 µs | 2.8 µs |
+| the same, 40,000-entry run | 7,576 µs | 95.3 µs |
+| the same with a 4,096-page pool, 2,500 / 40,000 entries | 14.8 / 304.7 µs | 1.5 / 40.7 µs |
+| A 400-entry block from the middle of a 2,500- and a 40,000-entry run of one tree, per operation: delete | 12.1 / 6,163 µs | 4.9 / 5.7 µs |
+| the same: erase | 19.9 / 6,414 µs | 1.2 / 1.3 µs |
+| the same: clear-deleter | 20.9 / 6,644 µs | 1.5 / 1.2 µs |
+| SQL `ON DELETE CASCADE`, 2,000 / 8,000 / 16,000 children, separate databases | 264 / 734 / 6,176 ms | 83 / 476 / 426 ms |
+| the same, 32,000 / 64,000 children | — | 966 / 1,582 ms |
+| SQL cascade of 4,000 and of 16,000 children in one table, per child | 39.1 / 391.0 µs | 23.0 / 22.5 µs |
+| Unique-index insert and seek, 100,000 INT keys in random order (median of three) | 10,883 inserts/s, 29,061 seeks/s | 10,818 / 28,969 (−0.6%, −0.3%) |
+| `SqlCascadeDeleteDepthTests`' 100,000-row self-referencing cascade (Debug, whole test) | 86 s | 77 s |
+
+The issue's own measurements of the same baseline (#1194: 124 µs and 7.2 ms per
+delete; 76 ms, 442 ms and 4,526 ms per cascade) were taken on the same kind of
+build. The random-delete rows still grow with the run because the storage layer
+journals an 8 KiB before-image the first time a transaction writes a page (about
+50 µs), and random deletes in a longer run touch more distinct leaves; the block
+rows hold the leaves touched constant and show the descent itself does not grow.
+The 100,000-row chain has one entry per key, so #1194 does not change its
+asymptotics. The timing guards — `BTreeEntryTimingTests` (delete, erase and
+clear-deleter in a 40,000-entry run against a 2,500-entry run of the same tree,
+allowed growth 4×; the baseline measured 317–510×) and `SqlCascadeFanOutTests`
+(16,000 children against 4,000, allowed growth 2×; the baseline measured 10×) —
+compare growth ratios, not absolute times, so CI speed and load cancel out.
+
 ## Transactional binding
 
-`IIndex` mutations take an `ITransactionContext` — index entries are stamped and become visible under the same MVCC rules as the data they reference. There is no "non-transactional index write" surface; recovery replays index changes from the same WAL as data changes. Unique enforcement happens at insert against the *visible* state (a unique violation with an in-flight competing writer resolves through the lock manager, not the index).
+`IIndex` mutations take an `ITransactionContext` — index entries are stamped and become visible under the same MVCC rules as the data they reference. There is no "non-transactional index write" surface; recovery replays index changes from the same WAL as data changes. Unique enforcement happens at insert against the *latest* state under the key lock (above); a competing in-flight writer of the same key is resolved by the lock manager, not the index.
 
 ### The maintenance surfaces (model-engine consumers)
 
@@ -132,15 +359,18 @@ transaction context — they run where no statement bracket exists:
   each stored version with its original stamps, so pre-existing snapshots read
   through the new index exactly what the row scan shows them. No uniqueness
   check — the builder detects live duplicates itself under the object's
-  exclusive lock (online rebuild remains a non-goal).
+  exclusive lock (online rebuild remains a non-goal). It positions each entry by
+  its identity like any insert, and refuses an identity already present.
 - **`EraseAsync` / `ClearDeleterAsync`** — the logical-undo pair: physically
   remove an aborted writer's insert; clear an aborted writer's tombstone. Both
   verify the recorded stamp before acting, so replays and stale ledgers no-op.
-  Physical removal drops only the directory slot; the entry bytes stay orphaned
-  in the node until a rebuild reclaims them (bounded space for a rare path). An
-  insert that finds a leaf full rebuilds it in place when the orphaned bytes are
-  what stands between it and room, and splits only otherwise — an undo can empty
-  a full leaf, and a split there would have no entries to divide.
+  Erase knows the entry's full identity and descends to it; clear-deleter knows the
+  key and reference and descends to the reference's versions. Physical removal
+  drops only the directory slot; the entry bytes stay orphaned in the node until a
+  rebuild reclaims them (bounded space for a rare path). An insert that finds a leaf
+  full rebuilds it in place when the orphaned bytes are what stands between it and
+  room, and splits only otherwise — an undo can empty a full leaf, and a split
+  there would have no entries to divide.
 - **`IIndexManager.PurgeWritersAsync(bracket, writers)`** — the open-time
   recovery obligation: one walk per tree removes every unproven writer's
   entries and clears their tombstones (the in-memory undo ledger died with the
@@ -154,6 +384,9 @@ transaction context — they run where no statement bracket exists:
   that must never wait inside a serialized apply scope can pre-acquire the
   unique-key lock in its own lock phase and rely on the lock manager's
   same-owner re-grant when the tree acquires it again internally.
+- **`BTreeIndexManager.EnsureFormat(storage, registrations)`** — the attach-time
+  page format check on its own (#1194), for an open that must refuse a database
+  before its recovery writes to it.
 
 ### Shared record-version undo binding (#918)
 
@@ -168,7 +401,7 @@ the coordinator's record scrub and its final checkpoint.
 
 ## Entry references are opaque `ulong`s
 
-The index maps keys to entry references the owning storage layer understands (page address, row id, node id). Making the reference generic (`IIndex<TReference>`) would infect every cursor and page layout with a type parameter for zero runtime benefit — models already own both sides of the mapping.
+The index maps keys to entry references the owning storage layer understands (page address, row id, node id). Making the reference generic (`IIndex<TReference>`) would infect every cursor and page layout with a type parameter for zero runtime benefit — models already own both sides of the mapping. The tree compares references as unsigned integers to break ties between equal keys and never interprets them otherwise.
 
 ## Error model
 
@@ -176,18 +409,23 @@ The index maps keys to entry references the owning storage layer understands (pa
 directly, not the area's `DatabaseException` — this package is a child root the
 area root rolls up (2026-07-13 inversion), so it must stay independently
 consumable. `IndexUniqueViolationException : IndexException` is the typed
-unique-violation surface; model engines that expose index failures on the area's
-error surface translate at their own boundary.
+unique-violation surface. `IndexFormatException : IndexException` is the typed
+page-format refusal at attach (`COHDBI001`, with the index, its object, its root
+page and the format found); a damaged page reached inside an attached tree raises
+`IndexException` coded `COHDBI002`. Model engines that expose index failures on
+the area's error surface translate at their own boundary and keep the code and the
+original exception as the inner exception.
 
 ## Relationship to `Database.Storage`
 
-`Database.Storage` provides the *physical* substrate through `IStoragePageManager` — index pages (`PageType.Index`) are allocated, pinned, and flushed like any other page and live in the same storage files. This project is the *logical* layer: structures, keys, cursors, uniqueness. The B+Tree implementation binds the two. (An earlier string-based `IStorageIndexManager` stub in `Database.Storage` was removed during the #157 alignment — it duplicated this project's `IIndexManager` at the wrong layer with no design behind it.)
+`Database.Storage` provides the *physical* substrate through `IStoragePageManager` — index pages (`PageType.Index`) are allocated, pinned, and flushed like any other page and live in the same storage files. This project is the *logical* layer: structures, keys, cursors, uniqueness, and the node page format inside each index page's body. The B+Tree implementation binds the two. (An earlier string-based `IStorageIndexManager` stub in `Database.Storage` was removed during the #157 alignment — it duplicated this project's `IIndexManager` at the wrong layer with no design behind it.)
 
 ## Non-goals
 
 - No full-text or spatial indexes in the MVP surface (future `IndexKind` members; the enum is the extension point).
 - No online index rebuild in the contract yet — DDL-blocking builds first.
 - No cost/statistics surface here — planners get statistics through their model catalogs.
+- No in-place upgrade of index pages from an older page format (#1152).
 
 ## AOT posture
 
