@@ -126,8 +126,10 @@ client that asserts `X-Forwarded-Host` directly is validated on its wire host.
 The trust model decides *whose* host assertion is believed; this guard decides
 whether the believed host is one the application serves.
 
-**Ordering.** Register `UseForwardedHeaders` first and `UseHostFiltering`
-directly after it, and allowlist the **public** names clients use. Registered
+**Ordering.** Register `UseHostFiltering` directly after `UseForwardedHeaders`
+(only `UseHttpLogging` and `UseSecurityHeaders`, which read no client identity,
+go ahead of both; the area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) gives the
+full sequence), and allowlist the **public** names clients use. Registered
 the other way round, the guard runs before the feature exists and validates
 the wire host — a supported, deliberate configuration for deployments that want
 to bound the upstream authority instead, but then the forwarded host is not

@@ -305,8 +305,11 @@ checks may be a group's. A preflight's candidate is not acknowledged, because it
 ## Ordering
 
 ```
-UseForwardedHeaders → UseHostFiltering → … → UseRouting → UseCors → UseAuthorization / UseRateLimiting / UseRequestTimeouts / UseOutputCache / antiforgery → endpoint
+UseForwardedHeaders → UseHostFiltering → … → UseRouting → UseCors → UseAuthorization → UseRequestTimeouts → UseRateLimiting
+    → UseAntiforgery → UseOutputCache → endpoint
 ```
+
+The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) places every Web middleware.
 
 - **After `UseRouting`**, so the endpoint and its `CorsMetadata` are known. Registered ahead of it, an
   endpoint that declares CORS fails at dispatch (see above).
@@ -358,11 +361,9 @@ the trim and AOT analyzers enabled (`IsAotCompatible`) and no warnings.
 ## Scope-creep candidates (recorded, not taken)
 
 - A response-start hook in the Web root, so the CORS headers survive an exception boundary registered ahead
-  of `UseCors` (the known limit above).
+  of `UseCors` (the known limit above). Filed as #1156.
 - A public evaluation seam for applications that answer CORS on their own `OPTIONS` routes, which today write
   the headers by hand.
-- Routing's "Endpoint metadata consumers and ordering" section lists the policy middleware that reads the
-  published endpoint; `UseCors` belongs at the head of that list once the Stage 7 middleware has landed.
 
 ## Testing
 

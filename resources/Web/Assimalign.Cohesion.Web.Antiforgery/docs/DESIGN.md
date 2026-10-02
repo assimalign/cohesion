@@ -42,7 +42,8 @@ docs), paid once.
 ## Family map
 
 Arrows mean "references". The package composes the token engine, the routing seam and the
-data-protection key ring; the token engine composes cookie storage and form parsing.
+data-protection key ring; the token engine composes cookie storage, form parsing and the effective
+request scheme that decides whether its cookie token is `Secure`.
 
 ```mermaid
 flowchart LR
@@ -55,6 +56,7 @@ flowchart LR
     Antiforgery --> Protection["Security.DataProtection"]
     Engine --> Cookies["Http.Cookies"]
     Engine --> Forms
+    Engine --> Forwarded["Http.Forwarded"]
 ```
 
 | Package | Role |
@@ -295,8 +297,7 @@ static property read inside the interceptor it already generates.
   problem+json.
 - The key ring reloads its repository for every payload that names an unknown key id
   (`KeyRing.ResolveForUnprotect`), so forged tokens can force repeated repository reads; a negative cache
-  or reload throttle belongs in `Security.DataProtection`.
-- Antiforgery coverage in the Web NativeAOT guard (`Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard`).
+  or reload throttle belongs in `Security.DataProtection` (filed as #1155).
 
 ## Testing
 

@@ -324,7 +324,6 @@ AOT-safe.
 - Hash-source helpers that compute the digest of a known inline script at startup.
 - Typed `require-trusted-types-for` and `trusted-types` directives (the `Directive` escape hatch covers
   them today).
-- Adding `UseSecurityHeaders` to the Web NativeAOT guard (`Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard`).
 
 ## Testing
 
