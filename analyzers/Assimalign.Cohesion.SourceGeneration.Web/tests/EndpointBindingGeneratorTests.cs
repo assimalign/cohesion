@@ -501,6 +501,64 @@ public class EndpointBindingGeneratorTests
     }
 
     // ---------------------------------------------------------------------
+    // Receivers (#1174)
+    // ---------------------------------------------------------------------
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Receivers: a type-parameter application receiver gets a generic interceptor")]
+    public void Generator_TypeParameterApplicationReceiver_EmitsGenericInterceptor()
+    {
+        // Act — TApp is not in scope in the generated file, so the interceptor cannot spell it out.
+        GeneratorRun run = Generate(
+            "",
+            members: """
+                public static void Configure<TApp>(TApp app) where TApp : IWebApplicationPipelineBuilder, IWebApplication
+                {
+                    app.MapGet("/items/{id}", (int id) => "item");
+                }
+            """);
+
+        // Assert — generic over the implementation's own type parameter, with its constraints, and the
+        // output compiles.
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("Intercept_0<TBuilder>(this TBuilder builder, string pattern, global::System.Delegate handler)", Case.Sensitive);
+        run.Generated.ShouldContain("            where TBuilder : ", Case.Sensitive);
+        run.Generated.ShouldContain("global::Assimalign.Cohesion.Web.IWebApplicationPipelineBuilder, global::Assimalign.Cohesion.Web.IWebApplication", Case.Sensitive);
+        run.Generated.ShouldNotContain("TApp", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Receivers: a type-parameter group receiver is intercepted over IRouterGroupBuilder")]
+    public void Generator_TypeParameterGroupReceiver_InterceptsOverGroupBuilder()
+    {
+        // Act — the call binds the group extension, whose receiver is IRouterGroupBuilder, not TGroup.
+        GeneratorRun run = Generate(
+            "",
+            members: """
+                public static void Configure<TGroup>(TGroup group) where TGroup : Assimalign.Cohesion.Web.Routing.IRouterGroupBuilder
+                {
+                    group.MapPost("items", (Widget widget) => widget);
+                }
+            """);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("Intercept_0(this global::Assimalign.Cohesion.Web.Routing.IRouterGroupBuilder builder", Case.Sensitive);
+        run.Generated.ShouldNotContain("TGroup", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Receivers: a concrete receiver keeps a non-generic interceptor")]
+    public void Generator_ConcreteApplicationReceiver_EmitsNonGenericInterceptor()
+    {
+        // Act
+        string generated = Run("""app.MapGet("/items/{id}", (int id) => "item");""");
+
+        // Assert
+        generated.ShouldContain("Intercept_0(this global::Assimalign.Cohesion.Web.Hosting.WebApplication builder, string pattern, global::System.Delegate handler)", Case.Sensitive);
+        generated.ShouldNotContain("where ", Case.Sensitive);
+    }
+
+    // ---------------------------------------------------------------------
     // Endpoint description metadata (#152)
     // ---------------------------------------------------------------------
 

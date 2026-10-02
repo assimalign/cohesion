@@ -68,6 +68,13 @@ The generator reads the call site through the compiler's operation tree, so a me
 (`app.MapGet("/orders/{id}", GetOrder)`) binds exactly like a lambda, and named arguments in any order
 resolve. Before #1059 a method group was silently left to the throwing placeholder.
 
+An endpoint module written over a type parameter binds like any other call site (#1174):
+`static void MapOrders<TApp>(TApp app) where TApp : IWebApplicationPipelineBuilder, IWebApplication`
+calling `app.MapGet(...)`, or a `TGroup : IRouterGroupBuilder` calling `group.MapGet(...)`. The
+interceptor takes the receiver the intercepted method declares — generic over the application's type
+when the call site's type cannot be named from generated code — so the application never fails to
+compile on generated code it did not write.
+
 Interceptors are emitted into `Assimalign.Cohesion.Web.Api.Generated`; consumers allow-list that
 namespace with `<InterceptorsNamespaces>`. The generator is delivered two ways: in-repo/test projects
 via `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />`, and to Sdk.Web

@@ -178,8 +178,10 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             endpoint = method.Name + "(" + patternLiteral.Token.Text + ")";
         }
 
-        if (invocation.Expression is not MemberAccessExpressionSyntax receiverAccess
-            || model.GetTypeInfo(receiverAccess.Expression, ct).Type is not ITypeSymbol receiverType)
+        // The interceptor's receiver must match the intercepted method's receiver parameter after type
+        // substitution, which is not always the static type of the receiver expression: a call on a
+        // TGroup : IRouterGroupBuilder binds the group extension, whose receiver is IRouterGroupBuilder.
+        if (!TryGetReceiver(method, compilation, out ITypeSymbol receiverType, out InterceptorShape shape))
         {
             return null;
         }
@@ -463,7 +465,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
         var endpointBinding = new EndpointBinding(
             location.GetInterceptsLocationAttributeSyntax(),
-            receiverType.ToDisplayString(_fullyQualified),
+            shape,
             hasMethodParameter,
             methodExpression,
             delegateType.ToDisplayString(_fullyQualified),
@@ -480,6 +482,100 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             requiresAntiforgery);
 
         return new EndpointAnalysis(endpointBinding, EquatableArray<DiagnosticInfo>.Empty);
+    }
+
+    // Resolves the receiver parameter of the intercepted Map* call and the shape of the interceptor that
+    // matches it. A call in extension form binds an extension-block member: its receiver is the block's
+    // extension parameter (after type substitution), and the compiler emits the member as the associated
+    // static implementation method, which is the signature the interceptor must match.
+    private static bool TryGetReceiver(IMethodSymbol method, Compilation compilation, out ITypeSymbol receiverType, out InterceptorShape shape)
+    {
+        receiverType = null!;
+        shape = default;
+
+        if (method.ContainingType is not { IsExtension: true, ExtensionParameter: { } extensionParameter }
+            || method.AssociatedExtensionImplementation is not { } implementation)
+        {
+            return false;
+        }
+
+        receiverType = extensionParameter.Type;
+
+        // Generated code lives in a file-local class of another namespace, so it names the receiver only
+        // when the type is accessible and closed. Any other receiver — a type parameter
+        // (Configure<TApp>(TApp app) calling app.MapGet), or a private application type — is matched by an
+        // interceptor generic over the implementation's own type parameters, which the compiler constructs
+        // with the call site's type arguments, so the receiver type is never spelled out.
+        if (HandlerTypeRules.CanName(receiverType, compilation, out bool isErrorType))
+        {
+            shape = new InterceptorShape(receiverType.ToDisplayString(_fullyQualified), string.Empty, EquatableArray<string>.Empty);
+            return true;
+        }
+
+        if (isErrorType || !implementation.IsGenericMethod || implementation.ContainingType.IsGenericType)
+        {
+            // An unresolved type is the compiler's to report. Every non-generic Map* family takes an
+            // accessible receiver (IRouterGroupBuilder), so no other receiver reaches this point.
+            return false;
+        }
+
+        IMethodSymbol definition = implementation.OriginalDefinition;
+        ImmutableArray<string>.Builder constraints = ImmutableArray.CreateBuilder<string>();
+
+        foreach (ITypeParameterSymbol typeParameter in definition.TypeParameters)
+        {
+            if (FormatConstraintClause(typeParameter) is { } clause)
+            {
+                constraints.Add(clause);
+            }
+        }
+
+        shape = new InterceptorShape(
+            definition.Parameters[0].Type.ToDisplayString(_fullyQualified),
+            "<" + string.Join(", ", definition.TypeParameters.Select(static typeParameter => typeParameter.Name)) + ">",
+            new EquatableArray<string>(constraints.ToImmutable()));
+        return true;
+    }
+
+    // The where-clause body ("TBuilder : A, B") a generic interceptor repeats from the implementation's
+    // type parameter, or null when the type parameter is unconstrained.
+    private static string? FormatConstraintClause(ITypeParameterSymbol typeParameter)
+    {
+        var constraints = new List<string>();
+
+        if (typeParameter.HasReferenceTypeConstraint)
+        {
+            constraints.Add(typeParameter.ReferenceTypeConstraintNullableAnnotation == NullableAnnotation.Annotated ? "class?" : "class");
+        }
+        else if (typeParameter.HasUnmanagedTypeConstraint)
+        {
+            constraints.Add("unmanaged");
+        }
+        else if (typeParameter.HasValueTypeConstraint)
+        {
+            constraints.Add("struct");
+        }
+        else if (typeParameter.HasNotNullConstraint)
+        {
+            constraints.Add("notnull");
+        }
+
+        foreach (ITypeSymbol constraint in typeParameter.ConstraintTypes)
+        {
+            constraints.Add(constraint.ToDisplayString(_fullyQualified));
+        }
+
+        if (typeParameter.HasConstructorConstraint)
+        {
+            constraints.Add("new()");
+        }
+
+        if (typeParameter.AllowsRefLikeType)
+        {
+            constraints.Add("allows ref struct");
+        }
+
+        return constraints.Count == 0 ? null : typeParameter.Name + " : " + string.Join(", ", constraints);
     }
 
     private static EndpointAnalysis Fail(DiagnosticInfo diagnostic)
@@ -968,8 +1064,9 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         builder.Append("        ").AppendLine(model.InterceptsAttribute);
         builder.Append("        public static global::Assimalign.Cohesion.Web.Routing.IRouterRouteBuilder Intercept_")
             .Append(index)
+            .Append(model.Interceptor.TypeParameters)
             .Append("(this ")
-            .Append(model.ReceiverType)
+            .Append(model.Interceptor.ReceiverType)
             .Append(" builder, ");
 
         if (model.HasMethodParameter)
@@ -980,6 +1077,12 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         builder.Append("string pattern, global::System.Delegate handler");
 
         builder.AppendLine(")");
+
+        foreach (string constraint in model.Interceptor.Constraints)
+        {
+            builder.Append("            where ").AppendLine(constraint);
+        }
+
         builder.AppendLine("        {");
         builder.Append("            var __handler = (").Append(model.DelegateType).AppendLine(")handler;");
         builder.Append("            return builder.Map(")

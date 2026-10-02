@@ -28,7 +28,7 @@ the parameters they bind to, so named arguments in any order work. The handler's
 the interceptor casts to, so the cast always matches the runtime delegate.
 
 For each typed call site the transform produces an `EndpointAnalysis`: either an equatable
-`EndpointBinding` model — the interceptable location, the concrete receiver type, whether an explicit
+`EndpointBinding` model — the interceptable location, the interceptor's receiver shape, whether an explicit
 `HttpMethod` parameter is present, the handler's delegate type, its return shape, how the returned
 value is written, and a classified `ParameterBinding` per handler parameter — or the diagnostics that
 explain why the call site cannot be rewritten (see "Diagnostics"). Only a call site the compiler itself
@@ -79,9 +79,22 @@ Each interceptor:
 - Registers the thunk through the raw `Map` overload — which binds to `WebApplicationMiddleware`, not
   the typed overload, so generated registration is never itself intercepted — and returns the raw
   overload's `IRouterRouteBuilder`, the intercepted overload's return type (#1055), so the caller's
-  `.WithMetadata(...)`/`.WithName(...)` chain applies to the generated route. The receiver is the call
-  site's own type: the application, or an `IRouterGroupBuilder`, whose raw `Map` overload lives in
-  Web.Api's `RouterGroupBuilderEndpointExtensions`.
+  `.WithMetadata(...)`/`.WithName(...)` chain applies to the generated route.
+- Takes the intercepted method's own receiver parameter as its `this` parameter, after type
+  substitution, not the static type of the receiver expression (#1174). The `Map*` verbs are C# 14
+  extension-block members, so the receiver is the block's extension parameter
+  (`ContainingType.ExtensionParameter`) and the signature the interceptor matches is the block's
+  static implementation method (`AssociatedExtensionImplementation`). An application call takes the
+  application's type (`TBuilder` of `extension<TBuilder>(TBuilder builder)`, substituted); a group call
+  takes `IRouterGroupBuilder` even when the receiver is a `TGroup : IRouterGroupBuilder`, whose raw `Map`
+  overload lives in Web.Api's `RouterGroupBuilderEndpointExtensions`.
+- Is generic when generated code cannot name the receiver: a type parameter (a reusable
+  `MapModule<TApp>(TApp app)` calling `app.MapGet`) or an inaccessible application type. The
+  interceptor then repeats the implementation's type parameter list and constraints
+  (`Intercept_0<TBuilder>(this TBuilder builder, ...) where TBuilder : ...`), and the compiler constructs
+  it with the call site's type arguments, so the receiver is never spelled out. Before #1174 the
+  generator wrote `this TApp builder`, which does not compile outside `TApp`'s method. A receiver it can
+  name keeps the plain, non-generic interceptor.
 
 Conversions use `IParsable<T>.TryParse` / `Enum.TryParse<T>` with `InvariantCulture`, so no runtime
 binder helper is required and the emitted code carries no reflection.

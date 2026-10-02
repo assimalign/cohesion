@@ -93,6 +93,28 @@ internal readonly record struct ParameterBinding(
     bool Required,
     string DescribedType) : IEquatable<ParameterBinding>;
 
+/// <summary>
+/// The signature an interceptor needs to match the intercepted <c>Map*</c> call's receiver.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <c>ReceiverType</c> is the fully qualified receiver parameter type, written as <c>this ReceiverType builder</c>.
+/// For a receiver generated code can name it is the call site's own receiver type (after type
+/// substitution) and <c>TypeParameters</c> is empty.
+/// </para>
+/// <para>
+/// A receiver generated code cannot name — a type parameter, or an inaccessible type — is matched by a
+/// generic interceptor: <c>TypeParameters</c> repeats the implementation method's type parameter list
+/// (<c>&lt;TBuilder&gt;</c>), <c>ReceiverType</c> is its receiver parameter type in terms of them, and
+/// <c>Constraints</c> holds one where-clause body (<c>TBuilder : A, B</c>) per constrained type
+/// parameter. The compiler constructs the interceptor with the call site's type arguments.
+/// </para>
+/// </remarks>
+internal readonly record struct InterceptorShape(
+    string ReceiverType,
+    string TypeParameters,
+    EquatableArray<string> Constraints) : IEquatable<InterceptorShape>;
+
 /// <summary>A modeled typed <c>Map*</c> call site the generator intercepts.</summary>
 /// <remarks>
 /// <para>
@@ -115,7 +137,7 @@ internal readonly record struct ParameterBinding(
 /// </remarks>
 internal readonly record struct EndpointBinding(
     string InterceptsAttribute,
-    string ReceiverType,
+    InterceptorShape Interceptor,
     bool HasMethodParameter,
     string MethodExpression,
     string DelegateType,

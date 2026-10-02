@@ -107,6 +107,17 @@ internal static class HandlerTypeRules
     }
 
     /// <summary>
+    /// Determines whether generated code can name <paramref name="type"/>: it is not a type parameter, an
+    /// anonymous type, a pointer, or an inaccessible type, and neither are its type arguments.
+    /// </summary>
+    /// <param name="type">The type to check.</param>
+    /// <param name="compilation">The consuming compilation.</param>
+    /// <param name="isErrorType">Set when the type, or a type it is built from, does not resolve.</param>
+    /// <returns><see langword="true"/> when generated code can spell the type out.</returns>
+    internal static bool CanName(ITypeSymbol type, Compilation compilation, out bool isErrorType)
+        => DescribeNameProblem(type, compilation, out isErrorType) is null && !isErrorType;
+
+    /// <summary>
     /// Describes why generated code — a file-local class in another namespace of the same assembly —
     /// cannot name <paramref name="type"/>: an anonymous type, a generic type parameter, a pointer, or a
     /// type that is private, protected or file-local. Type arguments and array element types are checked

@@ -36,6 +36,43 @@ public class EndpointBindingTests
         await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(text), context.RequestCancelled);
     }
 
+    // Reusable endpoint modules: mapped through a type-parameter receiver rather than a concrete one.
+    private static void MapModule<TApp>(TApp app) where TApp : IWebApplicationPipelineBuilder, IWebApplication
+    {
+        app.MapGet("/module/{id}", (int id) => $"app:{id}");
+    }
+
+    private static void MapGroupModule<TGroup>(TGroup group) where TGroup : IRouterGroupBuilder
+    {
+        group.MapGet("items/{id}", (int id) => $"group:{id}");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: endpoints mapped through type-parameter receivers bind like any other")]
+    public async Task Binding_TypeParameterReceivers_ShouldBind()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        factory.Application.UseRouting();
+
+        MapModule(factory.Application);
+        MapGroupModule(factory.Application.MapGroup("api"));
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage application = await client.GetAsync("/module/5", cancellation.Token);
+        using HttpResponseMessage group = await client.GetAsync("/api/items/6", cancellation.Token);
+
+        // Assert
+        application.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await application.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("app:5");
+        group.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await group.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("group:6");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: route value binds to a typed parameter")]
     public async Task Binding_RouteValue_ShouldBindTypedParameter()
     {
