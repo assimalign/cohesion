@@ -26,6 +26,11 @@ internal sealed class DefaultIndexManager : IIndexManager, IIndexRegistry
 
         if (options.ExistingIndexes is not null)
         {
+            // The open-time format check: every tree's root page is read once, before
+            // any tree is attached, so a database holding a tree of another page
+            // format is refused whole instead of misread (no upgrade path, #1152).
+            BTreeIndexManager.EnsureFormat(options.Storage, options.ExistingIndexes);
+
             foreach (var registration in options.ExistingIndexes)
             {
                 _indexes[(registration.ObjectId, registration.Definition.Name)] = new BTreeIndex(

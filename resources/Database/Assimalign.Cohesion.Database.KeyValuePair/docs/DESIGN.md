@@ -53,8 +53,36 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
   binary component). Entries live in the key space's per-object page chain
   (owner id 1), so a full scan of the database touches only entry pages. The
   key is stored in the record (not only in the index) so recovery scrubs and
-  integrity checks are self-describing; format version 1, catalog-persisted,
-  rejected-if-newer at open (no upgrade machinery — the model was born stamped).
+  integrity checks are self-describing. The entry-space format version is
+  catalog-persisted and gated at open (below); there is no upgrade machinery.
+- **Entry-space format 2 (#1194), gated in both directions.** The marker
+  describes the whole data file set: the entry records and the primary index
+  tree that rides it. Format 2 keeps format 1's entry records, but its primary
+  index is a tree of `Database.Indexing`'s B-tree page format 2 (entries ordered
+  by key, entry location and writer) instead of format 1 (ordered by key alone).
+  The engine stamps the marker at creation before it registers the primary
+  index, and at open, before it attaches the index or recovery writes anything,
+  it refuses any database that registers a primary index on a marker other than
+  2 — "Database 'x' uses entry-space format 1, but this engine supports only
+  format 2. …" with the export, drop and recreate remedy, or the newer-engine
+  remedy for a higher marker. (A catalog that registers no primary index is a
+  creation interrupted before the registration; nothing was written through it,
+  so the open bootstraps the index and stamps 2.) The bump also fences the other
+  direction: an engine before #1194 rejects a marker newer than its own 1, so it
+  refuses a format-2 database before it attaches the tree instead of misreading
+  it. **Behind the marker, the index manager checks the tree itself**: it reads
+  the root page's B-tree page format when the instance attaches the
+  registration, and a tree the marker does not describe is refused with
+  `DatabaseException` "Database 'x' cannot be opened. COHDBI001: Index … uses
+  B-tree page format 1, but this engine supports only format 2 …", the index
+  manager's `IndexFormatException` as its inner exception. A cleanly closed
+  database is left byte-identical by either refusal; a crashed one has had only
+  the storage layer's format-agnostic journal redo and undo, and keeps its
+  journal for the engine that wrote it (`KeyValueEngineLifecycleTests` pins both
+  refusals). There is no upgrade path (owner decision of 2026-10-02; #1152).
+  With entries ordered by location, a PUT's tombstone of the key's previous
+  version descends to it instead of walking the key's dead versions; the unique
+  check still reads them until version pruning (#1195).
 - **Writes are two-phase, key-grain.** Phase one: acquire the key's Exclusive
   lock (`LockResource.Entry(keySpace, IndexKey.Hash())` — the same identity the
   B+Tree's unique enforcement locks internally, so its in-gate re-acquisition is
@@ -221,10 +249,11 @@ transactional page surface, no separate index file) and `<name>.catalog`
 (registrations + format marker), both via `IKeyValueStorageStrategy` —
 file-backed under `RootPath`, in-memory otherwise, the SQL strategy pattern.
 The primary index bootstraps at database creation inside a durably-committed
-bracket (the self-committing DDL posture), then persists its registration and
-the format marker as catalog self-commits; a crash between tree build and
-registration leaves only an orphaned root page (safe leak), repaired by
-re-bootstrapping on the next open.
+bracket (the self-committing DDL posture), then persists the format marker and
+then its registration as catalog self-commits — in that order, so a registered
+primary index always carries the marker of the engine that built it; a crash
+between tree build and registration leaves only an orphaned root page (safe
+leak), repaired by re-bootstrapping on the next open.
 
 ## Error model
 

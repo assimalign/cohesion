@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Separator = Assimalign.Cohesion.Database.Indexing.Internal.BTreeEntryOrder.Separator;
+
 namespace Assimalign.Cohesion.Database.Indexing.Internal;
 
 /// <summary>
@@ -24,14 +26,12 @@ namespace Assimalign.Cohesion.Database.Indexing.Internal;
 /// belong to the vacuum feature that follows version pruning.
 /// </para>
 /// <para>
-/// Duplicate keys (#1159): keys are not unique — secondary indexes repeat a value per
-/// row, and every MVCC version adds an entry — so a run of equal keys can split, and
-/// a key equal to a separator can live on either side of it. Three rules keep that
-/// sound. Lookups that must see every entry of a key (seeks, deletes, the undo
-/// pair, the unique check) descend to the leftmost child that can hold it and walk
-/// right along the leaf chain. A split attaches its new node directly after the node
-/// that split, by position: equal separators cannot be told apart by value. And the
-/// leaf chain order therefore always equals the tree's child order.
+/// Entry order (#1194): keys repeat — secondary indexes repeat a value per row, and
+/// every MVCC version adds an entry — so entries are ordered by their identity
+/// <c>(key, entry reference, writer)</c> (<see cref="BTreeEntryOrder"/>), which is
+/// unique, and separators carry as much of that identity as they need to separate
+/// their neighbours. Every operation that targets one entry descends straight to
+/// it; seeks start before the first entry of their key, at <c>(key, -inf)</c>.
 /// </para>
 /// </remarks>
 internal sealed class BTreeIndex : IIndex
@@ -87,6 +87,40 @@ internal sealed class BTreeIndex : IIndex
         BTreeNode.Initialize(handle.Page.AsBodySpan(), BTreeNode.LeafKind);
         handle.MarkDirty();
         return (long)handle.Id;
+    }
+
+    /// <summary>
+    /// Verifies that the registered root page of an existing tree is a node of this
+    /// engine's page format — the attach-time check, PostgreSQL's metapage
+    /// <c>btm_magic</c>/<c>btm_version</c> test (<c>nbtpage.c</c> <c>_bt_getmeta</c>)
+    /// moved onto the root page, which never moves. A tree is written by one engine
+    /// from its root down, so the root's format is the tree's.
+    /// </summary>
+    /// <exception cref="IndexFormatException">The root page is not a node of this format.</exception>
+    internal static void EnsureFormat(IStorage storage, BTreeIndexRegistration registration)
+    {
+        int found;
+
+        using (var handle = storage.PageManager.GetPage((PageId)registration.RootPageId))
+        {
+            found = handle.Page.Type == PageType.Index
+                ? BTreeNode.ReadFormatVersion(handle.Page.AsBodySpan())
+                : 0;
+
+            if (found == BTreeNode.FormatVersion)
+            {
+                if (BTreeNode.IsCurrentFormat(handle.Page.AsBodySpan()))
+                {
+                    return;
+                }
+
+                // The current stamp over a body that is no node of this format (its
+                // kind byte is neither leaf nor internal) is damage, not a format.
+                found = 0;
+            }
+        }
+
+        throw new IndexFormatException(registration.Definition.Name, registration.ObjectId, registration.RootPageId, found);
     }
 
     /// <inheritdoc />
@@ -161,11 +195,19 @@ internal sealed class BTreeIndex : IIndex
         try
         {
             // The live mapping this transaction can see — tombstone it under the
-            // transaction's write scope. No match: nothing to delete.
-            if (TryFindEntry(key.Encoded.Span, EntryMatch.LiveVisible(entryReference, transaction.Snapshot), out long leafId, out int index))
+            // transaction's write scope. No match: nothing to delete. The caller
+            // knows the key and the reference but not the writer; the live version
+            // is the reference's newest (TryFindNewestEntry), so the lookup starts
+            // after the reference's last version and reads backward.
+            if (TryFindNewestEntry(
+                key.Encoded.Span,
+                entryReference,
+                EntryMatch.LiveVisible(entryReference, transaction.Snapshot),
+                out long leafId,
+                out int index))
             {
                 using var writable = _storage.OpenPageForWrite(storageTransaction, (PageId)leafId);
-                var writableNode = new BTreeNode(writable.Page.AsBodySpan());
+                var writableNode = OpenNode(writable.Page.AsBodySpan(), leafId);
                 writableNode.SetDeleter(index, transaction.Sequence.Value);
                 writable.MarkDirty();
             }
@@ -241,10 +283,15 @@ internal sealed class BTreeIndex : IIndex
         _latch.EnterWriteLock();
         try
         {
-            if (TryFindEntry(key.Encoded.Span, EntryMatch.WrittenBy(entryReference, writer.Value), out long leafId, out int index))
+            // The full identity is known: the descent lands on the entry's leaf.
+            if (TryFindEntry(
+                BTreeSearchKey.AtEntry(key.Encoded.Span, entryReference, writer.Value),
+                EntryMatch.WrittenBy(entryReference, writer.Value),
+                out long leafId,
+                out int index))
             {
                 using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
-                var writableNode = new BTreeNode(writable.Page.AsBodySpan());
+                var writableNode = OpenNode(writable.Page.AsBodySpan(), leafId);
                 writableNode.RemoveLeafEntry(index);
                 writable.MarkDirty();
             }
@@ -266,10 +313,18 @@ internal sealed class BTreeIndex : IIndex
         _latch.EnterWriteLock();
         try
         {
-            if (TryFindEntry(key.Encoded.Span, EntryMatch.DeletedBy(entryReference, deleter.Value), out long leafId, out int index))
+            // The deleter is not part of the order: look among the reference's
+            // versions, newest first — the only one an aborted deleter can have
+            // stamped is the reference's newest (TryFindNewestEntry).
+            if (TryFindNewestEntry(
+                key.Encoded.Span,
+                entryReference,
+                EntryMatch.DeletedBy(entryReference, deleter.Value),
+                out long leafId,
+                out int index))
             {
                 using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
-                var writableNode = new BTreeNode(writable.Page.AsBodySpan());
+                var writableNode = OpenNode(writable.Page.AsBodySpan(), leafId);
                 writableNode.SetDeleter(index, 0);
                 writable.MarkDirty();
             }
@@ -286,6 +341,8 @@ internal sealed class BTreeIndex : IIndex
     /// Walks every leaf once, physically removing entries written by any of the
     /// given writers and clearing tombstones they stamped — the open-time
     /// aborted-writer purge (see <see cref="IIndexManager.PurgeWritersAsync"/>).
+    /// Removing entries and clearing deleter stamps never reorders a leaf, and every
+    /// separator stays a valid bound for the entries that remain.
     /// </summary>
     internal long PurgeWriters(IStorageTransaction transaction, IReadOnlySet<TransactionSequence> writers)
     {
@@ -302,7 +359,7 @@ internal sealed class BTreeIndex : IIndex
 
                 using (var handle = _storage.PageManager.GetPage((PageId)leafId))
                 {
-                    var node = new BTreeNode(handle.Page.AsBodySpan());
+                    var node = OpenNode(handle.Page.AsBodySpan(), leafId);
                     nextLeaf = node.NextLeaf;
 
                     IStoragePageHandle? writable = null;
@@ -323,7 +380,7 @@ internal sealed class BTreeIndex : IIndex
                             if (writable is null)
                             {
                                 writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
-                                node = new BTreeNode(writable.Page.AsBodySpan());
+                                node = OpenNode(writable.Page.AsBodySpan(), leafId);
                             }
 
                             if (remove)
@@ -359,22 +416,21 @@ internal sealed class BTreeIndex : IIndex
     }
 
     /// <summary>
-    /// Materializes the snapshot-visible entries of <paramref name="range"/> in key
-    /// order. An inclusive start descends to the first leaf that can hold the start
-    /// key (its duplicates may begin left of an equal separator); an exclusive start
-    /// descends to the last such leaf, since nothing to its left is greater. Either
-    /// way only the first leaf needs positioning: every later leaf on the chain holds
-    /// keys at or past the start.
+    /// Materializes the snapshot-visible entries of <paramref name="range"/> in
+    /// order. An inclusive start descends to <c>(start, -inf)</c>, before the first
+    /// entry of the start key; an exclusive start to <c>(start, +inf)</c>, after its
+    /// last. Only the first leaf needs positioning: every later leaf on the chain
+    /// holds entries past the start. The first leaf may hold no entry at or past the
+    /// start (the start falls between its last entry and the next separator); the
+    /// walk then begins on the next leaf.
     /// </summary>
     private void CollectVisible(TransactionSnapshot snapshot, IndexKeyRange range, List<(byte[] Key, ulong EntryReference)> results)
     {
         ReadOnlySpan<byte> startKey = range.Start.HasValue ? range.Start.Value.Encoded.Span : default;
         ReadOnlySpan<byte> endKey = range.End.HasValue ? range.End.Value.Encoded.Span : default;
+        var start = range.IsStartInclusive ? BTreeSearchKey.AtKey(startKey) : BTreeSearchKey.AfterKey(startKey);
 
-        long leafId = range.Start is null
-            ? DescendToLeftmostLeaf()
-            : range.IsStartInclusive ? DescendToFirstLeaf(startKey) : DescendToLastLeaf(startKey, null);
-
+        long leafId = range.Start is null ? DescendToLeftmostLeaf() : Descend(start, null);
         bool firstLeaf = true;
 
         while (leafId >= 0)
@@ -383,13 +439,13 @@ internal sealed class BTreeIndex : IIndex
 
             using (var handle = _storage.PageManager.GetPage((PageId)leafId))
             {
-                var node = new BTreeNode(handle.Page.AsBodySpan());
+                var node = OpenNode(handle.Page.AsBodySpan(), leafId);
                 nextLeaf = node.NextLeaf;
                 int index = 0;
 
                 if (firstLeaf && range.Start is not null)
                 {
-                    index = range.IsStartInclusive ? node.FindLowerBound(startKey) : node.FindUpperBound(startKey);
+                    index = node.FindLowerBound(start);
                 }
 
                 firstLeaf = false;
@@ -422,20 +478,28 @@ internal sealed class BTreeIndex : IIndex
 
     /// <summary>
     /// Whether the key has a live entry (deleter stamp zero) in the LATEST state —
-    /// the unique check, which runs under the key's exclusive lock.
+    /// the unique check, which runs under the key's exclusive lock. A key's live
+    /// version can sit anywhere among its dead ones, so the check reads the key's
+    /// entries from <c>(key, -inf)</c> until it finds a live one or passes the key:
+    /// one descent, then a walk over the run on consecutive leaves. Bounding that
+    /// walk needs dead versions pruned (#1195).
     /// </summary>
-    private bool HasLiveEntry(ReadOnlySpan<byte> key) => TryFindEntry(key, EntryMatch.Live, out _, out _);
+    private bool HasLiveEntry(ReadOnlySpan<byte> key) => TryFindEntry(BTreeSearchKey.AtKey(key), EntryMatch.Live, out _, out _);
 
     /// <summary>
-    /// Finds the first entry with exactly <paramref name="key"/> that
-    /// <paramref name="match"/> accepts. The walk starts at the first leaf that can
-    /// hold the key and follows the leaf chain until it passes the key, so it sees
-    /// every one of the key's entries however many leaves the run spans. The caller
-    /// holds the tree latch, so the returned position stays valid while it acts on it.
+    /// Finds the first entry at or after <paramref name="start"/> that still shares
+    /// its prefix — the key, plus the entry reference and writer when
+    /// <paramref name="start"/> names them — and that <paramref name="match"/>
+    /// accepts. The descent lands on the leaf whose range holds
+    /// <paramref name="start"/>; the walk follows the leaf chain until an entry leaves
+    /// the prefix. For a full identity that is at most one entry (identities are
+    /// unique); for a key, its whole run (a reference's versions are read newest
+    /// first instead, <see cref="TryFindNewestEntry"/>). The caller holds the tree
+    /// latch, so the returned position stays valid while it acts on it.
     /// </summary>
-    private bool TryFindEntry(ReadOnlySpan<byte> key, in EntryMatch match, out long leafId, out int index)
+    private bool TryFindEntry(in BTreeSearchKey start, in EntryMatch match, out long leafId, out int index)
     {
-        leafId = DescendToFirstLeaf(key);
+        leafId = Descend(start, null);
         bool firstLeaf = true;
 
         while (leafId >= 0)
@@ -444,18 +508,18 @@ internal sealed class BTreeIndex : IIndex
 
             using (var handle = _storage.PageManager.GetPage((PageId)leafId))
             {
-                var node = new BTreeNode(handle.Page.AsBodySpan());
+                var node = OpenNode(handle.Page.AsBodySpan(), leafId);
                 nextLeaf = node.NextLeaf;
-                index = firstLeaf ? node.FindLowerBound(key) : 0;
+                index = firstLeaf ? node.FindLowerBound(start) : 0;
                 firstLeaf = false;
 
                 for (; index < node.EntryCount; index++)
                 {
-                    if (!node.GetKey(index).SequenceEqual(key))
+                    if (!SharesPrefix(node, index, start))
                     {
                         leafId = -1;
                         index = -1;
-                        return false; // walked past the key
+                        return false; // walked past the prefix
                     }
 
                     if (match.Accepts(node, index))
@@ -465,11 +529,97 @@ internal sealed class BTreeIndex : IIndex
                 }
             }
 
-            leafId = nextLeaf; // the run may continue on the next leaf
+            leafId = nextLeaf; // the prefix may continue on the next leaf
         }
 
         index = -1;
         return false;
+    }
+
+    /// <summary>
+    /// Finds the newest version of <paramref name="entryReference"/> under
+    /// <paramref name="key"/> that <paramref name="match"/> accepts, reading the
+    /// reference's versions from the last one backward: the descent goes to the
+    /// position after the reference's last version
+    /// (<see cref="BTreeSearchKey.AfterReference"/>), and the walk follows the leaf
+    /// chain leftward until an entry leaves the reference.
+    /// </summary>
+    /// <remarks>
+    /// The newest version is the one delete and clear-deleter want. A record slot holds
+    /// one version at a time, and an engine reuses a slot under the same key only after
+    /// the version purge reclaimed the slot's previous version, which needs that
+    /// version's deleter committed below every active transaction. Every version of a
+    /// reference but the newest therefore carries a committed deleter: the newest is
+    /// the only one that can be live, and the only one an in-flight or aborting deleter
+    /// can have stamped. The lookup is then one descent, however many dead versions a
+    /// reused slot has left under the key until they are pruned (#1195). When the
+    /// newest does not match — a replayed or stale undo, which is a no-op — the walk
+    /// reads the older versions too, so the result never depends on that invariant;
+    /// only the cost does.
+    /// </remarks>
+    private bool TryFindNewestEntry(ReadOnlySpan<byte> key, ulong entryReference, in EntryMatch match, out long leafId, out int index)
+    {
+        var end = BTreeSearchKey.AfterReference(key, entryReference);
+        var prefix = BTreeSearchKey.AtReference(key, entryReference);
+        leafId = Descend(end, null);
+        bool firstLeaf = true;
+
+        while (leafId >= 0)
+        {
+            long previousLeaf;
+
+            using (var handle = _storage.PageManager.GetPage((PageId)leafId))
+            {
+                var node = OpenNode(handle.Page.AsBodySpan(), leafId);
+                previousLeaf = node.PrevLeaf;
+
+                // On the first leaf, the entries before the end position; on every
+                // earlier leaf, all of them. An undo can leave a leaf empty, and the
+                // walk then simply moves on to the leaf before it.
+                index = (firstLeaf ? node.FindLowerBound(end) : node.EntryCount) - 1;
+                firstLeaf = false;
+
+                for (; index >= 0; index--)
+                {
+                    if (!SharesPrefix(node, index, prefix))
+                    {
+                        leafId = -1;
+                        index = -1;
+                        return false; // walked past the reference's first version
+                    }
+
+                    if (match.Accepts(node, index))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            leafId = previousLeaf; // the reference's versions may continue on the leaf before
+        }
+
+        index = -1;
+        return false;
+    }
+
+    /// <summary>
+    /// Whether leaf entry <paramref name="index"/> lies inside the prefix
+    /// <paramref name="start"/> names: the same key, and the same entry reference and
+    /// writer as far as <paramref name="start"/> carries them.
+    /// </summary>
+    private static bool SharesPrefix(in BTreeNode node, int index, in BTreeSearchKey start)
+    {
+        if (!node.GetKey(index).SequenceEqual(start.Key))
+        {
+            return false;
+        }
+
+        return start.Tiebreaker switch
+        {
+            BTreeTiebreaker.Reference => node.GetEntryReference(index) == start.EntryReference,
+            BTreeTiebreaker.Entry => node.GetEntryReference(index) == start.EntryReference && node.GetWriter(index) == start.Writer,
+            _ => true,
+        };
     }
 
     private static bool IsEntryVisible(in BTreeNode node, int index, TransactionSnapshot snapshot)
@@ -485,19 +635,35 @@ internal sealed class BTreeIndex : IIndex
 
     private void InsertCore(IStorageTransaction transaction, ReadOnlySpan<byte> key, ulong entryReference, ulong writer, ulong deleter)
     {
+        var position = BTreeSearchKey.AtEntry(key, entryReference, writer);
         var path = new List<PathEntry>();
 
         while (true)
         {
             path.Clear();
-            long leafId = DescendToLastLeaf(key, path);
+            long leafId = Descend(position, path);
             bool fits;
             bool fitsAfterCompaction;
+            int at;
 
             using (var handle = _storage.PageManager.GetPage((PageId)leafId))
             {
-                var node = new BTreeNode(handle.Page.AsBodySpan());
-                int needed = node.LeafEntrySize(key.Length);
+                var node = OpenNode(handle.Page.AsBodySpan(), leafId);
+
+                // An entry's identity is unique — the order is total only because it
+                // is, and a separator can only fall between two different entries.
+                // An equal entry would be in this leaf, at the insert position.
+                // PostgreSQL treats a duplicate heap TID the same way, as corruption
+                // (nbtsearch.c, _bt_binsrch_insert).
+                at = node.FindLowerBound(position);
+                if (at < node.EntryCount && node.CompareToEntry(position, at) == 0)
+                {
+                    throw new IndexException(
+                        $"Index '{Name}' already holds the entry for reference {entryReference} written by transaction {writer} under this key; " +
+                        "an entry's (key, reference, writer) identity must be unique.");
+                }
+
+                int needed = BTreeNode.LeafEntrySize(key.Length);
                 fits = needed <= node.FreeSpace;
 
                 // Undo removals (erase, purge) orphan entry bytes. A leaf they fill is
@@ -509,14 +675,16 @@ internal sealed class BTreeIndex : IIndex
             if (fits || fitsAfterCompaction)
             {
                 using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
-                var writableNode = new BTreeNode(writable.Page.AsBodySpan());
+                var writableNode = OpenNode(writable.Page.AsBodySpan(), leafId);
 
+                // The position the read pass found still holds: the write latch kept
+                // the leaf unchanged, and compaction keeps its entries and their order.
                 if (fitsAfterCompaction)
                 {
                     RebuildLeaf(ref writableNode, writableNode.EntryCount, writableNode.PrevLeaf, writableNode.NextLeaf);
                 }
 
-                writableNode.InsertLeafEntry(writableNode.FindLowerBound(key), key, entryReference, writer, deleter);
+                writableNode.InsertLeafEntry(at, key, entryReference, writer, deleter);
                 writable.MarkDirty();
                 return;
             }
@@ -533,7 +701,7 @@ internal sealed class BTreeIndex : IIndex
         while (true)
         {
             using var handle = _storage.PageManager.GetPage((PageId)current);
-            var node = new BTreeNode(handle.Page.AsBodySpan());
+            var node = OpenNode(handle.Page.AsBodySpan(), current);
 
             if (node.IsLeaf)
             {
@@ -545,49 +713,28 @@ internal sealed class BTreeIndex : IIndex
     }
 
     /// <summary>
-    /// Descends to the first leaf that can hold <paramref name="key"/>: every entry
-    /// equal to the key lies in that leaf or to its right on the leaf chain. Lookups
-    /// that must see all of a key's entries start here.
+    /// Descends to the leaf whose range holds <paramref name="key"/>: at every level,
+    /// the child of the last separator not greater than the key. An entry equal to a
+    /// full identity is in that leaf; entries after a partial position start in it or
+    /// on the next leaf. When <paramref name="path"/> is supplied, it receives each
+    /// internal node visited and the child slot taken, which is where a split
+    /// attaches its new node.
     /// </summary>
-    private long DescendToFirstLeaf(ReadOnlySpan<byte> key)
+    private long Descend(in BTreeSearchKey key, List<PathEntry>? path)
     {
         long current = RootPageId;
 
         while (true)
         {
             using var handle = _storage.PageManager.GetPage((PageId)current);
-            var node = new BTreeNode(handle.Page.AsBodySpan());
+            var node = OpenNode(handle.Page.AsBodySpan(), current);
 
             if (node.IsLeaf)
             {
                 return current;
             }
 
-            current = node.GetChildAt(node.FindFirstChildSlot(key));
-        }
-    }
-
-    /// <summary>
-    /// Descends to the last leaf that can hold <paramref name="key"/>: no entry to its
-    /// left is greater than the key. Inserts route here; when <paramref name="path"/>
-    /// is supplied, it receives each internal node visited and the child slot taken,
-    /// which is where a split attaches its new node.
-    /// </summary>
-    private long DescendToLastLeaf(ReadOnlySpan<byte> key, List<PathEntry>? path)
-    {
-        long current = RootPageId;
-
-        while (true)
-        {
-            using var handle = _storage.PageManager.GetPage((PageId)current);
-            var node = new BTreeNode(handle.Page.AsBodySpan());
-
-            if (node.IsLeaf)
-            {
-                return current;
-            }
-
-            int slot = node.FindLastChildSlot(key);
+            int slot = node.FindChildSlot(key);
             path?.Add(new PathEntry(current, slot));
             current = node.GetChildAt(slot);
         }
@@ -595,13 +742,13 @@ internal sealed class BTreeIndex : IIndex
 
     private void SplitLeaf(IStorageTransaction transaction, List<PathEntry> parentPath, long leafId)
     {
-        byte[] separator;
+        Separator separator;
         long siblingId;
 
         using (var leafHandle = _storage.OpenPageForWrite(transaction, (PageId)leafId))
         using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index))
         {
-            var leaf = new BTreeNode(leafHandle.Page.AsBodySpan());
+            var leaf = OpenNode(leafHandle.Page.AsBodySpan(), leafId);
             int count = leaf.EntryCount;
 
             if (count < 2)
@@ -611,10 +758,12 @@ internal sealed class BTreeIndex : IIndex
                 throw new IndexException($"Index '{Name}' cannot split leaf page {leafId} holding {count} entries.");
             }
 
+            int mid = ChooseLeafSplit(leaf);
+            separator = BTreeEntryOrder.BuildSeparator(leaf, mid - 1, mid);
+            EnsureLeafSeparator(leaf, leafId, mid, separator);
+
             var sibling = BTreeNode.Initialize(siblingHandle.Page.AsBodySpan(), BTreeNode.LeafKind);
             siblingId = (long)siblingHandle.Id;
-
-            int mid = count / 2;
 
             // Move the upper half to the sibling.
             for (int i = mid; i < count; i++)
@@ -622,8 +771,6 @@ internal sealed class BTreeIndex : IIndex
                 sibling.InsertLeafEntry(
                     i - mid, leaf.GetKey(i), leaf.GetEntryReference(i), leaf.GetWriter(i), leaf.GetDeleter(i));
             }
-
-            separator = sibling.GetKey(0).ToArray();
 
             // Fix the sibling chain.
             long oldNext = leaf.NextLeaf;
@@ -633,7 +780,7 @@ internal sealed class BTreeIndex : IIndex
             if (oldNext >= 0)
             {
                 using var oldNextHandle = _storage.OpenPageForWrite(transaction, (PageId)oldNext);
-                var oldNextNode = new BTreeNode(oldNextHandle.Page.AsBodySpan());
+                var oldNextNode = OpenNode(oldNextHandle.Page.AsBodySpan(), oldNext);
                 oldNextNode.PrevLeaf = siblingId;
                 oldNextHandle.MarkDirty();
             }
@@ -648,6 +795,16 @@ internal sealed class BTreeIndex : IIndex
         // The caller re-descends, so where a root leaf's lower half lands is moot here.
         InsertIntoParent(transaction, parentPath, leafId, separator, siblingId);
     }
+
+    /// <summary>
+    /// Chooses where a full leaf splits: the number of entries that stay on the left.
+    /// The one place the leaf split point is decided, so a better policy (#1196: split
+    /// at the insertion point for rightmost and duplicate-run inserts, PostgreSQL's
+    /// <c>nbtsplitloc.c</c> <c>_bt_findsplitloc</c>) replaces this function alone. The
+    /// separator is built from the entries on either side of the point, and any point
+    /// in <c>[1, count - 1]</c> is valid: adjacent entries always differ.
+    /// </summary>
+    private static int ChooseLeafSplit(in BTreeNode leaf) => leaf.EntryCount / 2;
 
     private static void RebuildLeaf(ref BTreeNode leaf, int keepCount, long prevLeaf, long nextLeaf)
     {
@@ -678,16 +835,15 @@ internal sealed class BTreeIndex : IIndex
     /// <summary>
     /// Attaches <paramref name="childId"/> — the new right half of
     /// <paramref name="splitId"/>, the child the last path entry descended into —
-    /// directly after that child in its parent. The position comes from the recorded
-    /// slot, not from the separator's value: a parent over a split run of equal keys
-    /// holds equal separators, and a value-based position could land the new child
-    /// left of its sibling, out of step with the leaf chain.
+    /// directly after that child in its parent, at the slot the descent recorded.
+    /// Separators are unique under the entry order, so the slot always agrees with
+    /// the separator's value; <see cref="EnsureSeparatorOrder"/> checks that it does.
     /// </summary>
     /// <returns>
     /// The page now holding the split node's lower half: <paramref name="splitId"/>,
     /// unless that node was the root, whose contents move to a new page.
     /// </returns>
-    private long InsertIntoParent(IStorageTransaction transaction, List<PathEntry> parentPath, long splitId, byte[] separator, long childId)
+    private long InsertIntoParent(IStorageTransaction transaction, List<PathEntry> parentPath, long splitId, Separator separator, long childId)
     {
         if (parentPath.Count == 0)
         {
@@ -702,15 +858,15 @@ internal sealed class BTreeIndex : IIndex
 
         using (var parentHandle = _storage.OpenPageForWrite(transaction, (PageId)parentId))
         {
-            var parent = new BTreeNode(parentHandle.Page.AsBodySpan());
+            var parent = OpenNode(parentHandle.Page.AsBodySpan(), parentId);
 
             // Checked before the parent changes at all — a full parent would
             // otherwise split around a separator it cannot accept.
             EnsureSeparatorOrder(parent, parentId, position, separator);
 
-            if (parent.InternalEntrySize(separator.Length) <= parent.FreeSpace)
+            if (BTreeNode.InternalEntrySize(separator.Key.Length, separator.Tiebreaker) <= parent.FreeSpace)
             {
-                parent.InsertInternalEntry(position, separator, childId);
+                parent.InsertInternalEntry(position, separator.AsSearchKey(), childId);
                 parentHandle.MarkDirty();
                 return splitId;
             }
@@ -725,9 +881,9 @@ internal sealed class BTreeIndex : IIndex
         int targetPosition = position <= mid ? position : position - mid - 1;
 
         using var targetHandle = _storage.OpenPageForWrite(transaction, (PageId)target);
-        var targetNode = new BTreeNode(targetHandle.Page.AsBodySpan());
+        var targetNode = OpenNode(targetHandle.Page.AsBodySpan(), target);
         EnsureSeparatorOrder(targetNode, target, targetPosition, separator);
-        targetNode.InsertInternalEntry(targetPosition, separator, childId);
+        targetNode.InsertInternalEntry(targetPosition, separator.AsSearchKey(), childId);
         targetHandle.MarkDirty();
         return splitId;
     }
@@ -740,7 +896,7 @@ internal sealed class BTreeIndex : IIndex
     /// rollback or a crash reverts the root page like any other.
     /// </summary>
     /// <returns>The new page holding the old root's contents.</returns>
-    private long GrowRoot(IStorageTransaction transaction, byte[] separator, long childId)
+    private long GrowRoot(IStorageTransaction transaction, Separator separator, long childId)
     {
         long leftId;
 
@@ -752,7 +908,7 @@ internal sealed class BTreeIndex : IIndex
             leftId = (long)leftHandle.Id;
 
             rootBody.CopyTo(leftBody);
-            var left = new BTreeNode(leftBody);
+            var left = OpenNode(leftBody, leftId);
 
             if (left.IsLeaf)
             {
@@ -761,21 +917,21 @@ internal sealed class BTreeIndex : IIndex
                 if (left.PrevLeaf >= 0)
                 {
                     using var previousHandle = _storage.OpenPageForWrite(transaction, (PageId)left.PrevLeaf);
-                    new BTreeNode(previousHandle.Page.AsBodySpan()).NextLeaf = leftId;
+                    OpenNode(previousHandle.Page.AsBodySpan(), left.PrevLeaf).NextLeaf = leftId;
                     previousHandle.MarkDirty();
                 }
 
                 if (left.NextLeaf >= 0)
                 {
                     using var nextHandle = _storage.OpenPageForWrite(transaction, (PageId)left.NextLeaf);
-                    new BTreeNode(nextHandle.Page.AsBodySpan()).PrevLeaf = leftId;
+                    OpenNode(nextHandle.Page.AsBodySpan(), left.NextLeaf).PrevLeaf = leftId;
                     nextHandle.MarkDirty();
                 }
             }
 
             var root = BTreeNode.Initialize(rootBody, BTreeNode.InternalKind);
             root.LeftmostChild = leftId;
-            root.InsertInternalEntry(0, separator, childId);
+            root.InsertInternalEntry(0, separator.AsSearchKey(), childId);
 
             leftHandle.MarkDirty();
             rootHandle.MarkDirty();
@@ -787,10 +943,10 @@ internal sealed class BTreeIndex : IIndex
     /// <summary>
     /// Splits the internal node the last path entry names and attaches the new right
     /// half to the parent. The split point balances bytes, not entry counts:
-    /// separators range from a few bytes to <see cref="BTreeNode.MaxKeyLength"/>, and
-    /// a count-balanced split can leave a half too full to take the one separator it
-    /// must accept next. With each half holding at most half the node's bytes, both
-    /// keep room for a maximum-length separator.
+    /// separators range from one byte to a maximum-length key with both tiebreaker
+    /// attributes, and a count-balanced split can leave a half too full to take the
+    /// one separator it must accept next. With each half holding at most half the
+    /// node's bytes, both keep room for a maximum-size separator.
     /// </summary>
     /// <returns>
     /// The directory index that was promoted (and the count kept on the left), the
@@ -800,19 +956,19 @@ internal sealed class BTreeIndex : IIndex
     private (int Mid, long LeftId, long SiblingId) SplitInternal(IStorageTransaction transaction, List<PathEntry> path)
     {
         long nodeId = path[^1].PageId;
-        byte[] promoted;
+        Separator promoted;
         int mid;
         long siblingId;
 
         using (var nodeHandle = _storage.OpenPageForWrite(transaction, (PageId)nodeId))
         using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index))
         {
-            var node = new BTreeNode(nodeHandle.Page.AsBodySpan());
+            var node = OpenNode(nodeHandle.Page.AsBodySpan(), nodeId);
             int count = node.EntryCount;
 
             if (count < 2)
             {
-                // Unreachable: a full internal node holds several maximum-length separators.
+                // Unreachable: a full internal node holds several maximum-size separators.
                 throw new IndexException($"Index '{Name}' cannot split internal page {nodeId} holding {count} entries.");
             }
 
@@ -822,12 +978,12 @@ internal sealed class BTreeIndex : IIndex
             mid = ChooseInternalSplit(node);
 
             // The separator at mid is promoted; its child becomes the sibling's leftmost.
-            promoted = node.GetKey(mid).ToArray();
+            promoted = Separator.FromNode(node, mid);
             sibling.LeftmostChild = node.GetChild(mid);
 
             for (int i = mid + 1; i < count; i++)
             {
-                sibling.InsertInternalEntry(i - mid - 1, node.GetKey(i), node.GetChild(i));
+                sibling.InsertInternalEntry(i - mid - 1, node.GetSeparator(i), node.GetChild(i));
             }
 
             RebuildInternal(ref node, mid);
@@ -853,7 +1009,7 @@ internal sealed class BTreeIndex : IIndex
 
         for (int i = 0; i < count; i++)
         {
-            total += node.InternalEntrySize(node.GetKey(i).Length) + BTreeNode.DirectorySlotSize;
+            total += node.InternalEntryFootprint(i);
         }
 
         int half = total / 2;
@@ -862,7 +1018,7 @@ internal sealed class BTreeIndex : IIndex
 
         while (mid < count - 1)
         {
-            int size = node.InternalEntrySize(node.GetKey(mid).Length) + BTreeNode.DirectorySlotSize;
+            int size = node.InternalEntryFootprint(mid);
             if (kept + size > half)
             {
                 break;
@@ -876,16 +1032,36 @@ internal sealed class BTreeIndex : IIndex
     }
 
     /// <summary>
+    /// Fails a leaf split, in every build, unless its separator falls strictly after
+    /// the last entry kept on the left and at or before the first entry moved right —
+    /// the bound every descent relies on. Adjacent leaf entries always differ, so
+    /// this holds for any sorted leaf; a failure means the leaf is out of order, and
+    /// the caller's storage bracket rolls the split back.
+    /// </summary>
+    /// <exception cref="IndexException">The separator would not separate the two halves.</exception>
+    private void EnsureLeafSeparator(in BTreeNode leaf, long leafId, int mid, Separator separator)
+    {
+        var bound = separator.AsSearchKey();
+
+        if (leaf.CompareToEntry(bound, mid - 1) <= 0 || leaf.CompareToEntry(bound, mid) > 0)
+        {
+            throw new IndexException(
+                $"Index '{Name}' cannot split leaf page {leafId}: its entries {mid - 1} and {mid} are out of order.");
+        }
+    }
+
+    /// <summary>
     /// Fails the split, in every build, when a separator inserted at
-    /// <paramref name="position"/> would leave the directory unordered: it may equal
-    /// its neighbours, never invert them. A misordered separator would be committed
-    /// with the split and misroute lookups from then on, and there is no repair path
-    /// for a persisted tree (#1152). Throwing instead leaves the caller's storage
-    /// bracket to roll the half-done split back. The cost is two key comparisons per
-    /// split.
+    /// <paramref name="position"/> would leave the directory unordered: separators
+    /// are unique under the entry order, so each must be strictly greater than its
+    /// left neighbour and strictly less than its right one. A misordered separator
+    /// would be committed with the split and misroute lookups from then on, and there
+    /// is no repair path for a persisted tree (#1152). Throwing instead leaves the
+    /// caller's storage bracket to roll the half-done split back. The cost is two
+    /// comparisons per split.
     /// </summary>
     /// <exception cref="IndexException">The separator or its position would break the directory's order.</exception>
-    private void EnsureSeparatorOrder(in BTreeNode node, long pageId, int position, ReadOnlySpan<byte> separator)
+    private void EnsureSeparatorOrder(in BTreeNode node, long pageId, int position, Separator separator)
     {
         if (position < 0 || position > node.EntryCount)
         {
@@ -893,8 +1069,10 @@ internal sealed class BTreeIndex : IIndex
                 $"Index '{Name}' split would insert a separator at position {position} of the {node.EntryCount}-entry directory on page {pageId}.");
         }
 
-        if ((position > 0 && node.GetKey(position - 1).SequenceCompareTo(separator) > 0)
-            || (position < node.EntryCount && node.GetKey(position).SequenceCompareTo(separator) < 0))
+        var bound = separator.AsSearchKey();
+
+        if ((position > 0 && node.CompareToSeparator(bound, position - 1) <= 0)
+            || (position < node.EntryCount && node.CompareToSeparator(bound, position) >= 0))
         {
             throw new IndexException($"Index '{Name}' split would misorder separators on page {pageId}.");
         }
@@ -903,12 +1081,12 @@ internal sealed class BTreeIndex : IIndex
     private static void RebuildInternal(ref BTreeNode node, int keepCount)
     {
         long leftmost = node.LeftmostChild;
-        var keys = new byte[keepCount][];
+        var separators = new Separator[keepCount];
         var children = new long[keepCount];
 
         for (int i = 0; i < keepCount; i++)
         {
-            keys[i] = node.GetKey(i).ToArray();
+            separators[i] = Separator.FromNode(node, i);
             children[i] = node.GetChild(i);
         }
 
@@ -917,8 +1095,27 @@ internal sealed class BTreeIndex : IIndex
 
         for (int i = 0; i < keepCount; i++)
         {
-            node.InsertInternalEntry(i, keys[i], children[i]);
+            node.InsertInternalEntry(i, separators[i].AsSearchKey(), children[i]);
         }
+    }
+
+    /// <summary>
+    /// Overlays a node on a page body, checking the page is a node of this format
+    /// first — PostgreSQL checks every B-tree page it reads the same way and reports a
+    /// failure as index corruption (<c>nbtpage.c</c> <c>_bt_checkpage</c>,
+    /// <c>ERRCODE_INDEX_CORRUPTED</c>). A tree is attached only after its root passed
+    /// <see cref="EnsureFormat"/>, so a failure here means a damaged page or a pointer
+    /// to one.
+    /// </summary>
+    /// <exception cref="IndexCorruptionException">The page is not a node of this format.</exception>
+    private BTreeNode OpenNode(Span<byte> body, long pageId)
+    {
+        if (!BTreeNode.IsCurrentFormat(body))
+        {
+            throw new IndexCorruptionException(Name, pageId, BTreeNode.ReadFormatVersion(body));
+        }
+
+        return new BTreeNode(body);
     }
 
     /// <summary>
@@ -936,7 +1133,7 @@ internal sealed class BTreeIndex : IIndex
     }
 
     /// <summary>
-    /// Which of a key's entries a lookup wants: an allocation-free predicate for
+    /// Which of the entries a lookup walks it wants: an allocation-free predicate for
     /// <see cref="TryFindEntry"/>.
     /// </summary>
     private readonly struct EntryMatch

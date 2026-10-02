@@ -89,10 +89,14 @@ uses those same transforms for uniqueness enforcement.
   record cannot be told apart record-by-record, version 2 vs 3 (shared page
   stream vs per-object page chains) is a page-placement property no record
   carries, and version 3 vs 4 (index keys with or without the temporal kind and
-  offset, #1099) is a property of the index trees — so the database-grain marker
-  is catalog metadata. The engine writes its version (4) when it creates a
-  database and refuses to open one whose marker reads anything else; it has no
-  upgrade path (owner decision of 2026-10-01; upgrades are #1152). Absent marker
+  offset, #1099) and 4 vs 5 (index trees in B-tree page format 1, ordered by key
+  alone, or format 2, ordered by key, entry reference and writer, #1194) are
+  properties of the index trees — so the database-grain marker is catalog
+  metadata. (`Database.Indexing` also stamps and checks its own page format on
+  each tree, behind this marker.) The engine writes its version (5) when it
+  creates a database and refuses to open one whose marker reads anything else; it
+  has no upgrade path (owner decisions of 2026-10-01 and 2026-10-02; upgrades are
+  #1152). Version 5 is stored as a kind-8 record like version 4. Absent marker
   reads as version 1 (pre-marker databases, or a creation interrupted before the
   engine stamped the marker).
 - **From version 4 the marker is a kind-8 record (downgrade fence, #1099).**

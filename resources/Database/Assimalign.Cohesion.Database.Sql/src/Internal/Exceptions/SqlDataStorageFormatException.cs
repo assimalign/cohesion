@@ -19,4 +19,16 @@ internal sealed class SqlDataStorageFormatException : DatabaseException
         : base(message)
     {
     }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SqlDataStorageFormatException"/> class
+    /// for a refusal another component raised: an index tree whose B-tree page format
+    /// this engine does not read.
+    /// </summary>
+    /// <param name="message">The refusal: the database, the format found, the format supported and the remedy.</param>
+    /// <param name="inner">The component's refusal.</param>
+    public SqlDataStorageFormatException(string message, System.Exception inner)
+        : base(message, inner)
+    {
+    }
 }

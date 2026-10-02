@@ -226,7 +226,33 @@ internal sealed partial class DefaultDocumentCatalog
     {
         _registrations.Clear();
         var registrations = new List<BTreeIndexRegistration>();
-        using var iterator = _storage.GetUnitIterator(1);
+        foreach (var (registration, page, slot) in ReadRegistrations(_storage))
+        {
+            registrations.Add(registration);
+            _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
+        }
+        _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        {
+            Storage = _storage,
+            TransactionSource = new TransactionSource(_coordinator),
+            ExistingIndexes = registrations
+        });
+    }
+
+    /// <summary>
+    /// Checks the B-tree page format of every index tree the storage registers, without
+    /// opening the catalog: registration records carry no MVCC stamps, so they read the
+    /// same before and after the coordinator's recovery scrub.
+    /// </summary>
+    /// <exception cref="IndexFormatException">A tree is not in the B-tree page format this engine reads.</exception>
+    internal static void EnsureIndexFormat(DocumentStorage storage)
+        => BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
+
+    private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot)> ReadRegistrations(DocumentStorage storage)
+    {
+        var registrations = new List<(BTreeIndexRegistration, PageId, int)>();
+        var objectIds = new HashSet<ulong>();
+        using var iterator = storage.GetUnitIterator(1);
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
@@ -239,19 +265,13 @@ internal sealed partial class DefaultDocumentCatalog
             ulong objectId = reader.ReadUInt64();
             long root = reader.ReadInt64();
             string name = DocumentCatalogCodec.ReadString(reader) ?? throw new DocumentCatalogException("Missing physical index name.");
-            if (objectId == 0 || root <= 0 || stream.Position != stream.Length || _registrations.ContainsKey(objectId))
+            if (objectId == 0 || root <= 0 || stream.Position != stream.Length || !objectIds.Add(objectId))
             {
                 throw new DocumentCatalogException("Invalid physical index registration.");
             }
-            registrations.Add(new BTreeIndexRegistration(objectId, new IndexDefinition(name), root));
-            _registrations.Add(objectId, (unit.PageId, unit.SlotIndex, root));
+            registrations.Add((new BTreeIndexRegistration(objectId, new IndexDefinition(name), root), unit.PageId, unit.SlotIndex));
         }
-        _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
-        {
-            Storage = _storage,
-            TransactionSource = new TransactionSource(_coordinator),
-            ExistingIndexes = registrations
-        });
+        return registrations;
     }
 
     private void SaveRegistrations(IStorageTransaction bracket)

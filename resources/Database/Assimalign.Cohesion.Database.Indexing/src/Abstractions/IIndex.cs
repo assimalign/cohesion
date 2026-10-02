@@ -11,10 +11,19 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// A single index over an object's entries: ordered key → entry-reference mappings.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Index mutations ride the owning transaction — they are stamped with the writing
 /// transaction's sequence and become visible under the same MVCC rules as the data
 /// they reference. Values are opaque entry references (typically a page address or
 /// entry identity) supplied by the model's storage layer.
+/// </para>
+/// <para>
+/// An entry is identified by its key, its entry reference and its writer stamp, and
+/// that identity is unique: inserting an identity that is already present is a defect
+/// in the caller and fails with <see cref="IndexException"/>. Any operation fails with
+/// <see cref="IndexCorruptionException"/> (<c>COHDBI002</c>) when it reaches a damaged
+/// index page.
+/// </para>
 /// </remarks>
 public interface IIndex
 {
@@ -40,7 +49,14 @@ public interface IIndex
     /// <param name="key">The key to insert.</param>
     /// <param name="entryReference">The opaque entry reference the key maps to.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <exception cref="IndexException">Thrown when the index is unique and the key already maps to a visible entry.</exception>
+    /// <exception cref="IndexUniqueViolationException">
+    /// The index is unique and the key already maps to a live entry in the latest
+    /// state (not only in the transaction's snapshot).
+    /// </exception>
+    /// <exception cref="IndexException">
+    /// The key exceeds the maximum key length, or an entry with the same key, entry
+    /// reference and writer already exists (a defect: entry identities are unique).
+    /// </exception>
     ValueTask InsertAsync(ITransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -55,6 +71,10 @@ public interface IIndex
     /// <summary>
     /// Opens a cursor over the specified key range, positioned before the first match.
     /// </summary>
+    /// <remarks>
+    /// Entries with equal keys are returned in entry-reference order (reversed when
+    /// <paramref name="reverse"/> is true).
+    /// </remarks>
     /// <param name="transaction">The transaction whose snapshot reads resolve through.</param>
     /// <param name="range">The key range to scan.</param>
     /// <param name="reverse">Whether to scan in descending key order.</param>
@@ -68,6 +88,10 @@ public interface IIndex
     /// through the same snapshot the row scan uses is what keeps an index seek
     /// exactly equivalent to the scan it replaces.
     /// </summary>
+    /// <remarks>
+    /// Entries with equal keys are returned in entry-reference order (reversed when
+    /// <paramref name="reverse"/> is true).
+    /// </remarks>
     /// <param name="snapshot">The visibility snapshot entries filter through.</param>
     /// <param name="range">The key range to scan.</param>
     /// <param name="reverse">Whether to scan in descending key order.</param>
@@ -89,7 +113,10 @@ public interface IIndex
     /// <param name="writer">The version's writer stamp, preserved from the source row.</param>
     /// <param name="deleter">The version's deleter stamp, preserved from the source row (<see cref="TransactionSequence.None"/> for live versions).</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <exception cref="IndexException">The key exceeds the maximum key length.</exception>
+    /// <exception cref="IndexException">
+    /// The key exceeds the maximum key length, or an entry with the same key, entry
+    /// reference and writer already exists (a defect: entry identities are unique).
+    /// </exception>
     ValueTask InsertVersionAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, TransactionSequence deleter, CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -414,7 +414,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
 
         // Assert
         failure.Message.ShouldStartWith("Database 'legacy' uses data-storage format 3", Case.Sensitive);
-        failure.Message.ShouldContain("supports only format 4", Case.Sensitive);
+        failure.Message.ShouldContain($"supports only format {SqlRowCodec.RecordSpaceFormatVersion}", Case.Sensitive);
         failure.Message.ShouldContain("does not upgrade", Case.Sensitive);
         failure.Message.ShouldNotContain("damaged", Case.Insensitive);
     }

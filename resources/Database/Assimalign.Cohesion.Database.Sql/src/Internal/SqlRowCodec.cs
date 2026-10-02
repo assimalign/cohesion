@@ -23,15 +23,18 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 4 = stamped records in per-object page chains whose index
-    /// keys encode the temporal identity (<see cref="ToKeyIdentity"/>). Earlier
-    /// versions — 3 (the same layout with the kind and offset inside temporal
-    /// keys), 2 (records in the shared page stream) and 1 (pre-MVCC unstamped
-    /// records) — are history: a database is created on this version, and an
-    /// existing one on any other version is refused at open. There is no upgrade
-    /// path (owner decision of 2026-10-01; upgrades are #1152).
+    /// the catalog: 5 = stamped records in per-object page chains whose index
+    /// keys encode the temporal identity (<see cref="ToKeyIdentity"/>), in index
+    /// trees of B-tree page format 2, which order entries by key, entry reference
+    /// and writer (#1194). Earlier versions — 4 (the same rows, with index trees
+    /// of B-tree page format 1, ordered by key alone), 3 (the kind and offset
+    /// inside temporal keys), 2 (records in the shared page stream) and 1
+    /// (pre-MVCC unstamped records) — are history: a database is created on this
+    /// version, and an existing one on any other version is refused at open.
+    /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
+    /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 4;
+    internal const int RecordSpaceFormatVersion = 5;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.

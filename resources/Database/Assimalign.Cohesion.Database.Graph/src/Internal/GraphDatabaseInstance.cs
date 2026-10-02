@@ -20,6 +20,21 @@ internal sealed partial class GraphDatabaseInstance : IGraphDatabase
         Engine = engine;
         DataStorage = storage;
         Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        // Indexing owns the B-tree page format (#1194) and checks each tree's root
+        // page as it attaches the tree. That happens inside the store's open, after
+        // the recovery scrub has written to the database, so the check runs here
+        // first: a database whose indexes this engine cannot read is refused before
+        // anything is written to it.
+        try
+        {
+            GraphStore.EnsureIndexFormat(storage);
+        }
+        catch (Indexing.IndexFormatException exception)
+        {
+            Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+        }
+
         var recovery = recover ? Coordinator.AnalyzeAndScrub() : null;
         Catalog = GraphCatalog.Open(storage, Coordinator);
         Store = GraphStore.Open(storage, Coordinator);
