@@ -468,15 +468,17 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   which is what the walks recurse through. The `FromSql` overload that takes
   `SqlQueryParserOptions` is public, so a typed caller parses with the engine's
   limit and accepts exactly what the text seam accepts; the overload without options
-  parses at the default 256. The builder's `ExpressionNestingLimit` is an addition to
-  the published `ISqlDatabaseEngineBuilder`, so it has a default implementation: a
-  builder that predates it reports 256, accepts that value and refuses any other
-  with `NotSupportedException` rather than ignore it. A value outside 32..4096 set on
-  the engine's own builder fails in `Build()`, not in the setter, with the
-  `ArgumentOutOfRangeException` that `SqlDatabaseEngine.Create` and
-  `SqlDatabaseEngineFactory.Create` throw. A parse that runs out of stack (`SQL0007`) is not a
-  syntax error: `FromSql` raises it as `COHSQLE004`, like any other walk out of
-  stack. Text the engine generates rather than receives (persisted definitions,
+  parses at the default 256. `ISqlDatabaseEngineBuilder.ExpressionNestingLimit` is an
+  ordinary member that every implementation supplies, the engine's own builder and
+  builders written outside the repository alike; it has no default implementation,
+  because the interface is meant to be implemented elsewhere and nothing has shipped
+  that predates it (owner decision of 2026-10-02). An implementation reports 256 until
+  the value is set and carries it to the engine it builds. A value outside 32..4096
+  fails in `Build()`, not in the setter, with the `ArgumentOutOfRangeException` that
+  `SqlDatabaseEngine.Create` and `SqlDatabaseEngineFactory.Create` throw, so a builder
+  that builds through `SqlDatabaseEngine.Create` needs no range check of its own. A
+  parse that runs out of stack (`SQL0007`) is not a syntax error: `FromSql` raises
+  it as `COHSQLE004`, like any other walk out of stack. Text the engine generates rather than receives (persisted definitions,
   schema-migration statements) parses at the 4096 ceiling: the executing engine's
   limit still applies to a migration's requests, and a definition stored under one
   engine's limit opens under any other.

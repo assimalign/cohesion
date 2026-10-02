@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Threading;
@@ -422,22 +423,36 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(1L);
     }
 
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: an engine refuses a limit outside 32..4096")]
+    /// <summary>
+    /// A limit outside 32..4096 is refused by the engine and fails every builder in
+    /// <see cref="IDatabaseEngineBuilder.Build"/>, not in the setter: the engine's own builder and
+    /// one written outside the repository, which reports the engine's range check because it
+    /// builds through <see cref="SqlDatabaseEngine.Create"/>.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: an engine, and every builder's Build, refuses a limit outside 32..4096")]
     [InlineData(int.MinValue)]
     [InlineData(0)]
     [InlineData(SqlQueryParserOptions.MinimumExpressionNestingLimit - 1)]
     [InlineData(SqlQueryParserOptions.MaximumExpressionNestingLimit + 1)]
+    [InlineData(int.MaxValue)]
     public void Create_LimitOutOfRange_ShouldThrow(int limit)
     {
+        // Arrange
+        ISqlDatabaseEngineBuilder own = SqlDatabaseEngine.CreateBuilder();
+        ISqlDatabaseEngineBuilder external = new ExternalEngineBuilder();
+        own.ExpressionNestingLimit = limit;
+        external.ExpressionNestingLimit = limit;
+
         // Act
         var direct = Should.Throw<ArgumentOutOfRangeException>(() =>
             SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { ExpressionNestingLimit = limit }));
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.ExpressionNestingLimit = limit;
-        var built = Should.Throw<ArgumentOutOfRangeException>(() => builder.Build());
+        var built = Should.Throw<ArgumentOutOfRangeException>(() => own.Build());
+        var externallyBuilt = Should.Throw<ArgumentOutOfRangeException>(() => external.Build());
 
         // Assert
-        foreach (var failure in new[] { direct, built })
+        own.ExpressionNestingLimit.ShouldBe(limit);
+        external.ExpressionNestingLimit.ShouldBe(limit);
+        foreach (var failure in new[] { direct, built, externallyBuilt })
         {
             failure.ParamName.ShouldBe("options");
             failure.ActualValue.ShouldBe(limit);
@@ -478,24 +493,57 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>
-    /// The builder's limit is an addition to a published interface, so it has a default
-    /// implementation: a builder written before it existed keeps compiling and loading, reports
-    /// the default limit, accepts that value, and refuses any other rather than ignore it.
+    /// The builder's limit is an ordinary member of an interface meant to be implemented outside
+    /// the repository (owner decision of 2026-10-02). The interface gives it no body to fall back
+    /// on, so a builder that leaves it out does not compile and none can drop the value it is given.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a builder without its own limit reports the default and refuses another")]
-    public void Builder_WithoutOwnLimit_ShouldReportTheDefaultAndRefuseAnother()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: the builder interface requires every implementer to supply the limit")]
+    public void BuilderInterface_Limit_ShouldBeRequiredOfEveryImplementer()
     {
-        // Arrange
-        ISqlDatabaseEngineBuilder builder = new EarlierEngineBuilder();
-
         // Act
-        builder.ExpressionNestingLimit = Limit;
-        var failure = Should.Throw<NotSupportedException>(() => builder.ExpressionNestingLimit = 1000);
+        var property = typeof(ISqlDatabaseEngineBuilder).GetProperty(nameof(ISqlDatabaseEngineBuilder.ExpressionNestingLimit)).ShouldNotBeNull();
+        var withBodies = typeof(ISqlDatabaseEngineBuilder)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+            .Where(method => !method.IsAbstract)
+            .Select(method => method.Name)
+            .ToArray();
 
         // Assert
-        builder.ExpressionNestingLimit.ShouldBe(Limit);
-        failure.Message.ShouldBe(
-            "This ISqlDatabaseEngineBuilder implementation builds engines with the default expression nesting limit of 256 levels and cannot apply another.");
+        property.PropertyType.ShouldBe(typeof(int));
+        property.GetMethod.ShouldNotBeNull().IsAbstract.ShouldBeTrue();
+        property.SetMethod.ShouldNotBeNull().IsAbstract.ShouldBeTrue();
+        withBodies.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A builder written outside the repository supplies the limit itself, reports the engine's
+    /// default until it is set, and carries the value it is given through
+    /// <see cref="IDatabaseEngineBuilder.Build"/> to the engine, which parses with it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a custom builder's limit reaches the engine through Build")]
+    public async Task ExternalBuilder_Limit_ShouldReachTheEngineThroughBuild()
+    {
+        // Arrange
+        ISqlDatabaseEngineBuilder builder = new ExternalEngineBuilder();
+        int unset = builder.ExpressionNestingLimit;
+        builder.ExpressionNestingLimit = 40;
+
+        // Act
+        await using var engine = builder.Build().ShouldBeOfType<SqlDatabaseEngine>();
+        await using var session = await SeedAsync(engine);
+        var atLimit = await ScalarAsync(session, $"SELECT {Chain("1", " + ", 40)} FROM t");
+        var pastLimit = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync($"SELECT {Chain("1", " + ", 41)} FROM t").AsTask());
+        var typedPastLimit = await session.ExecuteAsync(Request($"SELECT {Chain("1", " + ", 41)} FROM t"));
+
+        // Assert
+        unset.ShouldBe(Limit);
+        builder.ExpressionNestingLimit.ShouldBe(40);
+        atLimit.ShouldBe(40L);
+        pastLimit.Message.ShouldBe("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 40 levels.");
+        typedPastLimit.Status.ShouldBe(QueryResultStatus.Error);
+        var diagnostic = typedPastLimit.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("SQL0006");
+        diagnostic.Message.ShouldBe($"Expression nesting of {Number(41)} levels exceeds this engine's limit of 40 levels.");
     }
 
     /// <summary>
@@ -1179,33 +1227,60 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>
-    /// A builder written against the interface before it had an expression nesting limit: it
-    /// implements every other member and relies on the default implementation for the limit.
+    /// An <see cref="ISqlDatabaseEngineBuilder"/> written outside the repository, as the interface
+    /// intends: it supplies every member itself, the expression nesting limit included, keeps them
+    /// on a <see cref="SqlDatabaseEngineOptions"/> (so each reports the engine's default until it is
+    /// set), and builds through the public <see cref="SqlDatabaseEngine.Create"/>, whose range check
+    /// is the one its <see cref="Build"/> reports. Only the engine's own builder can hand worker and
+    /// server products to a <see cref="SqlDatabaseEngine"/>, so this one refuses to compose them.
     /// </summary>
-    private sealed class EarlierEngineBuilder : ISqlDatabaseEngineBuilder
+    private sealed class ExternalEngineBuilder : ISqlDatabaseEngineBuilder
     {
-        public string? EngineName { get; set; }
+        // Quiet background workers, as CreateEngine keeps them.
+        private readonly SqlDatabaseEngineOptions _options = new()
+        {
+            EngineName = "external-builder",
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        };
+        private bool _buildAttempted;
 
-        public FileSystemPath? RootPath { get; set; }
+        public string? EngineName { get => _options.EngineName; set => _options.EngineName = value; }
 
-        public StorageCommitDurability? Durability { get; set; }
+        public FileSystemPath? RootPath { get => _options.RootPath; set => _options.RootPath = value; }
 
-        public ISqlStorageStrategy? StorageStrategy { get; set; }
+        public StorageCommitDurability? Durability { get => _options.Durability; set => _options.Durability = value; }
 
-        public TimeSpan GroupCommitWindow { get; set; }
+        public ISqlStorageStrategy? StorageStrategy { get => _options.StorageStrategy; set => _options.StorageStrategy = value; }
 
-        public TimeSpan CheckpointInterval { get; set; }
+        public TimeSpan GroupCommitWindow { get => _options.GroupCommitWindow; set => _options.GroupCommitWindow = value; }
 
-        public TimeSpan PageWriteBackInterval { get; set; }
+        public TimeSpan CheckpointInterval { get => _options.CheckpointInterval; set => _options.CheckpointInterval = value; }
 
-        public int PageWriteBackBatchSize { get; set; }
+        public TimeSpan PageWriteBackInterval { get => _options.PageWriteBackInterval; set => _options.PageWriteBackInterval = value; }
 
-        public TimeSpan MaintenanceInterval { get; set; }
+        public int PageWriteBackBatchSize { get => _options.PageWriteBackBatchSize; set => _options.PageWriteBackBatchSize = value; }
 
-        public IDatabaseEngineBuilder AddWorker(Func<IDatabaseEngine, IDatabaseEngineWorker> configure) => this;
+        public TimeSpan MaintenanceInterval { get => _options.MaintenanceInterval; set => _options.MaintenanceInterval = value; }
 
-        public IDatabaseEngineBuilder AddServer(Func<IDatabaseEngine, IDatabaseServer> configure) => this;
+        public int ExpressionNestingLimit { get => _options.ExpressionNestingLimit; set => _options.ExpressionNestingLimit = value; }
 
-        public IDatabaseEngine Build() => throw new NotSupportedException("The test never builds this builder.");
+        public IDatabaseEngineBuilder AddWorker(Func<IDatabaseEngine, IDatabaseEngineWorker> configure)
+            => throw new NotSupportedException("Only the engine's own builder can attach a worker to a SqlDatabaseEngine.");
+
+        public IDatabaseEngineBuilder AddServer(Func<IDatabaseEngine, IDatabaseServer> configure)
+            => throw new NotSupportedException("Only the engine's own builder can attach a server to a SqlDatabaseEngine.");
+
+        public IDatabaseEngine Build()
+        {
+            if (_buildAttempted)
+            {
+                throw new InvalidOperationException("A build was already attempted.");
+            }
+
+            _buildAttempted = true;
+            return SqlDatabaseEngine.Create(_options);
+        }
     }
 }
