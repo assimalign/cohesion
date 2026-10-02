@@ -619,52 +619,86 @@ internal sealed class SqlExpressionEvaluator
         return expression.ElseResult is null ? null : EvaluateCore(expression.ElseResult, row);
     }
 
+    /// <summary>
+    /// Computes a scalar function call. The call is matched against its signature first
+    /// (<see cref="SqlFunctionSignatures"/>), the table the planner resolved it against before any
+    /// row was read; a tree that reaches evaluation without planning fails here with the same
+    /// <c>COHSQLE006</c>, instead of computing a wrong-arity call (#1189: one used to evaluate no
+    /// argument and return NULL).
+    /// </summary>
+    /// <exception cref="SqlEvaluationException">
+    /// The call's arguments do not match its signature (<c>COHSQLE006</c>), or <c>ABS</c> of the
+    /// BIGINT minimum overflows (<c>COHSQLE002</c>).
+    /// </exception>
+    /// <exception cref="DatabaseException">The function does not execute as a scalar, or <c>ABS</c> receives a non-number.</exception>
     private object? EvaluateFunction(SqlFunctionCallExpression function, object?[] row)
     {
-        string name = function.FunctionName.ToUpperInvariant();
-
-        if (name == "COALESCE")
+        var signature = SqlFunctionSignatures.Resolve(function);
+        if (signature is null || signature.Kind != SqlFunctionKind.Scalar)
         {
-            foreach (var argument in function.Arguments)
-            {
-                object? value = EvaluateCore(argument, row);
-
-                if (value is not null)
-                {
-                    return value;
-                }
-            }
-
-            return null;
+            // A declared name outside the table (NULLIF, TRIM, ...), or an aggregate outside the
+            // grouping plan that binds it to a slot.
+            throw new DatabaseException($"Function '{function.FunctionName}' is not supported by the executor yet.");
         }
 
-        object? single = function.Arguments.Count == 1 ? EvaluateCore(function.Arguments[0], row) : null;
-
-        return name switch
+        // Each case evaluates the arguments its signature admits, and no more: the signature has
+        // just proven the count, and no case reads an argument another function's count implies.
+        var arguments = function.Arguments;
+        return signature.Function switch
         {
-            "UPPER" => (single as string)?.ToUpperInvariant() ?? single,
-            "LOWER" => (single as string)?.ToLowerInvariant() ?? single,
-            "LENGTH" => single is null ? null : (long)(Convert.ToString(single, CultureInfo.InvariantCulture)?.Length ?? 0),
-            // Every numeric storage type: exact integers widen to BIGINT before the
-            // magnitude is taken (so INT's minimum is representable), approximate and
-            // decimal values keep their own type.
-            "ABS" => single switch
-            {
-                null => null,
-                sbyte value => Math.Abs((long)value),
-                short value => Math.Abs((long)value),
-                int value => Math.Abs((long)value),
-                long value => value == long.MinValue
-                    ? throw SqlEvaluationException.NumericValueOutOfRange($"ABS of BIGINT {value.ToString(CultureInfo.InvariantCulture)} overflowed.")
-                    : Math.Abs(value),
-                float value => Math.Abs(value),
-                double value => Math.Abs(value),
-                decimal value => Math.Abs(value),
-                _ => throw new DatabaseException("ABS requires a numeric argument."),
-            },
+            SqlBuiltinFunction.Coalesce => Coalesce(arguments, row),
+            SqlBuiltinFunction.Upper => Upper(EvaluateCore(arguments[0], row)),
+            SqlBuiltinFunction.Lower => Lower(EvaluateCore(arguments[0], row)),
+            SqlBuiltinFunction.Length => Length(EvaluateCore(arguments[0], row)),
+            SqlBuiltinFunction.Abs => Abs(EvaluateCore(arguments[0], row)),
+            // A scalar entry added to the signature table without a case here.
             _ => throw new DatabaseException($"Function '{function.FunctionName}' is not supported by the executor yet."),
         };
     }
+
+    /// <summary>The first non-NULL argument, evaluated left to right and no further.</summary>
+    private object? Coalesce(IReadOnlyList<SqlExpression> arguments, object?[] row)
+    {
+        for (int index = 0; index < arguments.Count; index++)
+        {
+            object? value = EvaluateCore(arguments[index], row);
+
+            if (value is not null)
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static object? Upper(object? value) => (value as string)?.ToUpperInvariant() ?? value;
+
+    private static object? Lower(object? value) => (value as string)?.ToLowerInvariant() ?? value;
+
+    private static object? Length(object? value)
+        => value is null ? null : (long)(Convert.ToString(value, CultureInfo.InvariantCulture)?.Length ?? 0);
+
+    /// <summary>
+    /// Every numeric storage type: exact integers widen to BIGINT before the magnitude is taken
+    /// (so INT's minimum is representable), approximate and decimal values keep their own type.
+    /// </summary>
+    /// <exception cref="SqlEvaluationException">The BIGINT minimum has no positive counterpart (<c>COHSQLE002</c>).</exception>
+    /// <exception cref="DatabaseException">The value is not a number.</exception>
+    private static object? Abs(object? value) => value switch
+    {
+        null => null,
+        sbyte number => Math.Abs((long)number),
+        short number => Math.Abs((long)number),
+        int number => Math.Abs((long)number),
+        long number => number == long.MinValue
+            ? throw SqlEvaluationException.NumericValueOutOfRange($"ABS of BIGINT {number.ToString(CultureInfo.InvariantCulture)} overflowed.")
+            : Math.Abs(number),
+        float number => Math.Abs(number),
+        double number => Math.Abs(number),
+        decimal number => Math.Abs(number),
+        _ => throw new DatabaseException("ABS requires a numeric argument."),
+    };
 
     /// <summary>
     /// Uses the same non-null value order as grouping, sorting and extrema.

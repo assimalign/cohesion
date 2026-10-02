@@ -36,6 +36,16 @@ internal static class SqlPersistedExpression
     internal const string DamagedCatalogHint =
         "The catalog is damaged or was written by an incompatible engine build; restore the database from a backup.";
 
+    /// <summary>
+    /// What a persisted definition whose function call has arguments its function does not
+    /// accept means, and what to do about it (#1189). Such a call never had a value: an engine
+    /// build that did not match calls against their signatures stored it, and a backup holds the
+    /// same definition, so restoring one does not help.
+    /// </summary>
+    internal const string UncheckedCallHint =
+        "An engine build that did not check function arguments stored it, and this engine cannot evaluate it; " +
+        "open the database with that build and drop the constraint or replace it with a valid one.";
+
     // The parser's code for text within the nesting limits that the calling thread has too
     // little stack left to parse (#1151): the same text parses on a larger stack.
     private const string ParserOutOfStackCode = "SQL0007";
@@ -156,9 +166,9 @@ internal static class SqlPersistedExpression
 
     /// <summary>
     /// Binds a loaded expression to the row shape it is evaluated over: every column and
-    /// collation must resolve, and the expression must be a row expression — no parameter,
-    /// subquery, <c>*</c>, aggregate, or unresolved CAST target, none of which has a value
-    /// against one row.
+    /// collation must resolve, every function call must pass arguments its signature accepts, and
+    /// the expression must be a row expression — no parameter, subquery, <c>*</c>, aggregate, or
+    /// unresolved CAST target, none of which has a value against one row.
     /// </summary>
     /// <remarks>
     /// Binding checks only what evaluation needs. The rules a statement or DDL applies when it
@@ -166,11 +176,15 @@ internal static class SqlPersistedExpression
     /// construct a CHECK may not declare — are not applied again: the engine that stored the
     /// definition accepted it, so tightening such a rule never makes an existing database
     /// refuse to open (or an unrelated DDL fail). A row the evaluator cannot evaluate fails its
-    /// own statement with the evaluator's coded error, as for any other expression.
+    /// own statement with the evaluator's coded error, as for any other expression. A call's
+    /// argument count is not such a rule: a call no signature of its function accepts has no
+    /// value on any row (one used to evaluate to NULL, #1189), so it fails the bind with
+    /// <c>COHSQLE006</c>, and through it the open.
     /// </remarks>
     /// <param name="expression">The loaded expression.</param>
     /// <param name="evaluator">The evaluator over the row shape the expression binds to.</param>
     /// <exception cref="DatabaseException">A column or collation does not resolve, or the expression is not a row expression.</exception>
+    /// <exception cref="SqlEvaluationException">A function call's arguments do not match its signature (<c>COHSQLE006</c>).</exception>
     internal static void Bind(SqlExpression expression, SqlExpressionEvaluator evaluator)
     {
         ArgumentNullException.ThrowIfNull(expression);
@@ -189,13 +203,19 @@ internal static class SqlPersistedExpression
                 throw new DatabaseException($"CAST target '{cast.TargetType}' has not been resolved.");
             case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression or SqlInExpression { Values: null }:
                 throw new DatabaseException("Parameters, subqueries and * have no value in a persisted row expression.");
-            case SqlFunctionCallExpression call when call.FunctionName.ToUpperInvariant() is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX":
+            case SqlFunctionCallExpression call when SqlFunctionSignatures.IsAggregate(call.FunctionName):
                 throw new DatabaseException($"Aggregate function '{call.FunctionName}' has no value in a persisted row expression.");
         }
 
         foreach (var child in SqlPlanner.Children(expression))
         {
             Bind(child, evaluator);
+        }
+
+        // After the arguments, as the planner resolves a call (SqlPlanner.ValidateFunctionCalls).
+        if (expression is SqlFunctionCallExpression function)
+        {
+            SqlFunctionSignatures.Resolve(function);
         }
     }
 

@@ -863,8 +863,10 @@ internal sealed partial class SqlPlanExecutor
             throw new DatabaseException("CHECK requires deterministic row expressions without parameters, subqueries, or casts.");
         }
 
-        // The functions the row evaluator implements; any other call cannot be evaluated.
-        if (expression is SqlFunctionCallExpression function && function.FunctionName.ToUpperInvariant() is not ("COALESCE" or "UPPER" or "LOWER" or "LENGTH" or "ABS"))
+        // The scalar functions the row evaluator implements, read from the signature table; any
+        // other call cannot be evaluated. A call's arguments were matched against its signature
+        // when the statement was planned (DDL) or the persisted predicate was bound (open).
+        if (expression is SqlFunctionCallExpression function && !SqlFunctionSignatures.IsScalar(function.FunctionName))
         {
             throw new DatabaseException($"Function '{function.FunctionName}' is not supported in CHECK.");
         }
@@ -885,7 +887,7 @@ internal sealed partial class SqlPlanExecutor
                 ValidateCheckSyntax(negation.Operand, table, requireBoolean: true, declaring);
                 break;
             case SqlFunctionCallExpression call:
-                bool booleanArguments = requireBoolean && string.Equals(call.FunctionName, "COALESCE", StringComparison.OrdinalIgnoreCase);
+                bool booleanArguments = requireBoolean && SqlFunctionSignatures.FunctionOf(call) == SqlBuiltinFunction.Coalesce;
                 foreach (var argument in call.Arguments)
                 {
                     ValidateCheckSyntax(argument, table, booleanArguments, declaring);
@@ -926,7 +928,7 @@ internal sealed partial class SqlPlanExecutor
             SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => true,
             SqlLiteralExpression literal => literal.LiteralType is SqlLiteralType.Boolean or SqlLiteralType.Null,
             SqlColumnReferenceExpression column => table.Columns[FindColumnOrdinal(table, column.ColumnName)].Type.Type == DatabaseType.Boolean,
-            SqlFunctionCallExpression functionCall => string.Equals(functionCall.FunctionName, "COALESCE", StringComparison.OrdinalIgnoreCase),
+            SqlFunctionCallExpression functionCall => SqlFunctionSignatures.FunctionOf(functionCall) == SqlBuiltinFunction.Coalesce,
             SqlCaseExpression => true,
             _ => false,
         };

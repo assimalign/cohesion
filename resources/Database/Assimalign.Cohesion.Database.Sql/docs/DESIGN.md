@@ -279,15 +279,66 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   shape). That promise paid out with index adoption: the IR gained exactly one
   node family (`SqlAccessPath` on the SELECT plan — scan | index seek) and the
   executor seam did not move.
-- **Unknown functions fail before binding (#1068).** `SqlPlanner.Plan` walks the
-  whole statement, subqueries, DML values and `CHECK` predicates included, and
-  rejects a call to any name outside `SqlLanguageProfile.Instance.Functions` with
-  `Unknown function '<name>'.` before it binds the catalog or reads a row. The
-  evaluator used to discover the name per row, so the same statement failed on a
-  populated table and succeeded on an empty one. A declared name that does not
-  execute yet (`NULLIF`, `TRIM`, ...) passes this check and still fails during
-  evaluation; #1103 rejects those at parse time and gives planner rejections
-  structured codes.
+- **Unknown functions and wrong argument counts fail before binding (#1068,
+  #1189).** `SqlPlanner.Plan` walks the whole statement
+  (`ValidateFunctionCalls`), subqueries, DML values, `CHECK` predicates and
+  `DEFAULT`s included, and resolves every call before it binds the catalog or
+  reads a row: a name outside `SqlLanguageProfile.Instance.Functions` is
+  `Unknown function '<name>'.`, and a call whose arguments its function's
+  signature does not accept fails with `SqlEvaluationException` `COHSQLE006`. The
+  evaluator used to discover an unknown name per row, so the same statement failed
+  on a populated table and succeeded on an empty one, and it evaluated an argument
+  only when a call had exactly one, so `ABS(1, 2)`, `UPPER()` and `COALESCE()`
+  returned NULL and a CHECK built on one never fired. The walk resolves a call's
+  arguments before the call itself, as PostgreSQL's parse analysis does
+  (`transformFuncCall` transforms the arguments and then `ParseFuncOrColumn`
+  resolves the function, `src/backend/parser/parse_expr.c`), so the innermost bad
+  call is the one reported. A declared name that does not execute yet (`NULLIF`,
+  `TRIM`, ...) passes this check and still fails during evaluation; #1103 rejects
+  those at parse time and gives planner rejections structured codes.
+- **One table of function signatures (#1189).** `SqlFunctionSignatures` holds one
+  `SqlFunctionSignature` per executable function: name, scalar or aggregate, the
+  fewest and most arguments a call may pass, whether `*` is accepted (only
+  `COUNT`), and the call forms a diagnostic shows. Its readers are the planner walk
+  above; the evaluator, which resolves each call against it again before computing
+  it (a tree that reaches evaluation unplanned gets the same `COHSQLE006`) and
+  dispatches on the entry instead of comparing upper-cased names per row; the
+  grouping planner and aggregate detection; CHECK validation, which admits exactly
+  the table's scalars; and persisted-definition binding (below). The rule follows
+  PostgreSQL's function resolution: `func_get_detail` keeps only candidates whose
+  argument count matches, and a call none accepts is `function ... does not exist`,
+  SQLSTATE 42883, with the detail "No function of that name accepts the given number
+  of arguments" (`src/backend/parser/parse_func.c`, `ParseFuncOrColumn` and
+  `func_lookup_failure_details`). `COALESCE` takes one or more operands, as
+  PostgreSQL's grammar does (`COALESCE '(' expr_list ')'` in `gram.y`), where ISO
+  requires two; the dialect records the deviation. The T1 functions of #1120 are
+  new entries, and their argument-type rules, result types, NULL rule and
+  determinism new members of `SqlFunctionSignature`, not a second list. Until those
+  members exist, each reader that behaves per function finds the function through
+  the table (`SqlFunctionSignatures.FunctionOf`, or the signature `Resolve` returns)
+  and switches on `SqlBuiltinFunction`; none compares the written name against a
+  literal. Those switches are the evaluator's dispatch, which evaluates inside each
+  function's case only the arguments that function's signature admits; the grouping
+  planner's result types and its SUM/AVG numeric-argument rule; the static operand
+  type; CHECK's Boolean `COALESCE` rule; and the grouping executor's accumulators and
+  `COUNT`'s non-nullable result, where each aggregate of a `SqlGroupPlan` carries
+  the signature the planner bound it to (`SqlGroupAggregate`) and an aggregate entry
+  without an accumulator fails when the plan executes rather than counting rows.
+  #1120 moves those arms into signature members. The SQL parser's own aggregate list
+  (`SqlQueryParser.IsAggregateFunction`, Sql.Language, which cannot read this
+  engine's internal table) is the one name list outside it. The table is a frozen
+  dictionary over a fixed array: no reflection, no runtime code, a case-insensitive
+  lookup that does not allocate.
+- **Aggregates in UPDATE and DELETE.** `PlanUpdate` and `PlanDelete` reject an
+  aggregate in an assignment or a `WHERE` filter while planning (`Aggregate
+  functions are not allowed in UPDATE SET.` / `... in WHERE.`), as `PlanSelectCore`
+  does for a SELECT's `WHERE` and `JOIN ... ON`, and as PostgreSQL's
+  `check_agglevels_and_constraints` does for `EXPR_KIND_UPDATE_SOURCE` and
+  `EXPR_KIND_WHERE` (`src/backend/parser/parse_agg.c`, SQLSTATE 42803). The statements
+  write one row at a time, so no group exists for the aggregate to summarize; without
+  the check they succeeded over an empty table and failed per row, uncoded, over a
+  populated one. The arity walk runs first, so a wrong count still reports
+  `COHSQLE006`.
 - **Access-path selection (rule-based; no cost model — the MVP planner
   contract).** The planner flattens the WHERE clause's top-level `AND`
   conjuncts into per-column sargable predicates — `column op comparand` where
@@ -426,7 +477,8 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   otherwise, ordinal string comparison, hand-rolled `LIKE`
   (`%`/`_`), `CASE`, `BETWEEN`, `IN` (lists), `IS NULL`, parameters (`@name`
   bound by bare name), and a small builtin set (`COALESCE`, `UPPER`, `LOWER`,
-  `LENGTH`, `ABS`). Compiled expression plans are a later optimization.
+  `LENGTH`, `ABS`) dispatched through the signature table above. Compiled
+  expression plans are a later optimization.
 - **Arithmetic faults are coded statement failures (#1069).** Division or
   modulo by zero raises `SqlEvaluationException` with `COHSQLE001`; a result,
   operand, literal, aggregate or CASE/COALESCE value outside its numeric type
@@ -496,7 +548,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   that recurses over an expression tree calls
   `RuntimeHelpers.EnsureSufficientExecutionStack()` before it descends: the
   session's system-relation scan (`UsesSystemView`), the planner's validators and
-  binders (`RejectUnknownFunctions`, `ValidateExpression`, `StaticOperandType`,
+  binders (`ValidateFunctionCalls`, `ValidateExpression`, `StaticOperandType`,
   `ContainsAggregate`, `ContainsCast`, `ReferencesAnyColumn`, `RejectColumnReferences`,
   `ContainsStar`, the sargable and join
   equality collectors, ordering alias binding, grouping binding, `SameGroupExpression`,
@@ -1042,9 +1094,11 @@ updates are restricted while referenced. `ON UPDATE` is unsupported and returns
 
 Checks require Boolean predicates made from supported deterministic row
 expressions. Parameters, subqueries, aggregates, unsupported functions and casts
-are rejected when the DDL declares the check (`SqlPlanExecutor.ValidateCheck`); the
-load path binds a stored predicate with `BindPersistedCheck`, which does not apply
-the declaration rules again (see
+are rejected when the DDL declares the check (`SqlPlanExecutor.ValidateCheck`), and a
+call with arguments its function's signature does not accept is rejected while the
+DDL is planned (`COHSQLE006`, #1189); the
+load path binds a stored predicate with `BindPersistedCheck`, which matches calls
+against their signatures but does not apply the declaration rules again (see
 [Persisted definitions](#persisted-definitions-canonical-text-parsed-once)). The
 CHECK shape walk visits each node once, so its cost is linear in the predicate.
 Multiple unnamed constraints receive distinct generated names. Cascades are collected before restriction checks; a child
@@ -1237,7 +1291,8 @@ and add it again" as the only remedy.
   `SqlPlanExecutor.ValidateCheck`: binding, plus the declaration rules (no casts,
   no sign over an operand the plan types as non-numeric). Loading binds it through
   `BindPersistedCheck`: columns and collations resolve (`SqlPersistedExpression.Bind`),
-  the predicate is a row expression (no parameter, subquery, `*` or aggregate) and a
+  every call passes arguments its function's signature accepts, the predicate is a
+  row expression (no parameter, subquery, `*` or aggregate) and a
   Boolean predicate over the functions the evaluator implements — what evaluating
   it needs, and nothing more. The engine that stored a predicate accepted it, so a
   later release that tightens a declaration rule must not turn the predicate into
@@ -1251,6 +1306,22 @@ and add it again" as the only remedy.
   change** and needs a format version and a migration, never a silent open failure.
   `EnsureCanDropColumn` binds the same way, so a tightened rule cannot block an
   unrelated DROP COLUMN.
+- **Argument counts are binding, not a declaration rule (#1189).** A call whose
+  argument count no signature of its function accepts has no value on any row: the
+  evaluator used to evaluate no argument for it and return NULL, so `CHECK (ABS(c, 1)
+  > 0)` admitted every row. Binding therefore matches every call against the
+  signature table (`SqlPersistedExpression.Bind`, after the call's arguments), and a
+  stored CHECK holding such a call fails the open with `COHSQLE006`. By the rule
+  above that is a catalog-format change, and it takes no version bump only because
+  format 4 is unreleased and has no upgrade path (#1152, owner decision of
+  2026-10-01): engine builds before #1189 wrote format-4 catalogs that can hold such a
+  CHECK, and none is carried forward. The open names the database, table and
+  constraint and carries the coded error (the `SqlEvaluationException` is the inner
+  exception of the definition's), and its hint is not the restore-from-backup one,
+  since a backup holds the same definition: it says an engine build that did not
+  check function arguments stored the constraint, and to drop or replace it with
+  that build (`SqlPersistedExpression.UncheckedCallHint`). Once a format has shipped,
+  a narrowing like this one bumps the format version through the format gate.
 - **Linear validation.** `ValidateCheckSyntax` visits each node of a predicate once,
   passing each child the Boolean requirement its position imposes (AND/OR/NOT
   operands, and COALESCE arguments and CASE results when the call or CASE must be
@@ -1303,7 +1374,8 @@ and add it again" as the only remedy.
   binds to its table means the catalog is damaged or came from an incompatible
   engine build. The open fails with `Database '<name>' cannot be opened.`, naming
   the table and the constraint or column and telling the operator to restore from
-  a backup; nothing is half-opened, because binding precedes every other
+  a backup (a call that fails its signature has its own hint, above); nothing is
+  half-opened, because binding precedes every other
   component. Canonical storage is part of data-storage format 4, which is
   unreleased, so there is no further version bump and earlier text is not
   migrated.
@@ -1383,9 +1455,13 @@ catalog violations unchanged. Arithmetic faults throw the internal
 a sign over a non-numeric operand throws it with `COHSQLE003`, from planning when
 the operand's type is known there or the operand is a parameter whose bound value
 is not a number, and a statement whose walk runs out of stack throws it with
-`COHSQLE004` (#1151). The codes are published in the dialect's
-diagnostics table. A persisted CHECK or DEFAULT that does not load fails the open
-with a `DatabaseException` naming the database, table and constraint or column. No runtime
+`COHSQLE004` (#1151). A column reference where no columns are in scope throws it
+with `COHSQLE005` (#1165), and a function call whose arguments its function's
+signature does not accept with `COHSQLE006` (#1189), both while planning. The codes
+are published in the dialect's diagnostics table. A persisted CHECK or DEFAULT that
+does not load fails the open with a `DatabaseException` naming the database, table
+and constraint or column; one whose call fails its signature carries the
+`COHSQLE006` error in its message and as its inner exception. No runtime
 `ArithmeticException` escapes expression evaluation.
 
 ## The MVCC integration (scoped under #862)
