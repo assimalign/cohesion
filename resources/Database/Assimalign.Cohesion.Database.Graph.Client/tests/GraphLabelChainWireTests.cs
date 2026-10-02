@@ -132,10 +132,16 @@ public sealed class GraphLabelChainWireTests
     }
 
     /// <summary>
-    /// 100,000 nested groups are deeper than any server thread's stack. The parse stops with
+    /// 500,000 nested groups are deeper than any server thread's stack. The parse stops with
     /// GQL0009, which the server reports as the COHDBG008 execution failure (the text is within the
     /// language; the thread is too small for it), and the same pooled session serves the next query.
     /// </summary>
+    /// <remarks>
+    /// The server parses on a thread pool thread, whose default stack is 8 MB on Linux
+    /// (RLIMIT_STACK) against 1 to 1.5 MB on Windows, so the depth has to defeat 8 MB even at 32
+    /// bytes per level. 500,000 levels keep the longest template's text (about 10 MB) under the
+    /// protocol's 16 MB frame limit.
+    /// </remarks>
     /// <param name="template">The statement, with the nested text at <c>{0}</c>.</param>
     /// <param name="open">The text that opens one level.</param>
     /// <param name="leaf">The innermost text.</param>
@@ -147,7 +153,7 @@ public sealed class GraphLabelChainWireTests
     public async Task QueryAsync_NestingPastTheStack_ShouldFailAsCohdbg008AndKeepSession(string template, string open, string leaf)
     {
         // Arrange
-        const int depth = 100_000;
+        const int depth = 500_000;
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.ExecuteAsync("CREATE (:L0 {name: 'one'})", cancellationToken: harness.Token);

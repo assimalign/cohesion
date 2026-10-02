@@ -311,19 +311,27 @@ public sealed class GqlLabelChainExecutionTests
     /// A hand-built tree deeper than any thread's stack validates without recursion and fails in
     /// evaluation with COHDBG008, which aborts only the statement.
     /// </summary>
+    /// <remarks>
+    /// The statement runs on whatever thread the session continues on, so the depth has to defeat
+    /// every platform's default stack, not only Windows' 1 to 1.5 MB: Linux threads default to
+    /// 8 MB (RLIMIT_STACK). A level of the smallest recursion (<c>return !Matches(...)</c>) can cost
+    /// as little as 32 bytes, so 1,000,000 levels need at least 32 MB. At 200,000 levels the
+    /// negation chain fitted in a Linux thread pool thread and evaluated without failing.
+    /// </remarks>
     [Fact(DisplayName = "Cohesion Test [Graph] - Label chains: a hand-built tree deeper than the stack is COHDBG008 and the session survives")]
     public async Task Execute_HandBuiltTreePastTheStack_ShouldFailWithCohdbg008Async()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
         await using var session = await SeedAsync(engine);
-        const int depth = 200_000;
+        const int depth = 1_000_000;
+        var always = new GqlLiteralExpression(true);
         GqlLabelExpression negations = new GqlLabelName("X");
         GqlExpression predicate = new GqlBinaryExpression(new GqlPropertyExpression("n", "name"), "=", new GqlLiteralExpression("x"));
         for (int i = 0; i < depth; i++)
         {
             negations = new GqlLabelNegation(negations);
-            predicate = new GqlLogicalExpression(GqlLogicalOperator.And, [predicate, new GqlLiteralExpression(true)]);
+            predicate = new GqlLogicalExpression(GqlLogicalOperator.And, [predicate, always]);
         }
         var empty = new Dictionary<string, object?>();
         GqlQueryStatement[] statements =
