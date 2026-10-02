@@ -27,6 +27,11 @@ public static class SqlDatabaseEngineFactory
     /// </summary>
     /// <param name="options">Engine creation options.</param>
     /// <returns>A new SQL engine instance.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="SqlDatabaseEngineOptions.ExpressionNestingLimit"/> is outside
+    /// <see cref="Language.SqlQueryParserOptions.MinimumExpressionNestingLimit"/>..<see cref="Language.SqlQueryParserOptions.MaximumExpressionNestingLimit"/>.
+    /// </exception>
     public static SqlDatabaseEngine Create(SqlDatabaseEngineOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

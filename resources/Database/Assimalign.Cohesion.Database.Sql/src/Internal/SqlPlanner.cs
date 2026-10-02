@@ -343,10 +343,14 @@ internal sealed partial class SqlPlanner
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.And } conjunction)
+        if (expression is SqlLogicalExpression { Operator: SqlLogicalOperator.And } conjunction)
         {
-            CollectSargablePredicates(table, conjunction.Left, predicates);
-            CollectSargablePredicates(table, conjunction.Right, predicates);
+            // Every term of the chain at one level; a parenthesized conjunction among them is a
+            // nested chain whose terms are just as mandatory.
+            foreach (var term in conjunction.Operands)
+            {
+                CollectSargablePredicates(table, term, predicates);
+            }
             return;
         }
 
@@ -1026,6 +1030,7 @@ internal sealed partial class SqlPlanner
             SqlCollateExpression collate => StaticOperandType(collate.Operand, evaluator, boundSubqueries, boundValues),
             SqlCastExpression { TargetTypeInfo: { } target } => target.Type,
             SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
+            SqlLogicalExpression => DatabaseType.Boolean,
             SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,
             SqlBinaryExpression { Operator: not (SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
@@ -1064,10 +1069,13 @@ internal sealed partial class SqlPlanner
     /// <remarks>
     /// Every walker that recurses through these children calls
     /// <see cref="RuntimeHelpers.EnsureSufficientExecutionStack"/> before it descends (#1151). A
-    /// parsed tree is at most <c>SqlQueryParser.MaximumExpressionDepth</c> (128) levels deep, so
-    /// the check fails only for a tree built by hand or on a thread created with a small stack,
-    /// and the statement then fails with <c>COHSQLE004</c> instead of the process overflowing the
-    /// stack. A new walker follows the same rule.
+    /// parsed tree is at most the engine's configured expression nesting limit deep (256 levels
+    /// by default, at most 4096), so the check fails for a statement within a high limit that the
+    /// thread has too little stack for, or on a thread created with a small stack, and the
+    /// statement then fails with <c>COHSQLE004</c> instead of the process overflowing the stack.
+    /// An <c>AND</c> or <c>OR</c> chain yields all of its terms at one level, so a walker iterates
+    /// a chain of any length instead of recursing once per term. A new walker follows the same
+    /// rule.
     /// </remarks>
     internal static IEnumerable<SqlExpression> Children(SqlExpression expression)
     {
@@ -1075,6 +1083,12 @@ internal sealed partial class SqlPlanner
         {
             case SqlCollateExpression collate:
                 yield return collate.Operand;
+                break;
+            case SqlLogicalExpression logical:
+                foreach (var operand in logical.Operands)
+                {
+                    yield return operand;
+                }
                 break;
             case SqlBinaryExpression binary:
                 yield return binary.Left;

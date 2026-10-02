@@ -28,9 +28,13 @@ internal sealed class ServerTestHarness : IAsyncDisposable
 
     public const string DatabaseName = "app";
 
-    public static async Task<ServerTestHarness> StartAsync(Action<SqlDatabaseServerOptions>? configure = null)
+    public static async Task<ServerTestHarness> StartAsync(
+        Action<SqlDatabaseServerOptions>? configure = null,
+        Action<SqlDatabaseEngineOptions>? configureEngine = null)
     {
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-e2e" });
+        var engineOptions = new SqlDatabaseEngineOptions { EngineName = "sql-e2e" };
+        configureEngine?.Invoke(engineOptions);
+        var engine = SqlDatabaseEngine.Create(engineOptions);
 
         var database = await engine.CreateDatabaseAsync(DatabaseName);
 

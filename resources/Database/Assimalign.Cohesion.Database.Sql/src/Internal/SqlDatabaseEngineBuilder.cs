@@ -64,6 +64,12 @@ internal sealed class SqlDatabaseEngineBuilder : ISqlDatabaseEngineBuilder
         set { _state.EnsureMutable(); _options.MaintenanceInterval = value; }
     }
 
+    public int ExpressionNestingLimit
+    {
+        get => _options.ExpressionNestingLimit;
+        set { _state.EnsureMutable(); _options.ExpressionNestingLimit = value; }
+    }
+
     public IDatabaseEngineBuilder AddWorker(Func<IDatabaseEngine, IDatabaseEngineWorker> configure)
     {
         _state.AddWorker(configure);

@@ -10,8 +10,8 @@ public sealed partial class SqlQueryParser
     // ── Expression parsing (recursive descent with precedence) ─────────
     //
     //   ParseExpression         → ParseOr
-    //   ParseOr                 → ParseAnd (OR ParseAnd)*
-    //   ParseAnd                → ParseNot (AND ParseNot)*
+    //   ParseOr                 → ParseAnd (OR ParseAnd)*      one n-ary node per chain
+    //   ParseAnd                → ParseNot (AND ParseNot)*     one n-ary node per chain
     //   ParseNot                → NOT? ParseComparison
     //   ParseComparison         → ParseComparisonCore
     //                            (an infix ~ after IS NULL, IN, LIKE or BETWEEN reports COHDBL001)
@@ -33,8 +33,9 @@ public sealed partial class SqlQueryParser
     //                            (a ~ here, as in LIKE ~'x' or DEFAULT ~1, goes to ParseUnary)
     //
     // An operand a node encloses is parsed through ParseOperand, and a node built over an
-    // operand parsed before it is checked with Nest: together they bound the tree at
-    // MaximumExpressionDepth levels (SqlQueryParser.Nesting.cs, #1151).
+    // operand parsed before it is checked with Nest (an AND/OR chain also with TryOpenChain):
+    // together they bound the tree at the configured nesting limit (SqlQueryParser.Nesting.cs,
+    // #1151).
 
     private SqlExpression ParseExpression(ref TokenLexer lexer)
     {
@@ -43,34 +44,69 @@ public sealed partial class SqlQueryParser
 
     private SqlExpression ParseOr(ref TokenLexer lexer)
     {
-        var left = ParseAnd(ref lexer);
-
-        while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "OR"))
-        {
-            var pos = lexer.Current.Position;
-            Advance(ref lexer);
-            var right = ParseOperand(ref lexer, OperandRule.And);
-            left = Nest(ref lexer, new SqlBinaryExpression(left, SqlBinaryOperator.Or, right,
-                Location.Create(1, 1, pos, pos)));
-        }
-
-        return left;
+        var first = ParseAnd(ref lexer);
+        return !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "OR")
+            ? ParseLogicalChain(ref lexer, first, SqlLogicalOperator.Or)
+            : first;
     }
 
     private SqlExpression ParseAnd(ref TokenLexer lexer)
     {
-        var left = ParseNot(ref lexer);
+        var first = ParseNot(ref lexer);
+        return !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "AND")
+            ? ParseLogicalChain(ref lexer, first, SqlLogicalOperator.And)
+            : first;
+    }
 
-        while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "AND"))
+    /// <summary>
+    /// Parses the rest of an <c>AND</c> or <c>OR</c> chain into one n-ary node, PostgreSQL's
+    /// shape (#1151): the chain is one level of the tree however many terms it has, so a
+    /// 10,000-term predicate parses, and every walker iterates its terms instead of recursing
+    /// once per term. Binary nodes made such a chain as deep as it was long.
+    /// </summary>
+    /// <remarks>
+    /// A parenthesized chain of the same operator that opens the chain merges into it, so
+    /// <c>(a AND b) AND c</c> is the node <c>a AND b AND c</c> builds, exactly as left
+    /// associativity read it before; one in a later position, <c>a AND (b AND c)</c>, stays a
+    /// nested node. The tree is therefore the one the binary form had, with each run of links
+    /// collapsed, and the canonical text the renderer stores for it is unchanged.
+    /// <para>
+    /// Parsing a chain costs its own terms only. The chain takes over the operand list of the
+    /// chain it absorbs rather than copying it, and tracks the deepest operand as it adds each
+    /// one, so <c>((X AND t) AND t) ... AND t</c> is linear in its length however many
+    /// parentheses wrap <c>X</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="lexer">The lexer, at the chain's first operator.</param>
+    /// <param name="first">The first operand, parsed before the chain was known.</param>
+    /// <param name="op">The chain's operator.</param>
+    private SqlExpression ParseLogicalChain(ref TokenLexer lexer, SqlExpression first, SqlLogicalOperator op)
+    {
+        int position = lexer.Current.Position;
+        var opening = first is SqlLogicalExpression group && group.Operator == op ? group : null;
+
+        // The deepest operand so far: the first, or the deepest one of the chain it absorbs.
+        int operandDepth = opening is null ? first.Depth : opening.Depth - 1;
+        if (!TryOpenChain(ref lexer, operandDepth))
         {
-            var pos = lexer.Current.Position;
-            Advance(ref lexer);
-            var right = ParseOperand(ref lexer, OperandRule.Not);
-            left = Nest(ref lexer, new SqlBinaryExpression(left, SqlBinaryOperator.And, right,
-                Location.Create(1, 1, pos, pos)));
+            return first;
         }
 
-        return left;
+        // The absorbed chain is dropped, so its list is taken over rather than copied: a copy
+        // per pair of parentheses made the parse cost terms times parentheses.
+        List<SqlExpression> operands = opening is null ? [first] : opening.DetachOperands();
+
+        string keyword = op == SqlLogicalOperator.And ? "AND" : "OR";
+        var rule = op == SqlLogicalOperator.And ? OperandRule.Not : OperandRule.And;
+        while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, keyword))
+        {
+            Advance(ref lexer);
+            var operand = ParseOperand(ref lexer, rule);
+            operands.Add(operand);
+            operandDepth = Math.Max(operandDepth, operand.Depth);
+        }
+
+        return Nest(ref lexer, new SqlLogicalExpression(op, operands, operandDepth, Location.Create(1, 1, position, position)));
     }
 
     private SqlExpression ParseNot(ref TokenLexer lexer)
@@ -511,6 +547,10 @@ public sealed partial class SqlQueryParser
     {
         var pos = lexer.Current.Position;
 
+        // Whatever the primary is, it sits one level below the nodes that enclose it; the nodes
+        // inside it (a call's arguments, a CASE's branches) record themselves as they are entered.
+        EnterLeaf();
+
         if (IsAtEnd(ref lexer))
         {
             return MissingExpression(ref lexer, pos);
@@ -786,8 +826,7 @@ public sealed partial class SqlQueryParser
             // Handle COUNT(*) and similar
             if (lexer.Current.Type == TokenType.Asterisk)
             {
-                args.Add(new SqlStarExpression(Location.Create(1, 1, lexer.Current.Position, lexer.Current.Position + 1)));
-                Advance(ref lexer);
+                args.Add(ParseStarArgument(ref lexer));
             }
             else
             {
@@ -810,6 +849,27 @@ public sealed partial class SqlQueryParser
         SkipCallExtensions(ref lexer);
 
         return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, pos));
+    }
+
+    /// <summary>
+    /// Parses the <c>*</c> of <c>COUNT(*)</c>. It is the call's operand, a level below the call
+    /// like any other argument, so it enters that level the same way: a call at the deepest level
+    /// the limit allows has no room for it (#1151). The star used to be added without the check,
+    /// so <c>COUNT(*)</c> at that level built a tree one level deeper than the limit.
+    /// </summary>
+    private SqlExpression ParseStarArgument(ref TokenLexer lexer)
+    {
+        int position = lexer.Current.Position;
+        if (!TryEnterOperand(ref lexer))
+        {
+            return NestingPlaceholder(position);
+        }
+
+        EnterLeaf();
+        var star = new SqlStarExpression(Location.Create(1, 1, position, position + 1));
+        Advance(ref lexer);
+        _expressionDepth--;
+        return star;
     }
 
     /// <summary>

@@ -18,10 +18,21 @@ public sealed partial class SqlQueryParser : QueryParser
     /// <summary>
     /// Initializes a new <see cref="SqlQueryParser"/>.
     /// </summary>
-    /// <param name="options">Parser options.</param>
+    /// <param name="options">
+    /// Parser options. A <see cref="SqlQueryParserOptions"/> also sets the expression nesting
+    /// limit; any other options, or none, apply
+    /// <see cref="SqlQueryParserOptions.DefaultExpressionNestingLimit"/>.
+    /// </param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="SqlQueryParserOptions.ExpressionNestingLimit"/> is outside
+    /// <see cref="SqlQueryParserOptions.MinimumExpressionNestingLimit"/>..<see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>.
+    /// </exception>
     public SqlQueryParser(QueryParserOptions? options = null)
         : base(options ?? new QueryParserOptions())
     {
+        _nestingLimit = options is SqlQueryParserOptions sqlOptions
+            ? SqlQueryParserOptions.Validate(sqlOptions.ExpressionNestingLimit, nameof(options))
+            : SqlQueryParserOptions.DefaultExpressionNestingLimit;
     }
 
     /// <inheritdoc />
@@ -54,6 +65,7 @@ public sealed partial class SqlQueryParser : QueryParser
         _paginationDepth = 0;
         _expressionDepth = 0;
         _parenthesisDepth = 0;
+        _deepestNesting = 0;
         _nestingDiagnostic = -1;
         _implicitAlias = null;
         _parseDiagnostics.Clear();
@@ -190,6 +202,9 @@ public sealed partial class SqlQueryParser : QueryParser
             expression = new SqlQueryExpression(expression.CommandType, null, expression.Location);
         }
 
+        // An engine whose limit is lower than this parser's reads the measure back instead of
+        // parsing the statement again (SqlQueryStatement.ExpressionNestingDepth).
+        expression.SetNestingDepth(_deepestNesting);
         var statement = new SqlQueryStatement(expression);
 
         foreach (var diagnostic in _parseDiagnostics)

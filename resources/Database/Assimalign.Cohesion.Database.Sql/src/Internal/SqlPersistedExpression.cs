@@ -110,11 +110,13 @@ internal static class SqlPersistedExpression
     }
 
     /// <summary>
-    /// The failure to read a definition back on a thread too small for it. Canonical text stays
-    /// within the dialect's nesting limits (#1151), whose deepest form the parser reads with a
-    /// few hundred KB of stack in a release build, so this happens only on a thread created with
-    /// a small maximum size or called from deep inside another recursion. The catalog is intact,
-    /// so the message must not send the operator to a backup.
+    /// The failure to read a definition back on a thread too small for it. Canonical text nests
+    /// no deeper than the declaration the DDL accepted under the engine's nesting limit (#1151);
+    /// under the default limit the parser reads the deepest such text with well under a
+    /// default thread's stack in a release build, so this happens on a thread created with a small
+    /// maximum size, called from deep inside another recursion, or reading a definition an engine
+    /// with a much higher configured limit stored. The catalog is intact, so the message must not
+    /// send the operator to a backup.
     /// </summary>
     /// <remarks>
     /// It stays an exhausted-stack signal rather than a <see cref="DatabaseException"/>, because
@@ -201,7 +203,11 @@ internal static class SqlPersistedExpression
         out string? problem, out bool outOfStack)
     {
         expression = null;
-        var statement = new SqlQueryParser().Parse($"SELECT * FROM {carrierTable} WHERE {text}");
+        // Read at the highest nesting limit any engine can be configured with (#1151). The limit
+        // decides which statements an engine accepts, not which databases it can open: a
+        // definition a DDL stored under one engine's limit opens under every other, and canonical
+        // text never nests deeper than the declaration the DDL accepted.
+        var statement = new SqlQueryParser(SqlQueryRequest.CeilingParserOptions).Parse($"SELECT * FROM {carrierTable} WHERE {text}");
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         outOfStack = error?.Code == ParserOutOfStackCode;
         if (error is not null)
@@ -272,6 +278,7 @@ internal static class SqlPersistedExpression
     // SqlPlanner.Children. The counts and presence flags make that child sequence unambiguous.
     private static bool SameNode(SqlExpression left, SqlExpression right) => (left, right) switch
     {
+        (SqlLogicalExpression a, SqlLogicalExpression b) => a.Operator == b.Operator && a.Operands.Count == b.Operands.Count,
         (SqlBinaryExpression a, SqlBinaryExpression b) => a.Operator == b.Operator,
         (SqlUnaryExpression a, SqlUnaryExpression b) => a.Operator == b.Operator,
         (SqlLiteralExpression a, SqlLiteralExpression b) => a.LiteralType == b.LiteralType && Same(a.Value, b.Value),

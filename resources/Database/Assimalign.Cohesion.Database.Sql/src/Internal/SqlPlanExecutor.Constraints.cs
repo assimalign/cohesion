@@ -874,9 +874,12 @@ internal sealed partial class SqlPlanExecutor
         // (and a searched CASE's conditions) when the call or CASE itself must be Boolean.
         switch (expression)
         {
-            case SqlBinaryExpression { Operator: SqlBinaryOperator.And or SqlBinaryOperator.Or } logical:
-                ValidateCheckSyntax(logical.Left, table, requireBoolean: true, declaring);
-                ValidateCheckSyntax(logical.Right, table, requireBoolean: true, declaring);
+            case SqlLogicalExpression logical:
+                // Every term of an AND/OR chain at one level, however long the chain (#1151).
+                foreach (var term in logical.Operands)
+                {
+                    ValidateCheckSyntax(term, table, requireBoolean: true, declaring);
+                }
                 break;
             case SqlUnaryExpression { Operator: SqlUnaryOperator.Not } negation:
                 ValidateCheckSyntax(negation.Operand, table, requireBoolean: true, declaring);
@@ -917,7 +920,8 @@ internal sealed partial class SqlPlanExecutor
         }
         bool boolean = expression switch
         {
-            SqlBinaryExpression binary => binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual or SqlBinaryOperator.And or SqlBinaryOperator.Or,
+            SqlLogicalExpression => true,
+            SqlBinaryExpression binary => binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual,
             SqlUnaryExpression unary => unary.Operator == SqlUnaryOperator.Not,
             SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => true,
             SqlLiteralExpression literal => literal.LiteralType is SqlLiteralType.Boolean or SqlLiteralType.Null,

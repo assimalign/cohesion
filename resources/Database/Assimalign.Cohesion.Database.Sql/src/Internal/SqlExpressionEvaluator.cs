@@ -108,8 +108,9 @@ internal sealed class SqlExpressionEvaluator
 
     private object? EvaluateCore(SqlExpression expression, object?[] row)
     {
-        // Every operator recurses through here. A parsed tree is at most 128 levels deep; a
-        // deeper one built by hand fails the statement instead of overflowing the stack (#1151).
+        // Every operator recurses through here, once per level of the tree, never once per term
+        // of an AND/OR chain. A tree the thread has too little stack left for fails the statement
+        // instead of overflowing the stack (#1151).
         RuntimeHelpers.EnsureSufficientExecutionStack();
 
         // A grouping plan binds complete key expressions and aggregate calls
@@ -126,6 +127,7 @@ internal sealed class SqlExpressionEvaluator
             SqlLiteralExpression literal => EvaluateLiteral(literal),
             SqlColumnReferenceExpression column => row[ResolveColumn(column)],
             SqlParameterExpression parameter => ResolveParameter(parameter),
+            SqlLogicalExpression logical => EvaluateLogical(logical, row),
             SqlBinaryExpression binary => EvaluateBinary(binary, row),
             SqlUnaryExpression unary => EvaluateUnary(unary, row),
             SqlIsNullExpression isNull => EvaluateIsNull(isNull, row),
@@ -370,38 +372,44 @@ internal sealed class SqlExpressionEvaluator
         ? value is sbyte or byte or short or ushort or int or uint or long or ulong or float or double or decimal
         : value is sbyte or short or int or long or float or double or decimal;
 
-    private object? EvaluateBinary(SqlBinaryExpression binary, object?[] row)
+    /// <summary>
+    /// Evaluates an <c>AND</c> or <c>OR</c> chain with SQL three-valued logic over nullable
+    /// Booleans, term by term from the first (#1151): a chain of any length costs one level of
+    /// recursion, not one per term.
+    /// </summary>
+    /// <remarks>
+    /// The first term that decides the chain (<see langword="false"/> for <c>AND</c>,
+    /// <see langword="true"/> for <c>OR</c>) ends it, and no later term is evaluated, so a guard
+    /// such as <c>d &lt;&gt; 0 AND x / d &gt; 1</c> never divides by zero. Otherwise the chain is
+    /// unknown when any term was unknown (a NULL, or a value that is not a Boolean), and the
+    /// operator's identity when none was. That is exactly what the nested binary operators the
+    /// chain replaces computed, in the same order and with the same faults: evaluating
+    /// <c>(a AND b) AND c</c> left operand first visits a, b, c in turn and stops at the same
+    /// term (the #1069 short-circuit contract).
+    /// </remarks>
+    private object? EvaluateLogical(SqlLogicalExpression logical, object?[] row)
     {
-        // Logical operators get SQL three-valued treatment over nullable booleans.
-        if (binary.Operator is SqlBinaryOperator.And or SqlBinaryOperator.Or)
+        bool deciding = logical.Operator == SqlLogicalOperator.Or;
+        bool unknown = false;
+        var operands = logical.Operands;
+        for (int index = 0; index < operands.Count; index++)
         {
-            bool? left = EvaluateCore(binary.Left, row) as bool?;
-
-            // FALSE AND x and TRUE OR x are decided by the left operand whatever x is,
-            // including UNKNOWN, so the right operand is not evaluated: a guard such as
-            // d <> 0 AND x / d > 1 never divides by zero.
-            if (binary.Operator == SqlBinaryOperator.And ? left is false : left is true)
+            bool? value = EvaluateCore(operands[index], row) as bool?;
+            if (value is null)
             {
-                return left;
+                unknown = true;
             }
-
-            bool? right = EvaluateCore(binary.Right, row) as bool?;
-
-            return binary.Operator == SqlBinaryOperator.And
-                ? (left, right) switch
-                {
-                    (false, _) or (_, false) => false,
-                    (true, true) => true,
-                    _ => null,
-                }
-                : (left, right) switch
-                {
-                    (true, _) or (_, true) => true,
-                    (false, false) => false,
-                    _ => (object?)null,
-                };
+            else if (value.Value == deciding)
+            {
+                return deciding;
+            }
         }
 
+        return unknown ? null : !deciding;
+    }
+
+    private object? EvaluateBinary(SqlBinaryExpression binary, object?[] row)
+    {
         object? leftValue = EvaluateCore(binary.Left, row);
         object? rightValue = EvaluateCore(binary.Right, row);
 

@@ -28,7 +28,12 @@ shared storage, with DDL flowing through the relational catalog
   projection, `ORDER BY`, `LIMIT/OFFSET`, `DISTINCT`, lone `COUNT(*)`;
   `INSERT` (multi-row, defaults, nullability); `UPDATE`/`DELETE` with accurate
   affected counts; `CREATE/ALTER/DROP TABLE`. Unsupported dialect features fail
-  at plan time with precise messages.
+  at plan time with precise messages. Statements nest at most the engine's
+  `ExpressionNestingLimit` (256 levels by default, 32..4096; an `AND`/`OR` chain
+  of any length is one level), and a statement within it that exhausts the
+  executing thread's stack fails with `COHSQLE004` instead of ending the process
+  (#1151). Typed requests for an engine with another limit parse with it through
+  `SqlQueryRequest.FromSql(sql, parameters, parserOptions)`.
 - **Typed rows** — rows encode with the shared self-describing tuple codec,
   prefixed by the owning table's object id (tables share one record space and
   scans filter by it).
@@ -68,6 +73,7 @@ builder.AddSql((context, engine) =>
     engine.EngineName = "orders";
     engine.RootPath = dataDirectory;
     engine.Durability = StorageCommitDurability.Grouped;
+    engine.ExpressionNestingLimit = 512; // optional; 256 by default, 32..4096
     engine.AddServer(databaseEngine =>
     {
         var options = new SqlDatabaseServerOptions();

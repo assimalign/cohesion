@@ -25,17 +25,20 @@ current exchange without completion. ParseFailure and ExecutionFailure leave the
 session ready; malformed payloads, unknown messages, and bad ordering close it.
 Evaluation faults are ExecutionFailure: division by zero, numeric overflow and a
 sign over a non-numeric operand carry messages that begin with `COHSQLE001:`,
-`COHSQLE002:` and `COHSQLE003:`, and a statement whose walk needs more stack than
-the server's thread has left, such as a `LIKE` match that backtracks through more
-wildcards than the stack holds, carries `COHSQLE004:` (see the dialect's
-diagnostics table). A column reference in an `INSERT ... VALUES` row or a `LIMIT`
-or `OFFSET` count, a subquery's included, is an ExecutionFailure carrying
-`COHSQLE005:`, raised while planning, so nothing executes and the session stays
-ready (#1165; a reference to a target column in VALUES used to end the session with
-`Internal`, and one in a subquery's count carried `COHDBL001:`). A statement
-nested deeper than the dialect's 128-level expression limit is a ParseFailure whose
-message carries `SQL0006`; it is refused before anything executes (see the
-dialect's expression nesting limit, #1151).
+`COHSQLE002:` and `COHSQLE003:`, and a statement whose parse or walk needs more
+stack than the server's thread has left, such as one within a high configured
+nesting limit or a `LIKE` match that backtracks through more wildcards than the
+stack holds, carries `COHSQLE004:` (see the dialect's diagnostics table). A
+statement nested deeper than the engine's expression nesting limit (256 levels by
+default, configured per engine within 32..4096) is a ParseFailure whose message
+carries `SQL0006`; it is refused before anything executes. A chain of `AND` or `OR`
+terms counts one level however long it is, so a 10,000-term predicate executes (see
+the dialect's expression nesting limit, #1151).
+A column reference in an `INSERT ... VALUES` row or a `LIMIT` or `OFFSET` count,
+a subquery's included, is an ExecutionFailure carrying `COHSQLE005:`, raised while
+planning, so nothing executes and the session stays ready (#1165; a reference to a
+target column in VALUES used to end the session with `Internal`, and one in a
+subquery's count carried `COHDBL001:`).
 There is no pipelining or multiplexing. Terminate closes; Ping receives Pong while ready.
 
 The model-owned exchange has this order.
