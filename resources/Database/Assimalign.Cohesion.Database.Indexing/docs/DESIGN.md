@@ -71,6 +71,12 @@ entries and splits stay correct.
     before it would exceed half the node, so both halves keep room for a
     maximum-length separator (a count-balanced split could not guarantee it).
     Leaves still split by count — the insert loop re-splits until the entry fits.
+  - *Separator order is checked in every build.* Before a split writes a
+    separator into its parent, it checks the separator against both neighbours
+    and throws `IndexException` if it would invert them; the caller's storage
+    bracket then rolls the half-done split back. A misordered separator that
+    reached disk would misroute lookups permanently (there is no repair path,
+    #1152), and the check costs two key comparisons per split.
 - **The root page never moves.** A root split copies the root's contents to a new
   page and rewrites the root in place as an internal node over that page and the
   new sibling (SQLite's balance-deeper). The root id a catalog registered when the

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -705,9 +704,12 @@ internal sealed class BTreeIndex : IIndex
         {
             var parent = new BTreeNode(parentHandle.Page.AsBodySpan());
 
+            // Checked before the parent changes at all — a full parent would
+            // otherwise split around a separator it cannot accept.
+            EnsureSeparatorOrder(parent, parentId, position, separator);
+
             if (parent.InternalEntrySize(separator.Length) <= parent.FreeSpace)
             {
-                AssertSeparatorOrder(parent, position, separator);
                 parent.InsertInternalEntry(position, separator, childId);
                 parentHandle.MarkDirty();
                 return splitId;
@@ -724,7 +726,7 @@ internal sealed class BTreeIndex : IIndex
 
         using var targetHandle = _storage.OpenPageForWrite(transaction, (PageId)target);
         var targetNode = new BTreeNode(targetHandle.Page.AsBodySpan());
-        AssertSeparatorOrder(targetNode, targetPosition, separator);
+        EnsureSeparatorOrder(targetNode, target, targetPosition, separator);
         targetNode.InsertInternalEntry(targetPosition, separator, childId);
         targetHandle.MarkDirty();
         return splitId;
@@ -874,17 +876,28 @@ internal sealed class BTreeIndex : IIndex
     }
 
     /// <summary>
-    /// Checks (debug builds) that a separator inserted at <paramref name="position"/>
-    /// keeps the directory ordered: it may equal its neighbours, never invert them.
+    /// Fails the split, in every build, when a separator inserted at
+    /// <paramref name="position"/> would leave the directory unordered: it may equal
+    /// its neighbours, never invert them. A misordered separator would be committed
+    /// with the split and misroute lookups from then on, and there is no repair path
+    /// for a persisted tree (#1152). Throwing instead leaves the caller's storage
+    /// bracket to roll the half-done split back. The cost is two key comparisons per
+    /// split.
     /// </summary>
-    [Conditional("DEBUG")]
-    private static void AssertSeparatorOrder(in BTreeNode node, int position, ReadOnlySpan<byte> separator)
+    /// <exception cref="IndexException">The separator or its position would break the directory's order.</exception>
+    private void EnsureSeparatorOrder(in BTreeNode node, long pageId, int position, ReadOnlySpan<byte> separator)
     {
-        Debug.Assert(position >= 0 && position <= node.EntryCount, "Separator position outside the directory.");
-        Debug.Assert(position == 0 || node.GetKey(position - 1).SequenceCompareTo(separator) <= 0,
-            "Separator sorts before its left neighbour.");
-        Debug.Assert(position == node.EntryCount || node.GetKey(position).SequenceCompareTo(separator) >= 0,
-            "Separator sorts after its right neighbour.");
+        if (position < 0 || position > node.EntryCount)
+        {
+            throw new IndexException(
+                $"Index '{Name}' split would insert a separator at position {position} of the {node.EntryCount}-entry directory on page {pageId}.");
+        }
+
+        if ((position > 0 && node.GetKey(position - 1).SequenceCompareTo(separator) > 0)
+            || (position < node.EntryCount && node.GetKey(position).SequenceCompareTo(separator) < 0))
+        {
+            throw new IndexException($"Index '{Name}' split would misorder separators on page {pageId}.");
+        }
     }
 
     private static void RebuildInternal(ref BTreeNode node, int keepCount)
