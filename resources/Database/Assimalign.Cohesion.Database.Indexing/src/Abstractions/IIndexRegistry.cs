@@ -10,8 +10,9 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// <remarks>
 /// Index-directory persistence deliberately belongs to the model catalog, not this
 /// project: the catalog owns schema metadata and its transactional DDL apply, and
-/// the index manager stays a purely physical component. Root page identifiers
-/// change when a root splits — catalogs re-export at their persistence points.
+/// the index manager stays a purely physical component. A tree's root page stays
+/// fixed through splits (#1159), so a registration changes only through index DDL;
+/// catalogs' re-export at their persistence points is a backstop.
 /// </remarks>
 public interface IIndexRegistry
 {

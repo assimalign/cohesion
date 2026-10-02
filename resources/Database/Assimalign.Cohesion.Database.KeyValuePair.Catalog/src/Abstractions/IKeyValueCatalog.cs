@@ -15,8 +15,9 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 /// The key-value model deliberately has a <b>minimal</b> catalog: no schemas, no
 /// tables, no constraints beyond key uniqueness (which the primary index itself
 /// enforces). What must persist is exactly what re-attaches the database on open —
-/// the index registrations (root page ids drift on splits; the engine re-exports at
-/// its persistence points) and the entry-space format version (records are not
+/// the index registrations (a tree's root page stays fixed through splits since
+/// #1159; the engine still re-exports at its persistence points as a backstop) and
+/// the entry-space format version (records are not
 /// self-describing across format changes). Catalog writes are self-committing:
 /// each runs in its own storage transaction on the dedicated catalog file set and
 /// is durable when the call returns. Named key spaces (multiple ordered key spaces

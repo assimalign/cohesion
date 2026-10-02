@@ -114,7 +114,9 @@ creation; those snapshots use scans.
 
 Saving a document prepares old and new scalar keys, then one shared physical statement bracket
 tombstones prior metadata, inserts new metadata, tombstones old index entries, inserts new index
-entries, and persists changed root registrations. Deletion tombstones metadata and keys in one
+entries, and persists any changed root registration (a backstop: a tree's root page stays fixed
+through splits since #1159, so registrations change only when a tree is created). Deletion
+tombstones metadata and keys in one
 bracket. The surrounding logical transaction also owns all chunk writes/tombstones. The catalog
 publishes its in-memory reference only after the physical bracket succeeds. The shared version
 ledger records record and index mutations, so logical rollback erases the writer's keys and
@@ -122,8 +124,9 @@ restores old tombstones. The caller aborts the logical operation after failure.
 
 Physical tree generations use reserved storage sequences and are never reused. Root registrations
 carry writer/deleter zero because they describe current physical topology, including nodes holding
-uncommitted versions. Root splits and registration updates share one physical bracket. A failure
-reattaches the manager from physically restored registrations. Undo adapters resolve the current
+uncommitted versions. Root splits rewrite the root page in place, and a tree's creation and its
+registration share one physical bracket. A failure reattaches the manager from physically
+restored registrations. Undo adapters resolve the current
 tree instead of holding a stale manager object. Current B+Tree erase/purge removes leaf entries
 without merging nodes or collapsing roots, so undo does not change the persisted root.
 

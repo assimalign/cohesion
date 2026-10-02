@@ -11,7 +11,8 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// key columns, and uniqueness. The physical tree identity (root page id) is not
 /// part of this description — it lives in the index-registration record the index
 /// manager exports (<see cref="ISqlCatalog.SaveIndexRegistrationsAsync"/>), because
-/// root page ids drift on splits while the schema-level description is stable.
+/// the description is schema while the registration is physical topology that the
+/// index manager owns (its root page stays fixed through splits since #1159).
 /// </summary>
 /// <remarks>Key-column names are copied into a read-only collection so published descriptions remain stable.</remarks>
 public sealed class SqlCatalogIndex
