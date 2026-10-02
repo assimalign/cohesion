@@ -8,7 +8,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// code, and the session and any open transaction stay usable, exactly as for any
 /// other statement failure. An operand-type fault the planner can already see is raised
 /// while planning, with the same code, so it does not depend on whether rows exist, and a
-/// statement too complex to walk fails wherever its walk runs out of stack.
+/// statement too complex to walk fails wherever its walk runs out of stack. A column
+/// reference in a clause that has no columns in scope is raised while planning, before
+/// anything executes.
 /// </summary>
 /// <remarks>
 /// The code leads the message (<c>COHSQLE001: ...</c>), the engine-code convention
@@ -42,6 +44,13 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// process (#1151).
     /// </summary>
     internal const string StatementTooComplexCode = "COHSQLE004";
+
+    /// <summary>
+    /// A column reference appears in a clause that has no columns in scope (ISO SQLSTATE class 42,
+    /// syntax error or access rule violation): a row of <c>INSERT ... VALUES</c>, or a
+    /// <c>LIMIT</c> or <c>OFFSET</c> count. Raised while planning, so nothing executes (#1165).
+    /// </summary>
+    internal const string ColumnReferenceNotAllowedCode = "COHSQLE005";
 
     private SqlEvaluationException(string code, string detail, Exception? innerException)
         : base($"{code}: {detail}", innerException)
@@ -84,6 +93,19 @@ internal sealed class SqlEvaluationException : DatabaseException
             "Statement too complex: running it needs more stack than the executing thread has left. " +
             "Reduce the nesting of its expressions or the number of wildcards in a LIKE pattern, or run it on a thread with a larger stack.",
             innerException);
+
+    /// <summary>Creates the failure for a column reference in a clause that has no columns in scope.</summary>
+    /// <param name="column">The reference as written, qualifiers included.</param>
+    /// <param name="clause">The clause, as the dialect names it, for example <c>INSERT ... VALUES</c>.</param>
+    /// <param name="alternative">
+    /// The clause's own way to read table columns, appended to the advice, or null when it has none.
+    /// </param>
+    /// <returns>The coded failure.</returns>
+    internal static SqlEvaluationException ColumnReferenceNotAllowed(string column, string clause, string? alternative = null)
+        => new(ColumnReferenceNotAllowedCode,
+            $"Column reference '{column}' is not allowed in {clause}, which has no columns in scope. " +
+            $"Use literals, parameters and expressions over them{(alternative is null ? string.Empty : $", or {alternative}")}.",
+            null);
 
     /// <summary>
     /// Codes a runtime arithmetic fault that no evaluation site coded at its source,

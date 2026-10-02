@@ -40,7 +40,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | Statement | Status | Notes |
 |---|---|---|
 | `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two stored-table `INNER JOIN ... ON`; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
-| `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES`, and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
+| `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES`, and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `UPDATE` | Supported | multi-column `SET`, `WHERE` |
 | `DELETE` | Supported | optional `WHERE` |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
@@ -648,6 +648,57 @@ the value order cannot compare (`Cannot compare values of types ...`).
   represent remains a CAST failure under the conversion contract below, with its
   `CAST ... failed` message.
 
+## VALUES and counts have no column scope (#1165)
+
+A row of `INSERT ... VALUES` is evaluated once, against no table row: ISO SQL
+forbids a column reference in an INSERT's table value constructor. `LIMIT` and
+`OFFSET` counts are evaluated once too, while planning. Their expressions are
+literals, parameters, and operators, signs, `CAST`, `COLLATE`, `CASE`, predicates
+and scalar functions over them. A column reference anywhere in one of them,
+qualified or not and however deeply nested, reports `COHSQLE005` (ISO SQLSTATE
+class 42, syntax error or access rule violation) while planning, so nothing
+executes:
+
+```text
+COHSQLE005: Column reference 'id' is not allowed in INSERT ... VALUES, which has no columns in scope. Use literals, parameters and expressions over them, or INSERT ... SELECT to read values from a table.
+```
+
+For a count the clause is `LIMIT` or `OFFSET` and the message ends after
+"expressions over them.". Every row is checked before the first is written, so
+`VALUES (1, 1), (2, id)` inserts nothing. In process the statement throws a
+`DatabaseException` with that message; over the wire it is `ExecutionFailure` with
+the same text, the session stays ready, and an explicit transaction stays active.
+`INSERT INTO u (id, a) VALUES (id, 1)` used to resolve `id` against the target table
+and fail during evaluation with a runtime error that ended a wire session with
+`Internal`. A count with a column reference reported `Unknown column` without a
+code, or, inside a subquery, came back as an error result carrying `COHDBL001`'s
+correlated-subquery diagnosis instead of throwing (`ExecutionFailure` on the wire
+either way). A subquery's count follows the same rule as the top level's at every
+nesting level, whether the reference names the subquery's own columns or the outer
+query's: ISO SQL's fetch-first count is a simple value specification, so no column
+of any scope is visible to it. An explicit outer qualifier there, as in
+`(SELECT id FROM w LIMIT v.a)`, is still the parser's `COHDBL001`, reported before
+planning. To insert values read from a table, use `INSERT ... SELECT`.
+
+The same clauses reject an aggregate (`Aggregate functions are not allowed in
+INSERT ... VALUES.`, and likewise for `LIMIT` and `OFFSET`) and a bare `*` (`'*' is
+not allowed in INSERT ... VALUES.`, likewise for `LIMIT` and `OFFSET`, where it used
+to report `Expression 'SqlStarExpression' is not supported by the executor yet.`)
+while planning, and a sign over an operand the plan already knows is not a number
+reports `COHSQLE003` there too. A column reference is reported first, so
+`VALUES (SUM(a))` and `VALUES (-a)` name the column. `DEFAULT` as a VALUES item is
+not in the dialect: it parses as a column reference named `DEFAULT` and reports
+`COHSQLE005`. Omit the column from the column list to store its default.
+
+`CURRENT_DATE`, `CURRENT_TIME` and `CURRENT_TIMESTAMP` take no parentheses, so the
+parser reads each as a name. In these clauses an unqualified name spelled as one of
+them is the recognized function, not a column, and reports
+`Function 'CURRENT_TIMESTAMP' is not supported by the executor yet.` while
+planning, the message `NOW()` reports during evaluation; nothing executes. The
+parser does not keep quoting, so a delimited `"CURRENT_TIMESTAMP"` reports the same
+message. Elsewhere the name still binds as a column and reports `Unknown column`
+when the source has none.
+
 ## Grouping and aggregate functions (#1020)
 
 Grouping is a separate execution stage over a stored table, a virtual system
@@ -746,7 +797,10 @@ inserted rows cannot feed back into the source query.
 Correlation is excluded with `COHDBL001`: a nested column must bind to that
 query's local FROM/JOIN scope. The parser diagnoses explicit outer qualifiers;
 catalog binding rejects unresolved local columns, including unqualified outer
-references. Local aliases may shadow outer aliases. Query nesting permits at
+references. A column reference in a subquery's `LIMIT` or `OFFSET` that the parser
+lets through, outer or local, reports `COHSQLE005` instead, because counts have no
+column scope (#1165; see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)).
+Local aliases may shadow outer aliases. Query nesting permits at
 most **32 expression-subquery levels** below the top-level SELECT (or INSERT's
 source SELECT); level 33 reports `COHDBL001` before recursive parsing continues.
 Each subquery is also one level of the statement's expression tree, and its
@@ -1092,6 +1146,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHSQLE002` | Error | Numeric value out of range during evaluation or store assignment (ISO SQLSTATE 22003) |
 | `COHSQLE003` | Error | Unary `+` or `-` over a non-numeric operand (ISO SQLSTATE 42804) |
 | `COHSQLE004` | Error | Statement too complex: a walk over it needs more stack than the executing thread has left, which only a hand-built tree, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
+| `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
@@ -1121,10 +1176,16 @@ when an entry's diagnostic does not name the construct the table records for it.
 Plan-time rejections, such as `Unknown column '<name>'.` and
 `Unknown function '<name>'.`, are `DatabaseException` messages without a code
 (`ExecutionFailure` on the wire). #1103 gives planner rejections structured codes.
+While planning, the engine raises `COHSQLE003` for a sign over an operand it knows
+is not a number and `COHSQLE005` for a column reference where no columns are in
+scope; a `LIMIT`/`OFFSET` count is evaluated while planning, so its arithmetic
+faults (`COHSQLE001`, `COHSQLE002`) surface there too, and `COHSQLE004` can come
+from any planner walk.
 
 The `COHSQLE` codes are engine execution diagnostics, not parser diagnostics, and
 carry no position. They lead the `DatabaseException` message in process and the
 `ExecutionFailure` message on the wire; the arithmetic fault contract above
-defines when each of `COHSQLE001`–`COHSQLE003` is raised, and the expression
-nesting limit when `COHSQLE004` is. The engine's transaction-state codes,
+defines when each of `COHSQLE001`–`COHSQLE003` is raised, the expression
+nesting limit when `COHSQLE004` is, and the column-scope rule for VALUES and
+counts when `COHSQLE005` is. The engine's transaction-state codes,
 `COHSQLT001`–`COHSQLT003`, are documented in the SQL engine design.

@@ -457,7 +457,8 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   `RuntimeHelpers.EnsureSufficientExecutionStack()` before it descends: the
   session's system-relation scan (`UsesSystemView`), the planner's validators and
   binders (`RejectUnknownFunctions`, `ValidateExpression`, `StaticOperandType`,
-  `ContainsAggregate`, `ContainsCast`, `ReferencesAnyColumn`, the sargable and join
+  `ContainsAggregate`, `ContainsCast`, `ReferencesAnyColumn`, `RejectColumnReferences`,
+  `ContainsStar`, the sargable and join
   equality collectors, ordering alias binding, grouping binding, `SameGroupExpression`,
   `GroupExpressionType`, the subquery source walk and `PlanSubqueries`), the
   evaluator (`EvaluateCore`, `FindCollation`), CHECK validation
@@ -488,9 +489,50 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   type is fixed by the plan — a string or Boolean literal, a column, a predicate,
   `||`, `UPPER`/`LOWER`, a CAST, a bound scalar subquery — `SqlPlanner.ValidateExpression`
   raises it before execution (`StaticOperandType`), so the result does not depend on
-  whether the table has rows; that is the one coded fault raised at plan time. A
-  parameter, CASE or other operand only its value types fails when evaluated, with
-  the same code and message.
+  whether the table has rows; it and `COHSQLE005` (below) are the planner's own
+  coded rejections, and count evaluation and stack checks can also raise
+  `COHSQLE001`/`002`/`004` while planning. A parameter, CASE or other operand only
+  its value types fails when evaluated, with the same code and message.
+- **VALUES rows and LIMIT/OFFSET counts have no column scope (#1165).** Both are
+  evaluated once, against an empty row: a VALUES row before the INSERT writes
+  anything, a count while planning. ISO SQL forbids a column reference in an
+  INSERT's table value constructor. The planner used to bind no VALUES expression,
+  and the executor evaluated each one with the target table's columns in scope, so
+  `INSERT INTO u (id, a) VALUES (id, 1)` resolved `id` to ordinal 0 and indexed the
+  empty row; the `IndexOutOfRangeException` was not a `DatabaseException`, so over the
+  wire it reached the `Internal` catch-all and closed the session. Now
+  `SqlPlanner.ValidateScopelessExpression` checks every expression of every VALUES row,
+  and each count, before anything executes. It rejects a column reference anywhere
+  (under a sign, CAST, CASE, aggregate or function call, qualified or not) with
+  `SqlEvaluationException` `COHSQLE005`, which names the reference and the clause
+  (ISO SQLSTATE class 42, syntax error or access rule violation). It then rejects an
+  aggregate and `*` with uncoded messages naming the clause, and runs
+  `ValidateExpression` against an empty column scope, which raises `COHSQLE003` for a
+  sign over a non-numeric literal or parameter and `COHDBL001` for a subquery. The
+  column check runs first, so `-a` and `SUM(a)` report the column, not the
+  operand type or the aggregate. Every row is checked before planning returns, so a
+  fault in a later row leaves the earlier rows unwritten. As defense in depth,
+  `ExecuteInsertAsync` evaluates VALUES with an empty column scope too, so its
+  evaluator can never resolve an ordinal the empty row does not have.
+  Parameters and expressions over literals and parameters are unchanged. A count
+  with a column reference already failed while planning, as `Unknown column`, or,
+  inside a subquery, as an error result: `PlanSubqueries` turned the child's
+  `Unknown column` into `SqlUnsupportedQueryException`, which `SqlQueryExecutor`
+  returns as a `QueryResultStatus.Error` result carrying `COHDBL001`'s
+  correlated-subquery diagnosis. It now throws `COHSQLE005` at every nesting level,
+  for a reference to the subquery's own columns or the outer query's: ISO SQL's
+  fetch-first count is a simple value specification, which no column of any scope
+  reaches. (An explicit outer qualifier is still the parser's `COHDBL001`.) A `*` in
+  a count now reports `'*' is not allowed in LIMIT.` (or `OFFSET`) instead of the
+  evaluator's `Expression 'SqlStarExpression' is not supported by the executor yet.`
+  The unqualified
+  `DEFAULT` keyword in VALUES is not in the dialect and parses as a column reference
+  named `DEFAULT`, so it reports `COHSQLE005` too. The niladic datetime functions
+  `CURRENT_DATE`, `CURRENT_TIME` and `CURRENT_TIMESTAMP` also parse as names, because
+  they take no parentheses; `RejectColumnReferences` reports an unqualified name
+  spelled as one of them as the unsupported function (`Function '<name>' is not
+  supported by the executor yet.`, the message `NOW()` gets at evaluation), not as
+  a column, until the parser gives them a function node.
 - **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.
@@ -828,7 +870,10 @@ record moves with the machinery):
   the session stays ready (#1069; before that fix a raw `DivideByZeroException`
   reached the `Internal` catch-all and closed the session, and so did the
   `InvalidOperationException` the runtime sort wraps around an `ORDER BY` key
-  comparison that fails). A statement nested deeper than the dialect's 128-level
+  comparison that fails). A column reference in an `INSERT ... VALUES` row is a
+  planning error coded `COHSQLE005` and takes the same path (#1165; before that fix
+  the `IndexOutOfRangeException` it raised during evaluation closed the session as
+  `Internal`). A statement nested deeper than the dialect's 128-level
   expression limit is a `ParseFailure` (`SQL0006`); before #1151 a 200,000-term
   expression overflowed the stack and ended the server process, every session with
   it. A cascading delete of any depth is an ordinary statement; before #1164 one
