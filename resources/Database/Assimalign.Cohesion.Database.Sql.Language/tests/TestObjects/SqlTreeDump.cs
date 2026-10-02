@@ -35,6 +35,11 @@ internal static class SqlTreeDump
             case null:
                 builder.Append("null");
                 break;
+            case SqlLogicalExpression logical:
+                builder.Append("Logical(").Append(logical.Operator).Append(", ");
+                AppendList(builder, logical.Operands);
+                builder.Append(')');
+                break;
             case SqlBinaryExpression binary:
                 builder.Append("Binary(").Append(binary.Operator).Append(", ");
                 Append(builder, binary.Left);

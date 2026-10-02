@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 namespace Assimalign.Cohesion.Database.Sql;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Types;
 
@@ -44,6 +45,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     private readonly List<Thread> _workerThreads = new();
     private readonly CancellationTokenSource _workerStopSource = new();
     private readonly ISqlStorageStrategy _strategy;
+    private readonly SqlQueryParserOptions _parserOptions;
 
     private SqlStorage[] _storageSnapshot = [];
     private SqlDatabaseInstance[] _instanceSnapshot = [];
@@ -60,6 +62,10 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         _options = options;
         Name = options.EngineName ?? "sql-engine";
         _signalCommitPending = _commitPendingSignal.Set;
+
+        // Captured once, already validated by Create: a later change to the options object
+        // never changes what the running engine accepts.
+        _parserOptions = new SqlQueryParserOptions { ExpressionNestingLimit = options.ExpressionNestingLimit };
 
         // Resolve the storage strategy at creation: the engine is operational from
         // the moment the constructor returns (create → use → dispose; no start).
@@ -121,6 +127,13 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     internal SqlDatabaseEngineOptions EngineOptions => _options;
 
     /// <summary>
+    /// Gets the parser options the engine's sessions parse statement text with: its expression
+    /// nesting limit, captured when the engine was created (#1151). Never handed out of the
+    /// engine, so nothing changes them.
+    /// </summary>
+    internal SqlQueryParserOptions ParserOptions => _parserOptions;
+
+    /// <summary>
     /// Gets a point-in-time snapshot of every open storage file set (the data and
     /// catalog sets of every open database), for the engine's background workers.
     /// The snapshot is rebuilt when databases open or close; a worker pass may
@@ -142,9 +155,24 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     /// </summary>
     /// <param name="options">Engine creation options.</param>
     /// <returns>A new engine instance.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="SqlDatabaseEngineOptions.ExpressionNestingLimit"/> is outside
+    /// <see cref="SqlQueryParserOptions.MinimumExpressionNestingLimit"/>..<see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>.
+    /// </exception>
     public static SqlDatabaseEngine Create(SqlDatabaseEngineOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+
+        // Checked before the constructor spawns the worker threads.
+        if (options.ExpressionNestingLimit is < SqlQueryParserOptions.MinimumExpressionNestingLimit
+            or > SqlQueryParserOptions.MaximumExpressionNestingLimit)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), options.ExpressionNestingLimit,
+                $"{nameof(SqlDatabaseEngineOptions.ExpressionNestingLimit)} must be between " +
+                $"{SqlQueryParserOptions.MinimumExpressionNestingLimit} and {SqlQueryParserOptions.MaximumExpressionNestingLimit} levels.");
+        }
+
         return new SqlDatabaseEngine(options);
     }
 

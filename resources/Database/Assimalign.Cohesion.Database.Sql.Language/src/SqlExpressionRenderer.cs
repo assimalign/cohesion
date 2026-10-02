@@ -63,8 +63,8 @@ public static class SqlExpressionRenderer
     /// <exception cref="NotSupportedException">
     /// The tree contains a node the dialect cannot spell: a node type the parser does not
     /// produce, or a name containing a double quote, which the dialect cannot delimit. Or the tree
-    /// nests deeper than the dialect's expression limit of 128 levels, so no text of it would
-    /// parse.
+    /// nests deeper than <see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>, the
+    /// highest limit a parser can be configured with, so no parser would read its text.
     /// </exception>
     /// <exception cref="InsufficientExecutionStackException">
     /// The calling thread has too little stack left to walk the tree.
@@ -83,8 +83,8 @@ public static class SqlExpressionRenderer
     /// <returns>The canonical SQL text of <paramref name="query"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="query"/> is null.</exception>
     /// <exception cref="NotSupportedException">
-    /// The query contains a node the dialect cannot spell, or nests deeper than the dialect's
-    /// expression limit of 128 levels.
+    /// The query contains a node the dialect cannot spell, or nests deeper than
+    /// <see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>.
     /// </exception>
     /// <exception cref="InsufficientExecutionStackException">
     /// The calling thread has too little stack left to walk the query.
@@ -97,17 +97,19 @@ public static class SqlExpressionRenderer
     }
 
     /// <summary>
-    /// Refuses a tree deeper than the parser accepts (#1151). Its text would not parse back, so it
-    /// has no canonical form; and refusing it before the walk keeps the walk's recursion within
-    /// the limit. The renderer adds at most one pair of parentheses per node, so the text of a
-    /// tree within the limit also nests its parentheses within it.
+    /// Refuses a tree deeper than any parser accepts (#1151): the highest limit a parser can be
+    /// configured with. Its text would not parse back, so it has no canonical form; and refusing it
+    /// before the walk keeps the walk's recursion within that ceiling. The renderer adds at most
+    /// one pair of parentheses per node, so the text of a tree nests its parentheses no deeper than
+    /// the tree: it parses under every limit at least as deep as the tree, including the one of the
+    /// parser that built it.
     /// </summary>
     private static void ThrowIfTooDeep(int depth)
     {
-        if (depth > SqlQueryParser.MaximumExpressionDepth)
+        if (depth > SqlQueryParserOptions.MaximumExpressionNestingLimit)
         {
             throw new NotSupportedException(
-                $"The expression nests {depth} levels deep; the SQL dialect allows at most {SqlQueryParser.MaximumExpressionDepth}, so its text would not parse.");
+                $"The expression nests {depth} levels deep; the SQL dialect allows at most {SqlQueryParserOptions.MaximumExpressionNestingLimit}, so its text would not parse.");
         }
     }
 
@@ -120,6 +122,7 @@ public static class SqlExpressionRenderer
 
     private static string Node(SqlExpression expression) => expression switch
     {
+        SqlLogicalExpression logical => Logical(logical),
         SqlBinaryExpression binary => Binary(binary),
         SqlUnaryExpression unary => Unary(unary),
         SqlLiteralExpression literal => Literal(literal),
@@ -144,8 +147,8 @@ public static class SqlExpressionRenderer
     /// <summary>The precedence level the parser assigns the node.</summary>
     private static int Level(SqlExpression expression) => expression switch
     {
-        SqlBinaryExpression { Operator: SqlBinaryOperator.Or } => orLevel,
-        SqlBinaryExpression { Operator: SqlBinaryOperator.And } => andLevel,
+        SqlLogicalExpression { Operator: SqlLogicalOperator.Or } => orLevel,
+        SqlLogicalExpression => andLevel,
         SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => notLevel,
         // NOT EXISTS is read by the NOT rung itself, so the negated form sits at that level.
         SqlExistsExpression { IsNegated: true } => notLevel,
@@ -171,11 +174,36 @@ public static class SqlExpressionRenderer
     {
         int level = Level(binary);
 
-        // Logical and arithmetic operators associate to the left, so a right operand at the
-        // operator's own level needs parentheses. Comparisons do not chain at all.
+        // Arithmetic operators associate to the left, so a right operand at the operator's own
+        // level needs parentheses. Comparisons do not chain at all.
         int right = level == comparisonLevel ? additiveLevel : level + 1;
         int left = level == comparisonLevel ? additiveLevel : level;
         return Operand(binary.Left, left) + " " + OperatorText(binary.Operator) + " " + Operand(binary.Right, right);
+    }
+
+    /// <summary>
+    /// Renders an <c>AND</c> or <c>OR</c> chain term by term, iterating however many terms it has
+    /// (#1151). Every term is parenthesized when it parses below the next rung, so a nested chain
+    /// of the same operator keeps its parentheses and reads back as the nested node it is. The
+    /// parser merges such a chain only in first position, where it never leaves one, so the text
+    /// is the one the binary form rendered: <c>a AND b AND c</c>, <c>a AND (b AND c)</c>.
+    /// </summary>
+    private static string Logical(SqlLogicalExpression logical)
+    {
+        int level = Level(logical);
+        string separator = logical.Operator == SqlLogicalOperator.And ? " AND " : " OR ";
+        var builder = new StringBuilder();
+        for (int index = 0; index < logical.Operands.Count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(separator);
+            }
+
+            builder.Append(Operand(logical.Operands[index], level + 1));
+        }
+
+        return builder.ToString();
     }
 
     private static string OperatorText(SqlBinaryOperator op) => op switch
@@ -192,8 +220,7 @@ public static class SqlExpressionRenderer
         SqlBinaryOperator.GreaterThan => ">",
         SqlBinaryOperator.LessOrEqual => "<=",
         SqlBinaryOperator.GreaterOrEqual => ">=",
-        SqlBinaryOperator.And => "AND",
-        SqlBinaryOperator.Or => "OR",
+        // AND and OR are SqlLogicalExpression chains; the parser builds no binary node for them.
         _ => throw new NotSupportedException($"Binary operator '{op}' has no SQL spelling."),
     };
 

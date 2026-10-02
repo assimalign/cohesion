@@ -107,10 +107,12 @@ internal sealed partial class SqlPlanner
         List<(int Left, int Right, Collation Collation)> equalities)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.And } conjunction)
+        if (expression is SqlLogicalExpression { Operator: SqlLogicalOperator.And } conjunction)
         {
-            CollectJoinEqualities(conjunction.Left, evaluator, equalities);
-            CollectJoinEqualities(conjunction.Right, evaluator, equalities);
+            foreach (var term in conjunction.Operands)
+            {
+                CollectJoinEqualities(term, evaluator, equalities);
+            }
         }
         else if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.Equal } binary
             && UnwrapCollation(binary.Left) is SqlColumnReferenceExpression left

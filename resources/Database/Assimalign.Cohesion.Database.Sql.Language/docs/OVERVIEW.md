@@ -15,7 +15,13 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
   exceptions.
 - **AST** — sealed statement/expression node families under
   `SqlQueryStatement`/`SqlQueryExpression`; the raw statement text is stamped on
-  the root after parsing.
+  the root after parsing. An `AND` or `OR` chain is one n-ary
+  `SqlLogicalExpression` of any length.
+- **Nesting limit** — `SqlQueryParserOptions.ExpressionNestingLimit` (256 by
+  default, 32..4096) bounds how deep an expression and its parentheses nest
+  (`SQL0006`); a flat `AND`/`OR` chain counts one level. The statement records
+  how deep it nests (`SqlQueryStatement.ExpressionNestingDepth`). See
+  [DIALECT.md](DIALECT.md#expression-nesting-limit-1151).
 - **Dialect contract** — [DIALECT.md](DIALECT.md) is the authoritative supported /
   recognized / rejected matrix. `SqlLanguageProfile.Instance` carries its lexical
   tables and implemented clause set; recognized clauses outside that set report
@@ -45,6 +51,9 @@ var select = (SqlSelectExpression)statement.SqlExpression;
 
 // Canonical text: "age >= 21"
 string canonical = SqlExpressionRenderer.Render(select.Where!);
+
+// A stricter nesting limit than the default 256 levels.
+var strict = new SqlQueryParser(new SqlQueryParserOptions { ExpressionNestingLimit = 64 });
 ```
 
 See [DESIGN.md](DESIGN.md) for the parser's shape and the decisions behind it.

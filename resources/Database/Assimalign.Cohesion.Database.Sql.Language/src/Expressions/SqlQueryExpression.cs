@@ -37,4 +37,14 @@ public class SqlQueryExpression : QueryExpression
     /// expression constructors do not).
     /// </summary>
     internal void SetStatementText(string text) => _statementText = text;
+
+    /// <summary>
+    /// Gets how deep the statement this node roots nests, as the parser measured it: the greater
+    /// of its deepest expression tree and its deepest grouping parentheses (#1151). Zero on a
+    /// nested query, and on a node the parser did not return as a statement root.
+    /// </summary>
+    internal int NestingDepth { get; private set; }
+
+    /// <summary>Stamps the nesting the parser measured over the whole statement.</summary>
+    internal void SetNestingDepth(int depth) => NestingDepth = depth;
 }

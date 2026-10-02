@@ -27,6 +27,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     private readonly IIndexManager _indexManager;
     private readonly SqlSchemaProvisioner _schemaProvisioner;
     private readonly SqlBoundTableCache _definitions;
+    private readonly SqlDatabaseEngine _engine;
     private bool _disposed;
 
     /// <summary>
@@ -43,11 +44,12 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// <see cref="ThrowIfFormatIsNotCurrent"/> before its data file set was opened;
     /// <see langword="false"/> for a new one, which is born on this engine's format.
     /// </param>
-    internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage,
+    internal SqlDatabaseInstance(string name, SqlDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage,
         ISqlCatalog catalog, bool recover)
     {
         Name = name;
         Engine = engine;
+        _engine = engine;
         _storage = storage;
         _catalogStorage = catalogStorage;
         _catalog = catalog;
@@ -297,7 +299,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         cancellationToken.ThrowIfCancellationRequested();
 
         var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager, _definitions);
-        var session = new SqlDatabaseSession(this, _coordinator, executor);
+        var session = new SqlDatabaseSession(this, _coordinator, executor, _engine.ParserOptions);
 
         return new ValueTask<IDatabaseSession>(session);
     }
@@ -311,7 +313,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
         var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager, _definitions);
-        return new SqlDatabaseSession(this, _coordinator, executor, provisioningSchema);
+        return new SqlDatabaseSession(this, _coordinator, executor, _engine.ParserOptions, provisioningSchema);
     }
 
     /// <inheritdoc />

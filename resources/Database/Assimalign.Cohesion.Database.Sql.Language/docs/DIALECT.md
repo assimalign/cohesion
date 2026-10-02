@@ -54,7 +54,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` | Supported subset, measured | Two stored-table `INNER JOIN ... ON` or bare `JOIN ... ON`, with index assistance where the mandatory equality predicate matches an applicable secondary-index prefix. `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, `CROSS`, additional joins beyond two tables, joins without `ON`, comma joins, and joins of virtual system relations report `COHDBL001`. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported two-table inner joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
-| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions, plus transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's 128-level expression nesting limit (`SQL0006`). Correlated queries, derived tables, quantified comparisons, subqueries in UPDATE/DELETE, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET expressions report `COHDBL001`. See the subquery contract below. |
+| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions, plus transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Correlated queries, derived tables, quantified comparisons, subqueries in UPDATE/DELETE, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET expressions report `COHDBL001`. See the subquery contract below. |
 | `TOP` / `SELECT ALL` / `FETCH` | Recognized, not supported | row-limit and select modifiers rejected with `COHDBL001` |
 | DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
 | `NATURAL JOIN` / `JOIN ... USING` | Recognized, not supported | rejected with `COHDBL001` |
@@ -222,7 +222,10 @@ the tree alone:
 - Parentheses appear only where precedence needs them: `(qty + 1) * 2` keeps
   them, `((qty - 1) - 2)` becomes `qty - 1 - 2`, `qty - (1 - 2)` keeps them. A sign
   applied to a sign is parenthesized (`- -1` becomes `-(-1)`, never a `--`
-  comment), and `+(1)` keeps its parentheses so it stays unary plus.
+  comment), and `+(1)` keeps its parentheses so it stays unary plus. An `AND` or
+  `OR` chain is written term by term: `(a AND b) AND c` becomes `a AND b AND c`,
+  and `a AND (b AND c)` keeps its parentheses, as it did before chains became one
+  node (#1151).
 - Literals keep their value: strings double embedded quotes (`'O''Brien'`),
   numbers keep their digits as written (`007`, `1.5e3`, `.5`), and a `+` that was
   part of a numeric literal is gone (`+5` is `5`).
@@ -242,6 +245,12 @@ CHECK accepts and the invariant that parsing the rendered text yields the same
 tree. A CHECK supplied by a compiled schema keeps its author's spelling in the
 schema document; the engine compares it with the catalog by canonical form, so
 reapplying an unchanged schema stays a no-op.
+
+**Size.** A table's whole definition, the canonical text of its CHECKs and DEFAULTs
+included, is one catalog record of at most 8,092 bytes. That bounds a stored CHECK
+at a few hundred comparisons however the nesting limit is configured; a larger
+definition fails its DDL with `The definition of table '<name>' encodes to <n>
+bytes, more than the 8092 bytes a catalog record can hold.` and stores nothing.
 
 **Parsed once.** The engine parses and binds a table's persisted CHECK and DEFAULT
 definitions once per table version — when the database opens, and when a DDL
@@ -634,7 +643,11 @@ the value order cannot compare (`Cannot compare values of types ...`).
 - **Short-circuit:** `AND` and `OR` evaluate their left operand first and skip the
   right one when the left decides the result (`FALSE AND x`, `TRUE OR x`). A guard
   such as `d <> 0 AND x / d > 1` therefore never divides by zero; a guard written
-  after the division, or a left operand that is NULL, does not protect it. `CASE`
+  after the division, or a left operand that is NULL, does not protect it. A chain
+  of terms (`a AND b AND c ...`, one node of any length since #1151) runs its terms
+  first to last and stops at the first that decides the result, which is the order
+  and the stopping point of the nested operators it replaces, so a guard anywhere
+  before a division protects it. `CASE`
   evaluates only the selected branch, `COALESCE` stops at the first non-NULL
   argument, and `IN` stops at the first list value that matches. Every other
   operator and function evaluates all of its operands.
@@ -751,7 +764,8 @@ most **32 expression-subquery levels** below the top-level SELECT (or INSERT's
 source SELECT); level 33 reports `COHDBL001` before recursive parsing continues.
 Each subquery is also one level of the statement's expression tree, and its
 clauses nest below it, so the [expression nesting limit](#expression-nesting-limit-1151)
-of 128 levels bounds the statement as a whole, subqueries included.
+(256 levels by default) bounds the statement as a whole, subqueries included. The
+32-level subquery limit is fixed; it does not follow the configured expression limit.
 
 `ANY`/`ALL`/`SOME` quantified comparisons, derived tables in FROM or JOIN, CTEs,
 lateral joins, and subqueries in UPDATE/DELETE, INSERT VALUES, CHECK/DEFAULT,
@@ -762,88 +776,140 @@ These subset boundaries do not add named clauses to the 49-clause denominator.
 
 ## Expression nesting limit (#1151)
 
-An expression nests at most **128 levels**, the limit OQL (`OQL0005`) and GQL
-(`GQL0005`) also apply. ISO SQL leaves nesting limits implementation-defined. The
-limit has two parts, each 128:
+ISO SQL leaves nesting limits implementation-defined. The dialect takes a middle
+course between SQL Server, which fixes small limits on particular constructs, and
+PostgreSQL, which bounds only the stack (owner decision of 2026-10-01): it counts
+**genuine nesting only**, against **one documented, configurable limit**, and keeps
+a **stack check as the backstop** for whatever the limit admits.
 
-- **Tree depth.** Every node of the expression tree is a level: an operator, a
-  predicate (`IS NULL`, `BETWEEN`, `IN`, `LIKE`, a comparison), `NOT`, a sign,
-  `CASE`, `CAST`, `COLLATE`, a function call, a subquery, and the leaf at the
-  bottom (a literal, column, parameter or `*`). Depth is measured on the tree, so a
-  left-associative chain counts every link: `1 + 1 + ... + 1` with N terms is N
-  levels deep, and so are N - 1 signs over a column or N - 1 nested `ABS(...)`
-  calls. N comparisons joined by `AND` are N + 1 levels deep, so a flat chain of
-  127 is the longest. A subquery's clauses count below the subquery, so the limit
-  spans the whole statement: `SELECT (SELECT <127-level expression> FROM u) FROM t`
-  is at the limit.
-- **Parenthesis nesting.** Grouping parentheses are not nodes, so they add no
-  level to the tree, but at most 128 pairs may enclose any point of an
-  expression. A subquery's, call's, `IN` list's or `CAST`'s own parentheses are
+- **The limit.** An expression nests at most **256 levels** by default. An engine
+  sets its own within **32..4096** (`SqlDatabaseEngineOptions.ExpressionNestingLimit`,
+  or `ExpressionNestingLimit` on the engine builder) and refuses a value outside that
+  range with `ArgumentOutOfRangeException` when it is created. A parser takes the
+  limit from `SqlQueryParserOptions.ExpressionNestingLimit` and checks the range when
+  it is constructed; any other parser options, or none, give the default.
+- **Tree depth counts.** Every node of the expression tree is a level: an
+  arithmetic, concatenation or comparison operator, a predicate (`IS NULL`,
+  `BETWEEN`, `IN`, `LIKE`), `NOT`, a sign, `CASE`, `CAST`, `COLLATE`, a function call
+  (its arguments sit one level below it), an `IN` list (its values sit one level
+  below it), a subquery, and the leaf at the bottom (a literal, column, parameter or
+  `*`, the `*` of `COUNT(*)` included). Depth is measured on the tree, so an
+  arithmetic chain counts every link: `1 + 1 + ... + 1` with N terms is N levels
+  deep, and so are N - 1 signs over a column or N - 1 nested `ABS(...)` calls. A
+  subquery's clauses count below the subquery, so the limit spans the whole
+  statement: `SELECT (SELECT <255-level expression> FROM u) FROM t` is at the
+  default limit.
+- **Parenthesis nesting counts.** Grouping parentheses are not nodes, so they add no
+  level to the tree, but at most as many pairs as the limit may enclose any point of
+  an expression. A subquery's, call's, `IN` list's or `CAST`'s own parentheses are
   part of that construct, not grouping.
+- **A flat `AND` or `OR` chain does not.** A run of terms joined by `AND` (or by
+  `OR`) at one level is one node however many terms it has, as in PostgreSQL:
+  `a = 1 OR a = 2 OR ... OR a = 10000` is three levels deep (the `OR`, the
+  comparisons, their operands), and it parses, plans and executes, in process and
+  over the wire. A parenthesized chain that opens a chain of the same operator is
+  part of it (`(a AND b) AND c` is the chain `a AND b AND c`); one in a later
+  position is a nested chain and a level (`a AND (b AND c)`). Evaluation is
+  unchanged: the terms run first to last, the first that decides the result ends
+  the chain, and three-valued logic gives the result the nested binary operators
+  gave (see Short-circuit under [Arithmetic and numeric faults](#arithmetic-and-numeric-faults-1069)).
 
 Deeper text reports `SQL0006` at the token where the limit was crossed: the link of
-a chain that made it too deep, the operand that would be one level too deep, or
-the 129th `(`. The rest of the statement is not parsed, so the parser reports
-nothing further, and the statement keeps only its command type, so it never
-executes: the text-execute seam throws `DatabaseParseException` (`ParseFailure` on
-the wire, with the connection still usable), and a typed request returns an error
-result carrying the diagnostic. Diagnostics the parser reported before that point,
-such as a `COHDBL001` earlier in the statement, are kept, and so are those of the
-checks that scan the whole text before parsing: an unterminated literal or
-comment, a character outside the dialect, and an unsupported clause.
+a chain that made it too deep, the operand that would be one level too deep, the
+operator of an `AND`/`OR` chain that would be one level too deep, or the first `(`
+past the limit. The message names the limit (`Expression nesting exceeds the
+supported limit of 256 levels.`). The rest of the statement is not parsed, so the
+parser reports nothing further, and the statement keeps only its command type, so it
+never executes: the text-execute seam throws `DatabaseParseException`
+(`ParseFailure` on the wire, with the connection still usable), and a typed request
+returns an error result carrying the diagnostic. Diagnostics the parser reported
+before that point, such as a `COHDBL001` earlier in the statement, are kept, and so
+are those of the checks that scan the whole text before parsing: an unterminated
+literal or comment, a character outside the dialect, and an unsupported clause.
 Before #1151 nothing bounded nesting: a 200,000-term expression overflowed the
 stack, which .NET cannot catch, so one statement ended the process, and over the
 wire every session of the server with it.
 
-| Written | Levels | Result |
+**The engine's limit holds on every seam.** The engine parses statement text with
+its own limit, which covers every statement a wire client sends. A typed request was
+parsed by its caller, perhaps with a higher limit, so the parser records how deep
+each statement nests (`SqlQueryStatement.ExpressionNestingDepth`, the greater of its
+deepest tree and its deepest parentheses), and the engine refuses a request that
+nests deeper than its limit with an error result carrying `SQL0006`
+(`Expression nesting of 300 levels exceeds this engine's limit of 256 levels.`),
+exactly what parsing the text itself would have decided.
+
+| Written | Levels | Result under the default limit |
 |---|---|---|
-| `1 + 1 + ... + 1`, 128 terms | 128 | Parses and executes |
-| `1 + 1 + ... + 1`, 129 terms | 129 | `SQL0006` at the 128th `+` |
-| `- - ... - a`, 127 signs | 128 | Parses and executes |
-| `ABS(ABS(... 1 ...))`, 128 calls | 129 | `SQL0006` at the innermost `1` |
-| `((( ... 1 ... )))`, 128 pairs | 1 | Parses and executes |
-| `((( ... 1 ... )))`, 129 pairs | 1 | `SQL0006` at the 129th `(` |
-| `a = 1 AND a = 2 AND ...`, 128 comparisons | 129 | `SQL0006` at the 127th `AND` |
+| `1 + 1 + ... + 1`, 256 terms | 256 | Parses and executes |
+| `1 + 1 + ... + 1`, 257 terms | 257 | `SQL0006` at the 256th `+` |
+| `- - ... - a`, 255 signs | 256 | Parses and executes |
+| `ABS(ABS(... 1 ...))`, 256 calls | 257 | `SQL0006` at the innermost `1` |
+| `((( ... 1 ... )))`, 256 pairs | 1 | Parses and executes |
+| `((( ... 1 ... )))`, 257 pairs | 1 | `SQL0006` at the 257th `(` |
+| `a = 1 AND a = 2 AND ...`, 10,000 comparisons | 3 | Parses and executes |
+| `a = 1 OR (a = 2 OR (... OR (a = 256)))`, 256 comparisons | 257 | `SQL0006` at the 255th `OR` |
+| `a IN (1, 2, ..., 10000)` | 2 | Parses and executes |
 
-A long list of alternatives fits as a flat list: `a IN (1, 2, ..., 5000)` is two
-levels deep however many values it lists. A long conjunction can be grouped into
-balanced parenthesized halves, `(c1 AND c2) AND (c3 AND c4)`, whose depth grows
-with the logarithm of its length.
+**Compared with SQL Server and PostgreSQL.**
 
-**Stack.** Each level of parentheses, call arguments, `CASE` or `CAST` costs the
-parser about 2 KB of stack in a release build, so the deepest text the limits
-accept, 128 pairs of parentheses around 127 nested calls, needs about 0.7 MB. The
-default stack of a .NET thread is 1 MB or more. On a thread created with a
-smaller stack, or called from deep inside another recursion, the parser
-reports `SQL0007` instead of overflowing: the text is within the dialect, and it
-parses on a thread with more stack. The parser checks the stack each time it
-recurses, so no text can overflow it.
+| | SQL Server | PostgreSQL | This dialect |
+|---|---|---|---|
+| Long `AND`/`OR` chains | Thousands of terms; an expression holds at most 65,535 identifiers and constants (error 8632) | One n-ary `BoolExpr` per chain, bounded by the stack alone | One n-ary `SqlLogicalExpression` per chain, one level of the limit |
+| Fixed construct limits | `CASE` nests at most 10 levels (error 125); subqueries at most 32 | None | Subqueries at most 32 (`COHDBL001`); every other construct only by the expression limit |
+| Expression nesting | No documented limit; a statement too deep for the server's stack fails (error 8631) | None beyond `max_stack_depth` (2 MB by default) | A documented limit, 256 by default, configurable within 32..4096 (`SQL0006`) |
+| Stack backstop | Error 8631 | `check_stack_depth()`: SQLSTATE 54001, stack depth limit exceeded | Stack checks in the parser and every walker: `COHSQLE004`, SQLSTATE 54001 |
+
+From SQL Server the dialect takes a fixed, documented limit that a client can rely
+on and an operator can tune; from PostgreSQL it takes n-ary chains, which make long
+generated predicates cheap, and the stack check as the last line of defense rather
+than the only one.
+
+**Stack.** The limit bounds how deep a statement nests, not how much stack the
+thread that runs it has. Each level of parentheses, call arguments, `CASE` or `CAST`
+costs the parser about 1 to 2 KB of stack in a release build, depending on how far
+the JIT has optimized it, and about 6 KB in a debug build. In a release build the
+deepest text the default limit accepts, 256 pairs of parentheses around 255 nested
+calls, parses on a 1 MB thread, and a default .NET thread has more (1.5 MB on
+Windows); a debug build needs about 3 MB for it. A higher configured limit admits
+text no default thread can parse: 4,000 nested parentheses need several MB. Wherever
+the stack runs out first, the statement fails instead of the process. The parser
+checks the stack each time it recurses and reports `SQL0007` (the text is within
+the dialect and parses on a thread with more stack). An engine reports a statement
+whose parse, or any later walk, runs out of stack as `COHSQLE004` (ISO SQLSTATE
+54001, statement too complex): a `DatabaseException` in process, `ExecutionFailure`
+on the wire, with the session and any open transaction intact as for any failed
+statement. A statement within the limit therefore executes or fails with
+`COHSQLE004`; it never ends the process.
 
 **Persisted definitions stay openable.** `CREATE TABLE` and `ALTER TABLE` parse
-with the same limit, so a stored `CHECK` or `DEFAULT` is never deeper than 128
-levels. Its canonical text (see [Persisted definitions are canonical](#persisted-definitions-are-canonical))
-has the same tree, and the renderer adds at most one pair of parentheses around a
-node, so the stored text also nests its parentheses no deeper than 128: what the
-DDL stores always parses again when the database opens. `SqlExpressionRenderer`
-refuses a tree deeper than the limit with `NotSupportedException`, because no text
-of it would parse. A database opened on a thread too small to read its deepest
-definition back fails to open with an error that says so, that the catalog is not
-damaged, and to open it on a thread with a larger stack. A statement that reads a
-definition back on such a thread, such as a DDL proving its canonical text,
-fails with `COHSQLE004` instead.
+with the engine's limit, so a stored `CHECK` or `DEFAULT` is never deeper than the
+limit of the engine that stored it. Its canonical text (see [Persisted definitions
+are canonical](#persisted-definitions-are-canonical)) has the same tree, and the
+renderer adds at most one pair of parentheses around a node, so the stored text also
+nests its parentheses no deeper than that tree. The engine reads persisted
+definitions back at the highest limit, 4096, because the limit decides which
+statements an engine accepts, not which databases it opens: a definition stored
+under one engine's limit opens, and is enforced, under every other, including one
+that would refuse the same text as a statement. `SqlExpressionRenderer` refuses a
+tree deeper than 4096 levels with `NotSupportedException`, because no parser would
+read its text back. An `AND`/`OR` chain renders term by term to the text the nested
+binary form rendered (`a AND b AND c`, `a AND (b AND c)`), so canonical text stored
+before chains were n-ary reads back to the same chain and renders unchanged. A
+database opened on a thread too small to read its deepest definition back fails to
+open with an error that says so, that the catalog is not damaged, and to open it on
+a thread with a larger stack. A statement that reads a definition back on such a
+thread, such as a DDL proving its canonical text, fails with `COHSQLE004` instead.
 
 **The engine checks its stack too.** Every recursive walk over a statement (the
 session's system-relation scan, planning, evaluation, CHECK validation, and
-binding a persisted definition) checks the stack before it descends. A parsed
-statement is bounded far inside an ordinary thread's stack, so only a tree built
-by hand, or a thread created with a small stack, can reach the check, and then the
-statement fails with `COHSQLE004` (ISO SQLSTATE 54001, statement too
-complex) instead of ending the process: a `DatabaseException` in process,
-`ExecutionFailure` on the wire, with the session and any open transaction intact
-as for any failed statement. `LIKE` matching recurses once per `%` it backtracks
-through, so its depth follows the values rather than the text: a match that needs
-more stack than the thread has, such as a pattern of 200,000 `%a` segments over a
-value of 200,000 characters, fails the same way with `COHSQLE004`.
+binding a persisted definition) checks the stack before it descends, and recurses
+once per level of the tree, never once per term of an `AND`/`OR` chain, whose terms
+it iterates. A statement that runs any walk out of stack fails with `COHSQLE004` as
+described above. `LIKE` matching recurses once per `%` it backtracks through, so
+its depth follows the values rather than the text: a match that needs more stack
+than the thread has, such as a pattern of 200,000 `%a` segments over a value of
+200,000 characters, fails the same way with `COHSQLE004`.
 
 ## System-view matrix (C1)
 
@@ -918,9 +984,10 @@ SQL aggregates follow the grouping and aggregate contract below. Arithmetic resu
 types and the `COHSQLE001`/`COHSQLE002`/`COHSQLE003` faults follow the arithmetic
 contract above.
 `IS` takes only `[NOT] NULL`, and `LIKE` has no `ESCAPE` clause; the other forms
-report `SQL0003` (see Statement completeness). An expression nests at most 128
-levels, and its parentheses at most 128 pairs; deeper text reports `SQL0006` (see
-[Expression nesting limit](#expression-nesting-limit-1151)).
+report `SQL0003` (see Statement completeness). An expression nests at most 256
+levels by default (configurable per engine within 32..4096), and its parentheses at
+most as many pairs; a chain of `AND` (or `OR`) terms is one level however long, and
+deeper text reports `SQL0006` (see [Expression nesting limit](#expression-nesting-limit-1151)).
 
 `~` is recognized but not part of the dialect, and is rejected at parse time with
 one `COHDBL001` at the operator (#1101). In prefix position (`~a`, bitwise NOT)
@@ -1085,13 +1152,13 @@ function names are lexed but not supported (see the statement matrix).
 | `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; type arguments other than one or two unsigned integer literals; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | Error | Unknown CAST target type |
 | `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
-| `SQL0006` | Error | Expression nesting exceeds 128 levels, or parentheses nest deeper than 128 pairs; the rest of the statement is not parsed (#1151) |
-| `SQL0007` | Error | The statement is within the nesting limits, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack (#1151) |
+| `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
+| `SQL0007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `COHSQLE004` (#1151) |
 | `SQL0100` | Information | Statement does not end with `;` |
 | `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
 | `COHSQLE002` | Error | Numeric value out of range during evaluation or store assignment (ISO SQLSTATE 22003) |
 | `COHSQLE003` | Error | Unary `+` or `-` over a non-numeric operand (ISO SQLSTATE 42804) |
-| `COHSQLE004` | Error | Statement too complex: a walk over it needs more stack than the executing thread has left, which only a hand-built tree, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
+| `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

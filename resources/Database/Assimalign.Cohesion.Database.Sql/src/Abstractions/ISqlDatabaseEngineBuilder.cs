@@ -34,4 +34,7 @@ public interface ISqlDatabaseEngineBuilder : IDatabaseEngineBuilder
 
     /// <summary>Gets or sets the maintenance cadence.</summary>
     TimeSpan MaintenanceInterval { get; set; }
+
+    /// <inheritdoc cref="SqlDatabaseEngineOptions.ExpressionNestingLimit" />
+    int ExpressionNestingLimit { get; set; }
 }

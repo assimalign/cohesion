@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -20,52 +22,69 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
-/// The expression nesting limit against the live engine (#1151). A 200,000-term expression used
-/// to overflow the stack, which .NET cannot catch: one statement ended the process, and over the
-/// wire every session of the server with it. Text deeper than 128 levels is now a parse failure,
-/// a walk that runs out of stack fails its statement with <c>COHSQLE004</c>, and in every case the
-/// session, and the server, keep serving.
+/// The expression nesting limit against the live engine (#1151, owner decision of 2026-10-01: a
+/// happy medium between SQL Server and PostgreSQL). A 200,000-term expression used to overflow
+/// the stack, which .NET cannot catch: one statement ended the process, and over the wire every
+/// session of the server with it. Only genuine nesting counts now: an AND/OR chain of any length
+/// is one level and executes, text nested deeper than the engine's configured limit (256 by
+/// default) is a parse failure, a statement within the limit that runs out of stack fails with
+/// <c>COHSQLE004</c>, and in every case the session, and the server, keep serving.
 /// </summary>
 /// <remarks>
+/// <para>
+/// A level of parentheses, calls, CASE or CAST costs the parser about 6 KB of stack in the debug
+/// build these tests run in, so the deepest text the default limit accepts needs more than the
+/// 1.5 MB a default thread has; statements at the limit therefore run on a thread with ample
+/// stack (<see cref="OnLargeStack{T}"/>). A release build spends about 1 KB per level.
+/// </para>
+/// <para>
 /// A tree deeper than the parser builds needs the language package's internal constructors,
-/// which this assembly does not reach. The stack checks are proven instead by running a tree at
-/// the limit with almost no stack left (<see cref="NearStackLimit"/>): a walker that checks as
-/// it descends throws long before the tree ends, and one that does not check would complete
-/// inside the runtime's reserve, failing the test instead of the process.
+/// which this assembly does not reach. The stack checks are proven instead by running a tree of
+/// 128 levels with almost no stack left (<see cref="NearStackLimit"/>): a walker that checks as it
+/// descends throws long before the tree ends, and one that does not check would complete inside
+/// the runtime's reserve, failing the test instead of the process.
+/// </para>
 /// </remarks>
 public sealed class SqlExpressionDepthExecutionTests : IDisposable
 {
-    private const int Limit = 128;
+    private const int Limit = SqlQueryParserOptions.DefaultExpressionNestingLimit;
     private const int Hostile = 200_000;
     private const string StatementTooComplex = "COHSQLE004";
 
+    /// <summary>The depth of the trees the near-stack-limit walks use: well inside the runtime's reserve.</summary>
+    private const int WalkDepth = 128;
+
     private readonly string _rootPath = Path.Combine(Path.GetTempPath(), "cohesion-expression-depth", Guid.NewGuid().ToString("N"));
 
-    /// <summary>Statements whose expressions nest exactly 128 levels, and the value each returns.</summary>
+    /// <summary>Statements whose expressions nest exactly 256 levels, or that chain 10,000 terms, and the value each returns.</summary>
     public static TheoryData<string, object> AtLimit => new()
     {
-        // 128 terms; each + is a level over the chain before it.
-        { $"SELECT {Chain("1", " + ", Limit)} FROM t", 128L },
-        // 127 signs over a column: negation computes in BIGINT, an odd count of signs negates.
-        { $"SELECT {string.Concat(Enumerable.Repeat("- ", Limit - 1))}id FROM t", -1L },
-        { $"SELECT {string.Concat(Enumerable.Repeat("ABS(", Limit - 1))}id{new string(')', Limit - 1)} FROM t", 1L },
-        { $"SELECT {string.Concat(Enumerable.Repeat("CASE WHEN TRUE THEN ", Limit - 1))}id{string.Concat(Enumerable.Repeat(" END", Limit - 1))} FROM t", 1 },
-        // 128 grouping parentheses add no level to the tree.
-        { $"SELECT {new string('(', Limit)}id{new string(')', Limit)} FROM t", 1 },
-        // 127 comparisons under 126 ANDs.
-        { $"SELECT id FROM t WHERE {Chain("id <> 0", " AND ", Limit - 1)}", 1 },
+        // 256 terms; each + is a level over the chain before it.
+        { $"SELECT {Chain("1", " + ", Limit)} FROM t", (long)Limit },
+        // 255 signs over a column: negation computes in BIGINT, an odd count of signs negates.
+        { $"SELECT {Repeat("- ", Limit - 1)}id FROM t", -1L },
+        { $"SELECT {Repeat("ABS(", Limit - 1)}id{Close(Limit - 1)} FROM t", 1L },
+        { $"SELECT {Repeat("CASE WHEN TRUE THEN ", Limit - 1)}id{Repeat(" END", Limit - 1)} FROM t", 1 },
+        // 256 grouping parentheses add no level to the tree.
+        { $"SELECT {Open(Limit)}id{Close(Limit)} FROM t", 1 },
+        // 255 comparisons in right-nested AND groups: 254 nested chains over a comparison.
+        { $"SELECT id FROM t WHERE {RightNested("id <> 0", "AND", Limit - 1)}", 1 },
+        // A flat chain is one level however long.
+        { $"SELECT id FROM t WHERE {Chain("id <> 0", " AND ", 10_000)}", 1 },
+        { $"SELECT id FROM t WHERE {Chain("id = 0", " OR ", 9_999)} OR id = 1", 1 },
     };
 
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a statement at the 128-level limit executes")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a statement at the 256-level limit, or with a 10,000-term chain, executes")]
     [MemberData(nameof(AtLimit))]
-    public async Task ExecuteAsync_AtLimit_ShouldExecute(string sql, object expected)
+    public void ExecuteAsync_AtLimit_ShouldExecute(string sql, object expected)
     {
-        // Arrange
-        await using var engine = CreateEngine();
-        await using var session = await SeedAsync(engine);
-
         // Act
-        var value = await ScalarAsync(session, sql);
+        var value = OnLargeStack(async () =>
+        {
+            await using var engine = CreateEngine();
+            await using var session = await SeedAsync(engine);
+            return await ScalarAsync(session, sql);
+        });
 
         // Assert
         value.ShouldBe(expected);
@@ -74,11 +93,11 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     /// <summary>One level past the limit and the adversarial 200,000 terms are parse failures on both session seams.</summary>
     /// <param name="terms">The number of terms in a <c>1 + 1 + ...</c> chain.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: an expression past the limit is SQL0006 before anything executes")]
-    [InlineData(Limit + 1)]
+    [InlineData(Limit)]
     [InlineData(Hostile)]
     public async Task ExecuteAsync_PastLimit_ShouldFailToParseAndKeepTheSession(int terms)
     {
-        // Arrange
+        // Arrange: the comparison adds a level over the chain.
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
         string sql = $"DELETE FROM t WHERE id = {Chain("1", " + ", terms)}";
@@ -88,7 +107,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         var typed = await session.ExecuteAsync(new SqlQueryRequest((SqlQueryStatement)new SqlQueryParser().Parse(sql)));
 
         // Assert
-        text.Message.ShouldStartWith("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 128 levels.", Case.Sensitive);
+        text.Message.ShouldStartWith("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 256 levels.", Case.Sensitive);
         typed.Status.ShouldBe(QueryResultStatus.Error);
         typed.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "SQL0006");
         (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(1L);
@@ -101,46 +120,318 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     [InlineData("signs")]
     [InlineData("not")]
     [InlineData("functions")]
-    [InlineData("or")]
-    public async Task ExecuteAsync_HostileShape_ShouldFailToParse(string shape)
+    [InlineData("nested-or")]
+    public void ExecuteAsync_HostileShape_ShouldFailToParse(string shape)
+    {
+        // Arrange
+        string sql = shape switch
+        {
+            "parentheses" => $"SELECT {Open(Hostile)}id{Close(Hostile)} FROM t",
+            "signs" => $"SELECT {Repeat("- ", Hostile)}id FROM t",
+            "not" => $"SELECT id FROM t WHERE {Repeat("NOT ", Hostile)}TRUE",
+            "functions" => $"SELECT {Repeat("ABS(", Hostile)}id{Close(Hostile)} FROM t",
+            _ => $"UPDATE t SET id = 2 WHERE {RightNested("id = 0", "OR", Hostile)}",
+        };
+
+        // Act
+        var (failure, after) = OnLargeStack(async () =>
+        {
+            await using var engine = CreateEngine();
+            await using var session = await SeedAsync(engine);
+            var failure = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(sql).AsTask());
+            return (failure, await ScalarAsync(session, "SELECT id FROM t"));
+        });
+
+        // Assert
+        failure.Message.ShouldStartWith("SQL parse error SQL0006:", Case.Sensitive);
+        after.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A 10,000-term AND or OR predicate is one n-ary node: it parses, plans and executes in every
+    /// statement kind, on the text seam and as a typed request, on an ordinary thread.
+    /// </summary>
+    /// <param name="keyword">The chain's operator.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a 10,000-term AND or OR predicate plans and executes in every statement kind")]
+    [InlineData("AND")]
+    [InlineData("OR")]
+    public async Task ExecuteAsync_TenThousandTermChain_ShouldPlanAndExecute(string keyword)
+    {
+        // Arrange: rows 1..20; the chain selects rows 1..10 either way.
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("chains");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE n (id INT NOT NULL, v INT)");
+        await session.ExecuteAsync("INSERT INTO n (id, v) VALUES " + string.Join(", ", Enumerable.Range(1, 20).Select(id => $"({Number(id)}, {Number(id)})")));
+        string predicate = keyword == "AND"
+            ? string.Join(" AND ", Enumerable.Range(1, 9_999).Select(term => $"v <> {Number(term + 100)}")) + " AND id <= 10"
+            : string.Join(" OR ", Enumerable.Range(1, 9_999).Select(term => $"v = {Number(term + 100)}")) + " OR id <= 10";
+
+        // Act
+        var counted = await ScalarAsync(session, $"SELECT COUNT(*) FROM n WHERE {predicate}");
+        var typed = await ReadScalarAsync(await session.ExecuteAsync(Request($"SELECT COUNT(*) FROM n WHERE {predicate}")));
+        var updated = await session.ExecuteAsync($"UPDATE n SET v = 0 WHERE {predicate}");
+        var grouped = await ScalarAsync(session, $"SELECT COUNT(*) FROM n GROUP BY v HAVING ({predicate.Replace("id <= 10", "COUNT(*) > 1", StringComparison.Ordinal)}) AND v = 0");
+        var deleted = await session.ExecuteAsync($"DELETE FROM n WHERE {predicate}");
+
+        // Assert
+        counted.ShouldBe(10L);
+        typed.ShouldBe(10L);
+        updated.AffectedCount.ShouldBe(10);
+        grouped.ShouldBe(10L);
+        deleted.AffectedCount.ShouldBe(10);
+        (await ScalarAsync(session, "SELECT COUNT(*) FROM n")).ShouldBe(10L);
+    }
+
+    /// <summary>
+    /// The n-ary chain computes what the nested binary operators computed: SQL three-valued logic
+    /// for every combination of TRUE, FALSE and NULL, the same as a chain nested in a later
+    /// position (still two nodes) and one grouped in first position (merged into one).
+    /// </summary>
+    /// <param name="keyword">The chains' operator.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: AND/OR chains keep three-valued logic for every operand combination")]
+    [InlineData("AND")]
+    [InlineData("OR")]
+    public async Task LogicalChain_ShouldKeepThreeValuedLogic(string keyword)
     {
         // Arrange
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
-        string sql = shape switch
+        string[] values = ["TRUE", "FALSE", "NULL"];
+
+        foreach (string a in values)
         {
-            "parentheses" => $"SELECT {new string('(', Hostile)}id{new string(')', Hostile)} FROM t",
-            "signs" => $"SELECT {string.Concat(Enumerable.Repeat("- ", Hostile))}id FROM t",
-            "not" => $"SELECT id FROM t WHERE {string.Concat(Enumerable.Repeat("NOT ", Hostile))}TRUE",
-            "functions" => $"SELECT {string.Concat(Enumerable.Repeat("ABS(", Hostile))}id{new string(')', Hostile)} FROM t",
-            _ => $"UPDATE t SET id = 2 WHERE {Chain("id = 0", " OR ", Hostile)}",
-        };
+            foreach (string b in values)
+            {
+                foreach (string c in values)
+                {
+                    bool? expected = Fold(keyword, [Value(a), Value(b), Value(c)]);
+
+                    // Act
+                    var row = await RowAsync(session,
+                        $"SELECT {a} {keyword} {b} {keyword} {c}, {a} {keyword} ({b} {keyword} {c}), ({a} {keyword} {b}) {keyword} {c}, " +
+                        $"{Chain(a, $" {keyword} ", 50)} {keyword} {Chain(b, $" {keyword} ", 50)} {keyword} {c} FROM t");
+
+                    // Assert
+                    row.ShouldBe(new object?[] { expected, expected, expected, expected }, $"{a} {keyword} {b} {keyword} {c}");
+                }
+            }
+        }
+
+        static bool? Value(string literal) => literal switch { "TRUE" => true, "FALSE" => false, _ => null };
+    }
+
+    /// <summary>
+    /// The terms of a chain run first to last and the first deciding term ends it (the #1069
+    /// contract): a guard anywhere before a division protects it, however long the chain, and a
+    /// guard after it or an unknown term does not.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: AND/OR chains short-circuit left to right")]
+    public async Task LogicalChain_ShouldShortCircuitLeftToRight()
+    {
+        // Arrange: d is 0 on the first row.
+        await using var engine = CreateEngine();
+        await using var session = await SeedAsync(engine);
+        await session.ExecuteAsync("CREATE TABLE g (id INT, d INT)");
+        await session.ExecuteAsync("INSERT INTO g VALUES (1, 0), (2, 2), (3, 20)");
+        string terms = Chain("id > 0", " AND ", 5_000);
+        string falseTerms = Chain("id < 0", " OR ", 5_000);
 
         // Act
-        var failure = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(sql).AsTask());
+        var guardedAnd = await ScalarAsync(session, $"SELECT COUNT(*) FROM g WHERE {terms} AND d <> 0 AND 10 / d >= 1 AND {terms}");
+        var guardedOr = await ScalarAsync(session, $"SELECT COUNT(*) FROM g WHERE {falseTerms} OR d = 0 OR 10 / d >= 1 OR {falseTerms}");
+        var guardAfter = await Should.ThrowAsync<DatabaseException>(() =>
+            session.ExecuteAsync($"SELECT COUNT(*) FROM g WHERE {terms} AND 10 / d >= 1 AND d <> 0").AsTask());
+        var unknownAnd = await Should.ThrowAsync<DatabaseException>(() =>
+            session.ExecuteAsync("SELECT COUNT(*) FROM g WHERE NULL AND 10 / d >= 1").AsTask());
+        var unknownOr = await Should.ThrowAsync<DatabaseException>(() =>
+            session.ExecuteAsync("SELECT COUNT(*) FROM g WHERE NULL OR id < 0 OR 10 / d >= 1").AsTask());
+        var faultFirst = await Should.ThrowAsync<DatabaseException>(() =>
+            session.ExecuteAsync("SELECT COUNT(*) FROM g WHERE 10 / d >= 1 OR TRUE").AsTask());
 
         // Assert
-        failure.Message.ShouldStartWith("SQL parse error SQL0006:", Case.Sensitive);
-        (await ScalarAsync(session, "SELECT id FROM t")).ShouldBe(1);
+        guardedAnd.ShouldBe(1L);
+        guardedOr.ShouldBe(2L);
+        foreach (var fault in new[] { guardAfter, unknownAnd, unknownOr, faultFirst })
+        {
+            fault.Message.ShouldStartWith("COHSQLE001:", Case.Sensitive);
+        }
+    }
+
+    /// <summary>
+    /// The planner reads every term of a conjunction at one level: an indexed equality anywhere
+    /// in a long chain, or inside a nested conjunction, still seeks, and a join still seeks on an
+    /// equality inside a long ON chain.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: an indexed term inside a long chain still seeks")]
+    public async Task LongConjunction_ShouldStillSeekAndJoinSeek()
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("seeks");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE s (id INT NOT NULL, v INT)");
+        await session.ExecuteAsync("CREATE INDEX ix_id ON s (id)");
+        await session.ExecuteAsync("INSERT INTO s (id, v) VALUES " + string.Join(", ", Enumerable.Range(0, 100).Select(id => $"({Number(id)}, {Number(id)})")));
+        await session.ExecuteAsync("CREATE TABLE r (k INT)");
+        await session.ExecuteAsync("INSERT INTO r VALUES (42), (7)");
+        string terms = Chain("v >= 0", " AND ", 2_000);
+
+        // Act
+        var flat = await ScalarAsync(session, $"SELECT v FROM s WHERE {terms} AND id = 42");
+        var flatMetrics = Metrics(session);
+        var nested = await ScalarAsync(session, $"SELECT v FROM s WHERE {terms} AND (v < 1000 AND id = 42)");
+        var nestedMetrics = Metrics(session);
+        var joined = await RowsAsync(session, $"SELECT r.k, s.v FROM r JOIN s ON {Chain("s.v >= 0", " AND ", 1_000)} AND s.id = r.k AND s.v < 1000 ORDER BY r.k");
+        var joinMetrics = Metrics(session);
+
+        // Assert
+        flat.ShouldBe(42);
+        flatMetrics.AccessPath.ShouldBe("seek:ix_id");
+        flatMetrics.RecordsExamined.ShouldBe(1);
+        nested.ShouldBe(42);
+        nestedMetrics.AccessPath.ShouldBe("seek:ix_id");
+        joined.Select(row => (row[0], row[1])).ShouldBe([(7, 7), (42, 42)]);
+        joinMetrics.AccessPath.ShouldBe("join-seek:ix_id");
+    }
+
+    /// <summary>
+    /// The limit is the engine's: its text seam parses with it, a typed request another parser
+    /// accepted is refused when it nests deeper, and a flat chain of any length still runs.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a configured limit applies to the text seam and to typed requests")]
+    public async Task Engine_ConfiguredLimit_ShouldApplyToEverySeam()
+    {
+        // Arrange
+        await using var engine = CreateEngine(limit: 32);
+        await using var session = await SeedAsync(engine);
+
+        // Act
+        var atLimit = await ScalarAsync(session, $"SELECT {Chain("1", " + ", 32)} FROM t");
+        var pastLimit = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync($"SELECT {Chain("1", " + ", 33)} FROM t").AsTask());
+        var typedAtLimit = await ReadScalarAsync(await session.ExecuteAsync(Request($"SELECT {Chain("1", " + ", 32)} FROM t")));
+        var typedPastLimit = await session.ExecuteAsync(Request($"SELECT {Chain("1", " + ", 40)} FROM t"));
+        var typedParentheses = await session.ExecuteAsync(Request($"SELECT {Open(33)}id{Close(33)} FROM t"));
+        var flat = await ScalarAsync(session, $"SELECT COUNT(*) FROM t WHERE {Chain("id = 1", " OR ", 1_000)}");
+
+        // Assert
+        atLimit.ShouldBe(32L);
+        pastLimit.Message.ShouldBe("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 32 levels.");
+        typedAtLimit.ShouldBe(32L);
+        foreach (var (result, depth) in new[] { (typedPastLimit, 40), (typedParentheses, 33) })
+        {
+            result.Status.ShouldBe(QueryResultStatus.Error);
+            var diagnostic = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("SQL0006");
+            diagnostic.Message.ShouldBe($"Expression nesting of {Number(depth)} levels exceeds this engine's limit of 32 levels.");
+        }
+        flat.ShouldBe(1L);
+        (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(1L);
+    }
+
+    /// <summary>
+    /// A high limit admits deeper statements, not more stack. Where the thread has room the
+    /// statement runs; where it does not, the statement fails with COHSQLE004, whether it ran out
+    /// while parsing or while planning and evaluating, and the session keeps serving.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: under a high limit a statement runs or fails with COHSQLE004, never a crash")]
+    public async Task Engine_HighLimit_ShouldRunOrFailWithStatementTooComplex()
+    {
+        // Arrange
+        await using var engine = CreateEngine(limit: SqlQueryParserOptions.MaximumExpressionNestingLimit);
+        await using var session = await SeedAsync(engine);
+        string deepChain = $"SELECT {Chain("1", " + ", 3_000)} FROM t";
+        string deepParentheses = $"SELECT {Open(3_000)}id{Close(3_000)} FROM t";
+
+        // Act: the chain parses in a loop, so a small thread runs out in the walks after the parse;
+        // the parentheses recurse in the parser itself.
+        var ample = RunOnThread(64 * 1024, () => ScalarAsync(session, deepChain).GetAwaiter().GetResult());
+        var walkOut = RunOnThread(256, () => ScalarAsync(session, deepChain).GetAwaiter().GetResult());
+        var parseOut = RunOnThread(1024, () => ScalarAsync(session, deepParentheses).GetAwaiter().GetResult());
+
+        // Assert
+        ample.Failure.ShouldBeNull();
+        ample.Result.ShouldBe(3_000L);
+        AssertStatementTooComplex(walkOut.Failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull());
+        var parseFailure = parseOut.Failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull();
+        AssertStatementTooComplex(parseFailure);
+        parseFailure.InnerException!.Message.ShouldStartWith("SQL parse error SQL0007:", Case.Sensitive);
+        (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(1L);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: an engine refuses a limit outside 32..4096")]
+    [InlineData(int.MinValue)]
+    [InlineData(0)]
+    [InlineData(SqlQueryParserOptions.MinimumExpressionNestingLimit - 1)]
+    [InlineData(SqlQueryParserOptions.MaximumExpressionNestingLimit + 1)]
+    public void Create_LimitOutOfRange_ShouldThrow(int limit)
+    {
+        // Act
+        var direct = Should.Throw<ArgumentOutOfRangeException>(() =>
+            SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { ExpressionNestingLimit = limit }));
+        var builder = SqlDatabaseEngine.CreateBuilder();
+        builder.ExpressionNestingLimit = limit;
+        var built = Should.Throw<ArgumentOutOfRangeException>(() => builder.Build());
+
+        // Assert
+        foreach (var failure in new[] { direct, built })
+        {
+            failure.ParamName.ShouldBe("options");
+            failure.ActualValue.ShouldBe(limit);
+            failure.Message.ShouldStartWith("ExpressionNestingLimit must be between 32 and 4096 levels.", Case.Sensitive);
+        }
+    }
+
+    /// <summary>
+    /// The builder carries the limit to the engine, which captures it when it is created: changing
+    /// the options object afterwards changes nothing.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: the builder's limit reaches the engine, which keeps the value it was created with")]
+    public async Task Builder_Limit_ShouldReachTheEngineAndStayFixed()
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder();
+        builder.ExpressionNestingLimit = 40;
+        await using var built = (SqlDatabaseEngine)builder.Build();
+        var options = new SqlDatabaseEngineOptions { ExpressionNestingLimit = 40 };
+        await using var created = SqlDatabaseEngine.Create(options);
+        options.ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit;
+
+        foreach (var engine in new[] { built, created })
+        {
+            await using var session = await SeedAsync(engine);
+
+            // Act
+            var atLimit = await ScalarAsync(session, $"SELECT {Chain("1", " + ", 40)} FROM t");
+            var pastLimit = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync($"SELECT {Chain("1", " + ", 41)} FROM t").AsTask());
+
+            // Assert
+            atLimit.ShouldBe(40L);
+            pastLimit.Message.ShouldContain("supported limit of 40 levels", Case.Sensitive);
+        }
+
+        builder.ExpressionNestingLimit.ShouldBe(40);
+        new SqlDatabaseEngineOptions().ExpressionNestingLimit.ShouldBe(Limit);
     }
 
     /// <summary>
     /// A statement whose walk runs out of stack fails as that statement, with COHSQLE004 and the
     /// exhausted-stack signal inside, and none of it takes effect; the same statement then runs
-    /// with ample stack. Every stack check leads here: a deeply backtracking LIKE, a tree deeper
-    /// than the parser builds, or a statement run on a thread created with a small stack.
+    /// with ample stack. Every stack check leads here: a deeply backtracking LIKE, a statement
+    /// within a high limit, or a statement run on a thread created with a small stack.
     /// </summary>
     /// <param name="sql">A statement whose predicate nests exactly 128 levels once <c>{0}</c> is filled.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a statement that runs out of stack fails with COHSQLE004 and keeps the session")]
     [InlineData("SELECT COUNT(*) FROM t WHERE id < {0}")]
     [InlineData("UPDATE t SET name = 'z' WHERE id < {0}")]
     [InlineData("DELETE FROM t WHERE id < {0}")]
+    [InlineData("SELECT COUNT(*) FROM t WHERE id > 0 AND id <> 7 AND id < {0}")]
     public async Task ExecuteAsync_StackExhausted_ShouldFailWithStatementTooComplex(string sql)
     {
         // Arrange: 127 terms under a comparison, 128 levels.
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
-        var request = Request(sql.Replace("{0}", Chain("1", " + ", Limit - 1), StringComparison.Ordinal));
+        var request = Request(sql.Replace("{0}", Chain("1", " + ", WalkDepth - 1), StringComparison.Ordinal));
 
         // Act
         var outcome = NearStackLimit.Run(() => session.ExecuteAsync(request).AsTask());
@@ -169,7 +460,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await using var session = await SeedAsync(engine);
         await session.ExecuteAsync("BEGIN");
         await session.ExecuteAsync("INSERT INTO t VALUES (2, 'b')");
-        var delete = Request($"DELETE FROM t WHERE id < {Chain("1", " + ", Limit - 1)}");
+        var delete = Request($"DELETE FROM t WHERE id < {Chain("1", " + ", WalkDepth - 1)}");
 
         // Act
         var outcome = NearStackLimit.Run(() => session.ExecuteAsync(delete).AsTask());
@@ -190,7 +481,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await using var engine = CreateEngine();
         var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        var create = Request($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({string.Concat(Enumerable.Repeat("- ", Limit - 2))}qty > 0))");
+        var create = Request($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({Repeat("- ", WalkDepth - 2)}qty > 0))");
 
         // Act
         var outcome = NearStackLimit.Run(() => session.ExecuteAsync(create).AsTask());
@@ -206,34 +497,43 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     /// <summary>
     /// Every expression walker checks the stack as it descends, not only on entry, so none of them
     /// depends on another walker having checked the same tree first. With ample stack each walk
-    /// of the deepest chain the parser accepts completes; with a few KB left each one throws.
+    /// of a 128-level chain, and of a long AND chain over it, completes; with a few KB left each
+    /// one throws.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: every expression walker checks the stack as it recurses")]
     public void Walkers_NearStackLimit_ShouldThrowInsufficientStack()
     {
-        // Arrange: two separately parsed trees, so equivalence walks both.
-        var deep = Projection(Chain("1", " + ", Limit));
-        var twin = Projection(Chain("1", " + ", Limit));
+        // Arrange: two separately parsed trees of each shape, so equivalence walks both.
+        string chain = Chain("1", " + ", WalkDepth);
+        string conjunction = $"{Chain("TRUE", " AND ", 1_000)} AND {Chain("1", " + ", WalkDepth - 2)} = 126";
         var columns = new[] { new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32)) };
         var evaluator = new SqlExpressionEvaluator(columns, null);
-        var walkers = new (string Name, Func<object?> Walk)[]
-        {
-            ("Evaluate", () => evaluator.Evaluate(deep, [1])),
-            ("ResolveCollation", () => evaluator.ResolveCollation(deep)),
-            ("ValidateExpression", () => { SqlPlanner.ValidateExpression(deep, evaluator); return null; }),
-            ("Bind", () => { SqlPersistedExpression.Bind(deep, evaluator); return null; }),
-            ("AreEquivalent", () => SqlPersistedExpression.AreEquivalent(deep, twin)),
-            ("Canonicalize", () => SqlPersistedExpression.Canonicalize(deep, "CHECK constraint 'ck'")),
-        };
 
-        foreach (var (name, walk) in walkers)
+        foreach (string expression in new[] { chain, conjunction })
         {
-            // Act: the ample-stack run also compiles and initializes everything the walk touches.
-            Should.NotThrow(walk, name);
-            var outcome = NearStackLimit.Run(walk);
+            var deep = Projection(expression);
+            var twin = Projection(expression);
+            var walkers = new (string Name, Func<object?> Walk)[]
+            {
+                ("Evaluate", () => evaluator.Evaluate(deep, [1])),
+                ("ResolveCollation", () => evaluator.ResolveCollation(deep)),
+                ("ValidateExpression", () => { SqlPlanner.ValidateExpression(deep, evaluator); return null; }),
+                ("Bind", () => { SqlPersistedExpression.Bind(deep, evaluator); return null; }),
+                ("AreEquivalent", () => SqlPersistedExpression.AreEquivalent(deep, twin)),
+                ("Canonicalize", () => SqlPersistedExpression.Canonicalize(deep, "CHECK constraint 'ck'")),
+            };
 
-            // Assert
-            outcome.Failure.ShouldBeOfType<InsufficientExecutionStackException>(name);
+            foreach (var (name, walk) in walkers)
+            {
+                // Act: the ample-stack run also compiles and initializes everything the walk touches.
+                Should.NotThrow(walk, name);
+                var outcome = NearStackLimit.Run(walk);
+
+                // Assert
+                outcome.Failure.ShouldBeOfType<InsufficientExecutionStackException>(name);
+            }
+
+            evaluator.Evaluate(deep, [1]).ShouldBe(expression == chain ? (object)(long)WalkDepth : true);
         }
     }
 
@@ -264,7 +564,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
     /// <summary>Both LIKE matchers check the stack, the index-backed one and the compatibility collation's.</summary>
     /// <param name="collation">The effective collation.</param>
-    /// <param name="pattern">One step of a pattern that recurses once per step.</param>
+    /// <param name="step">One step of a pattern that recurses once per step.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: both LIKE matchers check the stack before they recurse")]
     [InlineData("binary", "%a")]
     [InlineData("invariant", "_")]
@@ -284,42 +584,78 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>
-    /// The DDL parses with the same limit, and the canonical text stored for a CHECK at the limit
-    /// parses back under it, so a definition the engine stores always reopens. A sign applied to a
+    /// The DDL parses with the engine's limit, and the canonical text stored for a CHECK at the
+    /// limit parses back, so a definition the engine stores always reopens. A sign applied to a
     /// sign is stored parenthesized, which is the case that adds the most parentheses.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a CHECK at the limit is stored, reopens and is enforced")]
-    public async Task Check_AtLimit_ShouldPersistReopenAndEnforce()
+    public void Check_AtLimit_ShouldPersistReopenAndEnforce()
     {
-        // Arrange: 126 signs over a column, compared: 128 levels.
-        string predicate = string.Concat(Enumerable.Repeat("- ", Limit - 2)) + "qty > 0";
-        string tooDeep = string.Concat(Enumerable.Repeat("- ", Limit - 1)) + "qty > 0";
-        string canonical;
+        // Arrange: 254 signs over a column, compared: 256 levels.
+        string predicate = Repeat("- ", Limit - 2) + "qty > 0";
+        string tooDeep = Repeat("- ", Limit - 1) + "qty > 0";
 
-        await using (var engine = CreateEngine(_rootPath))
+        // Act
+        var (refused, canonical, reopened) = OnLargeStack(async () =>
         {
-            var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+            DatabaseParseException refused;
+            string canonical;
+            await using (var engine = CreateEngine(_rootPath))
+            {
+                var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+                await using var session = await database.CreateSessionAsync(CancellationToken.None);
+                await session.ExecuteAsync($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({predicate}))");
+                refused = await Should.ThrowAsync<DatabaseParseException>(() =>
+                    session.ExecuteAsync($"CREATE TABLE d (qty INT, CONSTRAINT ck CHECK ({tooDeep}))").AsTask());
+                canonical = Table(database, "c").Constraints.Single(constraint => constraint.Name == "ck").CheckExpression!;
+                Table(database, "d", exists: false);
+            }
+
+            await using var reopenedEngine = CreateEngine(_rootPath);
+            var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("db");
+            await using var reopenedSession = await reopened.CreateSessionAsync(CancellationToken.None);
+            (await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (1)")).AffectedCount.ShouldBe(1);
+            await Should.ThrowAsync<SqlConstraintViolationException>(() => reopenedSession.ExecuteAsync("INSERT INTO c VALUES (-1)").AsTask());
+            return (refused, canonical, Table(reopened, "c").Constraints.Single(constraint => constraint.Name == "ck").CheckExpression);
+        });
+
+        // Assert
+        refused.Message.ShouldContain("SQL0006", Case.Sensitive);
+        canonical.ShouldStartWith("-(-(-(", Case.Sensitive);
+        canonical.Count(character => character == '(').ShouldBe(Limit - 3);
+        reopened.ShouldBe(canonical);
+    }
+
+    /// <summary>
+    /// The limit decides which statements an engine accepts, not which databases it opens: a CHECK
+    /// an engine with a high limit stored opens, and is enforced, under the lowest limit, which
+    /// would refuse the same text as a statement.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a definition stored under a high limit opens under a low one")]
+    public async Task Check_StoredUnderHighLimit_ShouldOpenUnderLowLimit()
+    {
+        // Arrange: 100 levels, beyond the lowest limit of 32.
+        string predicate = $"qty + {Chain("1", " + ", 98)} > 100";
+        await using (var engine = CreateEngine(_rootPath, limit: 1_000))
+        {
+            var database = await engine.CreateDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
-
-            // Act
             await session.ExecuteAsync($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({predicate}))");
-            var refused = await Should.ThrowAsync<DatabaseParseException>(() =>
-                session.ExecuteAsync($"CREATE TABLE d (qty INT, CONSTRAINT ck CHECK ({tooDeep}))").AsTask());
-
-            // Assert
-            refused.Message.ShouldContain("SQL0006", Case.Sensitive);
-            canonical = Table(database, "c").Constraints.Single(constraint => constraint.Name == "ck").CheckExpression!;
-            canonical.ShouldStartWith("-(-(-(", Case.Sensitive);
-            canonical.Count(character => character == '(').ShouldBe(Limit - 3);
-            Table(database, "d", exists: false);
         }
 
-        await using var reopenedEngine = CreateEngine(_rootPath);
-        var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("db");
+        // Act
+        await using var lowEngine = CreateEngine(_rootPath, limit: SqlQueryParserOptions.MinimumExpressionNestingLimit);
+        var reopened = await lowEngine.OpenDatabaseAsync("db");
         await using var reopenedSession = await reopened.CreateSessionAsync(CancellationToken.None);
-        (await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (1)")).AffectedCount.ShouldBe(1);
-        await Should.ThrowAsync<SqlConstraintViolationException>(() => reopenedSession.ExecuteAsync("INSERT INTO c VALUES (-1)").AsTask());
-        Table(reopened, "c").Constraints.Single(constraint => constraint.Name == "ck").CheckExpression.ShouldBe(canonical);
+        var inserted = await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (3)");
+        var violation = await Should.ThrowAsync<SqlConstraintViolationException>(() => reopenedSession.ExecuteAsync("INSERT INTO c VALUES (2)").AsTask());
+        var restated = await Should.ThrowAsync<DatabaseParseException>(() =>
+            reopenedSession.ExecuteAsync($"CREATE TABLE d (qty INT, CONSTRAINT ck CHECK ({predicate}))").AsTask());
+
+        // Assert
+        inserted.AffectedCount.ShouldBe(1);
+        violation.Message.ShouldContain("ck", Case.Sensitive);
+        restated.Message.ShouldContain("supported limit of 32 levels", Case.Sensitive);
     }
 
     /// <summary>
@@ -330,12 +666,12 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a definition read on a thread too small for it is not reported as catalog damage")]
     public void Load_OnSmallStack_ShouldNotReportDamage()
     {
-        // Arrange: the stored text of 126 signs over a column, compared, 128 levels deep.
-        string canonical = string.Concat(Enumerable.Repeat("-(", Limit - 3)) + "-qty" + new string(')', Limit - 3) + " > 0";
+        // Arrange: the stored text of 254 signs over a column, compared, 256 levels deep.
+        string canonical = Repeat("-(", Limit - 3) + "-qty" + Close(Limit - 3) + " > 0";
         const string subject = "CHECK constraint 'ck' on table 'dbo.c'";
 
-        // Act: reading the deepest text back costs the parser a few hundred KB of stack, more
-        // than a default thread spares in a debug build, so the ample run gets 8 MB.
+        // Act: reading the deepest text back costs the parser about 1.4 MB of stack in a debug
+        // build, more than a default thread spares, so the ample run gets 8 MB.
         var small = NearStackLimit.Run(() => SqlPersistedExpression.Load(canonical, subject));
         var large = RunOnThread(8 * 1024, () => SqlPersistedExpression.Load(canonical, subject));
 
@@ -358,12 +694,12 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: binding out of stack fails the open with advice and a statement with COHSQLE004")]
     public async Task Bind_OnSmallStack_ShouldAdviseOnlyTheOpen()
     {
-        // Arrange: a stored CHECK at the limit.
+        // Arrange: a stored CHECK of 128 levels.
         await using var engine = CreateEngine();
         var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
         await using (var session = await database.CreateSessionAsync(CancellationToken.None))
         {
-            await session.ExecuteAsync($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({string.Concat(Enumerable.Repeat("- ", Limit - 2))}qty > 0))");
+            await session.ExecuteAsync($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({Repeat("- ", WalkDepth - 2)}qty > 0))");
         }
         var table = Table(database, "c");
         RunOnThread(8 * 1024, () => new SqlBoundTableCache(database.Catalog).Get(table)).Failure.ShouldBeNull();
@@ -383,11 +719,14 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>
-    /// Over the wire the hostile statement is a ParseFailure: the server stays up, the session that
-    /// sent it stays ready on the same connection, and other connections are unaffected.
+    /// Over the wire the hostile statement is refused: a ParseFailure (SQL0006) where the
+    /// server's thread reaches the limit, which a release build always does, or COHSQLE004 where
+    /// the thread runs out of stack first, as 256 parentheses can in a debug build. Either way the
+    /// server stays up, the session that sent it stays ready on the same connection, and other
+    /// connections are unaffected.
     /// </summary>
     /// <param name="statement">Which hostile statement to send.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Nesting: a 200,000-level statement is a ParseFailure that keeps the server and the session")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Nesting: a 200,000-level statement is refused and keeps the server and the session")]
     [InlineData("chain")]
     [InlineData("parentheses")]
     public async Task Wire_HostileStatement_ShouldReturnParseFailureAndKeepServing(string statement)
@@ -398,15 +737,23 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await client.HandshakeAsync();
         string sql = statement == "chain"
             ? $"SELECT {Chain("1", "+", Hostile)} FROM users"
-            : $"SELECT {new string('(', Hostile)}1{new string(')', Hostile)} FROM users";
+            : $"SELECT {Open(Hostile)}1{Close(Hostile)} FROM users";
 
         // Act
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create(sql).Encode());
         var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
 
-        // Assert
-        error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Message.ShouldContain("SQL0006", Case.Sensitive);
+        // Assert: a chain is parsed in a loop and always reaches the limit.
+        if (statement == "chain" || error.Code == ProtocolErrorCode.ParseFailure)
+        {
+            error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+            error.Message.ShouldContain("SQL0006", Case.Sensitive);
+        }
+        else
+        {
+            error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            error.Message.ShouldStartWith(StatementTooComplex + ":", Case.Sensitive);
+        }
         harness.Server.Context.Sessions.Count.ShouldBe(1);
         (await ScalarAsync(client, "SELECT 1 FROM users WHERE id = 1")).ShouldBe(1L);
 
@@ -414,6 +761,60 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await other.HandshakeAsync();
         (await ScalarAsync(other, "SELECT COUNT(*) FROM users")).ShouldBe(2L);
         harness.Server.Context.Sessions.Count.ShouldBe(2);
+    }
+
+    /// <summary>A 10,000-term predicate executes over the wire, where the server parses it with the engine's limit.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Nesting: a 10,000-term OR predicate executes over the wire")]
+    public async Task Wire_TenThousandTermChain_ShouldExecute()
+    {
+        // Arrange
+        await using var harness = await ServerTestHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        string predicate = string.Join(" OR ", Enumerable.Range(3, 9_999).Select(id => $"id = {Number(id)}")) + " OR id = 2";
+
+        // Act
+        var count = await ScalarAsync(client, $"SELECT COUNT(*) FROM users WHERE {predicate}");
+
+        // Assert
+        count.ShouldBe(1L);
+    }
+
+    /// <summary>
+    /// Over the wire, a statement within a high configured limit runs where the server's thread
+    /// has the stack for it, and where it does not, it is COHSQLE004, an ExecutionFailure, not a
+    /// ParseFailure: the text is valid, the thread ran out. 4,000 nested parentheses need a few MB
+    /// to parse: more than the 1.5 MB a .NET thread has by default on Windows and macOS, less than
+    /// the 8 MB it has on Linux. Either way the session stays ready.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Nesting: a statement within a high limit runs, or is COHSQLE004 over the wire")]
+    public async Task Wire_ParseOutOfStack_ShouldRunOrReturnStatementTooComplex()
+    {
+        // Arrange
+        await using var harness = await ServerTestHarness.StartAsync(configureEngine: options =>
+            options.ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit);
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+
+        // Act
+        await client.SendAsync(ProtocolMessageType.Execute,
+            ProtocolExecuteMessage.Create($"SELECT {Open(4_000)}1{Close(4_000)} FROM users WHERE id = 1").Encode());
+        var reply = (await client.ReadAsync(timeoutSeconds: 30)).ShouldNotBeNull();
+
+        // Assert
+        if (reply.Type == ProtocolMessageType.Error)
+        {
+            var error = ProtocolErrorMessage.Decode(reply.Payload.Span);
+            error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            error.Message.ShouldStartWith(StatementTooComplex + ": Statement too complex", Case.Sensitive);
+        }
+        else
+        {
+            reply.Type.ShouldBe(ProtocolMessageType.ResultHeader);
+            DatabaseValueCodec.DecodeComponent((await client.ExpectAsync(ProtocolMessageType.ResultRow)).Payload.Span).ShouldBe(1L);
+            await client.ExpectAsync(ProtocolMessageType.ResultComplete);
+        }
+        (await ScalarAsync(client, "SELECT COUNT(*) FROM users")).ShouldBe(2L);
     }
 
     /// <summary>A LIKE match that runs out of stack is an ExecutionFailure on the wire, and the session stays ready.</summary>
@@ -438,6 +839,48 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     private static string Chain(string term, string separator, int count) => string.Join(separator, Enumerable.Repeat(term, count));
+
+    private static string Repeat(string text, int count) => string.Concat(Enumerable.Repeat(text, count));
+
+    private static string Open(int count) => new('(', count);
+
+    private static string Close(int count) => new(')', count);
+
+    /// <summary><c>t AND (t AND (... t))</c>: <paramref name="count"/> terms, each chain nested in the one before.</summary>
+    private static string RightNested(string term, string keyword, int count)
+        => Repeat($"{term} {keyword} (", count - 1) + term + Close(count - 1);
+
+    private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>SQL three-valued AND or OR over the operands, folded left to right.</summary>
+    private static bool? Fold(string keyword, bool?[] operands)
+    {
+        bool? result = operands[0];
+        for (int index = 1; index < operands.Length; index++)
+        {
+            bool? right = operands[index];
+            result = keyword == "AND"
+                ? result == false || right == false ? false : result == true && right == true ? true : null
+                : result == true || right == true ? true : result == false && right == false ? false : null;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Runs work on a thread with 8 MB of stack and returns its result, or rethrows its failure.
+    /// Statements at the default limit need more than a default thread in a debug build.
+    /// </summary>
+    private static T OnLargeStack<T>(Func<Task<T>> work)
+    {
+        var (result, failure) = RunOnThread(8 * 1024, () => work().GetAwaiter().GetResult());
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+
+        return result!;
+    }
 
     private static (T? Result, Exception? Failure) RunOnThread<T>(int stackKilobytes, Func<T> work)
     {
@@ -466,6 +909,9 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         failure.InnerException.ShouldBeOfType<InsufficientExecutionStackException>();
     }
 
+    private static SqlStatementMetrics Metrics(IDatabaseSession session)
+        => ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+
     private static SqlCatalogTable Table(SqlDatabaseInstance database, string name, bool exists = true)
     {
         bool found = database.Catalog.TryGetTable(SqlPlanner.DefaultSchema, name, out var table);
@@ -473,11 +919,28 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         return table!;
     }
 
-    private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "expression-depth" });
+    private static SqlDatabaseEngine CreateEngine(int limit = Limit) => CreateEngine(null, limit);
 
-    private static SqlDatabaseEngine CreateEngine(string rootPath)
-        => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "expression-depth", RootPath = rootPath });
+    // The background workers stay quiet for the test's lifetime, so a statement never waits on
+    // one of them and resumes on a pool thread: the stack tests run each statement on a thread
+    // of a known size, and its walks must stay there.
+    private static SqlDatabaseEngine CreateEngine(string? rootPath, int limit = Limit)
+    {
+        var options = new SqlDatabaseEngineOptions
+        {
+            EngineName = "expression-depth",
+            ExpressionNestingLimit = limit,
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        };
+        if (rootPath is not null)
+        {
+            options.RootPath = rootPath;
+        }
+
+        return SqlDatabaseEngine.Create(options);
+    }
 
     private static async Task<IDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
     {
@@ -490,6 +953,25 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
     private static async Task<object?> ScalarAsync(IDatabaseSession session, string sql)
         => await ReadScalarAsync(await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+
+    private static async Task<object?[]> RowAsync(IDatabaseSession session, string sql)
+        => (await RowsAsync(session, sql)).ShouldHaveSingleItem();
+
+    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    {
+        await using var rows = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>()!;
+        var result = new List<object?[]>();
+        await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
+        {
+            var values = new object?[row.FieldCount];
+            for (int ordinal = 0; ordinal < values.Length; ordinal++)
+            {
+                values[ordinal] = row.GetValue(ordinal);
+            }
+            result.Add(values);
+        }
+        return result;
+    }
 
     private static async Task<object?> ReadScalarAsync(QueryResult result)
     {
@@ -505,10 +987,12 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         return value;
     }
 
-    // Parsed here, with ample stack, so only the statement's execution runs short of it.
+    // Parsed here, with ample stack and at the highest limit, so only the statement's execution
+    // meets the engine's limit and runs short of stack.
     private static SqlQueryRequest Request(string sql)
     {
-        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+        var statement = RunOnThread(8 * 1024, () => (SqlQueryStatement)new SqlQueryParser(
+            new SqlQueryParserOptions { ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit }).Parse(sql)).Result!;
         statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         return new SqlQueryRequest(statement);
     }

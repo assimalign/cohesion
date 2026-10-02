@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Sql;
@@ -59,6 +60,27 @@ public sealed class SqlDatabaseEngineOptions
     /// (currently a documented stub — see docs/DESIGN.md).
     /// </summary>
     public TimeSpan MaintenanceInterval { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Gets or sets how many levels a SQL expression may nest in a statement this engine executes
+    /// (#1151): the deepest expression tree, in which a chain of <c>AND</c> (or <c>OR</c>) terms is
+    /// one level however many terms it has, and the deepest grouping parentheses. Deeper text is a
+    /// parse failure (<c>SQL0006</c>) before anything executes. Defaults to
+    /// <see cref="SqlQueryParserOptions.DefaultExpressionNestingLimit"/> (256) and must lie within
+    /// <see cref="SqlQueryParserOptions.MinimumExpressionNestingLimit"/> (32) and
+    /// <see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/> (4096), which
+    /// <see cref="SqlDatabaseEngine.Create"/> checks.
+    /// </summary>
+    /// <remarks>
+    /// The engine parses statement text, including every statement a wire client sends, with this
+    /// limit, and refuses a typed request whose statement nests deeper
+    /// (<see cref="SqlQueryStatement.ExpressionNestingDepth"/>). A higher limit admits deeper
+    /// statements but not more stack: a statement within the limit that needs more stack than the
+    /// executing thread has left fails with <c>COHSQLE004</c> (ISO SQLSTATE 54001), never a crash.
+    /// Definitions the engine persists are read back at the highest limit, so a database written
+    /// under one limit opens under any other.
+    /// </remarks>
+    public int ExpressionNestingLimit { get; set; } = SqlQueryParserOptions.DefaultExpressionNestingLimit;
 
     /// <summary>
     /// Gets or sets the root directory where per-database files are created.

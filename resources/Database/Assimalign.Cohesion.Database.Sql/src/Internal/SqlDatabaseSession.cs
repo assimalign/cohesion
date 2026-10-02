@@ -23,6 +23,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 {
     private readonly TransactionCoordinator _coordinator;
     private readonly SqlQueryExecutor _executor;
+    private readonly SqlQueryParserOptions _parserOptions;
     private readonly string? _provisioningSchema;
 
     // B7 can push named scopes onto the same root transaction and attach undo
@@ -32,15 +33,26 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     private SqlStatementMetrics? _lastStatementMetrics;
     private SessionState _state;
 
+    /// <summary>Opens a session over a database.</summary>
+    /// <param name="database">The database.</param>
+    /// <param name="coordinator">The database's transaction coordinator.</param>
+    /// <param name="executor">The statement executor.</param>
+    /// <param name="parserOptions">
+    /// The engine's parser options: statement text parses with its expression nesting limit, and
+    /// a typed request nested deeper is refused (#1151).
+    /// </param>
+    /// <param name="provisioningSchema">The schema the provisioner's session owns, if any.</param>
     internal SqlDatabaseSession(
         ISqlDatabase database,
         TransactionCoordinator coordinator,
         SqlQueryExecutor executor,
+        SqlQueryParserOptions parserOptions,
         string? provisioningSchema = null)
     {
         Database = database;
         _coordinator = coordinator;
         _executor = executor;
+        _parserOptions = parserOptions;
         _provisioningSchema = provisioningSchema;
         _state = SessionState.Open;
     }
@@ -132,12 +144,14 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         {
             // Every recursive walk over a statement (the system-relation scan, planning,
             // evaluation, CHECK validation) checks the stack before it descends (#1151). The
-            // parser bounds every tree it builds well inside a normal thread's stack, so what
-            // gets here is a tree built by hand, a LIKE match backtracking through more
-            // wildcards than the stack holds, or a statement run on a thread too small for it,
-            // including a stored CHECK or DEFAULT the statement reads back on first use.
-            // It fails as this statement's error: the auto-commit context has rolled back, an
-            // explicit transaction stays active, and the session stays usable.
+            // nesting limit bounds how deep a statement nests, not how much stack the walks need
+            // on the thread that runs them, so a statement within a high configured limit, a
+            // LIKE match backtracking through more wildcards than the stack holds, or a
+            // statement run on a thread too small for it gets here, including a stored CHECK or
+            // DEFAULT the statement reads back on first use. It is PostgreSQL's backstop
+            // (SQLSTATE 54001): the statement fails as this statement's error, the auto-commit
+            // context has rolled back, an explicit transaction stays active, and the session
+            // stays usable.
             throw SqlEvaluationException.StatementTooComplex(exception);
         }
     }
@@ -156,6 +170,15 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
                     return new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
                         [.. parsed.Statement.Diagnostics]);
                 }
+            }
+
+            // A typed request was parsed by its caller, possibly with a higher nesting limit than
+            // this engine's. The parser recorded how deep the statement nests, so the engine's
+            // limit holds on this seam too, exactly as if the engine had parsed the text (#1151).
+            if (parsed.Statement.ExpressionNestingDepth > _parserOptions.ExpressionNestingLimit)
+            {
+                return new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
+                    [NestingLimitDiagnostic(parsed.Statement.ExpressionNestingDepth)]);
             }
 
             SqlSystemViews.EnsureReadOnly(parsed.Statement.SqlExpression);
@@ -245,17 +268,31 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     /// <inheritdoc />
     /// <remarks>
     /// The model-agnostic text-execute seam: SQL sessions parse the statement with
-    /// the SQL dialect (<see cref="SqlQueryRequest.FromSql"/>) — this is what lets
+    /// the SQL dialect, under the engine's expression nesting limit — this is what lets
     /// the wire-protocol server execute statement text without knowing any model
-    /// language.
+    /// language. A parse that runs out of stack fails with <c>COHSQLE004</c>, as any
+    /// other walk over the statement does.
     /// </remarks>
     public ValueTask<QueryResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {
         ThrowIfNotOpen();
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
 
-        return ExecuteAsync(SqlQueryRequest.FromSql(statement, parameters), cancellationToken);
+        return ExecuteAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions), cancellationToken);
     }
+
+    /// <summary>
+    /// The <c>SQL0006</c> a typed request gets when its statement nests deeper than this engine's
+    /// limit: the diagnostic the engine's own parse of the text would have reported, without its
+    /// position, which only a parse finds.
+    /// </summary>
+    private Diagnostic NestingLimitDiagnostic(int depth) => new()
+    {
+        Code = "SQL0006",
+        Message = $"Expression nesting of {depth} levels exceeds this engine's limit of {_parserOptions.ExpressionNestingLimit} levels.",
+        Severity = DiagnosticSeverity.Error,
+        Location = DiagnosticLocation.Absolute,
+    };
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()

@@ -161,6 +161,8 @@ internal sealed partial class SqlPlanner
             (SqlLiteralExpression a, SqlLiteralExpression b) => a.LiteralType == b.LiteralType && a.Value == b.Value,
             (SqlParameterExpression a, SqlParameterExpression b) => a.ParameterName == b.ParameterName,
             (SqlStarExpression, SqlStarExpression) => true,
+            // The child comparison below also requires the same number of terms.
+            (SqlLogicalExpression a, SqlLogicalExpression b) => a.Operator == b.Operator,
             (SqlBinaryExpression a, SqlBinaryExpression b) => a.Operator == b.Operator,
             (SqlUnaryExpression a, SqlUnaryExpression b) => a.Operator == b.Operator,
             (SqlFunctionCallExpression a, SqlFunctionCallExpression b) => a.FunctionName.Equals(b.FunctionName, StringComparison.OrdinalIgnoreCase),
@@ -255,7 +257,8 @@ internal sealed partial class SqlPlanner
             => GroupExpressionType(binary.Left, columns, evaluator) is DatabaseType.Decimal or DatabaseType.Float32 or DatabaseType.Float64
                 || GroupExpressionType(binary.Right, columns, evaluator) is DatabaseType.Decimal or DatabaseType.Float32 or DatabaseType.Float64
                     ? DatabaseType.Decimal : DatabaseType.Int64,
-        SqlBinaryExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => DatabaseType.Boolean,
+        SqlLogicalExpression or SqlBinaryExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression
+            or SqlLikeExpression => DatabaseType.Boolean,
         SqlCaseExpression @case => @case.WhenClauses.Select(clause => GroupExpressionType(clause.Result, columns, evaluator))
             .Append(@case.ElseResult is null ? DatabaseType.Null : GroupExpressionType(@case.ElseResult, columns, evaluator))
             .Aggregate(DatabaseType.Null, CommonGroupType),

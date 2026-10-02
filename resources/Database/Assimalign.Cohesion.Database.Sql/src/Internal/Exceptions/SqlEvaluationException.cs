@@ -33,13 +33,13 @@ internal sealed class SqlEvaluationException : DatabaseException
     internal const string InvalidOperandTypeCode = "COHSQLE003";
 
     /// <summary>
-    /// Running the statement needs more stack than the thread has left (ISO SQLSTATE 54001,
-    /// statement too complex): an expression tree deeper than any the parser accepts, which only
-    /// a tree built by hand can be, a <c>LIKE</c> match that backtracks through more wildcards
-    /// than the stack holds, or a statement within the limits run on a thread created with too
-    /// small a stack, including a stored definition the statement reads back on first use. Every
-    /// recursive walk checks the stack before it descends, so the statement fails instead of the
-    /// process (#1151).
+    /// Parsing or running the statement needs more stack than the thread has left (ISO SQLSTATE
+    /// 54001, statement too complex): a statement within a high configured nesting limit, a
+    /// <c>LIKE</c> match that backtracks through more wildcards than the stack holds, or a
+    /// statement run on a thread created with too small a stack, including a stored definition
+    /// the statement reads back on first use. The parser and every recursive walk check the stack
+    /// before they descend, so the statement fails instead of the process: PostgreSQL's backstop
+    /// behind the dialect's nesting limit (#1151).
     /// </summary>
     internal const string StatementTooComplexCode = "COHSQLE004";
 
