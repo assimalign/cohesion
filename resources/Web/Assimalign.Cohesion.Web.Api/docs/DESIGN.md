@@ -117,6 +117,7 @@ The thunk's path from binding to the written response:
 ```mermaid
 flowchart TD
     Bind["Bind parameters"] -->|"binding failure"| Problem["400 or 415 problem+json"]
+    Bind -->|"body: no registry or no contract"| Fault
     Bind --> Invoke["Invoke the handler, awaiting Task or ValueTask"]
     Invoke -->|"void, Task, ValueTask"| Done["The handler wrote the response"]
     Invoke -->|"null"| NoContent["No body; 204 unless the handler set a status"]
@@ -179,19 +180,31 @@ Binding failures are outcomes the thunk writes imperatively as RFC 9457 `applica
 | Condition | Status | Payload |
 | --- | --- | --- |
 | Unparseable/missing-required route, query, header, or form scalar | 400 | `errors` extension keyed by the parameter |
-| Request has no reader for its Content-Type (or none registered) | 415 | problem+json |
-| `HttpContentSerializationException` while reading the body | 415 | problem+json |
-| `System.Text.Json.JsonException` while deserializing the body | 400 | problem+json |
+| The request carries no parseable Content-Type, or the registry has no reader for it (an empty registry included) | 415 | problem+json |
+| `System.Text.Json.JsonException` while deserializing the body | 400 | `errors` extension keyed `$body` |
 
-Writing a returned value has one outcome and one fault (see "Return Values"):
+Reading a body and writing a returned value draw the same line between the client's errors and the
+server's (#1173). Both have outcomes the thunk answers and faults it never catches:
 
 | Condition | Result |
 | --- | --- |
 | No registered writer satisfies the request's `Accept` | `406 Not Acceptable` with no body and `Vary: Accept`, an outcome the status-code-pages middleware can explain |
-| No serialization registry, or no contract for the returned type | `HttpContentSerializationException`, propagated as a fault |
+| No serialization registry is composed, and the endpoint reads a body or returns a negotiated value | `HttpContentSerializationException`, propagated as a fault |
+| The reader for the request's Content-Type, or the negotiated writer, has no contract for the type | `HttpContentSerializationException`, propagated as a fault |
+
+The thunk decides the 415 with the registry's non-throwing lookup (`GetReader`) before it reads, so
+an `HttpContentSerializationException` from the read itself is never the client's doing: it means the
+application registered no serialization at all, or its source-generated resolver does not cover the
+parameter's type. Before #1173 the read path caught that exception and answered 415, which told the
+client it had sent the wrong media type when the server was misconfigured. The distinction needed no
+change in `Web.Serialization`: its lookup surface already separates "no reader for this media type"
+(`GetReader` returns `null`) from "no contract for this type" (`IHttpContentReader.CanRead` is
+`false`, and the read throws), per its faults-vs-outcomes model. An empty registry stays a 415 because
+the registry then truthfully accepts no media type; a missing registry is a composition error, as it
+is for a negotiated write.
 
 Exceptions thrown by the **handler itself** are never caught — they propagate to the pipeline
-exception boundary (#881), as does a serialization fault while writing the returned value.
+exception boundary (#881), as do the serialization faults above.
 
 ## Compile-Time Diagnostics (#1059)
 

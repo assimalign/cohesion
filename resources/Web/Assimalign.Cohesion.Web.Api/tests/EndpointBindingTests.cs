@@ -269,6 +269,109 @@ public class EndpointBindingTests
         response.StatusCode.ShouldBe(NetHttpStatusCode.UnsupportedMediaType);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: a body without a Content-Type yields 415")]
+    public async Task Binding_BodyWithoutContentType_ShouldReturnUnsupportedMediaType()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+        factory.Builder.AddJsonSerialization(ApiTestJsonContext.Default);
+
+        factory.Application.UseRouting();
+
+        factory.Application.MapPost("/widgets", (Widget widget) => widget.Name);
+
+        using HttpClient client = factory.CreateClient();
+        using ByteArrayContent content = new(Encoding.UTF8.GetBytes("""{"name":"gizmo","quantity":3}"""));
+
+        // Act
+        using HttpResponseMessage response = await client.PostAsync("/widgets", content, cancellation.Token);
+
+        // Assert — the client did not declare the media type, so no reader can be chosen.
+        response.StatusCode.ShouldBe(NetHttpStatusCode.UnsupportedMediaType);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: a body type the resolver has no contract for faults instead of answering 415")]
+    public async Task Binding_BodyTypeWithoutContract_ShouldFault()
+    {
+        // Arrange — a JSON reader is registered, but the resolver does not cover the parameter's type.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+        factory.Builder.AddJsonSerialization(ApiTestJsonContext.Default);
+
+        HttpContentSerializationException? fault = null;
+        factory.Application.Use(async (context, next) =>
+        {
+            try
+            {
+                await next.Invoke(context);
+            }
+            catch (HttpContentSerializationException exception)
+            {
+                fault = exception;
+                context.Response.StatusCode = CohesionHttpStatusCode.InternalServerError;
+            }
+        });
+        factory.Application.UseRouting();
+
+        bool handlerRan = false;
+        factory.Application.MapPost("/unregistered", (Unregistered value) =>
+        {
+            handlerRan = true;
+            return value.Value;
+        });
+
+        using HttpClient client = factory.CreateClient();
+        using StringContent content = new("""{"value":"x"}""", Encoding.UTF8, "application/json");
+
+        // Act
+        using HttpResponseMessage response = await client.PostAsync("/unregistered", content, cancellation.Token);
+
+        // Assert — a composition fault on the server reaches the exception boundary; it is not a 415.
+        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        fault.ShouldNotBeNull();
+        fault.Message.ShouldContain(nameof(Unregistered), Case.Sensitive);
+        handlerRan.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: a body read without a serialization registry faults instead of answering 415")]
+    public async Task Binding_BodyWithoutRegistry_ShouldFault()
+    {
+        // Arrange — the application registered no serialization at all.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        HttpContentSerializationException? fault = null;
+        factory.Application.Use(async (context, next) =>
+        {
+            try
+            {
+                await next.Invoke(context);
+            }
+            catch (HttpContentSerializationException exception)
+            {
+                fault = exception;
+                context.Response.StatusCode = CohesionHttpStatusCode.InternalServerError;
+            }
+        });
+        factory.Application.UseRouting();
+        factory.Application.MapPost("/widgets", (Widget widget) => widget.Name);
+
+        using HttpClient client = factory.CreateClient();
+        using StringContent content = new("""{"name":"gizmo","quantity":3}""", Encoding.UTF8, "application/json");
+
+        // Act
+        using HttpResponseMessage response = await client.PostAsync("/widgets", content, cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        fault.ShouldNotBeNull();
+        fault.Message.ShouldContain("AddJsonSerialization", Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: malformed JSON body yields 400")]
     public async Task Binding_MalformedJsonBody_ShouldReturnBadRequest()
     {

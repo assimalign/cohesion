@@ -36,7 +36,10 @@ Parameters bind from the request by convention or by explicit attribute:
 | `IHttpFeature` types | — | Resolved from `context.Features` |
 
 Unparseable or missing-required scalars produce a 400 problem+json (with an `errors` extension naming
-the parameter); an unsupported body Content-Type produces 415; a malformed body produces 400.
+the parameter); an unsupported body Content-Type produces 415; a malformed body produces 400. A body
+type the registered resolver has no contract for, or an application with no serialization registry,
+is the server's fault, not the client's: `HttpContentSerializationException` reaches the exception
+boundary (a 500), as it does for a returned value.
 
 ## Return Values
 

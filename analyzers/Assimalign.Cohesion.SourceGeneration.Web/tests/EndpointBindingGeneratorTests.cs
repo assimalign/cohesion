@@ -152,6 +152,22 @@ public class EndpointBindingGeneratorTests
         generated.ShouldContain("using Assimalign.Cohesion.Web.Serialization;", Case.Sensitive);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a body read leaves serialization faults to the exception boundary")]
+    public void Generator_BodyParameter_LetsSerializationFaultsPropagate()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapPost("/widgets", (Widget widget) => "ok");""");
+
+        // Assert — the 415 is decided by the non-throwing lookup before the read; a missing registry or
+        // contract surfaced by the read is not caught, and the probe compiles.
+        run.Generated.ShouldContain("if (__serializer0 is not null", Case.Sensitive);
+        run.Generated.ShouldContain("!global::Assimalign.Cohesion.Http.HttpMediaType.TryParse(", Case.Sensitive);
+        run.Generated.ShouldContain("|| __serializer0.GetReader(__mediaType0) is null))", Case.Sensitive);
+        run.Generated.ShouldContain("catch (global::System.Text.Json.JsonException)", Case.Sensitive);
+        run.Generated.ShouldNotContain("HttpContentSerializationException", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: explicit header attribute overrides inference")]
     public void Generator_HeaderAttribute_EmitsHeaderBinding()
     {

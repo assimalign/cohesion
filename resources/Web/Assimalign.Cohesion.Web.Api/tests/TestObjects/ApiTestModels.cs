@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Web.Api.Tests.TestObjects;
 /// <summary>A body model bound from JSON in the binding end-to-end tests.</summary>
 internal sealed record Widget(string Name, int Quantity);
 
-/// <summary>A type deliberately absent from <see cref="ApiTestJsonContext"/>, for 415 and missing-contract tests.</summary>
+/// <summary>A type deliberately absent from <see cref="ApiTestJsonContext"/>, for the missing-contract fault tests (body and returned value).</summary>
 internal sealed record Unregistered(string Value);
 
 /// <summary>A response model the return-value end-to-end tests write through the serialization registry.</summary>

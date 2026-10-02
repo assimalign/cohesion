@@ -1184,6 +1184,12 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         }
     }
 
+    // Reads the body through the content-serialization registry. Only the client's own errors are
+    // outcomes: a Content-Type the registry has no reader for (415) and a payload the reader rejects
+    // (400). The registry's non-throwing lookup decides the 415 before anything is read, so an
+    // HttpContentSerializationException from the read itself is a composition fault on the server — no
+    // registry at all, or a reader with no contract for the parameter type — and propagates to the
+    // exception boundary, as it does when a returned value is written.
     private static void EmitBody(StringBuilder builder, ParameterBinding parameter, int index, string indent)
     {
         builder.Append(indent).Append(parameter.DeclaredType).Append(" __arg").Append(index).AppendLine(";");
@@ -1192,10 +1198,10 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
         builder.Append(inner).Append("global::Assimalign.Cohesion.Web.Serialization.IHttpContentSerializationFeature? __serializer").Append(index)
             .AppendLine(" = context.Features.Get<global::Assimalign.Cohesion.Web.Serialization.IHttpContentSerializationFeature>();");
-        builder.Append(inner).Append("global::Assimalign.Cohesion.Http.HttpMediaType.TryParse(context.Request.Headers.GetValue(global::Assimalign.Cohesion.Http.HttpHeaderKey.ContentType), out var __mediaType")
-            .Append(index).AppendLine(");");
-        builder.Append(inner).Append("if (__serializer").Append(index).Append(" is null || __serializer").Append(index)
-            .Append(".GetReader(__mediaType").Append(index).AppendLine(") is null)");
+        builder.Append(inner).Append("if (__serializer").Append(index).AppendLine(" is not null");
+        builder.Append(inner).Append("    && (!global::Assimalign.Cohesion.Http.HttpMediaType.TryParse(context.Request.Headers.GetValue(global::Assimalign.Cohesion.Http.HttpHeaderKey.ContentType), out var __mediaType")
+            .Append(index).AppendLine(")");
+        builder.Append(inner).Append("        || __serializer").Append(index).Append(".GetReader(__mediaType").Append(index).AppendLine(") is null))");
         EmitUnsupportedMediaType(builder, inner);
         builder.Append(inner).AppendLine("try");
         builder.Append(inner).AppendLine("{");
@@ -1204,8 +1210,6 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         builder.Append(inner).AppendLine("}");
         builder.Append(inner).AppendLine("catch (global::System.Text.Json.JsonException)");
         EmitBadRequest(builder, inner, "$body", "The request body could not be deserialized.");
-        builder.Append(inner).AppendLine("catch (global::Assimalign.Cohesion.Web.Serialization.HttpContentSerializationException)");
-        EmitUnsupportedMediaType(builder, inner);
         builder.Append(indent).AppendLine("}");
     }
 

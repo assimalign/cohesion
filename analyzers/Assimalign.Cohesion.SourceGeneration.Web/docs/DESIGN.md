@@ -67,9 +67,13 @@ Each interceptor:
 
 - Casts the `Delegate` to the handler's delegate type and invokes it directly (AOT-safe).
 - Emits inline binding per parameter: route (`TryGetRouteValues` + boxed fast-path/`TryParse`
-  fallback), query/form (`TryGetValue` + `TryParse`), header (`GetValue` + `TryParse`), body
-  (`IHttpContentSerializationFeature` reader probe → 415, `ReadContentAsync<T>` with `JsonException`
-  → 400 / `HttpContentSerializationException` → 415), and direct injections.
+  fallback), query/form (`TryGetValue` + `TryParse`), header (`GetValue` + `TryParse`), body, and
+  direct injections. The body is probed through the registry's non-throwing lookup first: a missing or
+  unparseable `Content-Type`, or one `IHttpContentSerializationFeature.GetReader` has no reader for,
+  is a 415. `ReadContentAsync<T>` then reads it, and a `JsonException` is a 400. An
+  `HttpContentSerializationException` from the read is not caught (#1173): after the probe it can only
+  mean no registry at all or a reader with no contract for the type, a composition fault that reaches
+  the exception boundary exactly as it does when a returned value is written.
 - Writes the value the handler returns, if any (see "Returned Values").
 - Chains the endpoint's description onto the mapped route (see "Endpoint Descriptions").
 - Registers the thunk through the raw `Map` overload — which binds to `WebApplicationMiddleware`, not
