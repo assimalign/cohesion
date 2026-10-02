@@ -16,6 +16,12 @@ separate middlewares that must be ordered correctly), one package covers file se
 default documents, and precompressed-asset negotiation — the Cohesion lean-dependency-tree
 rule applied to a feature family that always ships together.
 
+Handlers get the same protocol behavior without the middleware through two response helpers on
+`IHttpResponse`: `SendFileAsync` (an `IFileSystemFile`, or a path inside a mount) and
+`WriteStreamAsync` (a stream). The middleware and the helpers run one internal engine,
+`RepresentationWriter`, so there is a single implementation of validators, preconditions,
+ranges, and `HEAD` in the package (see "Response helpers" below).
+
 ## Why-this-not-that decisions
 
 - **`IFileSystem` as the content root, not a bespoke file-provider seam.** The FileSystem
@@ -103,6 +109,10 @@ range (GET only; If-Range gate) ──▶ 416 | single 206 | full 200
 open stream → head (Content-*, ETag, Last-Modified, Accept-Ranges, Cache-Control, Vary) → body (GET)
 ```
 
+Deriving the validators (`RepresentationMetadata.ForFile`) and every step after it belong to the shared
+`RepresentationWriter` engine, which the response helpers run as well; the steps before it are the
+middleware's own.
+
 The request path the flow starts from is `context.GetEffectivePath()` (#1056). Inside a
 `Map("/static", branch)` branch that is the path below `/static`, so `branch.UseStaticFiles()` serves
 `/static/app.js` from `wwwroot/app.js`. The add-a-slash redirect still builds its `Location` from the
@@ -123,6 +133,107 @@ fallback is mapped, and a missing file answers 404.
 The package takes a `Web.Routing` reference for this (a feature-to-feature reference, allowed by
 the Web dependency rule). Register `UseStaticFiles()` ahead of `UseRouting()`, so an existing asset is
 served before routing, and the fallback answers only what remains.
+
+## Response helpers: `SendFileAsync` and `WriteStreamAsync` (#1061)
+
+Before #1061 only the middleware could answer with a file under conditional and range rules; a
+handler that sent a download had to re-derive RFC 9110 §13 and §14 itself. The package now
+exposes three `extension(IHttpResponse)` members in `HttpResponseFileExtensions`:
+
+```csharp
+Task SendFileAsync(IFileSystemFile file, string? contentType = null, CancellationToken cancellationToken = default);
+Task SendFileAsync(IFileSystem fileSystem, string path, string? contentType = null, CancellationToken cancellationToken = default);
+Task WriteStreamAsync(Stream stream, string? contentType = null, HttpEntityTag? entityTag = null,
+    DateTimeOffset? lastModified = null, CancellationToken cancellationToken = default);
+```
+
+Every caller of the engine, and what the engine composes, is shown below. An arrow means "calls";
+the middleware's file resolution and the path overload share the traversal gate and mount lookup
+in `StaticFilePath`, and everything that writes a response goes through `RepresentationWriter`,
+which is the only code that touches the Http primitives.
+
+```mermaid
+flowchart TD
+    Fallback["MapFallbackToFile"] --> Middleware["StaticFilesMiddleware"]
+    Middleware --> Gate["StaticFilePath: gate and mount lookup"]
+    PathOverload["SendFileAsync(fileSystem, path)"] --> Gate
+    PathOverload --> FileOverload["SendFileAsync(file)"]
+    Middleware --> Writer["RepresentationWriter"]
+    FileOverload --> Writer
+    Stream["WriteStreamAsync(stream)"] --> Writer
+    Writer --> Conditional["HttpConditionalRequest"]
+    Writer --> Ranges["HttpRangeSelector and HttpIfRange"]
+```
+
+### How the engine is factored
+
+- **`RepresentationMetadata`** describes the selected representation independently of where its bytes
+  come from: content type, length (or unknown), `ETag`, `Last-Modified` at HTTP-date precision, and the
+  middleware-only `Content-Encoding`, `Cache-Control`, and `Vary: Accept-Encoding`.
+  `RepresentationMetadata.ForFile` derives the strong `ETag` and `Last-Modified` from `Size` and
+  `UpdatedOn` exactly as the middleware always did, so a handler and the middleware emit identical
+  validators for the same file, and a cache can revalidate either URL with either tag.
+- **`RepresentationWriter`** works in two steps. `TrySelectContent` evaluates the preconditions
+  (`HttpConditionalRequest`) and the range (`HttpIfRange`, then `HttpRangeSelector`) and writes the
+  `304`, `412`, or `416` itself. Only when it returns `true` does the caller open its content and call
+  `WriteContentAsync`, which writes the `200`/`206` header section and, except for `HEAD`, the bytes.
+  The split keeps the rule "open the content only after every no-body outcome is resolved" for files
+  and streams alike. `SendFileAsync(context, file, …)` and `WriteStreamAsync(context, …)` are the two
+  compositions of those steps.
+- **The middleware** keeps what is specific to static files (the prefix match, default documents,
+  the add-a-slash redirect, the content-type gate, and precompressed-sibling negotiation) and ends
+  with one call: `RepresentationWriter.SendFileAsync(context, servedFile, representation, ...)`. The
+  extraction changed none of its behavior; every middleware test written before the engine existed
+  passes unmodified.
+
+### Why-this-not-that decisions
+
+- **Home: Web.StaticFiles, not the Web root or Http.** This package already owns `IFileSystem`-based
+  serving and composes the RFC primitives. The Web root references only `Http`, and `Http` only `Core`;
+  hosting the helpers in either would add a `FileSystem` dependency to a root every Web library takes,
+  or would have meant a second copy of the engine.
+- **Receiver: `IHttpResponse`.** The helpers write a response, like `WriteContentAsync` and
+  `WriteProblemDetailsAsync`; they read the request (method, preconditions, `Range`, `If-Range`)
+  through the `IHttpResponse.HttpContext` back-reference.
+- **The path overload resolves inside a mount; it does not trust the path.** A handler that builds the
+  path from a route value is the normal case, so the path runs the same two layers as a request path:
+  the `HasUnsafeSegments` gate (any `.`/`..` segment split on `/` and `\`, any `:`, any NUL) and then
+  `FileSystemPath.Parse`, before the mount's own lookup, and a leading `/` means the mount root. An
+  unsafe, missing, or directory path is answered `404`, not thrown: request input must not turn into a
+  `500`, and one answer for "outside" and "missing" gives an attacker no oracle. A physical-mount test
+  proves the gate is load-bearing — with it removed, `../secret.txt` reaches the file next to the
+  mount. The trusted-physical-path alternative (`SendFileAsync(string physicalPath)`, ASP.NET's shape)
+  was rejected because the common bug is exactly an application concatenating user input into it.
+- **Content type.** An explicit type wins; it must be a concrete media type and may not contain
+  control characters, because it is written into the header section verbatim and `HttpMediaType`
+  skips a malformed parameter rather than failing (a CR/LF would otherwise reach the wire). Without
+  one, a file's type comes from its extension in `HttpContentTypes.Default`, and an unmapped extension
+  is sent as `application/octet-stream`. That differs from the middleware, which passes unknown
+  types through: the middleware guards a whole directory, while a handler that calls `SendFileAsync`
+  chose this file. A stream defaults to `application/octet-stream`.
+- **Stream validators are the caller's, never computed.** Hashing a stream would turn every request,
+  `304`s included, into a full read of something that may be large, one-shot, or remote. Callers
+  supply `entityTag` and `lastModified` when they have them (a blob version, a row timestamp). Without
+  them the representation still exists, so only the `*` forms of `If-Match`/`If-None-Match` match, and
+  `If-Range` always yields the full `200`. A weak tag satisfies `If-None-Match` (weak comparison) but
+  never `If-Match` or `If-Range` (strong comparison), exactly as the primitives define.
+- **Ranges need a seekable stream.** The representation is the stream's remaining bytes, from its
+  current position to its end, so a seekable stream has a known length (`Length - Position`), gets
+  `Content-Length` and `Accept-Ranges: bytes`, and reaches a range by seeking. A non-seekable stream is
+  sent whole with no `Content-Length` (the transport delimits it) and no `Accept-Ranges`, and a `Range`
+  is ignored, which RFC 9110 §14.2 permits. Serving ranges by reading and discarding up to the
+  offset was rejected: one small request could make the server read an arbitrary amount from a backend.
+  A caller-declared length for a non-seekable stream was left out as well: a stream that yields a
+  different number of bytes than it declared breaks HTTP/1.1 framing.
+- **`HEAD`** gets the `GET` header section and no content; the copy is skipped, so a stream is never
+  read. An unknown length is omitted rather than guessed.
+- **Header ownership.** The helpers set the status and own `Content-Type`, `Content-Length`,
+  `Content-Range`, `Accept-Ranges`, `ETag`, and `Last-Modified`. Fields the application set first are
+  left alone, so a handler's `Cache-Control` also rides on the `304` (RFC 9110 §15.4.5).
+- **Cancellation.** The copy observes the caller's token, or the exchange's `RequestCancelled` when the
+  caller passed none, so a forgotten token still stops a download the client abandoned.
+- **Ownership.** A file is opened and disposed by the helper; a stream belongs to the caller and is not
+  disposed.
 
 ## HTTP/1.1 percent-decode parity (transport-owned)
 
@@ -145,7 +256,8 @@ would double-decode a path the transport already handled.
 
 No reflection anywhere: the content-type table is a `FrozenDictionary` built at composition
 time, negotiation and precondition evaluation are static pure functions over value types,
-and body copies use `ArrayPool<byte>` buffers. The package inherits `IsAotCompatible=true`.
+and body copies use `ArrayPool<byte>` buffers. The response helpers are static extension members
+over the same engine and add nothing AOT-relevant. The package inherits `IsAotCompatible=true`.
 
 ## Error model
 
@@ -155,6 +267,13 @@ into not-found/pass-through semantics; `ArgumentException` from `UseStaticFiles`
 surfaces at composition time. A file that shrinks mid-range-copy aborts the response with
 `EndOfStreamException` rather than silently serving wrong bytes (matching the h2
 truncated-body abort posture).
+
+The response helpers throw only for caller mistakes, synchronously, before anything is written:
+`ArgumentNullException` for a missing argument, and `ArgumentException` for a content type that is
+not a concrete media type or carries a control character, an unreadable stream, or an empty
+entity-tag. Everything the request controls is a status code instead: the path overload answers
+`404` for an unsafe, missing, or directory path, and preconditions and ranges produce `304`, `412`,
+or `416`. Cancellation surfaces as `OperationCanceledException` from the copy.
 
 ## Non-goals
 
@@ -166,3 +285,8 @@ truncated-body abort posture).
 - **Windows short-name (8.3) / trailing-dot equivalence defense** — the mount confines every
   lookup, so such OS-level aliasing cannot escape the root; serve dedicated mounts rather
   than pointing a physical mount at a directory whose *siblings* are sensitive.
+- **`Content-Disposition` from the helpers** — a handler that wants a download name sets the field
+  before calling `SendFileAsync`/`WriteStreamAsync`, which leave it in place. `Http` has no RFC 6266
+  formatter yet, and a hand-rolled `filename*=` encoder in this package is not where one belongs.
+- **Computed validators for streams** — no hashing of stream content (see "Response helpers").
+- **Ranges over non-seekable streams** — the full representation is sent instead.

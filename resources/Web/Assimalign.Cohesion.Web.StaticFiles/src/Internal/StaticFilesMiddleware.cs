@@ -1,12 +1,9 @@
 using System;
-using System.Buffers;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.IO;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.FileSystem;
@@ -16,17 +13,17 @@ namespace Assimalign.Cohesion.Web.StaticFiles.Internal;
 
 /// <summary>
 /// Serves <c>GET</c>/<c>HEAD</c> requests under a request-path prefix from a mounted
-/// <see cref="IFileSystem"/>, composing the shared protocol primitives: RFC 9110 &#167; 13
-/// preconditions via <see cref="HttpConditionalRequest"/>, &#167; 14 byte ranges via
-/// <see cref="HttpRangeSelector"/>, content types via <see cref="HttpContentTypes"/>, and
-/// <c>Accept-Encoding</c> negotiation of precompressed siblings via
-/// <see cref="HttpContentNegotiation"/>. All composition state is frozen at construction —
-/// no request-time service location, no per-request allocation beyond the exchange itself.
+/// <see cref="IFileSystem"/>. This type resolves the request to a file — the traversal gate,
+/// default documents, content types via <see cref="HttpContentTypes"/>, and <c>Accept-Encoding</c>
+/// negotiation of precompressed siblings via <see cref="HttpContentNegotiation"/> — and hands the
+/// selected file to <see cref="RepresentationWriter"/>, which applies RFC 9110 &#167; 13
+/// preconditions via <see cref="HttpConditionalRequest"/> and &#167; 14 byte ranges via
+/// <see cref="HttpRangeSelector"/> and writes the response. All composition state is frozen at
+/// construction — no request-time service location, no per-request allocation beyond the exchange
+/// itself.
 /// </summary>
 internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
 {
-    private const int CopyBufferSize = 64 * 1024;
-
     // Precompressed sibling codings in server preference order (RFC 9110 §12.5.3 lets the
     // server break client ties): brotli first, then gzip.
     private static readonly (string Coding, string Suffix)[] _precompressedCodings =
@@ -88,8 +85,6 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
     /// <returns>A task that completes when the response (or <paramref name="next"/>) has completed.</returns>
     internal async Task ServeAsync(IHttpContext context, string path, WebApplicationMiddleware next)
     {
-        HttpMethod method = context.Request.Method;
-
         if (!StaticFilePath.TryGetRelativePath(path, _prefix, out string remainder))
         {
             await next.Invoke(context);
@@ -195,136 +190,21 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
             SelectPrecompressedSibling(context, candidate, ref servedFile, ref contentEncoding, ref varyByAcceptEncoding);
         }
 
-        long length = servedFile.Size;
-        DateTimeOffset lastModified = TruncateToSeconds(NormalizeTimestamp(servedFile.UpdatedOn));
-        // Strong validator from the served representation's Size + UpdatedOn: hex ticks and hex
-        // length are valid etagc characters, and a sibling naturally yields a different tag than
-        // the identity file — distinct representations must not share a strong ETag.
-        HttpEntityTag etag = HttpEntityTag.Strong(string.Create(
-            CultureInfo.InvariantCulture,
-            $"{NormalizeTimestamp(servedFile.UpdatedOn).UtcTicks:x}-{length:x}"));
-
-        switch (EvaluatePreconditions(context.Request, method, etag, lastModified))
+        // Validators, preconditions, ranges, and the response itself are the shared representation
+        // engine's — the same code the SendFileAsync response helpers run. The served file's own
+        // metadata decides them, so a precompressed sibling carries its own length and ETag.
+        RepresentationMetadata representation = RepresentationMetadata.ForFile(servedFile, contentType) with
         {
-            case HttpPreconditionOutcome.NotModified:
-                WriteNotModified(context, etag, lastModified, varyByAcceptEncoding);
-                return;
-            case HttpPreconditionOutcome.PreconditionFailed:
-                context.Response.StatusCode = HttpStatusCode.PreconditionFailed;
-                return;
-        }
+            ContentEncoding = contentEncoding,
+            CacheControl = _cacheControl,
+            VaryByAcceptEncoding = varyByAcceptEncoding,
+        };
 
-        // Range applies to GET only (RFC 9110 §14.2 — Range on HEAD has no defined effect;
-        // this server ignores it) and only when If-Range, if present, still matches.
-        HttpRangeSlice? slice = null;
-        if (method == HttpMethod.Get
-            && TryGetRangeSelection(context.Request, etag, lastModified, length, out HttpRangeSelection selection))
-        {
-            if (selection.Status == HttpRangeSelectionStatus.Unsatisfiable)
-            {
-                WriteRangeNotSatisfiable(context, selection, etag, lastModified, varyByAcceptEncoding);
-                return;
-            }
-
-            // Only a single satisfiable range produces a 206; a multi-range set deliberately
-            // falls back to the full 200 representation (multipart/byteranges is out of scope).
-            if (selection.IsSingleSlice)
-            {
-                slice = selection.Slices[0];
-            }
-        }
-
-        Stream source;
-        try
-        {
-            source = servedFile.Open();
-        }
-        catch (FileSystemException)
-        {
-            // The file vanished between resolution and open; nothing has been committed to the
-            // response yet, so an honest 404 is still available.
-            context.Response.StatusCode = HttpStatusCode.NotFound;
-            return;
-        }
-
-        await using (source.ConfigureAwait(false))
-        {
-            IHttpHeaderCollection headers = context.Response.Headers;
-
-            context.Response.StatusCode = slice is null ? HttpStatusCode.Ok : HttpStatusCode.PartialContent;
-            headers[HttpHeaderKey.ContentType] = contentType;
-            headers[HttpHeaderKey.ContentLength] = (slice?.Length ?? length).ToString(CultureInfo.InvariantCulture);
-            headers[HttpHeaderKey.AcceptRanges] = HttpRangeHeader.BytesUnit;
-            headers[HttpHeaderKey.ETag] = etag.ToString();
-            headers[HttpHeaderKey.LastModified] = HttpDate.Format(lastModified);
-
-            if (_cacheControl is not null)
-            {
-                headers[HttpHeaderKey.CacheControl] = _cacheControl;
-            }
-            if (contentEncoding is not null)
-            {
-                headers[HttpHeaderKey.ContentEncoding] = contentEncoding;
-            }
-            if (varyByAcceptEncoding)
-            {
-                AppendVaryAcceptEncoding(headers);
-            }
-            if (slice is HttpRangeSlice partial)
-            {
-                headers[HttpHeaderKey.ContentRange] = partial.ContentRange.ToString();
-            }
-
-            if (method == HttpMethod.Head)
-            {
-                // RFC 9110 §9.3.2: same header section as GET, never a body. The transports
-                // suppress HEAD bodies as well; skipping the copy here saves the file read.
-                return;
-            }
-
-            if (slice is HttpRangeSlice single)
-            {
-                await CopySliceAsync(source, context.Response.Body, single.Offset, single.Length, context.RequestCancelled).ConfigureAwait(false);
-            }
-            else
-            {
-                await source.CopyToAsync(context.Response.Body, context.RequestCancelled).ConfigureAwait(false);
-            }
-        }
+        await RepresentationWriter.SendFileAsync(context, servedFile, representation, context.RequestCancelled).ConfigureAwait(false);
     }
 
     private bool TryGetInfo(FileSystemPath path, [NotNullWhen(true)] out IFileSystemInfo? info)
-    {
-        info = null;
-
-        // Lookups are mount-relative. Every provider merges a relative path against its own root,
-        // but a leading '/' means "absolute in the provider's namespace": the mount root for the
-        // in-memory provider, the drive root for the physical one, whose Merge then refuses the
-        // path. Stripping it here is safe because the traversal gate and FileSystemPath.Parse have
-        // already rejected dot segments.
-        ReadOnlySpan<char> relative = path.AsSpan().TrimStart('/');
-        if (relative.IsEmpty)
-        {
-            return false;
-        }
-
-        FileSystemPath mountPath = FileSystemPath.Parse(relative);
-        try
-        {
-            if (!_fileSystem.Exists(mountPath))
-            {
-                return false;
-            }
-            info = _fileSystem.GetInfo(mountPath);
-            return true;
-        }
-        catch (FileSystemException)
-        {
-            // A lookup race (deleted between Exists and GetInfo) or a mount-specific refusal:
-            // either way the path is not servable.
-            return false;
-        }
-    }
+        => StaticFilePath.TryGetInfo(_fileSystem, path, out info);
 
     private bool TryResolveDefaultDocument(string directory, [NotNullWhen(true)] out IFileSystemFile? document, out string documentName)
     {
@@ -411,138 +291,6 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
         }
     }
 
-    private static HttpPreconditionOutcome EvaluatePreconditions(
-        IHttpRequest request,
-        HttpMethod method,
-        HttpEntityTag etag,
-        DateTimeOffset lastModified)
-    {
-        // Malformed precondition fields are treated as absent: HttpEntityTagCondition parses
-        // strictly (RFC 9110 §13.1.1/§13.1.2 lists), and §13.1.3/§13.1.4 say an unparseable
-        // date is ignored.
-        HttpEntityTagCondition? ifMatch = null;
-        if (request.Headers.TryGetValue(HttpHeaderKey.IfMatch, out HttpHeaderValue ifMatchValue)
-            && HttpEntityTagCondition.TryParse((string?)ifMatchValue, out HttpEntityTagCondition parsedIfMatch))
-        {
-            ifMatch = parsedIfMatch;
-        }
-
-        HttpEntityTagCondition? ifNoneMatch = null;
-        if (request.Headers.TryGetValue(HttpHeaderKey.IfNoneMatch, out HttpHeaderValue ifNoneMatchValue)
-            && HttpEntityTagCondition.TryParse((string?)ifNoneMatchValue, out HttpEntityTagCondition parsedIfNoneMatch))
-        {
-            ifNoneMatch = parsedIfNoneMatch;
-        }
-
-        DateTimeOffset? ifModifiedSince = null;
-        if (request.Headers.TryGetValue(HttpHeaderKey.IfModifiedSince, out HttpHeaderValue ifModifiedSinceValue)
-            && HttpDate.TryParse((string?)ifModifiedSinceValue, out DateTimeOffset parsedIfModifiedSince))
-        {
-            ifModifiedSince = parsedIfModifiedSince;
-        }
-
-        DateTimeOffset? ifUnmodifiedSince = null;
-        if (request.Headers.TryGetValue(HttpHeaderKey.IfUnmodifiedSince, out HttpHeaderValue ifUnmodifiedSinceValue)
-            && HttpDate.TryParse((string?)ifUnmodifiedSinceValue, out DateTimeOffset parsedIfUnmodifiedSince))
-        {
-            ifUnmodifiedSince = parsedIfUnmodifiedSince;
-        }
-
-        return HttpConditionalRequest.Evaluate(new HttpConditionalRequestContext
-        {
-            Method = method,
-            ETag = etag,
-            LastModified = lastModified,
-            IfMatch = ifMatch,
-            IfNoneMatch = ifNoneMatch,
-            IfModifiedSince = ifModifiedSince,
-            IfUnmodifiedSince = ifUnmodifiedSince,
-        });
-    }
-
-    private static bool TryGetRangeSelection(
-        IHttpRequest request,
-        HttpEntityTag etag,
-        DateTimeOffset lastModified,
-        long length,
-        out HttpRangeSelection selection)
-    {
-        selection = default;
-
-        if (!request.Headers.TryGetValue(HttpHeaderKey.Range, out HttpHeaderValue rangeValue))
-        {
-            return false;
-        }
-
-        // RFC 9110 §13.2.2 step 5: a present If-Range gates whether the Range is honored at
-        // all. An unparseable If-Range cannot be validated, so the range is ignored.
-        if (request.Headers.TryGetValue(HttpHeaderKey.IfRange, out HttpHeaderValue ifRangeValue))
-        {
-            if (!HttpIfRange.TryParse((string?)ifRangeValue, out HttpIfRange ifRange)
-                || !ifRange.Matches(etag, lastModified))
-            {
-                return false;
-            }
-        }
-
-        // An unrecognized unit or malformed range-set fails the parse — the RFC's signal to
-        // ignore the header and serve the full representation.
-        if (!HttpRangeHeader.TryParse((string?)rangeValue, out HttpRangeHeader range))
-        {
-            return false;
-        }
-
-        selection = HttpRangeSelector.Select(range, length);
-        return true;
-    }
-
-    private void WriteNotModified(IHttpContext context, HttpEntityTag etag, DateTimeOffset lastModified, bool varyByAcceptEncoding)
-    {
-        // RFC 9110 §15.4.5: a 304 carries the headers a 200 would need for cache updating —
-        // validators, Cache-Control, Vary — and no content headers or body.
-        IHttpHeaderCollection headers = context.Response.Headers;
-
-        context.Response.StatusCode = HttpStatusCode.NotModified;
-        headers[HttpHeaderKey.ETag] = etag.ToString();
-        headers[HttpHeaderKey.LastModified] = HttpDate.Format(lastModified);
-
-        if (_cacheControl is not null)
-        {
-            headers[HttpHeaderKey.CacheControl] = _cacheControl;
-        }
-        if (varyByAcceptEncoding)
-        {
-            AppendVaryAcceptEncoding(headers);
-        }
-    }
-
-    private void WriteRangeNotSatisfiable(
-        IHttpContext context,
-        in HttpRangeSelection selection,
-        HttpEntityTag etag,
-        DateTimeOffset lastModified,
-        bool varyByAcceptEncoding)
-    {
-        IHttpHeaderCollection headers = context.Response.Headers;
-
-        context.Response.StatusCode = HttpStatusCode.RequestedRangeNotSatisfiable;
-        // RFC 9110 §14.4: the unsatisfied-range form reports the selected representation's
-        // complete length so the client can retry with a valid range.
-        headers[HttpHeaderKey.ContentRange] = selection.UnsatisfiedContentRange.ToString();
-        headers[HttpHeaderKey.AcceptRanges] = HttpRangeHeader.BytesUnit;
-        headers[HttpHeaderKey.ETag] = etag.ToString();
-        headers[HttpHeaderKey.LastModified] = HttpDate.Format(lastModified);
-
-        if (_cacheControl is not null)
-        {
-            headers[HttpHeaderKey.CacheControl] = _cacheControl;
-        }
-        if (varyByAcceptEncoding)
-        {
-            AppendVaryAcceptEncoding(headers);
-        }
-    }
-
     private static void RedirectAppendingSlash(IHttpContext context)
     {
         // Reconstructing the query from the parsed collection re-encodes each part; a redirect
@@ -568,103 +316,9 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
         context.Response.Headers[HttpHeaderKey.Location] = location;
     }
 
-    private static void AppendVaryAcceptEncoding(IHttpHeaderCollection headers)
-    {
-        if (!headers.TryGetValue(HttpHeaderKey.Vary, out HttpHeaderValue existing))
-        {
-            headers[HttpHeaderKey.Vary] = "Accept-Encoding";
-            return;
-        }
-
-        string current = (string?)existing ?? string.Empty;
-        ReadOnlySpan<char> span = current.AsSpan();
-        foreach (Range segment in span.Split(','))
-        {
-            ReadOnlySpan<char> token = span[segment].Trim();
-            if (token.Equals("Accept-Encoding", StringComparison.OrdinalIgnoreCase) || token is "*")
-            {
-                return;
-            }
-        }
-
-        headers[HttpHeaderKey.Vary] = current.Length == 0 ? "Accept-Encoding" : current + ", Accept-Encoding";
-    }
-
     private static string GetFileName(string candidate)
     {
         int separator = candidate.LastIndexOf('/');
         return separator < 0 ? candidate : candidate[(separator + 1)..];
-    }
-
-    private static DateTimeOffset NormalizeTimestamp(DateTime value) => value.Kind switch
-    {
-        DateTimeKind.Utc => new DateTimeOffset(value),
-        DateTimeKind.Local => new DateTimeOffset(value).ToUniversalTime(),
-        // File systems that don't stamp a kind report wall-clock UTC in this repo's mounts.
-        _ => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)),
-    };
-
-    private static DateTimeOffset TruncateToSeconds(DateTimeOffset value)
-        // HTTP-date resolution is one second; validators must compare at the emitted precision.
-        => new(value.UtcTicks - (value.UtcTicks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
-
-    private static async Task CopySliceAsync(Stream source, Stream destination, long offset, long count, CancellationToken cancellationToken)
-    {
-        if (source.CanSeek)
-        {
-            source.Seek(offset, SeekOrigin.Begin);
-        }
-        else
-        {
-            await SkipAsync(source, offset, cancellationToken).ConfigureAwait(false);
-        }
-
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
-        try
-        {
-            long remaining = count;
-            while (remaining > 0)
-            {
-                int read = await source
-                    .ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken)
-                    .ConfigureAwait(false);
-                if (read <= 0)
-                {
-                    // The file shrank after the head (with its Content-Range) was computed:
-                    // completing the response would silently serve wrong bytes, so abort it.
-                    throw new EndOfStreamException("The file ended before the selected byte range was fully written.");
-                }
-                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                remaining -= read;
-            }
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-    }
-
-    private static async Task SkipAsync(Stream source, long count, CancellationToken cancellationToken)
-    {
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
-        try
-        {
-            long remaining = count;
-            while (remaining > 0)
-            {
-                int read = await source
-                    .ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken)
-                    .ConfigureAwait(false);
-                if (read <= 0)
-                {
-                    throw new EndOfStreamException("The file ended before the selected byte range was reached.");
-                }
-                remaining -= read;
-            }
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
     }
 }
