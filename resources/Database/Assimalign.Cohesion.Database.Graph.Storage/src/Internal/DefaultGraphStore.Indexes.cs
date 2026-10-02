@@ -21,6 +21,15 @@ internal sealed partial class DefaultGraphStore
 
     public bool HasIndex(string label, string propertyKey, TransactionSnapshot snapshot) => Definition(label, propertyKey, snapshot) is not null;
 
+    public IReadOnlyList<StoredGraphIndex> GetIndexes(TransactionSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var definitions = Definitions(snapshot);
+        var indexes = new StoredGraphIndex[definitions.Length];
+        for (int i = 0; i < definitions.Length; i++) { indexes[i] = new StoredGraphIndex(definitions[i].Label!, definitions[i].PropertyKey!); }
+        return indexes;
+    }
+
     public async ValueTask CreateIndexAsync(string label, string propertyKey, ITransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
@@ -70,7 +79,9 @@ internal sealed partial class DefaultGraphStore
     {
         var definition = Definition(label, propertyKey, snapshot)
             ?? throw new InvalidOperationException($"No visible node-property index exists for '{label}.{propertyKey}'.");
-        var key = GraphRecordCodec.Key(value);
+        // Every write and backfill refuses a value whose key does not fit, so no entry, and no
+        // indexed node, holds one: the search matches nothing rather than failing the query.
+        if (!GraphRecordCodec.TryKey(value, out var key)) { return []; }
         var result = new List<StoredGraphNode>();
         await using var cursor = ResolveIndex(definition.Id).OpenCursor(snapshot,
             new IndexKeyRange(Composite(key, 0), Composite(key, ulong.MaxValue), true, true));

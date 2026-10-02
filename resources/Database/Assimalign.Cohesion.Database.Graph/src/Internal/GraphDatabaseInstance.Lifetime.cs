@@ -2,8 +2,9 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 internal sealed partial class GraphDatabaseInstance
 {
@@ -59,6 +60,9 @@ internal sealed partial class GraphDatabaseInstance
     {
         var translated when !ReferenceEquals(translated, error) => translated,
         _ when error is InvalidOperationException => new DatabaseException("COHDBG003: " + error.Message, error),
+        // A label expression or predicate nested deeper than this thread's stack: the walks
+        // check the stack before they descend, so the statement fails, not the process.
+        _ when error is InsufficientExecutionStackException stack => GraphStatementTooComplex.Create(stack),
         _ => error,
     };
 
@@ -73,6 +77,9 @@ internal sealed partial class GraphDatabaseInstance
     {
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
+        // An element whose record or index key outgrows storage fails its statement; the store
+        // wrote nothing for it. It derives from StorageException, so it is matched first.
+        GraphElementTooLargeException => new DatabaseException("COHDBG009: " + error.Message, error),
         StorageException => new DatabaseException("COHDBG006: " + error.Message, error),
         _ => error,
     };

@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -221,7 +222,7 @@ public sealed class GraphStoreTests
         await using var fixture = new Fixture();
         var writer = await fixture.Begin();
         await Should.ThrowAsync<ArgumentException>(() => fixture.Store.CreateNodeAsync(["N"], Properties("bad", new object()), writer).AsTask());
-        await Should.ThrowAsync<ArgumentException>(() => fixture.Store.CreateNodeAsync(["N"], Properties("tooBig", new string('x', 100_000)), writer).AsTask());
+        await Should.ThrowAsync<GraphElementTooLargeException>(() => fixture.Store.CreateNodeAsync(["N"], Properties("tooBig", new string('x', 100_000)), writer).AsTask());
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         await Should.ThrowAsync<OperationCanceledException>(() => fixture.Store.CreateNodeAsync(["N"], _empty, writer, cancellation.Token).AsTask());
@@ -296,6 +297,98 @@ public sealed class GraphStoreTests
         (await next.SearchIndexAsync("N", "key", 239L, read.Snapshot)).Count.ShouldBe(1);
         (await next.SearchIndexAsync("N", "key", 240L, read.Snapshot)).ShouldBeEmpty();
         (await next.SearchIndexAsync("N", "group", "same", read.Snapshot)).Count.ShouldBe(240);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Element size: an oversized record or indexed value is refused before anything is written")]
+    public async Task CreateAsync_OversizedRecordOrIndexedValue_ShouldThrowAndWriteNothing()
+    {
+        // Arrange
+        await using var fixture = new Fixture();
+        var writer = await fixture.Begin();
+        await fixture.Store.CreateIndexAsync("N", "key", writer);
+        string[] labels = Enumerable.Range(0, 300).Select(i => "Label_with_a_fairly_long_name_" + i.ToString("D3", CultureInfo.InvariantCulture)).ToArray();
+
+        // Act
+        var record = await Should.ThrowAsync<GraphElementTooLargeException>(() => fixture.Store.CreateNodeAsync(labels, _empty, writer).AsTask());
+        var property = await Should.ThrowAsync<GraphElementTooLargeException>(() =>
+            fixture.Store.CreateNodeAsync(["M"], Properties("s", new string('s', 9_000)), writer).AsTask());
+        var key = await Should.ThrowAsync<GraphElementTooLargeException>(() =>
+            fixture.Store.CreateNodeAsync(["N"], Properties("key", new string('k', 600)), writer).AsTask());
+        var node = await fixture.Store.CreateNodeAsync(["N"], Properties("key", "fits"), writer);
+        var edge = await Should.ThrowAsync<GraphElementTooLargeException>(() =>
+            fixture.Store.CreateRelationshipAsync(node.Id, node.Id, "R", Properties("s", new string('s', 9_000)), writer).AsTask());
+
+        // Assert
+        record.Message.ShouldStartWith("A node's labels and properties encode to ", Case.Sensitive);
+        property.Message.ShouldEndWith("more than the 8092 bytes one graph record can hold.", Case.Sensitive);
+        key.Message.ShouldContain("1016-byte index key", Case.Sensitive);
+        edge.Message.ShouldStartWith("A relationship's type and properties encode to ", Case.Sensitive);
+        fixture.Store.GetNodes(null, writer.Snapshot).ShouldHaveSingleItem().Id.ShouldBe(node.Id);
+        (await fixture.Store.GetIncidentAsync(node.Id, writer.Snapshot)).ShouldBeEmpty();
+        (await fixture.Store.SearchIndexAsync("N", "key", "fits", writer.Snapshot)).ShouldHaveSingleItem().Id.ShouldBe(node.Id);
+        await fixture.Coordinator.CommitAsync(writer);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Element size: an index build over an oversized value is refused, and a search for one matches nothing")]
+    public async Task CreateIndexAsync_OversizedExistingValue_ShouldThrowAndSearchShouldMatchNothing()
+    {
+        // Arrange
+        await using var fixture = new Fixture();
+        var writer = await fixture.Begin();
+        string tooLong = new('k', 600);
+        await fixture.Store.CreateNodeAsync(["Long"], Properties("key", tooLong), writer);
+        await fixture.Store.CreateNodeAsync(["N"], Properties("key", "short"), writer);
+        await fixture.Store.CreateIndexAsync("N", "key", writer);
+
+        // Act
+        var build = await Should.ThrowAsync<GraphElementTooLargeException>(() => fixture.Store.CreateIndexAsync("Long", "key", writer).AsTask());
+        var search = await fixture.Store.SearchIndexAsync("N", "key", tooLong, writer.Snapshot);
+
+        // Assert
+        build.Message.ShouldContain("1016-byte index key", Case.Sensitive);
+        search.ShouldBeEmpty();
+        fixture.Store.HasIndex("Long", "key", writer.Snapshot).ShouldBeFalse();
+        fixture.Store.GetIndexes(writer.Snapshot).ShouldBe([new StoredGraphIndex("N", "key")]);
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Store.SearchIndexAsync("N", "key", new object(), writer.Snapshot).AsTask());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Indexes: GetIndexes lists exactly the indexes a snapshot sees, across restart")]
+    public async Task GetIndexes_AcrossSnapshotsAndRestart_ShouldListVisibleIndexes()
+    {
+        // Arrange
+        var data = new MemoryStream();
+        var journal = new MemoryStream();
+        using var storage = GraphStorage.Create(data, journal, new MemoryStream(), "indexes");
+        await using var coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        var store = GraphStore.Open(storage, coordinator);
+        var create = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await store.CreateNodeAsync(["N"], Properties("key", 1), create);
+        await store.CreateIndexAsync("N", "key", create);
+        await store.CreateIndexAsync("N", "other", create);
+        await store.CreateIndexAsync("M", "key", create);
+        await coordinator.CommitAsync(create);
+        var old = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var drop = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // Act
+        await store.DropIndexAsync("N", "other", drop);
+        var dropping = store.GetIndexes(drop.Snapshot);
+        var before = store.GetIndexes(old.Snapshot);
+        await coordinator.CommitAsync(drop);
+        await coordinator.RollbackAsync(old);
+        using var recovered = GraphStorage.Open(Clone(data), Clone(journal), new MemoryStream());
+        await using var recovery = new TransactionCoordinator(recovered, recovered.WriteAheadJournal, recovered.Records);
+        var plan = recovery.AnalyzeAndScrub();
+        var reopened = GraphStore.Open(recovered, recovery);
+        await reopened.RecoverIndexesAsync(plan.Aborted);
+        recovery.CompleteRecovery();
+        var read = await recovery.BeginAsync(IsolationLevel.Snapshot);
+        var afterRestart = reopened.GetIndexes(read.Snapshot);
+
+        // Assert
+        dropping.ShouldBe([new StoredGraphIndex("N", "key"), new StoredGraphIndex("M", "key")], ignoreOrder: true);
+        before.ShouldBe([new StoredGraphIndex("N", "key"), new StoredGraphIndex("N", "other"), new StoredGraphIndex("M", "key")], ignoreOrder: true);
+        afterRestart.ShouldBe(dropping, ignoreOrder: true);
     }
 
     private static readonly IReadOnlyDictionary<string, object?> _empty = new Dictionary<string, object?>();

@@ -255,14 +255,62 @@ or non-`A` rows. A `WHERE` labeled predicate (`n:A`, `n IS [NOT] LABELED A`) is 
 never an equality, so `MATCH (n) WHERE n:A AND n.k = 1` also plans no index property. The
 executor evaluates the expression on every candidate node, and a relationship pattern's expression
 on every incident edge's type. `GraphLabelEvaluator` validates each expression before execution:
-an unknown kind, a null operand or name, nesting past 128 levels, or `Labels`/`Type` that
-disagree with the expression are `COHDBG001`, and every name, including those under `!` and `|`,
-must be a catalog label or relationship type (`COHDBG002`). `Undirected` and `LeftOrRight`
+an unknown kind, a null operand, name or operand list, a conjunction or disjunction with fewer than
+two operands, or `Labels`/`Type` that disagree with the expression are `COHDBG001`, and every name,
+including those under `!` and `|`, must be a catalog label or relationship type (`COHDBG002`); a
+chain that repeats a name resolves it once. `Undirected` and `LeftOrRight`
 constrain neither end of a stored edge; insertion takes only `Outgoing` and `Incoming`, one type,
 and a label conjunction. Storage cannot hold an empty or all-whitespace label, relationship type or
 property key, and a delimited name such as `(n:" ")` or `{" ": 1}` can spell one, so insertion
 rejects each with `COHDBG001` before anything is written; matching on such a name finds no catalog
 entry (`COHDBG002`) or no row.
+
+Label expressions and `WHERE` predicates have no length or nesting limit (#1139 follow-up, owner
+decision 2026-10-02: do what Neo4j does; the evidence is in the
+[language design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#chain-length-and-nesting-1139-follow-up)).
+A conjunction or disjunction of labels, and an `AND` chain of predicates, is one n-ary node, and the
+engine evaluates it with a loop that stops at the first operand that decides it, under three-valued
+logic for `AND` (false, otherwise unknown, otherwise true). Validation, name collection and the
+anchor's equality search walk with an explicit stack. Anchor selection reads the visible indexes
+once per plan (`IGraphStore.GetIndexes`, grouped by label) and the `WHERE` chain's equalities once,
+keeping each variable's first non-null value per key; each node then tries, for each distinct label
+in order, only the keys that label has an index on. A plan therefore costs time linear in its `E`
+equalities, its `D` pattern labels and properties and its `I` visible indexes, plus for each node the
+indexes its own labels carry, never the product of labels, equalities and indexes (Neo4j's leaf
+planner likewise groups predicates once and visits only each label's own index descriptors,
+`NodeIndexLeafPlanner.scala`:184, :201, :248-296), and it chooses as a per-pair search would: the
+first label with an index on a key the node has a value for, then that label's key whose value comes
+first, inline properties before `WHERE` equalities. A node carrying more than 16 labels is tested
+through a hash set built once per evaluation. Only label and predicate evaluation recurse, where the
+tree nests, and each descent calls `RuntimeHelpers.EnsureSufficientExecutionStack`. A statement
+whose parse (`GQL0009`), plan or evaluation needs more stack than the executing thread has left
+fails with `COHDBG008`, statement too complex (ISO SQLSTATE 54001; Neo4j's transient
+`StackOverFlowError`, GQLSTATUS 51N37). A caller that runs `GraphQueryRequest.FromGql` itself gets
+the failure before any statement starts. Text the session parses (`ExecuteAsync(string)`, the wire)
+is part of its statement (#1188), and so is a typed request whose statement already carries
+`GQL0009`: a parse, plan or evaluation out of stack is a failed statement and, like any other,
+aborts an explicit transaction (`COHDBG007` until the caller rolls back; see
+[Failed statements in explicit transactions](#failed-statements-in-explicit-transactions-1188)).
+The session stays open. Over the wire's `Execute` seam the
+failure is an `ExecutionFailure` that keeps the connection ready; on the `ExecutePaths` seam the
+server session survives too, but the client currently closes its connection after any statement
+error received before the first path (a `Database.Client` follow-up). Planner messages quote at
+most 256 UTF-16 code units of a label expression, cut so that no surrogate pair is split.
+
+Two storage limits remain, recorded here rather than hidden behind the language. A node's labels
+and properties, or a relationship's type and properties, share one graph record of at most 8,092
+bytes (`GraphRecordCodec`), so the number of distinct labels one node can carry is bounded by their
+encoded size, and an indexed property value must fit the 1,016-byte index key. Past either limit the
+store throws `GraphElementTooLargeException` before it writes anything for the element, and the
+engine fails the statement with `COHDBG009`, element too large: the operation aborts like any other
+statement failure (an explicit transaction is aborted until the caller rolls back) and the session, in process and over the
+wire, stays open. A search for a value too long for its index matches nothing, since no write can
+store one. Neo4j instead spills labels to dynamic label records and long properties to property
+chains, which this store's format does not yet have. Defining a new label or relationship type
+checks identity uniqueness by listing every definition (`DefaultGraphCatalog.SaveDefinitionAsync`),
+so a statement that introduces N new labels costs time quadratic in N (measured in Release: 1,000
+new labels in one `INSERT` take 7.5 s, 2,000 take 42 s). Neither limit counts expression length;
+both are follow-up storage items.
 
 GQL patterns are finite chains of at most 64 relationships. Each matched path is a trail: an edge
 identity is used at most once within that path; a node may recur. Separate comma-separated paths
@@ -377,16 +425,19 @@ to exercise that enforcement path; compiled provisioning is not included.
 | Code | Meaning |
 | --- | --- |
 | `COHDBL001` | Unsupported language capability, reported on the parsed statement |
-| `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design |
+| `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design. `GQL0005` is the 64-relationship path bound only |
 | `GQL0007` | Attempt to mutate catalog introspection results |
 | `GQL0008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
-| `COHDBG001` | Invalid pattern, variable binding, label expression or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge |
+| `GQL0009` | Parentheses nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `COHDBG008` |
+| `COHDBG001` | Invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `COHDBG002` | Unknown label or relationship type |
 | `COHDBG003` | Schema/data mismatch, restricted deletion or invalid graph mutation |
 | `COHDBG004` | Path materialization or candidate-expansion limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
 | `COHDBG006` | Storage failure translated at the engine boundary |
 | `COHDBG007` | The session's explicit transaction is aborted, by a failed statement or by a rollback or commit that did not complete: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
+| `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; on the wire's `ExecutePaths` seam the client currently closes its connection |
+| `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
 
 Planner/data errors use stable code prefixes on `DatabaseException`. Kernel aborts cross the engine
 boundary as `DatabaseTransactionAbortedException`; deadlocks retain their specialized subtype.

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 
 using Shouldly;
@@ -11,8 +12,9 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 /// <summary>
 /// ISO/IEC 39075 16.8 label expressions in node and edge patterns, and the labeled predicate in
 /// <c>WHERE</c> (#1139). <c>!</c> binds tighter than <c>&amp;</c>, <c>&amp;</c> tighter than
-/// <c>|</c>, both binary operators associate to the left, and <c>:A:B</c> is the Cohesion
-/// convenience for <c>:A&amp;B</c>.
+/// <c>|</c>, a chain of one operator is one n-ary node, and <c>:A:B</c> is the Cohesion
+/// convenience for <c>:A&amp;B</c>. Chain length and nesting have no fixed limit
+/// (<see cref="GqlLabelChainParserTests"/>).
 /// </summary>
 public sealed class GqlLabelExpressionParserTests
 {
@@ -27,18 +29,29 @@ public sealed class GqlLabelExpressionParserTests
         { "MATCH (n:(A|B)&!C) RETURN n", And(Or(Name("A"), Name("B")), Not(Name("C"))), [] },
         { "MATCH (n IS A|B) RETURN n", Or(Name("A"), Name("B")), [] },
         { "MATCH (n IS A) RETURN n", Name("A"), ["A"] },
-        // '!' > '&' > '|', and both binary operators associate to the left.
+        // '!' > '&' > '|': flattening a chain never crosses a precedence level.
         { "MATCH (n:A|B&!C) RETURN n", Or(Name("A"), And(Name("B"), Not(Name("C")))), [] },
         { "MATCH (n:!A&B|C) RETURN n", Or(And(Not(Name("A")), Name("B")), Name("C")), [] },
-        { "MATCH (n:A|B|C) RETURN n", Or(Or(Name("A"), Name("B")), Name("C")), [] },
-        { "MATCH (n:A&B&C) RETURN n", And(And(Name("A"), Name("B")), Name("C")), ["A", "B", "C"] },
+        { "MATCH (n:A|B&C|D) RETURN n", Or(Name("A"), And(Name("B"), Name("C")), Name("D")), [] },
+        { "MATCH (n:!A&B) RETURN n", And(Not(Name("A")), Name("B")), [] },
+        // A chain of one operator is one n-ary node.
+        { "MATCH (n:A|B|C) RETURN n", Or(Name("A"), Name("B"), Name("C")), [] },
+        { "MATCH (n:A&B&C) RETURN n", And(Name("A"), Name("B"), Name("C")), ["A", "B", "C"] },
         { "MATCH (n:!(A|B)) RETURN n", Not(Or(Name("A"), Name("B"))), [] },
         { "MATCH (n:!(!A)) RETURN n", Not(Not(Name("A"))), [] },
         // Parentheses group without a node; a conjunction inside them still fills Labels.
         { "MATCH (n:((A&B))) RETURN n", And(Name("A"), Name("B")), ["A", "B"] },
+        // A group that opens a chain of its own operator merges into it; a later group stays nested,
+        // and a nested conjunction still fills Labels.
+        { "MATCH (n:(A|B)|C) RETURN n", Or(Name("A"), Name("B"), Name("C")), [] },
+        { "MATCH (n:A|(B|C)) RETURN n", Or(Name("A"), Or(Name("B"), Name("C"))), [] },
+        { "MATCH (n:((A&B))&C) RETURN n", And(Name("A"), Name("B"), Name("C")), ["A", "B", "C"] },
+        { "MATCH (n:A&(B&C)) RETURN n", And(Name("A"), And(Name("B"), Name("C"))), ["A", "B", "C"] },
+        { "MATCH (n:(A|B)&C) RETURN n", And(Or(Name("A"), Name("B")), Name("C")), [] },
         // The Cohesion convenience is the same tree as the conjunction.
         { "MATCH (n:A:B) RETURN n", And(Name("A"), Name("B")), ["A", "B"] },
-        { "MATCH (n:A:B:C) RETURN n", And(And(Name("A"), Name("B")), Name("C")), ["A", "B", "C"] },
+        { "MATCH (n:A:B:C) RETURN n", And(Name("A"), Name("B"), Name("C")), ["A", "B", "C"] },
+        { "MATCH (n:A:A) RETURN n", And(Name("A"), Name("A")), ["A", "A"] },
         // Label names are names: keywords and quoted names are labels, not clauses.
         { "MATCH (n:Order|\"with space\") RETURN n", Or(Name("Order"), Name("with space")), [] },
         { "MATCH (n:A {k: 1}) RETURN n", Name("A"), ["A"] },
@@ -68,6 +81,7 @@ public sealed class GqlLabelExpressionParserTests
         { "MATCH (a)-[r IS T]->(b) RETURN r", Name("T"), "T" },
         { "MATCH (a)-[:%]->(b) RETURN a", new GqlLabelWildcard(), null },
         { "MATCH (a)-[r:!T]->(b) RETURN r", Not(Name("T")), null },
+        { "MATCH (a)-[r:T|U|V]->(b) RETURN r", Or(Name("T"), Name("U"), Name("V")), null },
         { "MATCH (a)<-[r:T]-(b) RETURN r", Name("T"), "T" },
         { "MATCH (a)<-[r IS (T|U)&!V {k: 1}]->(b) RETURN r", And(Or(Name("T"), Name("U")), Not(Name("V"))), null },
     };
@@ -124,6 +138,38 @@ public sealed class GqlLabelExpressionParserTests
         Not(Or(Name("A"), new GqlLabelWildcard())).ToString().ShouldBe("!(A|%)");
         And(Name("A"), And(Name("B"), Name("C"))).ToString().ShouldBe("A&(B&C)");
         Or(Name("with space"), Name("Order")).ToString().ShouldBe("\"with space\"|Order");
+        Or(Name("A"), Name("B"), Name("C"), Name("D")).ToString().ShouldBe("A|B|C|D");
+        And(Name("A"), Name("B"), Name("C")).ToString().ShouldBe("A&B&C");
+        Or(Or(Name("A"), Name("B")), Name("C")).ToString().ShouldBe("(A|B)|C");
+        Not(Not(Name("A"))).ToString().ShouldBe("!(!A)");
+        // An invalid hand-built node renders a marker instead of throwing.
+        new GqlLabelConjunction([]).ToString().ShouldBe("<invalid>");
+        new GqlLabelDisjunction(null!).ToString().ShouldBe("<invalid>");
+        Or(Name("A"), null!).ToString().ShouldBe("A|<invalid>");
+        Name(null!).ToString().ShouldBe("<invalid>");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Label expressions: chains compare by operands in order, and copy their input")]
+    public void Equals_LabelChains_ShouldCompareOperandsStructurally()
+    {
+        // Arrange
+        List<GqlLabelExpression> operands = [Name("A"), Name("B")];
+        var chain = new GqlLabelDisjunction(operands);
+
+        // Act
+        operands.Add(Name("C"));
+
+        // Assert: the record copied its operands, so the caller's list cannot change it.
+        chain.Operands.Count.ShouldBe(2);
+        chain.ShouldBe(Or(Name("A"), Name("B")));
+        chain.GetHashCode().ShouldBe(Or(Name("A"), Name("B")).GetHashCode());
+        chain.ShouldNotBe(Or(Name("B"), Name("A")));
+        chain.ShouldNotBe(Or(Name("A"), Name("B"), Name("C")));
+        ((GqlLabelExpression)chain).ShouldNotBe(And(Name("A"), Name("B")));
+        And(Name("A"), Not(Name("B"))).ShouldBe(And(Name("A"), Not(Name("B"))));
+        And(Name("A"), Not(Name("B"))).ShouldNotBe(And(Name("A"), Not(Name("b"))));
+        new GqlLabelConjunction(null!).ShouldBe(new GqlLabelConjunction(null!));
+        new GqlLabelConjunction(null!).ShouldNotBe(new GqlLabelConjunction([]));
     }
 
     /// <param name="gql">A malformed label expression.</param>
@@ -167,34 +213,6 @@ public sealed class GqlLabelExpressionParserTests
         error.End.ShouldNotBeNull().ShouldBeInRange(start, gql.Length);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Label expressions: nesting past 128 levels is GQL0005, 128 parses")]
-    public void Parse_LabelExpressionNesting_ShouldBeBoundedAt128()
-    {
-        // Arrange
-        static string Parenthesized(int levels) => "MATCH (n:" + new string('(', levels) + "A" + new string(')', levels) + ") RETURN n";
-        static string Chain(int names, string separator) => "MATCH (n:" + string.Join(separator, Enumerable.Repeat("A", names)) + ") RETURN n";
-
-        // Act / Assert
-        Parse(Parenthesized(128)).Diagnostics.ShouldBeEmpty();
-        Parse(Parenthesized(129)).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
-        Parse(Chain(128, "|")).Diagnostics.ShouldBeEmpty();
-        Parse(Chain(129, "|")).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
-        Parse(Chain(129, "&")).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
-        // A flat :A:B list is a left-deep conjunction too, so it holds at most 128 labels, and the
-        // message says so rather than speaking of nesting the text does not have.
-        Parse(Chain(128, ":")).Diagnostics.ShouldBeEmpty();
-        var colons = Parse(Chain(129, ":")).Diagnostics.ShouldHaveSingleItem();
-        colons.Code.ShouldBe("GQL0005");
-        colons.Message.ShouldNotBeNull().ShouldContain("at most 128 labels", Case.Sensitive);
-        Parse(Parenthesized(129)).Diagnostics.ShouldHaveSingleItem().Message
-            .ShouldBe("Label-expression parentheses cannot nest more than 128 levels.");
-        Parse("MATCH (n) WHERE n:" + new string('(', 129) + "A" + new string(')', 129) + " RETURN n")
-            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
-        // 128 negations inside 128 groups: the groups fit, the tree is 129 levels deep.
-        Parse("MATCH (n:" + string.Concat(Enumerable.Repeat("!(", 128)) + "A" + new string(')', 128) + ") RETURN n")
-            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
-    }
-
     [Fact(DisplayName = "Cohesion Test [Graph.Language] - Labeled predicate: IS LABELED, the colon form and IS NOT LABELED build one primary")]
     public void Parse_LabeledPredicate_ShouldBuildABooleanPrimary()
     {
@@ -215,12 +233,13 @@ public sealed class GqlLabelExpressionParserTests
         var third = negated.ShouldBeOfType<GqlLabeledPredicate>();
         third.LabelExpression.ShouldBe(Name("A"));
         third.IsNegated.ShouldBeTrue();
-        var and = conjunction.ShouldBeOfType<GqlBinaryExpression>();
-        and.Operator.ShouldBe("AND");
-        and.Right.ShouldBeOfType<GqlLabeledPredicate>().LabelExpression.ShouldBe(new GqlLabelWildcard());
-        var inner = and.Left.ShouldBeOfType<GqlBinaryExpression>();
-        inner.Left.ShouldBeOfType<GqlLabeledPredicate>().Variable.ShouldBe("r");
-        inner.Right.ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("=");
+        // One AND chain over three Boolean primaries, the last of them parenthesized.
+        var and = conjunction.ShouldBeOfType<GqlLogicalExpression>();
+        and.Operator.ShouldBe(GqlLogicalOperator.And);
+        and.Operands.Count.ShouldBe(3);
+        and.Operands[0].ShouldBeOfType<GqlLabeledPredicate>().Variable.ShouldBe("r");
+        and.Operands[1].ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("=");
+        and.Operands[2].ShouldBeOfType<GqlLabeledPredicate>().LabelExpression.ShouldBe(new GqlLabelWildcard());
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph.Language] - Labeled predicate: its span covers the variable through the last label")]
@@ -269,18 +288,9 @@ public sealed class GqlLabelExpressionParserTests
         diagnostic.Start.ShouldBe(gql.IndexOf("IS", StringComparison.Ordinal));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Labeled predicate: each counts toward the 128-comparison bound")]
-    public void Parse_ManyLabeledPredicates_ShouldBeBounded()
-    {
-        // Act / Assert
-        Parse("MATCH (n) WHERE " + string.Join(" AND ", Enumerable.Repeat("n:A", 128)) + " RETURN n").Diagnostics.ShouldBeEmpty();
-        Parse("MATCH (n) WHERE " + string.Join(" AND ", Enumerable.Repeat("n:A", 129)) + " RETURN n")
-            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
-    }
-
     private static GqlLabelName Name(string name) => new(name);
     private static GqlLabelNegation Not(GqlLabelExpression operand) => new(operand);
-    private static GqlLabelConjunction And(GqlLabelExpression left, GqlLabelExpression right) => new(left, right);
-    private static GqlLabelDisjunction Or(GqlLabelExpression left, GqlLabelExpression right) => new(left, right);
+    private static GqlLabelConjunction And(params GqlLabelExpression[] operands) => new(operands);
+    private static GqlLabelDisjunction Or(params GqlLabelExpression[] operands) => new(operands);
     private static GqlQueryStatement Parse(string gql) => (GqlQueryStatement)new GqlQueryParser().Parse(gql);
 }

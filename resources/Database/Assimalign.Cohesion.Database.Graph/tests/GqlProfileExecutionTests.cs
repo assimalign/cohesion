@@ -183,13 +183,14 @@ public sealed class GqlProfileExecutionTests
     private static bool IsNameConjunction(GqlLabelExpression expression) => expression switch
     {
         GqlLabelName => true,
-        GqlLabelConjunction conjunction => IsNameConjunction(conjunction.Left) && IsNameConjunction(conjunction.Right),
+        GqlLabelConjunction conjunction => conjunction.Operands.All(IsNameConjunction),
         _ => false,
     };
 
     private static bool HasLabeledPredicate(GqlExpression? expression) => expression switch
     {
         GqlLabeledPredicate => true,
+        GqlLogicalExpression logical => logical.Operands.Any(HasLabeledPredicate),
         GqlBinaryExpression binary => HasLabeledPredicate(binary.Left) || HasLabeledPredicate(binary.Right),
         _ => false,
     };

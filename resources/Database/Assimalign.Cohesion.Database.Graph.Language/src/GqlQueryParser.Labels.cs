@@ -6,9 +6,6 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 public sealed partial class GqlQueryParser
 {
-    // Bounds both the label tree's depth and its parenthesis nesting, as GQL0005 bounds predicates.
-    private const int maximumLabelDepth = 128;
-
     /// <summary>
     /// Parses an ISO/IEC 39075 <c>&lt;is label expression&gt;</c> after an element variable:
     /// <c>:</c> or <c>IS</c>, then a label expression. A node pattern also takes the Cohesion
@@ -21,9 +18,8 @@ public sealed partial class GqlQueryParser
         bool colon = Current.Type == TokenType.Colon;
         if (!colon && !(Current.Type == TokenType.Keyword && Is("IS"))) { return null; }
         Advance();
-        _labelNesting = 0;
         int first = _position;
-        var (expression, depth) = ParseLabelDisjunction();
+        var expression = ParseLabelDisjunction();
         if (Failed || Current.Type != TokenType.Colon) { return expression; }
 
         if (!node)
@@ -44,6 +40,9 @@ public sealed partial class GqlQueryParser
             return expression;
         }
 
+        // :A:B:C is one conjunction, as long as the list runs (Neo4j: ColonConjunction, then
+        // Conjunctions.flat); no count of labels applies.
+        List<GqlLabelExpression> operands = [expression];
         while (!Failed && Take(TokenType.Colon))
         {
             if (Current.Type is TokenType.Bang or TokenType.Percent or TokenType.LeftParen)
@@ -51,85 +50,80 @@ public sealed partial class GqlQueryParser
                 Error("GQL0002", mixedColonMessage, Current);
                 break;
             }
-            var name = Current;
-            expression = new GqlLabelConjunction(expression, new GqlLabelName(Identifier(allowKeyword: true)));
-            depth = Deepen(depth, 1, name);
+            operands.Add(new GqlLabelName(Identifier(allowKeyword: true)));
         }
         if (!Failed && Current.Type is TokenType.Pipe or TokenType.Ampersand or TokenType.Concat)
         {
             Error("GQL0002", mixedColonMessage, Current);
         }
-        return expression;
+        return GqlLabelConjunction.FromOwnedList(operands);
     }
 
     private const string mixedColonMessage =
         "Repeated ':' labels cannot be combined with label-expression operators; write ':A&B' or ':A:B'.";
 
     // label-expression := label-term ('|' label-term)*
-    private (GqlLabelExpression Expression, int Depth) ParseLabelDisjunction()
+    private GqlLabelExpression ParseLabelDisjunction()
     {
-        var (left, depth) = ParseLabelConjunction();
+        var first = ParseLabelConjunction();
+        if (Failed || Current.Type is not (TokenType.Pipe or TokenType.Concat)) { return first; }
+
+        // A parenthesized disjunction that opens the chain merges into it: (A|B)|C is A|B|C. A term
+        // is a disjunction only when it came from parentheses.
+        List<GqlLabelExpression> operands = first is GqlLabelDisjunction opening ? opening.DetachOperands() : [first];
         while (!Failed && Current.Type is TokenType.Pipe or TokenType.Concat)
         {
-            var operation = Current;
-            if (operation.Type == TokenType.Concat)
+            if (Current.Type == TokenType.Concat)
             {
-                Error("GQL0002", "'||' is not a label operator; write one '|' between labels.", operation);
+                Error("GQL0002", "'||' is not a label operator; write one '|' between labels.", Current);
                 break;
             }
             Advance();
-            var (right, rightDepth) = ParseLabelConjunction();
-            left = new GqlLabelDisjunction(left, right);
-            depth = Deepen(depth, rightDepth, operation);
+            operands.Add(ParseLabelConjunction());
         }
-        return (left, depth);
+        return GqlLabelDisjunction.FromOwnedList(operands);
     }
 
     // label-term := label-factor ('&' label-factor)*
-    private (GqlLabelExpression Expression, int Depth) ParseLabelConjunction()
+    private GqlLabelExpression ParseLabelConjunction()
     {
-        var (left, depth) = ParseLabelFactor();
-        while (!Failed && Current.Type == TokenType.Ampersand)
+        var first = ParseLabelFactor();
+        if (Failed || Current.Type != TokenType.Ampersand) { return first; }
+
+        // A parenthesized conjunction that opens the chain merges into it: (A&B)&C is A&B&C. A
+        // factor is a conjunction only when it came from parentheses.
+        List<GqlLabelExpression> operands = first is GqlLabelConjunction opening ? opening.DetachOperands() : [first];
+        while (!Failed && Take(TokenType.Ampersand))
         {
-            var operation = Current;
-            Advance();
-            var (right, rightDepth) = ParseLabelFactor();
-            left = new GqlLabelConjunction(left, right);
-            depth = Deepen(depth, rightDepth, operation);
+            operands.Add(ParseLabelFactor());
         }
-        return (left, depth);
+        return GqlLabelConjunction.FromOwnedList(operands);
     }
 
     // label-factor := '!' label-primary | label-primary
-    private (GqlLabelExpression Expression, int Depth) ParseLabelFactor()
+    private GqlLabelExpression ParseLabelFactor()
     {
-        if (Current.Type != TokenType.Bang) { return ParseLabelPrimary(negated: false); }
-        var operation = Current;
-        Advance();
-        var (operand, depth) = ParseLabelPrimary(negated: true);
-        return (new GqlLabelNegation(operand), Deepen(depth, 0, operation));
+        if (!Take(TokenType.Bang)) { return ParseLabelPrimary(negated: false); }
+        return new GqlLabelNegation(ParseLabelPrimary(negated: true));
     }
 
     // label-primary := label-name | '%' | '(' label-expression ')'
-    private (GqlLabelExpression Expression, int Depth) ParseLabelPrimary(bool negated)
+    private GqlLabelExpression ParseLabelPrimary(bool negated)
     {
         var token = Current;
-        if (Take(TokenType.Percent)) { return (new GqlLabelWildcard(), 1); }
+        if (Take(TokenType.Percent)) { return new GqlLabelWildcard(); }
         if (token.Type is TokenType.Identifier or TokenType.Keyword or TokenType.Function or TokenType.QuotedIdentifier)
         {
-            return (new GqlLabelName(Identifier(allowKeyword: true)), 1);
+            return new GqlLabelName(Identifier(allowKeyword: true));
         }
         if (token.Type == TokenType.LeftParen)
         {
-            if (++_labelNesting > maximumLabelDepth)
-            {
-                Error("GQL0005", "Label-expression parentheses cannot nest more than 128 levels.", token);
-                return (new GqlLabelWildcard(), 1);
-            }
+            // The one place a label expression recurses: Neo4j bounds this nesting only by the
+            // stack, and so does this parser, with a diagnostic instead of an overflow.
+            if (!HasStackToNest(token)) { return new GqlLabelWildcard(); }
             Advance();
             var inner = ParseLabelDisjunction();
             Expect(TokenType.RightParen, "')'");
-            _labelNesting--;
             return inner;
         }
 
@@ -139,48 +133,35 @@ public sealed partial class GqlQueryParser
                 ? "Expected a label name, '%' or '(' after '!'; '!' negates one label, '%' or parenthesized expression."
                 : "Expected a label name, '%', '!' or '('.";
         Error("GQL0002", message, token);
-        return (new GqlLabelWildcard(), 1);
+        return new GqlLabelWildcard();
     }
 
     /// <summary>
-    /// The depth of a node over operands of the given depths; past 128 it is <c>GQL0005</c>. Every
-    /// operator adds a level, and a chain associates to the left, so one flat chain such as
-    /// <c>:A:B:...</c> or <c>A|B|...</c> holds at most 128 names.
-    /// </summary>
-    private int Deepen(int left, int right, Lexeme operation)
-    {
-        int depth = (left > right ? left : right) + 1;
-        if (depth > maximumLabelDepth && !Failed)
-        {
-            Error("GQL0005", "A label expression cannot be more than 128 levels deep; each '|', '&', '!' or repeated ':' " +
-                "adds a level, so one chain holds at most 128 labels.", operation);
-        }
-        return depth;
-    }
-
-    /// <summary>
-    /// The names of a pure conjunction (<c>A</c>, <c>A&amp;B</c>, <c>:A:B</c>), left to right, which
-    /// fill <see cref="GqlNodePattern.Labels"/>; empty when the expression is absent or uses
-    /// <c>|</c>, <c>!</c> or <c>%</c>.
+    /// The names of a pure conjunction (<c>A</c>, <c>A&amp;B</c>, <c>:A:B</c>, <c>A&amp;(B&amp;C)</c>),
+    /// left to right, which fill <see cref="GqlNodePattern.Labels"/>; empty when the expression is
+    /// absent or uses <c>|</c>, <c>!</c> or <c>%</c>. Walks the tree with an explicit stack.
     /// </summary>
     private static IReadOnlyList<string> ConjunctionNames(GqlLabelExpression? expression)
     {
+        if (expression is null) { return []; }
         List<string> names = [];
-        return expression is not null && CollectConjunction(expression, names) ? names.AsReadOnly() : [];
-
-        static bool CollectConjunction(GqlLabelExpression expression, List<string> names)
+        var pending = new Stack<GqlLabelExpression>();
+        pending.Push(expression);
+        while (pending.TryPop(out var current))
         {
-            switch (expression)
+            switch (current)
             {
                 case GqlLabelName name:
                     names.Add(name.Name);
-                    return true;
+                    break;
                 case GqlLabelConjunction conjunction:
-                    return CollectConjunction(conjunction.Left, names) && CollectConjunction(conjunction.Right, names);
+                    for (int i = conjunction.Operands.Count - 1; i >= 0; i--) { pending.Push(conjunction.Operands[i]); }
+                    break;
                 default:
-                    return false;
+                    return [];
             }
         }
+        return names.AsReadOnly();
     }
 
     /// <summary>
@@ -209,8 +190,7 @@ public sealed partial class GqlQueryParser
             negated = Take("NOT");
             Expect(GqlLabelVocabulary.Labeled);
         }
-        _labelNesting = 0;
-        var (labels, _) = ParseLabelDisjunction();
+        var labels = ParseLabelDisjunction();
         if (!Failed && Current.Type == TokenType.Colon)
         {
             Error("GQL0002", "Repeated ':' labels are a node-pattern convenience; write n:A&B in a predicate.", Current);

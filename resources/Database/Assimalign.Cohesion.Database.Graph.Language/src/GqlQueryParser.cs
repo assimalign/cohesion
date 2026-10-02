@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Assimalign.Cohesion.Database.Graph.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 
@@ -18,9 +19,12 @@ public sealed partial class GqlQueryParser : QueryParser
     private readonly Dictionary<int, Lexeme> _lineComments = new();
     private string _source = string.Empty;
     private int _position;
-    private int _depth;
-    private int _comparisons;
-    private int _labelNesting;
+
+    // A statement that nests deeper than the stack the parsing thread has left. The same text
+    // parses on a thread with more stack: the statement is within the language, the thread is too
+    // small for it, so GraphQueryRequest.FromGql reports it as the engine's statement-too-complex
+    // failure, COHDBG008, not as a parse error.
+    private const string statementTooDeepCode = "GQL0009";
 
     /// <summary>Initializes a GQL parser.</summary>
     /// <param name="options">Optional shared analyzer configuration.</param>
@@ -46,9 +50,6 @@ public sealed partial class GqlQueryParser : QueryParser
         _diagnostics.Clear();
         _lineComments.Clear();
         _position = 0;
-        _depth = 0;
-        _comparisons = 0;
-        _labelNesting = 0;
         int line = 1;
         int scanned = 0;
         while (lexer.MoveNext())
@@ -528,6 +529,22 @@ public sealed partial class GqlQueryParser : QueryParser
         }
         Error("GQL0002", "Expected an identifier.", token);
         return string.Empty;
+    }
+    /// <summary>
+    /// Whether the parser may descend into the parenthesized group that <paramref name="token"/>
+    /// opens. The grammar recurses only through parentheses, in a label expression or a predicate,
+    /// and no fixed depth applies (Neo4j bounds this nesting only by the stack too). When the
+    /// thread is out of stack, the parse stops with <c>GQL0009</c> at that <c>(</c>, and every rule
+    /// still on the stack returns without reading further, instead of the process overflowing.
+    /// </summary>
+    /// <param name="token">The <c>(</c> about to be consumed.</param>
+    /// <returns><see langword="true"/> when the thread has stack left to parse the group.</returns>
+    private bool HasStackToNest(Lexeme token)
+    {
+        if (RuntimeHelpers.TryEnsureSufficientExecutionStack()) { return true; }
+        Error(statementTooDeepCode, "The statement nests deeper than the stack available to the parser on this thread; " +
+            "reduce the nesting of its parentheses or run it on a thread with a larger stack.", token);
+        return false;
     }
     private void Unsupported(string clause, Lexeme token) =>
         _diagnostics.Add(QueryDiagnostics.UnsupportedClause(clause, Profile.Language, Span(token, token)));

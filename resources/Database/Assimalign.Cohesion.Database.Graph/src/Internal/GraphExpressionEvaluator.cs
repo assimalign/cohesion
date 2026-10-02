@@ -1,23 +1,60 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Assimalign.Cohesion.Database.Graph.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
+/// <summary>
+/// Evaluates a validated <c>WHERE</c> predicate against one binding. An <c>AND</c> chain is one
+/// n-ary node evaluated by a loop; the walk recurses only where predicates nest (parentheses and
+/// comparison operands) and checks the stack before each descent, so a predicate deeper than the
+/// executing thread's stack fails its statement with <c>COHDBG008</c> instead of overflowing it.
+/// </summary>
 internal static class GraphExpressionEvaluator
 {
+    /// <summary>Evaluates an expression; a predicate yields true, false or null (unknown).</summary>
+    /// <param name="expression">The validated expression.</param>
+    /// <param name="bindings">The binding to evaluate against.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="InsufficientExecutionStackException">The expression nests deeper than the thread's stack allows.</exception>
     internal static object? Evaluate(GqlExpression expression, IReadOnlyDictionary<string, object> bindings) => expression switch
     {
         GqlLiteralExpression literal => literal.Value,
         GqlPropertyExpression property => Property(bindings[property.Variable], property.Property),
         GqlBinaryExpression binary => Binary(binary, bindings),
+        GqlLogicalExpression logical => Logical(logical, bindings),
         GqlLabeledPredicate labeled => Labeled(labeled, bindings),
         _ => throw new DatabaseException("COHDBG001: Unsupported graph expression."),
     };
 
+    // ISO three-valued AND over the whole chain, first to last: false as soon as an operand is
+    // false, otherwise unknown when any operand was not true, otherwise true. WHERE keeps only true.
+    private static object? Logical(GqlLogicalExpression logical, IReadOnlyDictionary<string, object> bindings)
+    {
+        if (logical.Operator != GqlLogicalOperator.And) { throw new DatabaseException("COHDBG001: Unsupported logical operator."); }
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        bool unknown = false;
+        foreach (var operand in logical.Operands)
+        {
+            switch (Evaluate(operand, bindings))
+            {
+                case false:
+                    return false;
+                case true:
+                    break;
+                default:
+                    unknown = true;
+                    break;
+            }
+        }
+        return unknown ? null : true;
+    }
+
     // ISO <labeled predicate>: true or false for a bound element. A variable with no binding (a
-    // null optional match, once that clause exists) is UNKNOWN, which AND and WHERE treat as false.
+    // null optional match, once that clause exists) is UNKNOWN; AND propagates UNKNOWN unless an
+    // operand is false, and WHERE keeps only true.
     private static object? Labeled(GqlLabeledPredicate labeled, IReadOnlyDictionary<string, object> bindings)
     {
         if (!bindings.TryGetValue(labeled.Variable, out var entity) || entity is null) { return null; }
@@ -37,9 +74,9 @@ internal static class GraphExpressionEvaluator
     };
     private static object? Binary(GqlBinaryExpression binary, IReadOnlyDictionary<string, object> bindings)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         var left = Evaluate(binary.Left, bindings);
         var right = Evaluate(binary.Right, bindings);
-        if (binary.Operator == "AND") { return left is true && right is true; }
         if (left is null || right is null) { return null; }
         int? order = Compare(left, right);
         return binary.Operator switch
