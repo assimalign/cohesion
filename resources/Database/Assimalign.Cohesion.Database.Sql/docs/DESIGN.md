@@ -648,7 +648,12 @@ description + exported registrations), the engine binds them.
   and adds another under the same key), holds runs of equal keys that span leaf
   splits. Seeks, the UNIQUE check, and FOREIGN KEY lookups in both directions
   reach every entry of such a run; `SqlIndexDuplicateKeyTests` pins seek-versus-
-  scan equivalence for indexes built by `CREATE INDEX` and maintained by DML.
+  scan equivalence for indexes built by `CREATE INDEX` (over insert-only rows
+  and over UPDATE/DELETE history) and maintained by DML. The cost is linear in
+  the run, dead versions included, so a row updated thousands of times under a
+  UNIQUE index, or a cascade over thousands of children of one parent, slows
+  quadratically until the index gains an entry tiebreaker and version pruning
+  (`Database.Indexing` DESIGN, "Known limit").
 
 ## Engine-owned background workers
 

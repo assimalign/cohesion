@@ -77,6 +77,29 @@ entries and splits stay correct.
     bracket then rolls the half-done split back. A misordered separator that
     reached disk would misroute lookups permanently (there is no repair path,
     #1152), and the check costs two key comparisons per split.
+- **Known limit: work inside a duplicate run is linear in the run.** The tree
+  orders entries by key alone, so it cannot descend to one particular entry of a
+  key. Every lookup that targets an entry or proves a key absent — tombstone
+  deletes, the undo pair, the unique check — walks the key's run until it finds
+  its entry, and an inclusive-start seek reads every entry of its start key, dead
+  versions included. Runs only grow until vacuum exists: every SQL or key-value
+  UPDATE retires one entry and adds another under each of the row's index keys,
+  and nothing prunes the dead ones. Two workloads go quadratic: repeated
+  updates of one row under a UNIQUE index (the unique check must walk every
+  dead version to prove no live one exists), and deleting or updating many rows
+  that share a secondary key (an FK cascade, `DELETE … WHERE status = x`).
+  Measured on 2026-10-01 (Release build, one developer machine): `UPDATE … WHERE
+  id = 2` repeated on one row cost 0.48 ms per update over the first 5,000 and
+  10.5 ms per update between 15,000 and 20,000; an `ON DELETE CASCADE` through a
+  secondary index took 76 ms for 2,000 children, 442 ms for 8,000 and 4.5 s for
+  16,000. The descent before #1159 was faster here only because it skipped
+  entries and returned wrong results. The fix is an entry tiebreaker — physical
+  order `(key, entry reference, writer)`, with separators carrying the reference
+  so a lookup descends straight to its entry — plus version pruning to bound the
+  unique check on hot keys. Both change the page format, which is cheapest
+  before the first release because #1152 provides no on-disk upgrade path.
+  Leaves in a run also sit about half full: inserts reach the run's last leaf,
+  and leaves split at the middle, so a run spans about twice the pages it needs.
 - **The root page never moves.** A root split copies the root's contents to a new
   page and rewrites the root in place as an internal node over that page and the
   new sibling (SQLite's balance-deeper). The root id a catalog registered when the
