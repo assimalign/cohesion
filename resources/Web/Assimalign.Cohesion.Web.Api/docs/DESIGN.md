@@ -244,10 +244,33 @@ OpenAPI adapter (#152) first. Every typed endpoint it maps carries, as route-lev
 | Not described | The outcomes the thunk produces on its own: 400 and 415 binding problems and the negotiated 406. An adapter adds them by policy (a required parameter can produce 400, a body 415, a negotiated response 406). |
 | Extending | New sources are appended to `EndpointParameterSource` (file uploads arrive with #1061). An application describes further responses with `WithMetadata(new EndpointResponseMetadata(...))` on an endpoint or a group; they compose group items first, then the generated items, then the endpoint's own chain. |
 
-One gap is left to #152: an adapter needs the application's `IJsonTypeInfoResolver` to reach the
-`JsonTypeInfo` for a described type, and `Web.Serialization` keeps the JSON writer's options internal.
-The adapter can take the same `JsonSerializerContext` the application passes to `AddJsonSerialization`,
-or `Web.Serialization` can expose the registered resolver; #152 decides.
+#152 closed the one gap this left: an adapter needs the `JsonTypeInfo` the JSON writer serializes a
+described type with, and `Web.Serialization` keeps the writer's options internal. `Web.Serialization`
+now answers that question and no other, through
+`IHttpContentSerializationFeature.TryGetJsonTypeInfo(type, out typeInfo)` (its DESIGN, "Contract
+lookup"), so the description follows the wire's names and converters without the application passing
+its context twice.
+
+### Description verbs (#152)
+
+The application curates the description with four convention verbs, shipped here as generic
+`extension<TBuilder>(TBuilder builder) where TBuilder : IRouterConventionBuilder` members so they work on a
+route and on a group alike, each attaching one sealed carrier from `src/Metadata/`:
+
+| Verb | Carrier | Composition |
+| --- | --- | --- |
+| `WithTags(params string[])` | `EndpointTagsMetadata` | Every item applies, outer group first; an adapter lists each name once |
+| `WithSummary(string)` | `EndpointSummaryMetadata` | Last wins, so a route's replaces its group's |
+| `WithDescription(string)` | `EndpointDescriptionMetadata` | Last wins |
+| `ExcludeFromDescription()` | `ExcludeFromDescriptionMetadata` | Absolute: present anywhere, the endpoint is not described |
+
+They are format-neutral documentation metadata, like the generated parameter and response
+descriptions, and they live here for the same reason: `Web.Api` is a member of the `App.Web` framework,
+so a library that maps endpoints can describe them without referencing the OpenAPI adapter, which ships
+as its own NuGet package (`Assimalign.Cohesion.Web.OpenApi`) together with the whole OpenApi family. An
+application-declared `EndpointResponseMetadata` (`WithMetadata`) describes further responses; the
+adapter treats any of these carriers as the application describing an endpoint, which is what brings a
+raw middleware endpoint into the document.
 
 ## Antiforgery on form-bound endpoints (#1057)
 
@@ -286,8 +309,8 @@ body reader and the negotiated writer, and COHWEB0007 reports an application tha
   (see "Return Values"); a handler that needs control of the response writes it.
 - Filter/interceptor chains around handlers (a natural follow-up seam, not built).
 - OpenAPI documents. `Web.Api` describes typed endpoints in neutral metadata (see "Endpoint Description
-  Metadata"); the OpenAPI adapter and document endpoint (#152) build on it, and `Web.Api` takes no
-  OpenApi dependency.
+  Metadata"); the OpenAPI adapter and document endpoint (`Assimalign.Cohesion.Web.OpenApi`, #152) build
+  on it, and `Web.Api` takes no OpenApi dependency.
 - Content negotiation beyond `Web.Serialization`'s: returned values use `WriteNegotiatedContentAsync`,
   which negotiates media types only (no `Accept-Charset` or `Accept-Language`).
 - Whole-object binding from form fields (form binding is per-field scalar via `[FromForm]`).

@@ -111,6 +111,19 @@ app.MapGet("/orders/{id}", (long id) => orders.Get(id))
 The types are `typeof(...)` values written by the source generator, so a schema comes from the
 application's source-generated `JsonTypeInfo`, never from reflection.
 
+Four convention verbs curate the description on a route or a whole group, without depending on any
+documentation format: `WithTags` (tags compose, group first), `WithSummary` and `WithDescription` (the
+most specific wins), and `ExcludeFromDescription`. The OpenAPI adapter, `Assimalign.Cohesion.Web.OpenApi`
+(a NuGet package), maps them onto operation tags, summaries and descriptions:
+
+```csharp
+IRouterGroupBuilder orders = app.MapGroup("orders").WithTags("orders");
+orders.MapGet("{id:long}", (long id) => store.Find(id))
+      .WithSummary("Gets an order")
+      .WithDescription("Returns the order with the given identifier.");
+app.MapGet("/internal/cache", () => "cleared").ExcludeFromDescription();
+```
+
 ## Wiring
 
 - Reference the generator: `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />`
