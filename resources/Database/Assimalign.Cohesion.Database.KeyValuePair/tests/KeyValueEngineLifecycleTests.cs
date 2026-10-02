@@ -199,8 +199,89 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
             var failure = await Should.ThrowAsync<DatabaseException>(async () =>
                 await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
 
-            failure.Message.ShouldContain("format", Case.Insensitive);
+            failure.Message.ShouldContain("uses entry-space format 99, but this engine supports only format 2", Case.Sensitive);
+            failure.Message.ShouldContain("newer engine");
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A new database is stamped with entry-space format 2 and reopens (#1194)")]
+    public async Task Create_ShouldStampCurrentEntrySpaceFormat()
+    {
+        // Arrange / Act
+        await using (var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            var catalog = ((Internal.KeyValueDatabaseInstance)database).Catalog;
+            catalog.EntrySpaceFormatVersion.ShouldBe(2);
+            catalog.GetIndexRegistrations().ShouldHaveSingleItem();
+            await using var session = await database.CreateSessionAsync();
+            await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+        }
+
+        // Assert
+        await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        var reopenedDatabase = (IKeyValueDatabase)await reopened.OpenDatabaseAsync("kv", TestTimeout.Token());
+        ((Internal.KeyValueDatabaseInstance)reopenedDatabase).Catalog.EntrySpaceFormatVersion.ShouldBe(2);
+        await using var reader = await reopenedDatabase.CreateSessionAsync();
+        Text((await reopenedDatabase.GetAsync(reader, Bytes("alpha"), TestTimeout.Token()))!.Value.Value).ShouldBe("one");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A database on entry-space format 1 is refused at open, its files untouched (#1194)")]
+    public async Task Open_OlderEntrySpaceFormat_ShouldBeRefusedWithoutTouchingFiles()
+    {
+        // Arrange: a closed database whose marker reads 1, as every engine before #1194
+        // stamped it (their primary index trees are in B-tree page format 1).
+        await using (var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            await using var session = await database.CreateSessionAsync();
+            await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+            await ((Internal.KeyValueDatabaseInstance)database).Catalog.SetEntrySpaceFormatVersionAsync(1, TestTimeout.Token());
+        }
+
+        var before = Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+        // Act
+        await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
+
+        // Assert: the refusal names the database, both formats and the remedy, and the
+        // gate read only the catalog: nothing was written.
+        failure.Message.ShouldStartWith("Database 'kv' uses entry-space format 1, but this engine supports only format 2.", Case.Sensitive);
+        failure.Message.ShouldContain("#1152");
+        reopened.TryGetDatabase("kv", out _).ShouldBeFalse();
+        await reopened.DisposeAsync();
+
+        foreach (var (path, bytes) in before)
+        {
+            File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A database whose catalog registers no primary index (an interrupted creation) opens on entry-space format 2")]
+    public async Task Open_CatalogWithoutRegistration_ShouldBootstrapOnCurrentFormat()
+    {
+        // Arrange: a database whose creation stopped before its catalog held anything —
+        // modelled by a created, empty database whose catalog file set is gone. The
+        // reopened catalog reads as format 1 with no registration.
+        await using (var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+        }
+
+        Directory.Delete(Path.Combine(_rootPath, "kv" + KeyValueDatabaseEngine.CatalogSuffix), recursive: true);
+
+        // Act
+        await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        var database = (IKeyValueDatabase)await reopened.OpenDatabaseAsync("kv", TestTimeout.Token());
+
+        // Assert: the primary index was bootstrapped and the current marker stamped.
+        var catalog = ((Internal.KeyValueDatabaseInstance)database).Catalog;
+        catalog.EntrySpaceFormatVersion.ShouldBe(2);
+        catalog.GetIndexRegistrations().ShouldHaveSingleItem();
+        await using var session = await database.CreateSessionAsync();
+        await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+        Text((await database.GetAsync(session, Bytes("alpha"), TestTimeout.Token()))!.Value.Value).ShouldBe("one");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A database whose primary index is in B-tree page format 1 is refused at open with COHDBI001, its files untouched (#1194)")]

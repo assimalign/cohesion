@@ -27,18 +27,20 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 public interface IKeyValueCatalog
 {
     /// <summary>
-    /// Gets the entry-space format version of the database's data storage: 1 =
-    /// MVCC-stamped key/value entry records in the key space's page chain (the
-    /// format the model was born on; also the value reported when no marker is
-    /// persisted). The engine reads this at open and rejects versions newer than
-    /// it understands.
+    /// Gets the entry-space format version of the database's data storage — its
+    /// entry records and the primary index tree that shares their file set: 2 =
+    /// MVCC-stamped key/value entry records in the key space's page chain, indexed
+    /// by a tree of B-tree page format 2 (#1194); 1 = the same records over a tree of
+    /// B-tree page format 1, and also the value reported when no marker is persisted.
+    /// The engine reads this at open and refuses a database with a primary index on
+    /// any version but its own.
     /// </summary>
     int EntrySpaceFormatVersion { get; }
 
     /// <summary>
     /// Persists the entry-space format version. Self-committing, like every
-    /// catalog write; called by the engine at database creation (the space is
-    /// born on the current format).
+    /// catalog write; called by the engine at database creation, before it
+    /// registers the primary index (the space is born on the current format).
     /// </summary>
     /// <param name="version">The format version to persist.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>

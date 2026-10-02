@@ -17,12 +17,17 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 internal static class KeyValueRecordCodec
 {
     /// <summary>
-    /// The current entry-space format version, persisted in the catalog: 1 =
-    /// MVCC-stamped key/value records in the key space's per-object page chain.
-    /// The model was born on this format — there is no upgrade machinery, only a
-    /// too-new rejection at open.
+    /// The format version of the database's data storage — entry records and the
+    /// primary index tree that shares their file set — this engine reads and
+    /// writes, persisted in the catalog: 2 = MVCC-stamped key/value records in the
+    /// key space's per-object page chain, indexed by a tree of B-tree page format 2,
+    /// which orders entries by key, entry location and writer (#1194). Version 1 —
+    /// the same records over a tree of B-tree page format 1, ordered by key alone —
+    /// is history: a database is created on this version, and an existing database
+    /// with a primary index on any other version is refused at open. There is no
+    /// upgrade path (owner decision of 2026-10-02; upgrades are #1152).
     /// </summary>
-    internal const int EntrySpaceFormatVersion = 1;
+    internal const int EntrySpaceFormatVersion = 2;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.
