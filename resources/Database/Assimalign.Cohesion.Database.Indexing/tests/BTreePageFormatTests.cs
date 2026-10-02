@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// it, and a tree in any other format — format 1, written before the entry order
 /// changed, or a newer one — is refused with <c>COHDBI001</c> instead of misread. A
 /// page that is not a current-format node, reached inside an attached tree, fails the
-/// operation with <c>COHDBI002</c>.
+/// operation with <see cref="IndexCorruptionException"/> (<c>COHDBI002</c>).
 /// </summary>
 public class BTreePageFormatTests
 {
@@ -195,8 +195,8 @@ public class BTreePageFormatTests
         refusal.IndexName.ShouldBe("ix_legacy");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Page format: a damaged node inside an attached tree fails the lookup with COHDBI002")]
-    public async Task Read_DamagedLeaf_ShouldFailWithDamagedPageCode()
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Page format: a damaged node inside an attached tree fails the lookup and the delete with IndexCorruptionException (COHDBI002)")]
+    public async Task Read_DamagedLeaf_ShouldFailWithCorruption()
     {
         // Arrange: a tree with an internal root; one of its leaves loses its stamp.
         var (harness, registrations) = await CreateTreeAsync(2_000);
@@ -208,12 +208,20 @@ public class BTreePageFormatTests
 
         // Act
         var reader = await harness.BeginAsync();
-        var failure = Should.Throw<IndexException>(() => index.OpenCursor(reader, IndexKeyRange.All));
+        var failure = Should.Throw<IndexCorruptionException>(() => index.OpenCursor(reader, IndexKeyRange.All));
+        var deleting = await harness.BeginAsync();
+        var deleteFailure = await Should.ThrowAsync<IndexCorruptionException>(async () => await index.DeleteAsync(deleting, IndexKey.FromInt64(0), 0));
+        await harness.RollbackAsync(deleting);
 
-        // Assert
-        failure.Message.ShouldStartWith(IndexFormatException.DamagedPageCode + ":", Case.Sensitive);
+        // Assert: a typed failure that names the index, the page and what the page holds.
+        failure.Message.ShouldStartWith(IndexCorruptionException.ErrorCode + ":", Case.Sensitive);
         failure.Message.ShouldContain($"page {leaf}");
         failure.Message.ShouldContain("found format 1");
+        failure.IndexName.ShouldBe("ix_format");
+        failure.PageId.ShouldBe(leaf);
+        failure.FoundVersion.ShouldBe(1);
+        failure.ShouldBeAssignableTo<IndexException>();
+        deleteFailure.PageId.ShouldBe(leaf);
     }
 
     private static long LeftmostLeaf(IStorage storage, long root)

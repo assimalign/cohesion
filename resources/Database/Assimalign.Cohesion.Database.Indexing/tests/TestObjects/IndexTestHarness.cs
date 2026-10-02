@@ -20,21 +20,9 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
     private readonly Dictionary<ITransactionContext, IStorageTransaction> _pairs = new();
     private readonly object _sync = new();
 
-    /// <summary>
-    /// The buffer pool the harness storage gets by default: small, so the suites
-    /// exercise eviction and reload of index pages.
-    /// </summary>
-    public const int DefaultBufferPoolCapacity = 64;
-
-    /// <param name="data">The data file, or null for a simulated durable one.</param>
-    /// <param name="journal">The journal file, or null for a simulated durable one.</param>
-    /// <param name="bufferPoolCapacity">
-    /// The pages the storage caches. Timing tests raise it so the tree stays cached
-    /// and the time measured is the tree's own work, not page reloads.
-    /// </param>
-    public IndexTestHarness(IFileSystemFileHandle? data = null, IFileSystemFileHandle? journal = null, int bufferPoolCapacity = DefaultBufferPoolCapacity)
+    public IndexTestHarness(IFileSystemFileHandle? data = null, IFileSystemFileHandle? journal = null)
     {
-        Storage = HarnessStorage.Create(data ?? new SimulatedDurableFileHandle(), journal ?? new SimulatedDurableFileHandle(), bufferPoolCapacity);
+        Storage = HarnessStorage.Create(data ?? new SimulatedDurableFileHandle(), journal ?? new SimulatedDurableFileHandle());
         LockManager = Transactions.LockManager.Create();
         Manager = TransactionManager.Create(TransactionLog.CreateInMemory(), LockManager, VersionStore.CreateInMemory());
         IndexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
@@ -170,16 +158,16 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
     /// </summary>
     public sealed class HarnessStorage : Database.Storage.Storage
     {
-        private HarnessStorage(StorageStream data, StorageStream journal, int bufferPoolCapacity = DefaultBufferPoolCapacity)
-            : base(data, journal, new StorageStream(new MemoryStream()), bufferPoolCapacity)
+        private HarnessStorage(StorageStream data, StorageStream journal)
+            : base(data, journal, new StorageStream(new MemoryStream()), bufferPoolCapacity: 64)
         {
         }
 
         public override StorageModel Model => StorageModel.Custom;
 
-        public static HarnessStorage Create(IFileSystemFileHandle data, IFileSystemFileHandle journal, int bufferPoolCapacity = DefaultBufferPoolCapacity)
+        public static HarnessStorage Create(IFileSystemFileHandle data, IFileSystemFileHandle journal)
         {
-            var storage = new HarnessStorage(new StorageStream(data), new StorageStream(journal), bufferPoolCapacity);
+            var storage = new HarnessStorage(new StorageStream(data), new StorageStream(journal));
             storage.InitializeNew((Name)"index-harness");
             return storage;
         }

@@ -196,10 +196,12 @@ internal sealed class BTreeIndex : IIndex
         {
             // The live mapping this transaction can see — tombstone it under the
             // transaction's write scope. No match: nothing to delete. The caller
-            // knows the key and the reference but not the writer, so the lookup
-            // starts before the reference's first version, (key, reference, -inf).
-            if (TryFindEntry(
-                BTreeSearchKey.AtReference(key.Encoded.Span, entryReference),
+            // knows the key and the reference but not the writer; the live version
+            // is the reference's newest (TryFindNewestEntry), so the lookup starts
+            // after the reference's last version and reads backward.
+            if (TryFindNewestEntry(
+                key.Encoded.Span,
+                entryReference,
                 EntryMatch.LiveVisible(entryReference, transaction.Snapshot),
                 out long leafId,
                 out int index))
@@ -311,9 +313,12 @@ internal sealed class BTreeIndex : IIndex
         _latch.EnterWriteLock();
         try
         {
-            // The deleter is not part of the order: look among the reference's versions.
-            if (TryFindEntry(
-                BTreeSearchKey.AtReference(key.Encoded.Span, entryReference),
+            // The deleter is not part of the order: look among the reference's
+            // versions, newest first — the only one an aborted deleter can have
+            // stamped is the reference's newest (TryFindNewestEntry).
+            if (TryFindNewestEntry(
+                key.Encoded.Span,
+                entryReference,
                 EntryMatch.DeletedBy(entryReference, deleter.Value),
                 out long leafId,
                 out int index))
@@ -488,9 +493,9 @@ internal sealed class BTreeIndex : IIndex
     /// accepts. The descent lands on the leaf whose range holds
     /// <paramref name="start"/>; the walk follows the leaf chain until an entry leaves
     /// the prefix. For a full identity that is at most one entry (identities are
-    /// unique); for a reference, the reference's versions under the key; for a key,
-    /// its whole run. The caller holds the tree latch, so the returned position stays
-    /// valid while it acts on it.
+    /// unique); for a key, its whole run (a reference's versions are read newest
+    /// first instead, <see cref="TryFindNewestEntry"/>). The caller holds the tree
+    /// latch, so the returned position stays valid while it acts on it.
     /// </summary>
     private bool TryFindEntry(in BTreeSearchKey start, in EntryMatch match, out long leafId, out int index)
     {
@@ -525,6 +530,72 @@ internal sealed class BTreeIndex : IIndex
             }
 
             leafId = nextLeaf; // the prefix may continue on the next leaf
+        }
+
+        index = -1;
+        return false;
+    }
+
+    /// <summary>
+    /// Finds the newest version of <paramref name="entryReference"/> under
+    /// <paramref name="key"/> that <paramref name="match"/> accepts, reading the
+    /// reference's versions from the last one backward: the descent goes to the
+    /// position after the reference's last version
+    /// (<see cref="BTreeSearchKey.AfterReference"/>), and the walk follows the leaf
+    /// chain leftward until an entry leaves the reference.
+    /// </summary>
+    /// <remarks>
+    /// The newest version is the one delete and clear-deleter want. A record slot holds
+    /// one version at a time, and an engine reuses a slot under the same key only after
+    /// the version purge reclaimed the slot's previous version, which needs that
+    /// version's deleter committed below every active transaction. Every version of a
+    /// reference but the newest therefore carries a committed deleter: the newest is
+    /// the only one that can be live, and the only one an in-flight or aborting deleter
+    /// can have stamped. The lookup is then one descent, however many dead versions a
+    /// reused slot has left under the key until they are pruned (#1195). When the
+    /// newest does not match — a replayed or stale undo, which is a no-op — the walk
+    /// reads the older versions too, so the result never depends on that invariant;
+    /// only the cost does.
+    /// </remarks>
+    private bool TryFindNewestEntry(ReadOnlySpan<byte> key, ulong entryReference, in EntryMatch match, out long leafId, out int index)
+    {
+        var end = BTreeSearchKey.AfterReference(key, entryReference);
+        var prefix = BTreeSearchKey.AtReference(key, entryReference);
+        leafId = Descend(end, null);
+        bool firstLeaf = true;
+
+        while (leafId >= 0)
+        {
+            long previousLeaf;
+
+            using (var handle = _storage.PageManager.GetPage((PageId)leafId))
+            {
+                var node = OpenNode(handle.Page.AsBodySpan(), leafId);
+                previousLeaf = node.PrevLeaf;
+
+                // On the first leaf, the entries before the end position; on every
+                // earlier leaf, all of them. An undo can leave a leaf empty, and the
+                // walk then simply moves on to the leaf before it.
+                index = (firstLeaf ? node.FindLowerBound(end) : node.EntryCount) - 1;
+                firstLeaf = false;
+
+                for (; index >= 0; index--)
+                {
+                    if (!SharesPrefix(node, index, prefix))
+                    {
+                        leafId = -1;
+                        index = -1;
+                        return false; // walked past the reference's first version
+                    }
+
+                    if (match.Accepts(node, index))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            leafId = previousLeaf; // the reference's versions may continue on the leaf before
         }
 
         index = -1;
@@ -573,6 +644,7 @@ internal sealed class BTreeIndex : IIndex
             long leafId = Descend(position, path);
             bool fits;
             bool fitsAfterCompaction;
+            int at;
 
             using (var handle = _storage.PageManager.GetPage((PageId)leafId))
             {
@@ -583,7 +655,7 @@ internal sealed class BTreeIndex : IIndex
                 // An equal entry would be in this leaf, at the insert position.
                 // PostgreSQL treats a duplicate heap TID the same way, as corruption
                 // (nbtsearch.c, _bt_binsrch_insert).
-                int at = node.FindLowerBound(position);
+                at = node.FindLowerBound(position);
                 if (at < node.EntryCount && node.CompareToEntry(position, at) == 0)
                 {
                     throw new IndexException(
@@ -605,12 +677,14 @@ internal sealed class BTreeIndex : IIndex
                 using var writable = _storage.OpenPageForWrite(transaction, (PageId)leafId);
                 var writableNode = OpenNode(writable.Page.AsBodySpan(), leafId);
 
+                // The position the read pass found still holds: the write latch kept
+                // the leaf unchanged, and compaction keeps its entries and their order.
                 if (fitsAfterCompaction)
                 {
                     RebuildLeaf(ref writableNode, writableNode.EntryCount, writableNode.PrevLeaf, writableNode.NextLeaf);
                 }
 
-                writableNode.InsertLeafEntry(writableNode.FindLowerBound(position), key, entryReference, writer, deleter);
+                writableNode.InsertLeafEntry(at, key, entryReference, writer, deleter);
                 writable.MarkDirty();
                 return;
             }
@@ -1027,19 +1101,18 @@ internal sealed class BTreeIndex : IIndex
 
     /// <summary>
     /// Overlays a node on a page body, checking the page is a node of this format
-    /// first — PostgreSQL checks every B-tree page it reads the same way
-    /// (<c>nbtpage.c</c> <c>_bt_checkpage</c>). A tree is attached only after its
-    /// root passed <see cref="EnsureFormat"/>, so a failure here means a damaged
-    /// page or a pointer to one.
+    /// first — PostgreSQL checks every B-tree page it reads the same way and reports a
+    /// failure as index corruption (<c>nbtpage.c</c> <c>_bt_checkpage</c>,
+    /// <c>ERRCODE_INDEX_CORRUPTED</c>). A tree is attached only after its root passed
+    /// <see cref="EnsureFormat"/>, so a failure here means a damaged page or a pointer
+    /// to one.
     /// </summary>
-    /// <exception cref="IndexException">The page is not a node of this format.</exception>
+    /// <exception cref="IndexCorruptionException">The page is not a node of this format.</exception>
     private BTreeNode OpenNode(Span<byte> body, long pageId)
     {
         if (!BTreeNode.IsCurrentFormat(body))
         {
-            throw new IndexException(
-                $"{IndexFormatException.DamagedPageCode}: Index '{Name}' reached page {pageId}, which is not a B-tree node of page format " +
-                $"{BTreeNode.FormatVersion} (found format {BTreeNode.ReadFormatVersion(body)}); the index is damaged.");
+            throw new IndexCorruptionException(Name, pageId, BTreeNode.ReadFormatVersion(body));
         }
 
         return new BTreeNode(body);

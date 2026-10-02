@@ -13,12 +13,17 @@ namespace Assimalign.Cohesion.Database.Indexing;
 public static class BTreeIndexManager
 {
     /// <summary>
-    /// The B-tree page format this engine writes and the only one it reads. Format 2
-    /// (#1194) orders entries by <c>(key, entry reference, writer)</c> and stamps a
-    /// magic and this version on every node page; format 1 ordered entries by key
-    /// alone and carried no stamp.
+    /// Gets the B-tree page format this engine writes and the only one it reads.
+    /// Format 2 (#1194) orders entries by <c>(key, entry reference, writer)</c> and
+    /// stamps a magic and this version on every node page; format 1 ordered entries by
+    /// key alone and carried no stamp.
     /// </summary>
-    public const int FormatVersion = BTreeNode.FormatVersion;
+    /// <remarks>
+    /// A property, not a constant: the value changes with every page-format change, and
+    /// a constant would be compiled into separately built consumers, which would then
+    /// report the format of the engine they were built against.
+    /// </remarks>
+    public static int FormatVersion => BTreeNode.FormatVersion;
 
     /// <summary>
     /// Creates an index manager over the specified storage, attaching the trees in

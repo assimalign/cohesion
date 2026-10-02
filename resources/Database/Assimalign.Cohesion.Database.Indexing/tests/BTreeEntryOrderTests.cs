@@ -345,6 +345,213 @@ public class BTreeEntryOrderTests
         (await VisibleCountAsync()).ShouldBe(1);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Entry order: delete and clear-deleter read a reference's versions newest first, across leaves an undo emptied")]
+    public async Task ReferenceVersions_NewestFirst_ShouldCrossEmptiedLeaves()
+    {
+        // Arrange: 600 versions of (key, 31) — a record slot reused under one key, each
+        // version deleted by its successor's writer — between one live version each of
+        // references 30 and 32, and another key after them. With 200-byte keys a leaf
+        // holds at most 35 entries.
+        var (harness, index) = await CreateIndexAsync();
+        await using var harnessLifetime = harness;
+
+        const ulong reference = 31;
+        var key = PaddedKey(12, 192);
+        var writers = new List<TransactionSequence>();
+        for (int i = 0; i < 600; i++)
+        {
+            writers.Add(await CommittedSequenceAsync(harness));
+        }
+
+        using (var build = harness.Storage.BeginTransaction())
+        {
+            await index.InsertVersionAsync(build, key, reference - 1, writers[0], TransactionSequence.None);
+            foreach (int i in Enumerable.Range(0, 600).OrderBy(i => (i * 7919) % 600))
+            {
+                var deleter = i == 599 ? TransactionSequence.None : writers[i + 1];
+                await index.InsertVersionAsync(build, key, reference, writers[i], deleter);
+            }
+            await index.InsertVersionAsync(build, key, reference + 1, writers[0], TransactionSequence.None);
+            await index.InsertVersionAsync(build, PaddedKey(13, 192), reference, writers[0], TransactionSequence.None);
+            build.Commit();
+        }
+
+        long root = ((IIndexRegistry)harness.IndexManager).ExportRegistrations().Single().RootPageId;
+
+        async Task<List<ulong>> VisibleAsync()
+        {
+            var reader = await harness.BeginAsync();
+            var references = (await ReadAsync(index, reader, Exactly(key))).Select(entry => entry.Reference).ToList();
+            await harness.RollbackAsync(reader);
+            return references;
+        }
+
+        // The newest 60 versions are erased — the undo of their aborted writers — which
+        // empties whole leaves between the remaining versions and reference 32.
+        using (var undo = harness.Storage.BeginTransaction())
+        {
+            for (int i = 540; i < 600; i++)
+            {
+                await index.EraseAsync(undo, key, reference, writers[i]);
+            }
+            undo.Commit();
+        }
+        ReadLeafChain(harness.Storage, root).Any(leaf => leaf.Count == 0).ShouldBeTrue("the erase empties a leaf on the chain");
+
+        // Act / Assert: the aborted writer's tombstone on version 539 — now the newest —
+        // is found behind the emptied leaves and cleared.
+        using (var undo = harness.Storage.BeginTransaction())
+        {
+            await index.ClearDeleterAsync(undo, key, reference, writers[540]);
+            undo.Commit();
+        }
+        (await VisibleAsync()).ShouldBe(new[] { reference - 1, reference, reference + 1 });
+
+        // Delete tombstones that newest version.
+        var deleting = await harness.BeginAsync();
+        await index.DeleteAsync(deleting, key, reference);
+        (await ReadAsync(index, deleting, Exactly(key))).Select(entry => entry.Reference).ShouldBe(new[] { reference - 1, reference + 1 });
+        await harness.CommitAsync(deleting);
+        (await VisibleAsync()).ShouldBe(new[] { reference - 1, reference + 1 });
+
+        // An older version's stamp is still found: the walk reads past the newest.
+        using (var undo = harness.Storage.BeginTransaction())
+        {
+            await index.ClearDeleterAsync(undo, key, reference, writers[301]);
+            await index.ClearDeleterAsync(undo, key, reference, new TransactionSequence(999_999_999)); // no such deleter: a no-op
+            undo.Commit();
+        }
+        (await VisibleAsync()).ShouldBe(new[] { reference - 1, reference, reference + 1 });
+
+        // The neighbours are untouched by every lookup above.
+        var neighbours = await harness.BeginAsync();
+        await index.DeleteAsync(neighbours, key, reference + 1);
+        await index.DeleteAsync(neighbours, key, reference - 1);
+        await harness.CommitAsync(neighbours);
+        (await VisibleAsync()).ShouldBe(new[] { reference });
+        ShouldHaveConsistentLeafChain(harness.Storage, root);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Entry order: the largest entry reference's newest version is found")]
+    public async Task ReferenceVersions_LargestReference_ShouldBeFound()
+    {
+        // Arrange: three versions of (key, ulong.MaxValue), whose end position is the
+        // end of the key, followed by the next key.
+        var (harness, index) = await CreateIndexAsync();
+        await using var harnessLifetime = harness;
+
+        var key = IndexKey.FromInt64(8);
+        var first = await CommittedSequenceAsync(harness);
+        var second = await CommittedSequenceAsync(harness);
+        var third = await CommittedSequenceAsync(harness);
+        using (var build = harness.Storage.BeginTransaction())
+        {
+            await index.InsertVersionAsync(build, key, ulong.MaxValue, first, second);
+            await index.InsertVersionAsync(build, key, ulong.MaxValue, second, third);
+            await index.InsertVersionAsync(build, key, ulong.MaxValue, third, TransactionSequence.None);
+            await index.InsertVersionAsync(build, IndexKey.FromInt64(9), 0, first, TransactionSequence.None);
+            build.Commit();
+        }
+
+        // Act
+        var deleting = await harness.BeginAsync();
+        await index.DeleteAsync(deleting, key, ulong.MaxValue);
+        await harness.CommitAsync(deleting);
+
+        using (var undo = harness.Storage.BeginTransaction())
+        {
+            await index.ClearDeleterAsync(undo, key, ulong.MaxValue, third);
+            undo.Commit();
+        }
+
+        // Assert: the delete stamped the newest version, the undo restored the middle one.
+        var reader = await harness.BeginAsync();
+        (await ReadAsync(index, reader, Exactly(key))).Select(entry => entry.Reference).ShouldBe(new[] { ulong.MaxValue });
+        (await ReadAsync(index, reader, Exactly(IndexKey.FromInt64(9)))).Count.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// Reads the leaf chain from the pages, left to right: each leaf's page and entry
+    /// count.
+    /// </summary>
+    private static List<(long Page, int Count)> ReadLeafChain(IStorage storage, long root)
+    {
+        var leaves = new List<(long, int)>();
+        long current = LeftmostLeaf(storage, root);
+
+        while (current >= 0)
+        {
+            using var handle = storage.PageManager.GetPage(current);
+            var body = handle.Page.AsBodySpan();
+            leaves.Add((current, BinaryPrimitives.ReadUInt16LittleEndian(body[4..])));
+            current = BinaryPrimitives.ReadInt64LittleEndian(body[8..]);
+        }
+
+        return leaves;
+    }
+
+    /// <summary>
+    /// Fails unless the leaf chain read right to left through the previous-leaf links
+    /// is the chain read left to right through the next-leaf links, reversed — the
+    /// newest-first lookups walk it leftward — and both ends are the tree's leftmost
+    /// and rightmost leaves.
+    /// </summary>
+    private static void ShouldHaveConsistentLeafChain(IStorage storage, long root)
+    {
+        var forward = ReadLeafChain(storage, root).Select(leaf => leaf.Page).ToList();
+        var backward = new List<long>();
+        long current = RightmostLeaf(storage, root);
+        long next = -1;
+
+        while (current >= 0)
+        {
+            using var handle = storage.PageManager.GetPage(current);
+            var body = handle.Page.AsBodySpan();
+            body[3].ShouldBe((byte)1, $"page {current} on the leaf chain is a leaf");
+            BinaryPrimitives.ReadInt64LittleEndian(body[8..]).ShouldBe(next, $"leaf {current}'s next leaf");
+            backward.Add(current);
+            next = current;
+            current = BinaryPrimitives.ReadInt64LittleEndian(body[16..]);
+        }
+
+        backward.AsEnumerable().Reverse().ShouldBe(forward);
+    }
+
+    private static long LeftmostLeaf(IStorage storage, long root) => DescendEdge(storage, root, rightmost: false);
+
+    private static long RightmostLeaf(IStorage storage, long root) => DescendEdge(storage, root, rightmost: true);
+
+    /// <summary>
+    /// Descends from <paramref name="root"/> along the first or the last child of every
+    /// internal node (format 2: kind at 3, entry count at 4, leftmost child at 24,
+    /// directory at 32).
+    /// </summary>
+    private static long DescendEdge(IStorage storage, long root, bool rightmost)
+    {
+        long current = root;
+
+        while (true)
+        {
+            using var handle = storage.PageManager.GetPage(current);
+            var body = handle.Page.AsBodySpan();
+            if (body[3] == 1)
+            {
+                return current;
+            }
+
+            int count = BinaryPrimitives.ReadUInt16LittleEndian(body[4..]);
+            if (!rightmost || count == 0)
+            {
+                current = BinaryPrimitives.ReadInt64LittleEndian(body[24..]);
+                continue;
+            }
+
+            int entry = BinaryPrimitives.ReadUInt16LittleEndian(body[(32 + 2 * (count - 1))..]);
+            int field = BinaryPrimitives.ReadUInt16LittleEndian(body[entry..]);
+            current = BinaryPrimitives.ReadInt64LittleEndian(body[(entry + 2 + (field & 0x3FFF) + 8 * (field >> 14))..]);
+        }
+    }
+
     // ── Randomized: keys that are prefixes of one another ───────────────
 
     [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Entry order: randomized prefix-sharing keys — every seek equals the scan and the model")]
@@ -477,6 +684,9 @@ public class BTreeEntryOrderTests
         }
 
         await harness.RollbackAsync(reader);
+
+        // Splits, rolled-back splits and root growth keep both leaf links consistent.
+        ShouldHaveConsistentLeafChain(harness.Storage, ((IIndexRegistry)harness.IndexManager).ExportRegistrations().Single().RootPageId);
     }
 
     // ── Recovery ────────────────────────────────────────────────────────
@@ -535,6 +745,7 @@ public class BTreeEntryOrderTests
         var reader = await recovered.BeginAsync();
         (await ReadAsync(recoveredIndex, reader, Exactly(key))).Select(entry => entry.Reference).ShouldBe(survivors);
         await recovered.RollbackAsync(reader);
+        ShouldHaveConsistentLeafChain(recovered.Storage, registrations.Single().RootPageId);
 
         // Exact lookups work on the recovered tree: a delete, then an erase of a new entry.
         var writer = await recovered.BeginAsync();

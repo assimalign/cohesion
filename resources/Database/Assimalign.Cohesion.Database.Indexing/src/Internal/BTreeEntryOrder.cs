@@ -93,6 +93,17 @@ internal readonly ref struct BTreeSearchKey
         => new(key, BTreeTiebreaker.Reference, entryReference, 0);
 
     /// <summary>
+    /// The position after every entry of <paramref name="key"/> that maps to
+    /// <paramref name="entryReference"/>: where a lookup that wants the reference's
+    /// newest version starts and walks backward. Entry references are unsigned
+    /// integers, so that position is <c>(key, entryReference + 1, -inf)</c>, or
+    /// <c>(key, +inf)</c> for the largest reference; no other entry lies between it and
+    /// the reference's last version.
+    /// </summary>
+    internal static BTreeSearchKey AfterReference(ReadOnlySpan<byte> key, ulong entryReference)
+        => entryReference == ulong.MaxValue ? AfterKey(key) : AtReference(key, entryReference + 1);
+
+    /// <summary>
     /// One entry's full identity: where an insert goes and what an erase removes.
     /// </summary>
     internal static BTreeSearchKey AtEntry(ReadOnlySpan<byte> key, ulong entryReference, ulong writer)

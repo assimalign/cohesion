@@ -22,13 +22,6 @@ public sealed class IndexFormatException : IndexException
     public const string ErrorCode = "COHDBI001";
 
     /// <summary>
-    /// The code that leads the message of an <see cref="IndexException"/> raised when
-    /// an attached tree reaches a page that is not a B-tree node of the current
-    /// format: the index is damaged.
-    /// </summary>
-    public const string DamagedPageCode = "COHDBI002";
-
-    /// <summary>
     /// Initializes a new <see cref="IndexFormatException"/>.
     /// </summary>
     /// <param name="indexName">The index whose pages were refused.</param>
