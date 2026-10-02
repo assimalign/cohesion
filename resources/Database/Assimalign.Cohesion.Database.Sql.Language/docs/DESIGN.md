@@ -273,7 +273,13 @@ checks stay as PostgreSQL's backstop. The parser reports nesting past the limit 
   a parser with any limit at least that large accepts the statement and one with a
   smaller limit rejects it, so an engine with a lower limit than the parser that
   built a typed request refuses it on that number alone, without parsing the text
-  again.
+  again. The parser stamps only the root, so a query it did not return as a root, a
+  subquery a caller takes out of a parsed statement and wraps in a statement of its
+  own, falls back to the depth of its own tree (`SqlQueryExpression.NestingDepth` is
+  the greater of the stamp and `SqlSelectExpression.ExpressionDepth`; `SELECT` is the
+  only query kind a statement nests). Both are cached, so the read stays
+  constant-time, and the fallback is what the engine's walks recurse through: such a
+  query is never parsed again, so its parentheses no longer matter.
 - **Parentheses are bounded apart from the tree.** They are not nodes, so they do
   not change `Depth`, but each pair is a level of recursion, so `_parenthesisDepth`
   caps them at the limit too. Folding them into the tree count would break persisted

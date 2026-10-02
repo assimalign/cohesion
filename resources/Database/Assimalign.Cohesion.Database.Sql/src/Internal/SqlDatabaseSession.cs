@@ -175,6 +175,8 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             // A typed request was parsed by its caller, possibly with a higher nesting limit than
             // this engine's. The parser recorded how deep the statement nests, so the engine's
             // limit holds on this seam too, exactly as if the engine had parsed the text (#1151).
+            // A statement over a subquery taken out of a parsed statement has no parser's measure
+            // and is held to the depth of its own tree, which is what the walks below recurse over.
             if (parsed.Statement.ExpressionNestingDepth > _parserOptions.ExpressionNestingLimit)
             {
                 return new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,

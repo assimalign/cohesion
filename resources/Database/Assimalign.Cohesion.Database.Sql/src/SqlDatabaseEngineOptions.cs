@@ -74,7 +74,10 @@ public sealed class SqlDatabaseEngineOptions
     /// <remarks>
     /// The engine parses statement text, including every statement a wire client sends, with this
     /// limit, and refuses a typed request whose statement nests deeper
-    /// (<see cref="SqlQueryStatement.ExpressionNestingDepth"/>). A higher limit admits deeper
+    /// (<see cref="SqlQueryStatement.ExpressionNestingDepth"/>). A typed request parses at the
+    /// default limit unless its caller passes this one, through
+    /// <see cref="SqlQueryRequest.FromSql(string, System.Collections.Generic.IReadOnlyDictionary{string, object?}?, SqlQueryParserOptions?)"/>
+    /// or a <see cref="SqlQueryParser"/> of its own. A higher limit admits deeper
     /// statements but not more stack: a statement within the limit that needs more stack than the
     /// executing thread has left fails with <c>COHSQLE004</c> (ISO SQLSTATE 54001), never a crash.
     /// Definitions the engine persists are read back at the highest limit, so a database written

@@ -837,7 +837,13 @@ each statement nests (`SqlQueryStatement.ExpressionNestingDepth`, the greater of
 deepest tree and its deepest parentheses), and the engine refuses a request that
 nests deeper than its limit with an error result carrying `SQL0006`
 (`Expression nesting of 300 levels exceeds this engine's limit of 256 levels.`),
-exactly what parsing the text itself would have decided.
+exactly what parsing the text itself would have decided. A request over a query the
+parser did not return as a statement, such as a subquery taken out of a parsed
+statement, has no parser's measure and is held to the depth of its own expression
+tree, which is what the engine's walks recurse through. `SqlQueryRequest.FromSql`
+parses at the default limit; a caller targeting an engine configured with another
+limit passes it through the overload that takes `SqlQueryParserOptions`, so the
+typed path accepts exactly what the engine accepts as text.
 
 | Written | Levels | Result under the default limit |
 |---|---|---|

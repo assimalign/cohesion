@@ -463,7 +463,18 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   engine's options), and refuses a typed request whose
   `SqlQueryStatement.ExpressionNestingDepth`, the nesting its own parser measured,
   exceeds it, with the `SQL0006` the engine's parse would have reported, so the
-  limit holds on every seam. A parse that runs out of stack (`SQL0007`) is not a
+  limit holds on every seam. A request over a subquery taken out of a parsed
+  statement carries no parser's measure and is held to the depth of its own tree,
+  which is what the walks recurse through. The `FromSql` overload that takes
+  `SqlQueryParserOptions` is public, so a typed caller parses with the engine's
+  limit and accepts exactly what the text seam accepts; the overload without options
+  parses at the default 256. The builder's `ExpressionNestingLimit` is an addition to
+  the published `ISqlDatabaseEngineBuilder`, so it has a default implementation: a
+  builder that predates it reports 256, accepts that value and refuses any other
+  with `NotSupportedException` rather than ignore it. A value outside 32..4096 set on
+  the engine's own builder fails in `Build()`, not in the setter, with the
+  `ArgumentOutOfRangeException` that `SqlDatabaseEngine.Create` and
+  `SqlDatabaseEngineFactory.Create` throw. A parse that runs out of stack (`SQL0007`) is not a
   syntax error: `FromSql` raises it as `COHSQLE004`, like any other walk out of
   stack. Text the engine generates rather than receives (persisted definitions,
   schema-migration statements) parses at the 4096 ceiling: the executing engine's

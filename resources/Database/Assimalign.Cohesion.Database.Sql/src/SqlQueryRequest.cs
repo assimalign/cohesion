@@ -44,7 +44,9 @@ public sealed class SqlQueryRequest : QueryRequest<SqlQueryStatement>
     /// Parses SQL text into a request, with the dialect's default expression nesting limit
     /// (<see cref="SqlQueryParserOptions.DefaultExpressionNestingLimit"/>). Parse errors surface as
     /// <see cref="DatabaseParseException"/> — callers wanting diagnostics-level
-    /// control, or another nesting limit, parse with <see cref="SqlQueryParser"/> directly.
+    /// control parse with <see cref="SqlQueryParser"/> directly, and callers targeting an engine
+    /// configured with another nesting limit pass it through
+    /// <see cref="FromSql(string, IReadOnlyDictionary{string, object?}?, SqlQueryParserOptions?)"/>.
     /// </summary>
     /// <param name="sql">The SQL statement text.</param>
     /// <param name="parameters">The parameter values to bind, keyed by parameter name.</param>
@@ -59,16 +61,34 @@ public sealed class SqlQueryRequest : QueryRequest<SqlQueryStatement>
         => FromSql(sql, parameters, parserOptions: null);
 
     /// <summary>
-    /// Parses SQL text into a request with the given parser options: the engine's sessions pass
-    /// the engine's own expression nesting limit (#1151).
+    /// Parses SQL text into a request with the given parser options (#1151). Pass the expression
+    /// nesting limit of the engine that will execute the request
+    /// (<see cref="SqlDatabaseEngineOptions.ExpressionNestingLimit"/>), so the typed path accepts
+    /// exactly what the engine accepts as text; the engine's own sessions parse text this way.
+    /// Parse errors surface as <see cref="DatabaseParseException"/>, as for
+    /// <see cref="FromSql(string, IReadOnlyDictionary{string, object?}?)"/>.
     /// </summary>
+    /// <remarks>
+    /// A limit above the engine's does not get a statement past it: the engine refuses a request
+    /// that nests deeper than its own limit with <c>SQL0006</c>
+    /// (<see cref="SqlQueryStatement.ExpressionNestingDepth"/>).
+    /// </remarks>
     /// <param name="sql">The SQL statement text.</param>
     /// <param name="parameters">The parameter values to bind, keyed by parameter name.</param>
     /// <param name="parserOptions">The parser options, or <see langword="null"/> for the defaults.</param>
     /// <returns>The parsed request.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="sql"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sql"/> is empty or white space.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="SqlQueryParserOptions.ExpressionNestingLimit"/> of <paramref name="parserOptions"/>
+    /// is outside <see cref="SqlQueryParserOptions.MinimumExpressionNestingLimit"/>..<see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>.
+    /// </exception>
     /// <exception cref="DatabaseParseException">The text failed to parse.</exception>
-    /// <exception cref="DatabaseException">The calling thread ran out of stack parsing the text (<c>COHSQLE004</c>).</exception>
-    internal static SqlQueryRequest FromSql(string sql, IReadOnlyDictionary<string, object?>? parameters, SqlQueryParserOptions? parserOptions)
+    /// <exception cref="DatabaseException">
+    /// The text is within the nesting limit, but the calling thread has too little stack left to
+    /// parse it: <c>COHSQLE004</c>, statement too complex (ISO SQLSTATE 54001).
+    /// </exception>
+    public static SqlQueryRequest FromSql(string sql, IReadOnlyDictionary<string, object?>? parameters, SqlQueryParserOptions? parserOptions)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 

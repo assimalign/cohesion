@@ -32,7 +32,8 @@ shared storage, with DDL flowing through the relational catalog
   `ExpressionNestingLimit` (256 levels by default, 32..4096; an `AND`/`OR` chain
   of any length is one level), and a statement within it that exhausts the
   executing thread's stack fails with `COHSQLE004` instead of ending the process
-  (#1151).
+  (#1151). Typed requests for an engine with another limit parse with it through
+  `SqlQueryRequest.FromSql(sql, parameters, parserOptions)`.
 - **Typed rows** — rows encode with the shared self-describing tuple codec,
   prefixed by the owning table's object id (tables share one record space and
   scans filter by it).

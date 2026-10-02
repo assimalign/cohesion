@@ -75,6 +75,14 @@ public sealed class SqlSelectExpression : SqlQueryExpression
     /// </summary>
     internal int ExpressionDepth { get; }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// A SELECT is the one query kind another statement nests, as a subquery or the source of an
+    /// <c>INSERT</c>, so it is the one a caller can take out of a parsed statement and execute
+    /// without a parser's measure.
+    /// </remarks>
+    private protected override int ExpressionTreeDepth => ExpressionDepth;
+
     /// <summary>
     /// Gets the columns in the SELECT list.
     /// </summary>

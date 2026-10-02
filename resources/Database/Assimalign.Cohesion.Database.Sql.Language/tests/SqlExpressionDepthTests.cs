@@ -243,6 +243,44 @@ public sealed class SqlExpressionDepthTests
         measured.NestedBytes.ShouldBeLessThan(measured.FlatBytes * 3 / 2);
     }
 
+    /// <summary>
+    /// A subquery taken out of a parsed statement to run on its own carries no parser's measure.
+    /// It is never parsed again, so it measures the depth of its own expression tree, which every
+    /// walk over it recurses through: an engine's limit holds for it as for the statement it came
+    /// from.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Nesting: a subquery taken out of a statement measures its own tree")]
+    public void ExpressionNestingDepth_ExtractedQuery_ShouldMeasureItsOwnTree()
+    {
+        // Arrange: each nested query filters on 300 levels of NOT, 301 with its leaf.
+        string deep = string.Concat(Enumerable.Repeat("NOT ", 300)) + "TRUE";
+        var select = Parse(
+            $"SELECT (SELECT x FROM u WHERE {deep}) FROM t " +
+            $"WHERE id IN (SELECT x FROM u WHERE {deep}) AND EXISTS (SELECT x FROM u WHERE {deep});",
+            SqlQueryParserOptions.MaximumExpressionNestingLimit);
+        var insert = Parse($"INSERT INTO t (id) SELECT x FROM u WHERE {deep};", SqlQueryParserOptions.MaximumExpressionNestingLimit);
+        Errors(select).ShouldBeEmpty();
+        Errors(insert).ShouldBeEmpty();
+        var outer = select.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
+        var where = outer.Where.ShouldBeOfType<SqlLogicalExpression>();
+
+        // Act
+        var queries = new[]
+        {
+            outer.Columns.Single().Expression.ShouldBeOfType<SqlSubqueryExpression>().Select,
+            where.Operands[0].ShouldBeOfType<SqlInExpression>().Subquery.ShouldNotBeNull(),
+            where.Operands[1].ShouldBeOfType<SqlExistsExpression>().Subquery,
+            insert.SqlExpression.ShouldBeOfType<SqlInsertExpression>().SelectSource.ShouldNotBeNull(),
+        }.Select(query => new SqlQueryStatement(query).ExpressionNestingDepth);
+
+        // Assert: the IN and EXISTS nodes are a level over their queries, the chain one more.
+        queries.ShouldBe([301, 301, 301, 301]);
+        select.ExpressionNestingDepth.ShouldBe(303);
+        new SqlQueryStatement(outer).ExpressionNestingDepth.ShouldBe(303);
+        insert.ExpressionNestingDepth.ShouldBe(301);
+        new SqlQueryStatement(new SqlQueryExpression(SqlQueryCommandType.Select, null, null)).ExpressionNestingDepth.ShouldBe(0);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: parentheses nest at most as deep as the limit")]
     [InlineData(1, false)]
     [InlineData(Limit, false)]

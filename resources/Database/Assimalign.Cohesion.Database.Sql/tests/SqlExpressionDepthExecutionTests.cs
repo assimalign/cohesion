@@ -14,6 +14,7 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
 using Shouldly;
@@ -330,6 +331,68 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>
+    /// A subquery taken out of a parsed statement and sent as a typed request of its own carries
+    /// no parser's measure. It is held to the depth of its own tree, which the engine's walks
+    /// recurse over, so the engine's limit holds for it as for the statement it came from.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a subquery taken out of a statement meets the engine's limit")]
+    public async Task Engine_ExtractedSubquery_ShouldMeetTheLimit()
+    {
+        // Arrange: 40 levels of NOT are 41 with their leaf, past the engine's 32; 20 are within it.
+        await using var engine = CreateEngine(limit: 32);
+        await using var session = await SeedAsync(engine);
+        var deep = Request($"SELECT id FROM t WHERE id IN (SELECT id FROM t WHERE {Repeat("NOT ", 40)}TRUE)");
+        var shallow = Request($"SELECT id FROM t WHERE id IN (SELECT id FROM t WHERE {Repeat("NOT ", 20)}TRUE)");
+        static SqlQueryRequest Extract(SqlQueryRequest request) => new(new SqlQueryStatement(request.Statement.SqlExpression
+            .ShouldBeOfType<SqlSelectExpression>().Where.ShouldBeOfType<SqlInExpression>().Subquery.ShouldNotBeNull()));
+
+        // Act
+        var whole = await session.ExecuteAsync(deep);
+        var extracted = await session.ExecuteAsync(Extract(deep));
+        var withinLimit = await ReadScalarAsync(await session.ExecuteAsync(Extract(shallow)));
+
+        // Assert: the IN node is a level over its subquery.
+        foreach (var (result, depth) in new[] { (whole, 42), (extracted, 41) })
+        {
+            result.Status.ShouldBe(QueryResultStatus.Error);
+            var diagnostic = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("SQL0006");
+            diagnostic.Message.ShouldBe($"Expression nesting of {Number(depth)} levels exceeds this engine's limit of 32 levels.");
+        }
+        withinLimit.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A typed caller parses with the engine's limit through the public <c>FromSql</c> overload
+    /// that takes parser options, so the typed path accepts exactly what the engine accepts as
+    /// text. The overload without options stays at the default 256, and a limit outside 32..4096
+    /// is refused as it is everywhere else.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: FromSql with the engine's limit accepts what the engine's text seam accepts")]
+    public async Task FromSql_WithEngineLimit_ShouldMatchTheTextSeam()
+    {
+        // Arrange
+        const int EngineLimit = 1000;
+        await using var engine = CreateEngine(limit: EngineLimit);
+        await using var session = await SeedAsync(engine);
+        string sql = $"SELECT {Chain("1", " + ", 400)} FROM t";
+        var options = new SqlQueryParserOptions { ExpressionNestingLimit = EngineLimit };
+
+        // Act
+        var text = OnLargeStack(() => ScalarAsync(session, sql));
+        var typed = OnLargeStack(async () => await ReadScalarAsync(await session.ExecuteAsync(SqlQueryRequest.FromSql(sql, null, options))));
+        var defaultLimit = Should.Throw<DatabaseParseException>(() => SqlQueryRequest.FromSql(sql));
+        var outOfRange = Should.Throw<ArgumentOutOfRangeException>(() => SqlQueryRequest.FromSql(sql, null,
+            new SqlQueryParserOptions { ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit + 1 }));
+
+        // Assert
+        text.ShouldBe(400L);
+        typed.ShouldBe(400L);
+        defaultLimit.Message.ShouldBe("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 256 levels.");
+        outOfRange.ParamName.ShouldBe("options");
+    }
+
+    /// <summary>
     /// A high limit admits deeper statements, not more stack. Where the thread has room the
     /// statement runs; where it does not, the statement fails with COHSQLE004, whether it ran out
     /// while parsing or while planning and evaluating, and the session keeps serving.
@@ -412,6 +475,27 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
         builder.ExpressionNestingLimit.ShouldBe(40);
         new SqlDatabaseEngineOptions().ExpressionNestingLimit.ShouldBe(Limit);
+    }
+
+    /// <summary>
+    /// The builder's limit is an addition to a published interface, so it has a default
+    /// implementation: a builder written before it existed keeps compiling and loading, reports
+    /// the default limit, accepts that value, and refuses any other rather than ignore it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a builder without its own limit reports the default and refuses another")]
+    public void Builder_WithoutOwnLimit_ShouldReportTheDefaultAndRefuseAnother()
+    {
+        // Arrange
+        ISqlDatabaseEngineBuilder builder = new EarlierEngineBuilder();
+
+        // Act
+        builder.ExpressionNestingLimit = Limit;
+        var failure = Should.Throw<NotSupportedException>(() => builder.ExpressionNestingLimit = 1000);
+
+        // Assert
+        builder.ExpressionNestingLimit.ShouldBe(Limit);
+        failure.Message.ShouldBe(
+            "This ISqlDatabaseEngineBuilder implementation builds engines with the default expression nesting limit of 256 levels and cannot apply another.");
     }
 
     /// <summary>
@@ -1089,5 +1173,36 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             // Read after the call, so the frame stays allocated across it.
             return depth + frame[^1] - 1;
         }
+    }
+
+    /// <summary>
+    /// A builder written against the interface before it had an expression nesting limit: it
+    /// implements every other member and relies on the default implementation for the limit.
+    /// </summary>
+    private sealed class EarlierEngineBuilder : ISqlDatabaseEngineBuilder
+    {
+        public string? EngineName { get; set; }
+
+        public FileSystemPath? RootPath { get; set; }
+
+        public StorageCommitDurability? Durability { get; set; }
+
+        public ISqlStorageStrategy? StorageStrategy { get; set; }
+
+        public TimeSpan GroupCommitWindow { get; set; }
+
+        public TimeSpan CheckpointInterval { get; set; }
+
+        public TimeSpan PageWriteBackInterval { get; set; }
+
+        public int PageWriteBackBatchSize { get; set; }
+
+        public TimeSpan MaintenanceInterval { get; set; }
+
+        public IDatabaseEngineBuilder AddWorker(Func<IDatabaseEngine, IDatabaseEngineWorker> configure) => this;
+
+        public IDatabaseEngineBuilder AddServer(Func<IDatabaseEngine, IDatabaseServer> configure) => this;
+
+        public IDatabaseEngine Build() => throw new NotSupportedException("The test never builds this builder.");
     }
 }
