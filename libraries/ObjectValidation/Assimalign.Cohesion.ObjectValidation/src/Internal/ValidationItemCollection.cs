@@ -31,9 +31,15 @@ internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T
             var value = this.GetValue(instance);
             var stopwatch = new Stopwatch();
 
+            // The chain stops on this member's own failure only, as in ValidationItem: errors other
+            // members reported earlier must not keep this member's rules from running. A rule runs over
+            // every element, so the rule that fails first reports each failing element before the chain
+            // stops.
+            var failed = false;
+
             foreach (var rule in this.ItemRuleStack)
             {
-                if (!context.ContinueThroughValidationChain && context.Errors.Any())
+                if (failed && !context.ContinueThroughValidationChain)
                 {
                     break;
                 }
@@ -53,6 +59,7 @@ internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T
                             foreach (var error in ruleContext.Errors)
                             {
                                 context.AddFailure(error);
+                                failed = true;
                             }
 
                             stopwatch.Stop();

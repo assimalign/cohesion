@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Diagnostics;
-using System.Linq;
 
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
@@ -26,9 +25,14 @@ internal sealed class ValidationItem<T, TValue> : ValidationItemBase<T, TValue>
 
         var value = this.GetValue(instance);
 
+        // The chain stops on this member's own failure only. The context also holds the errors of every
+        // member evaluated before this one, and those must not keep this member's rules from running:
+        // stopping across members is ValidationMode.Stop, which the validator applies between items.
+        var failed = false;
+
         foreach (var rule in this.ItemRuleStack)
         {
-            if (!context.ContinueThroughValidationChain && context.Errors.Any())
+            if (failed && !context.ContinueThroughValidationChain)
             {
                 break;
             }
@@ -44,6 +48,7 @@ internal sealed class ValidationItem<T, TValue> : ValidationItemBase<T, TValue>
                 foreach (var error in ruleContext.Errors)
                 {
                     context.AddFailure(error);
+                    failed = true;
                 }
 
                 _stopwatch.Stop();

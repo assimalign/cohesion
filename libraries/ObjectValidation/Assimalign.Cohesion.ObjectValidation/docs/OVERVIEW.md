@@ -16,7 +16,10 @@ Implements a fluent validation engine built from validators, profiles, rules, an
 
 - Validator coordinates profile execution and produces ValidationResult objects.
 - ValidationProfile and descriptor types capture the fluent rule configuration model.
-- ValidationOptions control execution behavior such as stop-on-first-failure and throw-on-failure.
+- ValidationOptions control which failures are reported and whether a failure throws. With the defaults,
+  every failing member is reported, each with the errors of one of its rules: `ValidationMode.Stop` stops
+  at the first failing member, and `ContinueThroughValidationChain` runs every rule of a member (see
+  [DESIGN.md](DESIGN.md), "Which Failures Are Reported").
 
 ## Key Types
 

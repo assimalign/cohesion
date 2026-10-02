@@ -24,9 +24,11 @@ namespace Assimalign.Cohesion.Web.Validation;
 /// registered.
 /// </para>
 /// <para>
-/// Register a validator built with <see cref="ValidationOptions.ContinueThroughValidationChain"/> set to
-/// report every failing member: with the ObjectValidation default, validation stops at the first error.
-/// <see cref="AddProfile{T}"/> sets it. A validator built with
+/// The <c>errors</c> map carries the failures the validator's options report. With the ObjectValidation
+/// defaults, every failing member is reported, each with one failing rule's messages;
+/// <see cref="ValidationOptions.ContinueThroughValidationChain"/> reports every failing rule of every
+/// member, and <see cref="AddProfile{T}"/> sets it. A validator built with <see cref="ValidationMode.Stop"/>
+/// reports only the first failing member. A validator built with
 /// <see cref="ValidationOptions.ThrowExceptionOnFailure"/> throws a <see cref="ValidationFailureException"/>
 /// that carries no errors; the request is still answered with <c>400</c>, but with an empty
 /// <c>errors</c> map.

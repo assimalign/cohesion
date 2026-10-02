@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -32,6 +33,9 @@ public class ValidationEndToEndTests
 
     private const string validCustomer = """{"name":"Ada","age":36,"address":{"city":"London"}}""";
     private const string invalidCustomer = """{"name":"","age":12}""";
+
+    // Every member fails, and the empty user name fails both of its chained rules.
+    private const string invalidSignup = """{"userName":"","age":12,"address":{"city":""}}""";
 
     private static WebApplicationTestFactory CreateFactory(Action<EndpointValidationOptions>? configure = null, bool registerValidation = true)
     {
@@ -282,6 +286,49 @@ public class ValidationEndToEndTests
 
         // Assert
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Validation] - Registration: a validator from AddProfile reports every failing rule of every member")]
+    public async Task MapPost_SeveralInvalidMembersThroughAddProfile_ShouldReportEveryRuleOfEveryMember()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = CreateFactory(options => options.AddProfile(new SignupProfile()));
+        factory.Application.MapPost("/signups", (Signup signup) => "accepted");
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.PostAsync("/signups", Json(invalidSignup), cancellation.Token);
+
+        // Assert — every failing member, and both of the user name's failing rules.
+        JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
+        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["UserName", "Age", "Address.City"], ignoreOrder: true);
+        errors.GetProperty("UserName").GetArrayLength().ShouldBe(2);
+        errors.GetProperty("Age").GetArrayLength().ShouldBe(1);
+        errors.GetProperty("Address.City").GetArrayLength().ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Validation] - Registration: a validator with default options from AddValidator reports every failing member, one message each")]
+    public async Task MapPost_SeveralInvalidMembersThroughDefaultOptionsValidator_ShouldReportEveryMember()
+    {
+        // Arrange — a validator built with ObjectValidation's default options, registered as it is.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        IValidator validator = Validator.Create(builder => builder.AddProfile(new SignupProfile()));
+        await using WebApplicationTestFactory factory = CreateFactory(options => options.AddValidator(validator));
+        factory.Application.MapPost("/signups", (Signup signup) => "accepted");
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.PostAsync("/signups", Json(invalidSignup), cancellation.Token);
+
+        // Assert — every failing member; the user name's chain stops once one of its rules fails.
+        JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
+        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["UserName", "Age", "Address.City"], ignoreOrder: true);
+        errors.GetProperty("UserName").GetArrayLength().ShouldBe(1);
+        errors.GetProperty("Age").GetArrayLength().ShouldBe(1);
+        errors.GetProperty("Address.City").GetArrayLength().ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Validation] - Handlers: a handler validates a value it bound itself through context.ValidateAsync")]

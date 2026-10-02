@@ -73,6 +73,13 @@ A second validator for a type is an `InvalidOperationException` at registration,
 replacement. Lookup is exact on the type the value is bound as: no base-type or interface matching,
 which would need runtime type inspection.
 
+The `errors` map carries the failures the validator's ObjectValidation options report (that library's
+DESIGN, "Which Failures Are Reported"). With the defaults, every failing member is reported, each with
+one failing rule's messages. `AddProfile` sets `ContinueThroughValidationChain`, which adds the messages of
+each member's other failing rules, and a validator built with `ValidationMode.Stop` reports only the first
+failing member. Until ObjectValidation #1206, a default-options validator registered with `AddValidator`
+stopped at the first failing member, so a body with several invalid members was answered with one.
+
 ## The generated call
 
 When the consuming compilation resolves `Assimalign.Cohesion.Web.Validation.HttpContextValidationExtensions`
