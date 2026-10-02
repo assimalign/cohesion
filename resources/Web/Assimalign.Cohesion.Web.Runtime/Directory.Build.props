@@ -24,9 +24,12 @@
          apps see the whole family because Sdk.Web pulls this framework
          (Web-area dependency rule: resources/Web/README.md).
 
-         Exclusions: Web.Testing (test harness, not runtime) and
+         Exclusions: Web.Testing (test harness, not runtime),
          Web.ApplicationModel (NuGet-only; Sdk.Web injects it only for an
-         orchestration-enabled executable).
+         orchestration-enabled executable), and Web.OpenApi (NuGet-only, #152:
+         an application that documents its API references it, so one that does
+         not carries none of the OpenApi family; the description verbs it reads
+         ship in Web.Api, which is a member).
          ================================================================ -->
     <ItemGroup>
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Web" />
@@ -105,7 +108,6 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Protocols.Saml" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel.Token.Saml" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenApi" />
-        -->
+        The OpenApi family stays out: Web.OpenApi ships NuGet-only (see Exclusions above). -->
     </ItemGroup>
 </Project>

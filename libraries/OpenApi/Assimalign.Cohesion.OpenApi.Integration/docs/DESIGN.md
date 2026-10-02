@@ -39,6 +39,15 @@ whole Web path (annotated endpoints → generated registry → endpoint source �
 therefore reflection-free and NativeAOT-safe end to end, which the tests prove by driving it through
 validation and serialization.
 
+The shipped Web adapter (`Assimalign.Cohesion.Web.OpenApi`, #152) implements the contract over the
+Web route table rather than over the attribute registry: its operations come from the source-generated
+endpoint descriptions Web.Api attaches to routes, and its schemas from the application's
+System.Text.Json contracts. Those schemas are richer than the flat metadata can spell (arrays of
+components, dictionaries, enums, nullable references), so it passes complete model schemas through the
+metadata's optional `Schema` members (`OpenApi.Attributes` DESIGN, "Pass-through schemas"). The
+provider still assembles the document; the adapter contributes data only. An application can compose
+the generated registry beside it as an extra source.
+
 ## Version targeting and lossy export
 
 `IOpenApiDescriptionProvider.GetDocument(version)` targets a line, so a Web layer can serve 3.0, 3.1, or

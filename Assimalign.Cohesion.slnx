@@ -2531,6 +2531,19 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/tests/Assimalign.Cohesion.Web.HttpsPolicy.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.OpenApi/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.OpenApi/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.OpenApi/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.OpenApi/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.OpenApi/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.OpenApi/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.OpenApi/src/Assimalign.Cohesion.Web.OpenApi.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.OpenApi/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.OpenApi/tests/Assimalign.Cohesion.Web.OpenApi.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ProblemDetails/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ProblemDetails/docs/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.ProblemDetails/docs/DESIGN.md" />

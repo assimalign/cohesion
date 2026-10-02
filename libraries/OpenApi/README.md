@@ -52,9 +52,10 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 - **L1 (this area):** the document model, serialization, validation, fluent and attribute authoring,
   document generation, version transforms, and the integration contracts — pure description machinery.
-- **L2/L3:** the Web layer and ApiManager are meant to build on the `OpenApi.Integration` contracts,
-  keeping service runtime concerns out of the root model. Neither does yet; the Web OpenAPI adapter
-  (#152) is the first.
+- **L2/L3:** the Web layer and ApiManager build on the `OpenApi.Integration` contracts, keeping service
+  runtime concerns out of the root model. The Web OpenAPI adapter
+  ([`Assimalign.Cohesion.Web.OpenApi`](../../resources/Web/Assimalign.Cohesion.Web.OpenApi/), #152) is
+  the first: it implements `IOpenApiEndpointSource` over the Web route table. ApiManager does not yet.
 
 ## Project family
 
@@ -183,7 +184,8 @@ The planned family is implemented: the model, JSON and YAML serialization (YAML 
 AOT source generator, document generation, version transforms, the advanced authoring surfaces, and the
 Web/ApiManager integration contracts, with the official example and upgrade compliance corpus in the
 root project's tests. All eight libraries and the generator are in the release. The first
-service-layer consumer is the Web OpenAPI adapter (#152), which builds on Integration, Attributes, and
-Generation.
+service-layer consumer is the Web OpenAPI adapter (`Assimalign.Cohesion.Web.OpenApi`, #152), which builds
+on Integration, Attributes, and Generation and passes the schemas it derives from System.Text.Json
+contracts through the metadata's optional `Schema` members (Attributes DESIGN, "Pass-through schemas").
 
 See each package's `docs/OVERVIEW.md` and `docs/DESIGN.md` for detail.

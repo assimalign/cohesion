@@ -235,6 +235,19 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.HttpsPolicy/tests/">
 		<Project Path="Assimalign.Cohesion.Web.HttpsPolicy/tests/Assimalign.Cohesion.Web.HttpsPolicy.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.OpenApi/">
+		<File Path="Assimalign.Cohesion.Web.OpenApi/README.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.OpenApi/docs/">
+		<File Path="Assimalign.Cohesion.Web.OpenApi/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.OpenApi/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.OpenApi/src/">
+		<Project Path="Assimalign.Cohesion.Web.OpenApi/src/Assimalign.Cohesion.Web.OpenApi.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.OpenApi/tests/">
+		<Project Path="Assimalign.Cohesion.Web.OpenApi/tests/Assimalign.Cohesion.Web.OpenApi.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.ProblemDetails/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.ProblemDetails/docs/">
 		<File Path="Assimalign.Cohesion.Web.ProblemDetails/docs/DESIGN.md" />
