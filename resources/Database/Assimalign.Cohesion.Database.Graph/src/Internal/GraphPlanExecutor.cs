@@ -20,7 +20,11 @@ internal static class GraphPlanExecutor
     {
         operation.EnsureActive();
         var error = statement.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
-        if (error is not null) { throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}"); }
+        if (error is not null)
+        {
+            if (error.Code == GraphStatementTooComplex.ParserCode) { throw GraphStatementTooComplex.FromParse(error); }
+            throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}");
+        }
         if (paths)
         {
             var query = statement.GqlExpression;

@@ -19,7 +19,10 @@ property projection, `INSERT`, `CREATE` as an insertion compatibility extension,
 cascading deletion. Unsupported features, including the undirected tilde edges, produce
 `COHDBL001`; malformed supported syntax produces stable `GQL` diagnostics, and a Cypher arrow such
 as `(a)-->(b)`, which GQL reads as a comment, produces `GQL0008`. The parser does not throw for
-malformed query text.
+malformed query text. As in Neo4j, label expressions and predicates have no length or nesting
+limit: `:A:B:...`, `A|B|...` and `p AND q AND ...` are each one n-ary node of any length, and
+parentheses nest as deep as the parsing thread's stack allows; deeper text reports `GQL0009`
+instead of overflowing it.
 
 Named path assignment is supported only in `MATCH`. The engine's path request API projects one
 bound node, relationship or named path; deleting a path variable or accessing a path property is

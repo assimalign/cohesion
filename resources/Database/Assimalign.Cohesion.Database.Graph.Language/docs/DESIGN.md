@@ -55,12 +55,22 @@ contains a variable and exactly one property key; qualified database names have 
 A node or relationship pattern's label specification (`:` or `IS`, then a label expression) is the
 init-only `LabelExpression`, a `GqlLabelExpression` tree of five sealed records: `GqlLabelName`,
 `GqlLabelWildcard` (`%`), `GqlLabelNegation` (`!`), `GqlLabelConjunction` (`&`) and
-`GqlLabelDisjunction` (`|`). Parentheses group without a node. `Labels` and `Type` are filled only
+`GqlLabelDisjunction` (`|`). The conjunction and disjunction are n-ary: each holds an `Operands` list
+of any length, so `A|B|C` and `:A:B:C` are one node each (see "Chain length and nesting" below).
+Parentheses group without a node. `Labels` and `Type` are filled only
 for a pure conjunction or a single type, so a hand-built AST that sets only those keeps its meaning;
 when both are set, the planner requires `Labels` to name exactly the conjunction and `Type` to equal
 the single name (`COHDBG001` otherwise). `GqlPatternDirection.LeftOrRight` is the ISO left-or-right
 direction. A `WHERE` labeled predicate is `GqlLabeledPredicate` (variable, expression, `IsNegated`),
-a Boolean primary beside the comparisons.
+a Boolean primary beside the comparisons. A `WHERE` conjunction is one n-ary `GqlLogicalExpression`
+(`Operator` `GqlLogicalOperator.And`, `Operands`); `GqlBinaryExpression` holds one comparison, and the
+planner rejects a binary node whose operator is `AND` (`COHDBG001`).
+
+The label records compare structurally: two trees are equal when they have the same kinds in the
+same shape, names equal ordinally and chains with the same operands in the same order, and
+`GetHashCode` agrees. `ToString`, equality and hashing walk the tree with an explicit stack, so they
+hold for a hand-built tree of any depth. The public chain constructors copy their operand sequence;
+only the parser hands a list it built to a node without copying it.
 
 ## Supported-clause matrix
 
@@ -71,14 +81,14 @@ The builtin-function table is empty because the executor implements no functions
 | Clause | Accepted subset | Execution |
 | --- | --- | --- |
 | `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, label expressions, literal property maps; every ISO full and abbreviated edge except the tilde forms | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
-| `WHERE` | Scalar `=`, `<>`, `!=`, `<`, `<=`, `>`, `>=` comparisons and labeled predicates (`n IS [NOT] LABELED A`, `n:A`) joined by `AND`; predicate parentheses | Filters bound properties against literal or property operands, and bound elements by label expression |
+| `WHERE` | Scalar `=`, `<>`, `!=`, `<`, `<=`, `>`, `>=` comparisons and labeled predicates (`n IS [NOT] LABELED A`, `n:A`) joined by `AND`, one n-ary chain of any length; predicate parentheses of any depth the stack allows | Filters bound properties against literal or property operands, and bound elements by label expression |
 | `RETURN` | Bound node/relationship/path variables or scalar properties, optional `AS` aliases | Projects elements or scalar values in source order; the engine path-request API requires exactly one bound entity or path projection |
 | `INSERT` | Literal node/path insertion, optionally following a match; a node takes a label conjunction (`:A&B`, `:A:B`), a relationship one type and a directed edge (`-[:T]->`, `<-[:T]-`) | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
 | `DETACH DELETE` | Bound node/relationship variables following a match | Deletes incident relationships with the node in one transaction |
 | `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
-| `LABEL EXPRESSION` | ISO/IEC 39075 16.8 `\|`, `&`, `!`, `%` and parentheses after `:` or `IS` in a node or edge pattern; the labeled predicate in `WHERE` (#1139) | A node is tested against its label set, a relationship against its one type; a disjunction, negation, wildcard or labeled predicate never supplies the index anchor |
+| `LABEL EXPRESSION` | ISO/IEC 39075 16.8 `\|`, `&`, `!`, `%` and parentheses after `:` or `IS` in a node or edge pattern; the labeled predicate in `WHERE` (#1139); chains of any length and nesting the stack allows | A node is tested against its label set, a relationship against its one type; a disjunction, negation, wildcard or labeled predicate never supplies the index anchor |
 
 Match patterns accept `(a)`, `(a:Label {key: value})`, `(a IS A|B)`, `(a:(A|B)&!C)`, `(a:%)`, and
 every ISO directed edge in full and abbreviated form: `-[r:TYPE]->` or `->`, `<-[r:TYPE]-` or `<-`,
@@ -125,7 +135,8 @@ catalog      := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | OB
 The repeated-colon form of `label-spec` applies to node patterns only; a relationship has one type.
 `LABELED` is positional, like the path mode words: only after `IS` or `IS NOT` in a predicate does
 it introduce a label expression, so it remains usable as a name. `!` negates one primary, as ISO
-writes it, so `!!A` is `GQL0002` and `!(!A)` parses.
+writes it, so `!!A` is `GQL0002` and `!(!A)` parses. Each `(...)*` repetition in `label-spec`,
+`label-expr`, `label-term` and `predicate` builds one n-ary node; parentheses are the only recursion.
 
 A mutation can start without `MATCH`; a read or deletion must bind variables through `MATCH`.
 Named assignment is a MATCH-only construct: `INSERT p = (...)` and `CREATE p = (...)` are
@@ -134,14 +145,9 @@ the order of nodes and relationships when an indexed anchor starts in the middle
 is traversed in reverse. A path variable cannot be deleted or used as a scalar property owner;
 the planner rejects `DELETE p` and `RETURN p.name` rather than treating a path as an entity.
 A named path cannot rebind an existing variable, including a node or relationship binding.
-Pattern chains are limited to 64 relationships. Predicates are limited to 128 nesting levels and
-128 comparisons and labeled predicates together, bounding left-associated conjunction trees as well
-as parentheses. A label expression is limited to 128 levels of tree depth and 128 levels of
-parentheses (`GQL0005`), and the planner applies the same tree bound to a hand-built AST
-(`COHDBG001`), so evaluation recursion is bounded at 128. Each `|`, `&`, `!` or repeated `:` adds
-a level and a chain associates to the left, so one chain holds at most 128 labels: `:L1:...:L128`
-parses and a 129th label is `GQL0005`. Before #1139 the repeated-colon list was a flat list with no
-bound; a node pattern in parsed text now names at most 128 labels. Match execution
+Pattern chains are limited to 64 relationships (`GQL0005`). Label expressions and predicates have no
+length or nesting limit: a chain of one operator is one n-ary node of any length, and only the stack
+bounds parentheses and negations, as in Neo4j (see "Chain length and nesting" below). Match execution
 also imposes a materialized-binding limit, documented in the Graph engine design. Quantified paths
 are unsupported, so cycles cannot cause unbounded repetition of a path pattern. The executor's
 trail rule permits repeated nodes but forbids repeated relationship identities within one path.
@@ -169,10 +175,11 @@ The parser describes only the metadata subject; it never accesses or caches cata
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, `§`, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |
 | `GQL0004` | Invalid or out-of-range numeric literal |
-| `GQL0005` | Pattern length, comparison count, or expression or label-expression nesting limit exceeded |
+| `GQL0005` | Pattern length limit exceeded: a path pattern holds at most 64 relationships. Label expressions and predicates have no length or nesting limit (#1139 follow-up) |
 | `GQL0006` | Duplicate literal property key |
 | `GQL0007` | `Graph catalog introspection is read-only.`: mutation composed with `SHOW` |
 | `GQL0008` | A `--` comment begins exactly where a node pattern's `)` or an edge pattern's `]` ends, in `MATCH`, `INSERT` or `CREATE`: a Cypher arrow (`-->`, `--`) that would hide the rest of the line. Reported at the `--`; the message names `->`, `<-` and `-` |
+| `GQL0009` | The statement nests parentheses (in a label expression or a predicate) deeper than the parsing thread's stack can follow. Reported at the `(` that could not be entered; the parse stops there and reports nothing else. The same text parses on a thread with more stack, so the engine's `GraphQueryRequest.FromGql` reports it as `COHDBG007`, statement too complex, not as a parse error |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break
@@ -266,7 +273,7 @@ per-language lexer switch and ends the comment at the same terminators.
 
 The profile advertises `LABEL EXPRESSION`: ISO/IEC 39075 16.8 label expressions in node and edge
 patterns, G074's wildcard `%`, and the `<labeled predicate>` in `WHERE`. The parser binds `!`
-tighter than `&` and `&` tighter than `|`; both binary operators associate to the left. The
+tighter than `&` and `&` tighter than `|`; a run of one operator is one n-ary node. The
 engine evaluates a node's expression against its label set and a relationship's against its one
 type, with a typed switch over the five records and no reflection or text matching:
 
@@ -336,6 +343,76 @@ The residual is recorded rather than guessed at: whitespace or a block comment b
 and the dashes, as in `(a) -->(b)` or `(a)/* c */-->(b)`, leaves an ISO comment, so the rest of
 that line is still comment text. `GqlCypherArrowTests` pins that residual so a change to it is
 deliberate.
+
+## Chain length and nesting (#1139 follow-up)
+
+#1139 shipped binary `GqlLabelConjunction`/`GqlLabelDisjunction` records, and `WHERE` joined
+predicates in a left-deep binary `GqlBinaryExpression` `AND` tree. Every walker recursed once per
+operator, so the parser capped label trees, label parentheses, predicate parentheses and comparisons
+at 128 each (`GQL0005`) and the planner capped hand-built trees (`COHDBG001`). One chain therefore
+held at most 128 labels or 128 comparisons, while the repeated-colon list had been unbounded before
+#1139. The owner decision of 2026-10-02 was "do what Neo4j does". Neo4j has no such limit (paths are
+in the Neo4j repository):
+
+- Its label expression AST has n-ary `Conjunctions(children)` and `Disjunctions(children)` with
+  `flat`, which unnests a same-operator child, beside the binary `ColonConjunction` and `Negation`
+  (`community/cypher/front-end/expressions/src/main/scala/org/neo4j/cypher/internal/label_expressions/LabelExpression.scala:238-302,309-317,331`).
+  `replaceColonSyntax` rewrites `:A:B` into `Conjunctions.flat` (`:202-208`).
+- The Cypher 25 AST builder folds each run with `flat`: `A|B|C` in `exitLabelExpression4`, and
+  `A&B&C` and `:A:B` in `exitLabelExpression3`
+  (`community/cypher/front-end/parser/v25/ast-factory/src/main/scala/org/neo4j/cypher/internal/parser/v25/ast/factory/LabelExpressionBuilder.scala:144-189`).
+  The grammar counts nothing (`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:515-532`).
+- `WHERE` conjunctions become the n-ary `Ands` (`flattenBooleanOperators.scala:35-50` under
+  `community/cypher/front-end/frontend/src/main/scala/org/neo4j/cypher/internal/frontend/phases/rewriting/cnf/`).
+- Nesting is bounded only by the JVM stack. The parser has no depth check; a `StackOverflowError`
+  reaches Bolt, which reports the non-fatal transient `Neo.TransientError.General.StackOverFlowError`
+  (GQLSTATUS 51N37) and keeps the connection
+  (`community/bolt/src/main/java/org/neo4j/bolt/protocol/common/message/Error.java:188-249`,
+  `community/bolt/src/main/java/org/neo4j/bolt/fsm/StateMachineImpl.java:156-163`,
+  `community/common/src/main/java/org/neo4j/kernel/api/exceptions/Status.java:667-674`).
+- Storage does not cap labels per node: they sit in the node record while they fit 36 bits and spill
+  to a chain of dynamic label records otherwise
+  (`community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/InlineNodeLabels.java:42,115-122`,
+  `DynamicNodeLabels.java:105-229`).
+
+Cohesion now does the same:
+
+| | Before | Now |
+| --- | --- | --- |
+| `:A:B:...`, `A&B&...`, `A\|B\|...` | at most 128 names (`GQL0005`) | one n-ary node of any length |
+| `p AND q AND ...` in `WHERE` | at most 128 comparisons and labeled predicates (`GQL0005`) | one `GqlLogicalExpression` of any length |
+| Label parentheses and negations | at most 128 levels (`GQL0005`) | as deep as the parsing thread's stack allows; deeper is `GQL0009` |
+| Predicate parentheses | at most 128 levels (`GQL0005`) | as above |
+| Hand-built tree depth | at most 128 label levels or 256 predicate levels (`COHDBG001`) | no limit; a walk out of stack is `COHDBG007` |
+
+- **Flattening.** The parser builds each run of `|`, `&`, repeated `:` or `AND` in one list, so a chain
+  costs time linear in its length. A parenthesized chain of the same operator that opens a run
+  merges into it by handing over its list: `(A|B)|C` is the same node as `A|B|C`, as left
+  associativity read it before. A group in a later position stays nested, `A|(B|C)`. Neo4j's `flat`
+  also merges that one, but its builder re-flattens the growing vector at every operator, which is
+  quadratic in a plain chain's length, and merging a later group would cost a copy of its operands
+  per enclosing group; the meaning is identical because `&`, `|` and `AND` are associative. Flattening
+  never crosses a precedence level: `A|B&C` is `Or(A, And(B, C))` and `!A&B` is `And(Not(A), B)`.
+- **Nesting.** The grammar recurses only through parentheses. Before each descent the parser calls
+  `RuntimeHelpers.TryEnsureSufficientExecutionStack`; on a thread out of stack it reports `GQL0009` at
+  that `(` and stops, instead of overflowing. Every recursive engine walk (label evaluation and
+  predicate evaluation) calls `RuntimeHelpers.EnsureSufficientExecutionStack`, and the engine reports
+  the exhausted stack as `COHDBG007`. The walks that need no recursion do not recurse: shape
+  validation, name collection, anchor equalities, `ToString`, structural equality and hashing use an
+  explicit stack. This is .NET's form of Neo4j's backstop: .NET cannot catch a stack overflow, so the
+  check runs before the descent instead of after the overflow.
+- **Hand-built trees.** The planner validates shape, not depth: an undefined operator, a null operand
+  or operand list, or a chain with fewer than two operands is `COHDBG001`.
+- **Insertion.** An inserted node takes a conjunction of any length and receives each label once, in
+  first-mention order (`:A&A` labels it `A`). Unlike Neo4j's spill to dynamic label records, a node's
+  labels and properties share one graph record of at most 8,092 bytes, so the number of distinct
+  labels one node can carry is bounded by their encoded size, not by the language (Graph engine
+  design, "Planning, execution and bounds").
+
+`GqlLabelChainParserTests` pins 10,000-name chains of every operator in every position, the merge
+rule, precedence after flattening, the renderer round trip, 10,000 nested groups on a large stack and
+`GQL0009` on a small one. The engine's `GqlLabelChainExecutionTests` and Graph.Client's
+`GraphLabelChainWireTests` pin execution, insertion and `COHDBG007` in process and over the wire.
 
 ## AOT posture and extension discipline
 

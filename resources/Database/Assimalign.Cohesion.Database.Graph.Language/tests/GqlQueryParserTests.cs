@@ -139,13 +139,38 @@ public class GqlQueryParserTests
     public void PredicateAst_PreservesConjunctionAndNormalizedComparison()
     {
         var query = Parse("MATCH (a) WHERE a.age >= 18 AND a.name <> 'Bob' RETURN a").GqlExpression;
-        var conjunction = query.Predicate.ShouldBeOfType<GqlBinaryExpression>();
-        conjunction.Operator.ShouldBe("AND");
-        var age = conjunction.Left.ShouldBeOfType<GqlBinaryExpression>();
+        var conjunction = query.Predicate.ShouldBeOfType<GqlLogicalExpression>();
+        conjunction.Operator.ShouldBe(GqlLogicalOperator.And);
+        conjunction.Operands.Count.ShouldBe(2);
+        var age = conjunction.Operands[0].ShouldBeOfType<GqlBinaryExpression>();
         age.Operator.ShouldBe(">=");
         age.Left.ShouldBeOfType<GqlPropertyExpression>().Property.ShouldBe("age");
         age.Right.ShouldBeOfType<GqlLiteralExpression>().Value.ShouldBe(18L);
-        conjunction.Right.ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("!=");
+        conjunction.Operands[1].ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("!=");
+    }
+
+    /// <summary>
+    /// An AND chain is one n-ary node, as Neo4j's Ands: a group that opens the chain merges into it,
+    /// a group in a later position stays nested, and a single comparison is not wrapped.
+    /// </summary>
+    [Fact]
+    public void PredicateAst_FlattensAndChainsIntoOneNode()
+    {
+        // Act
+        var chain = Parse("MATCH (a) WHERE a.x = 1 AND a.x = 2 AND a.x = 3 AND a.x = 4 RETURN a").GqlExpression.Predicate;
+        var opening = Parse("MATCH (a) WHERE (a.x = 1 AND a.x = 2) AND a.x = 3 RETURN a").GqlExpression.Predicate;
+        var later = Parse("MATCH (a) WHERE a.x = 1 AND (a.x = 2 AND a.x = 3) RETURN a").GqlExpression.Predicate;
+        var single = Parse("MATCH (a) WHERE ((a.x = 1)) RETURN a").GqlExpression.Predicate;
+
+        // Assert
+        chain.ShouldBeOfType<GqlLogicalExpression>().Operands.Count.ShouldBe(4);
+        var merged = opening.ShouldBeOfType<GqlLogicalExpression>();
+        merged.Operands.Count.ShouldBe(3);
+        merged.Operands.ShouldAllBe(operand => operand is GqlBinaryExpression);
+        var nested = later.ShouldBeOfType<GqlLogicalExpression>();
+        nested.Operands.Count.ShouldBe(2);
+        nested.Operands[1].ShouldBeOfType<GqlLogicalExpression>().Operands.Count.ShouldBe(2);
+        single.ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("=");
     }
 
     [Fact]
@@ -184,17 +209,23 @@ public class GqlQueryParserTests
         diagnostic.Location.ShouldBe(DiagnosticLocation.Absolute);
     }
 
+    /// <summary>
+    /// A path pattern keeps its 64-relationship bound (GQL0005). Predicates have no count or depth
+    /// limit (#1139 follow-up): a 10,000-comparison AND chain is one node, and parentheses nest
+    /// as deep as the stack allows (GqlLabelChainParserTests covers the stack).
+    /// </summary>
     [Fact]
-    public void DeepPredicateAndLongPath_ReturnBoundDiagnostics()
+    public void LongPredicateAndLongPath_OnlyThePathIsBounded()
     {
-        Parse("MATCH (a) WHERE " + new string('(', 129) + "a.x = 1" + new string(')', 129) + " RETURN a")
-            .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "GQL0005");
         Parse("MATCH (a)" + string.Concat(Enumerable.Repeat("-[]->()", 65)) + " RETURN a")
-            .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "GQL0005");
-        Parse("MATCH (a) WHERE " + string.Join(" AND ", Enumerable.Repeat("a.x = 1", 129)) + " RETURN a")
-            .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "GQL0005");
-        Parse("MATCH (a) WHERE " + string.Join(" AND ", Enumerable.Repeat("a.x = 1", 128)) + " RETURN a")
-            .Diagnostics.ShouldBeEmpty();
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
+        Parse("MATCH (a)" + string.Concat(Enumerable.Repeat("-[]->()", 64)) + " RETURN a").Diagnostics.ShouldBeEmpty();
+        var chain = Parse("MATCH (a) WHERE " + string.Join(" AND ", Enumerable.Repeat("a.x = 1", 10_000)) + " RETURN a");
+        chain.Diagnostics.ShouldBeEmpty();
+        chain.GqlExpression.Predicate.ShouldBeOfType<GqlLogicalExpression>().Operands.Count.ShouldBe(10_000);
+        var deep = Parse("MATCH (a) WHERE " + new string('(', 300) + "a.x = 1" + new string(')', 300) + " RETURN a");
+        deep.Diagnostics.ShouldBeEmpty();
+        deep.GqlExpression.Predicate.ShouldBeOfType<GqlBinaryExpression>();
     }
 
     [Fact]

@@ -51,6 +51,9 @@ internal sealed partial class GraphDatabaseInstance
             if (error is TransactionAbortedException) { throw new DatabaseTransactionAbortedException(error.Message, error); }
             if (error is StorageException) { throw new DatabaseException("COHDBG006: " + error.Message, error); }
             if (error is InvalidOperationException) { throw new DatabaseException("COHDBG003: " + error.Message, error); }
+            // A label expression or predicate nested deeper than this thread's stack: the walks
+            // check the stack before they descend, so the statement fails, not the process.
+            if (error is InsufficientExecutionStackException stack) { throw GraphStatementTooComplex.Create(stack); }
             throw;
         }
     }

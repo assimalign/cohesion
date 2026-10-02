@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using Assimalign.Cohesion.Database.Graph.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
@@ -9,17 +10,30 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// label set, a relationship against its one type. No reflection, no text matching.
 /// </summary>
 /// <remarks>
+/// <para>
+/// A conjunction or disjunction is one n-ary node, so a chain of any length is evaluated by a loop,
+/// and no count or depth limit applies (as Neo4j). Validation and the name walks use an explicit
+/// stack and hold for a tree of any shape. Evaluation recurses only where the tree nests (a group
+/// inside a chain, or a negation), and checks the stack before each descent: a tree deeper than the
+/// executing thread's stack fails its statement with <c>COHDBG007</c> instead of overflowing it.
+/// </para>
+/// <para>
 /// The planner validates every expression before execution, so evaluation sees only the five
-/// known kinds, no null operand, and at most <see cref="MaximumDepth"/> levels of recursion.
+/// known kinds, no null operand, and chains of at least two operands.
+/// </para>
 /// </remarks>
 internal static class GraphLabelEvaluator
 {
-    /// <summary>The deepest label expression the engine accepts, as the parser bounds it.</summary>
-    internal const int MaximumDepth = 128;
+    // A node with more labels than this is tested through a hash set built once per evaluation, so
+    // a long chain costs its length plus the label count rather than their product.
+    private const int linearLabelLimit = 16;
+
+    // Planner messages quote an expression; a long chain is cut here so the message stays readable.
+    private const int describedLength = 256;
 
     /// <summary>
     /// Validates an expression's shape and lists the names it mentions, in source order. A null
-    /// operand or name, an unknown kind, or nesting past <see cref="MaximumDepth"/> is
+    /// operand, name or operand list, a chain with fewer than two operands, or an unknown kind is
     /// <c>COHDBG001</c>.
     /// </summary>
     /// <param name="expression">The expression to validate.</param>
@@ -28,33 +42,26 @@ internal static class GraphLabelEvaluator
     internal static IReadOnlyList<string> Names(GqlLabelExpression? expression)
     {
         var names = new List<string>();
-        Collect(expression, names, 1);
-        return names;
-
-        static void Collect(GqlLabelExpression? expression, List<string> names, int depth)
+        var pending = new Stack<GqlLabelExpression?>();
+        pending.Push(expression);
+        while (pending.TryPop(out var current))
         {
-            if (depth > MaximumDepth)
-            {
-                throw new DatabaseException($"COHDBG001: Label-expression nesting exceeds {MaximumDepth} levels.");
-            }
-            switch (expression)
+            switch (current)
             {
                 case GqlLabelName { Name: { } name }:
                     names.Add(name);
-                    return;
+                    break;
                 case GqlLabelWildcard:
-                    return;
+                    break;
                 case GqlLabelNegation negation:
-                    Collect(negation.Operand, names, depth + 1);
-                    return;
+                    pending.Push(negation.Operand);
+                    break;
                 case GqlLabelConjunction conjunction:
-                    Collect(conjunction.Left, names, depth + 1);
-                    Collect(conjunction.Right, names, depth + 1);
-                    return;
+                    PushOperands(pending, conjunction.Operands, "conjunction");
+                    break;
                 case GqlLabelDisjunction disjunction:
-                    Collect(disjunction.Left, names, depth + 1);
-                    Collect(disjunction.Right, names, depth + 1);
-                    return;
+                    PushOperands(pending, disjunction.Operands, "disjunction");
+                    break;
                 case null:
                     throw new DatabaseException("COHDBG001: A label expression has a missing operand.");
                 case GqlLabelName:
@@ -63,47 +70,53 @@ internal static class GraphLabelEvaluator
                     throw new DatabaseException("COHDBG001: Unsupported label expression; use a name, %, !, & or |.");
             }
         }
+        return names;
+
+        static void PushOperands(Stack<GqlLabelExpression?> pending, IReadOnlyList<GqlLabelExpression>? operands, string kind)
+        {
+            if (operands is null) { throw new DatabaseException($"COHDBG001: A label {kind} has no operand list."); }
+            if (operands.Count < 2) { throw new DatabaseException($"COHDBG001: A label {kind} needs at least two operands."); }
+            // Pushed last to first, so names list in source order.
+            for (int i = operands.Count - 1; i >= 0; i--) { pending.Push(operands[i]); }
+        }
     }
 
     /// <summary>
-    /// The names of a pure conjunction (<c>A</c>, <c>A&amp;B</c>), or <see langword="null"/> when
-    /// the expression uses <c>|</c>, <c>!</c> or <c>%</c>. Call after <see cref="Names"/>.
+    /// The names of a pure conjunction (<c>A</c>, <c>A&amp;B</c>, <c>A&amp;(B&amp;C)</c>), in source
+    /// order, or <see langword="null"/> when the expression uses <c>|</c>, <c>!</c> or <c>%</c>. Call
+    /// after <see cref="Names"/>.
     /// </summary>
     /// <param name="expression">A validated expression.</param>
     /// <returns>The conjunction's names, or <see langword="null"/>.</returns>
     internal static IReadOnlyList<string>? Conjunction(GqlLabelExpression expression)
     {
         var names = new List<string>();
-        return Collect(expression, names) ? names : null;
-
-        static bool Collect(GqlLabelExpression expression, List<string> names)
+        var pending = new Stack<GqlLabelExpression>();
+        pending.Push(expression);
+        while (pending.TryPop(out var current))
         {
-            switch (expression)
+            switch (current)
             {
                 case GqlLabelName name:
                     names.Add(name.Name);
-                    return true;
+                    break;
                 case GqlLabelConjunction conjunction:
-                    return Collect(conjunction.Left, names) && Collect(conjunction.Right, names);
+                    for (int i = conjunction.Operands.Count - 1; i >= 0; i--) { pending.Push(conjunction.Operands[i]); }
+                    break;
                 default:
-                    return false;
+                    return null;
             }
         }
+        return names;
     }
 
     /// <summary>Whether a node with <paramref name="labels"/> satisfies a validated expression.</summary>
     /// <param name="expression">The validated expression.</param>
     /// <param name="labels">The node's labels.</param>
     /// <returns><see langword="true"/> when the node matches.</returns>
-    internal static bool Matches(GqlLabelExpression expression, IReadOnlyList<string> labels) => expression switch
-    {
-        GqlLabelName name => Contains(labels, name.Name),
-        GqlLabelWildcard => labels.Count != 0,
-        GqlLabelNegation negation => !Matches(negation.Operand, labels),
-        GqlLabelConjunction conjunction => Matches(conjunction.Left, labels) && Matches(conjunction.Right, labels),
-        GqlLabelDisjunction disjunction => Matches(disjunction.Left, labels) || Matches(disjunction.Right, labels),
-        _ => throw new DatabaseException("COHDBG001: Unsupported label expression."),
-    };
+    /// <exception cref="InsufficientExecutionStackException">The expression nests deeper than the thread's stack allows.</exception>
+    internal static bool Matches(GqlLabelExpression expression, IReadOnlyList<string> labels)
+        => Matches(expression, new LabelSet(labels));
 
     /// <summary>
     /// Whether a relationship of <paramref name="type"/> satisfies a validated expression. Every
@@ -112,15 +125,36 @@ internal static class GraphLabelEvaluator
     /// <param name="expression">The validated expression.</param>
     /// <param name="type">The relationship's type.</param>
     /// <returns><see langword="true"/> when the relationship matches.</returns>
-    internal static bool Matches(GqlLabelExpression expression, string type) => expression switch
+    /// <exception cref="InsufficientExecutionStackException">The expression nests deeper than the thread's stack allows.</exception>
+    internal static bool Matches(GqlLabelExpression expression, string type)
     {
-        GqlLabelName name => string.Equals(name.Name, type, StringComparison.Ordinal),
-        GqlLabelWildcard => true,
-        GqlLabelNegation negation => !Matches(negation.Operand, type),
-        GqlLabelConjunction conjunction => Matches(conjunction.Left, type) && Matches(conjunction.Right, type),
-        GqlLabelDisjunction disjunction => Matches(disjunction.Left, type) || Matches(disjunction.Right, type),
-        _ => throw new DatabaseException("COHDBG001: Unsupported label expression."),
-    };
+        switch (expression)
+        {
+            case GqlLabelName name:
+                return string.Equals(name.Name, type, StringComparison.Ordinal);
+            case GqlLabelWildcard:
+                return true;
+            case GqlLabelNegation negation:
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                return !Matches(negation.Operand, type);
+            case GqlLabelConjunction conjunction:
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                foreach (var operand in conjunction.Operands)
+                {
+                    if (!Matches(operand, type)) { return false; }
+                }
+                return true;
+            case GqlLabelDisjunction disjunction:
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                foreach (var operand in disjunction.Operands)
+                {
+                    if (Matches(operand, type)) { return true; }
+                }
+                return false;
+            default:
+                throw new DatabaseException("COHDBG001: Unsupported label expression.");
+        }
+    }
 
     /// <summary>Whether a node pattern accepts a node's labels: its expression, or every listed label.</summary>
     /// <param name="pattern">The validated node pattern.</param>
@@ -129,9 +163,10 @@ internal static class GraphLabelEvaluator
     internal static bool Accepts(GqlNodePattern pattern, IReadOnlyList<string> labels)
     {
         if (pattern.LabelExpression is { } expression) { return Matches(expression, labels); }
+        var set = new LabelSet(labels);
         foreach (string label in pattern.Labels)
         {
-            if (!Contains(labels, label)) { return false; }
+            if (!set.Contains(label)) { return false; }
         }
         return true;
     }
@@ -144,11 +179,14 @@ internal static class GraphLabelEvaluator
         ? Matches(expression, type)
         : pattern.Type is null || string.Equals(pattern.Type, type, StringComparison.Ordinal);
 
-    /// <summary>The labels an inserted node receives: its validated conjunction, or <c>Labels</c>.</summary>
+    /// <summary>
+    /// The labels an inserted node receives: its validated conjunction, or <c>Labels</c>, each once,
+    /// in first-mention order. <c>:A&amp;A</c> labels the node <c>A</c> once.
+    /// </summary>
     /// <param name="pattern">A node pattern the planner validated for insertion.</param>
     /// <returns>The labels to create the node with.</returns>
-    internal static IReadOnlyList<string> InsertLabels(GqlNodePattern pattern) =>
-        pattern.LabelExpression is { } expression ? Conjunction(expression)! : pattern.Labels;
+    internal static IReadOnlyList<string> InsertLabels(GqlNodePattern pattern)
+        => Distinct(pattern.LabelExpression is { } expression ? Conjunction(expression)! : pattern.Labels);
 
     /// <summary>The type an inserted relationship receives: its <c>Type</c>, or its expression's single name.</summary>
     /// <param name="pattern">A relationship pattern the planner validated for insertion.</param>
@@ -156,12 +194,85 @@ internal static class GraphLabelEvaluator
     internal static string InsertType(GqlRelationshipPattern pattern) =>
         pattern.Type ?? ((GqlLabelName)pattern.LabelExpression!).Name;
 
-    private static bool Contains(IReadOnlyList<string> labels, string label)
+    /// <summary>Each name once, in first-mention order.</summary>
+    /// <param name="names">The names, possibly repeated.</param>
+    /// <returns>The distinct names.</returns>
+    internal static IReadOnlyList<string> Distinct(IReadOnlyList<string> names)
     {
-        for (int i = 0; i < labels.Count; i++)
+        if (names.Count < 2) { return names; }
+        var seen = new HashSet<string>(names.Count, StringComparer.Ordinal);
+        var distinct = new List<string>(names.Count);
+        foreach (string name in names)
         {
-            if (string.Equals(labels[i], label, StringComparison.Ordinal)) { return true; }
+            if (seen.Add(name)) { distinct.Add(name); }
         }
-        return false;
+        return distinct.Count == names.Count ? names : distinct;
+    }
+
+    /// <summary>
+    /// The expression as GQL text for a diagnostic, cut to a readable length: a chain of thousands
+    /// of labels would otherwise fill the message.
+    /// </summary>
+    /// <param name="expression">The expression to describe.</param>
+    /// <returns>The text, ending in <c>...</c> when it was cut.</returns>
+    internal static string Describe(GqlLabelExpression expression)
+    {
+        string text = expression.ToString();
+        return text.Length <= describedLength ? text : string.Concat(text.AsSpan(0, describedLength), "...");
+    }
+
+    private static bool Matches(GqlLabelExpression expression, in LabelSet labels)
+    {
+        switch (expression)
+        {
+            case GqlLabelName name:
+                return labels.Contains(name.Name);
+            case GqlLabelWildcard:
+                return labels.Count != 0;
+            case GqlLabelNegation negation:
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                return !Matches(negation.Operand, labels);
+            case GqlLabelConjunction conjunction:
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                foreach (var operand in conjunction.Operands)
+                {
+                    if (!Matches(operand, labels)) { return false; }
+                }
+                return true;
+            case GqlLabelDisjunction disjunction:
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                foreach (var operand in disjunction.Operands)
+                {
+                    if (Matches(operand, labels)) { return true; }
+                }
+                return false;
+            default:
+                throw new DatabaseException("COHDBG001: Unsupported label expression.");
+        }
+    }
+
+    /// <summary>A node's labels, looked up linearly when there are few and through a hash set otherwise.</summary>
+    private readonly struct LabelSet
+    {
+        private readonly IReadOnlyList<string> _labels;
+        private readonly HashSet<string>? _set;
+
+        internal LabelSet(IReadOnlyList<string> labels)
+        {
+            _labels = labels;
+            _set = labels.Count > linearLabelLimit ? new HashSet<string>(labels, StringComparer.Ordinal) : null;
+        }
+
+        internal int Count => _labels.Count;
+
+        internal bool Contains(string label)
+        {
+            if (_set is not null) { return _set.Contains(label); }
+            for (int i = 0; i < _labels.Count; i++)
+            {
+                if (string.Equals(_labels[i], label, StringComparison.Ordinal)) { return true; }
+            }
+            return false;
+        }
     }
 }

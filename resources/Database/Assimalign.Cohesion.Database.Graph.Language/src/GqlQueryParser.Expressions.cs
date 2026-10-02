@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Assimalign.Cohesion.Database.Language;
 
@@ -6,37 +7,37 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 public sealed partial class GqlQueryParser
 {
+    // predicate := comparison ('AND' comparison)*
+    // One n-ary node holds the whole chain, so no count of comparisons applies; only parentheses
+    // nest, and they are bounded by the stack (GQL0009).
     private GqlExpression ParsePredicate()
     {
         var start = Current;
-        if (++_depth > 128)
-        {
-            Error("GQL0005", "Predicate nesting cannot exceed 128 levels.", Current);
-            _depth--;
-            return new GqlLiteralExpression(null, Span(start, start));
-        }
-        var left = ParseComparison();
+        var first = ParseComparison();
+        if (Failed || !Is("AND")) { return first; }
+
+        // A parenthesized chain that opens this one merges into it: (p AND q) AND r is p AND q AND r.
+        // ParseComparison returns a logical node only from inside parentheses.
+        List<GqlExpression> operands = first is GqlLogicalExpression { Operator: GqlLogicalOperator.And } opening
+            ? opening.DetachOperands()
+            : [first];
         while (!Failed && Take("AND"))
         {
-            left = new GqlBinaryExpression(left, "AND", ParseComparison(), Span(start, Previous));
+            operands.Add(ParseComparison());
         }
-        _depth--;
-        return left;
+        return GqlLogicalExpression.FromOwnedList(GqlLogicalOperator.And, operands, Span(start, Previous));
     }
 
     private GqlExpression ParseComparison()
     {
         var start = Current;
-        if (Take(TokenType.LeftParen))
+        if (Current.Type == TokenType.LeftParen)
         {
+            if (!HasStackToNest(start)) { return new GqlLiteralExpression(null, Span(start, start)); }
+            Advance();
             var predicate = ParsePredicate();
             Expect(TokenType.RightParen, "')'");
             return predicate;
-        }
-        if (++_comparisons > 128)
-        {
-            Error("GQL0005", "A predicate cannot exceed 128 comparisons and labeled predicates.", start);
-            return new GqlLiteralExpression(null, Span(start, start));
         }
         // n:A and n IS [NOT] LABELED A are Boolean primaries, not comparison operands.
         if (StartsLabeledPredicate()) { return ParseLabeledPredicate(); }

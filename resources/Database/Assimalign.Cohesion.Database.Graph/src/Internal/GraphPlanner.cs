@@ -81,17 +81,44 @@ internal sealed class GraphPlanner
             { throw new DatabaseException($"COHDBG003: Path variable '{variable}' cannot be deleted or used as a property owner."); }
             return kind;
         }
-        void ValidateExpression(GqlExpression? expression, int depth = 0)
+        // Walks the predicate with an explicit stack, in source order: an AND chain of any length
+        // and parentheses of any depth validate without recursion, as Neo4j's n-ary Ands carry
+        // any number of predicates. Only evaluation recurses, and it checks the stack (COHDBG007).
+        void ValidateExpression(GqlExpression? root)
         {
-            if (depth > 256) { throw new DatabaseException("COHDBG001: Predicate nesting exceeds 256 levels."); }
-            switch (expression)
+            if (root is null) { return; }
+            var pending = new Stack<GqlExpression?>();
+            pending.Push(root);
+            while (pending.TryPop(out var expression))
             {
-                case null or GqlLiteralExpression: return;
-                case GqlPropertyExpression property: RequireVariable(property.Variable, entity: true); return;
-                case GqlBinaryExpression binary when binary.Operator is "AND" or "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=":
-                    ValidateExpression(binary.Left, depth + 1); ValidateExpression(binary.Right, depth + 1); return;
-                case GqlLabeledPredicate labeled: ValidateLabeledPredicate(labeled); return;
-                default: throw new DatabaseException("COHDBG001: Unsupported graph predicate.");
+                switch (expression)
+                {
+                    case GqlLiteralExpression:
+                        break;
+                    case GqlPropertyExpression property:
+                        RequireVariable(property.Variable, entity: true);
+                        break;
+                    case GqlBinaryExpression { Operator: "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=" } binary:
+                        pending.Push(binary.Right);
+                        pending.Push(binary.Left);
+                        break;
+                    case GqlBinaryExpression { Operator: "AND" }:
+                        throw new DatabaseException("COHDBG001: AND joins predicates in a GqlLogicalExpression; a GqlBinaryExpression holds one comparison.");
+                    case GqlLogicalExpression logical:
+                        if (!Enum.IsDefined(logical.Operator))
+                        { throw new DatabaseException($"COHDBG001: Logical operator {(int)logical.Operator} is not defined."); }
+                        if (logical.Operands is null || logical.Operands.Count < 2)
+                        { throw new DatabaseException("COHDBG001: A logical predicate needs at least two operands."); }
+                        for (int i = logical.Operands.Count - 1; i >= 0; i--) { pending.Push(logical.Operands[i]); }
+                        break;
+                    case GqlLabeledPredicate labeled:
+                        ValidateLabeledPredicate(labeled);
+                        break;
+                    case null:
+                        throw new DatabaseException("COHDBG001: A predicate has a missing operand.");
+                    default:
+                        throw new DatabaseException("COHDBG001: Unsupported graph predicate.");
+                }
             }
         }
         // A labeled predicate tests a node's labels or a relationship's type; a path has neither.
@@ -103,7 +130,7 @@ internal sealed class GraphPlanner
             if (kind == BindingKind.Path)
             { throw new DatabaseException($"COHDBG003: Path variable '{labeled.Variable}' has no labels; a labeled predicate tests a node or relationship."); }
             if (labeled.LabelExpression is null) { throw new DatabaseException("COHDBG001: A labeled predicate requires a label expression."); }
-            foreach (string name in GraphLabelEvaluator.Names(labeled.LabelExpression))
+            foreach (string name in GraphLabelEvaluator.Distinct(GraphLabelEvaluator.Names(labeled.LabelExpression)))
             {
                 if (kind == BindingKind.Node) { RequireLabel(name); }
                 else { RequireRelationshipType(name); }
@@ -128,14 +155,15 @@ internal sealed class GraphPlanner
             if (node.Labels.Count != 0 && (conjunction is null ||
                 !new HashSet<string>(node.Labels, StringComparer.Ordinal).SetEquals(conjunction)))
             {
-                throw new DatabaseException($"COHDBG001: A node pattern's labels must be empty or name exactly the conjunction of its label expression '{expression}'.");
+                throw new DatabaseException($"COHDBG001: A node pattern's labels must be empty or name exactly the conjunction of its label expression '{GraphLabelEvaluator.Describe(expression)}'.");
             }
             if (creating && conjunction is null)
             {
-                throw new DatabaseException($"COHDBG001: An inserted node takes a label conjunction such as :A&B; '{expression}' selects nodes and cannot label a new one.");
+                throw new DatabaseException($"COHDBG001: An inserted node takes a label conjunction such as :A&B; '{GraphLabelEvaluator.Describe(expression)}' selects nodes and cannot label a new one.");
             }
         }
-        foreach (string label in names)
+        // A chain may name a label many times; each is resolved once.
+        foreach (string label in GraphLabelEvaluator.Distinct(names))
         {
             if (label is null) { throw new DatabaseException("COHDBG001: A label name cannot be null."); }
             if (!creating) { RequireLabel(label); }
@@ -182,7 +210,7 @@ internal sealed class GraphPlanner
             string? single = (expression as GqlLabelName)?.Name;
             if (type is not null && !string.Equals(type, single, StringComparison.Ordinal))
             {
-                throw new DatabaseException($"COHDBG001: A relationship pattern's type '{type}' must equal its label expression '{expression}'.");
+                throw new DatabaseException($"COHDBG001: A relationship pattern's type '{type}' must equal its label expression '{GraphLabelEvaluator.Describe(expression)}'.");
             }
             type = single;
         }
@@ -194,7 +222,7 @@ internal sealed class GraphPlanner
             { throw new DatabaseException("COHDBG001: An inserted relationship type cannot be empty or only whitespace."); }
             return;
         }
-        foreach (string name in names) { RequireRelationshipType(name); }
+        foreach (string name in GraphLabelEvaluator.Distinct(names)) { RequireRelationshipType(name); }
     }
 
     private void RequireLabel(string label)
@@ -220,12 +248,18 @@ internal sealed class GraphPlanner
         for (int i = 0; i < path.Nodes.Count; i++)
         {
             var node = path.Nodes[i];
+            if (node.Labels.Count == 0) { continue; }
+            // The candidate values are the same for every label, so they are read once: a long
+            // conjunction against a long AND chain stays linear in each.
+            var values = node.Properties.Concat(Equalities(predicate, node.Variable)).Where(value => value.Value is not null).ToArray();
+            if (values.Length == 0) { continue; }
+            var tried = new HashSet<string>(StringComparer.Ordinal);
             foreach (string label in node.Labels)
             {
-                var values = node.Properties.Concat(Equalities(predicate, node.Variable));
+                if (!tried.Add(label)) { continue; }
                 foreach (var value in values)
                 {
-                    if (value.Value is not null && _database.Store.HasIndex(label, value.Key, _snapshot))
+                    if (_database.Store.HasIndex(label, value.Key, _snapshot))
                     { return new GraphAnchor(i, label, value.Key, value.Value); }
                 }
             }
@@ -233,20 +267,31 @@ internal sealed class GraphPlanner
         return new GraphAnchor(0, path.Nodes[0].Labels.FirstOrDefault(), null, null);
     }
 
-    private static IEnumerable<KeyValuePair<string, object?>> Equalities(GqlExpression? expression, string? variable)
+    /// <summary>
+    /// The <c>variable.key = literal</c> equalities an <c>AND</c> chain holds for one variable, in
+    /// source order, through nested chains of any depth. Walks with an explicit stack.
+    /// </summary>
+    private static List<KeyValuePair<string, object?>> Equalities(GqlExpression? predicate, string? variable)
     {
-        if (expression is not GqlBinaryExpression binary) { yield break; }
-        if (binary.Operator == "AND")
+        var equalities = new List<KeyValuePair<string, object?>>();
+        if (predicate is null) { return equalities; }
+        // Anchors are chosen before the predicate is validated, so a malformed hand-built chain is
+        // skipped here and rejected by validation.
+        var pending = new Stack<GqlExpression?>();
+        pending.Push(predicate);
+        while (pending.TryPop(out var expression))
         {
-            foreach (var item in Equalities(binary.Left, variable)) { yield return item; }
-            foreach (var item in Equalities(binary.Right, variable)) { yield return item; }
-        }
-        if (binary.Operator == "=")
-        {
+            if (expression is GqlLogicalExpression { Operator: GqlLogicalOperator.And, Operands: { } operands })
+            {
+                for (int i = operands.Count - 1; i >= 0; i--) { pending.Push(operands[i]); }
+                continue;
+            }
+            if (expression is not GqlBinaryExpression { Operator: "=" } binary) { continue; }
             if (binary.Left is GqlPropertyExpression left && left.Variable == variable && binary.Right is GqlLiteralExpression right)
-            { yield return new(left.Property, right.Value); }
+            { equalities.Add(new(left.Property, right.Value)); }
             if (binary.Right is GqlPropertyExpression property && property.Variable == variable && binary.Left is GqlLiteralExpression literal)
-            { yield return new(property.Property, literal.Value); }
+            { equalities.Add(new(property.Property, literal.Value)); }
         }
+        return equalities;
     }
 }

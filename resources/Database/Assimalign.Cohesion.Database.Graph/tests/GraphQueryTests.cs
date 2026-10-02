@@ -270,7 +270,7 @@ public sealed class GraphQueryTests
     }
 
     [Fact]
-    public async Task DirectAst_CannotBypassPatternDirectionOrDepthBounds()
+    public async Task DirectAst_CannotBypassPatternDirectionOrShapeRules()
     {
         await using var engine = GraphDatabaseEngine.Create(new());
         var database = (IGraphDatabase)await engine.CreateDatabaseAsync("ast-bounds");
@@ -280,26 +280,42 @@ public sealed class GraphQueryTests
         var malformed = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node, node], [edge])], null, [], [], false, [new GqlProjection("a")]));
         var invalid = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(malformed)));
         invalid.Message.ShouldContain("COHDBG001");
-        GqlExpression predicate = new GqlBinaryExpression(new GqlLiteralExpression(1L), "=", new GqlLiteralExpression(1L));
-        for (int i = 0; i < 1000; i++) { predicate = new GqlBinaryExpression(predicate, "AND", new GqlLiteralExpression(true)); }
-        var deep = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], predicate, [], [], false, [new GqlProjection("a")]));
-        var bounded = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(deep)));
-        bounded.Message.ShouldContain("COHDBG001");
 
-        // Label expressions (#1139): a null operand or name, nesting past 128 levels, a labeled
-        // predicate without an expression, and Labels or Type that disagree with the expression.
+        // Predicates (#1139 follow-up): AND is one n-ary GqlLogicalExpression, so a binary AND,
+        // an undefined operator, a missing operand or list, and a chain of fewer than two operands
+        // are COHDBG001. Depth has no fixed limit (GqlLabelChainExecutionTests).
+        GqlExpression one = new GqlBinaryExpression(new GqlLiteralExpression(1L), "=", new GqlLiteralExpression(1L));
+        GqlExpression[] badChains =
+        [
+            new GqlBinaryExpression(one, "AND", new GqlLiteralExpression(true)),
+            new GqlLogicalExpression((GqlLogicalOperator)7, [one, one]),
+            new GqlLogicalExpression(GqlLogicalOperator.And, [one]),
+            new GqlLogicalExpression(GqlLogicalOperator.And, null!),
+            new GqlLogicalExpression(GqlLogicalOperator.And, [one, null!]),
+            new GqlBinaryExpression(null!, "=", new GqlLiteralExpression(1L)),
+        ];
+        foreach (var badChain in badChains)
+        {
+            var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], badChain, [], [], false, [new GqlProjection("a")]));
+            (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
+                .Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        }
+
+        // Label expressions (#1139): a null operand, name or operand list, a chain of fewer than
+        // two operands, a labeled predicate without an expression, and Labels or Type that
+        // disagree with the expression.
         await session.ExecuteAsync("INSERT (:A {k: 1})-[:T]->(:B)");
-        GqlLabelExpression nested = new GqlLabelName("A");
-        for (int i = 0; i < 128; i++) { nested = new GqlLabelNegation(nested); }
         var empty = new Dictionary<string, object?>();
         GqlNodePattern[] nodes =
         [
             new("a", [], empty) { LabelExpression = new GqlLabelNegation(null!) },
-            new("a", [], empty) { LabelExpression = new GqlLabelDisjunction(new GqlLabelName("A"), null!) },
+            new("a", [], empty) { LabelExpression = new GqlLabelDisjunction([new GqlLabelName("A"), null!]) },
             new("a", [], empty) { LabelExpression = new GqlLabelName(null!) },
-            new("a", [], empty) { LabelExpression = nested },
+            new("a", [], empty) { LabelExpression = new GqlLabelConjunction([new GqlLabelName("A")]) },
+            new("a", [], empty) { LabelExpression = new GqlLabelDisjunction([]) },
+            new("a", [], empty) { LabelExpression = new GqlLabelConjunction(null!) },
             new("a", ["B"], empty) { LabelExpression = new GqlLabelName("A") },
-            new("a", ["A"], empty) { LabelExpression = new GqlLabelDisjunction(new GqlLabelName("A"), new GqlLabelName("B")) },
+            new("a", ["A"], empty) { LabelExpression = new GqlLabelDisjunction([new GqlLabelName("A"), new GqlLabelName("B")]) },
             new("a", ["A"], null!),
         ];
         foreach (var badNode in nodes)
@@ -310,8 +326,8 @@ public sealed class GraphQueryTests
         }
         GqlRelationshipPattern[] edges =
         [
-            new("r", null, GqlPatternDirection.Outgoing, empty) { LabelExpression = new GqlLabelConjunction(null!, new GqlLabelName("T")) },
-            new("r", null, GqlPatternDirection.Outgoing, empty) { LabelExpression = nested },
+            new("r", null, GqlPatternDirection.Outgoing, empty) { LabelExpression = new GqlLabelConjunction([null!, new GqlLabelName("T")]) },
+            new("r", null, GqlPatternDirection.Outgoing, empty) { LabelExpression = new GqlLabelDisjunction([new GqlLabelName("T")]) },
             new("r", "U", GqlPatternDirection.Outgoing, empty) { LabelExpression = new GqlLabelName("T") },
             new("r", "T", GqlPatternDirection.Outgoing, empty) { LabelExpression = new GqlLabelNegation(new GqlLabelName("T")) },
             new("r", null, (GqlPatternDirection)4, empty),
@@ -327,7 +343,8 @@ public sealed class GraphQueryTests
         [
             new GqlLabeledPredicate("a", null!),
             new GqlLabeledPredicate(null!, new GqlLabelName("A")),
-            new GqlLabeledPredicate("a", nested),
+            new GqlLabeledPredicate("a", new GqlLabelConjunction([new GqlLabelName("A")])),
+            new GqlLogicalExpression(GqlLogicalOperator.And, [one, new GqlLabeledPredicate("a", new GqlLabelDisjunction(null!))]),
         ];
         foreach (var badPredicate in predicates)
         {
@@ -341,7 +358,7 @@ public sealed class GraphQueryTests
         GqlPathPattern[] unstorable =
         [
             new([new(null, [""], empty)], []),
-            new([new(null, [], empty) { LabelExpression = new GqlLabelConjunction(new GqlLabelName("A"), new GqlLabelName(" ")) }], []),
+            new([new(null, [], empty) { LabelExpression = new GqlLabelConjunction([new GqlLabelName("A"), new GqlLabelName(" ")]) }], []),
             new([new(null, ["A"], new Dictionary<string, object?> { [""] = 1L })], []),
             new([new(null, ["A"], empty), new(null, ["B"], empty)], [new(null, "", GqlPatternDirection.Outgoing, empty)]),
             new([new(null, ["A"], empty), new(null, ["B"], empty)],
