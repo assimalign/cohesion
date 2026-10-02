@@ -193,14 +193,15 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
         // Validators, preconditions, ranges, and the response itself are the shared representation
         // engine's — the same code the SendFileAsync response helpers run. The served file's own
         // metadata decides them, so a precompressed sibling carries its own length and ETag.
-        RepresentationMetadata representation = RepresentationMetadata.ForFile(servedFile, contentType) with
+        RepresentationMetadata presentation = new()
         {
+            ContentType = contentType,
             ContentEncoding = contentEncoding,
             CacheControl = _cacheControl,
             VaryByAcceptEncoding = varyByAcceptEncoding,
         };
 
-        await RepresentationWriter.SendFileAsync(context, servedFile, representation, context.RequestCancelled).ConfigureAwait(false);
+        await RepresentationWriter.SendFileAsync(context, servedFile, presentation, context.RequestCancelled).ConfigureAwait(false);
     }
 
     private bool TryGetInfo(FileSystemPath path, [NotNullWhen(true)] out IFileSystemInfo? info)

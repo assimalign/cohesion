@@ -55,22 +55,25 @@ internal readonly struct RepresentationMetadata
     public bool VaryByAcceptEncoding { get; init; }
 
     /// <summary>
-    /// Describes <paramref name="file"/>: its <c>Size</c> as the length, a strong entity-tag derived
-    /// from <c>Size</c> and <c>UpdatedOn</c>, and <c>UpdatedOn</c> as the last-modified time.
+    /// Returns this metadata completed from <paramref name="file"/>: its <c>Size</c> as the length, a
+    /// strong entity-tag derived from <c>Size</c> and <c>UpdatedOn</c>, and <c>UpdatedOn</c> as the
+    /// last-modified time. The content type and the fields that ride on every outcome are kept.
     /// </summary>
     /// <param name="file">The file to describe.</param>
-    /// <param name="contentType">The <c>Content-Type</c> to serve the file with.</param>
     /// <returns>The file's representation metadata.</returns>
-    public static RepresentationMetadata ForFile(IFileSystemFile file, string contentType)
+    /// <remarks>
+    /// Reading the metadata touches the mount: the physical mount throws
+    /// <see cref="System.IO.FileNotFoundException"/> here for a file deleted after it was resolved.
+    /// </remarks>
+    public RepresentationMetadata WithFile(IFileSystemFile file)
     {
         // Size is read first: the physical mount refreshes its cached file information on that read,
         // so UpdatedOn below reflects the same refresh.
         long length = file.Size;
         DateTimeOffset updatedOn = NormalizeTimestamp(file.UpdatedOn);
 
-        return new RepresentationMetadata
+        return this with
         {
-            ContentType = contentType,
             Length = length,
             // Strong validator from Size + UpdatedOn: hex ticks and hex length are valid etagc
             // characters, and a precompressed sibling naturally yields a different tag than the

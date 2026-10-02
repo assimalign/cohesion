@@ -32,21 +32,43 @@ internal static class RepresentationWriter
     private const int copyBufferSize = 64 * 1024;
 
     /// <summary>
-    /// Serves <paramref name="file"/> described by <paramref name="representation"/>, opening it only
-    /// when the outcome has content. A file that can no longer be opened answers <c>404</c>, since
-    /// nothing has been committed to the response at that point.
+    /// Serves <paramref name="file"/>, opening it only when the outcome has content. Its length and
+    /// validators are read from the file here (<see cref="RepresentationMetadata.WithFile"/>);
+    /// <paramref name="presentation"/> supplies the content type and the fields that ride on every
+    /// outcome. A file that no longer exists when its metadata is read or when it is opened answers
+    /// <c>404</c>, since nothing has been committed to the response at either point.
     /// </summary>
     /// <param name="context">The exchange.</param>
     /// <param name="file">The file whose content is served.</param>
-    /// <param name="representation">The file's representation metadata.</param>
+    /// <param name="presentation">The content type, and any <c>Content-Encoding</c>, <c>Cache-Control</c>, and <c>Vary</c> to emit.</param>
     /// <param name="cancellationToken">A token that cancels the content copy.</param>
     /// <returns>A task that completes when the response has been written.</returns>
     public static async Task SendFileAsync(
         IHttpContext context,
         IFileSystemFile file,
-        RepresentationMetadata representation,
+        RepresentationMetadata presentation,
         CancellationToken cancellationToken)
     {
+        RepresentationMetadata representation;
+        try
+        {
+            representation = presentation.WithFile(file);
+        }
+        catch (Exception exception) when (IsMissingFile(exception))
+        {
+            // The file vanished after it was resolved (the physical mount reports that as soon as
+            // its size is read); nothing has been committed to the response yet.
+            context.Response.StatusCode = HttpStatusCode.NotFound;
+            return;
+        }
+
+        // IFileSystemFile reports -1 for a file that does not exist.
+        if (representation.Length is < 0)
+        {
+            context.Response.StatusCode = HttpStatusCode.NotFound;
+            return;
+        }
+
         if (!TrySelectContent(context, representation, out HttpRangeSlice? slice))
         {
             return;
@@ -55,9 +77,14 @@ internal static class RepresentationWriter
         Stream source;
         try
         {
-            source = file.Open();
+            // Read access with shared reading: concurrent responses for one file must not lock each
+            // other out (the parameterless Open() denies all sharing, and asks for write access on a
+            // writable mount). Delete sharing lets a deployment delete or rename the file while it is
+            // served; the open handle keeps reading the bytes its validators describe. Writers stay
+            // refused, so the content cannot change under the copy.
+            source = file.Open(FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
         }
-        catch (FileSystemException)
+        catch (Exception exception) when (IsMissingFile(exception))
         {
             // The file vanished between resolution and open; nothing has been committed to the
             // response yet, so an honest 404 is still available.
@@ -146,8 +173,8 @@ internal static class RepresentationWriter
     /// <summary>
     /// Writes the <c>200</c> or <c>206</c> header section for <paramref name="representation"/> and,
     /// unless the request is <c>HEAD</c>, its content from <paramref name="source"/>: the bytes of
-    /// <paramref name="slice"/>, or every remaining byte when <paramref name="slice"/> is
-    /// <see langword="null"/>.
+    /// <paramref name="slice"/>; otherwise exactly the representation's length when it is known, or
+    /// every remaining byte when it is not.
     /// </summary>
     /// <param name="context">The exchange.</param>
     /// <param name="representation">The representation being served.</param>
@@ -201,13 +228,27 @@ internal static class RepresentationWriter
 
         if (slice is HttpRangeSlice single)
         {
-            await CopySliceAsync(source, response.Body, single.Offset, single.Length, cancellationToken).ConfigureAwait(false);
+            await CopyExactAsync(source, response.Body, single.Offset, single.Length, cancellationToken).ConfigureAwait(false);
+        }
+        else if (representation.Length is long declared)
+        {
+            // The header section promised exactly this many bytes, so copy exactly that many: content
+            // that grew since its length was read is cut at the declared length, and content that
+            // shrank aborts the response, as a short range does — either way HTTP/1.1 framing holds.
+            await CopyExactAsync(source, response.Body, 0, declared, cancellationToken).ConfigureAwait(false);
         }
         else
         {
+            // No length was declared; the transport delimits the body, so every byte goes.
             await source.CopyToAsync(response.Body, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    // A mount reports a missing file through its own exception type (FileSystemException) when it
+    // maps the failure, and through the BCL's when it does not (the physical and in-memory mounts'
+    // Open, the physical mount's Size).
+    private static bool IsMissingFile(Exception exception)
+        => exception is FileSystemException or FileNotFoundException or DirectoryNotFoundException;
 
     private static HttpPreconditionOutcome EvaluatePreconditions(
         IHttpRequest request,
@@ -377,18 +418,21 @@ internal static class RepresentationWriter
         headers[HttpHeaderKey.Vary] = current.Length == 0 ? "Accept-Encoding" : current + ", Accept-Encoding";
     }
 
-    private static async Task CopySliceAsync(Stream source, Stream destination, long offset, long count, CancellationToken cancellationToken)
+    private static async Task CopyExactAsync(Stream source, Stream destination, long offset, long count, CancellationToken cancellationToken)
     {
         // Offsets are relative to the representation's first byte, which is the stream's current
         // position: a freshly opened file stream sits at 0, and a handler's stream is served from
         // wherever the handler left it.
-        if (source.CanSeek)
+        if (offset > 0)
         {
-            source.Seek(offset, SeekOrigin.Current);
-        }
-        else
-        {
-            await SkipAsync(source, offset, cancellationToken).ConfigureAwait(false);
+            if (source.CanSeek)
+            {
+                source.Seek(offset, SeekOrigin.Current);
+            }
+            else
+            {
+                await SkipAsync(source, offset, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         byte[] buffer = ArrayPool<byte>.Shared.Rent(copyBufferSize);
@@ -402,9 +446,10 @@ internal static class RepresentationWriter
                     .ConfigureAwait(false);
                 if (read <= 0)
                 {
-                    // The content shrank after the head (with its Content-Range) was computed:
-                    // completing the response would silently serve wrong bytes, so abort it.
-                    throw new EndOfStreamException("The content ended before the selected byte range was fully written.");
+                    // The content shrank after the head (with its Content-Length and any
+                    // Content-Range) was computed: completing the response would silently serve
+                    // wrong bytes, so abort it.
+                    throw new EndOfStreamException("The content ended before its declared length was fully written.");
                 }
                 await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 remaining -= read;

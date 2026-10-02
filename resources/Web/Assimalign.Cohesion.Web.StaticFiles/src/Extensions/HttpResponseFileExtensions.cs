@@ -54,8 +54,10 @@ public static class HttpResponseFileExtensions
         /// The <c>ETag</c> is a strong entity-tag derived from the file's <c>Size</c> and
         /// <c>UpdatedOn</c>, and <c>Last-Modified</c> is <c>UpdatedOn</c>: the validators
         /// <c>UseStaticFiles</c> emits for the same file. The file is opened only when the outcome has
-        /// content, so a <c>304</c>, <c>412</c>, or <c>416</c> never reads it, and a file that can no
-        /// longer be opened is answered with <c>404 Not Found</c>.
+        /// content, so a <c>304</c>, <c>412</c>, or <c>416</c> never reads it, and a file that no
+        /// longer exists by the time it is read is answered with <c>404 Not Found</c>. It is opened
+        /// for shared reading, so any number of responses can send it at once, and it may be deleted
+        /// or renamed while a response is sending it.
         /// </para>
         /// <para>
         /// When <paramref name="contentType"/> is <see langword="null"/>, the type is looked up from the
@@ -224,7 +226,7 @@ public static class HttpResponseFileExtensions
         return RepresentationWriter.SendFileAsync(
             context,
             file,
-            RepresentationMetadata.ForFile(file, contentType),
+            new RepresentationMetadata { ContentType = contentType },
             ResolveCancellation(context, cancellationToken));
     }
 

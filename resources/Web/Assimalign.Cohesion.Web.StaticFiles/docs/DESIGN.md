@@ -92,7 +92,25 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   application decides. `ServeUnknownContentTypes` + `FallbackContentType` opt in explicitly.
 - **Open the stream only after all no-body outcomes are resolved.** `304`/`412`/`416` never
   touch the file; a file that vanishes between resolution and open yields a clean `404`
-  because nothing has been committed to the response yet.
+  because nothing has been committed to the response yet. "Vanishes" covers how each mount says
+  so: `FileSystemException` where a mount maps the failure, and the BCL's `FileNotFoundException`
+  and `DirectoryNotFoundException` where it does not — the physical and in-memory mounts' `Open`,
+  and the physical mount's `Size`, which is read first. Until #1061 only the first was caught, so a
+  vanished file on those mounts faulted the exchange instead.
+- **Open for shared reading, not with `Open()`.** The parameterless `IFileSystemFile.Open()` denies
+  all sharing (and asks for write access on a writable mount), so two overlapping requests for one
+  file failed with a sharing violation on both the physical and in-memory mounts; until #1061 the
+  second request faulted. Files are opened with `FileAccess.Read` and
+  `FileShare.Read | FileShare.Delete`: any number of responses read a file at once, a deployment
+  may delete or rename a file while it is served (the open handle keeps reading the bytes its
+  validators describe), and writers stay refused for the duration, so the content cannot change
+  under a copy. `FileShare.ReadWrite` (ASP.NET's choice) was rejected: it lets a writer modify a
+  file mid-copy, serving mixed bytes under the old strong `ETag`, which caches would then keep.
+- **Copy exactly the declared length.** Once `Content-Length` is in the header section, the body
+  is that many bytes: content that grew after its size was read is cut there, and content that
+  shrank aborts the response with `EndOfStreamException`, as a short range always did. Copying
+  "to the end" instead would let a file replaced between its metadata read and its open
+  desynchronize HTTP/1.1 framing.
 
 ## Request flow
 
@@ -109,7 +127,7 @@ range (GET only; If-Range gate) ──▶ 416 | single 206 | full 200
 open stream → head (Content-*, ETag, Last-Modified, Accept-Ranges, Cache-Control, Vary) → body (GET)
 ```
 
-Deriving the validators (`RepresentationMetadata.ForFile`) and every step after it belong to the shared
+Deriving the validators (`RepresentationMetadata.WithFile`) and every step after it belong to the shared
 `RepresentationWriter` engine, which the response helpers run as well; the steps before it are the
 middleware's own.
 
@@ -170,21 +188,25 @@ flowchart TD
 - **`RepresentationMetadata`** describes the selected representation independently of where its bytes
   come from: content type, length (or unknown), `ETag`, `Last-Modified` at HTTP-date precision, and the
   middleware-only `Content-Encoding`, `Cache-Control`, and `Vary: Accept-Encoding`.
-  `RepresentationMetadata.ForFile` derives the strong `ETag` and `Last-Modified` from `Size` and
-  `UpdatedOn` exactly as the middleware always did, so a handler and the middleware emit identical
-  validators for the same file, and a cache can revalidate either URL with either tag.
+  `RepresentationMetadata.WithFile` derives the length, strong `ETag`, and `Last-Modified` from
+  `Size` and `UpdatedOn` exactly as the middleware always did, so a handler and the middleware emit
+  identical validators for the same file, and a cache can revalidate either URL with either tag.
 - **`RepresentationWriter`** works in two steps. `TrySelectContent` evaluates the preconditions
   (`HttpConditionalRequest`) and the range (`HttpIfRange`, then `HttpRangeSelector`) and writes the
   `304`, `412`, or `416` itself. Only when it returns `true` does the caller open its content and call
   `WriteContentAsync`, which writes the `200`/`206` header section and, except for `HEAD`, the bytes.
   The split keeps the rule "open the content only after every no-body outcome is resolved" for files
   and streams alike. `SendFileAsync(context, file, …)` and `WriteStreamAsync(context, …)` are the two
-  compositions of those steps.
+  compositions of those steps; the file one also owns the file-access rules above (missing file →
+  `404`, shared reading, exact-length copy), so the middleware and the helpers cannot drift apart on
+  them.
 - **The middleware** keeps what is specific to static files (the prefix match, default documents,
   the add-a-slash redirect, the content-type gate, and precompressed-sibling negotiation) and ends
-  with one call: `RepresentationWriter.SendFileAsync(context, servedFile, representation, ...)`. The
-  extraction changed none of its behavior; every middleware test written before the engine existed
-  passes unmodified.
+  with one call: `RepresentationWriter.SendFileAsync(context, servedFile, presentation, ...)`, where
+  `presentation` carries the content type, `Content-Encoding`, `Cache-Control`, and `Vary`. The
+  extraction itself changed none of its behavior — every middleware test written before the engine
+  existed passes unmodified; the file-access rules then changed it deliberately, and only for
+  concurrent, vanishing, or resized files.
 
 ### Why-this-not-that decisions
 
@@ -264,9 +286,9 @@ over the same engine and add nothing AOT-relevant. The package inherits `IsAotCo
 No package-specific exception types. `FileSystemException` from mount lookups is absorbed
 into not-found/pass-through semantics; `ArgumentException` from `UseStaticFiles` validation
 (bad prefix, bad default-document name, unparseable `Cache-Control`, missing fallback type)
-surfaces at composition time. A file that shrinks mid-range-copy aborts the response with
-`EndOfStreamException` rather than silently serving wrong bytes (matching the h2
-truncated-body abort posture).
+surfaces at composition time. A file that shrinks mid-copy, whether a range or the full body, aborts
+the response with `EndOfStreamException` rather than silently serving wrong bytes (matching the h2
+truncated-body abort posture); one that grew is cut at its declared length.
 
 The response helpers throw only for caller mistakes, synchronously, before anything is written:
 `ArgumentNullException` for a missing argument, and `ArgumentException` for a content type that is
