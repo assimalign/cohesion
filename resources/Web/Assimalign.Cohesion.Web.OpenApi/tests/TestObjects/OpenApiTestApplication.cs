@@ -18,8 +18,8 @@ namespace Assimalign.Cohesion.Web.OpenApi.Tests.TestObjects;
 
 /// <summary>
 /// Composes the small order API the end-to-end tests describe: typed endpoints with route, query,
-/// header, body and form inputs, a nullable result, a group with a route-or-query prefix parameter, an
-/// authorized endpoint, described and undescribed raw endpoints, and an excluded endpoint.
+/// header, body, form and uploaded-file inputs, a nullable result, a group with a route-or-query prefix
+/// parameter, an authorized endpoint, described and undescribed raw endpoints, and an excluded endpoint.
 /// </summary>
 internal static class OpenApiTestApplication
 {
@@ -109,6 +109,12 @@ internal static class OpenApiTestApplication
 
         orders.MapPut("{id:long}/status", (long id, [FromForm] string status, [FromForm] int? priority) => "accepted")
             .WithName("setStatus");
+
+        orders.MapPost("{id:long}/attachments", (long id, IHttpFormFile file, IHttpFormFile? thumbnail, IReadOnlyList<IHttpFormFile> pages, [FromForm] string? note) => "stored")
+            .WithName("attachFiles");
+
+        orders.MapPost("{id:long}/documents", (long id, IHttpFormFileCollection documents) => "stored")
+            .WithName("uploadDocuments");
 
         IRouterGroupBuilder tenants = factory.Application.MapGroup("tenants/{tenant}");
         tenants.MapGet("orders", (string tenant, [FromQuery(Name = "q")] string? search) => new Page<Order>([], 0))

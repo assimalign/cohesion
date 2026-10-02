@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 248 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 689 |
+| Declared project references | 690 |
 | Declared shared-source links | 14 |
 
 ## Ambiguous project names
@@ -1056,7 +1056,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Web.Hosting.Health` | `Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Web.Health` | — | — | — |
 | `Assimalign.Cohesion.Web.Hosting.Resources` | `Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web` | — | — | — |
 | `Assimalign.Cohesion.Web.HttpsPolicy` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Web` | — | — | — |
-| `Assimalign.Cohesion.Web.OpenApi` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.OpenApi`<br>`Assimalign.Cohesion.OpenApi.Attributes`<br>`Assimalign.Cohesion.OpenApi.Integration`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Api`<br>`Assimalign.Cohesion.Web.Authentication`<br>`Assimalign.Cohesion.Web.Authorization`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Serialization` | — | — | — |
+| `Assimalign.Cohesion.Web.OpenApi` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.OpenApi`<br>`Assimalign.Cohesion.OpenApi.Attributes`<br>`Assimalign.Cohesion.OpenApi.Integration`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Api`<br>`Assimalign.Cohesion.Web.Authentication`<br>`Assimalign.Cohesion.Web.Authorization`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Serialization` | — | — | — |
 | `Assimalign.Cohesion.Web.ProblemDetails` | `Assimalign.Cohesion.Http` | — | — | — |
 | `Assimalign.Cohesion.Web.Query` | `Assimalign.Cohesion.Web` | — | — | — |
 | `Assimalign.Cohesion.Web.RateLimiting` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Forwarded`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Routing` | — | — | `System.Threading.RateLimiting` |

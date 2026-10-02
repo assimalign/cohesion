@@ -39,6 +39,7 @@ namespace Assimalign.Cohesion.Web.OpenApi.Internal;
 internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
 {
     private const string formMediaType = "application/x-www-form-urlencoded";
+    private const string multipartFormMediaType = "multipart/form-data";
     private const string problemMediaType = "application/problem+json";
 
     private readonly IHttpContentSerializationFeature? _serialization;
@@ -240,9 +241,10 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
             });
         }
 
-        List<EndpointParameterMetadata> formFields = [];
+        List<EndpointParameterMetadata> formParts = [];
         EndpointParameterMetadata? body = null;
         bool bindsInput = false;
+        bool uploadsFiles = false;
 
         foreach (EndpointParameterMetadata input in inputs)
         {
@@ -269,7 +271,12 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
                     break;
                 case EndpointParameterSource.Form:
                     bindsInput = true;
-                    formFields.Add(input);
+                    formParts.Add(input);
+                    break;
+                case EndpointParameterSource.FormFile:
+                    bindsInput = true;
+                    uploadsFiles = true;
+                    formParts.Add(input);
                     break;
                 case EndpointParameterSource.Body:
                     bindsInput = true;
@@ -284,7 +291,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
 
         OpenApiRequestBodyMetadata? requestBody = body is not null
             ? DescribeBody(body)
-            : formFields.Count > 0 ? DescribeForm(formFields) : null;
+            : formParts.Count > 0 ? DescribeForm(formParts, uploadsFiles) : null;
 
         return new EndpointDescription
         {
@@ -293,7 +300,7 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
             Tags = DescribeTags(metadata),
             Parameters = parameters,
             RequestBody = requestBody,
-            Responses = DescribeResponses(metadata, bindsInput, body is not null),
+            Responses = DescribeResponses(metadata, bindsInput, body is not null, formParts.Count > 0),
             Security = DescribeSecurity(metadata)
         };
     }
@@ -340,29 +347,34 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
         };
     }
 
-    private static OpenApiRequestBodyMetadata DescribeForm(List<EndpointParameterMetadata> fields)
+    // One object with a property per form field and file, in handler order. A file can only be sent in a
+    // multipart/form-data body (RFC 7578), so a form that uploads one is described that way; a form of fields
+    // alone lists the urlencoded media type, though the form reader accepts both.
+    private static OpenApiRequestBodyMetadata DescribeForm(List<EndpointParameterMetadata> parts, bool uploadsFiles)
     {
         OpenApiSchema schema = new() { Type = SchemaType.Object };
 
-        foreach (EndpointParameterMetadata field in fields)
+        foreach (EndpointParameterMetadata part in parts)
         {
-            schema.Properties[field.Name] = ClrSchemas.ForText(field.Type);
+            schema.Properties[part.Name] = part.Source == EndpointParameterSource.FormFile
+                ? ClrSchemas.ForFile(part.Type)
+                : ClrSchemas.ForText(part.Type);
 
-            if (field.IsRequired)
+            if (part.IsRequired && !schema.Required.Contains(part.Name))
             {
-                schema.Required.Add(field.Name);
+                schema.Required.Add(part.Name);
             }
         }
 
         return new OpenApiRequestBodyMetadata
         {
-            ContentType = formMediaType,
+            ContentType = uploadsFiles ? multipartFormMediaType : formMediaType,
             Required = schema.Required.Count > 0,
             Schema = schema
         };
     }
 
-    private IReadOnlyList<OpenApiResponseMetadata> DescribeResponses(IRouterRouteMetadataCollection metadata, bool bindsInput, bool readsBody)
+    private IReadOnlyList<OpenApiResponseMetadata> DescribeResponses(IRouterRouteMetadataCollection metadata, bool bindsInput, bool readsBody, bool readsForm)
     {
         // Responses form a set keyed by status: the last item for a status wins (group items come first,
         // then the generated ones, then the endpoint's own chain).
@@ -387,6 +399,12 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
         if (bindsInput)
         {
             responses.TryAdd(HttpStatusCode.BadRequest.Value, CreateProblemResponse(HttpStatusCode.BadRequest.Value));
+        }
+
+        if (readsForm)
+        {
+            // A form over an Http.Forms limit (#1061).
+            responses.TryAdd(HttpStatusCode.RequestEntityTooLarge.Value, CreateProblemResponse(HttpStatusCode.RequestEntityTooLarge.Value));
         }
 
         if (readsBody)

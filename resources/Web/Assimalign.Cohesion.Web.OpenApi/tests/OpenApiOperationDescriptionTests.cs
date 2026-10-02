@@ -146,7 +146,63 @@ public class OpenApiOperationDescriptionTests
         OpenApiResponse ok = operation.Responses!.Items["200"];
         ok.Content.Keys.ShouldBe(["text/plain"]);
         ok.Content["text/plain"].Schema!.Type.ShouldBe(SchemaType.String);
+
+        // A form over an Http.Forms limit is answered 413; a form is never a 415.
+        operation.Responses.Items["413"].Content.Keys.ShouldBe(["application/problem+json"]);
         operation.Responses.Items.ShouldNotContainKey("415");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.OpenApi] - Operations: uploaded files make the form a multipart body of binary parts")]
+    public async Task Describe_FileUploads_ShouldBecomeMultipartBody()
+    {
+        // Arrange / Act
+        OpenApiDocument document = await GetOrdersDocumentAsync();
+        OpenApiOperation operation = GetOperation(document, "/orders/{id}/attachments", OperationType.Post);
+
+        // Assert — a file is a binary part and a file sequence an array of them; the form field shares the body.
+        operation.Parameters.ShouldHaveSingleItem().Name.ShouldBe("id");
+        operation.RequestBody!.Content.Keys.ShouldBe(["multipart/form-data"]);
+        operation.RequestBody.Required.ShouldBeTrue();
+
+        OpenApiSchema form = operation.RequestBody.Content["multipart/form-data"].Schema!;
+        form.Type.ShouldBe(SchemaType.Object);
+        form.Properties.Keys.ShouldBe(["file", "thumbnail", "pages", "note"], ignoreOrder: true);
+        form.Required.ShouldBe(["file"]);
+
+        foreach (string name in new[] { "file", "thumbnail" })
+        {
+            form.Properties[name].Type.ShouldBe(SchemaType.String);
+            form.Properties[name].Format.ShouldBe("binary");
+        }
+
+        form.Properties["pages"].Type.ShouldBe(SchemaType.Array);
+        form.Properties["pages"].Items!.Type.ShouldBe(SchemaType.String);
+        form.Properties["pages"].Items!.Format.ShouldBe("binary");
+        form.Properties["note"].Type.ShouldBe(SchemaType.String);
+        form.Properties["note"].Format.ShouldBeNull();
+
+        // A missing required file is a 400 and an oversized form a 413.
+        operation.Responses!.Items.Keys.ShouldBe(["200", "400", "413"]);
+        operation.Responses.Items["413"].Content.Keys.ShouldBe(["application/problem+json"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.OpenApi] - Operations: a file collection is an optional array part named for its parameter")]
+    public async Task Describe_FileCollection_ShouldBeOptionalArrayPart()
+    {
+        // Arrange / Act
+        OpenApiDocument document = await GetOrdersDocumentAsync();
+        OpenApiOperation operation = GetOperation(document, "/orders/{id}/documents", OperationType.Post);
+
+        // Assert — the collection takes every uploaded file whatever its field name, so the parameter's
+        // name is one a client can send them under, and it may send none.
+        operation.RequestBody!.Content.Keys.ShouldBe(["multipart/form-data"]);
+        operation.RequestBody.Required.ShouldBeFalse();
+
+        OpenApiSchema form = operation.RequestBody.Content["multipart/form-data"].Schema!;
+        form.Properties.Keys.ShouldBe(["documents"]);
+        form.Required.ShouldBeEmpty();
+        form.Properties["documents"].Type.ShouldBe(SchemaType.Array);
+        form.Properties["documents"].Items!.Format.ShouldBe("binary");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.OpenApi] - Operations: a group prefix parameter bound as route-or-query is a path parameter")]

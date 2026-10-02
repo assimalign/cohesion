@@ -2,21 +2,24 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.OpenApi;
 using Assimalign.Cohesion.Web.Routing.Patterns;
 
 namespace Assimalign.Cohesion.Web.OpenApi.Internal;
 
 /// <summary>
-/// Schemas for values the request carries as text: route values, query strings, headers and form fields.
+/// Schemas for values the request carries as text (route values, query strings, headers and form fields)
+/// and for the files it uploads.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The Web.Api thunk binds these with <c>IParsable&lt;T&gt;.TryParse</c> under the invariant culture (enums
-/// with <c>Enum.TryParse</c>), never through System.Text.Json, so their schemas come from the declared
+/// The Web.Api thunk binds text values with <c>IParsable&lt;T&gt;.TryParse</c> under the invariant culture
+/// (enums with <c>Enum.TryParse</c>), never through System.Text.Json, so their schemas come from the declared
 /// CLR type alone: the type the source generator recorded with <c>typeof(...)</c>, matched against a
 /// fixed table. Nothing is reflected over except an enum's names, read with <see cref="Enum.GetNames(Type)"/>,
-/// which NativeAOT keeps for every enum a program uses.
+/// which NativeAOT keeps for every enum a program uses. A file parameter is matched against the Http.Forms
+/// file types the same way.
 /// </para>
 /// <para>
 /// A route parameter with no recorded type (an endpoint mapped with plain middleware) is typed from its
@@ -131,6 +134,31 @@ internal static class ClrSchemas
 
         // Any other IParsable<T> is text the type parses.
         return new OpenApiSchema { Type = SchemaType.String, Format = textFormat };
+    }
+
+    /// <summary>
+    /// Describes an uploaded-file parameter as a part of a <c>multipart/form-data</c> body: a binary string
+    /// for an <see cref="IHttpFormFile"/>, and an array of them for a file sequence or an
+    /// <see cref="IHttpFormFileCollection"/>, which may each hold any number of files.
+    /// </summary>
+    /// <remarks>
+    /// The schema is the same on every OpenAPI line: <c>type: string</c> with the registry format
+    /// <c>binary</c> ("any sequence of octets"), which OpenAPI 3.0 defines as an
+    /// <c>application/octet-stream</c> part and which client generators also read as a file in 3.1 and 3.2
+    /// documents, where JSON Schema treats <c>format</c> as an annotation.
+    /// </remarks>
+    /// <param name="type">
+    /// The declared CLR type, which Web.Api restricts to <see cref="IHttpFormFile"/>, a sequence of it, or
+    /// <see cref="IHttpFormFileCollection"/>.
+    /// </param>
+    /// <returns>The schema. Optionality is the part's entry in the body's <c>required</c>, not a null type.</returns>
+    public static OpenApiSchema ForFile(Type type)
+    {
+        OpenApiSchema file = new() { Type = SchemaType.String, Format = "binary" };
+
+        return type == typeof(IHttpFormFile)
+            ? file
+            : new OpenApiSchema { Type = SchemaType.Array, Items = file };
     }
 
     /// <summary>

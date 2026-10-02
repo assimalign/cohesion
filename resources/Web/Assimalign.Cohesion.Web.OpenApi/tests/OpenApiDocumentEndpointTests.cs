@@ -50,7 +50,7 @@ public class OpenApiDocumentEndpointTests
         document.Info.Version.ShouldBe("2.1.0");
         document.Info.Description.ShouldBe("Manages orders.");
         document.Paths!.Items.Keys.ShouldBe(
-            ["/orders/{id}", "/orders", "/orders/{id}/status", "/tenants/{tenant}/orders", "/ping", "/described/{id}"],
+            ["/orders/{id}", "/orders", "/orders/{id}/status", "/orders/{id}/attachments", "/orders/{id}/documents", "/tenants/{tenant}/orders", "/ping", "/described/{id}"],
             ignoreOrder: true);
     }
 

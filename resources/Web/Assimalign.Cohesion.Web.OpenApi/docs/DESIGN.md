@@ -32,6 +32,7 @@ flowchart LR
     Adapter --> Routing["Web.Routing"]
     Adapter --> Serialization["Web.Serialization"]
     Adapter --> Authorization["Web.Authorization"]
+    Adapter --> Forms["Http.Forms"]
     Adapter --> Integration["OpenApi.Integration"]
     Adapter --> Attributes["OpenApi.Attributes"]
     Api --> Routing
@@ -48,6 +49,7 @@ flowchart LR
 | `Assimalign.Cohesion.Web.Serialization` | The registered readers and writers, and `TryGetJsonTypeInfo`, the read-only seam to the JSON writer's contracts |
 | `Assimalign.Cohesion.Web.Authorization` / `.Authentication` | The registered `AuthorizationOptions` and each route's effective policy (`TryGetAuthorizationOptions`, `GetEffectivePolicy`) for security requirements; the default authenticate scheme |
 | `Assimalign.Cohesion.Web.ProblemDetails` | The RFC 9457 type the binding failures are written as |
+| `Assimalign.Cohesion.Http.Forms` | The uploaded-file types (`IHttpFormFile`, `IHttpFormFileCollection`) a file parameter's declared type is matched against; an `App.Web` member, so an `Sdk.Web` application ships no extra assembly for it |
 | `Assimalign.Cohesion.OpenApi.Integration` | `IOpenApiEndpointSource`, the description provider, the JSON/YAML exporter |
 | `Assimalign.Cohesion.OpenApi.Attributes` / `OpenApi` | The intermediate metadata records and the document model |
 
@@ -110,15 +112,30 @@ differ only in constraints (`{id:int}` beside `{id}`) or host share one OpenAPI 
 | Query and header parameters | `EndpointParameterMetadata` | `Query`, and `RouteOrQuery` the template does not name, are query parameters; `Header` is a header parameter, except `Accept`, `Content-Type` and `Authorization`, which the OpenAPI Parameter Object says to ignore; `required` is `IsRequired` |
 | Parameter schemas | Declared CLR type | A fixed table, not JSON contracts, because the thunk parses these with `IParsable<T>` under the invariant culture: integers and floats with their registry format, `bool`, `string`, `Guid` (`uuid`), dates and times (`date-time`, `date`, `time`), `Uri`, `char`; an enum as a string enum of its names (`Enum.TryParse` accepts them); any other `IParsable<T>` as a string |
 | Request body | `EndpointParameterMetadata` (`Body`) | Required; media type of the first registered reader that can read the type (registration order is server preference); schema from the JSON contract |
-| Form body | `EndpointParameterMetadata` (`Form`) | `application/x-www-form-urlencoded`, an object with one property per field, `required` listing the required fields |
+| Form body | `EndpointParameterMetadata` (`Form`, `FormFile`) | An object with one property per field and file, `required` listing the required ones; `multipart/form-data` when the endpoint uploads a file, otherwise `application/x-www-form-urlencoded`. A field's schema comes from the parameter-schema table; a file is `type: string, format: binary`, and a file sequence or an `IHttpFormFileCollection` an array of them (see "Uploaded files" below) |
 | Responses | `EndpointResponseMetadata` | One per status, the last item for a status winning (group, generated, then the endpoint's own); description the RFC 9110 reason phrase; no type means no content; a fixed media type as given (`text/plain` strings get `type: string`); a negotiated value under the media type of the first registered writer that can write it |
-| Binding outcomes | The thunk's failure semantics | Added unless the endpoint describes the status: `400` problem+json when the endpoint binds any input, `415` problem+json when it reads a body, a bodyless `406` when it writes a negotiated value; a `200` when nothing else is described |
+| Binding outcomes | The thunk's failure semantics | Added unless the endpoint describes the status: `400` problem+json when the endpoint binds any input, `413` problem+json when it reads a form field or file (a form over an Http.Forms limit), `415` problem+json when it reads a body, a bodyless `406` when it writes a negotiated value; a `200` when nothing else is described |
 | Schemas | JSON contracts | See the next section |
 | Security | The effective authorization policy: `AuthorizationMetadata` against the registered `AuthorizationOptions` | See "Security requirements" |
 | Security schemes | `OpenApiOptions.AddSecurityScheme` | As declared |
 
 The binding outcomes are the ones Web.Api's DESIGN leaves to "an adapter … by policy": they are what the
 generated thunk actually answers, so a client generated from the document knows the error body shape.
+
+### Uploaded files
+
+A file can only travel in a `multipart/form-data` body (RFC 7578), so an endpoint that binds one is
+described with that media type, its form fields as sibling parts. A file part is `type: string` with the
+registry format `binary` on every OpenAPI line. That is the form OpenAPI 3.0 defines for an
+`application/octet-stream` part. In 3.1 and 3.2, JSON Schema treats `format` as an annotation, but the
+format registry keeps `binary` and client generators read it as a file there too. A per-line schema
+(`contentMediaType` on 3.1 and later) would be more literal and less widely understood.
+
+The declared type decides the shape. An `IHttpFormFile` is one part, required unless the parameter is
+nullable. A file sequence (`IHttpFormFile[]`, `IReadOnlyList<IHttpFormFile>`, …) is an optional array of
+parts sent under one field name. An `IHttpFormFileCollection` takes every uploaded file whatever its
+field name, which a schema cannot express without giving clients a name to use, so it is described as an
+optional array part named for the handler parameter: a name the server accepts, as it accepts any.
 
 ## Schemas from System.Text.Json contracts
 
@@ -380,8 +397,9 @@ OpenAPI endpoint is exercised under `PublishAot`.
   `WithDescription` carry text explicitly.
 - **Multiple media types per body or status.** The intermediate metadata carries one media type per
   request body and per response status, so a negotiated response lists the default writer's type and a
-  form body lists `application/x-www-form-urlencoded` (the form reader also accepts
-  `multipart/form-data`).
+  form body of fields alone lists `application/x-www-form-urlencoded` (the form reader also accepts
+  `multipart/form-data`). A form that uploads a file lists `multipart/form-data`, the only encoding that
+  can carry one.
 - **Antiforgery and CORS in the description.** Neither has an OpenAPI representation beyond a parameter
   the application can declare itself.
 - **Discriminator objects, examples, and `x-` extensions from contracts.** The exporter does not produce
@@ -391,9 +409,9 @@ OpenAPI endpoint is exercised under `PublishAot`.
 
 ## Extending
 
-- **A new `EndpointParameterSource`** (file uploads, #1061) is skipped as undescribed until this adapter
-  maps it, which Web.Api asks of every consumer. Mapping files means a `multipart/form-data` body with
-  `format: binary` parts, and switching a form body that contains one to `multipart/form-data`.
+- **A new `EndpointParameterSource`** is skipped as undescribed until this adapter maps it, which Web.Api
+  asks of every consumer. `FormFile` (#1061) is the precedent: it joined `Form` in the request body
+  ("Uploaded files" above) and added the form's `413` outcome.
 - **A new description carrier** belongs in `Web.Api` with its verb, and counts toward "described" in
   `WebOpenApiEndpointSource.IsDescribed`.
 - **A non-JSON format's schemas** would need a seam like `TryGetJsonTypeInfo` on that format's writer;
