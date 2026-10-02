@@ -53,11 +53,13 @@ internal sealed class GraphPlanner
             {
                 Bind(node.Variable, BindingKind.Node);
                 ValidateNodeLabels(node, creating);
+                ValidateProperties(node.Properties, creating);
             }
             foreach (var relationship in path.Relationships)
             {
                 Bind(relationship.Variable, BindingKind.Relationship);
                 ValidateRelationship(relationship, creating);
+                ValidateProperties(relationship.Properties, creating);
             }
             if (path.Variable is { } variable)
             {
@@ -137,6 +139,28 @@ internal sealed class GraphPlanner
         {
             if (label is null) { throw new DatabaseException("COHDBG001: A label name cannot be null."); }
             if (!creating) { RequireLabel(label); }
+            else if (string.IsNullOrWhiteSpace(label))
+            {
+                throw new DatabaseException("COHDBG001: An inserted label cannot be empty or only whitespace.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validates a pattern's literal property map. Storage cannot hold an empty or all-whitespace
+    /// key, and an ISO delimited name such as <c>{" ": 1}</c> can spell one, so insertion rejects
+    /// it here, before anything is written, instead of letting the store throw.
+    /// </summary>
+    private static void ValidateProperties(IReadOnlyDictionary<string, object?>? properties, bool creating)
+    {
+        if (properties is null) { throw new DatabaseException("COHDBG001: A pattern requires a property map."); }
+        if (!creating) { return; }
+        foreach (string key in properties.Keys)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                throw new DatabaseException("COHDBG001: An inserted property key cannot be empty or only whitespace.");
+            }
         }
     }
 
@@ -166,6 +190,8 @@ internal sealed class GraphPlanner
         {
             if (type is null || relationship.Direction is not (GqlPatternDirection.Outgoing or GqlPatternDirection.Incoming))
             { throw new DatabaseException("COHDBG001: Inserted relationships require a type and a directed pattern."); }
+            if (string.IsNullOrWhiteSpace(type))
+            { throw new DatabaseException("COHDBG001: An inserted relationship type cannot be empty or only whitespace."); }
             return;
         }
         foreach (string name in names) { RequireRelationshipType(name); }

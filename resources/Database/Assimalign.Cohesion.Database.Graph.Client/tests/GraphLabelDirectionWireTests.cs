@@ -13,7 +13,8 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 /// <summary>
 /// ISO/IEC 39075 label expressions and edge directions (#1139) through the production
 /// GraphDatabaseServer and Graph.Client over Connections.InMemory: scalar rows, path frames that
-/// keep the stored direction, and a Cypher arrow that fails as a reusable parse failure.
+/// keep the stored direction, a Cypher arrow that fails as a reusable parse failure, and an
+/// all-whitespace label that fails as a reusable execution failure.
 /// </summary>
 public sealed class GraphLabelDirectionWireTests
 {
@@ -101,6 +102,33 @@ public sealed class GraphLabelDirectionWireTests
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (a:Person)->(b) RETURN b.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("Bob");
+        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+    }
+
+    /// <summary>
+    /// An all-whitespace delimited label used to escape the engine as an uncoded argument error,
+    /// which the server treats as an internal failure that ends the session. It is now a coded
+    /// execution failure, so the pooled session survives and serves the next statement.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - Insertion: an all-whitespace label is a COHDBG001 execution failure that keeps the pooled session")]
+    public async Task ExecuteAsync_WhitespaceLabel_ShouldFailAsExecutionFailureAndKeepSession()
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.ExecuteAsync("CREATE (:Person {name: 'Alice'})", cancellationToken: harness.Token);
+        Guid sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+
+        // Act
+        var error = await Should.ThrowAsync<GraphClientException>(async () =>
+            await connection.ExecuteAsync("INSERT (:Person&\" \" {name: 'Bob'})", cancellationToken: harness.Token));
+
+        // Assert
+        error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        error.Message.ShouldContain("COHDBG001", Case.Sensitive);
+        connection.IsOpen.ShouldBeTrue();
+        (await connection.QueryAsync("MATCH (n:Person) RETURN n.name", cancellationToken: harness.Token))
+            .ShouldHaveSingleItem()[0].ShouldBe("Alice");
         harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 

@@ -155,7 +155,10 @@ an unknown kind, a null operand or name, nesting past 128 levels, or `Labels`/`T
 disagree with the expression are `COHDBG001`, and every name, including those under `!` and `|`,
 must be a catalog label or relationship type (`COHDBG002`). `Undirected` and `LeftOrRight`
 constrain neither end of a stored edge; insertion takes only `Outgoing` and `Incoming`, one type,
-and a label conjunction.
+and a label conjunction. Storage cannot hold an empty or all-whitespace label, relationship type or
+property key, and a delimited name such as `(n:" ")` or `{" ": 1}` can spell one, so insertion
+rejects each with `COHDBG001` before anything is written; matching on such a name finds no catalog
+entry (`COHDBG002`) or no row.
 
 GQL patterns are finite chains of at most 64 relationships. Each matched path is a trail: an edge
 identity is used at most once within that path; a node may recur. Separate comma-separated paths

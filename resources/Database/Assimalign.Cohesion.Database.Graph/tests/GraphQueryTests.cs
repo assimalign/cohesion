@@ -300,6 +300,7 @@ public sealed class GraphQueryTests
             new("a", [], empty) { LabelExpression = nested },
             new("a", ["B"], empty) { LabelExpression = new GqlLabelName("A") },
             new("a", ["A"], empty) { LabelExpression = new GqlLabelDisjunction(new GqlLabelName("A"), new GqlLabelName("B")) },
+            new("a", ["A"], null!),
         ];
         foreach (var badNode in nodes)
         {
@@ -314,6 +315,7 @@ public sealed class GraphQueryTests
             new("r", "U", GqlPatternDirection.Outgoing, empty) { LabelExpression = new GqlLabelName("T") },
             new("r", "T", GqlPatternDirection.Outgoing, empty) { LabelExpression = new GqlLabelNegation(new GqlLabelName("T")) },
             new("r", null, (GqlPatternDirection)4, empty),
+            new("r", "T", GqlPatternDirection.Outgoing, null!),
         ];
         foreach (var badEdge in edges)
         {
@@ -333,6 +335,25 @@ public sealed class GraphQueryTests
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
                 .Message.ShouldStartWith("COHDBG001", Case.Sensitive);
         }
+
+        // Storage cannot hold an empty label, type or property key, so a hand-built insertion
+        // naming one is COHDBG001 before anything is written.
+        GqlPathPattern[] unstorable =
+        [
+            new([new(null, [""], empty)], []),
+            new([new(null, [], empty) { LabelExpression = new GqlLabelConjunction(new GqlLabelName("A"), new GqlLabelName(" ")) }], []),
+            new([new(null, ["A"], new Dictionary<string, object?> { [""] = 1L })], []),
+            new([new(null, ["A"], empty), new(null, ["B"], empty)], [new(null, "", GqlPatternDirection.Outgoing, empty)]),
+            new([new(null, ["A"], empty), new(null, ["B"], empty)],
+                [new(null, "T", GqlPatternDirection.Incoming, new Dictionary<string, object?> { ["\t"] = 1L })]),
+        ];
+        foreach (var insertion in unstorable)
+        {
+            var statement = new GqlQueryStatement(new GqlQueryExpression([], null, [insertion], [], false, []));
+            (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
+                .Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        }
+        (await Rows(session, "MATCH (n) RETURN n")).Count.ShouldBe(2);
 
         // A hand-built pattern with Labels alone keeps its meaning, and a consistent pair agrees.
         GqlNodePattern legacy = new("a", ["A"], empty);

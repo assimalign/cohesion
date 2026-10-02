@@ -216,6 +216,40 @@ public sealed class GqlLabelDirectionExecutionTests
         (await RowsAsync(session, "MATCH ()-[r]->() RETURN r")).ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// A delimited name may be all whitespace, but storage cannot hold such a label, type or
+    /// property key. Insertion rejects it with a coded error before anything is written, instead
+    /// of letting the store's argument check escape as an uncoded exception.
+    /// </summary>
+    /// <param name="gql">An insertion naming an all-whitespace label, type or property key.</param>
+    [Theory(DisplayName = "Cohesion Test [Graph] - Insertion: an all-whitespace label, type or property key is COHDBG001 and writes nothing")]
+    [InlineData("INSERT (:\" \")")]
+    [InlineData("INSERT (n IS \" \")")]
+    [InlineData("INSERT (:A&\" \")")]
+    [InlineData("INSERT (:A:\"\t\")")]
+    [InlineData("INSERT (:A {\" \": 1})")]
+    [InlineData("INSERT (a:A)-[:\" \"]->(b:B)")]
+    [InlineData("INSERT (a:A)<-[r IS \" \"]-(b:B)")]
+    [InlineData("INSERT (a:A)-[:T {\" \": 1}]->(b:B)")]
+    [InlineData("MATCH (a:A) INSERT (a)-[:\" \"]->(:B)")]
+    public async Task Execute_WhitespaceInsertName_ShouldFailWithoutWritingAsync(string gql)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var session = await SeedAsync(engine, "INSERT (:A {name: 'a'}), (:B {name: 'b'})");
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None));
+
+        // Assert
+        error.Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        error.Message.ShouldContain("only whitespace", Case.Sensitive);
+        (await RowsAsync(session, "MATCH (n) RETURN n")).Count.ShouldBe(2);
+        (await RowsAsync(session, "MATCH ()-[r]->() RETURN r")).ShouldBeEmpty();
+        (await RowsAsync(session, "SHOW LABELS")).Count.ShouldBe(2);
+    }
+
     /// <param name="gql">A read naming a label or type the catalog does not define.</param>
     [Theory(DisplayName = "Cohesion Test [Graph] - Label expressions: an unknown name anywhere in MATCH is COHDBG002")]
     [InlineData("MATCH (n:A|Missing) RETURN n")]
