@@ -230,6 +230,8 @@ The audit behind these stages is §7. Within each stage, rows are in the recomme
 
 ### Stage 8 — API surface
 
+**Status:** delivered 2026-10-02 on the Phase 2 branch and in owner review, together with the defects found along the way (#1169, #1172–#1176, #1180, #1187, #1205, #1206). Commits, behavior changes, questions for the review and follow-ups are in §5.
+
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
 | #1059 | F | Serialize handler return values; compile-time diagnostics for unsupported handlers | #1055 |
@@ -376,6 +378,49 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - #1154: a `101` upgrade response sends each `Set-Cookie` twice.
   - #1155: an unknown key id reloads the whole key ring, with no throttle.
   - #1156: a response-starting hook for the Web pipeline, which would remove the CORS trade-off.
+- **Stage 8 delivered (2026-10-01 to 2026-10-02), awaiting owner review.** Agent sessions built the items in their own worktrees. Each was reviewed, integrated on the Phase 2 branch, verified and pushed to PR #1094 item by item. The integrator's own commits are the guard coverage, the OpenAPI upload mapping, the #1180 thrower move and the doc corrections:
+  - #1062 `4e0fb6da`, `509681a6`: the five remaining OpenApi packages are built, tested and released, and the OpenApi source generator ships inside `OpenApi.Attributes`. Shipping it made a generated-code collision reachable; #1169 `e03cd9f9` composes generated metadata across assemblies through `IOpenApiMetadataProvider`.
+  - #1059 `079e3ef0`, `b62485e8`: typed handlers return `T`, `Task<T>` or `ValueTask<T>`, written with content negotiation (`string` as `text/plain`, `null` as 204, 406 when nothing is acceptable, a 500 fault when no contract covers `T`), and unsupported handler shapes fail the build with `COHWEB0001`–`COHWEB0007`. Every typed endpoint carries `EndpointParameterMetadata` and `EndpointResponseMetadata`.
+  - #1172–#1176 `d0952645`, `439e5197`, `c05248a0`, `1a563bb4`, `dfc81374`: generator defects found during #1059 (escaped binding names, a body with no contract is a fault rather than a 415, generic receivers, conditional-access and static-form calls, injected `IHttpRequest`/`IHttpResponse`).
+  - #1060 `650b2b83`: the new Web.Validation runs a registered validator on a bound body model before the handler and answers 400 problem+json keyed by member path. ObjectValidation composes nested member paths. #1206 `227f49e6`: under default options a member's rule chain stops only on its own failure, so every failing member is reported; it used to stop every later member once any member had failed.
+  - #1061: `60747509` adds `SendFileAsync`/`WriteStreamAsync` with conditional and single-range support on the StaticFiles engine; `6125b9c2` binds uploaded files in typed handlers and answers an over-limit form 413 and a malformed one 400. #1187 `cb2e5903` opens served files for shared reading.
+  - #152 `821168fb`, `b8a12a91`, `2fdf64ae`, `3fd06146`: the new Web.OpenApi, NuGet-only, generates OpenAPI 3.0/3.1/3.2 documents from endpoint metadata and the app's source-generated JSON contracts. #1205 `bb476a67` takes each operation's security from the endpoint's effective authorization policy through a read-only Web.Authorization seam; `b22c4fb1` describes uploads as multipart binary parts and lists a form's 413; `c029accd` pins the missing-serializer error.
+  - #1180 (P001, security) `efda629b`, `e76b4bd4`: `PhysicalFileSystem` and the in-memory provider refuse any path outside their root with `PathOutsideRoot` before touching storage. `../` escapes and sibling-prefix roots were open; StaticFiles had been protected only by its own request-path gate.
+  - NativeAOT guard: `3feae793` return values, `2ba14611` the OpenAPI document, `c9ad011c` validation and uploads, 28 smoke checks.
+  - Housekeeping: `c571c739` and `b8d5a5db` correct statements Stage 7 left stale, `f949d019` an Http cref, `9c774357` lists Web.HttpsPolicy in the resources solution, and `934cdbd2` documents the Web root's application and builder contracts.
+  - Docs site ([cohesion-docs#1](https://github.com/assimalign/cohesion-docs/pull/1)): `09b697a` through `6da9f2b` add the Web.Validation and Web.OpenApi pages and an OpenAPI guide, sync the pages Stage 8 changed, and list DependencyInjection on the 16 hosting pages that omitted it. `405b072f` corrects five cohesion statements the sync found stale.
+
+  Verification, run as each change was integrated and again on the suites the later fixes touched (final tip `227f49e6`):
+  - Web: the endpoint generator (67), Web.Api (71), Web.Validation (35), Web.Antiforgery (63), Web.Forms (2), Web.Serialization (48), Web.Routing (344), Web.OpenApi (50), Web.Authorization (87), Web.StaticFiles (175) and Web.Hosting (136).
+  - Outside the area: ObjectValidation (230), Http.Forms (35), IdentityHub.Hosting (27), App.Runtime (3), Core (232), FileSystem (41), its Physical (209), InMemory (223), Aggregate (96), Globbing (39) and IsolatedStorage (102) providers, Configuration.FileSystem (4), Configuration.Json (3), Database.Storage (96) and Database.Hosting (50).
+  - Both App.Web producers pack, and the release-inventory and dependency-graph checks pass.
+  - The guard publishes NativeAOT for win-arm64 at `227f49e6` with no trim or AOT warnings and passes 28/28 smoke checks.
+
+  Behavior changes for the review:
+  - A typed handler's return value is written instead of throwing at mapping time, and a shape the generator cannot bind fails the build.
+  - A body type no registered serializer covers, or a body read with no serialization registered, is a 500 through the exception boundary instead of a 415 (#1173).
+  - With Web.Validation referenced, an invalid body model is answered 400 before the handler runs. App.Web ships Web.Validation and ObjectValidation.
+  - An ObjectValidation validator with default options reports every failing member, one rule's errors each, instead of the first failing member only.
+  - Uploads bind; an over-limit or malformed form on a typed endpoint is 413 or 400 instead of 500, and an over-limit form read by `UseAntiforgery` is 413 instead of a 400 token rejection. `HttpFormFileCollection` keeps every file of a repeated field.
+  - `PhysicalFileSystem` throws `PathOutsideRoot` for a path outside its root, `Exists` included; `RootDirectory.Parent` is `null`; `FileSystemPath.Merge` throws when `..` climbs past the root and matches prefixes on segment boundaries.
+  - The OpenAPI document lists security for fallback-protected endpoints and named policies' schemes, and an unregistered policy name fails the document as it fails every request to that endpoint.
+
+  Questions for the review:
+  - #1180 was a path-traversal hole in the released 10.0.0-preview.1. Should a security advisory go out for it?
+  - Should validation stay its own package (Web.Validation)? The owner descoped validation from Web.Api on 2026-07-20; the separate package was the integrator's placement.
+  - The OpenAPI document fails on an unregistered authorization policy name, as every request to that endpoint does. The alternative is to describe the endpoint and degrade.
+  - #1221 (P002): putting ObjectValidation's evaluation order right changes which message every chained rule reports.
+  - `IOpenApiMetadataProvider` (#1169) and `IOpenApiEndpointSource` are two seams for contributing operations. Keep both, or fold one into the other?
+  - Two program-level items Stage 8 made visible:
+    - Every Cohesion assembly carries `RequiresPreviewFeatures`, so a consumer on the plain .NET SDK gets CA2252 until it enables preview features.
+    - The release is about 389 packages, above nuget.org's 350-per-hour push ceiling, which `VERSIONING_RELEASE_POLICY.md` says must not be exceeded by one promotion.
+
+  Scope-creep filed:
+  - #1206–#1209: ObjectValidation reporting, shared state, exception errors and error keys (#1206 is fixed in this stage).
+  - #1221 (P002): ObjectValidation evaluates chained rules and members in reverse declaration order, against its FIFO contract. #1222–#1224: README samples, `Stop` with a custom context, `ValidateAsync` cancellation.
+  - #1210, #1211: `UseForms()` failures and repeated multipart fields.
+  - #1212–#1216, #1218: root deletion, aggregate mounts, file watching, an IsolatedStorage flake, `Parse` of `/..`, and isolated-storage containment.
+  - #1217: `security: []` on an operation. #1219: database names escape the data root. #1220: Configuration's trim and AOT warnings.
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
