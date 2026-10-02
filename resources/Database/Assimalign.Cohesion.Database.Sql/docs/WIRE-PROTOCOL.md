@@ -39,6 +39,11 @@ a subquery's included, is an ExecutionFailure carrying `COHSQLE005:`, raised whi
 planning, so nothing executes and the session stays ready (#1165; a reference to a
 target column in VALUES used to end the session with `Internal`, and one in a
 subquery's count carried `COHDBL001:`).
+A function call whose arguments its function does not accept, such as `ABS(1, 2)`,
+`UPPER()`, `COALESCE()` or `COUNT(a, b)`, is an ExecutionFailure carrying
+`COHSQLE006:`, raised while planning in every expression position, so nothing
+executes and the session stays ready (#1189; such a call used to return NULL, and a
+CHECK built on one was stored and never fired).
 There is no pipelining or multiplexing. Terminate closes; Ping receives Pong while ready.
 
 The model-owned exchange has this order.

@@ -75,11 +75,9 @@ internal sealed partial class SqlPlanner
             }
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
             {
-                if (call.Arguments.Count != 1 || call.Arguments[0] is SqlStarExpression
-                    && !call.FunctionName.Equals("COUNT", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new DatabaseException($"{call.FunctionName} requires exactly one expression; only COUNT accepts '*'.");
-                }
+                // Planning resolved every call already; the signature is read again rather than
+                // assumed, because the argument below is indexed on it (#1189).
+                SqlFunctionSignatures.Resolve(call);
                 var argument = call.Arguments[0];
                 if (ContainsAggregate(argument))
                 {
@@ -140,9 +138,8 @@ internal sealed partial class SqlPlanner
         }
     }
 
-    /// <summary>Recognizes the closed set of executable aggregate functions.</summary>
-    private static bool IsAggregate(SqlFunctionCallExpression call)
-        => call.FunctionName.ToUpperInvariant() is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX";
+    /// <summary>Recognizes the executable aggregate functions of the signature table.</summary>
+    private static bool IsAggregate(SqlFunctionCallExpression call) => SqlFunctionSignatures.IsAggregate(call.FunctionName);
 
     /// <summary>
     /// Compares expression structure after column binding. Qualified and bare

@@ -62,7 +62,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `WITH` / `WITH RECURSIVE` (CTEs) | Recognized, not supported | rejected with `COHDBL001` |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
 | `CREATE VIEW` / `DROP VIEW` | Recognized, not supported | rejected with `COHDBL001` |
-| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the supported scalar functions; parameters and aggregates are excluded. CHECK predicates and DEFAULT literals are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
+| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the supported scalar functions, each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT literals are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `ON DELETE RESTRICT` | Supported | omitted deletion action defaults to `RESTRICT`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
@@ -195,6 +195,36 @@ Declared names that do not execute yet, such as `NULLIF` and `TRIM` (see
 [Builtin functions](#builtin-functions)), are not unknown. They still fail during
 evaluation; #1103 rejects them at parse time with `COHDBL001`.
 
+**Function arguments (#1189).** A call to an executable function must pass a number
+of arguments its signature accepts (the table under
+[Builtin functions](#builtin-functions)): `UPPER`, `LOWER`, `LENGTH` and `ABS` take
+exactly one, `COALESCE` one or more, each aggregate exactly one, and only `COUNT`
+accepts `*`. Any other call fails while planning with `COHSQLE006`, a
+`DatabaseException` (`ExecutionFailure` on the wire), in every position the
+unknown-function check covers: projections, `VALUES`, `UPDATE ... SET`, predicates
+(`WHERE`, `JOIN ... ON`, `HAVING`), grouping, ordering, `LIMIT`/`OFFSET`,
+subqueries, `CHECK` (in `CREATE TABLE`, `ALTER TABLE ADD CONSTRAINT` and `ADD
+COLUMN`) and `DEFAULT`. Nothing is read or written, and the statement fails the same
+way over an empty table as over a populated one. The message names the function as
+written, the counts it accepts, what the call passed and the accepted call forms:
+
+```text
+COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).
+COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).
+```
+
+The engine resolves a call's arguments before the call itself, as PostgreSQL's parse
+analysis does, so `COALESCE(name, UPPER())` reports `UPPER`, and `FOO(ABS())` reports
+`ABS` rather than the unknown `FOO`. Until #1189 the evaluator evaluated an argument
+only when a call had exactly one, so `SELECT ABS(1, 2), UPPER(), COALESCE() FROM t`
+returned three NULLs, `CHECK (ABS(c, 1) > 0)` was stored and admitted every row, and
+an aggregate with no argument outside a projection (`UPDATE t SET a = SUM()`)
+succeeded over an empty table. A wrong aggregate count in a projection failed while
+planning already, without a code. A declared name that does not execute has no
+signature, and fails as described above. A database whose catalog stores a CHECK
+with such a call does not open; see [Persisted definitions are
+canonical](#persisted-definitions-are-canonical).
+
 **Guard.** `SqlStatementCompletenessTests` (Sql.Language) holds a complete statement
 form for every profile clause and every `SqlQueryCommandType`, appends leftover
 text to each form (words, a literal, `)`, a misspelled clause, text after `;`,
@@ -272,12 +302,24 @@ whose catalog holds a CHECK or DEFAULT fails the open with a format error that
 says so.
 
 **Binding is not re-validation.** Opening a database binds each stored CHECK —
-its columns and collations resolve, and it is a Boolean row predicate the engine
-can evaluate — but does not apply again the rules `CREATE TABLE` and `ALTER TABLE`
-use to accept one, such as the sign operand check or the ban on `CAST`. Those
-rules may tighten in a later release; a predicate an earlier release accepted
-keeps opening and is enforced as stored, and a row it cannot evaluate fails its
-own statement with the evaluator's coded error.
+its columns and collations resolve, each function call passes arguments its
+signature accepts, and it is a Boolean row predicate the engine can evaluate — but
+does not apply again the rules `CREATE TABLE` and `ALTER TABLE` use to accept one,
+such as the sign operand check or the ban on `CAST`. Those rules may tighten in a
+later release; a predicate an earlier release accepted keeps opening and is
+enforced as stored, and a row it cannot evaluate fails its own statement with the
+evaluator's coded error.
+
+A call's argument count is not such a rule: a call no signature accepts has no
+value on any row (#1189). Engine builds before #1189 stored such CHECKs in format-4
+catalogs, and format 4 is unreleased and has no upgrade path (#1152), so none is
+carried forward. Opening a database whose catalog holds one fails with the coded
+error and the constraint's name, and sends the operator to the build that stored it
+rather than to a backup, which holds the same definition:
+
+```text
+Database 'shop' cannot be opened. CHECK constraint 'ck1' on table 'dbo.t' cannot be loaded: its persisted definition 'ABS(c, 1) > 0' calls a function with arguments the function does not accept (COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).). An engine build that did not check function arguments stored it, and this engine cannot evaluate it; open the database with that build and drop the constraint or replace it with a valid one.
+```
 
 ## Ordering, output aliases and ordinals (#1024)
 
@@ -355,9 +397,10 @@ Only literal defaults execute. `DEFAULT (1 + 2)`, function calls, parameters,
 CAST, and other expressions are rejected during planning, before schema or data
 mutation, using CREATE TABLE's diagnostic:
 `Column 'extra': only literal DEFAULT values are supported.` A call to a name
-outside the profile's function list fails first, with `Unknown function '<name>'.`
-(see [Statement completeness](#statement-completeness-1068)), and a parameter such
-as `:x` is a parse error. Defaults must
+outside the profile's function list fails first, with `Unknown function '<name>'.`,
+and so does a call whose arguments its function does not accept, with `COHSQLE006`
+(`DEFAULT ABS(1, 2)`; see [Statement completeness](#statement-completeness-1068)),
+and a parameter such as `:x` is a parse error. Defaults must
 convert to the declared storage type and fit its bounds, including string length
 and decimal precision/scale; invalid conversions and out-of-range defaults reject
 before publication. `CREATE TABLE` applies the same check to every column
@@ -1187,7 +1230,29 @@ storage coercion; nested arithmetic therefore sees the converted numeric value.
 The profile's function list is lexical vocabulary, not an execution claim and
 not part of the 49-clause denominator. Executable scalar functions are `COALESCE`,
 `UPPER`, `LOWER`, `LENGTH`, and `ABS`; supported aggregates are `COUNT`, `SUM`,
-`AVG`, `MIN`, and `MAX`, under the contract below. `ABS` accepts every numeric
+`AVG`, `MIN`, and `MAX`, under the contract below. Each has one signature, which the
+planner checks every call against before it reads a row, the evaluator checks again
+before it computes one, and opening a database checks in every stored CHECK (#1189).
+A call outside it reports `COHSQLE006` (see Function arguments under
+[Statement completeness](#statement-completeness-1068)):
+
+| Function | Kind | Arguments | Accepted call forms |
+|---|---|---|---|
+| `COALESCE` | Scalar | 1 or more | `COALESCE(value [, value ...])` |
+| `UPPER`, `LOWER`, `LENGTH` | Scalar | Exactly 1 | `UPPER(value)`, `LOWER(value)`, `LENGTH(value)` |
+| `ABS` | Scalar | Exactly 1 | `ABS(numeric)` |
+| `COUNT` | Aggregate | Exactly 1, or `*` | `COUNT(*)`, `COUNT(value)` |
+| `SUM`, `AVG` | Aggregate | Exactly 1 | `SUM(numeric)`, `AVG(numeric)` |
+| `MIN`, `MAX` | Aggregate | Exactly 1 | `MIN(value)`, `MAX(value)` |
+
+`*` is an argument only of `COUNT`: `SUM(*)` and `UPPER(*)` report `COHSQLE006`.
+**`COALESCE` takes one or more operands, a recorded deviation from ISO.** ISO/IEC
+9075-2's `<case abbreviation>` spells `COALESCE` with two or more value expressions;
+PostgreSQL's grammar (`COALESCE '(' expr_list ')'`) accepts one or more, and the
+dialect follows PostgreSQL. `COALESCE(x)` is `x`, so accepting it changes no result
+and keeps PostgreSQL text running; `COALESCE()` is an error in all three. The
+argument-type, result-type and NULL rules of the T1 functions (#1120) extend these
+same signatures. `ABS` accepts every numeric
 storage type: integer arguments return BIGINT (so `ABS` of the INT minimum is
 exact), REAL returns REAL, DOUBLE returns DOUBLE, and DECIMAL returns DECIMAL.
 `ABS` of the BIGINT minimum reports `COHSQLE002`.
@@ -1220,6 +1285,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHSQLE003` | Error | Unary `+` or `-` over a non-numeric operand (ISO SQLSTATE 42804) |
 | `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 | `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
+| `COHSQLE006` | Error | Function call whose arguments no signature of its function accepts: a count outside the signature's bounds (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`) or `*` for a function other than `COUNT`. Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding one (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
@@ -1250,8 +1316,9 @@ Plan-time rejections, such as `Unknown column '<name>'.` and
 `Unknown function '<name>'.`, are `DatabaseException` messages without a code
 (`ExecutionFailure` on the wire). #1103 gives planner rejections structured codes.
 While planning, the engine raises `COHSQLE003` for a sign over an operand it knows
-is not a number and `COHSQLE005` for a column reference where no columns are in
-scope; a `LIMIT`/`OFFSET` count is evaluated while planning, so its arithmetic
+is not a number, `COHSQLE005` for a column reference where no columns are in
+scope, and `COHSQLE006` for a function call whose arguments its function does not
+accept; a `LIMIT`/`OFFSET` count is evaluated while planning, so its arithmetic
 faults (`COHSQLE001`, `COHSQLE002`) surface there too, and `COHSQLE004` can come
 from any planner walk.
 
@@ -1259,6 +1326,7 @@ The `COHSQLE` codes are engine execution diagnostics, not parser diagnostics, an
 carry no position. They lead the `DatabaseException` message in process and the
 `ExecutionFailure` message on the wire; the arithmetic fault contract above
 defines when each of `COHSQLE001`–`COHSQLE003` is raised, the expression
-nesting limit when `COHSQLE004` is, and the column-scope rule for VALUES and
-counts when `COHSQLE005` is. The engine's transaction-state codes,
+nesting limit when `COHSQLE004` is, the column-scope rule for VALUES and
+counts when `COHSQLE005` is, and the function-argument rule under Statement
+completeness when `COHSQLE006` is. The engine's transaction-state codes,
 `COHSQLT001`–`COHSQLT003`, are documented in the SQL engine design.

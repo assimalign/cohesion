@@ -41,7 +41,7 @@ internal sealed partial class SqlPlanner
     internal SqlPlan Plan(SqlQueryExpression expression)
     {
         SqlSystemViews.EnsureReadOnly(expression);
-        RejectUnknownFunctions(expression);
+        ValidateFunctionCalls(expression);
         return expression switch
         {
             SqlSelectExpression select => PlanSelect(select),
@@ -1047,8 +1047,7 @@ internal sealed partial class SqlPlanner
     private static bool ContainsAggregate(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (expression is SqlFunctionCallExpression call &&
-            call.FunctionName.ToUpperInvariant() is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX")
+        if (expression is SqlFunctionCallExpression call && SqlFunctionSignatures.IsAggregate(call.FunctionName))
         {
             return true;
         }

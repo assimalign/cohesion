@@ -182,6 +182,16 @@ internal sealed class SqlBoundTableCache
                 SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation);
                 ordinals = ColumnOrdinals(table, predicate);
             }
+            catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.FunctionSignatureMismatchCode)
+            {
+                // Not damage: DDL before #1189 did not match calls against their signatures, so a
+                // format-4 catalog can hold such a predicate, which never had a value. Format 4 is
+                // unreleased and carries no such definition forward (#1152); the open fails, coded.
+                throw new DatabaseException(
+                    $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' calls a function with " +
+                    $"arguments the function does not accept ({exception.Message}). {SqlPersistedExpression.UncheckedCallHint}",
+                    exception);
+            }
             catch (DatabaseException exception)
             {
                 throw new DatabaseException(

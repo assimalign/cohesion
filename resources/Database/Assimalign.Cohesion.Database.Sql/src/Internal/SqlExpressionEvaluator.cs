@@ -619,11 +619,29 @@ internal sealed class SqlExpressionEvaluator
         return expression.ElseResult is null ? null : EvaluateCore(expression.ElseResult, row);
     }
 
+    /// <summary>
+    /// Computes a scalar function call. The call is matched against its signature first
+    /// (<see cref="SqlFunctionSignatures"/>), the table the planner resolved it against before any
+    /// row was read; a tree that reaches evaluation without planning fails here with the same
+    /// <c>COHSQLE006</c>, instead of computing a wrong-arity call (#1189: one used to evaluate no
+    /// argument and return NULL).
+    /// </summary>
+    /// <exception cref="SqlEvaluationException">
+    /// The call's arguments do not match its signature (<c>COHSQLE006</c>), or <c>ABS</c> of the
+    /// BIGINT minimum overflows (<c>COHSQLE002</c>).
+    /// </exception>
+    /// <exception cref="DatabaseException">The function does not execute as a scalar, or <c>ABS</c> receives a non-number.</exception>
     private object? EvaluateFunction(SqlFunctionCallExpression function, object?[] row)
     {
-        string name = function.FunctionName.ToUpperInvariant();
+        var signature = SqlFunctionSignatures.Resolve(function);
+        if (signature is null || signature.Kind != SqlFunctionKind.Scalar)
+        {
+            // A declared name outside the table (NULLIF, TRIM, ...), or an aggregate outside the
+            // grouping plan that binds it to a slot.
+            throw new DatabaseException($"Function '{function.FunctionName}' is not supported by the executor yet.");
+        }
 
-        if (name == "COALESCE")
+        if (signature.Function == SqlBuiltinFunction.Coalesce)
         {
             foreach (var argument in function.Arguments)
             {
@@ -638,17 +656,18 @@ internal sealed class SqlExpressionEvaluator
             return null;
         }
 
-        object? single = function.Arguments.Count == 1 ? EvaluateCore(function.Arguments[0], row) : null;
+        // Every other scalar takes exactly one argument; the signature has just proven it.
+        object? single = EvaluateCore(function.Arguments[0], row);
 
-        return name switch
+        return signature.Function switch
         {
-            "UPPER" => (single as string)?.ToUpperInvariant() ?? single,
-            "LOWER" => (single as string)?.ToLowerInvariant() ?? single,
-            "LENGTH" => single is null ? null : (long)(Convert.ToString(single, CultureInfo.InvariantCulture)?.Length ?? 0),
+            SqlBuiltinFunction.Upper => (single as string)?.ToUpperInvariant() ?? single,
+            SqlBuiltinFunction.Lower => (single as string)?.ToLowerInvariant() ?? single,
+            SqlBuiltinFunction.Length => single is null ? null : (long)(Convert.ToString(single, CultureInfo.InvariantCulture)?.Length ?? 0),
             // Every numeric storage type: exact integers widen to BIGINT before the
             // magnitude is taken (so INT's minimum is representable), approximate and
             // decimal values keep their own type.
-            "ABS" => single switch
+            SqlBuiltinFunction.Abs => single switch
             {
                 null => null,
                 sbyte value => Math.Abs((long)value),
@@ -662,6 +681,7 @@ internal sealed class SqlExpressionEvaluator
                 decimal value => Math.Abs(value),
                 _ => throw new DatabaseException("ABS requires a numeric argument."),
             },
+            // A scalar entry added to the signature table without a case here.
             _ => throw new DatabaseException($"Function '{function.FunctionName}' is not supported by the executor yet."),
         };
     }

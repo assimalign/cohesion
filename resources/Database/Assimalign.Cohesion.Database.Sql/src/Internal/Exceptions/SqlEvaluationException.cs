@@ -9,8 +9,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// other statement failure. An operand-type fault the planner can already see is raised
 /// while planning, with the same code, so it does not depend on whether rows exist, and a
 /// statement too complex to walk fails wherever its walk runs out of stack. A column
-/// reference in a clause that has no columns in scope is raised while planning, before
-/// anything executes.
+/// reference in a clause that has no columns in scope, and a function call whose arguments
+/// its function does not accept, are raised while planning, before anything executes.
 /// </summary>
 /// <remarks>
 /// The code leads the message (<c>COHSQLE001: ...</c>), the engine-code convention
@@ -51,6 +51,15 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <c>LIMIT</c> or <c>OFFSET</c> count. Raised while planning, so nothing executes (#1165).
     /// </summary>
     internal const string ColumnReferenceNotAllowedCode = "COHSQLE005";
+
+    /// <summary>
+    /// A function call passes a number of arguments, or a <c>*</c>, that no signature of its
+    /// function accepts: <c>ABS(1, 2)</c>, <c>UPPER()</c>, <c>COALESCE()</c>, <c>COUNT(a, b)</c>,
+    /// <c>SUM(*)</c> (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function). Raised while
+    /// planning, in every expression position, and by the evaluator for a call that reaches it
+    /// without planning; a persisted definition that holds one fails the database's open (#1189).
+    /// </summary>
+    internal const string FunctionSignatureMismatchCode = "COHSQLE006";
 
     private SqlEvaluationException(string code, string detail, Exception? innerException)
         : base($"{code}: {detail}", innerException)
@@ -105,6 +114,17 @@ internal sealed class SqlEvaluationException : DatabaseException
         => new(ColumnReferenceNotAllowedCode,
             $"Column reference '{column}' is not allowed in {clause}, which has no columns in scope. " +
             $"Use literals, parameters and expressions over them{(alternative is null ? string.Empty : $", or {alternative}")}.",
+            null);
+
+    /// <summary>Creates the failure for a function call whose arguments no signature of its function accepts.</summary>
+    /// <param name="functionName">The function name as written.</param>
+    /// <param name="accepted">The argument counts the function accepts, for example <c>exactly 1 argument</c>.</param>
+    /// <param name="given">What the call passed: <c>'*'</c>, <c>none</c>, or the number of arguments.</param>
+    /// <param name="usage">The accepted call forms, for example <c>ABS(numeric)</c>.</param>
+    /// <returns>The coded failure.</returns>
+    internal static SqlEvaluationException FunctionSignatureMismatch(string functionName, string accepted, string given, string usage)
+        => new(FunctionSignatureMismatchCode,
+            $"Function '{functionName}' takes {accepted} but was called with {given}. Accepted: {usage}.",
             null);
 
     /// <summary>
