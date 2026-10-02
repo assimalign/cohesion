@@ -293,7 +293,10 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        // A VALUES row has no columns in scope: the planner rejects column references (#1165), and
+        // the evaluator's scope matches the empty row it is given, so no reference can resolve to an
+        // ordinal that row does not have.
+        var evaluator = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
         var values = new List<object?[]>(plan.Rows.Count);
         foreach (var valueRow in plan.Rows)
         {

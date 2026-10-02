@@ -130,11 +130,12 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     /// with ample stack. Every stack check leads here: a deeply backtracking LIKE, a tree deeper
     /// than the parser builds, or a statement run on a thread created with a small stack.
     /// </summary>
-    /// <param name="sql">A statement whose predicate nests exactly 128 levels once <c>{0}</c> is filled.</param>
+    /// <param name="sql">A statement whose predicate or value nests exactly 128 levels once <c>{0}</c> is filled.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a statement that runs out of stack fails with COHSQLE004 and keeps the session")]
     [InlineData("SELECT COUNT(*) FROM t WHERE id < {0}")]
     [InlineData("UPDATE t SET name = 'z' WHERE id < {0}")]
     [InlineData("DELETE FROM t WHERE id < {0}")]
+    [InlineData("INSERT INTO t VALUES ({0} - 126, 'z')")]
     public async Task ExecuteAsync_StackExhausted_ShouldFailWithStatementTooComplex(string sql)
     {
         // Arrange: 127 terms under a comparison, 128 levels.
@@ -221,6 +222,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             ("Evaluate", () => evaluator.Evaluate(deep, [1])),
             ("ResolveCollation", () => evaluator.ResolveCollation(deep)),
             ("ValidateExpression", () => { SqlPlanner.ValidateExpression(deep, evaluator); return null; }),
+            ("RejectColumnReferences", () => { SqlPlanner.RejectColumnReferences(deep, "INSERT ... VALUES", null); return null; }),
+            ("ContainsStar", () => SqlPlanner.ContainsStar(deep)),
             ("Bind", () => { SqlPersistedExpression.Bind(deep, evaluator); return null; }),
             ("AreEquivalent", () => SqlPersistedExpression.AreEquivalent(deep, twin)),
             ("Canonicalize", () => SqlPersistedExpression.Canonicalize(deep, "CHECK constraint 'ck'")),

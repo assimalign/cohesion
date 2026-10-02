@@ -26,6 +26,9 @@ internal sealed partial class SqlPlanner
     private readonly ISqlCatalog _catalog;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
+    /// <summary>Backs <see cref="ScopelessEvaluator"/>.</summary>
+    private SqlExpressionEvaluator? _scopelessEvaluator;
+
     internal SqlPlanner(ISqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters)
     {
         _catalog = catalog;
@@ -553,7 +556,94 @@ internal sealed partial class SqlPlanner
             }
         }
 
+        // A VALUES row is evaluated once, against no row, before anything is written; every
+        // row is checked here so a bad expression in a later row fails before the first one
+        // is inserted (#1165).
+        foreach (var row in insert.Values!)
+        {
+            foreach (var value in row)
+            {
+                ValidateScopelessExpression(value, InsertValuesClause, "INSERT ... SELECT to read values from a table");
+            }
+        }
+
         return new SqlInsertPlan(table, targetOrdinals, insert.Values!);
+    }
+
+    /// <summary>The dialect's name for a row of an INSERT's table value constructor, in diagnostics.</summary>
+    private const string InsertValuesClause = "INSERT ... VALUES";
+
+    /// <summary>
+    /// Validates an expression of a clause that has no columns in scope: a row of
+    /// <c>INSERT ... VALUES</c> (ISO SQL's table value constructor of an INSERT, whose
+    /// expressions may not reference a column), and a <c>LIMIT</c> or <c>OFFSET</c> count. Such
+    /// an expression is evaluated against an empty row, so a column reference has nothing to
+    /// bind to: before #1165 a VALUES reference to a target column resolved against the table and
+    /// then indexed the empty row, and the <see cref="IndexOutOfRangeException"/> ended the wire
+    /// session with <c>Internal</c>.
+    /// </summary>
+    /// <remarks>
+    /// The column check runs first, so a reference anywhere in the expression, including under an
+    /// aggregate, a sign or a CAST, reports this rule rather than another error.
+    /// </remarks>
+    /// <param name="expression">The expression to validate.</param>
+    /// <param name="clause">The clause, as diagnostics name it.</param>
+    /// <param name="alternative">The clause's own way to read table columns, or null when it has none.</param>
+    /// <exception cref="SqlEvaluationException">
+    /// The expression references a column (<c>COHSQLE005</c>), or signs an operand the plan
+    /// already knows is not a number (<c>COHSQLE003</c>).
+    /// </exception>
+    /// <exception cref="DatabaseException">The expression contains an aggregate, <c>*</c> or a subquery.</exception>
+    private void ValidateScopelessExpression(SqlExpression expression, string clause, string? alternative = null)
+    {
+        RejectColumnReferences(expression, clause, alternative);
+        if (ContainsAggregate(expression))
+        {
+            throw new DatabaseException($"Aggregate functions are not allowed in {clause}.");
+        }
+        if (ContainsStar(expression))
+        {
+            throw new DatabaseException($"'*' is not allowed in {clause}.");
+        }
+
+        ValidateExpression(expression, ScopelessEvaluator);
+    }
+
+    /// <summary>
+    /// The empty column scope that VALUES rows and LIMIT/OFFSET counts bind and evaluate against,
+    /// created on first use and shared by the statement.
+    /// </summary>
+    private SqlExpressionEvaluator ScopelessEvaluator => _scopelessEvaluator ??=
+        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation);
+
+    /// <summary>Whether <c>*</c> appears anywhere in an expression, outside a subquery.</summary>
+    /// <param name="expression">The expression to search.</param>
+    /// <returns><see langword="true"/> when the expression contains <c>*</c>.</returns>
+    internal static bool ContainsStar(SqlExpression expression)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return expression is SqlStarExpression || Children(expression).Any(ContainsStar);
+    }
+
+    /// <summary>Rejects the first column reference in an expression, outside a subquery.</summary>
+    /// <param name="expression">The expression to search.</param>
+    /// <param name="clause">The clause, as diagnostics name it.</param>
+    /// <param name="alternative">The clause's own way to read table columns, or null when it has none.</param>
+    /// <exception cref="SqlEvaluationException">The expression references a column (<c>COHSQLE005</c>).</exception>
+    internal static void RejectColumnReferences(SqlExpression expression, string clause, string? alternative)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlColumnReferenceExpression column)
+        {
+            string name = string.Join('.', new[] { column.SchemaName, column.TableAlias, column.ColumnName }
+                .Where(part => part is not null));
+            throw SqlEvaluationException.ColumnReferenceNotAllowed(name, clause, alternative);
+        }
+
+        foreach (var child in Children(expression))
+        {
+            RejectColumnReferences(child, clause, alternative);
+        }
     }
 
     private SqlUpdatePlan PlanUpdate(SqlUpdateExpression update)
@@ -806,8 +896,9 @@ internal sealed partial class SqlPlanner
             return null;
         }
 
-        object? value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation)
-            .Evaluate(expression, Array.Empty<object?>());
+        // A count has no columns in scope; a reference fails here as COHSQLE005 (#1165).
+        ValidateScopelessExpression(expression, clause);
+        object? value = ScopelessEvaluator.Evaluate(expression, Array.Empty<object?>());
 
         return value switch
         {
