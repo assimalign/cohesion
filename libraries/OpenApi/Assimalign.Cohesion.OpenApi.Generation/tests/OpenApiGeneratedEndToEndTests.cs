@@ -21,7 +21,10 @@ public class OpenApiGeneratedEndToEndTests
     public void Generated_Registry_DiscoversSample()
     {
         // The registry is emitted by the source generator from this project's annotated sample types,
-        // with no runtime reflection.
+        // with no runtime reflection. No reference of this project is annotated, so the registry
+        // composes exactly one provider: the one generated for this assembly.
+        OpenApiMetadataRegistry.Providers.ShouldHaveSingleItem().GetType().Name
+            .ShouldBe("OpenApiMetadataProvider_Assimalign__Cohesion__OpenApi__Generation__Tests");
         OpenApiMetadataRegistry.Operations.ShouldContain(o => o.OperationId == "getGeneratedPet");
         OpenApiMetadataRegistry.Schemas.ShouldContain(s => s.Name == "GeneratedPet");
         OpenApiMetadataRegistry.Tags.ShouldContain(t => t.Name == "pets");

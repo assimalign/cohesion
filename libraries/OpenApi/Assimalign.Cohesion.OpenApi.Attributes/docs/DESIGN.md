@@ -65,15 +65,40 @@ The mapper corrects or flags these combinations (codes in `OpenApiMetadataDiagno
 only reflection in the test suite (reading attributes off a sample type) is test-only. Runtime
 discovery in an application is the source generator's job (feature .06).
 
+## The provider contract: metadata across assemblies
+
+An application's annotated endpoints are usually spread over several assemblies, and each assembly's
+metadata is generated in that assembly's own compile. Two public, hand-written types carry it across:
+
+- `IOpenApiMetadataProvider` (`src/Abstractions/`) — the operations, schemas, tags, and security schemes
+  one assembly contributes.
+- `OpenApiMetadataProviderAttribute` (`src/Attributes/`) — `[assembly: OpenApiMetadataProvider(typeof(T))]`
+  advertises a provider type to every compilation that references the assembly.
+
+The source generator implements the interface once per annotated assembly and applies the attribute for
+that implementation. In each referencing compilation it reads the advertised attributes from metadata at
+compile time and emits an internal `OpenApiMetadataRegistry` that constructs every provider directly, so
+nothing is discovered at run time and trimming keeps each provider. The attribute is not generator-only:
+an assembly can advertise a hand-written provider the same way, under the rules in the attribute's XML
+documentation.
+
+The contract lives here, not in a package of its own, because the generator ships here: every
+compilation that runs the generator references this package, so the code it emits always compiles
+against the contract. Why composition has this shape, and the alternatives rejected (module
+initializers, hand composition, the former fixed public registry), are recorded in the generator's
+[DESIGN.md](../../../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
+("Composing metadata across assemblies").
+
 ## The package carries the source generator
 
 The project declares `CohesionAnalyzerReference` for `Assimalign.Cohesion.OpenApi.SourceGeneration`,
 so the generator DLL ships in this package at `analyzers/dotnet/cs/` and runs in every project that
 references the package, directly or through `OpenApi.Generation` or `OpenApi.Integration`. Shipping the
-two together means the generator and the metadata records its output compiles against cannot version
-apart: renaming or reshaping a metadata member is a change to the generator's emitted code in the same
-package. Why this package is the carrier, and the alternatives rejected, are recorded in the
-generator's [DESIGN.md](../../../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
+two together means the generator cannot version apart from what its output compiles against, the
+metadata records and the provider contract: renaming or reshaping one of them is a change to the
+generator's emitted code in the same package. Why this package is the carrier, and the alternatives
+rejected, are recorded in the generator's
+[DESIGN.md](../../../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
 ("Delivery").
 
 ## Non-goals

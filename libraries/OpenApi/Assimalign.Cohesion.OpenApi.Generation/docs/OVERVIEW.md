@@ -17,13 +17,15 @@ attribute mapper — into a version-targeted `OpenApiDocument`.
   project that references this package gets it through that dependency. A project inside this
   repository adds `<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />`,
   because a project reference carries no analyzer.
+- The registry is internal to each assembly and combines that assembly's metadata with every annotated
+  assembly it references, so one input describes an application whose endpoints span several libraries.
 
 ## Usage
 
 ```csharp
 using Assimalign.Cohesion.OpenApi;
 using Assimalign.Cohesion.OpenApi.Generation;
-using Assimalign.Cohesion.OpenApi.Generated; // emitted by the source generator
+using Assimalign.Cohesion.OpenApi.Generated; // this assembly's generated registry, internal
 
 var input = new OpenApiGenerationInput
 {

@@ -32,7 +32,9 @@ validation, generation, and versioning libraries never learn that Web or ApiMana
 `IOpenApiEndpointSource` yields `OpenApiOperationMetadata`, `OpenApiSchemaMetadata`, … rather than a new
 descriptor type. This is deliberate: a real Web layer already gets that metadata for free from the
 source generator (feature .06), so the endpoint source is a trivial adapter over the generated
-`OpenApiMetadataRegistry` — the integration test's `GeneratedEndpointSource` is exactly that shape. The
+`OpenApiMetadataRegistry` — the integration test's `GeneratedEndpointSource` is exactly that shape. That
+registry is internal to the assembly declaring the endpoint source and already combines every annotated
+assembly it references, so one endpoint source covers endpoints spread over several libraries. The
 whole Web path (annotated endpoints → generated registry → endpoint source → provider → document) is
 therefore reflection-free and NativeAOT-safe end to end, which the tests prove by driving it through
 validation and serialization.

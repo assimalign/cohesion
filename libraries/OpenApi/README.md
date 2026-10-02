@@ -77,7 +77,7 @@ ApiManager, or any service runtime.
 | [`Assimalign.Cohesion.OpenApi.Validation`](./Assimalign.Cohesion.OpenApi.Validation/) | Diagnostics model; structural, semantic, and version-placement rules | model, serialization | NuGet package |
 | [`Assimalign.Cohesion.OpenApi.Fluent`](./Assimalign.Cohesion.OpenApi.Fluent/) | Version-aware fluent authoring builders | model | NuGet package |
 | [`Assimalign.Cohesion.OpenApi.Attributes`](./Assimalign.Cohesion.OpenApi.Attributes/) | Attribute authoring model + intermediate metadata + mapper | model | NuGet package, carrying the source generator |
-| [`Assimalign.Cohesion.OpenApi.SourceGeneration`](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/) | AOT-safe compile-time attribute discovery → metadata registry | — (build time; shipped inside attributes) | Inside the Attributes package |
+| [`Assimalign.Cohesion.OpenApi.SourceGeneration`](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/) | AOT-safe compile-time attribute discovery → per-assembly provider + composed metadata registry | — (build time; shipped inside attributes) | Inside the Attributes package |
 | [`Assimalign.Cohesion.OpenApi.Generation`](./Assimalign.Cohesion.OpenApi.Generation/) | Metadata → version-targeted document generation | model, attributes | NuGet package |
 | [`Assimalign.Cohesion.OpenApi.Versioning`](./Assimalign.Cohesion.OpenApi.Versioning/) | Version targets + 3.0↔3.1↔3.2 transforms with diagnostics | model, serialization, validation | NuGet package |
 | [`Assimalign.Cohesion.OpenApi.Integration`](./Assimalign.Cohesion.OpenApi.Integration/) | Web/ApiManager integration contracts (endpoint source, description provider, import/export) | model, attributes, generation, serialization, versioning | NuGet package |
@@ -112,8 +112,8 @@ set for an ordinary NuGet library that carries a generator.
   applies the attributes references Attributes. The SDK loads analyzers from every package in the
   restore graph, so a project that references only `OpenApi.Generation` or `OpenApi.Integration` gets
   the generator through their Attributes dependency; this was checked against locally packed packages.
-  The emitted registry compiles against Attributes' metadata records and the root model's enums, so the
-  package that brings the generator also brings everything its output needs.
+  The emitted code compiles against Attributes' metadata records and provider contract and the root
+  model's enums, so the package that brings the generator also brings everything its output needs.
 - **Inside this repository** a project reference carries no analyzer, so a project that needs the
   registry adds `<CohesionAnalyzerReference Include="Assimalign.Cohesion.OpenApi.SourceGeneration" />`,
   as the Generation and Integration test projects do.
@@ -130,6 +130,40 @@ set for an ordinary NuGet library that carries a generator.
 The full reasoning is in the generator's
 [docs/DESIGN.md](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
 ("Delivery").
+
+## Combining metadata from several assemblies
+
+An application whose annotated endpoints are spread over several assemblies reads all of them from its
+own generated registry, with no runtime discovery:
+
+```csharp
+using Assimalign.Cohesion.OpenApi.Generated;
+using Assimalign.Cohesion.OpenApi.Generation;
+
+var input = new OpenApiGenerationInput
+{
+    Operations = OpenApiMetadataRegistry.Operations,
+    Schemas = OpenApiMetadataRegistry.Schemas,
+    Tags = OpenApiMetadataRegistry.Tags,
+    SecuritySchemes = OpenApiMetadataRegistry.SecuritySchemes
+};
+```
+
+Each annotated assembly gets a generated public provider class with an assembly-unique name, which
+implements `IOpenApiMetadataProvider` and is advertised with `[assembly: OpenApiMetadataProvider]`; that
+interface and attribute are the hand-written contract in `OpenApi.Attributes`. The generator in a
+referencing compilation reads those attributes at compile time and emits an **internal**
+`OpenApiMetadataRegistry` that constructs every advertised provider: referenced assemblies first,
+ordered by assembly name, then the compilation's own. Every assembly the compilation references
+contributes, including the transitive references an SDK project passes to the compiler, and the
+application needs no annotations of its own to get the registry. Because each registry is internal, any
+number of annotated assemblies compose without CS0433 or CS0436. The one exception is
+`InternalsVisibleTo`: a friend assembly that names the registry gets CS0436 and still binds its own
+registry, which is the complete one.
+
+Design, ordering, hand-written providers, and the alternatives rejected are in the generator's
+[docs/DESIGN.md](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md)
+("Composing metadata across assemblies").
 
 ## Standards
 

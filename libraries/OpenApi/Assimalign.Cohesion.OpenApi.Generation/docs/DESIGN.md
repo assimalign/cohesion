@@ -18,7 +18,9 @@ and serializes and validates like any other.
 ```
 
 `OpenApiGenerationInput` is the seam: the source generator emits a registry of the metadata records
-(feature .06's generator), and this pipeline consumes them. Because the input is plain data, the same
+(feature .06's generator), and this pipeline consumes them. The registry is internal to each assembly
+and already combines every annotated assembly that assembly references, so one input covers an
+application whose endpoints span several libraries. Because the input is plain data, the same
 pipeline is exercised in tests from hand-built metadata and from the runtime attribute mapper's output —
 the generator's compile-time path and the runtime path converge on one emitter.
 

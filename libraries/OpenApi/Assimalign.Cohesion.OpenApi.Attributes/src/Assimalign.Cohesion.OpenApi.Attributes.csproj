@@ -11,7 +11,8 @@
 			reference runs it here (it finds nothing to emit) and packs the DLL into this
 			package at analyzers/dotnet/cs/, the ObjectMapping and Core precedent. This package
 			carries it because every compilation that applies the attributes references it, and
-			the emitted code compiles against its metadata records. Decision and rejected
+			the emitted code compiles against its metadata records and provider contract
+			(IOpenApiMetadataProvider, OpenApiMetadataProviderAttribute). Decision and rejected
 			alternatives: analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/docs/DESIGN.md,
 			"Delivery".
 		-->

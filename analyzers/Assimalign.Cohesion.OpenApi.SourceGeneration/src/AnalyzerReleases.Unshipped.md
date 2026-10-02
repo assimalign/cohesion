@@ -10,3 +10,4 @@ OPENAPIATTR0002 | OpenApi | Error | Body declares both a model type and a schema
 OPENAPIATTR0003 | OpenApi | Warning | Path parameter generated as required
 OPENAPIATTR0004 | OpenApi | Error | Example declares conflicting value fields
 OPENAPIATTR0006 | OpenApi | Error | API key scheme missing parameter name or location
+OPENAPIGEN0001 | OpenApi | Warning | Advertised metadata provider cannot be composed
