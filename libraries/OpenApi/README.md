@@ -50,26 +50,44 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## Layering
 
-- **L1 (this area):** the document model, serialization, and validation — pure description machinery.
-- **L2/L3 (future):** Web endpoint metadata and ApiManager contract workflows feed this foundation
-  through integration contracts (Wave 3), keeping service runtime concerns out of the root model.
+- **L1 (this area):** the document model, serialization, validation, fluent and attribute authoring,
+  document generation, version transforms, and the integration contracts — pure description machinery.
+- **L2/L3:** the Web layer and ApiManager are meant to build on the `OpenApi.Integration` contracts,
+  keeping service runtime concerns out of the root model. Neither does yet; the Web OpenAPI adapter
+  (#152) is the first.
 
 ## Project family
 
-Dependency direction is one-way: every package depends on the root model; no package depends on a
-sibling except through the model.
+The root model references nothing in the family, and every other package references it. Sibling
+references exist as well, and each points from a package to one whose behavior it reuses:
 
-| Package | Responsibility | Depends on | Status |
+- **Validation → Serialization:** the official-schema conformance stage checks the serialized document.
+- **Generation → Attributes:** generation consumes the attributes' intermediate metadata.
+- **Versioning → Serialization, Validation:** a transform deep-copies by a serialization round trip and
+  reports version fit by running the validator.
+- **Integration → Attributes, Generation, Serialization, Versioning:** the contracts compose all four.
+
+Fluent and Attributes reference only the root. The graph is acyclic, and no package references Web,
+ApiManager, or any service runtime.
+
+| Package | Responsibility | Depends on | Release |
 |---|---|---|---|
-| [`Assimalign.Cohesion.OpenApi`](./Assimalign.Cohesion.OpenApi/) | Canonical version-aware model, capability matrix, `OpenApiNode` value tree | — | Implemented |
-| [`Assimalign.Cohesion.OpenApi.Serialization`](./Assimalign.Cohesion.OpenApi.Serialization/) | Model ↔ node-tree mapping; JSON and YAML read/write | model, Content.Yaml | Implemented |
-| [`Assimalign.Cohesion.OpenApi.Validation`](./Assimalign.Cohesion.OpenApi.Validation/) | Diagnostics model; structural, semantic, and version-placement rules | model | Implemented |
-| [`Assimalign.Cohesion.OpenApi.Fluent`](./Assimalign.Cohesion.OpenApi.Fluent/) | Version-aware fluent authoring builders | model | Implemented |
-| [`Assimalign.Cohesion.OpenApi.Attributes`](./Assimalign.Cohesion.OpenApi.Attributes/) | Attribute authoring model + intermediate metadata + mapper | model | Implemented |
-| [`Assimalign.Cohesion.OpenApi.SourceGeneration`](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/) | AOT-safe compile-time attribute discovery → metadata registry | — (build time; shipped inside attributes) | Implemented |
-| [`Assimalign.Cohesion.OpenApi.Generation`](./Assimalign.Cohesion.OpenApi.Generation/) | Metadata → version-targeted document generation | model, attributes | Implemented |
-| [`Assimalign.Cohesion.OpenApi.Versioning`](./Assimalign.Cohesion.OpenApi.Versioning/) | Version targets + 3.0↔3.1↔3.2 transforms with diagnostics | model, serialization, validation | Implemented |
-| [`Assimalign.Cohesion.OpenApi.Integration`](./Assimalign.Cohesion.OpenApi.Integration/) | Web/ApiManager integration contracts (endpoint source, description provider, import/export) | attributes, generation, serialization, versioning | Implemented |
+| [`Assimalign.Cohesion.OpenApi`](./Assimalign.Cohesion.OpenApi/) | Canonical version-aware model, capability matrix, `OpenApiNode` value tree | — | NuGet package |
+| [`Assimalign.Cohesion.OpenApi.Serialization`](./Assimalign.Cohesion.OpenApi.Serialization/) | Model ↔ node-tree mapping; JSON and YAML read/write | model, Content.Yaml | NuGet package |
+| [`Assimalign.Cohesion.OpenApi.Validation`](./Assimalign.Cohesion.OpenApi.Validation/) | Diagnostics model; structural, semantic, and version-placement rules | model, serialization | NuGet package |
+| [`Assimalign.Cohesion.OpenApi.Fluent`](./Assimalign.Cohesion.OpenApi.Fluent/) | Version-aware fluent authoring builders | model | NuGet package |
+| [`Assimalign.Cohesion.OpenApi.Attributes`](./Assimalign.Cohesion.OpenApi.Attributes/) | Attribute authoring model + intermediate metadata + mapper | model | NuGet package, carrying the source generator |
+| [`Assimalign.Cohesion.OpenApi.SourceGeneration`](../../analyzers/Assimalign.Cohesion.OpenApi.SourceGeneration/) | AOT-safe compile-time attribute discovery → metadata registry | — (build time; shipped inside attributes) | Inside the Attributes package |
+| [`Assimalign.Cohesion.OpenApi.Generation`](./Assimalign.Cohesion.OpenApi.Generation/) | Metadata → version-targeted document generation | model, attributes | NuGet package |
+| [`Assimalign.Cohesion.OpenApi.Versioning`](./Assimalign.Cohesion.OpenApi.Versioning/) | Version targets + 3.0↔3.1↔3.2 transforms with diagnostics | model, serialization, validation | NuGet package |
+| [`Assimalign.Cohesion.OpenApi.Integration`](./Assimalign.Cohesion.OpenApi.Integration/) | Web/ApiManager integration contracts (endpoint source, description provider, import/export) | model, attributes, generation, serialization, versioning | NuGet package |
+
+Every package in the table is implemented. The eight libraries are built and tested on Linux, Windows,
+and macOS by `.github/workflows/library-openapi.yml` and are listed in the release inventory
+(`installer/scripts/modules/CohesionPackaging.psm1`), so a release publishes each as its own package.
+The generator is built and tested by `.github/workflows/analyzers.yml` and reaches consumers only inside
+the Attributes package. No OpenApi package is a member of a shared framework, so an application, an
+`Sdk.Web` one included, references the packages it uses.
 
 The **compliance suite** — the vendored official OpenAPI example corpus, round-trip/format-equivalence
 and validation over every example, version-upgrade fixtures, and the
@@ -126,9 +144,12 @@ emission) and validation (field placement).
 
 ## Status and roadmap
 
-Wave 1 (model + JSON/YAML serialization + validation) is implemented; YAML rides the Cohesion
-`Content.Yaml` engine through the node-tree seam. Subsequent work covers fluent authoring, the
-attribute model and AOT source generator, version transforms, advanced authoring surfaces, an
-official example/upgrade compliance corpus, and Web/ApiManager integration contracts.
+The planned family is implemented: the model, JSON and YAML serialization (YAML rides the Cohesion
+`Content.Yaml` engine through the node-tree seam), validation, fluent and attribute authoring with the
+AOT source generator, document generation, version transforms, the advanced authoring surfaces, and the
+Web/ApiManager integration contracts, with the official example and upgrade compliance corpus in the
+root project's tests. All eight libraries and the generator are in the release. The first
+service-layer consumer is the Web OpenAPI adapter (#152), which builds on Integration, Attributes, and
+Generation.
 
 See each package's `docs/OVERVIEW.md` and `docs/DESIGN.md` for detail.

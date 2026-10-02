@@ -161,10 +161,16 @@ $script:CohesionReleaseLibrary = @(
     # libraries/ObjectValidation
     'libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation'
 
-    # libraries/OpenApi
+    # libraries/OpenApi. OpenApi.Attributes also carries the OpenApi.SourceGeneration analyzer under
+    # analyzers/dotnet/cs; the generator has no package of its own.
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi'
+    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Attributes'
+    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Fluent'
+    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Generation'
+    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Integration'
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Serialization'
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Validation'
+    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Versioning'
 
     # libraries/OpenTelemetry
     'libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry'
@@ -454,11 +460,6 @@ $script:CohesionCiMatrixExclusion = [ordered]@{
     'libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http2/Assimalign.Cohesion.Http.Connections.Examples.Http2.csproj' = 'Example project is not an independently shipped CI matrix entry.'
     'libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http3/Assimalign.Cohesion.Http.Connections.Examples.Http3.csproj' = 'Example project is not an independently shipped CI matrix entry.'
     'libraries/Http/Assimalign.Cohesion.Http.ServerSentEvents/examples/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse.csproj' = 'Example project is not an independently shipped CI matrix entry.'
-    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Attributes/src/Assimalign.Cohesion.OpenApi.Attributes.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
-    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Fluent/src/Assimalign.Cohesion.OpenApi.Fluent.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
-    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Generation/src/Assimalign.Cohesion.OpenApi.Generation.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
-    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Integration/src/Assimalign.Cohesion.OpenApi.Integration.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
-    'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Versioning/src/Assimalign.Cohesion.OpenApi.Versioning.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/Database/Assimalign.Cohesion.Database.Cache/src/Assimalign.Cohesion.Database.Cache.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/Database/Assimalign.Cohesion.Database.Cache/src/Assimalign.Cohesion.Database.Cache.Tests.csproj' = 'Stray duplicate csproj shares the Cache source directory; cleanup or an explicit packability fix is outside #944.'
     'resources/Database/Assimalign.Cohesion.Database.Replication/src/Assimalign.Cohesion.Database.Replication.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
