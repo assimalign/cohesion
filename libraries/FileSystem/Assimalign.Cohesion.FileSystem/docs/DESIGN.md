@@ -53,9 +53,13 @@ to a separate implementation step.
 ## Error model
 
 Every provider raises `FileSystemException` with one of the explicit codes
-in `FileSystemErrorCode`. The base class has `[DoesNotReturn]` static helpers
-(`ThrowFileNotFound`, `ThrowReadOnly`, etc.) so providers don't construct
-exceptions inline.
+in `FileSystemErrorCode`. `[DoesNotReturn]` static helpers
+(`ThrowFileNotFound`, `ThrowReadOnly`, etc.) keep providers from constructing
+exceptions inline. The original helpers are declared on the exception type. New
+ones are static extension members in `FileSystemExceptionExtensions`, following
+the repository rule against throw-helper types: `ThrowPathOutsideRoot` is the
+first. Both are called the same way (`FileSystemException.ThrowPathOutsideRoot(path)`),
+so the older helpers can move to the extension container without changing callers.
 
 Handle I/O also exposes the BCL argument, access, cancellation, and disposal exceptions.
 In particular, unsupported durable flush raises `NotSupportedException` as required by the

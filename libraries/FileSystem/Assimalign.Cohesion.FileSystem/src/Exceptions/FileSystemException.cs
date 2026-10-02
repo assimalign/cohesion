@@ -152,29 +152,6 @@ public class FileSystemException : SystemException
     }
 
     /// <summary>
-    /// Throws a <see cref="FileSystemException"/> with <see cref="FileSystemErrorCode.PathOutsideRoot"/>
-    /// indicating that <paramref name="path"/> resolves outside the file system's root directory.
-    /// </summary>
-    /// <param name="path">The path as the caller supplied it.</param>
-    /// <param name="innerException">Optional inner exception.</param>
-    /// <remarks>
-    /// The message names only the caller's path. It deliberately leaves out the root and the
-    /// resolved host location, which would disclose the host's directory layout to whoever sees
-    /// the message.
-    /// </remarks>
-    [DoesNotReturn]
-    public static void ThrowPathOutsideRoot(
-        [NotNull] FileSystemPath path,
-        [AllowNull] Exception? innerException = null)
-    {
-        var message = string.Format("The path resolves outside the file system root: '{0}'.", path);
-        throw new FileSystemException(
-            FileSystemErrorCode.PathOutsideRoot,
-            message,
-            innerException);
-    }
-
-    /// <summary>
     /// Throws a <see cref="FileSystemException"/> indicating that the file system has run out
     /// of space.
     /// </summary>
