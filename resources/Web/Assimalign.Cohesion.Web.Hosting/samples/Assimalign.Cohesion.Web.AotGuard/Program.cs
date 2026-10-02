@@ -100,6 +100,17 @@ application.MapPost("/items", async (GuardItem item, IHttpContext context) =>
 })
     .RequireCors("json-clients");
 
+// Handler return values (#1059): the generated thunk writes the value. A model is negotiated through the
+// source-generated JSON context, a string is text/plain, and null answers 204.
+application.MapGet("/values/{id:int}", (int id) => new GuardItem(id, $"value-{id}"));
+application.MapGet("/values/async/{id:int}", async (int id) =>
+{
+    await Task.Yield();
+    return new GuardItem(id, $"async-value-{id}");
+});
+application.MapGet("/greeting", () => "hello from the AOT guard");
+application.MapGet("/values/none", () => (GuardItem?)null);
+
 application.MapGet("/large", async (IHttpContext context) =>
 {
     context.Response.StatusCode = HttpStatusCode.Ok;

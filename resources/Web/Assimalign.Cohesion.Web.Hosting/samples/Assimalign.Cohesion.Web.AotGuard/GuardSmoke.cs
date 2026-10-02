@@ -58,6 +58,37 @@ internal static class GuardSmoke
             return response.StatusCode == HttpStatusCode.OK && body.Contains("posted-echo", StringComparison.Ordinal);
         });
 
+        failures += await CheckAsync("a returned model is written as negotiated JSON", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("values/5", cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK
+                && response.Content.Headers.ContentType?.MediaType == "application/json"
+                && body.Contains("value-5", StringComparison.Ordinal);
+        });
+
+        failures += await CheckAsync("an awaited return value is written", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("values/async/6", cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK && body.Contains("async-value-6", StringComparison.Ordinal);
+        });
+
+        failures += await CheckAsync("a returned string is written as text/plain", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("greeting", cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK
+                && response.Content.Headers.ContentType?.MediaType == "text/plain"
+                && body == "hello from the AOT guard";
+        });
+
+        failures += await CheckAsync("a null return answers 204", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("values/none", cancellationToken);
+            return response.StatusCode == HttpStatusCode.NoContent;
+        });
+
         failures += await CheckAsync("CORS answers a JSON preflight from its candidate endpoint's policy", async () =>
         {
             using var request = new HttpRequestMessage(HttpMethod.Options, "items");
