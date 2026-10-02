@@ -58,6 +58,25 @@ internal static class GuardSmoke
             return response.StatusCode == HttpStatusCode.OK && body.Contains("posted-echo", StringComparison.Ordinal);
         });
 
+        failures += await CheckAsync("validation rejects an invalid body with problem details", async () =>
+        {
+            using var content = new StringContent("{\"id\":4,\"name\":\"\"}", Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await client.PostAsync("items", content, cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.BadRequest
+                && response.Content.Headers.ContentType?.MediaType == "application/problem+json"
+                && body.Contains("\"Name\"", StringComparison.Ordinal);
+        });
+
+        failures += await CheckAsync("an uploaded file binds to a typed handler", async () =>
+        {
+            using var form = new MultipartFormDataContent();
+            form.Add(new ByteArrayContent("hello upload"u8.ToArray()), "file", "guard.txt");
+            using HttpResponseMessage response = await client.PostAsync("upload", form, cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK && body == "guard.txt:12";
+        });
+
         failures += await CheckAsync("a returned model is written as negotiated JSON", async () =>
         {
             using HttpResponseMessage response = await client.GetAsync("values/5", cancellationToken);

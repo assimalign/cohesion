@@ -25,6 +25,7 @@ using Assimalign.Cohesion.Web.Routing;
 using Assimalign.Cohesion.Web.SecurityHeaders;
 using Assimalign.Cohesion.Web.Serialization;
 using Assimalign.Cohesion.Web.StaticFiles;
+using Assimalign.Cohesion.Web.Validation;
 
 // NativeAOT guard for the Web area (#1052): a representative application composed the way a
 // customer's Program.cs composes one. Run plainly it serves like any Web application; run with
@@ -52,6 +53,7 @@ builder.AddAuthentication(options => options.DefaultScheme = JwtBearerDefaults.A
 builder.AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")));
 builder.AddAntiforgery();
 builder.AddOpenApi(options => options.Title = "Cohesion Web AOT guard");
+builder.AddValidation(validation => validation.AddProfile(new GuardItemProfile()));
 
 await using WebApplication application = builder.Build();
 
@@ -183,6 +185,14 @@ application.MapGet("/cookies", (IHttpContext context) =>
     context.Response.StatusCode = HttpStatusCode.NoContent;
     return Task.CompletedTask;
 });
+
+// File binding (#1061): an uploaded file binds to a typed handler under Http.Forms' limits. Form-bound
+// endpoints require antiforgery by default; this one opts out, since antiforgery has its own checks.
+application.MapPost("/upload", async (IHttpFormFile file, IHttpContext context) =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"{file.FileName}:{file.Length}"), context.RequestCancelled);
+}).DisableAntiforgery();
 
 // The OpenAPI document (#152): built once from the typed endpoints' metadata and the source-generated
 // JSON contracts, then served with an ETag.
