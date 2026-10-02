@@ -676,6 +676,18 @@ internal sealed partial class SqlPlanner
             || string.Equals(name, "CURRENT_TIME", StringComparison.OrdinalIgnoreCase)
             || string.Equals(name, "CURRENT_TIMESTAMP", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Binds an UPDATE: each assignment's target column and value, and the row filter.</summary>
+    /// <remarks>
+    /// UPDATE writes one row at a time, so no group exists for an aggregate to summarize: an
+    /// aggregate in an assignment or the WHERE filter fails while planning, as PostgreSQL's parse
+    /// analysis rejects one in <c>EXPR_KIND_UPDATE_SOURCE</c> and <c>EXPR_KIND_WHERE</c>
+    /// (<c>check_agglevels_and_constraints</c>, <c>src/backend/parser/parse_agg.c</c>, SQLSTATE
+    /// 42803). Without the check the statement succeeded over an empty table and failed per row
+    /// over a populated one. The search treats a subquery as opaque, since an aggregate there
+    /// summarizes the subquery's own rows; the dialect admits no subquery in UPDATE or DELETE yet
+    /// (<c>COHDBL001</c> at parse time).
+    /// </remarks>
+    /// <exception cref="DatabaseException">An assignment or the filter contains an aggregate.</exception>
     private SqlUpdatePlan PlanUpdate(SqlUpdateExpression update)
     {
         var table = ResolveTable(update.Table);
@@ -685,28 +697,51 @@ internal sealed partial class SqlPlanner
         foreach (var assignment in update.Assignments)
         {
             int ordinal = FindColumnOrdinal(table, assignment.ColumnName);
+            if (ContainsAggregate(assignment.Value))
+            {
+                throw new DatabaseException("Aggregate functions are not allowed in UPDATE SET.");
+            }
             ValidateExpression(assignment.Value, evaluator);
             assignments.Add((ordinal, assignment.Value));
         }
 
         if (update.Where is not null)
         {
+            RejectAggregateInDmlWhere(update.Where);
             ValidateExpression(update.Where, evaluator);
         }
 
         return new SqlUpdatePlan(table, assignments, update.Where);
     }
 
+    /// <summary>Binds a DELETE's row filter.</summary>
+    /// <remarks>An aggregate in the filter fails while planning, as in UPDATE (see <see cref="PlanUpdate"/>).</remarks>
+    /// <exception cref="DatabaseException">The filter contains an aggregate.</exception>
     private SqlDeletePlan PlanDelete(SqlDeleteExpression delete)
     {
         var table = ResolveTable(delete.Table);
 
         if (delete.Where is not null)
         {
+            RejectAggregateInDmlWhere(delete.Where);
             ValidateExpression(delete.Where, new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation));
         }
 
         return new SqlDeletePlan(table, delete.Where);
+    }
+
+    /// <summary>
+    /// Rejects an aggregate in an UPDATE or DELETE filter. Unlike a SELECT's WHERE, the message
+    /// suggests no HAVING, which these statements do not have.
+    /// </summary>
+    /// <param name="where">The statement's WHERE filter.</param>
+    /// <exception cref="DatabaseException">The filter contains an aggregate.</exception>
+    private static void RejectAggregateInDmlWhere(SqlExpression where)
+    {
+        if (ContainsAggregate(where))
+        {
+            throw new DatabaseException("Aggregate functions are not allowed in WHERE.");
+        }
     }
 
     private SqlCreateTablePlan PlanCreateTable(SqlCreateTableExpression create)

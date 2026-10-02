@@ -41,8 +41,8 @@ complete ISO SQL support; the boundaries below are part of the contract.
 |---|---|---|
 | `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two stored-table `INNER JOIN ... ON`; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES`, and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
-| `UPDATE` | Supported | multi-column `SET`, `WHERE` |
-| `DELETE` | Supported | optional `WHERE` |
+| `UPDATE` | Supported | multi-column `SET`, `WHERE`; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
+| `DELETE` | Supported | optional `WHERE`, without an aggregate |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). |
 | `DROP TABLE` | Supported | `IF EXISTS` |
@@ -779,6 +779,17 @@ from grouped columns. An ungrouped source column in a projection, `HAVING`, or
 `ORDER BY` is a planning error, even when the input is empty; the executor never
 chooses an arbitrary row's value. Aggregate arguments cannot contain another
 aggregate, and aggregates cannot occur in `WHERE`, `JOIN ... ON`, or `GROUP BY`.
+
+`UPDATE` and `DELETE` act on one row at a time, so an aggregate in `UPDATE ... SET`
+or in their `WHERE` fails while planning, as PostgreSQL rejects one in those clauses
+(SQLSTATE 42803), with `Aggregate functions are not allowed in UPDATE SET.` or
+`Aggregate functions are not allowed in WHERE.`. The statement fails
+the same way over an empty table as over a populated one and changes no row. Until
+the #1189 review it succeeded over an empty table and failed per row over a
+populated one, with an uncoded `... is not supported by the executor yet.` message.
+A wrong argument count is checked first, so `UPDATE t SET a = SUM()` reports
+`COHSQLE006`. (A subquery in either statement is outside the dialect and reports
+`COHDBL001` at parse time.)
 
 | Aggregate | NULL and empty-input behavior | Result type |
 |---|---|---|

@@ -329,6 +329,16 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   engine's internal table) is the one name list outside it. The table is a frozen
   dictionary over a fixed array: no reflection, no runtime code, a case-insensitive
   lookup that does not allocate.
+- **Aggregates in UPDATE and DELETE.** `PlanUpdate` and `PlanDelete` reject an
+  aggregate in an assignment or a `WHERE` filter while planning (`Aggregate
+  functions are not allowed in UPDATE SET.` / `... in WHERE.`), as `PlanSelectCore`
+  does for a SELECT's `WHERE` and `JOIN ... ON`, and as PostgreSQL's
+  `check_agglevels_and_constraints` does for `EXPR_KIND_UPDATE_SOURCE` and
+  `EXPR_KIND_WHERE` (`src/backend/parser/parse_agg.c`, SQLSTATE 42803). The statements
+  write one row at a time, so no group exists for the aggregate to summarize; without
+  the check they succeeded over an empty table and failed per row, uncoded, over a
+  populated one. The arity walk runs first, so a wrong count still reports
+  `COHSQLE006`.
 - **Access-path selection (rule-based; no cost model — the MVP planner
   contract).** The planner flattens the WHERE clause's top-level `AND`
   conjuncts into per-column sargable predicates — `column op comparand` where
