@@ -73,6 +73,35 @@ public class EndpointBindingTests
         (await group.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("group:6");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: conditional-access and static-form calls bind instead of reaching the placeholder")]
+    public async Task Binding_ConditionalAccessAndStaticFormCalls_ShouldBind()
+    {
+        // Arrange — each of these used to compile against the placeholder, which throws when mapping.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        factory.Application.UseRouting();
+
+        WebApplicationPipelineBuilderExtensions.MapGet(factory.Application, "/static/{id}", (int id) => $"static:{id}");
+        RouterGroupBuilderEndpointExtensions.MapGet(factory.Application.MapGroup("api"), "items/{id}", (int id) => $"group:{id}");
+
+        Hosting.WebApplication? application = factory.Application;
+        application?.MapGet("/conditional/{id}", (int id) => $"conditional:{id}");
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage staticForm = await client.GetAsync("/static/1", cancellation.Token);
+        using HttpResponseMessage groupStaticForm = await client.GetAsync("/api/items/2", cancellation.Token);
+        using HttpResponseMessage conditional = await client.GetAsync("/conditional/3", cancellation.Token);
+
+        // Assert
+        (await staticForm.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("static:1");
+        (await groupStaticForm.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("group:2");
+        (await conditional.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("conditional:3");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: route value binds to a typed parameter")]
     public async Task Binding_RouteValue_ShouldBindTypedParameter()
     {

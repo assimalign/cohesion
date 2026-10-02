@@ -6,6 +6,8 @@ using System.Linq;
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 
 using Shouldly;
 
@@ -116,6 +118,30 @@ public class EndpointBindingGeneratorTests
 
     private static string Describe(IEnumerable<Diagnostic> diagnostics)
         => string.Join(Environment.NewLine, diagnostics.Select(diagnostic => diagnostic.ToString()));
+
+    // Every call in the source that binds a typed Map* placeholder (an overload taking System.Delegate)
+    // must be rewritten by an interceptor in the output compilation; otherwise it would compile against
+    // the placeholder, which throws when the endpoint is mapped.
+    private static void AssertEveryTypedCallSiteIsIntercepted(GeneratorRun run)
+    {
+        SyntaxTree source = run.Output.SyntaxTrees.First();
+        SemanticModel model = run.Output.GetSemanticModel(source);
+        int typedCallSites = 0;
+
+        foreach (InvocationExpressionSyntax invocation in source.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            if (model.GetOperation(invocation) is not IInvocationOperation operation
+                || !operation.TargetMethod.Parameters.Any(parameter => parameter.Type.ToDisplayString() == "System.Delegate"))
+            {
+                continue;
+            }
+
+            typedCallSites++;
+            model.GetInterceptorMethod(invocation).ShouldNotBeNull($"'{invocation}' is not intercepted");
+        }
+
+        typedCallSites.ShouldBeGreaterThan(0);
+    }
 
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: route parameter emits an interceptor")]
     public void Generator_RouteParameter_EmitsInterceptor()
@@ -471,6 +497,7 @@ public class EndpointBindingGeneratorTests
         run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
         run.Generated.ShouldContain("Intercept_11(", Case.Sensitive);
         run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        AssertEveryTypedCallSiteIsIntercepted(run);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a method-group handler is intercepted like a lambda")]
@@ -525,6 +552,7 @@ public class EndpointBindingGeneratorTests
         run.Generated.ShouldContain("global::Assimalign.Cohesion.Web.IWebApplicationPipelineBuilder, global::Assimalign.Cohesion.Web.IWebApplication", Case.Sensitive);
         run.Generated.ShouldNotContain("TApp", Case.Sensitive);
         run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        AssertEveryTypedCallSiteIsIntercepted(run);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Receivers: a type-parameter group receiver is intercepted over IRouterGroupBuilder")]
@@ -545,6 +573,71 @@ public class EndpointBindingGeneratorTests
         run.Generated.ShouldContain("Intercept_0(this global::Assimalign.Cohesion.Web.Routing.IRouterGroupBuilder builder", Case.Sensitive);
         run.Generated.ShouldNotContain("TGroup", Case.Sensitive);
         run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        AssertEveryTypedCallSiteIsIntercepted(run);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Receivers: conditional-access calls are intercepted like ordinary calls")]
+    public void Generator_ConditionalAccessCalls_AreIntercepted()
+    {
+        // Act — app?.MapGet is a member binding, not a member access.
+        GeneratorRun run = Generate(
+            """
+            WebApplication? maybe = app;
+            maybe?.MapGet("/items/{id}", (int id) => "item");
+            maybe?.MapGroup("api")?.MapPost("items", (Widget widget) => widget);
+            """);
+
+        // Assert — both are intercepted over the receiver the extension declares, and compile.
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("Intercept_0(this global::Assimalign.Cohesion.Web.Hosting.WebApplication builder", Case.Sensitive);
+        run.Generated.ShouldContain("Intercept_1(this global::Assimalign.Cohesion.Web.Routing.IRouterGroupBuilder builder", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        AssertEveryTypedCallSiteIsIntercepted(run);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Receivers: static-form calls are intercepted")]
+    public void Generator_StaticFormCalls_AreIntercepted()
+    {
+        // Act — the static form passes the receiver as the first argument.
+        GeneratorRun run = Generate(
+            """
+            WebApplicationPipelineBuilderExtensions.MapGet(app, "/items/{id}", (int id) => "item");
+            WebApplicationPipelineBuilderExtensions.MapGet<WebApplication>(app, "/typed/{id}", (int id) => id);
+            WebApplicationPipelineBuilderExtensions.Map(app, HttpMethod.Put, "/put/{id}", (int id, Widget widget) => widget);
+            RouterGroupBuilderEndpointExtensions.MapPost(app.MapGroup("api"), "items", (Widget widget) => widget);
+            """,
+            members: """
+                public static void Module<TApp>(TApp app) where TApp : IWebApplicationPipelineBuilder, IWebApplication
+                {
+                    WebApplicationPipelineBuilderExtensions.MapDelete(app, "/module/{id}", (int id) => "deleted");
+                }
+            """);
+
+        // Assert — the receiver comes from the implementation's first parameter, generic for TApp.
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("(this global::Assimalign.Cohesion.Web.Hosting.WebApplication builder, string pattern", Case.Sensitive);
+        run.Generated.ShouldContain("(this global::Assimalign.Cohesion.Web.Hosting.WebApplication builder, global::Assimalign.Cohesion.Http.HttpMethod method, string pattern", Case.Sensitive);
+        run.Generated.ShouldContain("(this global::Assimalign.Cohesion.Web.Routing.IRouterGroupBuilder builder, string pattern", Case.Sensitive);
+        run.Generated.ShouldContain("<TBuilder>(this TBuilder builder, string pattern", Case.Sensitive);
+        run.Generated.ShouldNotContain("WebApplicationPipelineBuilderExtensions builder", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+        AssertEveryTypedCallSiteIsIntercepted(run);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Receivers: a delegate instance wrapped in a delegate creation reports COHWEB0001")]
+    public void Generator_WrappedDelegateInstance_ReportsCohweb0001()
+    {
+        // Act — new Func<...>(existing) is a delegate creation, but over an instance, not a lambda or method.
+        GeneratorRun run = Generate(
+            """
+            System.Func<int, string> existing = id => "item";
+            app.MapGet("/items/{id}", new System.Func<int, string>(existing));
+            """);
+
+        // Assert — reported rather than left to the throwing placeholder.
+        Diagnostic diagnostic = run.WithId("COHWEB0001").ShouldHaveSingleItem();
+        run.TextAt(diagnostic).ShouldBe("new System.Func<int, string>(existing)");
+        run.Generated.ShouldNotContain("Intercept_", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Receivers: a concrete receiver keeps a non-generic interceptor")]

@@ -15,9 +15,17 @@ consuming library bundles the DLL under `analyzers/dotnet/cs/` (see delivery bel
 ## What It Intercepts
 
 `EndpointBindingGenerator` is an `IIncrementalGenerator`. Its syntax predicate cheaply matches
-`Map`/`MapGet`/`MapPost`/`MapPut`/`MapPatch`/`MapDelete` invocations; the semantic transform then keeps
-only the calls that resolve to a typed overload — one whose handler parameter is `System.Delegate`
-(the `WebApplicationMiddleware` overloads are registered verbatim and ignored).
+`Map`/`MapGet`/`MapPost`/`MapPut`/`MapPatch`/`MapDelete` invocations in every form a call can take: a
+member access (`app.MapGet(...)`), a member binding under a conditional access (`app?.MapGet(...)`),
+and the static form, which is a member access on the extension class
+(`WebApplicationPipelineBuilderExtensions.MapGet(app, ...)`, `RouterGroupBuilderEndpointExtensions.MapGet(group, ...)`).
+Before #1175 the predicate matched only a member access and the transform read the receiver from it,
+so a conditional-access call was never seen and a static-form call produced an interceptor typed over
+the static class; both reached the throwing placeholder or broke the build. The semantic transform then
+keeps only the calls that resolve to a typed overload — one whose handler parameter is `System.Delegate`
+(the `WebApplicationMiddleware` overloads are registered verbatim and ignored). A static-form call binds
+the extension block's implementation method directly, so its receiver is that method's first parameter
+rather than the block's extension parameter; both resolve to the same interceptor signature.
 
 The transform reads the call through the compiler's operation tree (`IInvocationOperation`), not the
 symbol API. Two reasons. A method group converted to `System.Delegate` has no symbol of its own (the
@@ -166,7 +174,7 @@ emits no interceptor; the others in the compilation are still emitted.
 
 | ID | Condition |
 | --- | --- |
-| COHWEB0001 | The handler is a delegate instance, not a lambda or method group: no `IDelegateCreationOperation` |
+| COHWEB0001 | The handler is a delegate instance, not a lambda or method group: no `IDelegateCreationOperation`, or one whose target is itself a delegate instance (`new Func<int, string>(existing)`, silently skipped before #1175) |
 | COHWEB0002 | The return type cannot be written (`async void`, a stream, an awaitable that is not `Task`/`ValueTask`, an anonymous type, a ref struct, `dynamic`, a pointer, a by-reference return, a type parameter, an inaccessible type) |
 | COHWEB0003 | A parameter cannot be bound: a scalar source on a complex type, a by-reference modifier, a default value or `params` array that forced an anonymous delegate type, or a type generated code cannot name or bind |
 | COHWEB0004 | A second request-body parameter |
@@ -241,7 +249,9 @@ source and the reported diagnostics. A case models an application with or withou
 or `Web.Serialization` by adding or withholding that assembly from the compilation's references.
 Cases compile the generated code with interceptors enabled (the antiforgery requirement, every
 supported return shape, method groups), and every `COHWEB` diagnostic has a case that asserts its
-severity, message and location. Runtime behavior — real requests through every binding source, the
+severity, message and location. The call-shape cases (generic, conditional-access and static-form
+receivers) also ask the output compilation, through `SemanticModel.GetInterceptorMethod`, whether
+every call that binds a typed placeholder is intercepted, so no shape can silently fall through to it. Runtime behavior — real requests through every binding source, the
 400/415 outcomes, injection, every return shape with its 204/406/fault outcomes, and the description
 metadata read back from the built route table — is proven end-to-end in
 `Assimalign.Cohesion.Web.Api/tests` against the in-memory `WebApplicationTestFactory`;

@@ -90,13 +90,25 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         context.RegisterImplementationSourceOutput(endpoints, static (spc, models) => Emit(spc, models));
     }
 
+    // A Map* call in any form that binds a typed overload: app.MapGet(...), app?.MapGet(...) (the
+    // invocation's expression is then a member binding), and the static form
+    // WebApplicationPipelineBuilderExtensions.MapGet(app, ...), which is a member access on the type.
     private static bool IsCandidate(SyntaxNode node)
-        => node is InvocationExpressionSyntax
+    {
+        if (node is not InvocationExpressionSyntax { ArgumentList.Arguments.Count: >= 2 } invocation)
         {
-            Expression: MemberAccessExpressionSyntax memberAccess,
-            ArgumentList.Arguments.Count: >= 2
+            return false;
         }
-        && _verbs.Contains(memberAccess.Name.Identifier.Text);
+
+        SimpleNameSyntax? name = invocation.Expression switch
+        {
+            MemberAccessExpressionSyntax memberAccess => memberAccess.Name,
+            MemberBindingExpressionSyntax memberBinding => memberBinding.Name,
+            _ => null
+        };
+
+        return name is not null && _verbs.Contains(name.Identifier.Text);
+    }
 
     // ---------------------------------------------------------------------
     // Analysis
@@ -223,7 +235,19 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             _ => null
         };
 
-        if (handler is null || creation.Type is not INamedTypeSymbol { DelegateInvokeMethod: { } invoke } delegateType)
+        if (handler is null)
+        {
+            // new Func<int, string>(existing) wraps a delegate instance: its parameters are as invisible
+            // as the instance's own. Anything else is a creation the compiler already rejects.
+            if (creation.Target is IInvalidOperation || creation.Target.Type is null || creation.Target.Type.TypeKind != TypeKind.Delegate)
+            {
+                return null;
+            }
+
+            return Fail(DiagnosticInfo.Create(EndpointBindingDiagnostics.HandlerNotLambdaOrMethodGroup, handlerLocation, endpoint));
+        }
+
+        if (creation.Type is not INamedTypeSymbol { DelegateInvokeMethod: { } invoke } delegateType)
         {
             return null;
         }
@@ -485,21 +509,32 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     }
 
     // Resolves the receiver parameter of the intercepted Map* call and the shape of the interceptor that
-    // matches it. A call in extension form binds an extension-block member: its receiver is the block's
-    // extension parameter (after type substitution), and the compiler emits the member as the associated
-    // static implementation method, which is the signature the interceptor must match.
+    // matches it. A call in extension form (app.MapGet, or app?.MapGet) binds an extension-block member:
+    // its receiver is the block's extension parameter (after type substitution), and the compiler emits
+    // the member as the associated static implementation method, which is the signature the interceptor
+    // must match. A call in static form (WebApplicationPipelineBuilderExtensions.MapGet(app, ...)) binds
+    // that implementation method directly, and its first parameter is the receiver.
     private static bool TryGetReceiver(IMethodSymbol method, Compilation compilation, out ITypeSymbol receiverType, out InterceptorShape shape)
     {
         receiverType = null!;
         shape = default;
+        IMethodSymbol implementation;
 
-        if (method.ContainingType is not { IsExtension: true, ExtensionParameter: { } extensionParameter }
-            || method.AssociatedExtensionImplementation is not { } implementation)
+        if (method.ContainingType is { IsExtension: true, ExtensionParameter: { } extensionParameter }
+            && method.AssociatedExtensionImplementation is { } associated)
+        {
+            receiverType = extensionParameter.Type;
+            implementation = associated;
+        }
+        else if (method is { IsStatic: true, IsExtensionMethod: true, Parameters.Length: > 0 })
+        {
+            receiverType = method.Parameters[0].Type;
+            implementation = method;
+        }
+        else
         {
             return false;
         }
-
-        receiverType = extensionParameter.Type;
 
         // Generated code lives in a file-local class of another namespace, so it names the receiver only
         // when the type is accessible and closed. Any other receiver — a type parameter

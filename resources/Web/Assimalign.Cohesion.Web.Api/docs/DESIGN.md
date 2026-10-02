@@ -27,7 +27,10 @@ for it (#1059, see "Return Values").
   or a method group. Their bodies **throw** `NotSupportedException`: they are placeholders the
   generator rewrites. A handler the generator cannot rewrite is a `COHWEB` compile error (see
   "Compile-Time Diagnostics"), so reaching a placeholder at run time means only that the generator was
-  not wired in (missing `CohesionAnalyzerReference` or `InterceptorsNamespaces` allow-list).
+  not wired in (missing `CohesionAnalyzerReference` or `InterceptorsNamespaces` allow-list). Every call
+  form reaches the generator (#1175): `app.MapGet(...)`, a conditional access `app?.MapGet(...)`, and
+  the static form `WebApplicationPipelineBuilderExtensions.MapGet(app, ...)` (or
+  `RouterGroupBuilderEndpointExtensions.MapGet(group, ...)`).
 
 All `Map*` overloads compose on the router: they resolve the `IRouterFeature` and register a `Route`,
 so an application still calls `AddRouting()` (builder) and `UseRouting()` (pipeline) exactly as it
@@ -223,7 +226,7 @@ parameter list and arrow, or the method group) or at the offending lambda parame
 
 | ID | Reported when | What to write instead |
 | --- | --- | --- |
-| COHWEB0001 | The handler is a delegate instance (a `Func<...>` variable, a `Delegate`, a call that returns one), so its parameter names and attributes are not visible | A lambda or a method group |
+| COHWEB0001 | The handler is a delegate instance (a `Func<...>` variable, a `Delegate`, a call that returns one, or an instance wrapped in `new Func<...>(instance)`), so its parameter names and attributes are not visible | A lambda or a method group |
 | COHWEB0002 | The return type cannot be written: `async void`, a stream, an anonymous type, a ref struct, `dynamic`, a pointer, an awaitable other than `Task`/`ValueTask` (or an awaited value that is itself awaitable), a by-reference return, a generic type parameter, or a private, protected or file-local type | What the message names: `async Task`, copying the stream to the body, a named record |
 | COHWEB0003 | A parameter cannot be bound: a complex type from `[FromRoute]`/`[FromQuery]`/`[FromHeader]`/`[FromForm]`, a `ref`/`out`/`in` modifier, a default value or a `params` array (both give the handler a compiler-generated delegate type), a ref struct, `dynamic`, a pointer, a generic type parameter, or a type generated code cannot access | What the message names: `[FromBody]`, a nullable parameter in place of a default value |
 | COHWEB0004 | More than one parameter binds from the request body | One body model; the other values from the route, query string or headers |
