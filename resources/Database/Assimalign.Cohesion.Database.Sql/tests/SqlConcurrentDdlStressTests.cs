@@ -40,8 +40,10 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// ADD, which relocates the whole grown record, meets a page with less than a record free
 /// but more than the growth — the state the old relocation wrote past the page from — and
 /// the catalog has to move the record to another page. Each case keeps going past its
-/// duration until <see cref="minimumAdds"/> ADD statements have succeeded, so even a
-/// slow file-backed run crosses that state that many times. While it catches up, new
+/// duration until <see cref="minimumAdds"/> ADD statements have succeeded and a writer has
+/// committed at least one row, so even a slow file-backed run crosses that state that many
+/// times and a slow CI runner still proves inserts land; until a row commits, the DDL
+/// pauses, and the assertion names the commonest INSERT failures. While it catches up, new
 /// inserts wait for each running ALTER: the lock manager lets compatible requests pass a
 /// waiting exclusive one, and sustained file-backed inserts can otherwise starve DDL for
 /// tens of seconds.
@@ -100,8 +102,10 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
         var committed = new ConcurrentDictionary<int, byte>();
         var attempted = new ConcurrentDictionary<int, byte>();
         var addFailures = new ConcurrentDictionary<string, int>();
+        var insertFailures = new ConcurrentDictionary<string, int>();
         int alterCycles = 0;
         int addsSucceeded = 0;
+        int positiveCommits = 0;
         var duration = StressDuration;
 
         await using (var engine = SqlDatabaseEngine.Create(NewOptions(fileBacked)))
@@ -134,9 +138,13 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
                     // Every 50th id is negative, so a CHECK (id > 0) backfill meets rows to refuse.
                     int id = (i % 50 == 0 ? -1 : 1) * ((writer * 10_000_000) + i);
                     attempted[id] = 0;
-                    if (await TryExecuteAsync(session, $"INSERT INTO t (id, qty) VALUES ({id}, {Quantity(id)})"))
+                    if (await TryExecuteAsync(session, $"INSERT INTO t (id, qty) VALUES ({id}, {Quantity(id)})", insertFailures))
                     {
                         committed[id] = 0;
+                        if (id > 0)
+                        {
+                            Interlocked.Increment(ref positiveCommits);
+                        }
                     }
 
                     if (random.Next(8) == 0)
@@ -173,10 +181,19 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
                     }
 
                     // Run for the duration, then on until enough ADDs have relocated the
-                    // record, within a hard limit.
+                    // record and at least one writer has committed a row, within a hard
+                    // limit. On a slow CI runner two seconds of DDL churn can pass before any
+                    // insert lands; past the duration the DDL pauses until one does.
                     while (elapsed.Elapsed < duration
-                        || (Volatile.Read(ref addsSucceeded) < minimumAdds && elapsed.Elapsed < duration + catchUpLimit))
+                        || ((Volatile.Read(ref addsSucceeded) < minimumAdds || Volatile.Read(ref positiveCommits) == 0)
+                            && elapsed.Elapsed < duration + catchUpLimit))
                     {
+                        if (elapsed.Elapsed >= duration && Volatile.Read(ref positiveCommits) == 0)
+                        {
+                            await Task.Delay(5);
+                            continue;
+                        }
+
                         int cycle = Interlocked.Increment(ref alterCycles);
                         if (ddl == "column" || (ddl == "mixed" && random.Next(2) == 0))
                         {
@@ -223,7 +240,9 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
             addsSucceeded.ShouldBeGreaterThanOrEqualTo(minimumAdds,
                 $"only {addsSucceeded} ADDs succeeded in {alterCycles} ALTER cycles; ADDs that every row satisfies failed with: "
                 + string.Join("; ", addFailures.OrderByDescending(failure => failure.Value).Take(3).Select(failure => $"{failure.Value}x {failure.Key}")));
-            committed.Keys.Count(id => id > 0).ShouldBeGreaterThan(0);
+            committed.Keys.Count(id => id > 0).ShouldBeGreaterThan(0,
+                $"no positive row committed in {elapsed.Elapsed}; INSERT failures: "
+                + string.Join("; ", insertFailures.OrderByDescending(failure => failure.Value).Take(3).Select(failure => $"{failure.Value}x {failure.Key}")));
             await using var check = await database.CreateSessionAsync();
             await AssertRowsAsync(check, committed, attempted, ddl);
         }
