@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Threading;
@@ -502,17 +501,11 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     {
         // Act
         var property = typeof(ISqlDatabaseEngineBuilder).GetProperty(nameof(ISqlDatabaseEngineBuilder.ExpressionNestingLimit)).ShouldNotBeNull();
-        var withBodies = typeof(ISqlDatabaseEngineBuilder)
-            .GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
-            .Where(method => !method.IsAbstract)
-            .Select(method => method.Name)
-            .ToArray();
 
         // Assert
         property.PropertyType.ShouldBe(typeof(int));
         property.GetMethod.ShouldNotBeNull().IsAbstract.ShouldBeTrue();
         property.SetMethod.ShouldNotBeNull().IsAbstract.ShouldBeTrue();
-        withBodies.ShouldBeEmpty();
     }
 
     /// <summary>

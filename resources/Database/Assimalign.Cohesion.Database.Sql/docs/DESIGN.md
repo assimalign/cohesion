@@ -478,10 +478,10 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   `SqlDatabaseEngine.Create` and `SqlDatabaseEngineFactory.Create` throw, so a builder
   that builds through `SqlDatabaseEngine.Create` needs no range check of its own. A
   parse that runs out of stack (`SQL0007`) is not a syntax error: `FromSql` raises
-  it as `COHSQLE004`, like any other walk out of stack. Text the engine generates rather than receives (persisted definitions,
-  schema-migration statements) parses at the 4096 ceiling: the executing engine's
-  limit still applies to a migration's requests, and a definition stored under one
-  engine's limit opens under any other.
+  it as `COHSQLE004`, like any other walk out of stack. Text the engine generates
+  rather than receives (persisted definitions, schema-migration statements) parses
+  at the 4096 ceiling: the executing engine's limit still applies to a migration's
+  requests, and a definition stored under one engine's limit opens under any other.
 - **Walkers iterate chains.** Every walker reaches an `AND`/`OR` chain's terms
   through `SqlPlanner.Children` or iterates `Operands` itself, so it recurses once
   per level of the tree and never once per term: the evaluator's `EvaluateLogical`
