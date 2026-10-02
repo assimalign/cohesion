@@ -9,7 +9,10 @@ namespace Assimalign.Cohesion.Http;
 /// <c>application/x-www-form-urlencoded</c> or <c>multipart/form-data</c>
 /// request body. Every limit maps to a defence against unbounded memory or CPU
 /// use by a hostile or malformed body; exceeding one throws an
-/// <see cref="InvalidDataException"/> mid-parse.
+/// <see cref="InvalidDataException"/> mid-parse whose
+/// <see cref="System.Exception.InnerException"/> is an
+/// <see cref="HttpFormLimitExceededException"/>, so a caller can tell a body over a limit
+/// (<c>413 Content Too Large</c>) from a malformed one (<c>400 Bad Request</c>) by type.
 /// </summary>
 public class HttpFormOptions
 {

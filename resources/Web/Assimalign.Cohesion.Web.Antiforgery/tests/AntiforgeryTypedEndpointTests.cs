@@ -227,6 +227,81 @@ public class AntiforgeryTypedEndpointTests
         (await response.Content.ReadAsStringAsync(cancellationToken)).ShouldBe("cohesion");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Antiforgery] - Typed: A file-bound endpoint should require antiforgery like a form-bound one")]
+    public async Task MapPost_FileBound_ShouldRequireToken()
+    {
+        // Arrange — an uploaded file is form content a cross-site page can post too.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = CreateFactory(useAntiforgery: true);
+        factory.Application.MapPost("/uploads", (IHttpFormFile upload) => upload.FileName);
+
+        using HttpClient client = factory.CreateClient();
+        string requestToken = await FetchTokenAsync(client, cancellationToken);
+
+        using MultipartFormDataContent anonymous = new() { { new ByteArrayContent(Encoding.UTF8.GetBytes("data")), "upload", "report.txt" } };
+        using MultipartFormDataContent signed = new()
+        {
+            { new ByteArrayContent(Encoding.UTF8.GetBytes("data")), "upload", "report.txt" },
+            { new StringContent(requestToken), "__RequestVerificationToken" }
+        };
+
+        // Act
+        using HttpResponseMessage rejected = await client.PostAsync("/uploads", anonymous, cancellationToken);
+        using HttpResponseMessage accepted = await client.PostAsync("/uploads", signed, cancellationToken);
+
+        // Assert
+        rejected.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
+        accepted.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await accepted.Content.ReadAsStringAsync(cancellationToken)).ShouldBe("report.txt");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Antiforgery] - Typed: A form over the size limit should be answered 413 when its token is read from the form")]
+    public async Task MapPost_FormOverLimitWithFormToken_ShouldAnswer413()
+    {
+        // Arrange — the application limits each multipart section to 16 bytes. The token travels in the
+        // form, so the middleware parses the form before the endpoint does.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+        factory.Builder.AddAntiforgery();
+        factory.Application.Use(async (context, next) =>
+        {
+            context.Features.Set<IHttpFormFeature>(new HttpFormFeature(context.Request, new HttpFormOptions { MultipartBodyLengthLimit = 16 }));
+            await next.Invoke(context);
+        });
+        factory.Application.UseRouting();
+        factory.Application.UseAntiforgery();
+        MapTokenEndpoint(factory.Application);
+
+        int invocations = 0;
+        factory.Application.MapPost("/uploads", (IHttpFormFile upload) =>
+        {
+            invocations++;
+            return upload.FileName;
+        });
+
+        using HttpClient client = factory.CreateClient();
+        string requestToken = await FetchTokenAsync(client, cancellationToken);
+
+        using MultipartFormDataContent form = new()
+        {
+            { new ByteArrayContent(Encoding.UTF8.GetBytes(new string('x', 64))), "upload", "large.bin" },
+            { new StringContent(requestToken), "__RequestVerificationToken" }
+        };
+
+        // Act
+        using HttpResponseMessage response = await client.PostAsync("/uploads", form, cancellationToken);
+
+        // Assert — the client must send less whatever its token says: RFC 9110 §15.5.14, not a 400.
+        response.StatusCode.ShouldBe(NetHttpStatusCode.RequestEntityTooLarge);
+        response.Content.Headers.ContentType?.MediaType.ShouldBe("application/problem+json");
+        invocations.ShouldBe(0);
+    }
+
     private static WebApplicationTestFactory CreateFactory(bool useAntiforgery)
     {
         WebApplicationTestFactory factory = new();

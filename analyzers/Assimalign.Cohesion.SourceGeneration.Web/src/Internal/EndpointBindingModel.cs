@@ -27,7 +27,13 @@ internal enum BindingSource
     /// elsewhere, or a non-literal pattern), so a parameter the visible template does not name may still
     /// be a route parameter.
     /// </summary>
-    RouteOrQuery
+    RouteOrQuery,
+
+    /// <summary>
+    /// Uploaded files of a <c>multipart/form-data</c> body, read from the same parsed form as
+    /// <see cref="Form"/> fields: one file by field name, the files sent under one field name, or every file.
+    /// </summary>
+    FormFile
 }
 
 /// <summary>How a raw source value is converted to the parameter's type.</summary>
@@ -39,7 +45,16 @@ internal enum ConversionKind
     NullableParsable,
     NullableEnum,
     Complex,
-    Injection
+    Injection,
+
+    /// <summary>The first <c>IHttpFormFile</c> uploaded under the binding key.</summary>
+    File,
+
+    /// <summary>Every <c>IHttpFormFile</c> uploaded under the binding key, as an array.</summary>
+    FileList,
+
+    /// <summary>The <c>IHttpFormFileCollection</c> of every uploaded file, whatever its field name.</summary>
+    FileCollection
 }
 
 /// <summary>The shape of the handler's return: what the thunk awaits, and whether a value comes back.</summary>
@@ -147,6 +162,11 @@ internal readonly record struct InterceptorShape(
 /// <c>Nullable&lt;T&gt;</c> — when the consuming compilation can name the validation entry point
 /// (<c>Assimalign.Cohesion.Web.Validation.HttpContextValidationExtensions</c>); empty otherwise.
 /// </para>
+/// <para>
+/// <c>ReportsFormLimit</c> is set for a form-bound endpoint when the consuming compilation can name
+/// <c>Assimalign.Cohesion.Http.HttpFormLimitExceededException</c>, the cause a form parse records when the
+/// body exceeds a configured limit; the thunk then answers that failure with <c>413</c>.
+/// </para>
 /// </remarks>
 internal readonly record struct EndpointBinding(
     string InterceptsAttribute,
@@ -165,7 +185,8 @@ internal readonly record struct EndpointBinding(
     int BodyParameterIndex,
     bool UsesForm,
     bool RequiresAntiforgery,
-    string ValidatedBodyType) : IEquatable<EndpointBinding>;
+    string ValidatedBodyType,
+    bool ReportsFormLimit) : IEquatable<EndpointBinding>;
 
 /// <summary>
 /// The outcome of analyzing one typed <c>Map*</c> call site: the binding to emit, or the diagnostics that

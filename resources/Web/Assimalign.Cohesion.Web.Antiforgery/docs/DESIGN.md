@@ -113,8 +113,12 @@ flowchart TD
   store uses for the same reason.
 - **The form is parsed once.** `context.ReadFormAsync` caches the parse on the exchange's
   `IHttpFormFeature`, so a form-bound typed endpoint binds from the same parse instead of a consumed
-  body. A body the form reader rejects (`InvalidDataException`: malformed, or over the form limits)
-  carries no token the server can verify, and is a validation failure.
+  body. A malformed body the form reader rejects (`InvalidDataException`) carries no token the server
+  can verify, and is a validation failure (`400`). A body over a configured Http.Forms limit — the
+  reader's `InvalidDataException` with an `HttpFormLimitExceededException` as its cause — is answered
+  `413 Content Too Large` instead (RFC 9110 §15.5.14, #1061): the client must send less whatever its
+  token, and the endpoint's own form binding answers the same body the same way, so the status does not
+  depend on whether the token travels in the header or the form.
 - **Validation** is `IHttpAntiforgery.IsRequestValidAsync` on the exchange's service
   (`context.Antiforgery`): the one `AddAntiforgery` registered, unless a middleware replaced it for the
   exchange. The service that validates is therefore always the one handlers mint with.
@@ -159,8 +163,9 @@ route table is built, in any call order.
 
 ## The generator integration
 
-Every typed endpoint with a `[FromForm]` parameter requires antiforgery: a form post is the request a
-cross-site page can forge. The endpoint-binding generator chains
+Every typed endpoint with a `[FromForm]` parameter or an uploaded-file parameter (`IHttpFormFile`, a
+file sequence, `IHttpFormFileCollection`; #1061) requires antiforgery: a form post, files included, is
+the request a cross-site page can forge. The endpoint-binding generator chains
 `.WithMetadata(global::Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata.Required)` onto the route
 its interceptor maps.
 
@@ -262,7 +267,8 @@ The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md
 | Condition | Outcome |
 | --- | --- |
 | Missing, malformed, forged, or unbound token on a protected unsafe request | `400` `application/problem+json`; the endpoint does not run |
-| Form body the reader rejects, with no token header | `400` `application/problem+json` |
+| Malformed form body, with no token header | `400` `application/problem+json` |
+| Form body over a configured Http.Forms limit, with no token header | `413` `application/problem+json` |
 | Rejection after the response head was committed | The exchange is aborted |
 | A protected endpoint dispatched without `UseAntiforgery` having processed it | `InvalidOperationException` at dispatch |
 | `UseAntiforgery` without `AddAntiforgery` | `InvalidOperationException` when the pipeline is built |

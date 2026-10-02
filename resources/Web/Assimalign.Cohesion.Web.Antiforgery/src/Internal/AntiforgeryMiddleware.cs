@@ -38,6 +38,7 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
     internal const string Verb = "UseAntiforgery";
 
     private const string rejectionDetail = "The antiforgery token was missing or invalid.";
+    private const string tooLargeDetail = "The request form exceeds a configured size limit, so its antiforgery token could not be read.";
 
     private readonly AntiforgeryFeature _registration;
 
@@ -54,10 +55,10 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
         {
             if (endpoint.Metadata.GetMetadata<AntiforgeryMetadata>() is { RequiresValidation: true }
                 && !IsExempt(context.Request.Method)
-                && !await IsValidAsync(context).ConfigureAwait(false))
+                && await ValidateAsync(context).ConfigureAwait(false) is { } rejection)
             {
                 // Answer the request here; the endpoint does not run.
-                await RejectAsync(context).ConfigureAwait(false);
+                await RejectAsync(context, rejection).ConfigureAwait(false);
                 return;
             }
 
@@ -70,7 +71,9 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
         await next.Invoke(context).ConfigureAwait(false);
     }
 
-    private async Task<bool> IsValidAsync(IHttpContext context)
+    // Validates the request's token pair: null when the request may proceed, otherwise the status it is
+    // rejected with.
+    private async Task<HttpStatusCode?> ValidateAsync(IHttpContext context)
     {
         IHttpRequest request = context.Request;
 
@@ -82,16 +85,22 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
                 // parse instead of reading a consumed body.
                 await context.ReadFormAsync(context.RequestCancelled).ConfigureAwait(false);
             }
+            catch (InvalidDataException exception) when (exception.InnerException is HttpFormLimitExceededException)
+            {
+                // A form over a configured Http.Forms limit is answered as the endpoint's own form binding
+                // answers it, 413 Content Too Large (RFC 9110 §15.5.14): the client must send less, whatever
+                // its token.
+                return HttpStatusCode.RequestEntityTooLarge;
+            }
             catch (InvalidDataException)
             {
-                // A body the form reader rejects (malformed, or over the form limits) carries no token the
-                // server can verify.
-                return false;
+                // A malformed body carries no token the server can verify.
+                return HttpStatusCode.BadRequest;
             }
         }
 
         IHttpAntiforgery antiforgery = context.Antiforgery ?? _registration.Antiforgery;
-        return await antiforgery.IsRequestValidAsync(context).ConfigureAwait(false);
+        return await antiforgery.IsRequestValidAsync(context).ConfigureAwait(false) ? null : HttpStatusCode.BadRequest;
     }
 
     private bool HasHeaderToken(IHttpRequest request)
@@ -118,7 +127,7 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
             || method == HttpMethod.Trace;
     }
 
-    private static async Task RejectAsync(IHttpContext context)
+    private static async Task RejectAsync(IHttpContext context, HttpStatusCode status)
     {
         // The check runs before next, so the head is normally still writable. A middleware ahead of this
         // one may already have committed it, though, and then the status can no longer be set: abort the
@@ -129,7 +138,8 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
             return;
         }
 
-        ProblemDetails problem = ProblemDetails.FromStatus(HttpStatusCode.BadRequest, rejectionDetail);
+        string detail = status == HttpStatusCode.RequestEntityTooLarge ? tooLargeDetail : rejectionDetail;
+        ProblemDetails problem = ProblemDetails.FromStatus(status, detail);
         await context.Response.WriteProblemDetailsAsync(problem, context.RequestCancelled).ConfigureAwait(false);
     }
 }

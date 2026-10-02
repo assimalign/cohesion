@@ -50,6 +50,10 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     private const string validationTypeName = "Assimalign.Cohesion.Web.Validation.HttpContextValidationExtensions";
     private const string validationMethodName = "ValidateAsync";
 
+    // The cause an Http.Forms parse records (as the InvalidDataException's inner exception) when the body
+    // exceeds a configured limit (#1061).
+    private const string formLimitTypeName = "Assimalign.Cohesion.Http.HttpFormLimitExceededException";
+
     // Generated code invokes a handler through its Func<...>/Action<...> type, which takes at most 16 parameters.
     private const int maxHandlerParameters = 16;
 
@@ -350,7 +354,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
                 bodyParameterIndex = i;
             }
-            else if (binding.Source == BindingSource.Form && formParameterIndex < 0)
+            else if ((binding.Source is BindingSource.Form or BindingSource.FormFile) && formParameterIndex < 0)
             {
                 formParameterIndex = i;
             }
@@ -476,6 +480,10 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         bool usesForm = formParameterIndex >= 0;
         bool requiresAntiforgery = usesForm && CanRequireAntiforgery(compilation);
 
+        // A form over a configured Http.Forms limit is answered 413 when the application can name the
+        // cause the parse records; any other unreadable form is a 400.
+        bool reportsFormLimit = usesForm && CanName(compilation, formLimitTypeName);
+
         // A bound request-body model is validated before the handler runs whenever the application
         // references Web.Validation; whether it is validated for a given request is decided at run time.
         string validatedBodyType = bodyParameterIndex >= 0 && CanValidate(compilation)
@@ -509,7 +517,8 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             bodyParameterIndex,
             usesForm,
             requiresAntiforgery,
-            validatedBodyType);
+            validatedBodyType,
+            reportsFormLimit);
 
         return new EndpointAnalysis(endpointBinding, EquatableArray<DiagnosticInfo>.Empty);
     }
@@ -904,6 +913,11 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             return null;
         }
 
+        if (TryClassifyFile(parameter, type, known, declaredType, describedType, out binding, out string? fileProblem))
+        {
+            return fileProblem;
+        }
+
         (ConversionKind conversion, string coreType, bool required) = ClassifyConversion(type, known.Parsable);
 
         BindingSource? explicitSource = GetExplicitSource(parameter, out string? explicitName);
@@ -952,8 +966,105 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         BindingSource.Query => "query string",
         BindingSource.Header => "header",
         BindingSource.Form => "form field",
+        BindingSource.Body => "request body",
         _ => "route or query string"
     };
+
+    // Uploaded files (#1061) bind from the parsed multipart/form-data body, by their field name: an
+    // IHttpFormFile is the first file sent under the name, a sequence of IHttpFormFile every file sent
+    // under it (RFC 7578 §4.3 sends a multiple-file field as several parts with one name), and an
+    // IHttpFormFileCollection every uploaded file. Returns false for a type that is not a file at all;
+    // otherwise the binding, or the reason a COHWEB0003 diagnostic embeds.
+    private static bool TryClassifyFile(
+        IParameterSymbol parameter,
+        ITypeSymbol type,
+        KnownTypes known,
+        string declaredType,
+        string describedType,
+        out ParameterBinding binding,
+        out string? problem)
+    {
+        binding = default;
+        problem = null;
+
+        if (known.FormFile is null)
+        {
+            return false;
+        }
+
+        ConversionKind conversion;
+        if (Is(type, known.FormFile))
+        {
+            conversion = ConversionKind.File;
+        }
+        else if (Is(type, known.FormFileCollection))
+        {
+            conversion = ConversionKind.FileCollection;
+        }
+        else if (IsFileSequence(type, known.FormFile))
+        {
+            conversion = ConversionKind.FileList;
+        }
+        else if (HoldsFiles(type, known))
+        {
+            problem = $"'{type.ToDisplayString(HandlerTypeRules.MessageFormat)}' holds uploaded files, which bind as IHttpFormFile, IHttpFormFile[], IReadOnlyList<IHttpFormFile>, IReadOnlyCollection<IHttpFormFile>, IEnumerable<IHttpFormFile> or IHttpFormFileCollection; declare the parameter as one of those";
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+
+        BindingSource? explicitSource = GetExplicitSource(parameter, out string? explicitName);
+        if (explicitSource is { } declared && declared != BindingSource.Form)
+        {
+            problem = $"'{type.ToDisplayString(HandlerTypeRules.MessageFormat)}' is read from the uploaded files of a multipart/form-data body, not from the {DescribeSource(declared)}; bind it with [FromForm] or without an attribute";
+            return true;
+        }
+
+        string key = string.IsNullOrEmpty(explicitName) ? parameter.Name : explicitName!;
+
+        // A single file is required unless the parameter admits null; a sequence or the collection is
+        // never missing, only empty.
+        bool required = conversion == ConversionKind.File && type.NullableAnnotation != NullableAnnotation.Annotated;
+
+        binding = new ParameterBinding(declaredType, "", "", BindingSource.FormFile, conversion, key, required, describedType);
+        return true;
+    }
+
+    // IHttpFormFile[] and the read-only sequence interfaces an array of files converts to.
+    private static bool IsFileSequence(ITypeSymbol type, INamedTypeSymbol formFile)
+    {
+        if (type is IArrayTypeSymbol { Rank: 1 } array)
+        {
+            return Is(array.ElementType, formFile);
+        }
+
+        return type is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } named
+            && Is(named.TypeArguments[0], formFile)
+            && named.OriginalDefinition.SpecialType is SpecialType.System_Collections_Generic_IEnumerable_T
+                or SpecialType.System_Collections_Generic_IReadOnlyCollection_T
+                or SpecialType.System_Collections_Generic_IReadOnlyList_T;
+    }
+
+    // A file shape the binder does not produce: a concrete file or file collection type, a mutable or
+    // multi-dimensional collection of files, or any other generic type over IHttpFormFile. Left alone, it
+    // would fall to the complex-type convention and be read as a JSON body.
+    private static bool HoldsFiles(ITypeSymbol type, KnownTypes known)
+    {
+        if (ImplementsInterface(type, known.FormFile!)
+            || (known.FormFileCollection is not null && ImplementsInterface(type, known.FormFileCollection)))
+        {
+            return true;
+        }
+
+        return type switch
+        {
+            IArrayTypeSymbol array => Is(array.ElementType, known.FormFile),
+            INamedTypeSymbol { IsGenericType: true } named => named.TypeArguments.Any(argument => Is(argument, known.FormFile)),
+            _ => false
+        };
+    }
 
     private static (ConversionKind Conversion, string CoreType, bool Required) ClassifyConversion(ITypeSymbol type, INamedTypeSymbol? parsableType)
     {
@@ -1244,6 +1355,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         BindingSource.Header => "Header",
         BindingSource.Form => "Form",
         BindingSource.Body => "Body",
+        BindingSource.FormFile => "FormFile",
         _ => null
     };
 
@@ -1251,7 +1363,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     {
         if (model.UsesForm)
         {
-            builder.Append(indent).AppendLine("global::Assimalign.Cohesion.Http.IHttpFormCollection __form = await context.ReadFormAsync(context.RequestCancelled);");
+            EmitFormRead(builder, model, indent);
         }
 
         var parameters = model.Parameters;
@@ -1287,6 +1399,73 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         }
 
         EmitResponse(builder, model, indent);
+    }
+
+    // Reads the form once for every form field and file the handler binds. A form the parser rejects is
+    // the client's error, answered before any parameter is bound: 413 Content Too Large (RFC 9110
+    // §15.5.14) when the body exceeds a configured Http.Forms limit — the parse records an
+    // HttpFormLimitExceededException as the InvalidDataException's cause — and 400 for a malformed body.
+    // Other exceptions (a transport's own body cap, request decompression's limit) are not caught: their
+    // owners answer them.
+    private static void EmitFormRead(StringBuilder builder, EndpointBinding model, string indent)
+    {
+        builder.Append(indent).AppendLine("global::Assimalign.Cohesion.Http.IHttpFormCollection __form;");
+        builder.Append(indent).AppendLine("try");
+        builder.Append(indent).AppendLine("{");
+        builder.Append(indent).AppendLine("    __form = await context.ReadFormAsync(context.RequestCancelled);");
+        builder.Append(indent).AppendLine("}");
+
+        if (model.ReportsFormLimit)
+        {
+            builder.Append(indent).Append("catch (global::System.IO.InvalidDataException __formError) when (__formError.InnerException is global::")
+                .Append(formLimitTypeName).AppendLine(")");
+            builder.Append(indent).AppendLine("{");
+            builder.Append(indent).AppendLine("    global::Assimalign.Cohesion.Web.ProblemDetails __problem = global::Assimalign.Cohesion.Web.ProblemDetails.FromStatus(global::Assimalign.Cohesion.Http.HttpStatusCode.RequestEntityTooLarge, \"The request form exceeds a configured size limit.\");");
+            builder.Append(indent).AppendLine("    await context.Response.WriteProblemDetailsAsync(__problem, context.RequestCancelled);");
+            builder.Append(indent).AppendLine("    return;");
+            builder.Append(indent).AppendLine("}");
+        }
+
+        builder.Append(indent).AppendLine("catch (global::System.IO.InvalidDataException)");
+        EmitBadRequest(builder, indent, "$form", "The request form could not be read.");
+    }
+
+    private static void EmitFile(StringBuilder builder, ParameterBinding parameter, int index, string indent)
+    {
+        string arg = "__arg" + index;
+
+        switch (parameter.Conversion)
+        {
+            case ConversionKind.FileCollection:
+                // Every uploaded file, whatever its field name.
+                builder.Append(indent).Append(parameter.DeclaredType).Append(' ').Append(arg).AppendLine(" = __form.Files;");
+                return;
+
+            case ConversionKind.FileList:
+                // Every file uploaded under the field name, in the order the parts arrived.
+                builder.Append(indent).Append("global::System.Collections.Generic.List<global::Assimalign.Cohesion.Http.IHttpFormFile> __files")
+                    .Append(index).AppendLine(" = new();");
+                builder.Append(indent).Append("foreach (global::Assimalign.Cohesion.Http.IHttpFormFile __file").Append(index)
+                    .Append(" in __form.Files) { if (string.Equals(__file").Append(index).Append(".Name, ").Append(Literal(parameter.Key))
+                    .Append(", global::System.StringComparison.OrdinalIgnoreCase)) { __files").Append(index).Append(".Add(__file").Append(index)
+                    .AppendLine("); } }");
+                builder.Append(indent).Append(parameter.DeclaredType).Append(' ').Append(arg).Append(" = __files").Append(index).AppendLine(".ToArray();");
+                return;
+
+            default:
+                // The first file uploaded under the field name; a missing required file is a 400.
+                builder.Append(indent).Append("global::Assimalign.Cohesion.Http.IHttpFormFile? ").Append(arg)
+                    .Append(" = __form.Files.TryGetValue(").Append(Literal(parameter.Key)).Append(", out global::Assimalign.Cohesion.Http.IHttpFormFile __file")
+                    .Append(index).Append(") ? __file").Append(index).AppendLine(" : null;");
+
+                if (parameter.Required)
+                {
+                    builder.Append(indent).Append("if (").Append(arg).AppendLine(" is null)");
+                    EmitBadRequest(builder, indent, parameter.Key, "The file is required.");
+                }
+
+                return;
+        }
     }
 
     // Validates the bound request-body model after every parameter is bound, so a binding failure is
@@ -1378,6 +1557,10 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
             case BindingSource.Body:
                 EmitBody(builder, parameter, index, indent);
+                return;
+
+            case BindingSource.FormFile:
+                EmitFile(builder, parameter, index, indent);
                 return;
 
             case BindingSource.Route:
@@ -1583,6 +1766,8 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             Response = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpResponse");
             Cancellation = compilation.GetTypeByMetadataName("System.Threading.CancellationToken");
             Feature = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpFeature");
+            FormFile = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpFormFile");
+            FormFileCollection = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpFormFileCollection");
         }
 
         public INamedTypeSymbol? Parsable { get; }
@@ -1596,6 +1781,10 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         public INamedTypeSymbol? Cancellation { get; }
 
         public INamedTypeSymbol? Feature { get; }
+
+        public INamedTypeSymbol? FormFile { get; }
+
+        public INamedTypeSymbol? FormFileCollection { get; }
     }
 
     // True when the parameter type is exactly the known type; nullable annotations do not matter.

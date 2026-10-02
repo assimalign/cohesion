@@ -149,7 +149,8 @@ internal sealed class HttpMultipartFormReader
             {
                 // Defensive: a peer that just emits non-boundary lines forever
                 // should not be allowed to drain the buffer indefinitely.
-                throw new InvalidDataException("Multipart preamble exceeded the headers-length limit.");
+                const string message = "Multipart preamble exceeded the headers-length limit.";
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(message));
             }
 
             if (line.Length == 0)
@@ -197,7 +198,10 @@ internal sealed class HttpMultipartFormReader
 
         while (true)
         {
-            string line = await _stream.ReadLineAsync(HeadersLengthLimit - totalBytes, cancellationToken).ConfigureAwait(false);
+            // The CRLF of each line counts against the budget, so it can run two bytes past the limit;
+            // a negative remainder would reach the pooled buffer as a negative size. With nothing left,
+            // only the blank line that ends the block still fits.
+            string line = await _stream.ReadLineAsync(Math.Max(0, HeadersLengthLimit - totalBytes), cancellationToken).ConfigureAwait(false);
             totalBytes += line.Length + 2; // CRLF
 
             if (line.Length == 0)
@@ -213,7 +217,8 @@ internal sealed class HttpMultipartFormReader
 
             if (headers.Count >= HeadersCountLimit)
             {
-                throw new InvalidDataException($"Multipart section header count exceeded the {HeadersCountLimit} limit.");
+                string message = $"Multipart section header count exceeded the {HeadersCountLimit} limit.";
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(message));
             }
 
             string name = line[..colon].Trim();

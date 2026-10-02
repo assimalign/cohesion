@@ -30,7 +30,7 @@ namespace Assimalign.Cohesion.Web;
 /// <c>GetOrderedMetadata&lt;EndpointResponseMetadata&gt;()</c>. An application can describe more responses
 /// with <c>WithMetadata</c> on the endpoint or its group — a <c>404</c> the handler answers, for example —
 /// and they compose with the generated ones, group items first. The failures the binding thunk itself
-/// answers (400 and 415 problem details, 406) are not described.
+/// answers (400, 413 and 415 problem details, 406) are not described.
 /// </para>
 /// <para>
 /// <see cref="Type"/> is a <c>typeof(...)</c> value, never found by inspecting members, so a documentation

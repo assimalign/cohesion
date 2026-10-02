@@ -22,8 +22,10 @@ reimplements token cryptography; it chooses the protector the engine seals token
   `400 Bad Request` as RFC 9457 `application/problem+json`, and the endpoint does not run.
 - **Endpoint metadata and verbs.** `RequireAntiforgery()` and `DisableAntiforgery()` attach the sealed
   `AntiforgeryMetadata` to a route or a route group, most specific declaration winning. Every typed
-  endpoint with a `[FromForm]` parameter requires antiforgery automatically: the Web endpoint-binding
-  generator attaches the requirement when the application references this package.
+  endpoint with a `[FromForm]` parameter or an uploaded-file parameter requires antiforgery
+  automatically: the Web endpoint-binding generator attaches the requirement when the application
+  references this package. A form read for its token that exceeds a configured Http.Forms limit is
+  answered `413 Content Too Large`, as the endpoint's own binding would answer it.
 - **Fail closed.** An endpoint that requires validation fails at dispatch with
   `InvalidOperationException` when `UseAntiforgery` is missing or registered ahead of `UseRouting`,
   instead of running unprotected.

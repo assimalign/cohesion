@@ -58,8 +58,12 @@ interceptors are implementation-only output.
 
 Per parameter, in order: direct injections (`IHttpContext`, `IHttpRequest`, `IHttpResponse`,
 `CancellationToken`, `IHttpFeature` implementations) win first — the request and response since #1176,
-before which they fell through to the complex-type convention and bound from the body; then an explicit `[From*]` attribute; then convention (route-token name
-match → route, scalar → query, complex → body). When the call site cannot see the whole template, a
+before which they fell through to the complex-type convention and bound from the body; then uploaded
+files (#1061), recognized by type (`IHttpFormFile` → `ConversionKind.File`, the read-only file sequences
+and `IHttpFormFile[]` → `FileList`, `IHttpFormFileCollection` → `FileCollection`, all
+`BindingSource.FormFile`; any other attribute than `[FromForm]` on them, or another type over
+`IHttpFormFile`, is COHWEB0003 instead of falling to the complex-type convention); then an explicit
+`[From*]` attribute; then convention (route-token name match → route, scalar → query, complex → body). When the call site cannot see the whole template, a
 scalar the visible template does not name binds **route-or-query** instead of query (#1055): route
 values first, then the query string. The call site cannot see the whole template when the receiver
 is an `IRouterGroupBuilder`, whose prefix is declared elsewhere, or when the pattern argument is not
@@ -83,6 +87,15 @@ Each interceptor:
   `HttpContentSerializationException` from the read is not caught (#1173): after the probe it can only
   mean no registry at all or a reader with no contract for the type, a composition fault that reaches
   the exception boundary exactly as it does when a returned value is written.
+- Reads the form once (`context.ReadFormAsync`) when the handler binds form fields or files
+  (`EndpointBinding.UsesForm`), before any parameter is bound. An `InvalidDataException` whose
+  `InnerException` is Http.Forms' `HttpFormLimitExceededException` is a body over a configured limit,
+  answered `413` problem+json (emitted when the compilation can name the type,
+  `EndpointBinding.ReportsFormLimit`); any other `InvalidDataException` is a `400` with `errors` keyed
+  `$form` (#1061). Files bind from that form: `__form.Files.TryGetValue(key, ...)` for an
+  `IHttpFormFile` (a missing required one is a `400`), every file whose `Name` matches the key
+  (case-insensitively, as the collection compares names) collected into an array for a sequence, and
+  `__form.Files` itself for the collection.
 - Validates the bound request-body model when the application references `Web.Validation` (see
   "Validation of Bound Models").
 - Writes the value the handler returns, if any (see "Returned Values").
@@ -154,7 +167,9 @@ requirement and before the caller's own chain:
   skipped. The name is the binding key, emitted with `SymbolDisplay.FormatLiteral`. The type is the
   declared type in a display format without nullable reference annotations (`ParameterBinding.DescribedType`),
   because `typeof(string?)` does not compile; `Nullable<T>` keeps its `?`. `IsRequired` is the
-  binding's own required flag, and `true` for a body.
+  binding's own required flag, and `true` for a body. An uploaded file is described with
+  `EndpointParameterSource.FormFile` (appended after `Body`, #1061): required for a non-nullable
+  `IHttpFormFile`, never for a file sequence or the collection.
 - **Responses.** A `200` with `typeof(written type)` (`null` for `void`/`Task`/`ValueTask`) and
   `HttpMediaType.TextPlain` for a string; a `204` when `EndpointBinding.DescribesNoContent` is set.
 - **When the result may be null.** A `Nullable<T>` always lists the 204. For a reference type, the
@@ -179,9 +194,9 @@ emits no interceptor; the others in the compilation are still emitted.
 | --- | --- |
 | COHWEB0001 | The handler is a delegate instance, not a lambda or method group: no `IDelegateCreationOperation`, or one whose target is itself a delegate instance (`new Func<int, string>(existing)`, silently skipped before #1175) |
 | COHWEB0002 | The return type cannot be written (`async void`, a stream, an awaitable that is not `Task`/`ValueTask`, an anonymous type, a ref struct, `dynamic`, a pointer, a by-reference return, a type parameter, an inaccessible type) |
-| COHWEB0003 | A parameter cannot be bound: a scalar source on a complex type, a by-reference modifier, a default value or `params` array that forced an anonymous delegate type, or a type generated code cannot name or bind |
+| COHWEB0003 | A parameter cannot be bound: a scalar source on a complex type, a by-reference modifier, a default value or `params` array that forced an anonymous delegate type, a type generated code cannot name or bind, an uploaded file under an attribute other than `[FromForm]`, or a file shape the binder does not produce |
 | COHWEB0004 | A second request-body parameter |
-| COHWEB0005 | A request-body parameter alongside form fields |
+| COHWEB0005 | A request-body parameter alongside form fields or uploaded files |
 | COHWEB0006 | An anonymous delegate type with no parameter-level cause (more than 16 parameters), or an explicitly created delegate type generated code cannot name |
 | COHWEB0007 | A body parameter or a serialized result, but the compilation cannot name `Web.Serialization`'s request reader or negotiated writer |
 
@@ -212,8 +227,8 @@ Mechanics, following the house convention (`OpenApi.SourceGeneration`, `SourceGe
 
 ## Antiforgery on Form-Bound Endpoints (#1057)
 
-A call site with a `[FromForm]` parameter (`EndpointBinding.UsesForm`) is the request a cross-site page
-can forge, so its interceptor chains
+A call site with a `[FromForm]` parameter or an uploaded-file parameter (`EndpointBinding.UsesForm`) is
+the request a cross-site page can forge, so its interceptor chains
 `.WithMetadata(global::Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata.Required)` onto the route
 the raw `Map` overload returns. `UseAntiforgery` then validates the endpoint's unsafe requests, and
 routing fails the endpoint at dispatch when the middleware did not process it.
@@ -227,8 +242,8 @@ routing fails the endpoint at dispatch when the middleware did not process it.
   than any route-group declaration, and the caller's own `.DisableAntiforgery()` (chained after the
   interceptor's return) still wins under last-wins resolution.
 - **Driven by `UsesForm`, not by the HTTP method.** A `Map(method, ...)` call site has no static method,
-  and a safe-method request passes the middleware anyway. A future form-file binding source that sets
-  `UsesForm` inherits the requirement.
+  and a safe-method request passes the middleware anyway. File binding (`BindingSource.FormFile`, #1061)
+  sets `UsesForm` like a form field, so file-bound endpoints carry the requirement too.
 
 ## Validation of Bound Models (#1060)
 

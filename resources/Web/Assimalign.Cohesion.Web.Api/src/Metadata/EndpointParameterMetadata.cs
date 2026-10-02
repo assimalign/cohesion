@@ -34,9 +34,10 @@ public sealed class EndpointParameterMetadata
     /// Creates the description of one request-bound parameter.
     /// </summary>
     /// <param name="name">
-    /// The name the request supplies the value under: the route parameter, query key, header, or form
-    /// field name, which is an attribute's <c>Name</c> when one is given. For
-    /// <see cref="EndpointParameterSource.Body"/>, the handler parameter's name.
+    /// The name the request supplies the value under: the route parameter, query key, header, form field
+    /// or file field name, which is an attribute's <c>Name</c> when one is given. For
+    /// <see cref="EndpointParameterSource.Body"/>, and for an <c>IHttpFormFileCollection</c> of every
+    /// uploaded file, the handler parameter's name.
     /// </param>
     /// <param name="source">Where the value is read from.</param>
     /// <param name="type">

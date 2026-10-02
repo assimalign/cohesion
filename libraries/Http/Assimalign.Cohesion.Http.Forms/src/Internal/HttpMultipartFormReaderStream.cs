@@ -129,7 +129,8 @@ internal sealed class HttpMultipartFormReaderStream : Stream
 
         if (LengthLimit is long cap && _observedLength > cap)
         {
-            throw new InvalidDataException($"Multipart section body exceeded the {cap}-byte limit.");
+            string message = $"Multipart section body exceeded the {cap}-byte limit.";
+            throw new InvalidDataException(message, new HttpFormLimitExceededException(message));
         }
 
         return take;

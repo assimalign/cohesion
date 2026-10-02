@@ -18,6 +18,14 @@ app.MapPost("/orders", async (Order order, IHttpContext context) =>
     // `order` is deserialized from the request body via the serialization registry; `context` is injected.
     context.Response.StatusCode = HttpStatusCode.Created;
 });
+
+// `avatar` is the file uploaded under that field name of a multipart/form-data body; `photos` every
+// file of a multiple-file field.
+app.MapPost("/profiles/{id}/media", async (long id, IHttpFormFile avatar, IReadOnlyList<IHttpFormFile> photos) =>
+{
+    await using Stream content = avatar.OpenReadStream();
+    return await media.SaveAsync(id, avatar.FileName, content, photos);
+});
 ```
 
 A handler can be a lambda or a method group (`app.MapGet("/users/{id}", GetUser)`).
@@ -31,13 +39,15 @@ Parameters bind from the request by convention or by explicit attribute:
 | Header | `[FromHeader]` | Explicit only |
 | Body | `[FromBody]` | Default for complex parameters; one per handler |
 | Form field | `[FromForm]` | Per-field scalars |
+| Uploaded file | `[FromForm]` (optional) | `IHttpFormFile` (by field name), `IHttpFormFile[]` / `IReadOnlyList<IHttpFormFile>` / `IReadOnlyCollection<IHttpFormFile>` / `IEnumerable<IHttpFormFile>` (every file under the name), `IHttpFormFileCollection` (every file) |
 | `IHttpContext` | — | Injected directly |
 | `IHttpRequest` / `IHttpResponse` | — | Injected as `context.Request` / `context.Response` |
 | `CancellationToken` | — | Bound from `RequestCancelled` |
 | `IHttpFeature` types | — | Resolved from `context.Features` |
 
-Unparseable or missing-required scalars produce a 400 problem+json (with an `errors` extension naming
-the parameter); an unsupported body Content-Type produces 415; a malformed body produces 400. A body
+Unparseable or missing-required scalars, and a missing required file, produce a 400 problem+json (with
+an `errors` extension naming the parameter); a form over an Http.Forms size limit produces 413 and a
+malformed form 400; an unsupported body Content-Type produces 415; a malformed body produces 400. A body
 type the registered resolver has no contract for, or an application with no serialization registry,
 is the server's fault, not the client's: `HttpContentSerializationException` reaches the exception
 boundary (a 500), as it does for a returned value.
@@ -75,7 +85,7 @@ A handler the source generator cannot bind fails the build with a `COHWEB` error
 write instead, rather than throwing when the endpoint is mapped: a delegate instance in place of a
 lambda (COHWEB0001), a return type an endpoint cannot write such as a `Stream` or `async void`
 (COHWEB0002), a parameter that cannot be bound (COHWEB0003), two request bodies (COHWEB0004), a body
-with form fields (COHWEB0005), a delegate type generated code cannot name (COHWEB0006), and a body or
+with form fields or files (COHWEB0005), a delegate type generated code cannot name (COHWEB0006), and a body or
 serialized return without `Web.Serialization` referenced (COHWEB0007). The table is in
 [DESIGN.md](DESIGN.md#compile-time-diagnostics-1059).
 
@@ -145,7 +155,9 @@ app.MapGet("/internal/cache", () => "cleared").ExcludeFromDescription();
 - Body binding and serialized return values need `Web.Serialization` (`AddJsonSerialization(...)` with
   the application's source-generated `JsonSerializerContext`); form binding needs `Http.Forms`. Both
   are carried by the `App.Web` shared framework.
-- Form-bound endpoints require antiforgery when the application references
+- File uploads honor the Http.Forms limits of the exchange's form feature (`HttpFormOptions`): install
+  `new HttpFormFeature(context.Request, options)` in a middleware ahead of the endpoint to change them.
+- Form-bound endpoints (form fields or files) require antiforgery when the application references
   `Assimalign.Cohesion.Web.Antiforgery` (every `Sdk.Web` application does): register
   `AddAntiforgery(...)` and `UseAntiforgery()` after `UseRouting()`, or opt an endpoint out with
   `.DisableAntiforgery()`. Without the middleware those endpoints fail at dispatch.

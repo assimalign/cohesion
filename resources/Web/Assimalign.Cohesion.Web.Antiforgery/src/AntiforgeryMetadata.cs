@@ -18,7 +18,8 @@ namespace Assimalign.Cohesion.Web.Antiforgery;
 /// declaration decides: a route's <see cref="Disabled"/> overrides its group's <see cref="Required"/>,
 /// and the reverse. The convention verbs <c>RequireAntiforgery()</c> and <c>DisableAntiforgery()</c>
 /// append these instances. The Web endpoint-binding source generator appends <see cref="Required"/> to
-/// every typed endpoint with a <c>[FromForm]</c> parameter, as route-level metadata, so a form-bound
+/// every typed endpoint with a <c>[FromForm]</c> parameter or an uploaded-file parameter
+/// (<c>IHttpFormFile</c> and its sequences), as route-level metadata, so a form-bound
 /// endpoint opts out with its own <c>DisableAntiforgery()</c>; a group-level opt-out does not reach it.
 /// </para>
 /// <para>

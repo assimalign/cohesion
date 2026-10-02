@@ -397,6 +397,108 @@ public class EndpointBindingGeneratorTests
     }
 
     // ---------------------------------------------------------------------
+    // Uploaded files (#1061)
+    // ---------------------------------------------------------------------
+
+    private const string fileType = "global::Assimalign.Cohesion.Http.IHttpFormFile";
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Files: an IHttpFormFile binds the first file uploaded under its name, and is required")]
+    public void Generator_FileParameter_BindsFromFormFilesAndRequiresIt()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """app.MapPost("/avatars", (IHttpFormFile avatar, [FromForm(Name = "cv")] IHttpFormFile? resume) => avatar.FileName);""",
+            referenceAntiforgery: true);
+
+        // Assert — one form read, the file looked up by name, a missing required file answered 400, and
+        // the endpoint marked for antiforgery like any other form-bound endpoint.
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.Split("await context.ReadFormAsync(").Length.ShouldBe(2);
+        run.Generated.ShouldContain(fileType + "? __arg0 = __form.Files.TryGetValue(\"avatar\", out " + fileType + " __file0) ? __file0 : null;", Case.Sensitive);
+        run.Generated.ShouldContain("[\"avatar\"] = new string[] { \"The file is required.\" }", Case.Sensitive);
+        run.Generated.ShouldContain(fileType + "? __arg1 = __form.Files.TryGetValue(\"cv\", out " + fileType + " __file1) ? __file1 : null;", Case.Sensitive);
+        run.Generated.ShouldNotContain("[\"cv\"] = new string[]", Case.Sensitive);
+        run.Generated.ShouldContain(antiforgeryRequirement, Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Files: sequences bind every file under a name, and the collection every file")]
+    public void Generator_FileSequencesAndCollection_BindEveryFile()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """
+            app.MapPost("/albums", ([FromForm(Name = "photos")] System.Collections.Generic.IReadOnlyList<IHttpFormFile> images, IHttpFormFile[] scans, System.Collections.Generic.IEnumerable<IHttpFormFile> notes, System.Collections.Generic.IReadOnlyCollection<IHttpFormFile> extras, IHttpFormFileCollection all) => "ok");
+            """);
+
+        // Assert
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("if (string.Equals(__file0.Name, \"photos\", global::System.StringComparison.OrdinalIgnoreCase)) { __files0.Add(__file0); }", Case.Sensitive);
+        run.Generated.ShouldContain("global::System.Collections.Generic.IReadOnlyList<" + fileType + "> __arg0 = __files0.ToArray();", Case.Sensitive);
+        run.Generated.ShouldContain(fileType + "[] __arg1 = __files1.ToArray();", Case.Sensitive);
+        run.Generated.ShouldContain("global::Assimalign.Cohesion.Http.IHttpFormFileCollection __arg4 = __form.Files;", Case.Sensitive);
+        run.Generated.ShouldNotContain("The file is required.", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Files: a form over a size limit answers 413 and a malformed form 400")]
+    public void Generator_FormRead_MapsLimitTo413AndMalformedTo400()
+    {
+        // Act
+        string generated = Run("""app.MapPost("/uploads", (IHttpFormFile upload) => "ok");""");
+
+        // Assert — the limit is recognized by the cause the parse records, not by its message.
+        generated.ShouldContain("catch (global::System.IO.InvalidDataException __formError) when (__formError.InnerException is global::Assimalign.Cohesion.Http.HttpFormLimitExceededException)", Case.Sensitive);
+        generated.ShouldContain("global::Assimalign.Cohesion.Http.HttpStatusCode.RequestEntityTooLarge", Case.Sensitive);
+        generated.ShouldContain("[\"$form\"] = new string[] { \"The request form could not be read.\" }", Case.Sensitive);
+        generated.IndexOf("RequestEntityTooLarge", StringComparison.Ordinal)
+            .ShouldBeLessThan(generated.IndexOf("\"$form\"", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Files: file parameters are described with the FormFile source")]
+    public void Generator_FileParameters_DescribeFormFileSource()
+    {
+        // Act
+        string generated = Run("""app.MapPost("/uploads", (IHttpFormFile upload, IHttpFormFile? thumbnail, IHttpFormFileCollection all) => "ok");""");
+
+        // Assert
+        generated.ShouldContain(parameterMetadata + "\"upload\", global::Assimalign.Cohesion.Web.EndpointParameterSource.FormFile, typeof(" + fileType + "), true)", Case.Sensitive);
+        generated.ShouldContain(parameterMetadata + "\"thumbnail\", global::Assimalign.Cohesion.Web.EndpointParameterSource.FormFile, typeof(" + fileType + "), false)", Case.Sensitive);
+        generated.ShouldContain(parameterMetadata + "\"all\", global::Assimalign.Cohesion.Web.EndpointParameterSource.FormFile, typeof(global::Assimalign.Cohesion.Http.IHttpFormFileCollection), false)", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Files: a file read from another source, or an unsupported file shape, reports COHWEB0003")]
+    public void Generator_UnsupportedFileParameters_ReportCohweb0003()
+    {
+        // Act
+        GeneratorRun run = Generate(
+            """
+            app.MapPost("/query", ([FromQuery] IHttpFormFile upload) => "ok");
+            app.MapPost("/list", (System.Collections.Generic.List<IHttpFormFile> uploads) => "ok");
+            app.MapPost("/concrete", (HttpFormFile upload) => "ok");
+            """);
+
+        // Assert — each would otherwise have been read as a JSON body.
+        Diagnostic[] diagnostics = run.WithId("COHWEB0003");
+        diagnostics.Length.ShouldBe(3);
+        diagnostics[0].GetMessage().ShouldContain("not from the query string; bind it with [FromForm] or without an attribute", Case.Sensitive);
+        diagnostics[1].GetMessage().ShouldContain("'List<IHttpFormFile>' holds uploaded files", Case.Sensitive);
+        diagnostics[2].GetMessage().ShouldContain("'HttpFormFile' holds uploaded files", Case.Sensitive);
+        run.Generated.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Files: a request body with an uploaded file reports COHWEB0005")]
+    public void Generator_BodyAndFileParameters_ReportCohweb0005()
+    {
+        // Act
+        GeneratorRun run = Generate("""app.MapPost("/mixed", (Widget widget, IHttpFormFile upload) => "ok");""");
+
+        // Assert
+        Diagnostic diagnostic = run.WithId("COHWEB0005").ShouldHaveSingleItem();
+        run.TextAt(diagnostic).ShouldBe("upload");
+    }
+
+    // ---------------------------------------------------------------------
     // Validation (#1060)
     // ---------------------------------------------------------------------
 

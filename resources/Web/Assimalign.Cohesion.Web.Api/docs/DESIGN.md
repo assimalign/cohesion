@@ -95,9 +95,17 @@ Each handler parameter is classified once, at compile time:
    Before #1176 the request and response were classified as complex types and bound from the body,
    so a handler declaring them compiled and then failed every request with a 415 or a
    deserialization error.
-2. **Explicit attributes** override the source: `[FromRoute]`, `[FromQuery]`, `[FromHeader]`,
+2. **Uploaded files** (#1061) bind from the parsed `multipart/form-data` body by their type, with or
+   without `[FromForm]` (whose `Name` sets the field name): an `IHttpFormFile` is the first file uploaded
+   under its field name, required unless the parameter is nullable; `IHttpFormFile[]`,
+   `IReadOnlyList<IHttpFormFile>`, `IReadOnlyCollection<IHttpFormFile>` and `IEnumerable<IHttpFormFile>`
+   are every file uploaded under the name (RFC 7578 §4.3 sends a multiple-file field as several parts
+   with one name), possibly none; `IHttpFormFileCollection` is every uploaded file, whatever its field
+   name. Any other attribute on a file, and any other file shape (`List<IHttpFormFile>`, the concrete
+   `HttpFormFile`), is COHWEB0003 rather than a JSON body.
+3. **Explicit attributes** override the source: `[FromRoute]`, `[FromQuery]`, `[FromHeader]`,
    `[FromBody]`, `[FromForm]` (each with an optional `Name`, except `[FromBody]`).
-3. **Convention** otherwise: a name matching a `{token}` in a literal route pattern → route;
+4. **Convention** otherwise: a name matching a `{token}` in a literal route pattern → route;
    a scalar type (`string`, `IParsable<T>` primitives, enums, and their `Nullable<>` forms) → query;
    a complex type → body. **Route-or-query** replaces query for a scalar the call site cannot place
    (#1055). That happens in two cases: a route-group endpoint, whose group prefix is declared
@@ -111,7 +119,20 @@ Scalars convert inline with `IParsable<T>.TryParse(..., CultureInfo.InvariantCul
 the boxed value directly when the runtime type matches and parses its invariant string form otherwise.
 Non-nullable scalars are required; nullable/reference-nullable parameters are optional. Bodies are read
 through `Web.Serialization`'s `ReadContentAsync<T>`; at most one body parameter is allowed (COHWEB0004)
-and body and form binding are mutually exclusive (COHWEB0005).
+and body binding is mutually exclusive with form fields and files (COHWEB0005).
+
+**The form is read once**, through `context.ReadFormAsync`, for every form field and file a handler
+binds, so fields and files come from the same parse — the one `UseAntiforgery` or `UseForms` already
+cached, when either ran. The read honors the Http.Forms limits (`HttpFormOptions`) of the exchange's
+`IHttpFormFeature`: the defaults (a 128 MB multipart section, 4 MB values, 1,024 entries), or the limits
+an application sets by installing `new HttpFormFeature(context.Request, options)` ahead of the
+endpoint. A form over a limit is answered `413 Content Too Large` (RFC 9110 §15.5.14), recognized by
+the `HttpFormLimitExceededException` the parse records as its `InvalidDataException`'s cause, not by its
+message; any other unreadable form is a `400` (`errors` keyed `$form`). Before #1061 both reached the
+exception boundary as a `500`. A body over the transport's own cap is answered `413` by the transport,
+and an over-limit decompressed body by `Web.Compression`; the thunk does not catch either. `UseForms()`
+parses every request eagerly, ahead of the endpoint, so a form it cannot read fails in that middleware
+(and reaches the exception boundary) before the thunk's mapping applies.
 
 ## Return Values (#1059)
 
@@ -194,6 +215,9 @@ Binding failures are outcomes the thunk writes imperatively as RFC 9457 `applica
 | Condition | Status | Payload |
 | --- | --- | --- |
 | Unparseable/missing-required route, query, header, or form scalar | 400 | `errors` extension keyed by the parameter |
+| A required `IHttpFormFile` is missing | 400 | `errors` extension keyed by the field name |
+| The form exceeds an Http.Forms limit (`HttpFormLimitExceededException` as the parse's cause) | 413 | problem+json |
+| The form is otherwise unreadable (a malformed multipart or urlencoded body) | 400 | `errors` extension keyed `$form` |
 | The request carries no parseable Content-Type, or the registry has no reader for it (an empty registry included) | 415 | problem+json |
 | `System.Text.Json.JsonException` while deserializing the body | 400 | `errors` extension keyed `$body` |
 | The bound body model fails its registered validator (an application with `Web.Validation`, see "Validation") | 400 | `errors` extension keyed by member path |
@@ -235,9 +259,9 @@ parameter list and arrow, or the method group) or at the offending lambda parame
 | --- | --- | --- |
 | COHWEB0001 | The handler is a delegate instance (a `Func<...>` variable, a `Delegate`, a call that returns one, or an instance wrapped in `new Func<...>(instance)`), so its parameter names and attributes are not visible | A lambda or a method group |
 | COHWEB0002 | The return type cannot be written: `async void`, a stream, an anonymous type, a ref struct, `dynamic`, a pointer, an awaitable other than `Task`/`ValueTask` (or an awaited value that is itself awaitable), a by-reference return, a generic type parameter, or a private, protected or file-local type | What the message names: `async Task`, copying the stream to the body, a named record |
-| COHWEB0003 | A parameter cannot be bound: a complex type from `[FromRoute]`/`[FromQuery]`/`[FromHeader]`/`[FromForm]`, a `ref`/`out`/`in` modifier, a default value or a `params` array (both give the handler a compiler-generated delegate type), a ref struct, `dynamic`, a pointer, a generic type parameter, or a type generated code cannot access | What the message names: `[FromBody]`, a nullable parameter in place of a default value |
+| COHWEB0003 | A parameter cannot be bound: a complex type from `[FromRoute]`/`[FromQuery]`/`[FromHeader]`/`[FromForm]`, a `ref`/`out`/`in` modifier, a default value or a `params` array (both give the handler a compiler-generated delegate type), a ref struct, `dynamic`, a pointer, a generic type parameter, a type generated code cannot access, an uploaded file read from a source other than the form, or a file shape the binder does not produce (`List<IHttpFormFile>`, `HttpFormFile`) | What the message names: `[FromBody]`, a nullable parameter in place of a default value, `IHttpFormFile` or one of the file sequences |
 | COHWEB0004 | More than one parameter binds from the request body | One body model; the other values from the route, query string or headers |
-| COHWEB0005 | The handler binds a request body and form fields | Form fields only, or the model only |
+| COHWEB0005 | The handler binds a request body and form fields or uploaded files | Form fields and files only, or the model only |
 | COHWEB0006 | The handler's delegate type cannot be named: more than 16 parameters, or an explicitly created delegate type that is private | A body model for the extra values; a lambda |
 | COHWEB0007 | The endpoint reads a body or returns a negotiated value, but the compilation cannot name `Assimalign.Cohesion.Web.Serialization` | A reference to the package; `Sdk.Web` applications receive it through `App.Web` |
 
@@ -252,9 +276,10 @@ compile time, so it records them on the route for documentation adapters that mu
 OpenAPI adapter (#152) first. Every typed endpoint it maps carries, as route-level metadata:
 
 - **One `EndpointParameterMetadata` per request-bound parameter**, in handler order: the `Name` the
-  request supplies it under (the route parameter, query key, header or form-field name — an attribute's
-  `Name` when one is given — and the handler parameter's name for a body), its
-  `EndpointParameterSource` (`Route`, `RouteOrQuery`, `Query`, `Header`, `Form`, `Body`), its declared
+  request supplies it under (the route parameter, query key, header, form-field or file field name — an
+  attribute's `Name` when one is given — and the handler parameter's name for a body or for the
+  collection of every file), its `EndpointParameterSource` (`Route`, `RouteOrQuery`, `Query`, `Header`,
+  `Form`, `Body`, `FormFile`), its declared
   CLR `Type`, and `IsRequired`, which matches the 400 the thunk answers for a missing value (a body is
   always required). Injected parameters (`IHttpContext`, `IHttpRequest`, `IHttpResponse`,
   `CancellationToken`, features) are not request inputs and are not described.
@@ -271,8 +296,8 @@ OpenAPI adapter (#152) first. Every typed endpoint it maps carries, as route-lev
 | Types | `typeof(...)` values the generator writes; nothing inspects members. An adapter produces a schema from the application's source-generated `JsonTypeInfo` for the type (System.Text.Json's `JsonSchemaExporter` over the resolver the application registered, which is NativeAOT-safe) and maps scalars such as `long` or `Guid` to primitive schemas. |
 | `RouteOrQuery` | Described when the call site could not see the whole template (a group endpoint, a non-literal pattern). Resolve it against the built route's composed template, `IRouterRoute.Pattern`: a name the template contains is a path parameter, any other a query parameter. |
 | The 204 | Listed when the compiler's nullability analysis says the result may be `null`: an annotated declared return (a method group's, or a lambda's explicit return type such as `Order? (long id) => ...`), a `Nullable<T>`, or — for an implicitly typed lambda, whose inferred return type is nullable-oblivious — a returned value whose null-state is maybe-null. Nullable-oblivious code lists no 204, though the thunk still answers 204 for a `null` at run time. |
-| Not described | The outcomes the thunk produces on its own: 400 and 415 binding problems and the negotiated 406. An adapter adds them by policy (a required parameter can produce 400, a body 415, a negotiated response 406). |
-| Extending | New sources are appended to `EndpointParameterSource` (file uploads arrive with #1061). An application describes further responses with `WithMetadata(new EndpointResponseMetadata(...))` on an endpoint or a group; they compose group items first, then the generated items, then the endpoint's own chain. |
+| Not described | The outcomes the thunk produces on its own: 400, 413 and 415 binding problems and the negotiated 406. An adapter adds them by policy (a required parameter can produce 400, a form or file 413, a body 415, a negotiated response 406). |
+| Extending | New sources are appended to `EndpointParameterSource`, never renumbered: `FormFile` (#1061) follows `Body`. A file parameter is described with its declared type — `IHttpFormFile` (required unless nullable), a file sequence, or `IHttpFormFileCollection` (named for the handler parameter, since it holds every file) — so an adapter maps it to a binary part of a `multipart/form-data` request body. An application describes further responses with `WithMetadata(new EndpointResponseMetadata(...))` on an endpoint or a group; they compose group items first, then the generated items, then the endpoint's own chain. |
 
 #152 closed the one gap this left: an adapter needs the `JsonTypeInfo` the JSON writer serializes a
 described type with, and `Web.Serialization` keeps the writer's options internal. `Web.Serialization`
@@ -304,7 +329,8 @@ raw middleware endpoint into the document.
 
 ## Antiforgery on form-bound endpoints (#1057)
 
-A typed endpoint with a `[FromForm]` parameter requires antiforgery validation: the generator chains
+A typed endpoint with a `[FromForm]` parameter or an uploaded-file parameter (#1061) requires antiforgery
+validation — a file is form content a cross-site page can post as easily as a field: the generator chains
 `AntiforgeryMetadata.Required` onto the route it maps, but only when the consuming compilation
 references `Assimalign.Cohesion.Web.Antiforgery` (every `Sdk.Web` application does, through `App.Web`).
 `UseAntiforgery`, registered after `UseRouting`, validates the token and reads the form for the
@@ -363,5 +389,9 @@ body reader and the negotiated writer, and COHWEB0007 reports an application tha
   on it, and `Web.Api` takes no OpenApi dependency.
 - Content negotiation beyond `Web.Serialization`'s: returned values use `WriteNegotiatedContentAsync`,
   which negotiates media types only (no `Accept-Charset` or `Accept-Language`).
-- Whole-object binding from form fields (form binding is per-field scalar via `[FromForm]`).
-- Stream and file return values, and file binding (#1061).
+- Whole-object binding from form fields (form binding is per-field scalar via `[FromForm]`, plus
+  uploaded files).
+- Stream and file return values: a handler writes a file or a stream itself. The file and stream
+  response helpers of #1061 are delivered separately from its file binding.
+- Per-endpoint form limits (`HttpFormOptions` as endpoint metadata). The limits are the exchange's form
+  feature's, set by installing one ahead of the endpoint.

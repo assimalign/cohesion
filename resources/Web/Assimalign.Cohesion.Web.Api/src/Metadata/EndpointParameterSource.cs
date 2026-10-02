@@ -5,8 +5,8 @@ namespace Assimalign.Cohesion.Web;
 /// <see cref="EndpointParameterMetadata"/>.
 /// </summary>
 /// <remarks>
-/// New sources are appended as binding grows (file uploads, #1061). A consumer that meets a value it does
-/// not recognize should treat that parameter as undescribed rather than fail.
+/// New sources are appended as binding grows, so existing values never change. A consumer that meets a
+/// value it does not recognize should treat that parameter as undescribed rather than fail.
 /// </remarks>
 public enum EndpointParameterSource
 {
@@ -32,5 +32,14 @@ public enum EndpointParameterSource
     Form,
 
     /// <summary>The request body, deserialized through the content-serialization registry.</summary>
-    Body
+    Body,
+
+    /// <summary>
+    /// Uploaded files of a <c>multipart/form-data</c> request body (RFC 7578). The parameter's
+    /// <see cref="EndpointParameterMetadata.Type"/> says which: <c>IHttpFormFile</c> is the file sent under
+    /// the field <see cref="EndpointParameterMetadata.Name"/>, a sequence of <c>IHttpFormFile</c> every file
+    /// sent under that name, and <c>IHttpFormFileCollection</c> every uploaded file whatever its field name
+    /// (its name is then the handler parameter's).
+    /// </summary>
+    FormFile
 }

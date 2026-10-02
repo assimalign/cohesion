@@ -245,7 +245,8 @@ internal class HttpFormReader : IDisposable
         }
         if (_builder.Length >= limit)
         {
-            throw new InvalidDataException($"Form key or value length limit {limit} exceeded.");
+            string message = $"Form key or value length limit {limit} exceeded.";
+            throw new InvalidDataException(message, new HttpFormLimitExceededException(message));
         }
         _builder.Append(c);
         word = null;
@@ -321,7 +322,8 @@ internal class HttpFormReader : IDisposable
             accumulator.Append(_currentKey, _currentValue);
             if (accumulator.ValueCount > ValueCountLimit)
             {
-                throw new InvalidDataException($"Form value count limit {ValueCountLimit} exceeded.");
+                string message = $"Form value count limit {ValueCountLimit} exceeded.";
+                throw new InvalidDataException(message, new HttpFormLimitExceededException(message));
             }
         }
     }
