@@ -29,7 +29,11 @@ that has none.
   The key-value model was born on format 1 (MVCC-stamped entries in the key
   space's page chain); the name scopes the marker to the model's own vocabulary.
   There is no upgrade machinery because there is no older format — the engine
-  writes the marker at creation and rejects unknown newer versions at open.
+  writes the marker at creation and rejects unknown newer versions at open. The
+  marker does not cover the primary index's pages: `Database.Indexing` stamps its
+  own B-tree page format on them and checks it when the engine attaches the
+  registration this catalog persists (#1194), so a page format change needs no
+  catalog change.
 
 ## Query-time introspection captures (C2)
 

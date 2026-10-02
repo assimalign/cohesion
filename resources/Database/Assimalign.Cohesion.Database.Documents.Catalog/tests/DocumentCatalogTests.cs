@@ -4,6 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Documents.Storage;
+using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
 using Xunit;
@@ -174,6 +176,25 @@ public sealed class DocumentCatalogTests
         source.WriteTo(clone);
         clone.Position = 0;
         return clone;
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Documents.Catalog] - Format: EnsureIndexFormat passes current trees and refuses trees in B-tree page format 1, as Open does (#1194)")]
+    public async Task EnsureIndexFormat_TreesInFormatOne_ShouldRefuse()
+    {
+        // Arrange: an index over a document, committed.
+        await using var fixture = await Fixture.Create();
+        await fixture.Write("one", "{\"score\":1}");
+        await fixture.CreateIndex("by_score", "score");
+        DocumentCatalog.EnsureIndexFormat(fixture.Storage);
+
+        // Act: the trees rewritten into the layout engines before #1194 wrote.
+        LegacyBTreePages.DowngradeIndexPages(fixture.Storage).ShouldBeGreaterThan(0);
+
+        // Assert
+        var refusal = Should.Throw<IndexFormatException>(() => DocumentCatalog.EnsureIndexFormat(fixture.Storage));
+        refusal.FoundVersion.ShouldBe(1);
+        refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+        Should.Throw<IndexFormatException>(() => DocumentCatalog.Open(fixture.Storage, fixture.Coordinator)).FoundVersion.ShouldBe(1);
     }
 
     private sealed class Fixture : IAsyncDisposable

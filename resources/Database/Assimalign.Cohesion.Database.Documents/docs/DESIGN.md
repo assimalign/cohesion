@@ -243,7 +243,10 @@ are aggregated after attempting every database.
 File-backed databases have `document.dat`, `document.log`, and `document.bak` under
 one validated database-name directory. Open performs kernel WAL replay with its
 checkpoint deferred, scrubs uncommitted record writers and index changes, and then
-completes the recovery checkpoint. Both synchronous and grouped durability
+completes the recovery checkpoint. Before the scrub it checks every index tree's
+B-tree page format (`DocumentCatalog.EnsureIndexFormat`, #1194): a database whose
+indexes an engine before #1194 wrote is refused with "Database 'x' cannot be
+opened. COHDBI001: …" and left byte-identical. Both synchronous and grouped durability
 acknowledge commits only after the journal is durable. Memory-backed databases
 use the identical storage/transaction implementation over in-memory streams.
 

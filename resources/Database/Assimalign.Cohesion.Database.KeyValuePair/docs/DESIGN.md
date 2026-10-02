@@ -55,6 +55,21 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
   key is stored in the record (not only in the index) so recovery scrubs and
   integrity checks are self-describing; format version 1, catalog-persisted,
   rejected-if-newer at open (no upgrade machinery — the model was born stamped).
+- **The primary index's page format is Indexing's, checked at attach (#1194).**
+  The entry-space format describes entry records, which #1194 did not change, so
+  its marker stays 1. The primary index's pages carry `Database.Indexing`'s own
+  B-tree page format (2 since #1194: entries ordered by key, entry location and
+  writer), and the index manager checks the tree's root page when the instance
+  attaches it — before the recovery scrub writes anything. A database whose
+  primary index an engine before #1194 wrote (format 1) is refused with
+  `DatabaseException` "Database 'x' cannot be opened. COHDBI001: Index … uses
+  B-tree page format 1, but this engine supports only format 2 …", the index
+  manager's `IndexFormatException` as its inner exception, and its files are left
+  byte-identical (`KeyValueEngineLifecycleTests`). There is no upgrade path
+  (owner decision of 2026-10-02; #1152). With entries ordered by location, a PUT's
+  tombstone of the key's previous version descends to it instead of walking the
+  key's dead versions; the unique check still reads them until version pruning
+  (#1195).
 - **Writes are two-phase, key-grain.** Phase one: acquire the key's Exclusive
   lock (`LockResource.Entry(keySpace, IndexKey.Hash())` — the same identity the
   B+Tree's unique enforcement locks internally, so its in-gate re-acquisition is

@@ -153,7 +153,33 @@ internal sealed partial class DefaultGraphStore
     {
         _registrations.Clear();
         var registrations = new List<BTreeIndexRegistration>();
-        using var iterator = _storage.GetUnitIterator(1);
+        foreach (var (registration, page, slot) in ReadRegistrations(_storage))
+        {
+            registrations.Add(registration);
+            _registrations.Add(registration.ObjectId, (page, slot, registration.RootPageId));
+        }
+        _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        {
+            Storage = _storage,
+            TransactionSource = new TransactionSource(_coordinator),
+            ExistingIndexes = registrations
+        });
+    }
+
+    /// <summary>
+    /// Checks the B-tree page format of every index tree the storage registers, without
+    /// opening the store: registration records carry no MVCC stamps, so they read the
+    /// same before and after the coordinator's recovery scrub.
+    /// </summary>
+    /// <exception cref="IndexFormatException">A tree is not in the B-tree page format this engine reads.</exception>
+    internal static void EnsureIndexFormat(GraphStorage storage)
+        => BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
+
+    private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot)> ReadRegistrations(GraphStorage storage)
+    {
+        var registrations = new List<(BTreeIndexRegistration, PageId, int)>();
+        var ids = new HashSet<ulong>();
+        using var iterator = storage.GetUnitIterator(1);
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
@@ -166,16 +192,10 @@ internal sealed partial class DefaultGraphStore
             }
             ulong id = reader.ReadUInt64();
             long root = reader.ReadInt64();
-            if (id == 0 || root <= 0 || _registrations.ContainsKey(id)) { throw new StorageCorruptionException("Invalid graph B+Tree registration identity."); }
-            registrations.Add(new BTreeIndexRegistration(id, new IndexDefinition(TreeName), root));
-            _registrations.Add(id, (unit.PageId, unit.SlotIndex, root));
+            if (id == 0 || root <= 0 || !ids.Add(id)) { throw new StorageCorruptionException("Invalid graph B+Tree registration identity."); }
+            registrations.Add((new BTreeIndexRegistration(id, new IndexDefinition(TreeName), root), unit.PageId, unit.SlotIndex));
         }
-        _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
-        {
-            Storage = _storage,
-            TransactionSource = new TransactionSource(_coordinator),
-            ExistingIndexes = registrations
-        });
+        return registrations;
     }
 
     private void SaveRegistrations(IStorageTransaction bracket)

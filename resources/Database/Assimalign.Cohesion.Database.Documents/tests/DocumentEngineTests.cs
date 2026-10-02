@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
@@ -201,5 +203,46 @@ public sealed class DocumentEngineTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(name));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Format: a database whose indexes are in B-tree page format 1 is refused at open with COHDBI001, its files untouched (#1194)")]
+    public async Task Open_IndexPagesInFormatOne_ShouldBeRefused()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-format-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            // Arrange: a closed database with an index, its index pages rewritten into
+            // the layout engines before #1194 wrote (entries ordered by key alone).
+            await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
+            {
+                var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("legacy");
+                var collection = await database.CreateCollectionAsync("items");
+                await using var session = await database.CreateSessionAsync();
+                await collection.PutAsync(session, "a", Encoding.UTF8.GetBytes("{\"score\":1}"));
+                await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
+            }
+
+            LegacyBTreePages.DowngradeDataFiles(root).ShouldBeGreaterThan(0);
+            var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+            // Act
+            await using var reopened = DocumentDatabaseEngine.Create(new() { RootPath = root });
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy"));
+
+            // Assert: the coded refusal, with the index manager's as its cause; the
+            // check ran before recovery, so the database is left as it was.
+            failure.Message.ShouldStartWith("Database 'legacy' cannot be opened. " + IndexFormatException.ErrorCode + ": ", Case.Sensitive);
+            failure.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+            failure.InnerException.ShouldBeOfType<IndexFormatException>().FoundVersion.ShouldBe(1);
+            reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
+            await reopened.DisposeAsync();
+
+            foreach (var (path, bytes) in before)
+            {
+                File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 }

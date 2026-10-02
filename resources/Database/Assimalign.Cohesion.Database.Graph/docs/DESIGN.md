@@ -438,6 +438,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG007` | The session's explicit transaction is aborted, by a failed statement or by a rollback or commit that did not complete: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
 | `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; on the wire's `ExecutePaths` seam the client currently closes its connection |
 | `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
+| `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery so the files stay as they were |
 
 Planner/data errors use stable code prefixes on `DatabaseException`. Kernel aborts cross the engine
 boundary as `DatabaseTransactionAbortedException`; deadlocks retain their specialized subtype.

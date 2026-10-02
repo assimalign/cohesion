@@ -373,7 +373,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   proof surface — the planner suite asserts an indexed equality seek examines
   O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
-  chains (since record-space format version 3; the current format is 4).**
+  chains (since record-space format version 3; the current format is 5).**
   Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
   B+Tree leaf-entry design adopted for the record space — followed by the
   shared tuple codec payload (#854): the owning table's object id, then one
@@ -405,12 +405,16 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 4 only: stamped rows in per-object page chains whose index keys use the
-  temporal identity encoding (#1099, below). The earlier versions are history —
+  format 5 only: stamped rows in per-object page chains whose index keys use the
+  temporal identity encoding (#1099, below), in index trees of B-tree page format
+  2, which order entries by key, entry reference and writer (#1194,
+  `Database.Indexing` DESIGN). The earlier versions are history —
   1 = the pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream,
   3 = per-object chains with the `DateTimeKind` and offset inside temporal keys
-  (written through 10.0.0-preview.1). `CreateDatabaseAsync` writes the format-4
-  marker as soon as the catalog opens, and first checks that the catalog is new
+  (written through 10.0.0-preview.1), 4 = format 5's rows over index trees of
+  B-tree page format 1, ordered by key alone (owner decision of 2026-10-02: the
+  page format change takes no upgrade path either). `CreateDatabaseAsync` writes
+  the format-5 marker as soon as the catalog opens, and first checks that the catalog is new
   (no marker, no tables): `ISqlStorageStrategy.CreateStorage` must refuse
   existing storage, and a strategy that reopened it instead would otherwise get
   an older catalog declared current. `OpenDatabaseAsync` refuses a database on
@@ -445,7 +449,18 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   duplicate handling, crash safety, progress). **Downgrade fence:** engines
   before format 4 never compared the marker against a newer version, so the
   format-4 marker is a record kind their catalogs refuse to load; they fail the
-  open instead of writing format-3 keys into a format-4 database.
+  open instead of writing format-3 keys into a format-4 database. Format-4
+  engines compare the marker for equality, so they refuse a format-5 database as
+  written by a newer engine. **Behind the gate, the index manager checks the trees
+  themselves (#1194).** `Database.Indexing` owns the B-tree page format and checks
+  every tree's root page when `SqlDatabaseInstance` attaches the catalog's
+  registrations, before recovery's scrub or checkpoint writes anything. A marker
+  that does not describe its trees — a damaged root, or pages another engine build
+  wrote — fails the open with `SqlDataStorageFormatException` ("uses data-storage
+  format 5, but one of its index trees does not: COHDBI001: …", the index manager's
+  `IndexFormatException` as its inner exception), and the files are left
+  byte-identical. `SqlDataStorageFormatTests` pins both refusals with real format-1
+  index pages.
 - **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
   current rows under the exclusive object lock before publishing the complete
   replacement definition in one catalog transaction. Backfill is resolved at
@@ -787,11 +802,17 @@ description + exported registrations), the engine binds them.
   splits. Seeks, the UNIQUE check, and FOREIGN KEY lookups in both directions
   reach every entry of such a run; `SqlIndexDuplicateKeyTests` pins seek-versus-
   scan equivalence for indexes built by `CREATE INDEX` (over insert-only rows
-  and over UPDATE/DELETE history) and maintained by DML. The cost is linear in
-  the run, dead versions included, so a row updated thousands of times under a
-  UNIQUE index, or a cascade over thousands of children of one parent, slows
-  quadratically until the index gains an entry tiebreaker and version pruning
-  (`Database.Indexing` DESIGN, "Known limit").
+  and over UPDATE/DELETE history) and maintained by DML.
+- **Index maintenance descends to its entry** (#1194): the trees order entries by
+  key, then the row version's location (the entry reference this engine passes),
+  then the writer, so tombstoning a row version's entries and the logical undo of
+  a ROLLBACK find each entry in one descent however long its key's run. An
+  `ON DELETE CASCADE` over one parent's children is linear in the child count
+  (16,000 children: 6.2 s before, 0.43 s after; `SqlCascadeFanOutTests` guards the
+  growth ratio). The UNIQUE check still reads its key's dead versions until a
+  live one, so a row updated thousands of times under a UNIQUE index slows
+  linearly per update until dead versions are pruned (#1195). Measurements and
+  the design are in the `Database.Indexing` DESIGN ("Entry order").
 
 ## Engine-owned background workers
 
@@ -1387,7 +1408,8 @@ and add it again" as the only remedy.
   TEXT default, even for old rows that lack the field), `+5` as `5`, and `abc` as
   a column reference reported as catalog damage. The format gate
   (`ThrowIfFormatIsNotCurrent`, see "Format rule") refuses every database not on
-  format 4 before `BindCatalog` runs, so no pre-canonical definition is ever bound.
+  the current format (5; canonical since 4) before `BindCatalog` runs, so no
+  pre-canonical definition is ever bound.
   `BindCatalog` runs after that gate on open and after the format marker is written
   on create; keep that order.
 - **Compiled schemas.** A compiled CHECK keeps its author's spelling in the

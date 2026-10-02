@@ -7,7 +7,10 @@ Its B+Trees come from `Database.Indexing`, and every data/index mutation joins t
 `ITransactionContext` through `TransactionCoordinator`.
 
 `DocumentCatalog.Open(storage, coordinator)` opens the metadata directory and persisted physical
-trees. Read methods accept an explicit visibility snapshot. Mutation methods neither begin nor
+trees. `DocumentCatalog.EnsureIndexFormat(storage)` checks, before the coordinator's recovery
+scrub and without writing, that every persisted tree is in the B-tree page format this engine
+reads, and throws `IndexFormatException` (`COHDBI001`) when one is not (#1194). Read methods
+accept an explicit visibility snapshot. Mutation methods neither begin nor
 commit the caller's transaction. The engine takes the logical database's exclusive writer lock,
 rejects write conflicts and stale index definitions, and enforces schema ownership before calling
 the catalog.

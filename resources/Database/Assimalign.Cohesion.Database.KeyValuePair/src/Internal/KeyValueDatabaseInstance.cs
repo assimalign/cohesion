@@ -51,14 +51,25 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         // scrub must be able to purge unproven writers' entries out of the tree.
         // Index pages live in the SAME data file set as entry records (the
         // transactional page surface), so storage recovery has already replayed
-        // them by the time the manager attaches.
-        _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        // them by the time the manager attaches. The manager checks the tree's
+        // page format as it attaches it (Indexing owns that format, #1194): a
+        // primary index written in another B-tree page format refuses the open
+        // here, before recovery writes anything.
+        try
         {
-            Storage = storage,
-            TransactionSource = new StatementTransactionSource(_coordinator),
-            LockManager = _coordinator.LockManager,
-            ExistingIndexes = _catalog.GetIndexRegistrations(),
-        });
+            _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+            {
+                Storage = storage,
+                TransactionSource = new StatementTransactionSource(_coordinator),
+                LockManager = _coordinator.LockManager,
+                ExistingIndexes = _catalog.GetIndexRegistrations(),
+            });
+        }
+        catch (IndexFormatException exception)
+        {
+            _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+        }
 
         if (recover)
         {

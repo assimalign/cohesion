@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
@@ -198,6 +200,37 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
                 await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
 
             failure.Message.ShouldContain("format", Case.Insensitive);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A database whose primary index is in B-tree page format 1 is refused at open with COHDBI001, its files untouched (#1194)")]
+    public async Task Open_PrimaryIndexInFormatOne_ShouldBeRefused()
+    {
+        // Arrange: a closed database whose index pages are rewritten into the layout
+        // engines before #1194 wrote (entries ordered by key alone, no page stamp).
+        await using (var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            await using var session = await database.CreateSessionAsync();
+            await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+        }
+
+        LegacyBTreePages.DowngradeDataFiles(_rootPath).ShouldBeGreaterThan(0);
+        var before = Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+        // Act
+        await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
+
+        // Assert: the coded refusal names the database and both formats, and the open
+        // wrote nothing — it failed before recovery's scrub and checkpoint.
+        failure.Message.ShouldStartWith("Database 'kv' cannot be opened. " + IndexFormatException.ErrorCode + ": ", Case.Sensitive);
+        failure.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+        failure.InnerException.ShouldBeOfType<IndexFormatException>().FoundVersion.ShouldBe(1);
+
+        foreach (var (path, bytes) in before)
+        {
+            File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
         }
     }
 }

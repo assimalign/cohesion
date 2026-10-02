@@ -6,6 +6,8 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
@@ -400,6 +402,27 @@ public sealed class GraphStoreTests
         result.Position = 0;
         return result;
     }
+    [Fact(DisplayName = "Cohesion Test [Database.Graph.Storage] - Format: EnsureIndexFormat passes current trees and refuses trees in B-tree page format 1, as Open does (#1194)")]
+    public async Task EnsureIndexFormat_TreesInFormatOne_ShouldRefuse()
+    {
+        // Arrange: a property index over a node, committed.
+        await using var fixture = new Fixture();
+        var writer = await fixture.Begin();
+        await fixture.Store.CreateIndexAsync("Person", "name", writer);
+        await fixture.Store.CreateNodeAsync(["Person"], Properties("name", "Alice"), writer);
+        await fixture.Coordinator.CommitAsync(writer);
+        GraphStore.EnsureIndexFormat(fixture.Storage);
+
+        // Act: the trees rewritten into the layout engines before #1194 wrote.
+        LegacyBTreePages.DowngradeIndexPages(fixture.Storage).ShouldBeGreaterThan(0);
+
+        // Assert
+        var refusal = Should.Throw<IndexFormatException>(() => GraphStore.EnsureIndexFormat(fixture.Storage));
+        refusal.FoundVersion.ShouldBe(1);
+        refusal.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+        Should.Throw<IndexFormatException>(() => GraphStore.Open(fixture.Storage, fixture.Coordinator)).FoundVersion.ShouldBe(1);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         internal GraphStorage Storage { get; } = GraphStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "test");

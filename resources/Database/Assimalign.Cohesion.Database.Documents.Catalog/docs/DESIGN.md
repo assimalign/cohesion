@@ -149,7 +149,17 @@ it verifies recovery and index scrub without claiming physical durable-flush sup
 Adding/removing fields, changing scalar type, or replacing an object with an array is supported
 without schema migration. Each change creates a new version and updates affected scalar indexes.
 On-disk record-layout changes require a new format version and explicit migration support;
-unknown versions are rejected. Former raw, unstamped DocumentStorage stub files are unsupported
+unknown versions are rejected.
+
+The index trees' pages are not catalog records: `Database.Indexing` owns their B-tree page
+format (2 since #1194, entries ordered by key, entry location and writer) and checks each tree's
+root page when the catalog attaches it. Opening the catalog happens after the coordinator's
+recovery scrub, so `DocumentCatalog.EnsureIndexFormat(storage)` makes the same check first,
+reading only the registration records (which carry no MVCC stamps, so the scrub does not change
+them) and each root page. The Documents engine calls it before recovery and refuses a database
+whose indexes an engine before #1194 wrote with "Database 'x' cannot be opened. COHDBI001: …",
+the `IndexFormatException` as its inner exception, leaving the files byte-identical. There is no
+upgrade path (owner decision of 2026-10-02; #1152). Former raw, unstamped DocumentStorage stub files are unsupported
 as engine databases. Catalog format failures raise `DocumentCatalogException`; shared storage
 corruption remains a storage exception. Invalid JSON/numeric-domain input is rejected by the
 validated storage write helper before publication. Public package APIs require no reflection,

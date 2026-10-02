@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Graph.Catalog;
+using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 using Shouldly;
@@ -139,6 +141,45 @@ public sealed class GraphEngineTests
             reopened.TryGetDatabase("persisted", out _).ShouldBeFalse();
             await Should.ThrowAsync<DatabaseNotFoundException>(async () => await reopened.OpenDatabaseAsync("persisted"));
             await reopened.DisposeAsync(); reopened.Dispose(); reopened.State.ShouldBe(EngineState.Disposed);
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Format: a database whose indexes are in B-tree page format 1 is refused at open with COHDBI001, its files untouched (#1194)")]
+    public async Task Open_IndexPagesInFormatOne_ShouldBeRefused()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-graph-format-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // Arrange: a closed database with a property index, its index pages rewritten
+            // into the layout engines before #1194 wrote (entries ordered by key alone).
+            await using (var engine = GraphDatabaseEngine.Create(new() { RootPath = root }))
+            {
+                var db = (IGraphDatabase)await engine.CreateDatabaseAsync("legacy");
+                await using var session = await db.CreateSessionAsync();
+                await db.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["name"] = "a" });
+                await GraphSchema.Open(db, session).CreateIndexAsync("Person", "by_name", "name");
+            }
+
+            LegacyBTreePages.DowngradeDataFiles(root).ShouldBeGreaterThan(0);
+            var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+            // Act
+            await using var reopened = GraphDatabaseEngine.Create(new() { RootPath = root });
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy"));
+
+            // Assert: the coded refusal, with the index manager's as its cause; the
+            // check ran before recovery, so the database is left as it was.
+            failure.Message.ShouldStartWith("Database 'legacy' cannot be opened. " + IndexFormatException.ErrorCode + ": ", Case.Sensitive);
+            failure.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
+            failure.InnerException.ShouldBeOfType<IndexFormatException>().FoundVersion.ShouldBe(1);
+            reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
+            await reopened.DisposeAsync();
+
+            foreach (var (path, bytes) in before)
+            {
+                File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
+            }
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }

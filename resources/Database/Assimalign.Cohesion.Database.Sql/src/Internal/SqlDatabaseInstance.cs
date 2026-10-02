@@ -67,9 +67,9 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             StampNewCatalog();
         }
 
-        // Every database that reaches this point is on format 4, which stores CHECK and DEFAULT
-        // definitions as canonical SQL; older formats were refused above, so no definition
-        // here predates canonical storage.
+        // Every database that reaches this point is on format 5, which (since format 4) stores
+        // CHECK and DEFAULT definitions as canonical SQL; older formats were refused above, so
+        // no definition here predates canonical storage.
         // Parse and bind every persisted CHECK and DEFAULT now, once, before anything else
         // touches the database: a definition that does not load fails the open, naming its
         // table, instead of failing an arbitrary later write. Writes reuse these bindings.
@@ -90,13 +90,28 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         // every tree. Index pages live in the SAME data file set as rows (the
         // transactional page surface), so storage recovery has already replayed
         // them by the time the manager attaches.
-        _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        try
         {
-            Storage = storage,
-            TransactionSource = new StatementTransactionSource(_coordinator),
-            LockManager = _coordinator.LockManager,
-            ExistingIndexes = _catalog.GetIndexRegistrations(),
-        });
+            _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+            {
+                Storage = storage,
+                TransactionSource = new StatementTransactionSource(_coordinator),
+                LockManager = _coordinator.LockManager,
+                ExistingIndexes = _catalog.GetIndexRegistrations(),
+            });
+        }
+        catch (IndexFormatException exception)
+        {
+            // The format gate above vouches for the trees only through the
+            // catalog's marker. The index manager checks each tree's own page
+            // format as it attaches it, and a tree the marker does not describe —
+            // a damaged root, or pages written by another engine build — fails the
+            // open before recovery writes anything, never a read later.
+            _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw new SqlDataStorageFormatException(
+                $"Database '{name}' uses data-storage format {_catalog.RecordSpaceFormatVersion}, but one of its index trees " +
+                $"does not: {exception.Message}", exception);
+        }
         _schemaProvisioner = new SqlSchemaProvisioner(this, _catalog);
 
         if (recover)
