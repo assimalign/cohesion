@@ -211,7 +211,13 @@ written, the counts it accepts, what the call passed and the accepted call forms
 ```text
 COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).
 COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).
+COHSQLE006: Function 'SUM' takes exactly 1 argument but was called with '*'. Accepted: SUM(numeric).
+COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2 arguments including '*'. Accepted: COUNT(*) or COUNT(value).
 ```
+
+A call passes `'*'` only when `*` is its sole argument; the parser also accepts `*`
+after other arguments (`COUNT(id, *)`, `COALESCE(a, *)`), and such a call is reported
+by its full count.
 
 The engine resolves a call's arguments before the call itself, as PostgreSQL's parse
 analysis does, so `COALESCE(name, UPPER())` reports `UPPER`, and `FOO(ABS())` reports

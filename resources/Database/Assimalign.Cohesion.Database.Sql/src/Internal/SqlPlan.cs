@@ -22,7 +22,7 @@ internal sealed record SqlGroupPlan(
     IReadOnlyList<SqlCatalogColumn> SourceColumns,
     IReadOnlyList<SqlTableBinding>? Bindings,
     IReadOnlyList<SqlExpression> Keys,
-    IReadOnlyList<SqlFunctionCallExpression> Aggregates,
+    IReadOnlyList<SqlGroupAggregate> Aggregates,
     IReadOnlyDictionary<SqlExpression, int> ValueOrdinals,
     IReadOnlyList<SqlProjection> Projections,
     SqlExpression? Having,
@@ -31,6 +31,14 @@ internal sealed record SqlGroupPlan(
     long? Offset,
     bool IsDistinct,
     IReadOnlyDictionary<SqlExpression, int> OrderByProjections) : SqlPlan;
+
+/// <summary>
+/// One distinct aggregate call of a grouping plan, bound to the signature it matched, so the
+/// executor accumulates by the function the planner resolved instead of by the written name.
+/// </summary>
+/// <param name="Call">The aggregate call; its one argument is the accumulated operand, or <c>*</c> for <c>COUNT(*)</c>.</param>
+/// <param name="Signature">The aggregate signature the call matched.</param>
+internal sealed record SqlGroupAggregate(SqlFunctionCallExpression Call, SqlFunctionSignature Signature);
 
 /// <summary>One projected output column of a SELECT.</summary>
 /// <param name="Name">The output column name (alias, column name, or a synthesized name).</param>

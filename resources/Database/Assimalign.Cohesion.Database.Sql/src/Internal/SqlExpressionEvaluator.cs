@@ -641,50 +641,64 @@ internal sealed class SqlExpressionEvaluator
             throw new DatabaseException($"Function '{function.FunctionName}' is not supported by the executor yet.");
         }
 
-        if (signature.Function == SqlBuiltinFunction.Coalesce)
-        {
-            foreach (var argument in function.Arguments)
-            {
-                object? value = EvaluateCore(argument, row);
-
-                if (value is not null)
-                {
-                    return value;
-                }
-            }
-
-            return null;
-        }
-
-        // Every other scalar takes exactly one argument; the signature has just proven it.
-        object? single = EvaluateCore(function.Arguments[0], row);
-
+        // Each case evaluates the arguments its signature admits, and no more: the signature has
+        // just proven the count, and no case reads an argument another function's count implies.
+        var arguments = function.Arguments;
         return signature.Function switch
         {
-            SqlBuiltinFunction.Upper => (single as string)?.ToUpperInvariant() ?? single,
-            SqlBuiltinFunction.Lower => (single as string)?.ToLowerInvariant() ?? single,
-            SqlBuiltinFunction.Length => single is null ? null : (long)(Convert.ToString(single, CultureInfo.InvariantCulture)?.Length ?? 0),
-            // Every numeric storage type: exact integers widen to BIGINT before the
-            // magnitude is taken (so INT's minimum is representable), approximate and
-            // decimal values keep their own type.
-            SqlBuiltinFunction.Abs => single switch
-            {
-                null => null,
-                sbyte value => Math.Abs((long)value),
-                short value => Math.Abs((long)value),
-                int value => Math.Abs((long)value),
-                long value => value == long.MinValue
-                    ? throw SqlEvaluationException.NumericValueOutOfRange($"ABS of BIGINT {value.ToString(CultureInfo.InvariantCulture)} overflowed.")
-                    : Math.Abs(value),
-                float value => Math.Abs(value),
-                double value => Math.Abs(value),
-                decimal value => Math.Abs(value),
-                _ => throw new DatabaseException("ABS requires a numeric argument."),
-            },
+            SqlBuiltinFunction.Coalesce => Coalesce(arguments, row),
+            SqlBuiltinFunction.Upper => Upper(EvaluateCore(arguments[0], row)),
+            SqlBuiltinFunction.Lower => Lower(EvaluateCore(arguments[0], row)),
+            SqlBuiltinFunction.Length => Length(EvaluateCore(arguments[0], row)),
+            SqlBuiltinFunction.Abs => Abs(EvaluateCore(arguments[0], row)),
             // A scalar entry added to the signature table without a case here.
             _ => throw new DatabaseException($"Function '{function.FunctionName}' is not supported by the executor yet."),
         };
     }
+
+    /// <summary>The first non-NULL argument, evaluated left to right and no further.</summary>
+    private object? Coalesce(IReadOnlyList<SqlExpression> arguments, object?[] row)
+    {
+        for (int index = 0; index < arguments.Count; index++)
+        {
+            object? value = EvaluateCore(arguments[index], row);
+
+            if (value is not null)
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static object? Upper(object? value) => (value as string)?.ToUpperInvariant() ?? value;
+
+    private static object? Lower(object? value) => (value as string)?.ToLowerInvariant() ?? value;
+
+    private static object? Length(object? value)
+        => value is null ? null : (long)(Convert.ToString(value, CultureInfo.InvariantCulture)?.Length ?? 0);
+
+    /// <summary>
+    /// Every numeric storage type: exact integers widen to BIGINT before the magnitude is taken
+    /// (so INT's minimum is representable), approximate and decimal values keep their own type.
+    /// </summary>
+    /// <exception cref="SqlEvaluationException">The BIGINT minimum has no positive counterpart (<c>COHSQLE002</c>).</exception>
+    /// <exception cref="DatabaseException">The value is not a number.</exception>
+    private static object? Abs(object? value) => value switch
+    {
+        null => null,
+        sbyte number => Math.Abs((long)number),
+        short number => Math.Abs((long)number),
+        int number => Math.Abs((long)number),
+        long number => number == long.MinValue
+            ? throw SqlEvaluationException.NumericValueOutOfRange($"ABS of BIGINT {number.ToString(CultureInfo.InvariantCulture)} overflowed.")
+            : Math.Abs(number),
+        float number => Math.Abs(number),
+        double number => Math.Abs(number),
+        decimal number => Math.Abs(number),
+        _ => throw new DatabaseException("ABS requires a numeric argument."),
+    };
 
     /// <summary>
     /// Uses the same non-null value order as grouping, sorting and extrema.

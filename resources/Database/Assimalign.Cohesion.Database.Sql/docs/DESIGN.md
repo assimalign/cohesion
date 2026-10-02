@@ -313,9 +313,22 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   PostgreSQL's grammar does (`COALESCE '(' expr_list ')'` in `gram.y`), where ISO
   requires two; the dialect records the deviation. The T1 functions of #1120 are
   new entries, and their argument-type rules, result types, NULL rule and
-  determinism new members of `SqlFunctionSignature`, not a second list. The table is
-  a frozen dictionary over a fixed array: no reflection, no runtime code, a
-  case-insensitive lookup that does not allocate.
+  determinism new members of `SqlFunctionSignature`, not a second list. Until those
+  members exist, each reader that behaves per function finds the function through
+  the table (`SqlFunctionSignatures.FunctionOf`, or the signature `Resolve` returns)
+  and switches on `SqlBuiltinFunction`; none compares the written name against a
+  literal. Those switches are the evaluator's dispatch, which evaluates inside each
+  function's case only the arguments that function's signature admits; the grouping
+  planner's result types and its SUM/AVG numeric-argument rule; the static operand
+  type; CHECK's Boolean `COALESCE` rule; and the grouping executor's accumulators and
+  `COUNT`'s non-nullable result, where each aggregate of a `SqlGroupPlan` carries
+  the signature the planner bound it to (`SqlGroupAggregate`) and an aggregate entry
+  without an accumulator fails when the plan executes rather than counting rows.
+  #1120 moves those arms into signature members. The SQL parser's own aggregate list
+  (`SqlQueryParser.IsAggregateFunction`, Sql.Language, which cannot read this
+  engine's internal table) is the one name list outside it. The table is a frozen
+  dictionary over a fixed array: no reflection, no runtime code, a case-insensitive
+  lookup that does not allocate.
 - **Access-path selection (rule-based; no cost model — the MVP planner
   contract).** The planner flattens the WHERE clause's top-level `AND`
   conjuncts into per-column sargable predicates — `column op comparand` where

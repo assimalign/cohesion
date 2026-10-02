@@ -29,7 +29,7 @@ internal sealed partial class SqlPlanner
             ValidateExpression(select.Where, evaluator, _subqueryTypes);
         }
 
-        var aggregates = new List<SqlFunctionCallExpression>();
+        var aggregates = new List<SqlGroupAggregate>();
         var slots = new Dictionary<SqlExpression, int>();
         var projections = new List<SqlProjection>();
         foreach (var column in select.Columns)
@@ -76,8 +76,9 @@ internal sealed partial class SqlPlanner
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
             {
                 // Planning resolved every call already; the signature is read again rather than
-                // assumed, because the argument below is indexed on it (#1189).
-                SqlFunctionSignatures.Resolve(call);
+                // assumed, because the argument below is indexed on it and the grouping executor
+                // accumulates by it (#1189).
+                var signature = SqlFunctionSignatures.Resolve(call)!;
                 var argument = call.Arguments[0];
                 if (ContainsAggregate(argument))
                 {
@@ -87,7 +88,7 @@ internal sealed partial class SqlPlanner
                 {
                     ValidateExpression(argument, evaluator, _subqueryTypes);
                 }
-                if (call.FunctionName.ToUpperInvariant() is "SUM" or "AVG")
+                if (signature.Function is SqlBuiltinFunction.Sum or SqlBuiltinFunction.Avg)
                 {
                     var type = GroupExpressionType(argument, columns, evaluator);
                     if (type is not (DatabaseType.Null or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
@@ -96,11 +97,11 @@ internal sealed partial class SqlPlanner
                         throw new DatabaseException($"{call.FunctionName} requires a numeric argument.");
                     }
                 }
-                int index = aggregates.FindIndex(candidate => SameGroupExpression(candidate, call, evaluator));
+                int index = aggregates.FindIndex(candidate => SameGroupExpression(candidate.Call, call, evaluator));
                 if (index < 0)
                 {
                     index = aggregates.Count;
-                    aggregates.Add(call);
+                    aggregates.Add(new SqlGroupAggregate(call, signature));
                 }
                 slots[expression] = select.GroupBy.Count + index;
                 return;
@@ -224,18 +225,19 @@ internal sealed partial class SqlPlanner
             SqlLiteralType.Boolean => DatabaseType.Boolean,
             _ => DatabaseType.Null,
         },
-        SqlFunctionCallExpression call => call.FunctionName.ToUpperInvariant() switch
+        // The function's result type, until #1120 makes it a member of its signature.
+        SqlFunctionCallExpression call => SqlFunctionSignatures.FunctionOf(call) switch
         {
-            "COUNT" or "LENGTH" => DatabaseType.Int64,
-            "SUM" or "AVG" => DatabaseType.Decimal,
-            "UPPER" or "LOWER" => call.Arguments.Count == 1
+            SqlBuiltinFunction.Count or SqlBuiltinFunction.Length => DatabaseType.Int64,
+            SqlBuiltinFunction.Sum or SqlBuiltinFunction.Avg => DatabaseType.Decimal,
+            SqlBuiltinFunction.Upper or SqlBuiltinFunction.Lower => call.Arguments.Count == 1
                 ? GroupExpressionType(call.Arguments[0], columns, evaluator) : DatabaseType.Null,
-            "ABS" when call.Arguments.Count == 1 => GroupExpressionType(call.Arguments[0], columns, evaluator) switch
+            SqlBuiltinFunction.Abs when call.Arguments.Count == 1 => GroupExpressionType(call.Arguments[0], columns, evaluator) switch
             {
                 DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64 => DatabaseType.Int64,
                 var type => type,
             },
-            "COALESCE" => call.Arguments.Select(argument => GroupExpressionType(argument, columns, evaluator))
+            SqlBuiltinFunction.Coalesce => call.Arguments.Select(argument => GroupExpressionType(argument, columns, evaluator))
                 .Aggregate(DatabaseType.Null, CommonGroupType),
             _ => call.Arguments.Count > 0 ? GroupExpressionType(call.Arguments[0], columns, evaluator) : DatabaseType.Null,
         },

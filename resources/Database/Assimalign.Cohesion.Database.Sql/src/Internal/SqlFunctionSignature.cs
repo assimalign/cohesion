@@ -55,7 +55,8 @@ internal enum SqlBuiltinFunction
 /// <summary>
 /// One executable function's signature: its name, whether it is a scalar or an aggregate, how
 /// many arguments a call may pass, whether it accepts <c>*</c>, and the call forms a diagnostic
-/// shows. Every reader of a function's shape reads it from here (see <see cref="SqlFunctionSignatures"/>).
+/// shows. Every check of a call's arguments reads it from here, and every reader that behaves
+/// per function finds the function through it (see <see cref="SqlFunctionSignatures"/>).
 /// </summary>
 /// <remarks>
 /// A call matches a signature only when its argument count lies within the signature's bounds,
@@ -63,7 +64,8 @@ internal enum SqlBuiltinFunction
 /// <c>src/backend/parser/parse_func.c</c>): a call no candidate accepts by count is
 /// <c>function ... does not exist</c>, SQLSTATE 42883, with the detail "No function of that name
 /// accepts the given number of arguments." Argument-type rules, result types, the NULL rule and
-/// determinism (#1120) are further members of this class, not another table.
+/// determinism (#1120) become further members of this class, not another table; until then the
+/// readers that need them switch on <see cref="Function"/>.
 /// </remarks>
 internal sealed class SqlFunctionSignature
 {
@@ -145,11 +147,22 @@ internal sealed class SqlFunctionSignature
 
     /// <summary>Describes what a call passed, as a diagnostic words it.</summary>
     /// <param name="arguments">The call's arguments.</param>
-    /// <returns><c>'*'</c>, <c>none</c>, or the number of arguments.</returns>
+    /// <returns>
+    /// <c>'*'</c> when <c>*</c> is the only argument, <c>none</c>, the number of arguments, or for
+    /// example <c>2 arguments including '*'</c> when a <c>*</c> is one of several, as the parser
+    /// accepts in <c>COUNT(id, *)</c>.
+    /// </returns>
     internal static string DescribeArguments(IReadOnlyList<SqlExpression> arguments)
-        => HasStar(arguments) ? "'*'"
-            : arguments.Count == 0 ? "none"
-            : arguments.Count.ToString(CultureInfo.InvariantCulture);
+    {
+        string count = arguments.Count.ToString(CultureInfo.InvariantCulture);
+        return arguments.Count switch
+        {
+            0 => "none",
+            1 when arguments[0] is SqlStarExpression => "'*'",
+            _ when HasStar(arguments) => $"{count} arguments including '*'",
+            _ => count,
+        };
+    }
 
     private static bool HasStar(IReadOnlyList<SqlExpression> arguments)
     {

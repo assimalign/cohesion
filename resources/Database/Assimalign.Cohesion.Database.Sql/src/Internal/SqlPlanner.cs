@@ -1036,7 +1036,8 @@ internal sealed partial class SqlPlanner
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
             SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
             SqlSubqueryExpression when boundSubqueries is not null && boundSubqueries.TryGetValue(expression, out var type) => type,
-            SqlFunctionCallExpression call when call.FunctionName.ToUpperInvariant() is "UPPER" or "LOWER" => DatabaseType.String,
+            SqlFunctionCallExpression call when SqlFunctionSignatures.FunctionOf(call) is SqlBuiltinFunction.Upper or SqlBuiltinFunction.Lower
+                => DatabaseType.String,
             _ => null,
         };
     }

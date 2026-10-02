@@ -8,8 +8,8 @@ using Assimalign.Cohesion.Database.Sql.Language;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// The engine's one table of executable function signatures (#1189). Every reader of a function's
-/// shape reads it here, so a function added to the table is checked everywhere at once: the
+/// The engine's one table of executable function signatures (#1189). Every check of a call's
+/// arguments reads it here, so a function added to the table is checked everywhere at once: the
 /// planner, which resolves every call in every expression position before it binds the catalog
 /// or reads a row; the evaluator, which checks a call again before it computes it; CHECK
 /// validation, which admits the scalars listed here; persisted-definition binding when a database
@@ -31,6 +31,19 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// arguments"). The T1 scalar functions (#1120) are added as entries of this table, and their
 /// argument-type rules, result types, NULL rule and determinism as members of
 /// <see cref="SqlFunctionSignature"/>; no second list of names may be introduced.
+/// </para>
+/// <para>
+/// Until those members exist, a reader whose behaviour differs per function finds the function
+/// here (<see cref="FunctionOf"/>, or the signature <see cref="Resolve"/> returns) and switches on
+/// <see cref="SqlBuiltinFunction"/>; none compares the written name against a literal. Those
+/// switches are the evaluator's dispatch (<c>SqlExpressionEvaluator.EvaluateFunction</c>), the
+/// grouping planner's result types and SUM/AVG argument rule (<c>SqlPlanner.GroupExpressionTypeCore</c>,
+/// <c>SqlPlanner.PlanGroup</c>), the static operand type (<c>SqlPlanner.StaticOperandType</c>),
+/// CHECK's Boolean <c>COALESCE</c> rule (<c>SqlPlanExecutor.ValidateCheckSyntax</c>), and aggregate
+/// accumulation and result nullability (<c>SqlPlanExecutor.ExecuteGroupAsync</c>). #1120 moves
+/// their per-function arms into <see cref="SqlFunctionSignature"/> members. The SQL parser's
+/// aggregate list (<c>SqlQueryParser.IsAggregateFunction</c> in Sql.Language, which cannot read
+/// this engine's table) is the one name list outside it.
 /// </para>
 /// <para>
 /// The table is a frozen dictionary built once from a fixed array: no reflection and no code
@@ -66,6 +79,15 @@ internal static class SqlFunctionSignatures
     /// <returns><see langword="true"/> when the table holds the function.</returns>
     internal static bool TryGet(string name, [NotNullWhen(true)] out SqlFunctionSignature? signature)
         => _signatures.TryGetValue(name, out signature);
+
+    /// <summary>
+    /// Names the executable function a call invokes, without matching its arguments; planning has
+    /// matched them already (<see cref="Resolve"/>).
+    /// </summary>
+    /// <param name="call">The function call.</param>
+    /// <returns>The function, or null when the table does not hold the call's name.</returns>
+    internal static SqlBuiltinFunction? FunctionOf(SqlFunctionCallExpression call)
+        => _signatures.TryGetValue(call.FunctionName, out var signature) ? signature.Function : null;
 
     /// <summary>Whether a name is an aggregate function a grouping plan executes.</summary>
     /// <param name="name">The function name as written.</param>

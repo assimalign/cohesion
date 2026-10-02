@@ -132,6 +132,9 @@ public sealed class SqlFunctionArityTests : IDisposable
     [InlineData("SELECT COUNT(id, age) FROM t;", "COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).")]
     [InlineData("SELECT SUM(*) FROM t;", "COHSQLE006: Function 'SUM' takes exactly 1 argument but was called with '*'. Accepted: SUM(numeric).")]
     [InlineData("SELECT LENGTH(*) FROM t;", "COHSQLE006: Function 'LENGTH' takes exactly 1 argument but was called with '*'. Accepted: LENGTH(value).")]
+    // '*' among other arguments is counted with them, not reported as if it were the only one.
+    [InlineData("SELECT COUNT(id, *) FROM t;", "COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2 arguments including '*'. Accepted: COUNT(*) or COUNT(value).")]
+    [InlineData("SELECT COALESCE(age, *) FROM t;", "COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with 2 arguments including '*'. Accepted: COALESCE(value [, value ...]).")]
     public async Task ExecuteAsync_WrongArity_ShouldNameTheFunctionAndItsSignature(string sql, string message)
     {
         // Arrange
@@ -230,10 +233,12 @@ public sealed class SqlFunctionArityTests : IDisposable
 
     /// <summary>
     /// The signature table is the one list of executable functions. Every entry is a name the SQL
-    /// profile declares, and every scalar entry has an evaluator case, so a scalar added to the
-    /// table without one fails here rather than at a user's first call.
+    /// profile declares, and every scalar entry has an evaluator case that computes it at the
+    /// fewest and at the most arguments its signature admits (one more than the fewest when there
+    /// is no limit), so a scalar added to the table without a case, or whose case reads arguments
+    /// another count implies, fails here rather than at a user's first call.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: every signature is a declared name and every scalar evaluates")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: every signature is a declared name and every scalar evaluates at each bound")]
     public void Signatures_EveryEntry_ShouldBeDeclaredAndEveryScalarShouldEvaluate()
     {
         // Arrange
@@ -254,10 +259,38 @@ public sealed class SqlFunctionArityTests : IDisposable
             signature.Usage.ShouldStartWith($"{signature.Name}(", Case.Sensitive);
             if (signature.Kind == SqlFunctionKind.Scalar)
             {
-                string arguments = string.Join(", ", Enumerable.Repeat("-1", signature.MinimumArguments));
-                Should.NotThrow(() => evaluator.Evaluate(ParseProjection($"{signature.Name}({arguments})"), []), signature.Name);
+                int most = signature.MaximumArguments ?? signature.MinimumArguments + 1;
+                foreach (int count in new[] { signature.MinimumArguments, most }.Distinct())
+                {
+                    string arguments = string.Join(", ", Enumerable.Repeat("-1", count));
+                    Should.NotThrow(() => evaluator.Evaluate(ParseProjection($"{signature.Name}({arguments})"), []), $"{signature.Name}/{count}");
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// Every aggregate entry of the signature table has an accumulator in the grouping executor,
+    /// so an aggregate added to the table without one fails here rather than at a user's first call.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: every aggregate signature accumulates in a grouping plan")]
+    public async Task Signatures_EveryAggregate_ShouldAccumulate()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-function-arity-aggregates" });
+        var database = await engine.CreateDatabaseAsync("arity");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await SeedAsync(session, withRows: true);
+        var aggregates = SqlFunctionSignatures.All.Where(signature => signature.Kind == SqlFunctionKind.Aggregate)
+            .OrderBy(signature => signature.Name, StringComparer.Ordinal).ToArray();
+
+        // Act
+        var row = (await RowsAsync(session,
+            $"SELECT {string.Join(", ", aggregates.Select(signature => $"{signature.Name}(age)"))} FROM t;")).ShouldHaveSingleItem();
+
+        // Assert: AVG, COUNT, MAX, MIN, SUM over 36, -45 and 41.
+        aggregates.Select(signature => signature.Name).ShouldBe(["AVG", "COUNT", "MAX", "MIN", "SUM"]);
+        row.ShouldBe(new object?[] { 32m / 3m, 3L, 41, -45, 32m });
     }
 
     /// <summary>

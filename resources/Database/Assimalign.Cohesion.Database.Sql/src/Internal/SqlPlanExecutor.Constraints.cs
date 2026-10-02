@@ -887,7 +887,7 @@ internal sealed partial class SqlPlanExecutor
                 ValidateCheckSyntax(negation.Operand, table, requireBoolean: true, declaring);
                 break;
             case SqlFunctionCallExpression call:
-                bool booleanArguments = requireBoolean && string.Equals(call.FunctionName, "COALESCE", StringComparison.OrdinalIgnoreCase);
+                bool booleanArguments = requireBoolean && SqlFunctionSignatures.FunctionOf(call) == SqlBuiltinFunction.Coalesce;
                 foreach (var argument in call.Arguments)
                 {
                     ValidateCheckSyntax(argument, table, booleanArguments, declaring);
@@ -928,7 +928,7 @@ internal sealed partial class SqlPlanExecutor
             SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => true,
             SqlLiteralExpression literal => literal.LiteralType is SqlLiteralType.Boolean or SqlLiteralType.Null,
             SqlColumnReferenceExpression column => table.Columns[FindColumnOrdinal(table, column.ColumnName)].Type.Type == DatabaseType.Boolean,
-            SqlFunctionCallExpression functionCall => string.Equals(functionCall.FunctionName, "COALESCE", StringComparison.OrdinalIgnoreCase),
+            SqlFunctionCallExpression functionCall => SqlFunctionSignatures.FunctionOf(functionCall) == SqlBuiltinFunction.Coalesce,
             SqlCaseExpression => true,
             _ => false,
         };
