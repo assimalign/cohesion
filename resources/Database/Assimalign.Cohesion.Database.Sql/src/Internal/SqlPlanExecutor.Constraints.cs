@@ -20,6 +20,46 @@ internal sealed partial class SqlPlanExecutor
     private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values);
 
     /// <summary>
+    /// One row on the cascade walk's path (<see cref="CollectCascadeDeletesAsync"/>),
+    /// holding what a recursive call held in its frame: the row, the references into
+    /// its table, and how far the walk has got through them.
+    /// </summary>
+    private sealed class SqlCascadeFrame
+    {
+        public SqlCascadeFrame(SqlCatalogTable table, object?[] values, List<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> incoming)
+        {
+            Table = table;
+            Values = values;
+            Incoming = incoming;
+        }
+
+        /// <summary>The table the row belongs to.</summary>
+        public SqlCatalogTable Table { get; }
+
+        /// <summary>The row's values, which supply the keys its child rows are found by.</summary>
+        public object?[] Values { get; }
+
+        /// <summary>The references into <see cref="Table"/>, read once the row was locked.</summary>
+        public List<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> Incoming { get; }
+
+        /// <summary>The index in <see cref="Incoming"/> of the reference being walked; -1 before the first.</summary>
+        public int Reference { get; set; } = -1;
+
+        /// <summary>The current reference's child rows, or null between references.</summary>
+        public List<((PageId PageId, int SlotIndex) Location, object?[] Values)>? Matches { get; set; }
+
+        /// <summary>The index in <see cref="Matches"/> of the next child row to consider.</summary>
+        public int Match { get; set; }
+
+        /// <summary>
+        /// Whether the walk has handed out every row this frame can descend into:
+        /// it is on its last incoming reference and that reference's matches are
+        /// exhausted.
+        /// </summary>
+        public bool IsComplete => Matches is null && Reference >= Incoming.Count - 1;
+    }
+
+    /// <summary>
     /// One parent row version a statement's outgoing foreign keys depend on: the
     /// referenced table and the packed location of the matching version, which is
     /// the entry-lock identity the row-write path already uses.
@@ -434,14 +474,77 @@ internal sealed partial class SqlPlanExecutor
     /// referential-locking note above). The traversal deduplicates by packed
     /// location, so a cyclic cascade graph deletes each row exactly once.
     /// </summary>
+    /// <remarks>
+    /// The walk is depth-first and pre-order: a row joins the deletion set, is
+    /// locked and releases its own references before any row below it is read.
+    /// It keeps its path in an explicit stack of <see cref="SqlCascadeFrame"/>s on
+    /// the heap rather than recursing once per level, because the depth of a
+    /// cascade is the data's, not the schema's: a self-referencing chain is as
+    /// deep as it is long, and recursing through it overflowed the stack of the
+    /// thread running the statement, which ends the process (#1164). Each frame
+    /// holds exactly what a recursive call held, so the order rows are visited,
+    /// locked and added to the deletion set is the recursion's.
+    /// <para>
+    /// A frame leaves the path as soon as it hands out the last matching row of
+    /// its last incoming reference, before that row's subtree is walked: the
+    /// recursive call had nothing left to do but return once the subtree did. A
+    /// self-referencing chain therefore walks with one frame on the path however
+    /// long it is; the path grows only with the rows that still have matches, or
+    /// references, left to visit.
+    /// </para>
+    /// </remarks>
     private async Task CollectCascadeDeletesAsync(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, object?[] values,
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions, HashSet<ulong> scannedTables,
-        List<SqlParentReference> released, SqlCatalogConstraint? arrivedBy,
-        SqlStatementContext statement, CancellationToken cancellationToken)
+        List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var root = await EnterCascadeRowAsync(table, location, values, arrivedBy: null, deletions, scannedTables, released,
+            statement, cancellationToken).ConfigureAwait(false);
+        if (root is null)
+        {
+            return; // an earlier target's cascade already reached this row
+        }
+
+        var path = new Stack<SqlCascadeFrame>();
+        path.Push(root);
+        while (path.TryPeek(out var frame))
+        {
+            // A long walk whose rows are all found through an index and whose locks
+            // are all granted at once has no other point that observes cancellation.
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryNextCascadeRow(frame, deletions, statement, cancellationToken, out var edge, out var match))
+            {
+                path.Pop(); // every row below this one is collected
+                continue;
+            }
+
+            if (frame.IsComplete)
+            {
+                path.Pop(); // that was its last child row
+            }
+
+            var next = await EnterCascadeRowAsync(edge.Child, match.Location, match.Values, edge.Constraint, deletions, scannedTables,
+                released, statement, cancellationToken).ConfigureAwait(false);
+            if (next is not null)
+            {
+                path.Push(next);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Visits one row of a cascade: adds it to the deletion set, takes its
+    /// exclusive lock (and, the first time the walk reaches its table, the intent
+    /// locks on the tables around it), and collects the references deleting it
+    /// releases. Returns the frame that descends from it, or null when the row is
+    /// already in the deletion set.
+    /// </summary>
+    private async ValueTask<SqlCascadeFrame?> EnterCascadeRowAsync(SqlCatalogTable table, (PageId PageId, int SlotIndex) location,
+        object?[] values, SqlCatalogConstraint? arrivedBy, Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
+        HashSet<ulong> scannedTables, List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (!deletions.TryAdd((table.ObjectId, SqlRecordLocation.Pack(location.PageId, location.SlotIndex)), new(table, location, values)))
         {
-            return;
+            return null;
         }
 
         await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken).ConfigureAwait(false);
@@ -456,25 +559,68 @@ internal sealed partial class SqlPlanExecutor
         // already exclusively locked by this statement.
         CollectReleasedReferences(table, [values], released, statement, cancellationToken, skip: arrivedBy);
 
-        foreach (var (child, constraint) in IncomingReferences(table).ToList())
+        // The incoming references are read after the row and its table are locked,
+        // exactly where the recursive walk read them.
+        return new SqlCascadeFrame(table, values, IncomingReferences(table).ToList());
+    }
+
+    /// <summary>
+    /// Advances a frame to the next child row its deletion cascades to: the next
+    /// match of the current incoming reference that is not already in the deletion
+    /// set, reading the next cascading reference's matches when the current one is
+    /// exhausted. Returns false when the frame has no more rows to descend into.
+    /// </summary>
+    /// <remarks>
+    /// A reference's matches are read when the walk reaches that reference, after
+    /// every row below the previous reference has been collected, and are
+    /// materialized: the walk awaits lock acquisitions between them, and the
+    /// storage iterator must not stay open across those awaits. The deletion-set
+    /// check is made per match, as late as possible, so a row an earlier sibling's
+    /// cascade already reached is skipped rather than visited twice.
+    /// </remarks>
+    private bool TryNextCascadeRow(SqlCascadeFrame frame, Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
+        SqlStatementContext statement, CancellationToken cancellationToken,
+        out (SqlCatalogTable Child, SqlCatalogConstraint Constraint) edge,
+        out ((PageId PageId, int SlotIndex) Location, object?[] Values) match)
+    {
+        while (true)
         {
-            var keys = constraint.ReferencedColumns!.Select(column => values[FindColumnOrdinal(table, column)]).ToArray();
+            if (frame.Matches is { } matches)
+            {
+                edge = frame.Incoming[frame.Reference];
+                while (frame.Match < matches.Count)
+                {
+                    match = matches[frame.Match++];
+                    if (!deletions.ContainsKey((edge.Child.ObjectId, SqlRecordLocation.Pack(match.Location.PageId, match.Location.SlotIndex))))
+                    {
+                        if (frame.Match == matches.Count)
+                        {
+                            frame.Matches = null; // the last match: let the list go before its subtree is walked
+                        }
+
+                        return true;
+                    }
+                }
+
+                frame.Matches = null;
+            }
+
+            if (++frame.Reference >= frame.Incoming.Count)
+            {
+                edge = default;
+                match = default;
+                return false;
+            }
+
+            var (child, constraint) = frame.Incoming[frame.Reference];
+            var keys = constraint.ReferencedColumns!.Select(column => frame.Values[FindColumnOrdinal(frame.Table, column)]).ToArray();
             if (constraint.OnDelete == SqlCatalogReferentialAction.Restrict || keys.Any(value => value is null))
             {
                 continue;
             }
-            // Materialized before descending: the recursion awaits lock
-            // acquisitions, and the storage iterator must not stay open across them.
-            foreach (var match in FindConstraintRows(child, constraint.Columns, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).ToList())
-            {
-                if (deletions.ContainsKey((child.ObjectId, SqlRecordLocation.Pack(match.Location.PageId, match.Location.SlotIndex))))
-                {
-                    continue;
-                }
 
-                await CollectCascadeDeletesAsync(child, match.Location, match.Values, deletions, scannedTables, released,
-                    constraint, statement, cancellationToken).ConfigureAwait(false);
-            }
+            frame.Matches = FindConstraintRows(child, constraint.Columns, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).ToList();
+            frame.Match = 0;
         }
     }
 

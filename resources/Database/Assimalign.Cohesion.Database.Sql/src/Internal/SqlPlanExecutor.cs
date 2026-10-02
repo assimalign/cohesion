@@ -434,7 +434,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var target in targets)
         {
             await CollectCascadeDeletesAsync(plan.Table, target.Location, target.Values, deletions, scannedTables, released,
-                arrivedBy: null, statement, cancellationToken).ConfigureAwait(false);
+                statement, cancellationToken).ConfigureAwait(false);
         }
 
         // Every deleted row releases the references it held; the shared locks are
