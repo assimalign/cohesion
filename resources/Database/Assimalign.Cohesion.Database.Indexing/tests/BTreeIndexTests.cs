@@ -406,6 +406,112 @@ public class BTreeIndexTests
         results.Select(x => x.Key).ShouldBe(Enumerable.Range(0, 800).Select(i => (long)i));
     }
 
+    /// <summary>
+    /// A 508-byte key: about fifteen entries fit on a leaf and fifteen separators on an
+    /// internal node, so a few thousand inserts grow the tree several levels.
+    /// </summary>
+    private static IndexKey WideKey(long value)
+    {
+        var bytes = new byte[508];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(bytes, (ulong)value ^ 0x8000_0000_0000_0000UL);
+        bytes.AsSpan(8).Fill(0x2E);
+        return new IndexKey(bytes);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Recovery: a rolled-back root split leaves the root in place and the tree usable")]
+    public async Task Rollback_RootSplits_ShouldKeepRootPageAndTree()
+    {
+        // Arrange: a committed single-leaf tree.
+        var (harness, index) = await CreateIndexAsync();
+        await using var harnessLifetime = harness;
+        var registry = (IIndexRegistry)harness.IndexManager;
+
+        var setup = await harness.BeginAsync();
+        for (long i = 0; i < 10; i++)
+        {
+            await index.InsertAsync(setup, WideKey(i), (ulong)i);
+        }
+        await harness.CommitAsync(setup);
+        long root = registry.ExportRegistrations().Single().RootPageId;
+
+        // Act: a transaction grows the tree three levels — the root splits as a leaf
+        // and again as an internal node — then rolls back physically.
+        var doomed = await harness.BeginAsync();
+        for (long i = 100; i < 3_100; i++)
+        {
+            await index.InsertAsync(doomed, WideKey(i), (ulong)i);
+        }
+        await harness.RollbackAsync(doomed);
+
+        // Assert: the committed tree is intact, and it keeps growing normally.
+        var reader = await harness.BeginAsync();
+        (await ScanAsync(index, reader, IndexKeyRange.All)).Select(x => x.Reference).ShouldBe(Enumerable.Range(0, 10).Select(i => (ulong)i));
+
+        var writer = await harness.BeginAsync();
+        for (long i = 10; i < 3_000; i++)
+        {
+            await index.InsertAsync(writer, WideKey(i), (ulong)i);
+        }
+        await harness.CommitAsync(writer);
+
+        var after = await harness.BeginAsync();
+        (await ScanAsync(index, after, IndexKeyRange.All)).Select(x => x.Reference).ShouldBe(Enumerable.Range(0, 3_000).Select(i => (ulong)i));
+        registry.ExportRegistrations().Single().RootPageId.ShouldBe(root);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Recovery: committed root splits survive a restart from registrations exported before them")]
+    public async Task Recovery_RootSplitsAfterLastExport_ShouldSurviveRestart()
+    {
+        // Arrange: the catalog exports the registration while the tree is one leaf;
+        // the same committed transaction then splits the root repeatedly with no
+        // further export — a crash before the catalog's next persistence point.
+        // (The writes ride the first transaction because the reopened harness
+        // restarts its in-memory sequence space, and its first reader, sequence 1,
+        // sees sequence 1's writes as its own.)
+        var data = new CrashSimulationStream(writeThrough: false);
+        var journal = new CrashSimulationStream(writeThrough: false);
+        var harness = new IndexTestHarness(data, journal);
+
+        var setup = await harness.BeginAsync();
+        var index = await harness.IndexManager.CreateIndexAsync(setup, 1, new IndexDefinition("ix_root"));
+        var registrations = ((IIndexRegistry)harness.IndexManager).ExportRegistrations();
+
+        for (long i = 0; i < 2_000; i++)
+        {
+            await index.InsertAsync(setup, WideKey(i), (ulong)i);
+        }
+        await harness.CommitAsync(setup);
+
+        byte[] crashedData = data.CaptureDurable();
+        byte[] crashedJournal = journal.CaptureDurable();
+
+        // Act
+        await using var recovered = IndexTestHarness.Reopen(crashedData, crashedJournal, registrations);
+        recovered.IndexManager.TryGetIndex(1, "ix_root", out var recoveredIndex).ShouldBeTrue();
+
+        // Assert: the registered root still routes every lookup — a full scan, a
+        // point seek, and a range seek deep in the tree's right half…
+        var reader = await recovered.BeginAsync();
+        (await ScanAsync(recoveredIndex, reader, IndexKeyRange.All)).Select(x => x.Reference)
+            .ShouldBe(Enumerable.Range(0, 2_000).Select(i => (ulong)i));
+        (await ScanAsync(recoveredIndex, reader, new IndexKeyRange(WideKey(1_234), WideKey(1_234), true, true)))
+            .Select(x => x.Reference).ShouldBe(new[] { 1_234UL });
+        (await ScanAsync(recoveredIndex, reader, new IndexKeyRange(WideKey(1_500), WideKey(1_510), true, false)))
+            .Select(x => x.Reference).ShouldBe(Enumerable.Range(1_500, 10).Select(i => (ulong)i));
+        await recovered.RollbackAsync(reader);
+
+        // …and new keys at both ends land in order.
+        var writer = await recovered.BeginAsync();
+        await recoveredIndex.InsertAsync(writer, WideKey(5_000), 5_000);
+        await recoveredIndex.InsertAsync(writer, WideKey(-1), 9_999);
+        await recovered.CommitAsync(writer);
+
+        var after = await recovered.BeginAsync();
+        var keys = (await ScanAsync(recoveredIndex, after, IndexKeyRange.All)).Select(x => x.Key).ToList();
+        keys.Count.ShouldBe(2_002);
+        keys.ShouldBe(keys.Order().ToList());
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Manager: duplicate names rejected, drop removes, registry exports")]
     public async Task IndexManager_Lifecycle_ShouldEnforceDirectoryRules()
     {

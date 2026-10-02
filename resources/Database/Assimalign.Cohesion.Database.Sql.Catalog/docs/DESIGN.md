@@ -67,14 +67,15 @@ uses those same transforms for uniqueness enforcement.
 - **Index directory persistence lives here** — the index manager stays a physical
   component (`Database.Indexing`'s documented split): the catalog stores the
   exported `BTreeIndexRegistration` set and hands it back for re-attachment on
-  open. Root page ids drift on splits; the engine re-saves at its persistence
-  points (checkpoint/shutdown).
+  open. A tree's root page stays fixed through splits (#1159), so registrations
+  change through index DDL; the engine still re-saves at its persistence points
+  (checkpoint/shutdown) as a backstop.
 - **Index descriptions are schema metadata, one record per index (kind 5)** —
   `SqlCatalogIndex`: name (unique per table, case-insensitive), owning table
   object id, ordered key columns, uniqueness. The description is deliberately
-  separate from the physical registration: the description is stable while root
-  page ids drift, and the planner needs columns/uniqueness the registration
-  doesn't carry. **Description and registration writes are atomic** —
+  separate from the physical registration: the description is schema, the
+  registration physical identity, and the planner needs columns/uniqueness the
+  registration doesn't carry. **Description and registration writes are atomic** —
   `CreateIndexAsync`/`DropIndexAsync` take the registration set and persist both
   records in one self-committing transaction, because a crash must never leave a
   description promising an index no tree backs (an unenforced UNIQUE) or a

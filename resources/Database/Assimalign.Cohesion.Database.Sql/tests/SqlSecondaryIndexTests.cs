@@ -21,7 +21,7 @@ using Assimalign.Cohesion.Database.Types;
 /// MVCC-correct maintenance on the write path (entries mirror row-version stamps),
 /// unique enforcement through the key-lock discipline, logical rollback undoing
 /// index stamps, crash-recovery scrubbing, and registration persistence across
-/// restart including root-page drift.
+/// restart, including after root splits and a failed statement's rolled-back splits.
 /// </summary>
 public sealed class SqlSecondaryIndexTests : IDisposable
 {
@@ -404,7 +404,47 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await engine.DisposeAsync();
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Indexes: root splits drift the root page id and re-export keeps restart consistent")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Indexes: a failed statement that split index roots leaves every index usable, now and after restart")]
+    public async Task FailedStatement_AfterRootSplits_ShouldLeaveIndexesUsable()
+    {
+        // Arrange: two small indexes (single-leaf trees).
+        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-failed-split", RootPath = _rootPath });
+        var database = await engine.CreateDatabaseAsync("failed-split-db");
+
+        await using (var session = await database.CreateSessionAsync())
+        {
+            await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, v INT NOT NULL)");
+            await session.ExecuteAsync("CREATE UNIQUE INDEX ux_t_id ON t (id)");
+            await session.ExecuteAsync("CREATE INDEX ix_t_v ON t (v)");
+            await session.ExecuteAsync("INSERT INTO t VALUES " + string.Join(", ", Enumerable.Range(0, 10).Select(i => $"({i}, {i % 3})")));
+
+            // Act: one statement inserts enough rows to split both roots, then hits a
+            // duplicate key — the statement's physical bracket rolls back, splits included.
+            var rows = Enumerable.Range(100, 1_000).Select(i => $"({i}, {i % 3})").Append("(5, 0)");
+            await Should.ThrowAsync<SqlConstraintViolationException>(
+                async () => await session.ExecuteAsync("INSERT INTO t VALUES " + string.Join(", ", rows)));
+
+            // Assert: both indexes still serve the committed rows and keep growing.
+            (await Rows(session, "SELECT id FROM t WHERE v = 1")).Select(row => (int)row[0]!).Order().ShouldBe(new[] { 1, 4, 7 });
+            await session.ExecuteAsync("INSERT INTO t VALUES " + string.Join(", ", Enumerable.Range(100, 1_000).Select(i => $"({i}, {i % 3})")));
+            (await Rows(session, "SELECT id FROM t WHERE id = 1099")).Count.ShouldBe(1);
+            (await Rows(session, "SELECT id FROM t WHERE v = 2")).Count.ShouldBe(3 + 333);
+            await Should.ThrowAsync<SqlConstraintViolationException>(
+                async () => await session.ExecuteAsync("INSERT INTO t VALUES (500, 0)"));
+        }
+
+        await engine.DisposeAsync();
+
+        // Restart: the registered roots still reach every entry.
+        var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-failed-split", RootPath = _rootPath });
+        await using var _ = reopenedEngine;
+        var reopened = await reopenedEngine.OpenDatabaseAsync("failed-split-db");
+
+        (await VisibleEntriesAsync(reopened, "t", "ux_t_id")).Count.ShouldBe(1_010);
+        (await VisibleEntriesAsync(reopened, "t", "ix_t_v")).Count.ShouldBe(1_010);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Indexes: root splits keep the registered root page, and restart stays consistent")]
     public async Task Restart_AfterRootSplits_ShouldReattachConsistently()
     {
         // Arrange: enough entries to split the root at least once (a leaf holds
@@ -425,7 +465,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
             }
         }
 
-        await engine.DisposeAsync(); // re-exports drifted registrations
+        await engine.DisposeAsync(); // persists registrations; the root page never moved
 
         // Act
         var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-split", RootPath = _rootPath });
