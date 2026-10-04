@@ -97,9 +97,18 @@ public sealed class StorageConcurrencyTests
                     }
                 }));
 
-                await Task.WhenAll(writers);
-                stop.Cancel();
-                await Task.WhenAll(background);
+                // Stop the readers even when a writer fails: disposing a chain lock a reader
+                // still holds throws SynchronizationLockException, which would replace the
+                // writer's error.
+                try
+                {
+                    await Task.WhenAll(writers);
+                }
+                finally
+                {
+                    stop.Cancel();
+                    await Task.WhenAll(background);
+                }
 
                 // Assert
                 VerifyPhase(storage, dataStream, journalStream, models);
@@ -112,6 +121,114 @@ public sealed class StorageConcurrencyTests
                 chainLock.Dispose();
             }
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Concurrency: a page a commit frees is never handed to another transaction while the commit still write-locks it")]
+    public void Commit_FreedPageAllocatedByAnotherTransactionAtOnce_ShouldNotBeWriteLocked()
+    {
+        // Arrange: a record alone on its page, so deleting it releases the page at commit, and
+        // a second transaction already open, the way a concurrent writer is. Nothing else is
+        // free, so the page is the next one the allocator hands out.
+        using var storage = ConcurrentStorage.Create(new MemoryStream(), new MemoryStream(), poolCapacity);
+        PageId freedPage;
+        using (var setup = storage.BeginTransaction())
+        {
+            freedPage = storage.Insert(setup, firstOwner, Record(0, 1, 64)).PageId;
+            setup.Commit();
+        }
+
+        using var deleting = storage.BeginTransaction();
+        storage.Delete(deleting, freedPage, 0);
+        using var inserting = storage.BeginTransaction();
+
+        // The other writer's insert runs at the instant the page joins the free list, the
+        // window two CI runs hit (#1157 test, seeds 2 and 3): it allocates a page for a new
+        // chain, so it takes the freed one (InsertRecord → AllocateDataPage → RegisterTouch).
+        // The handler runs on the committing thread, so the insert re-enters whatever storage
+        // locks the commit holds at that point and sees the page exactly as the commit left it
+        // on the list: it must already be unlocked.
+        var freeSpaceMap = (StorageFreeSpaceMap)storage.FreeSpaceMap;
+        var inserted = new List<PageId>();
+        var failures = new List<Exception>();
+        freeSpaceMap.Freed = pageId =>
+        {
+            if (pageId != freedPage)
+            {
+                return;
+            }
+
+            try
+            {
+                inserted.Add(storage.Insert(inserting, firstOwner + 1, Record(1, 1, 64)).PageId);
+            }
+            catch (StorageException exception)
+            {
+                failures.Add(exception);
+            }
+        };
+
+        // Act
+        try
+        {
+            deleting.Commit();
+        }
+        finally
+        {
+            freeSpaceMap.Freed = null;
+        }
+
+        // Assert: the insert got the page, and with it the page's write lock.
+        failures.Select(exception => exception.Message).ShouldBeEmpty();
+        inserted.ShouldBe([freedPage]);
+        inserting.Commit();
+        AssertChain(storage, 0, new Dictionary<(long, int), byte[]>());
+        AssertChain(storage, 1, new Dictionary<(long, int), byte[]> { [((long)freedPage, 0)] = Record(1, 1, 64) });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Concurrency: a page one transaction releases twice enters the free list once, so it is never handed out twice")]
+    public void Commit_PageReleasedTwiceInOneTransaction_ShouldEnterTheFreeListOnce()
+    {
+        // Arrange: deleting the last record releases its page, and releasing the whole chain in
+        // the same transaction releases it again: the chain lists the page until commit.
+        using var storage = ConcurrentStorage.Create(new MemoryStream(), new MemoryStream(), poolCapacity);
+        PageId page;
+        using (var setup = storage.BeginTransaction())
+        {
+            page = storage.Insert(setup, firstOwner, Record(0, 1, 64)).PageId;
+            setup.Commit();
+        }
+
+        using var dropping = storage.BeginTransaction();
+        storage.Delete(dropping, page, 0);
+        storage.FreeOwnerPages(dropping, firstOwner).ShouldBe(1);
+
+        // Another allocation takes the page each time it joins the free list.
+        var freeSpaceMap = (StorageFreeSpaceMap)storage.FreeSpaceMap;
+        var handedOut = new List<PageId>();
+        freeSpaceMap.Freed = pageId =>
+        {
+            if (pageId == page)
+            {
+                handedOut.Add(freeSpaceMap.Allocate());
+            }
+        };
+
+        // Act
+        try
+        {
+            dropping.Commit();
+        }
+        finally
+        {
+            freeSpaceMap.Freed = null;
+        }
+
+        // Assert: one hand-out; a second free would have put the allocated page back on the
+        // free list, and the next allocation would hand it to a second owner.
+        handedOut.ShouldBe([page]);
+        freeSpaceMap.IsAllocated(page).ShouldBeTrue();
+        freeSpaceMap.FreePageCount.ShouldBe(0);
+        freeSpaceMap.Allocate().ShouldNotBe(page);
     }
 
     [Theory(DisplayName = "Cohesion Test [Storage] - Concurrency: in-place updates beside page allocation and paced write-back keep every committed version on an in-memory stream")]

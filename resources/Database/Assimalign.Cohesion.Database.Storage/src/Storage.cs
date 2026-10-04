@@ -54,6 +54,8 @@ public abstract class Storage : IStorage
     // owner's current write page. Rebuilt from page headers on open (the same scan
     // that rebuilds the free-space map); maintained on allocation and commit-time
     // frees. Guarded by _ownerLock — page headers on disk stay the source of truth.
+    // Commit-time frees take _ownerLock inside _transactionLock; nothing takes
+    // _transactionLock while it holds _ownerLock.
     private readonly Dictionary<ulong, SortedSet<long>> _ownerPages = new();
     private readonly Dictionary<ulong, PageId> _currentWritePages = new();
     private readonly object _ownerLock = new();
@@ -897,7 +899,8 @@ public abstract class Storage : IStorage
         // increments the active count under the same lock, so no transaction can
         // start (and journal no before image) between the emptiness check and the
         // journal truncation. Lock order is transaction lock → header → buffer pool →
-        // journal; no other path takes them in the opposite order.
+        // journal, and transaction lock → owner lock → free-space map for commit-time
+        // frees; no other path takes them in the opposite order.
         lock (_transactionLock)
         {
             ThrowIfOffline();
@@ -1275,6 +1278,12 @@ public abstract class Storage : IStorage
     /// free-space map and leave the owner directory. Deferred to commit so the
     /// allocator can never hand out a page whose release might still roll back.
     /// </summary>
+    /// <remarks>
+    /// Runs under the transaction lock, after the transaction's page write locks are released
+    /// (<see cref="CompleteCommitted"/>). Each page is freed once, however many times the
+    /// transaction released it (<see cref="StorageTransaction.RegisterPendingFree"/>): a second
+    /// free could put the page back on the free list after another allocation took it.
+    /// </remarks>
     private void ApplyPendingFrees(StorageTransaction transaction)
     {
         var pendingFrees = transaction.PendingFrees;
@@ -1362,17 +1371,32 @@ public abstract class Storage : IStorage
     }
 
     /// <summary>
-    /// Ends a bracket whose commit record is in the journal: its page releases take effect and
-    /// its page write locks and place in the active count are released.
+    /// Ends a bracket whose commit record is in the journal: its page write locks and its place in
+    /// the active count are released, then its page releases take effect (the freed pages re-enter
+    /// the allocator and leave their owner chains), in one hold of the transaction lock.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every page write lock is taken under the transaction lock (<see cref="RegisterTouch"/>), so
+    /// dropping the bracket's locks before its pages reach the free-space map, inside that one
+    /// hold, means no page is ever on the free list while this bracket write-locks it. Another
+    /// transaction may take a freed page from the map the moment it is there: its touch of the
+    /// page waits for the transaction lock, and then finds the page unlocked. The two steps used
+    /// to run the other way round under separate locks, and an allocation that took a freed page
+    /// between them failed with "write-locked by" this bracket (the #1157 concurrency test on CI
+    /// runners with fewer cores than the test has threads).
+    /// </para>
+    /// <para>
+    /// PostgreSQL meets the same hazard on the allocating side: an index page the free-space map
+    /// reports is used only if its buffer lock can be taken without waiting, because a page someone
+    /// holds is not really free (<c>_bt_allocbuf</c>, <c>src/backend/access/nbtree/nbtpage.c:862-951</c>),
+    /// and VACUUM records a deleted page in the map only once no transaction can still reach it
+    /// (<c>_bt_pendingfsm_finalize</c>, <c>nbtpage.c:3013-3068</c>). Here a page reaches the map only
+    /// after its last holder let go of it, so an allocation never has to skip one.
+    /// </para>
+    /// </remarks>
     private void CompleteCommitted(StorageTransaction transaction)
-    {
-        // Page releases become effective only now that the commit record exists:
-        // the freed pages re-enter the allocator and leave their owner chains.
-        ApplyPendingFrees(transaction);
-
-        ReleasePageWriteLocks(transaction);
-    }
+        => ReleasePageWriteLocks(transaction, applyPendingFrees: true);
 
     /// <summary>
     /// Rolls a storage transaction back: restores every touched page to its before
@@ -1764,7 +1788,14 @@ public abstract class Storage : IStorage
     private static unsafe void ClearBody(Page page)
         => new Span<byte>(page.Pointer + Page.HeaderSize, Page.Size - Page.HeaderSize).Clear();
 
-    private void ReleasePageWriteLocks(StorageTransaction transaction)
+    /// <summary>
+    /// Ends a bracket: releases its page write locks and its place in the active count and, for a
+    /// committed bracket, then returns the pages it released to the allocator
+    /// (<see cref="CompleteCommitted"/>).
+    /// </summary>
+    /// <param name="transaction">The bracket to end.</param>
+    /// <param name="applyPendingFrees">True when the bracket committed, so its page releases take effect.</param>
+    private void ReleasePageWriteLocks(StorageTransaction transaction, bool applyPendingFrees = false)
     {
         lock (_transactionLock)
         {
@@ -1782,6 +1813,13 @@ public abstract class Storage : IStorage
             // completion that throws after this point is never repeated by Dispose.
             _activeTransactionCount--;
             transaction.MarkCompleted();
+
+            // After the locks above and under the same lock, so no page is on the free list while
+            // it is write-locked (CompleteCommitted).
+            if (applyPendingFrees)
+            {
+                ApplyPendingFrees(transaction);
+            }
         }
     }
 
