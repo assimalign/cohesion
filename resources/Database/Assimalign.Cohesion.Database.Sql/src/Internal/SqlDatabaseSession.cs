@@ -60,6 +60,12 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     /// <inheritdoc />
     public IDatabase Database { get; }
 
+    /// <summary>
+    /// Gets the engine's database instance behind <see cref="Database"/>, whose offline state the
+    /// session checks before every operation (#1243).
+    /// </summary>
+    private SqlDatabaseInstance? Instance => Database as SqlDatabaseInstance;
+
     /// <inheritdoc />
     public SessionState State => _state;
 
@@ -107,6 +113,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     public async ValueTask<IDatabaseTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
     {
         ThrowIfNotOpen();
+        Instance?.ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
 
         if (isolationLevel == IsolationLevel.Serializable)
@@ -122,8 +129,17 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             throw new DatabaseException("A transaction is already active on this session.");
         }
 
-        var context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
-        var transaction = new SqlDatabaseTransaction(_coordinator, context);
+        ITransactionContext context;
+        try
+        {
+            context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (Instance is { } instance && instance.TranslateOffline(exception) is DatabaseOfflineException offline)
+        {
+            throw offline;
+        }
+
+        var transaction = new SqlDatabaseTransaction(_coordinator, context, Instance);
         _transactionScopes.Push(new SqlTransactionScope(transaction, isolationLevel,
             isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null));
         return transaction;
@@ -134,11 +150,19 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     {
         ThrowIfNotOpen();
         ArgumentNullException.ThrowIfNull(request);
+        Instance?.ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
 
         try
         {
             return await ExecuteCoreAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (Instance is { } instance && instance.TranslateOffline(exception) is DatabaseOfflineException offline
+            && !ReferenceEquals(offline, exception))
+        {
+            // A statement that met the offline storage (#1243) gets the coded refusal; the
+            // unconfirmed commit that took it offline keeps its own type.
+            throw offline;
         }
         catch (InsufficientExecutionStackException exception)
         {
@@ -309,7 +333,8 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             return;
         }
 
-        // Dispose the root once, even after B7 adds nested scopes sharing it.
+        // Dispose the root once, even after B7 adds nested scopes sharing it. On an offline
+        // database the transaction's disposal touches nothing (the reopen's recovery aborts it).
         if (ActiveScope is { } scope)
         {
             await scope.Transaction.DisposeAsync().ConfigureAwait(false);

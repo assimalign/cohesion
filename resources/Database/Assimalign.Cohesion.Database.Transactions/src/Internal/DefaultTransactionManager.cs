@@ -65,6 +65,10 @@ internal sealed class DefaultTransactionManager : ITransactionManager
     // Serializes the retries of deferred undo, so two retries never undo one writer at once.
     private readonly SemaphoreSlim _undoRetryGate = new(1, 1);
     private readonly object _sync = new();
+
+    // When the next retry of deferred undo is due (#1226 owner decision): about 100 ms after a
+    // deferral, doubling after each failed retry up to the limit. Guarded by _sync.
+    private readonly DeferredUndoBackoff _undoBackoff;
     private ulong _lastSequence;
     private bool _disposed;
 
@@ -78,12 +82,101 @@ internal sealed class DefaultTransactionManager : ITransactionManager
         ITransactionLog log,
         ILockManager lockManager,
         IVersionStore versionStore,
-        Func<TransactionSequence>? sequenceAllocator = null)
+        Func<TransactionSequence>? sequenceAllocator = null,
+        TimeProvider? time = null)
     {
         _log = log;
         _lockManager = lockManager;
         _versionStore = versionStore;
         _sequenceAllocator = sequenceAllocator;
+        _undoBackoff = new DeferredUndoBackoff(time ?? TimeProvider.System);
+    }
+
+    /// <summary>
+    /// Invoked, outside the manager's locks, whenever a rollback's undo is deferred, so the
+    /// owner's version-purge worker can wake for the first retry instead of sleeping out its
+    /// maintenance interval. The handler must not call back into the manager synchronously.
+    /// </summary>
+    internal Action? UndoDeferred { get; set; }
+
+    /// <summary>
+    /// Gets or sets the longest delay between two retries of deferred undo: the owner's
+    /// maintenance interval. The first retry is due about 100 ms after a deferral, and each
+    /// failed retry doubles the delay up to this limit.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not positive.</exception>
+    internal TimeSpan DeferredUndoRetryLimit
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _undoBackoff.Limit;
+            }
+        }
+        set
+        {
+            lock (_sync)
+            {
+                _undoBackoff.Limit = value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the delay before the first retry of a deferred undo (100 ms unless set).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not positive.</exception>
+    internal TimeSpan DeferredUndoRetryDelay
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _undoBackoff.Initial;
+            }
+        }
+        set
+        {
+            lock (_sync)
+            {
+                _undoBackoff.Initial = value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the time until the next retry of deferred undo is due: zero when it is due now,
+    /// null when no undo is deferred.
+    /// </summary>
+    internal TimeSpan? DeferredUndoRetryDueIn
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _deferredUndo.Count == 0 ? null : _undoBackoff.DueIn;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Retries deferred undo if its backoff says a retry is due (see
+    /// <see cref="RetryDeferredUndoAsync"/>); otherwise does nothing.
+    /// </summary>
+    /// <param name="cancellationToken">Observed between writers only.</param>
+    /// <returns>The number of versions and index entries the completed undos changed.</returns>
+    internal ValueTask<long> RetryDeferredUndoIfDueAsync(CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            if (_deferredUndo.Count == 0 || !_undoBackoff.IsDue)
+            {
+                return new ValueTask<long>(0L);
+            }
+        }
+
+        return RetryDeferredUndoAsync(cancellationToken);
     }
 
     /// <inheritdoc />
@@ -485,12 +578,17 @@ internal sealed class DefaultTransactionManager : ITransactionManager
             lock (_sync)
             {
                 _deferredUndo.Add(sequence.Value);
+
+                // The writer holds its locks until the undo completes, so its retry runs on
+                // its own short backoff rather than once per maintenance interval.
+                _undoBackoff.OnDeferred();
             }
 
             // The transaction has ended even though its grants stay held: a request of
             // it still queued fails now, as the release at any other end fails it,
             // instead of waiting for a grant the ended transaction could only give back.
             AbandonPendingRequests(sequence);
+            UndoDeferred?.Invoke();
             return;
         }
 
@@ -580,6 +678,18 @@ internal sealed class DefaultTransactionManager : ITransactionManager
 
             await ReleaseUndoneAsync(sequence).ConfigureAwait(false);
             total += undone;
+        }
+
+        lock (_sync)
+        {
+            if (_deferredUndo.Count == 0)
+            {
+                _undoBackoff.OnCleared();
+            }
+            else if (failure is not null)
+            {
+                _undoBackoff.OnRetryFailed();
+            }
         }
 
         if (failure is not null)

@@ -74,6 +74,13 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     /// <summary>
     /// Opens an existing logical database by name.
     /// </summary>
+    /// <remarks>
+    /// A database that went offline after a failed durable flush (every operation on it throws
+    /// <see cref="DatabaseOfflineException"/>) is reopened: the offline instance is closed without
+    /// writing anything, and the database is opened again from its files, whose recovery decides
+    /// the outcome of every commit that was not confirmed (#1243). The returned instance is a new
+    /// one; the offline instance stays refused.
+    /// </remarks>
     /// <param name="name">The name of the database to open.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The opened database instance.</returns>

@@ -3,19 +3,26 @@ using System;
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
-/// Thrown by a commit whose record was written but could not be made durable. The
-/// transaction is committed (its state is <c>Committed</c>, its effects are visible and its
-/// locks are released); only its durability is unconfirmed, and it is lost if the database
-/// stops before its log is next flushed durably.
+/// Thrown by a commit whose record was written but could not be made durable. The commit's
+/// outcome is unknown: the failed flush took the database offline (#1243), and its reopen's
+/// recovery keeps the commit if the record reached stable storage and discards it if not.
 /// </summary>
 /// <remarks>
+/// <para>
 /// This is the area-root surface of the transaction kernel's
 /// <c>TransactionCommitUnconfirmedException</c> (in
 /// <c>Assimalign.Cohesion.Database.Transactions</c>), translated by the model engines at their
-/// boundary like <see cref="DatabaseTransactionAbortedException"/>. Unlike an abort, it is not
-/// retryable: the transaction's work is applied, and re-running it in a new transaction could
-/// apply it twice. A caller that must know the outcome reads it back after the database
-/// reopens, as after any commit whose acknowledgment was lost.
+/// boundary like <see cref="DatabaseTransactionAbortedException"/>. The transaction ended as
+/// committed in this process (its state is <c>Committed</c> and its locks are released), but
+/// every later operation on the database is refused with
+/// <see cref="DatabaseOfflineException"/> until it is reopened, so no session reads its effects
+/// before recovery decides them.
+/// </para>
+/// <para>
+/// Unlike an abort, it is not retryable: the transaction's work may be applied, and re-running
+/// it in a new transaction could apply it twice. A caller that must know the outcome reads it
+/// back after the database reopens, as after any commit whose acknowledgment was lost.
+/// </para>
 /// </remarks>
 public class DatabaseTransactionCommitUnconfirmedException : DatabaseException
 {

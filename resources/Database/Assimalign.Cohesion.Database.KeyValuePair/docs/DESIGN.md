@@ -333,6 +333,44 @@ compaction yet — the stub matters more here than in SQL, since every delete
 accrues a tombstone in the primary structure; the seam is kept stable for the
 compaction feature). Cadence knobs live on `KeyValueDatabaseEngineOptions`.
 
+The checkpointer and the purge worker follow the SQL engine's (#1254, #1226; Sql DESIGN.md,
+"Engine-owned background workers"): a file set is checkpointed when its journal reaches
+`CheckpointJournalSize` (its storage wakes the worker at once) or when `CheckpointInterval`
+passed and its journal received records; the worker otherwise looks once a second. The purge
+worker retries a deferred undo about 100 ms after the deferral and then at doubling delays up
+to `MaintenanceInterval`, records a failure as a worker fault, and keeps running. Both skip an
+offline database.
+
+## Storage operations (#1243, #1254, #1226)
+
+**A failed fsync takes the database offline (#1243).** When a durable flush of either file
+set fails, the storage goes offline (`Database.Storage` DESIGN.md, "A failed durable flush
+takes the storage offline") and the engine takes the other file set offline with it, so no
+file of the database changes after the failure — PostgreSQL's `PANIC` on a failed WAL fsync
+(`issue_xlog_fsync`, `src/backend/access/transam/xlog.c:9877-9937`; the commit critical
+section in `RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`; and
+`data_sync_retry` off, `src/backend/storage/file/fd.c:3966-3987`), without stopping the process.
+The command whose commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`;
+every later operation — a new session, a typed or text command, BEGIN, and the COMMIT or
+ROLLBACK of a transaction open at the failure — is refused with `DatabaseOfflineException`, code
+`COHDBK002`, carrying the storage's `StorageOfflineException`. `KeyValueDatabaseServer` answers a
+command on an existing session, and a handshake for the database, with `Unavailable` and the
+coded message. The workers skip the database, and closing its sessions writes nothing.
+`KeyValueDatabaseEngine.OpenDatabaseAsync(name)` disposes the offline instance without writing
+and reopens the file sets; recovery keeps the unconfirmed commit if its record's bytes reached
+the media, and aborts every transaction that was open. `KeyValueStorageOperationsTests` covers
+it with a fault-injecting strategy over durable in-memory handles, reopening with and without
+the unconfirmed record's bytes; the test strategy can now reopen a database it created, which
+the old one could not.
+
+**Buffer pool and checkpoint options (#1254).** `BufferPoolCapacity` (32 MiB per data file set;
+whole 8 KiB pages, at least 1 MiB), `CheckpointJournalSize` (256 MiB; zero for time only; not
+negative) and `CheckpointInterval` (5 minutes, was 30 seconds); `Create` validates all three and
+`IKeyValueDatabaseEngineBuilder` carries them. The catalog file set keeps a 128-page (1 MiB) pool
+(`KeyValueDatabaseEngine.CatalogBufferPoolPages`), so an open database costs up to about 34 MiB of
+pool memory once it has touched that many pages. The reasoning is in `Database.Storage`
+DESIGN.md ("Capacity", "Checkpoint triggers").
+
 ## Two file sets per database
 
 `<name>` (entries + primary index pages — index pages ride the data storage's
@@ -353,7 +391,10 @@ leak), repaired by re-bootstrapping on the next open.
 `DatabaseParseException` for grammar violations (→ `ParseFailure` on the wire);
 `DatabaseTransactionAbortedException`/`DatabaseTransactionDeadlockException`
 (retryable) for MVCC conflicts — kernel exceptions are translated at the model
-boundary, never leaked raw.
+boundary, never leaked raw; `DatabaseTransactionCommitUnconfirmedException` (not
+retryable) for a commit whose record was written but whose fsync failed, and
+`DatabaseOfflineException` (`COHDBK002`, → `Unavailable` on the wire) for every operation
+after it ("Storage operations").
 
 ## Shared MVCC composition (#918 — area DESIGN §3.10)
 

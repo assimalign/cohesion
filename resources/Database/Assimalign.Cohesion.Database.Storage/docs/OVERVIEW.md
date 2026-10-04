@@ -12,13 +12,21 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
   flags, slot bookkeeping), `SlottedPage` variable-length record layout, `PageSlot`
   directory entries.
 - **Buffer pool** — `IStorageBufferPool` pin/unpin caching over a `StorageStream`;
-  checksum stamped on write-back, verified on load.
+  checksum stamped on write-back, verified on load. 4,096 pages (32 MiB) by default,
+  resizable through `Storage.BufferPoolCapacity`; engines expose it as an option (#1254).
 - **Page management** — `IStoragePageManager` allocation/free/retrieval/flush;
   `IStorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open.
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
   pages and `IStorageUnitIterator` full scans.
 - **Journal** — `IStorageJournal` write-ahead logging with begin/commit/rollback
   markers, CRC-32C-protected frames, and recovery replay of committed operations.
+- **Offline on a failed fsync** — a durable flush of the journal or the data file that
+  fails takes the storage offline (`StorageOfflineException`, `COHDBS002`): nothing more is
+  written to either file, closing included, until the file set is reopened and its recovery
+  decides every unconfirmed commit (#1243, PostgreSQL's PANIC on a failed WAL fsync).
+- **Checkpoint triggers** — `CheckpointJournalSize` asks for a checkpoint when the journal
+  reaches a size (`OnCheckpointNeeded`), and `IsCheckpointDue(interval)` adds a time backstop
+  that skips idle journals; engines default to 256 MiB and 5 minutes (#1254).
 - **File header** — page 0: an identity block written at creation and two alternating,
   separately checksummed header slots (LSN and sequence floors, checkpoint anchor, and a
   copy of the identity block), so a torn header write cannot make a file set unopenable.

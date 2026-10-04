@@ -28,11 +28,17 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
     private Exception? _failure;
     private bool _ended;
 
+    // The database whose offline state (#1243) refuses the transaction's commit and rollback and
+    // makes its disposal touch nothing; null for a transaction composed without one.
+    private readonly GraphDatabaseInstance? _database;
+
     /// <summary>Initializes a new instance of the <see cref="GraphDatabaseTransaction"/> class.</summary>
     /// <param name="coordinator">The transaction coordinator that commits or rolls back the transaction.</param>
     /// <param name="context">The transaction context the transaction wraps.</param>
-    public GraphDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context)
+    /// <param name="database">The database the transaction runs on, whose offline state it observes.</param>
+    public GraphDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context, GraphDatabaseInstance? database = null)
     {
+        _database = database;
         _coordinator = coordinator;
         _context = context;
     }
@@ -99,6 +105,10 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        // An offline database refuses the commit before it starts (#1243): nothing is written,
+        // and the reopen's recovery aborts the transaction, which has no commit record.
+        _database?.ThrowIfOffline();
         await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -139,7 +149,7 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
                 catch (Exception error)
                 {
                     // A kernel abort of the commit crosses the engine boundary as the area root's exception.
-                    var translated = GraphDatabaseInstance.TranslateKernelFailure(error);
+                    var translated = Translate(error);
                     if (ReferenceEquals(translated, error)) { throw; }
                     throw translated;
                 }
@@ -167,6 +177,10 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
     public async ValueTask RollbackAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        // An offline database refuses the rollback too (#1243): its undo could write nothing,
+        // and the reopen's recovery aborts the transaction.
+        _database?.ThrowIfOffline();
         await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -272,7 +286,9 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
     // refuses the rollback before it starts, and its disposal then aborts the context itself.
     private async ValueTask RollbackContextAsync()
     {
-        if (_context.State != TransactionState.Active)
+        // On an offline database the disposal, the session's teardown and a statement's abort
+        // touch nothing (#1243): the reopen's recovery aborts the transaction.
+        if (_context.State != TransactionState.Active || _database?.IsOffline == true)
         {
             return;
         }
@@ -282,9 +298,17 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
         }
         catch (Exception error)
         {
-            var translated = GraphDatabaseInstance.TranslateKernelFailure(error);
+            var translated = Translate(error);
             if (ReferenceEquals(translated, error)) { throw; }
             throw translated;
         }
+    }
+
+    // A failure the offline storage caused is the database's coded refusal (#1243), checked first:
+    // the offline error is a StorageException, which the kernel translation reports as COHDBG006.
+    private Exception Translate(Exception error)
+    {
+        var offline = _database?.TranslateOffline(error) ?? error;
+        return ReferenceEquals(offline, error) ? GraphDatabaseInstance.TranslateKernelFailure(error) : offline;
     }
 }

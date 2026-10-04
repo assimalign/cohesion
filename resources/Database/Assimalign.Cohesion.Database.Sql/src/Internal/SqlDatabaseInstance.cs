@@ -83,7 +83,14 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
         }
 
-        _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage));
+        _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage))
+        {
+            // A deferred undo is retried on its own backoff, from about 100 ms up to the
+            // maintenance interval, and the purge worker wakes for it (#1226).
+            DeferredUndoRetryLimit = engine.EngineOptions.MaintenanceInterval,
+            DeferredUndoRetryDelay = engine.EngineOptions.DeferredUndoRetryDelay,
+            OnUndoDeferred = engine.UndoDeferredSignal.Set,
+        };
 
         // Re-attach the persisted secondary indexes before recovery: the
         // open-time scrub must be able to purge unproven writers' entries out of
@@ -306,12 +313,72 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// (recovery classification stays sound). The catalog storage has no logical
     /// transactions above it and checkpoints directly.
     /// </summary>
-    internal void CheckpointDataStorage() => _coordinator.Checkpoint();
+    /// <param name="cancellationToken">Cancels the wait for the coordinator's apply gate.</param>
+    internal void CheckpointDataStorage(CancellationToken cancellationToken = default) => _coordinator.Checkpoint(cancellationToken);
+
+    /// <summary>
+    /// The code that leads the message of every operation refused because the database is
+    /// offline (#1243).
+    /// </summary>
+    internal const string OfflineCode = "COHSQLT004";
+
+    /// <summary>
+    /// Gets whether a failed durable flush of either file set took the database offline.
+    /// </summary>
+    internal bool IsOffline => _storage.IsOffline || _catalogStorage.IsOffline;
+
+    /// <summary>
+    /// Gets the storage error that took the database offline, or null while it is online. The
+    /// first time either file set is found offline, the other is taken offline with it, so no
+    /// file of the database is written after the failure.
+    /// </summary>
+    internal StorageOfflineException? OfflineError
+    {
+        get
+        {
+            var error = _storage.OfflineError ?? _catalogStorage.OfflineError;
+            if (error is not null)
+            {
+                _storage.TakeOffline(error);
+                _catalogStorage.TakeOffline(error);
+            }
+
+            return error;
+        }
+    }
+
+    /// <summary>
+    /// Refuses an operation on an offline database with <see cref="DatabaseOfflineException"/>
+    /// (<see cref="OfflineCode"/>): every operation, in process and over the wire server, until
+    /// the database is reopened.
+    /// </summary>
+    /// <exception cref="DatabaseOfflineException">The database is offline.</exception>
+    internal void ThrowIfOffline()
+    {
+        if (OfflineError is { } error)
+        {
+            throw DatabaseOfflineException.Create(OfflineCode, Name, error);
+        }
+    }
+
+    /// <summary>
+    /// Translates a failure the storage's offline state caused into the coded refusal, unless it
+    /// is the unconfirmed commit itself, which keeps its own type; any other failure is returned
+    /// unchanged.
+    /// </summary>
+    /// <param name="error">The failure to translate.</param>
+    /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
+    internal Exception TranslateOffline(Exception error)
+        => error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
+            || StorageOfflineException.Find(error) is not { } offline
+            ? error
+            : DatabaseOfflineException.Create(OfflineCode, Name, OfflineError ?? offline);
 
     /// <inheritdoc />
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
 
         var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager, _definitions);
@@ -327,6 +394,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     internal IDatabaseSession CreateSchemaSession(string provisioningSchema, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
+        ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
         var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager, _definitions);
         return new SqlDatabaseSession(this, _coordinator, executor, _engine.ParserOptions, provisioningSchema);
@@ -338,6 +406,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        ThrowIfOffline();
         return _schemaProvisioner.ApplyAsync(schema, cancellationToken);
     }
 
@@ -351,6 +420,11 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
 
         _disposed = true;
 
+        // An offline database closes without writing anything (#1243): both file sets are
+        // taken offline, so the coordinator's aborts undo nothing, no registration is saved,
+        // and neither storage flushes at its close.
+        bool offline = OfflineError is not null;
+
         // The coordinator first: the manager aborts every still-active logical
         // transaction (rolling its paired bracket back) while the storage is
         // still open. Synchronous over the ValueTask by design — the in-process
@@ -363,7 +437,10 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         try
         {
             _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            SaveIndexRegistrationsIfChanged();
+            if (!offline && !IsOffline)
+            {
+                SaveIndexRegistrationsIfChanged();
+            }
         }
         finally
         {
@@ -387,10 +464,16 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         }
 
         _disposed = true;
+
+        // See Dispose: an offline database closes without writing anything (#1243).
+        bool offline = OfflineError is not null;
         try
         {
             await _coordinator.DisposeAsync().ConfigureAwait(false);
-            SaveIndexRegistrationsIfChanged();
+            if (!offline && !IsOffline)
+            {
+                SaveIndexRegistrationsIfChanged();
+            }
         }
         finally
         {

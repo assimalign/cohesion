@@ -24,8 +24,20 @@ public interface ISqlDatabaseEngineBuilder : IDatabaseEngineBuilder
     /// <summary>Gets or sets the bounded grouped-commit flush window.</summary>
     TimeSpan GroupCommitWindow { get; set; }
 
-    /// <summary>Gets or sets the checkpoint cadence.</summary>
+    /// <summary>Gets or sets the checkpoint time backstop (<see cref="SqlDatabaseEngineOptions.CheckpointInterval"/>).</summary>
     TimeSpan CheckpointInterval { get; set; }
+
+    /// <summary>
+    /// Gets or sets the journal size, in bytes, that triggers a checkpoint
+    /// (<see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/>; 256 MiB by default, zero for time only).
+    /// </summary>
+    long CheckpointJournalSize { get; set; }
+
+    /// <summary>
+    /// Gets or sets each database's buffer pool capacity, in bytes
+    /// (<see cref="SqlDatabaseEngineOptions.BufferPoolCapacity"/>; 32 MiB by default). Build validates it.
+    /// </summary>
+    long BufferPoolCapacity { get; set; }
 
     /// <summary>Gets or sets the page write-back cadence.</summary>
     TimeSpan PageWriteBackInterval { get; set; }

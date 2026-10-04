@@ -23,6 +23,13 @@ an optional borrowed `IGraphStorageStrategy`. Workers and servers register as ne
 factories; the built engine owns their products. Creating the engine starts its four
 built-in maintenance workers; application Start starts the nested servers.
 
+A failed journal or data fsync takes the database offline: every later operation, in process
+and over the server, is refused with `DatabaseOfflineException` (`COHDBG012`) until
+`OpenDatabaseAsync` reopens it and recovery decides the unconfirmed commit (#1243).
+`BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and `CheckpointInterval`
+(5 minutes) size the buffer pool and trigger checkpoints (#1254); a failed undo is retried on a
+100 ms backoff (#1226). See DESIGN.md, "Storage operations".
+
 The engine references the area root and Graph.Language, Graph.Catalog and Graph.Storage. The
 storage and catalog compose the shared kernel. It is `net10.0`, AOT compatible, and uses neither
 reflection nor `Microsoft.Extensions.*`. `GraphDatabaseServer` dispatches scalar GQL, mutations,

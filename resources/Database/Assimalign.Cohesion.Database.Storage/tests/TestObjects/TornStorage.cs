@@ -9,9 +9,10 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 /// A storage over crash-simulation streams that can share a <see cref="CrashPoint"/>: by default
 /// every write reaches the media as soon as it is issued (the worst case for both the steal path
 /// and a checkpoint), and a scheduled write can be torn. A journal can instead be flush-gated, so
-/// its appends survive a power loss only once flushed. The data handle can fail a flush after a
-/// chosen write (<see cref="DataFaults"/>). A storage that lost power is abandoned, not disposed:
-/// its shutdown would only throw again.
+/// its appends survive a power loss only once flushed. The data and journal handles can fail a
+/// flush after a chosen write or on demand, or a write (<see cref="DataFaults"/>,
+/// <see cref="JournalFaults"/>). A storage that lost power is abandoned, not disposed: its
+/// shutdown would only throw again.
 /// </summary>
 internal sealed class TornStorage : Storage
 {
@@ -19,17 +20,29 @@ internal sealed class TornStorage : Storage
     private readonly CrashSimulationStream _journal;
 
     private TornStorage(CrashSimulationStream data, CrashSimulationStream journal, int poolCapacity)
-        : this(data, journal, new FlushFaultingHandle(data), poolCapacity)
+        : this(data, journal, new FlushFaultingHandle(data), new FlushFaultingHandle(journal), poolCapacity)
     {
     }
 
-    private TornStorage(CrashSimulationStream data, CrashSimulationStream journal, FlushFaultingHandle dataFaults, int poolCapacity)
-        : base(new StorageStream(dataFaults), new StorageStream(journal), new StorageStream(new MemoryStream()), poolCapacity)
+    private TornStorage(
+        CrashSimulationStream data,
+        CrashSimulationStream journal,
+        FlushFaultingHandle dataFaults,
+        FlushFaultingHandle journalFaults,
+        int poolCapacity)
+        : base(new StorageStream(dataFaults), new StorageStream(journalFaults), new StorageStream(new MemoryStream()), poolCapacity)
     {
         _data = data;
         _journal = journal;
         DataFaults = dataFaults;
+        JournalFaults = journalFaults;
     }
+
+    /// <summary>Gets the journal handle, which can fail a flush or a write.</summary>
+    public FlushFaultingHandle JournalFaults { get; }
+
+    /// <summary>Gets what the data and journal streams hold right now, durable or not.</summary>
+    public (byte[] Data, byte[] Journal) CaptureLive() => (_data.CaptureLive(), _journal.CaptureLive());
 
     public override StorageModel Model => StorageModel.Custom;
 

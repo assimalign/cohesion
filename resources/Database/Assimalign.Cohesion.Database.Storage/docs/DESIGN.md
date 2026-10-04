@@ -316,6 +316,36 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   allocation of a free page whose last write a crash tore — recovery repairs torn pages
   from journal images, and an unjournaled checkpoint anchor page has none.
 
+### Capacity (#1254)
+
+The pool holds `Storage.DefaultBufferPoolCapacity` pages, 4,096 (32 MiB), unless the
+constructor is given another count; every engine exposes the size as a `BufferPoolCapacity`
+option in bytes, 32 MiB by default, validated by `Storage.GetBufferPoolPageCount` (a whole
+number of 8 KiB pages, at least `MinimumBufferPoolBytes`, 1 MiB) and applied through the
+settable `Storage.BufferPoolCapacity` right after the storage is created or opened. Until #1254
+every engine ran with a hard-coded 128 pages (1 MiB), which cannot keep a 4 MiB index resident:
+the #1236 random-reference benchmark stole and reloaded a page on almost every touch and ran at a
+third of the 4,096-page rate ("Measurements").
+
+- **Why 32 MiB.** PostgreSQL's default `shared_buffers` is 128 MB, 16,384 8 KiB buffers
+  (`NBuffers = 16384`, `src/backend/utils/init/globals.c:144`), shared by every database of a
+  cluster. A Cohesion pool belongs to one database, and a host commonly opens several, so the
+  default is a quarter of that: enough to keep the #1236 working set (a 4 MiB index plus the
+  table) resident with room for the catalog, small enough that ten open databases cost about
+  what one PostgreSQL cluster does.
+- **What it costs.** Page buffers are allocated on first load and recycled, never preallocated,
+  so a database pays for the pages it has touched, up to the capacity. At capacity the pool
+  holds 32 MiB of pinned-heap buffers plus about 160 bytes of bookkeeping per resident page
+  (entry, dictionary slot, LRU node: 0.6 MiB at 4,096 pages). The SQL and key-value engines open
+  a second, catalog file set per database whose pool stays at 128 pages (1 MiB): the catalog is
+  small and hot. So an open database costs up to about 33 MiB (34 MiB for SQL and key-value) of
+  pool memory; an in-memory database also holds its data and its journal (up to the checkpoint
+  size, "Checkpoint triggers") in memory.
+- **Resizing.** Growing takes effect at once. Shrinking evicts least-recently-used unpinned
+  pages, writing dirty ones back through the write-ahead gate, until the resident set fits; if
+  more pages than the new capacity are pinned, the resize throws `StorageIOException` and the
+  pool keeps its capacity.
+
 ## The record layer
 
 `SlottedPage` implements the classic slotted layout: records grow forward from the
@@ -485,6 +515,61 @@ outlives the failure:
   a second time. A failure while restoring the pages leaves the bracket active, so the
   caller can retry it.
 
+### A failed durable flush takes the storage offline (#1243)
+
+A failed append is recoverable because the journal knows exactly what it holds afterwards. A
+failed fsync is not: the operating system may have kept the bytes it was asked to make durable,
+or dropped them and marked its cache pages clean, and a second fsync can then report success
+for writes that never reached the device. That is PostgreSQL's 2018 "fsyncgate", and PostgreSQL
+answers it by never retrying: a WAL fsync failure is `PANIC` (`issue_xlog_fsync`,
+`src/backend/access/transam/xlog.c:9877-9937`), a failure inside the commit critical section is
+`PANIC` (`RecordTransactionCommit` runs the commit record's insert and `XLogFlush` between
+`START_CRIT_SECTION` and `END_CRIT_SECTION`, `src/backend/access/transam/xact.c:1470-1583`), and
+with `data_sync_retry` off, its default, a data-file fsync failure is `PANIC` too
+(`data_sync_elevel`, `src/backend/storage/file/fd.c:3966-3987`). Recovery from the WAL on the
+media then decides what survived.
+
+The storage does the same without stopping the process. When a durable flush of the journal
+(`EnsureDurable`, `FlushPendingCommits`, any `Flush(forceDurable: true)`) or of the data file
+(the checkpoint's and the header write's data flush) throws, the storage goes **offline**:
+
+- **The failing call throws `StorageOfflineException`** (`COHDBS002`), carrying the I/O
+  failure as its inner exception. The journal latches the error under its append lock, so no
+  append can slip in behind the failed flush; a data-file failure latches the journal too.
+  `Storage.OfflineError` and `IsOffline` report it for the life of the instance.
+- **Nothing more is written to either file.** Every later journal append, flush, durable
+  wait and checkpoint, every page write-back, eviction of a dirty page, file extension and
+  `FlushAll` (the buffer pool's write guard), every header write, every new storage
+  transaction and every record change throws `StorageOfflineException` (`StorageOfflineException.Refusal`,
+  same code and cause). Closing writes nothing: `ShutdownFlush` returns at once. Reads of
+  resident and on-disk pages still work; the engines refuse every operation of an offline
+  database before it reaches the storage, with the area root's `DatabaseOfflineException`
+  (`Database` DESIGN.md, "Error model"; each engine's DESIGN.md, "Storage operations").
+- **A commit whose record was appended ends committed in memory.** `CommitTransaction`
+  appends the commit record, then waits for durability; when that wait fails the bracket is
+  completed as committed (its page locks and active count released, its pages left as
+  written) before the exception propagates. The bracket cannot be rolled back — its commit
+  record may already be on the media, and a rollback record could not be written anyway — and
+  leaving it active would block the close. Whether it committed is decided by the reopen's
+  recovery: if the record's bytes reached the media it is redone, otherwise its pages are undone.
+  The transaction layer reports it as committed-unconfirmed (`Database.Transactions` DESIGN.md).
+- **Group-commit waiters are released.** Going offline abandons the group-commit gate: every
+  commit waiting on it wakes at once instead of waiting out its window for a flush that will
+  never come, and its own durability request then gets the offline refusal, unless its LSN was
+  already durable before the failure.
+- **Several file sets of one database go offline together.** `Storage.TakeOffline(error)` lets
+  an engine whose database spans two storages (SQL and key-value: data and catalog) take the
+  other one offline too, so no file of the database changes after the failure.
+- **Only a reopen brings it back.** Disposing an offline storage writes nothing; opening the file
+  set again runs recovery over the journal as the media holds it.
+
+Before #1243 a failed journal fsync surfaced as a plain `IOException` from the commit, and the
+next commit's flush could succeed and acknowledge work whose earlier records had been dropped. A
+failed data fsync in a header write let a retried checkpoint truncate the journal over pages the
+operating system may have discarded. `StorageOfflineTests` covers both files, the refusals, the
+quiet close and the reopen; every engine has an offline test that fails a journal fsync through
+a fault-injecting storage strategy and reopens with and without the unconfirmed record's bytes.
+
 ### The physical/logical bracket interplay (MVCC layering rules)
 
 The MVCC session binding (area DESIGN.md §3.8, first delivered by the SQL
@@ -634,8 +719,14 @@ everything since. A failure before the slot write is issued leaves the target sl
 the newest, so its chain may still be rewritten and the retry is allowed. PostgreSQL stops on a
 failed control-file write or fsync (`src/common/controldata_utils.c:245-265`; data-file fsync
 failures are PANIC unless `data_sync_retry`, `src/backend/storage/file/fd.c:3984-3987`);
-Voron never rewrites a header revision (`HeaderAccessor.cs:186-191`). `StorageFormatTests`
-covers both cases.
+Voron never rewrites a header revision (`HeaderAccessor.cs:186-191`). Since #1243 a failed
+*durable flush* of the data file — the one before the slot write, or the one after it — goes
+further and takes the whole storage offline ("A failed durable flush takes the storage
+offline"): the write-backs that flush covered may have been dropped while the pool recorded
+the pages clean, so even the retry that a failure before the slot write allows could truncate
+the journal over pages that never reached the media. A failed slot *write* (an I/O error, not
+an fsync) still only stops header writes. `StorageFormatTests` covers the four cases: a
+failed write before and after the slot write, and a failed data flush before and after it.
 
 **The LSN floor (#1242).** Every header generation persists the journal's last LSN, and open
 raises the journal to `max(last record, floor)` before anything appends. A checkpoint
@@ -700,6 +791,61 @@ lock, so no transaction can slip between the emptiness check and the truncation.
 reverse.) A checkpoint attempted while transactions are active still throws
 `StorageTransactionException` — background checkpointers treat that as "busy, retry
 next pass".
+
+### Checkpoint triggers (#1254)
+
+Until #1254 every engine checkpointed on a fixed 30-second timer and nothing else, so the
+journal — and with it recovery time, disk use, and for an in-memory database memory — grew
+with the write rate, without bound. Two triggers now decide when a storage is due, the two
+PostgreSQL uses:
+
+- **Size.** `Storage.CheckpointJournalSize` (zero, the storage-level default, disables it)
+  is compared with `JournalLength`, the bytes the journal holds since its last truncation
+  (counted as frames are appended, and from the verified frames when a journal is opened). The
+  first append that reaches the size invokes `OnCheckpointNeeded`, outside every storage lock
+  and once per checkpoint cycle; an engine sets the signal its checkpoint worker waits on. This
+  is PostgreSQL's `XLogWrite` requesting a checkpoint once the WAL written since the last one
+  passes its share of `max_wal_size` (`XLogCheckpointNeeded` and
+  `RequestCheckpoint(CHECKPOINT_CAUSE_XLOG)`, `src/backend/access/transam/xlog.c:2358-2367`,
+  `2579-2584`).
+- **Time, as a backstop.** `Storage.IsCheckpointDue(interval)` is also true once `interval` has
+  passed since the last checkpoint (or the open) *and* the journal received a record since then.
+  An idle storage is not checkpointed by time, as PostgreSQL skips a checkpoint when no important
+  WAL was written since the last one (`CreateCheckPoint`,
+  `src/backend/access/transam/xlog.c:7759-7775`); its timer is `checkpoint_timeout`
+  (`CheckpointerMain`, `src/backend/postmaster/checkpointer.c:405-412`). An offline storage is
+  never due.
+
+Each engine's checkpoint worker waits on its signal for at most a second, then checkpoints every
+database whose storage `IsCheckpointDue(CheckpointInterval)`. The time-only worker had a second
+defect the size trigger exposed: under a sustained statement load some statement bracket was
+always active, every checkpoint was refused as busy, and the journal grew without bound no
+matter how often the worker tried. The transaction coordinator's `Checkpoint` now takes the
+statement apply gate (`Database.Transactions` DESIGN.md, "Recovery and checkpoint interlock"),
+so a checkpoint waits for the statement in flight and runs before the next one.
+
+**The defaults** are engine options (every engine has the same three): `CheckpointJournalSize`
+256 MiB, `CheckpointInterval` 5 minutes (was 30 seconds), `BufferPoolCapacity` 32 MiB. The
+reference is PostgreSQL's `max_wal_size` of 1 GB (`max_wal_size_mb = 1024`,
+`src/backend/access/transam/xlog.c:121`) and `checkpoint_timeout` of 5 minutes, beside its
+128 MB `shared_buffers`:
+
+- PostgreSQL's WAL bound is eight times its buffer pool. The engines keep that ratio to their
+  32 MiB pool, which gives 256 MiB.
+- PostgreSQL's checkpoints are spread (`checkpoint_completion_target`, 0.9) and keep the
+  previous cycle's WAL until the next checkpoint completes, so it requests a checkpoint at about
+  `max_wal_size / (1 + checkpoint_completion_target)` of WAL (`CalculateCheckpointSegments`,
+  `src/backend/access/transam/xlog.c:2245-2275`) and lets the total float up to the full size.
+  A checkpoint here is sharp: it flushes and truncates at once, so the size is the journal's
+  bound, not a fraction of it. Writes that land while the worker wakes and the checkpoint runs
+  overshoot it; the engines' sustained-write tests hold the peak under four times a 4 MiB size,
+  and at the default the overshoot is a small fraction ("Measurements").
+- Recovery replays about 20 ms per MB of journal from a warm file cache (the #1251 table below:
+  a 50.2 MB journal in 0.9–1.2 s), so the bound caps a crash recovery at about five seconds;
+  PostgreSQL's 1 GB allows minutes, and its `checkpoint_timeout` is the time bound for slow
+  writers, which Cohesion adopts unchanged.
+- An in-memory database (no root path) keeps its journal in memory too, so the size is also a
+  memory bound for it: up to 256 MiB beside its data.
 
 ### Commit durability modes (group commit)
 
@@ -941,15 +1087,48 @@ appends at the offset its last append ended, and checks the length only once aft
 the journal holds records past its durable point and no dirty data page's write-back flushed
 it first — lifecycle records alone, here; after any page change the gate already flushed it.
 
-## Error model
+## Measurements (#1254, 2026-10-04)
+
+Release builds of this change on the same machine (win-arm64, 12 logical cores, .NET 10), from a
+probe outside the repository; three runs of each row, in alternation where two configurations
+are compared. The index rows ran on four reserved cores at high priority, each cell the range of
+the runs' medians of three; the others ran unpinned.
+
+| Workload | Before (#1254 default or behavior) | After |
+|---|---|---|
+| #1236 benchmark, random references: 100,000 index inserts over 10 INT keys, 1,000 per transaction, 128-page pool vs the new 4,096-page default | 94k–101k inserts/s | 136k–139k inserts/s |
+| the same, references in insertion order / ascending in shuffled 200-reference blocks | 591k–606k / 422k–437k | 545k–581k / 417k–477k |
+| Sustained SQL writes over physical files, synchronous durability: two writers, 1,000-row transactions of ~800-byte rows, until 1.5 GiB of journal was written; time-only 30-second trigger vs the 256 MiB / 5-minute defaults | peak journal 1,463–1,536 MiB, 0–1 checkpoints, 25.4k–28.8k rows/s | peak journal 256.4 MiB (1.00 × the size) in every run, 5 checkpoints, 26.2k–31.0k rows/s |
+| Recovery of a 257.5 MiB journal (1,000 pages, brackets of 100 page touches), physical files with a warm cache / in memory | — | 5.07–5.12 s (19.7 ms per MiB) / 0.40–0.46 s |
+| Managed memory per open SQL database over physical files after ~48 MiB of rows, 1 MiB vs 32 MiB `BufferPoolCapacity` | 1.4–1.5 MiB | 32.8–33.1 MiB |
+
+The random-reference row gains 1.4× from the larger pool: its working set is a 4 MiB index that
+the 128-page pool kept evicting. It is still bound by the full before- and after-image each touched
+leaf costs per bracket (#1236 steps 2 and 3, #1252 and #1253). Insertion-order inserts touch a few
+hot pages either way and run within about 10% of each other (the larger pool slightly slower in
+two of three runs); block order is unchanged within the noise. Under sustained load the size
+trigger holds the journal at its configured size: the checkpoint worker wakes on the storage's
+signal and the checkpoint waits for one statement at the apply gate, so the overshoot past
+256 MiB is a few hundred kilobytes. Throughput moves within the noise of the time-only runs, so
+checkpointing every 256 MiB costs no measurable write rate here. The time-only trigger let the
+journal grow by the write rate, about 50 MB a second, for 30 seconds — and before the
+coordinator took the apply gate, a sustained load could starve that checkpoint indefinitely.
+Recovery at the bound takes about five seconds, as the 20 ms per MB of the #1251 table predicted.
+The memory row is the pool at capacity: 31.0 MiB of the 31.6 MiB difference is the 3,968
+additional 8 KiB buffers, and the rest, about 150 bytes per page, is pool bookkeeping and noise.
+
 
 `StorageException` is the area root for this library. `StorageIOException` (stream and
 allocation failures), `SlottedPageException` (record layout violations),
 `StorageCorruptionException` (checksum/header integrity failures — carries the
 `PageId`), `StorageFormatException` (a file set in another on-disk format, coded
-`COHDBS001`, carrying the found and supported versions), and `JournalException` (journal
-framing/state violations) all derive from it, so consumers can catch the family or the
-specific failure.
+`COHDBS001`, carrying the found and supported versions), `StorageOfflineException` (a
+durable flush of the journal or the data file failed and the storage writes nothing more
+until it is reopened, coded `COHDBS002`, carrying the I/O failure; `Find` locates one in an
+inner-exception or aggregate chain), and `JournalException` (journal framing/state
+violations) all derive from it, so consumers can catch the family or the specific failure.
+Engines translate `StorageOfflineException` into the area root's `DatabaseOfflineException`
+with their own code.
 
 ## AOT posture
 

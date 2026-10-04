@@ -257,6 +257,17 @@ not confuse an operational failure with a missing database),
 conflict or deadlock victim is retryable by construction, and in-process
 consumers deserve to catch that kind precisely rather than parse messages; on
 the wire both remain `ExecutionFailure` with a precise message).
+`DatabaseTransactionCommitUnconfirmedException` is the non-retryable outcome of a
+commit whose record was written but whose fsync failed: the work may have committed,
+so retrying it could apply it twice. `DatabaseOfflineException` (#1243) is what every
+operation gets after such a failure, or after any failed fsync of a database's journal
+or data files: the storage stopped writing (the storage's `StorageOfflineException`,
+`COHDBS002`, is its inner exception), and the database refuses everything until
+`IDatabaseEngine.OpenDatabaseAsync` reopens it and recovery decides the unconfirmed
+commit — PostgreSQL's `PANIC` on a failed WAL fsync, scoped to one database instead of
+the process. Its `Code` leads the message and names the model: `COHSQLT004`,
+`COHDBK002`, `COHDBD002`, `COHDBG012`, `COHDBB002`. Every wire server reports it as
+`Unavailable`. `DatabaseOfflineException.Create` builds it from the storage error.
 
 **Child roots own independent exception roots** — `StorageException`,
 `DatabaseTypeException`, `QueryExecutionException`, `ProtocolException`,

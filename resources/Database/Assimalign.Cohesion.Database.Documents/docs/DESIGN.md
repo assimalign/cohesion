@@ -379,6 +379,46 @@ the database: "Database 'x' cannot be opened. COHDBS001: …", the storage's
 acknowledge commits only after the journal is durable. Memory-backed databases
 use the identical storage/transaction implementation over in-memory streams.
 
+## Storage operations (#1243, #1254, #1226)
+
+**A failed fsync takes the database offline (#1243).** When a durable flush of the
+database's journal or data file fails, the storage goes offline (`Database.Storage`
+DESIGN.md, "A failed durable flush takes the storage offline") and nothing more is written to
+the file set, closing included — PostgreSQL's `PANIC` on a failed WAL fsync (`issue_xlog_fsync`,
+`src/backend/access/transam/xlog.c:9877-9937`; the commit critical section in
+`RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`; and `data_sync_retry`
+off, `src/backend/storage/file/fd.c:3966-3987`), scoped to the database. The statement whose
+commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`. Every later operation —
+a new session, an OQL statement or typed request, a collection call, BEGIN, and the COMMIT or
+ROLLBACK of a transaction open at the failure — is refused with `DatabaseOfflineException`, code
+`COHDBD002`, carrying the storage's `StorageOfflineException`. The engine has no wire server.
+The workers skip the database; closing its sessions and transactions writes nothing.
+`DocumentDatabaseEngine.OpenDatabaseAsync(name)` disposes the offline instance without writing
+and reopens the file set, whose recovery keeps the unconfirmed commit if its record's bytes
+reached the media and aborts every transaction that was open. `DocumentStorageOperationsTests`
+fails the commit's journal fsync through a fault-injecting strategy over durable in-memory
+handles, checks every refusal and that the file set did not change through the workers' passes
+and the close, and reopens with and without the unconfirmed record's bytes. The test holds
+its open transaction as a reader: the engine's single database writer lock would otherwise block
+the failing commit.
+
+**Buffer pool and checkpoint options (#1254).** `DocumentDatabaseEngineOptions` (and
+`IDocumentDatabaseEngineBuilder`) carry `BufferPoolCapacity` (32 MiB; whole 8 KiB pages, at least
+1 MiB), `CheckpointJournalSize` (256 MiB; zero for time only; not negative) and
+`CheckpointInterval` (5 minutes, was 30 seconds), all validated by `Create`. The checkpoint
+worker checkpoints a database when its journal reaches the size (its storage wakes the worker
+at once) or when the interval passed and its journal received records, looking at most once a
+second otherwise; it checkpoints through the transaction coordinator, which takes the statement
+apply gate, so a sustained load cannot keep it out. An open database costs up to about 33 MiB of
+pool memory once it touched that many pages; an in-memory one also holds its data and journal.
+The reasoning is in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint triggers").
+
+**Deferred undo is retried on its own backoff (#1226).** The version-purge worker retries a
+rollback's failed undo about 100 ms after the deferral, then at doubling delays up to
+`MaintenanceInterval`, so a transient failure releases the database writer lock within about a
+second; a failure that persists is recorded as a worker fault and retried without stopping the
+worker (`Database.Transactions` DESIGN.md).
+
 ## Limits and verification
 
 The current engine materializes query inputs/results and whole JSON values in

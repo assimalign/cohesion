@@ -48,6 +48,7 @@ internal sealed class GraphDatabaseSession : IDatabaseSession
         lock (_sync)
         {
             ThrowIfNotOpen();
+            _database.ThrowIfOffline();
             if (OpenTransaction is { } open)
             {
                 // BEGIN is refused while an aborted transaction waits for its rollback, as in
@@ -69,17 +70,21 @@ internal sealed class GraphDatabaseSession : IDatabaseSession
             lock (_sync)
             {
                 ThrowIfNotOpen();
-                _transaction = new GraphDatabaseTransaction(_database.Coordinator, context);
+                _transaction = new GraphDatabaseTransaction(_database.Coordinator, context, _database);
                 return _transaction;
             }
         }
-        catch
+        catch (Exception error)
         {
-            if (context?.State == TransactionState.Active)
+            if (context?.State == TransactionState.Active && !_database.IsOffline)
             {
                 await _database.Coordinator.RollbackAsync(context).ConfigureAwait(false);
             }
-            throw;
+
+            // A begin that met the offline storage (#1243) gets the coded refusal.
+            var reported = _database.TranslateOffline(error);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
         }
         finally
         {
@@ -89,6 +94,7 @@ internal sealed class GraphDatabaseSession : IDatabaseSession
     public ValueTask<QueryResult> ExecuteAsync(QueryRequest request, CancellationToken cancellationToken = default)
     {
         ThrowIfNotOpen();
+        _database.ThrowIfOffline();
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
         if (request.Statement is not GqlQueryStatement statement)
@@ -101,6 +107,7 @@ internal sealed class GraphDatabaseSession : IDatabaseSession
     public ValueTask<QueryResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {
         ThrowIfNotOpen();
+        _database.ThrowIfOffline();
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
         cancellationToken.ThrowIfCancellationRequested();
         return ExecuteStatementAsync(() => GraphQueryRequest.FromGql(statement, parameters), cancellationToken);
@@ -117,6 +124,7 @@ internal sealed class GraphDatabaseSession : IDatabaseSession
     internal async ValueTask<QueryResult> ExecuteStatementAsync(Func<QueryRequest> parse, CancellationToken cancellationToken)
     {
         ThrowIfNotOpen();
+        _database.ThrowIfOffline();
         ThrowIfTransactionAborted();
         QueryRequest request;
         try

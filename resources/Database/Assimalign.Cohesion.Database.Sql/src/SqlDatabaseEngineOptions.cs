@@ -35,11 +35,40 @@ public sealed class SqlDatabaseEngineOptions
     public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.FromMilliseconds(5);
 
     /// <summary>
-    /// Gets or sets the cadence of the engine's checkpoint worker: how often each
-    /// open database's file sets (data and catalog) are durably flushed and their
-    /// journals truncated.
+    /// Gets or sets the checkpoint time backstop: the longest a file set (data or catalog) whose
+    /// journal received records waits for a checkpoint, which durably flushes its pages and
+    /// truncates its journal. Defaults to 5 minutes, PostgreSQL's <c>checkpoint_timeout</c>;
+    /// under load <see cref="CheckpointJournalSize"/> triggers checkpoints first. An idle file set
+    /// is not checkpointed by time.
     /// </summary>
-    public TimeSpan CheckpointInterval { get; set; } = TimeSpan.FromSeconds(30);
+    public TimeSpan CheckpointInterval { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Gets or sets the journal size, in bytes, that triggers a checkpoint of a file set:
+    /// 256 MiB by default, zero to rely on <see cref="CheckpointInterval"/> alone. It bounds the
+    /// journal's disk use and the work a recovery replays. Must not be negative.
+    /// </summary>
+    /// <remarks>
+    /// PostgreSQL triggers on WAL volume too (<c>max_wal_size</c>, 1 GB, about eight times its
+    /// 128 MB <c>shared_buffers</c>). Cohesion keeps that ratio to its 32 MiB pool, and its sharp
+    /// checkpoint truncates at once rather than spreading over the next cycle, so the size is the
+    /// journal's bound; a recovery replays about 20 ms per MB from a warm file cache
+    /// (Storage DESIGN.md, "Measurements"), about 5 seconds at the bound.
+    /// </remarks>
+    public long CheckpointJournalSize { get; set; } = 256L * 1024 * 1024;
+
+    /// <summary>
+    /// Gets or sets the buffer pool capacity of each database's data file set, in bytes: a whole
+    /// number of 8 KiB pages, at least 1 MiB. Defaults to 32 MiB (4,096 pages). The catalog file
+    /// set keeps a fixed 1 MiB pool.
+    /// </summary>
+    /// <remarks>
+    /// The pool allocates its page buffers as pages are first loaded, so a database costs up to
+    /// this much memory, plus the 1 MiB catalog pool and about 160 bytes of bookkeeping per
+    /// resident page (0.6 MiB at 4,096 pages), once it touched that many pages. A 4 MiB index did not fit the previous 128-page
+    /// default, and random inserts into it paid a steal and a reload per touch (#1236, #1254).
+    /// </remarks>
+    public long BufferPoolCapacity { get; set; } = 32L * 1024 * 1024;
 
     /// <summary>
     /// Gets or sets the cadence of the engine's page write-back worker: how often a
@@ -60,6 +89,13 @@ public sealed class SqlDatabaseEngineOptions
     /// (currently a documented stub — see docs/DESIGN.md).
     /// </summary>
     public TimeSpan MaintenanceInterval { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Gets or sets the delay before the first retry of a rolled-back writer's undo that failed
+    /// (#1226): 100 ms, doubling after each failed retry up to <see cref="MaintenanceInterval"/>.
+    /// Internal: tests that drive the purge pass themselves set it out of their way.
+    /// </summary>
+    internal TimeSpan DeferredUndoRetryDelay { get; set; } = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
     /// Gets or sets how many levels a SQL expression may nest in a statement this engine executes

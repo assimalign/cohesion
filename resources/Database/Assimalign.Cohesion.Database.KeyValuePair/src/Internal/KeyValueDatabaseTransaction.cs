@@ -46,10 +46,15 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     private int _commands;
     private bool _ended;
 
-    internal KeyValueDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context)
+    // The database whose offline state (#1243) refuses the transaction's commit and rollback and
+    // makes its disposal touch nothing; null for a transaction composed without one.
+    private readonly KeyValueDatabaseInstance? _database;
+
+    internal KeyValueDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context, KeyValueDatabaseInstance? database = null)
     {
         _coordinator = coordinator;
         _context = context;
+        _database = database;
     }
 
     /// <inheritdoc />
@@ -174,6 +179,10 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        // An offline database refuses the commit before it starts (#1243): nothing is written,
+        // and the reopen's recovery aborts the transaction, which has no commit record.
+        _database?.ThrowIfOffline();
         await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -244,6 +253,10 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     public async ValueTask RollbackAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        // An offline database refuses the rollback too (#1243): its undo could write nothing,
+        // and the reopen's recovery aborts the transaction.
+        _database?.ThrowIfOffline();
         await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -350,7 +363,9 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     // refuses the rollback before it starts, and its disposal then aborts the context itself.
     private async ValueTask RollbackContextAsync()
     {
-        if (_context.State != TransactionState.Active)
+        // On an offline database the disposal and the session's teardown touch nothing (#1243):
+        // the reopen's recovery aborts the transaction, which has no commit record.
+        if (_context.State != TransactionState.Active || _database?.IsOffline == true)
         {
             return;
         }
@@ -367,12 +382,14 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     }
 
     // The area error policy: the engine translates the transaction kernel's independent exception
-    // root at the model boundary.
-    private static Exception Translate(Exception error) => error switch
+    // root at the model boundary. A failure the offline storage caused becomes the coded refusal
+    // (#1243); the unconfirmed commit that took it offline keeps its own type.
+    private Exception Translate(Exception error) => error switch
     {
+        TransactionCommitUnconfirmedException => new DatabaseTransactionCommitUnconfirmedException(error.Message, error),
+        _ when _database?.TranslateOffline(error) is DatabaseOfflineException offline => offline,
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
-        TransactionCommitUnconfirmedException => new DatabaseTransactionCommitUnconfirmedException(error.Message, error),
         _ => error,
     };
 }

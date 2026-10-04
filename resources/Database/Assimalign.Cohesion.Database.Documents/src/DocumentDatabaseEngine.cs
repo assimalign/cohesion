@@ -20,6 +20,11 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
     private readonly Dictionary<string, DocumentDatabaseInstance> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
     private readonly ManualResetEventSlim _commitPending = new();
+
+    // Woken by a storage whose journal reached the checkpoint size, and by a coordinator that
+    // deferred an undo, so the checkpoint and version-purge workers act at once (#1254, #1226).
+    private readonly ManualResetEventSlim _checkpointNeeded = new();
+    private readonly ManualResetEventSlim _undoDeferred = new();
     private readonly CancellationTokenSource _stop = new();
     private readonly List<IDatabaseEngineWorker> _workers = [];
     private readonly List<IDatabaseServer> _servers = [];
@@ -61,6 +66,25 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
     internal DocumentStorage[] GetStorageSnapshot() => Volatile.Read(ref _storages);
     internal DocumentDatabaseInstance[] GetInstanceSnapshot() => Volatile.Read(ref _instances);
 
+    /// <summary>
+    /// Gets the signal a storage sets when its journal reaches
+    /// <see cref="DocumentDatabaseEngineOptions.CheckpointJournalSize"/>; the checkpoint worker waits on it.
+    /// </summary>
+    internal ManualResetEventSlim CheckpointNeededSignal => _checkpointNeeded;
+
+    /// <summary>
+    /// Gets the signal a database's coordinator sets when it defers an undo; the version-purge
+    /// worker waits on it so the first retry runs about 100 ms later, not a maintenance interval.
+    /// </summary>
+    internal ManualResetEventSlim UndoDeferredSignal => _undoDeferred;
+
+    /// <summary>
+    /// Records a background worker's failure without stopping the worker: the engine reports
+    /// <see cref="EngineState.Faulted"/> and the worker's next pass runs as usual.
+    /// </summary>
+    /// <param name="exception">The failure.</param>
+    internal void ReportWorkerFault(Exception exception) => Interlocked.CompareExchange(ref _workerFault, exception, null);
+
     /// <summary>Creates a dependency-free builder for an engine and its deferred workers and servers.</summary>
     /// <returns>A one-shot model builder; constructing the builder starts no components.</returns>
     /// <remarks>Use this entry point inside hosting-aware factories to assign already resolved values before Build.</remarks>
@@ -70,7 +94,10 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
     /// <param name="options">The engine configuration.</param>
     /// <returns>The running engine.</returns>
     /// <exception cref="ArgumentNullException">The options are null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">A worker interval or batch size is not positive.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A worker interval or batch size is not positive, the buffer pool capacity is not a whole
+    /// number of 8 KiB pages of at least 1 MiB, or the checkpoint journal size is negative.
+    /// </exception>
     public static DocumentDatabaseEngine Create(DocumentDatabaseEngineOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -79,6 +106,8 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaintenanceInterval, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.GroupCommitWindow, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.PageWriteBackBatchSize);
+        Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
+        ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
         return new DocumentDatabaseEngine(options);
     }
 
@@ -105,7 +134,17 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
                 }
 
                 existing.ThrowIfDisposed();
-                return new ValueTask<IDatabase>(existing);
+                if (!existing.IsOffline)
+                {
+                    return new ValueTask<IDatabase>(existing);
+                }
+
+                // The database went offline after a failed durable flush (#1243): reopening it
+                // is the one way back. Its close writes nothing, and the open below runs
+                // recovery, which decides the outcome of every commit that was not confirmed.
+                _databases.Remove(name);
+                RebuildSnapshot();
+                existing.Dispose();
             }
             var directory = FindDirectory(name);
             bool exists = _options.StorageStrategy?.StorageExists(name) ?? directory is not null;
@@ -136,6 +175,12 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
                 }
                 storage.GroupCommitWindow = _options.GroupCommitWindow;
                 storage.OnCommitPending = _commitPending.Set;
+
+                // The engine sizes the pool and arms the checkpoint trigger on whatever storage
+                // the strategy returned, so a custom strategy needs no knowledge of them (#1254).
+                storage.BufferPoolCapacity = Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(_options.BufferPoolCapacity, nameof(_options.BufferPoolCapacity));
+                storage.CheckpointJournalSize = _options.CheckpointJournalSize;
+                storage.OnCheckpointNeeded = _checkpointNeeded.Set;
                 Volatile.Write(ref _storages, [.. _storages, storage]);
                 var database = new DocumentDatabaseInstance(name, this, storage, recover: !create);
                 _databases.Add(name, database);
@@ -325,6 +370,8 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
             RebuildSnapshot();
         }
         _commitPending.Dispose();
+        _checkpointNeeded.Dispose();
+        _undoDeferred.Dispose();
         _stop.Dispose();
         if (errors is not null)
         {

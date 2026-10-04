@@ -713,6 +713,9 @@ public sealed class BlobTransactionFailureTests
         StorageStrategy = strategy,
         MaintenanceInterval = TimeSpan.FromHours(1),
         CheckpointInterval = TimeSpan.FromHours(1),
+
+        // The deferred-undo retry stays out of the way too: these tests drive the purge pass.
+        DeferredUndoRetryDelay = TimeSpan.FromHours(1),
     };
 
     /// <summary>A commit the kernel aborts crosses the boundary translated, and a catch-block rollback afterwards raises nothing.</summary>

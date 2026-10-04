@@ -59,6 +59,14 @@ internal sealed class FaultingMemoryStream : MemoryStream
         set => Volatile.Write(ref _failFlushes, value);
     }
 
+    /// <summary>
+    /// Gets the stream's length at its last successful <see cref="Flush"/>: what a flush confirmed.
+    /// Bytes past it model writes an operating system may drop after a failed fsync.
+    /// </summary>
+    internal long FlushedLength => Volatile.Read(ref _flushedLength);
+
+    private long _flushedLength;
+
     /// <inheritdoc />
     public override void Flush()
     {
@@ -68,6 +76,7 @@ internal sealed class FaultingMemoryStream : MemoryStream
         }
 
         base.Flush();
+        Volatile.Write(ref _flushedLength, Length);
     }
 
     // Every write funnels through the array overload: a MemoryStream subclass's span overload

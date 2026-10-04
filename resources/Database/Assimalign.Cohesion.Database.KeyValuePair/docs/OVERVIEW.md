@@ -24,7 +24,8 @@ keys order by unsigned lexicographic byte comparison.
   active, so later commands stay inside it until the caller commits or rolls back. A
   rollback can be repeated, and a started rollback always ends the transaction, even when
   the journal rejects its abort record or its undo (the kernel then keeps the written keys
-  locked until its purge pass completes the undo). A transaction the kernel ended under its
+  locked until a retry completes the undo: about 100 ms later, then at doubling delays up to
+  the maintenance interval, #1226). A transaction the kernel ended under its
   caller refuses commands and COMMIT with `COHDBK001`. A rollback or a closed session ends
   the transaction even under a running command, which then fails and writes nothing; a
   commit while a command runs is refused.
@@ -42,6 +43,12 @@ keys order by unsigned lexicographic byte comparison.
   wire-protocol server, carrying its own full copy of the server machinery
   (servers are per-model and each model package owns its copy — owner decision
   2026-07-14; see DESIGN.md for the placement history).
+- Storage operations: a failed journal or data fsync takes the database offline, and every
+  later operation, in process and over the server, is refused with `DatabaseOfflineException`
+  (`COHDBK002`) until `OpenDatabaseAsync` reopens it and recovery decides the unconfirmed
+  commit (#1243). `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and
+  `CheckpointInterval` (5 minutes) size the pool and trigger checkpoints (#1254). See
+  DESIGN.md, "Storage operations".
 
 ## Dependencies
 

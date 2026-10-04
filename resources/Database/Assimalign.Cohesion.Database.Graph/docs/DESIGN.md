@@ -543,6 +543,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
 | `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `QueryResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 1.0 |
 | `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 1.0 |
+| `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 
@@ -568,6 +569,45 @@ entries. Model security policies, replication, Hosting/ApplicationModel changes 
 provisioning remain out of scope. The graph server uses the shared authenticator rather than adding
 graph-specific authentication contracts.
 No reflection or runtime code generation is used.
+
+### Storage operations (#1243, #1254, #1226)
+
+**A failed fsync takes the database offline (#1243).** When a durable flush of the
+database's journal or data file fails, the storage goes offline (`Database.Storage`
+DESIGN.md, "A failed durable flush takes the storage offline") and nothing more is written to
+the file set, closing included — PostgreSQL's `PANIC` on a failed WAL fsync (`issue_xlog_fsync`,
+`src/backend/access/transam/xlog.c:9877-9937`; the commit critical section in
+`RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`; and `data_sync_retry`
+off, `src/backend/storage/file/fd.c:3966-3987`), scoped to the database. The statement whose
+commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`. Every later operation —
+a new session, a GQL statement, a typed `IGraphDatabase` call, BEGIN, and the COMMIT or ROLLBACK
+of a transaction open at the failure — is refused with `DatabaseOfflineException`, code
+`COHDBG012`, carrying the storage's `StorageOfflineException`; the offline check runs before the
+generic storage translation, so it is never reported as `COHDBG006`. `GraphDatabaseServer`
+answers a statement on an existing session, and a handshake for the database, with
+`Unavailable` and the coded message. The workers skip the database; closing its sessions and
+transactions writes nothing. `GraphDatabaseEngine.OpenDatabaseAsync(name)` disposes the offline
+instance without writing and reopens the file set, whose recovery keeps the unconfirmed commit if
+its record's bytes reached the media and aborts every transaction that was open.
+`GraphStorageOperationsTests` covers it in process and over the wire, with a fault-injecting
+strategy over durable in-memory handles, reopening with and without the unconfirmed record's
+bytes.
+
+**Buffer pool and checkpoint options (#1254).** `GraphDatabaseEngineOptions` (and
+`IGraphDatabaseEngineBuilder`) carry `BufferPoolCapacity` (32 MiB; whole 8 KiB pages, at least
+1 MiB), `CheckpointJournalSize` (256 MiB; zero for time only; not negative) and
+`CheckpointInterval` (5 minutes, was 30 seconds), all validated by `Create`. The checkpoint worker
+checkpoints a database when its journal reaches the size (its storage wakes the worker at once)
+or when the interval passed and its journal received records, looking at most once a second
+otherwise, through the transaction coordinator's apply gate so a sustained load cannot keep it
+out. An open database costs up to about 33 MiB of pool memory once it touched that many pages;
+an in-memory one also holds its data and journal. The reasoning is in `Database.Storage`
+DESIGN.md ("Capacity", "Checkpoint triggers").
+
+**Deferred undo is retried on its own backoff (#1226).** The version-purge worker retries a
+rollback's failed undo about 100 ms after the deferral, then at doubling delays up to
+`MaintenanceInterval`, so a transient failure releases the database writer lock within about a
+second (`Database.Transactions` DESIGN.md).
 
 ## Graph wire family
 

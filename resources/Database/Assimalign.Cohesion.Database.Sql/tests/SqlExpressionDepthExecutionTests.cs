@@ -1251,6 +1251,10 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
         public TimeSpan CheckpointInterval { get => _options.CheckpointInterval; set => _options.CheckpointInterval = value; }
 
+        public long CheckpointJournalSize { get => _options.CheckpointJournalSize; set => _options.CheckpointJournalSize = value; }
+
+        public long BufferPoolCapacity { get => _options.BufferPoolCapacity; set => _options.BufferPoolCapacity = value; }
+
         public TimeSpan PageWriteBackInterval { get => _options.PageWriteBackInterval; set => _options.PageWriteBackInterval = value; }
 
         public int PageWriteBackBatchSize { get => _options.PageWriteBackBatchSize; set => _options.PageWriteBackBatchSize = value; }

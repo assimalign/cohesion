@@ -43,6 +43,13 @@ shared storage, with DDL flowing through the relational catalog
   machine, guardrails, and two-phase drain are implemented inside this package
   (servers are per-model and each model carries its own copy of the machinery —
   owner decision 2026-07-14; see DESIGN.md).
+- **Storage operations** — a failed journal or data fsync takes the database offline:
+  every later operation, in process and over the server, is refused with
+  `DatabaseOfflineException` (`COHSQLT004`) until `OpenDatabaseAsync` reopens it and
+  recovery decides the unconfirmed commit (#1243). `BufferPoolCapacity` (32 MiB),
+  `CheckpointJournalSize` (256 MiB) and `CheckpointInterval` (5 minutes) size the pool and
+  trigger checkpoints (#1254); a failed undo is retried on a 100 ms backoff (#1226). See
+  DESIGN.md, "Storage operations".
 
 ## Usage
 

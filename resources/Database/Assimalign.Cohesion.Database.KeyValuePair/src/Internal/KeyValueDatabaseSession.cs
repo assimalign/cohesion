@@ -33,6 +33,12 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
     /// <inheritdoc />
     public IDatabase Database { get; }
 
+    /// <summary>
+    /// Gets the engine's database instance behind <see cref="Database"/>, whose offline state the
+    /// session checks before every operation (#1243).
+    /// </summary>
+    private KeyValueDatabaseInstance? Instance => Database as KeyValueDatabaseInstance;
+
     /// <inheritdoc />
     public SessionState State => _state;
 
@@ -63,6 +69,7 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
     public async ValueTask<IDatabaseTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
     {
         ThrowIfNotOpen();
+        Instance?.ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
 
         if (isolationLevel == IsolationLevel.Serializable)
@@ -82,8 +89,17 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
                 : open.CreateRefusal();
         }
 
-        var context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
-        _transaction = new KeyValueDatabaseTransaction(_coordinator, context);
+        ITransactionContext context;
+        try
+        {
+            context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (Instance is { } instance && instance.TranslateOffline(exception) is DatabaseOfflineException offline)
+        {
+            throw offline;
+        }
+
+        _transaction = new KeyValueDatabaseTransaction(_coordinator, context, Instance);
 
         return _transaction;
     }
@@ -93,7 +109,23 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
     {
         ThrowIfNotOpen();
         ArgumentNullException.ThrowIfNull(request);
+        Instance?.ThrowIfOffline();
 
+        try
+        {
+            return await ExecuteCoreAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (Instance is { } instance && instance.TranslateOffline(exception) is DatabaseOfflineException offline
+            && !ReferenceEquals(offline, exception))
+        {
+            // A command that met the offline storage (#1243) gets the coded refusal; the
+            // unconfirmed commit that took it offline keeps its own type.
+            throw offline;
+        }
+    }
+
+    private async ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
+    {
         if (request is not KeyValueRequest command)
         {
             throw new DatabaseException(
@@ -196,6 +228,7 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
     {
         ThrowIfNotOpen();
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
+        Instance?.ThrowIfOffline();
 
         // A transaction that refuses commands refuses the text before it is parsed.
         if (OpenTransaction is { IsUsable: false } refusing)

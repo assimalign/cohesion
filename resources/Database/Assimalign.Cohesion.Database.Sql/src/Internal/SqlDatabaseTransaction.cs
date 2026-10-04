@@ -19,11 +19,13 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
 {
     private readonly TransactionCoordinator _coordinator;
     private readonly ITransactionContext _context;
+    private readonly SqlDatabaseInstance? _database;
 
-    internal SqlDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context)
+    internal SqlDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context, SqlDatabaseInstance? database = null)
     {
         _coordinator = coordinator;
         _context = context;
+        _database = database;
     }
 
     /// <inheritdoc />
@@ -51,15 +53,22 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
             throw new DatabaseException($"Cannot commit transaction in state '{_context.State}'.");
         }
 
+        _database?.ThrowIfOffline();
+
         try
         {
             await _coordinator.CommitAsync(_context, cancellationToken).ConfigureAwait(false);
         }
         catch (TransactionCommitUnconfirmedException exception)
         {
-            // Committed (the context reports Committed); only the commit record's durability
-            // is unconfirmed, so this is not an abort and the work must not be retried.
+            // Committed in this process (the context reports Committed); the failed flush took
+            // the database offline, and the reopen's recovery decides whether the commit
+            // survives (#1243). Not an abort: the work must not be retried.
             throw new DatabaseTransactionCommitUnconfirmedException(exception.Message, exception);
+        }
+        catch (Exception exception) when (_database?.TranslateOffline(exception) is DatabaseOfflineException offline)
+        {
+            throw offline;
         }
         catch (TransactionDeadlockException exception)
         {
@@ -89,6 +98,10 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
             throw new DatabaseException($"Cannot rollback transaction in state '{_context.State}'.");
         }
 
+        // An offline database undoes nothing (#1243): the reopen's recovery aborts every
+        // transaction without a commit record.
+        _database?.ThrowIfOffline();
+
         try
         {
             await _coordinator.RollbackAsync(_context, CancellationToken.None).ConfigureAwait(false);
@@ -100,9 +113,14 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Disposing an active transaction of an offline database touches nothing and throws
+    /// nothing: the database refuses every operation until it is reopened, and the reopen's
+    /// recovery aborts the transaction, which has no commit record.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        if (_context.State == TransactionState.Active)
+        if (_context.State == TransactionState.Active && _database?.IsOffline != true)
         {
             await RollbackAsync().ConfigureAwait(false);
         }

@@ -612,69 +612,212 @@ public class TransactionCoordinatorRollbackTests
     /// <summary>
     /// A commit record that reached the journal cannot be taken back, so a commit whose durable
     /// flush fails after the append is reported as committed but unconfirmed, never as aborted:
-    /// the writer is not undone (its undo could not even succeed here), and the next open reads it
-    /// as committed, as the commit record says (#1226 integration review).
+    /// the writer is not undone in memory (its undo could not even succeed here). The failed
+    /// flush takes the storage offline (#1243): every later begin, statement and checkpoint is
+    /// refused, nothing more reaches the journal or the data file, and the close is quiet even
+    /// with a writer whose undo cannot run. The reopen's recovery decides the outcome: committed
+    /// when the record's bytes survived, nothing at all when they were lost with the flush.
     /// </summary>
-    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator commit: a commit record that cannot be made durable commits, unconfirmed")]
-    [InlineData(false)]
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator commit: a commit record that cannot be made durable takes the storage offline, and recovery decides")]
     [InlineData(true)]
-    public async Task CommitAsync_CommitRecordFlushFails_ShouldCommitAndReportTheDurabilityUnconfirmed(bool cleanClose)
+    [InlineData(false)]
+    public async Task CommitAsync_CommitRecordFlushFails_ShouldGoOfflineAndLeaveTheOutcomeToRecovery(bool recordSurvives)
     {
-        // Arrange: a writer whose undo would fail, and a transaction waiting for its row.
+        // Arrange: a durable commit, then a writer whose undo would fail, another writer, and a
+        // transaction waiting for the first writer's row.
         var storage = RollbackStorage.Create();
         var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var durable = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await InsertAsync(coordinator, storage, durable);
+        await coordinator.CommitAsync(durable);
+        long confirmedJournal = storage.JournalStream.FlushedLength;
         var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: int.MaxValue));
-        var location = storage.PackLocation(storage.LastInserted.PageId, storage.LastInserted.SlotIndex);
+        var other = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await InsertAsync(coordinator, storage, other);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
 
         // Act: the commit record is appended, and its durable flush fails.
         storage.JournalStream.FailFlushes = 1;
         var error = await Should.ThrowAsync<TransactionCommitUnconfirmedException>(async () => await coordinator.CommitAsync(writer));
-        int unspentFlushFailures = storage.JournalStream.FailFlushes;
-        storage.JournalStream.FailFlushes = 0;
-
-        // Assert: committed and released, not undone.
-        unspentFlushFailures.ShouldBe(0);
-        error.InnerException.ShouldBeOfType<IOException>();
-        writer.State.ShouldBe(TransactionState.Committed);
-        coordinator.GetOpenContexts().ShouldNotContain(writer);
-        coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        var atTheFailure = storage.CaptureClosedImages();
+        var refusals = new Exception[]
+        {
+            await Should.ThrowAsync<StorageOfflineException>(async () => await coordinator.BeginAsync(IsolationLevel.Snapshot)),
+            await Should.ThrowAsync<StorageOfflineException>(async () => await InsertAsync(coordinator, storage, next)),
+            Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint()),
+        };
         await waiting.WaitAsync(Timeout);
-        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        (await coordinator.VersionStore.GetVisibleVersionAsync(0, location, reader.Snapshot)).ShouldNotBeNull();
-        await coordinator.CommitAsync(reader);
-        await coordinator.CommitAsync(next);
-
-        // Act: crash, or close cleanly, and reopen.
-        (byte[] Data, byte[] Journal) images;
-        if (cleanClose)
-        {
-            await coordinator.DisposeAsync();
-            storage.Dispose();
-            images = storage.CaptureClosedImages();
-        }
-        else
-        {
-            images = storage.CaptureImages();
-        }
-
-        using var reopened = RollbackStorage.Open(images.Data, images.Journal);
+        await coordinator.DisposeAsync();
+        storage.Dispose();
+        var images = storage.CaptureClosedImages();
+        var journal = recordSurvives ? images.Journal : images.Journal[..(int)confirmedJournal];
+        using var reopened = RollbackStorage.Open(images.Data, journal);
         await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
         var plan = recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
-        var after = await recovered.BeginAsync(IsolationLevel.Snapshot);
 
-        // Assert: the outcome the caller was told, committed.
-        plan.Aborted.ShouldNotContain(writer.Sequence);
-        RecordCount(reopened).ShouldBe(1);
-        (await recovered.VersionStore.GetVisibleVersionAsync(0, location, after.Snapshot)).ShouldNotBeNull();
-        await recovered.CommitAsync(after);
-        if (!cleanClose)
+        // Assert: committed in memory and released, not undone; nothing written after the
+        // failure, the close included.
+        var offline = error.InnerException.ShouldBeOfType<StorageOfflineException>();
+        offline.InnerException.ShouldBeOfType<IOException>();
+        error.Message.ShouldContain("outcome is unknown");
+        writer.State.ShouldBe(TransactionState.Committed);
+        coordinator.IsStorageOffline.ShouldBeTrue();
+        refusals.ShouldAllBe(refusal => refusal.InnerException == offline.InnerException);
+        images.Journal.ShouldBe(atTheFailure.Journal);
+        images.Data.ShouldBe(atTheFailure.Data);
+
+        // Assert: recovery decided, and kept the durable commit either way. With the record lost,
+        // the journal ends before both writers, so it names neither and their rows were never
+        // written to the data file.
+        if (recordSurvives)
         {
-            await coordinator.DisposeAsync();
-            storage.Dispose();
+            plan.Aborted.ShouldContain(other.Sequence);
+            plan.Aborted.ShouldNotContain(writer.Sequence);
         }
+
+        RecordCount(reopened).ShouldBe(recordSurvives ? 2 : 1);
+        reopened.IsOffline.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A transient undo failure is retried on its own backoff (#1226 owner decision of
+    /// 2026-10-04): the first retry is due 100 ms after the deferral, not a maintenance interval
+    /// later, and the retry that succeeds releases the writer's locks to the transaction waiting
+    /// for them.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator deferred undo: the first retry is due 100 ms after the deferral")]
+    public async Task RetryDeferredUndo_TransientUndoFailure_ShouldReleaseTheWriterAtTheFirstRetry()
+    {
+        // Arrange
+        var time = new ManualTime();
+        using var storage = RollbackStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage, time)
+        {
+            DeferredUndoRetryLimit = TimeSpan.FromHours(1),
+        };
+        int signals = 0;
+        coordinator.OnUndoDeferred = () => Interlocked.Increment(ref signals);
+        var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: 1));
+        var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+
+        // Act
+        await coordinator.RollbackAsync(writer);
+        var dueAtTheDeferral = coordinator.NextDeferredUndoRetry;
+        time.Advance(TimeSpan.FromMilliseconds(60));
+        long early = coordinator.RetryDeferredUndo(CancellationToken.None);
+        bool waitingAfterTheEarlyCall = !waiting.IsCompleted;
+        time.Advance(TimeSpan.FromMilliseconds(40));
+        long undone = coordinator.RetryDeferredUndo(CancellationToken.None);
+        await waiting.WaitAsync(Timeout);
+
+        // Assert
+        signals.ShouldBe(1);
+        dueAtTheDeferral.ShouldBe(TimeSpan.FromMilliseconds(100));
+        early.ShouldBe(0);
+        waitingAfterTheEarlyCall.ShouldBeTrue();
+        undone.ShouldBeGreaterThan(0);
+        coordinator.NextDeferredUndoRetry.ShouldBeNull();
+        coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        await coordinator.CommitAsync(next);
+    }
+
+    /// <summary>
+    /// An undo that keeps failing is retried at 100, 200, 400 ms and so on, doubling up to the
+    /// configured limit, and every failed retry reports the failure.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator deferred undo: failed retries double the delay up to the limit")]
+    public async Task RetryDeferredUndo_UndoKeepsFailing_ShouldDoubleTheDelayUpToTheLimit()
+    {
+        // Arrange
+        var time = new ManualTime();
+        using var storage = RollbackStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage, time)
+        {
+            DeferredUndoRetryLimit = TimeSpan.FromSeconds(1),
+        };
+        // One failure defers the undo at the rollback, six more fail the retries below.
+        var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: 7));
+        await coordinator.RollbackAsync(writer);
+
+        // Act
+        var delays = new List<TimeSpan>();
+        for (int retry = 0; retry < 6; retry++)
+        {
+            var due = coordinator.NextDeferredUndoRetry.ShouldNotBeNull();
+            delays.Add(due);
+            time.Advance(due);
+            Should.Throw<IOException>(() => coordinator.RetryDeferredUndo(CancellationToken.None));
+        }
+
+        time.Advance(coordinator.NextDeferredUndoRetry!.Value);
+        long undone = coordinator.RetryDeferredUndo(CancellationToken.None);
+
+        // Assert
+        delays.ShouldBe(
+        [
+            TimeSpan.FromMilliseconds(100),
+            TimeSpan.FromMilliseconds(200),
+            TimeSpan.FromMilliseconds(400),
+            TimeSpan.FromMilliseconds(800),
+            TimeSpan.FromSeconds(1),
+            TimeSpan.FromSeconds(1),
+        ]);
+        undone.ShouldBeGreaterThan(0);
+        coordinator.NextDeferredUndoRetry.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A checkpoint waits for the statement apply gate, so a sustained statement load cannot keep
+    /// a storage bracket open at every attempt and refuse every checkpoint as busy (#1254).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: checkpoints succeed under a sustained statement load")]
+    public async Task Checkpoint_SustainedStatementLoad_ShouldSucceedEveryTime()
+    {
+        // Arrange: four sessions writing back to back.
+        using var storage = RollbackStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        using var stop = new CancellationTokenSource();
+        long statements = 0;
+        var load = Enumerable.Range(0, 4).Select(_ => Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                var context = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+                await InsertAsync(coordinator, storage, context);
+                await coordinator.CommitAsync(context);
+                Interlocked.Increment(ref statements);
+            }
+        })).ToArray();
+        while (Interlocked.Read(ref statements) < 100)
+        {
+            await Task.Delay(1);
+        }
+
+        // Act
+        int busy = 0;
+        for (int i = 0; i < 25; i++)
+        {
+            try
+            {
+                coordinator.Checkpoint();
+            }
+            catch (StorageTransactionException)
+            {
+                busy++;
+            }
+
+            await Task.Delay(1);
+        }
+
+        stop.Cancel();
+        await Task.WhenAll(load).WaitAsync(Timeout);
+
+        // Assert
+        busy.ShouldBe(0);
+        Interlocked.Read(ref statements).ShouldBeGreaterThan(100);
     }
 
     /// <summary>
@@ -855,6 +998,18 @@ public class TransactionCoordinatorRollbackTests
             _entered.TrySetResult();
             await _released.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>A clock that moves only when the test advances it.</summary>
+    private sealed class ManualTime : TimeProvider
+    {
+        private long _ticks = TimeSpan.TicksPerDay;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => Interlocked.Read(ref _ticks);
+
+        public void Advance(TimeSpan by) => Interlocked.Add(ref _ticks, by.Ticks);
     }
 
     /// <summary>An index whose entry undo fails a set number of times.</summary>

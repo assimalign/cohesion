@@ -75,6 +75,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// and call <see cref="CompleteRecovery"/> before admitting any sessions.
     /// </remarks>
     public TransactionCoordinator(IStorage storage, IStorageJournal journal, ITransactionRecordSpace records)
+        : this(storage, journal, records, TimeProvider.System)
+    {
+    }
+
+    /// <summary>
+    /// Creates the composition with the clock the deferred-undo retry schedule reads (tests).
+    /// </summary>
+    internal TransactionCoordinator(IStorage storage, IStorageJournal journal, ITransactionRecordSpace records, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(journal);
@@ -96,9 +104,77 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             _log,
             locks,
             _versionStore,
-            () => new TransactionSequence((ulong)storage.ReserveTransactionSequence()));
+            () => new TransactionSequence((ulong)storage.ReserveTransactionSequence()),
+            time);
         _lockManager = new EngineLockManager(locks, _manager);
     }
+
+    /// <summary>
+    /// Gets or sets the longest delay between two retries of a deferred undo; engines set it to
+    /// their maintenance interval (60 seconds unless set).
+    /// </summary>
+    /// <remarks>
+    /// A rolled-back writer whose undo failed keeps its locks until a retry completes the undo
+    /// (#1226), so the retry runs on its own backoff: due about 100 ms after the deferral, then
+    /// doubling after each failed retry up to this limit, and starting over with every new
+    /// deferral. Before the owner decision of 2026-10-04 each retry waited a whole maintenance
+    /// interval, which held every conflicting writer for 60 seconds per failed attempt.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not positive.</exception>
+    public TimeSpan DeferredUndoRetryLimit
+    {
+        get => _manager.DeferredUndoRetryLimit;
+        set => _manager.DeferredUndoRetryLimit = value;
+    }
+
+    /// <summary>
+    /// Gets or sets the delay before the first retry of a deferred undo: 100 ms unless set, and
+    /// never more than <see cref="DeferredUndoRetryLimit"/>. Each failed retry doubles it.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not positive.</exception>
+    public TimeSpan DeferredUndoRetryDelay
+    {
+        get => _manager.DeferredUndoRetryDelay;
+        set => _manager.DeferredUndoRetryDelay = value;
+    }
+
+    /// <summary>
+    /// Gets or sets the hook invoked when a rollback's undo is deferred, so the engine's
+    /// version-purge worker wakes for the first retry. Invoked outside the coordinator's locks;
+    /// it should only signal.
+    /// </summary>
+    public Action? OnUndoDeferred
+    {
+        get => _manager.UndoDeferred;
+        set => _manager.UndoDeferred = value;
+    }
+
+    /// <summary>
+    /// Gets the time until the next retry of a deferred undo is due: zero when it is due now,
+    /// null when no undo is deferred. The version-purge worker sleeps no longer than this.
+    /// </summary>
+    public TimeSpan? NextDeferredUndoRetry => _manager.DeferredUndoRetryDueIn;
+
+    /// <summary>
+    /// Retries every deferred undo when the retry backoff says one is due
+    /// (<see cref="NextDeferredUndoRetry"/>), and does nothing otherwise. Each writer whose undo
+    /// now completes gets its abort record, leaves the active table and releases its locks.
+    /// </summary>
+    /// <param name="cancellationToken">Observed between writers; a started undo runs to completion.</param>
+    /// <returns>The number of versions and index entries the completed undos changed.</returns>
+    /// <exception cref="ObjectDisposedException">The coordinator was disposed.</exception>
+    /// <remarks>
+    /// A retry that fails again doubles the delay and rethrows the first failure, after every
+    /// deferred writer was attempted; the writers still deferred wait for the next retry.
+    /// </remarks>
+    public long RetryDeferredUndo(CancellationToken cancellationToken)
+        => _manager.RetryDeferredUndoIfDueAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Gets whether the storage this coordinator composes went offline after a failed durable
+    /// flush (#1243): nothing more may be written to it, and only a reopen brings it back.
+    /// </summary>
+    public bool IsStorageOffline => _storage is Storage shared ? shared.IsOffline : _journal is StorageJournal journal && journal.IsOffline;
 
     /// <summary>
     /// Gets the transaction manager sessions begin their contexts on.
@@ -453,7 +529,38 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// first stamp exists.
     /// </summary>
     /// <exception cref="StorageTransactionException">A storage-level bracket is still active.</exception>
-    public void Checkpoint() => _log.CheckpointUnderGate(_storage);
+    public void Checkpoint() => Checkpoint(CancellationToken.None);
+
+    /// <summary>
+    /// Checkpoints the data storage (see <see cref="Checkpoint()"/>), first waiting for the
+    /// statement apply gate, so no statement bracket of this coordinator is open when the
+    /// storage counts its active brackets.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the wait for the apply gate.</param>
+    /// <exception cref="StorageTransactionException">
+    /// A storage-level bracket that does not go through the apply gate is still active.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">The wait for the apply gate was canceled.</exception>
+    /// <remarks>
+    /// A checkpoint truncates the journal only while no storage bracket is active. Every
+    /// statement, undo, prune and recovery-scrub bracket of the coordinator runs under the apply
+    /// gate, so without taking it a checkpoint under a sustained write load found a bracket
+    /// open nearly every time, was refused as busy, and the journal grew without bound. Taking
+    /// the gate waits for at most the statement already applying, the bounded wait a
+    /// size-triggered checkpoint needs (#1254).
+    /// </remarks>
+    public void Checkpoint(CancellationToken cancellationToken)
+    {
+        _applyGate.Wait(cancellationToken);
+        try
+        {
+            _log.CheckpointUnderGate(_storage);
+        }
+        finally
+        {
+            _applyGate.Release();
+        }
+    }
 
     /// <summary>
     /// Runs one maintenance pass for the version-purge worker: retries any
@@ -581,6 +688,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         try
         {
             await _manager.DisposeAsync().ConfigureAwait(false);
+        }
+        catch when (IsStorageOffline)
+        {
+            // The storage went offline after a failed durable flush (#1243): it refuses every
+            // write, so the aborts' undo could not run, and none is needed. The storage closes
+            // without writing, and the next open's recovery classifies every writer without a
+            // commit record, from the journal and the checkpoint anchor, as aborted and scrubs it.
         }
         catch
         {
@@ -772,10 +886,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             {
                 // The record is in the journal and the sequence has left the checkpoint
                 // list, so recovery and every later checkpoint read the transaction as
-                // committed: it can no longer abort, only its durability is open.
-                throw new TransactionCommitUnconfirmedException(
-                    $"Transaction {sequence} committed, but its commit record could not be made durable; " +
-                    "the commit is lost if the database stops before its journal is next flushed.", exception);
+                // committed: it can no longer abort. The failed flush took the storage
+                // offline, so the reopen's recovery decides whether it survives (#1243).
+                throw new TransactionCommitUnconfirmedException(JournalTransactionLog.UnconfirmedMessage(sequence), exception);
             }
 
             return default;

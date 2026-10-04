@@ -99,14 +99,69 @@ public abstract class Storage : IStorage
     // chain alone, so rewriting one slot never touches the pages the other slot reads.
     private readonly List<long>[] _anchorChains = [new List<long>(), new List<long>()];
 
+    // Set once, when a durable flush of the data file failed; the journal keeps its own latch
+    // for a failed durable flush of the journal, and OfflineError reads both (#1243).
+    private StorageOfflineException? _offline;
+
+    // The checkpoint size trigger (forwarded to the journal once it exists) and the bookkeeping
+    // IsCheckpointDue reads: when the last checkpoint completed (or the storage was created or
+    // opened), and the journal's last LSN at that moment.
+    private long _checkpointJournalSize;
+    private Action? _onCheckpointNeeded;
+    private long _lastCheckpointTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+    private long _lastCheckpointLsn;
+
+    /// <summary>
+    /// The buffer pool capacity a storage gets when its constructor is not given one: 4,096
+    /// pages, 32 MiB of page buffers (#1254).
+    /// </summary>
+    /// <remarks>
+    /// The pool allocates its 8 KiB buffers as pages are first loaded, so a storage that touches
+    /// fewer pages costs less; a storage under load reaches the capacity and stays there. The
+    /// previous default, 128 pages (1 MiB), could not keep a 4 MiB index resident, and random
+    /// inserts into one paid a steal and a reload per touch (#1236).
+    /// </remarks>
+    public const int DefaultBufferPoolCapacity = 4096;
+
+    /// <summary>
+    /// The smallest buffer pool, in bytes, an engine accepts for a database: 1 MiB, 128 pages,
+    /// the pool every engine ran with before #1254, which holds every page one operation pins at
+    /// once with room to spare.
+    /// </summary>
+    public const long MinimumBufferPoolBytes = 128L * Page.Size;
+
+    /// <summary>
+    /// Converts a buffer pool capacity in bytes, as engine options state it, to pages, after
+    /// checking it: a whole number of 8 KiB pages, at least <see cref="MinimumBufferPoolBytes"/>,
+    /// and no more pages than an <see cref="int"/> counts.
+    /// </summary>
+    /// <param name="capacityBytes">The capacity in bytes.</param>
+    /// <param name="paramName">The name of the option, for the exception.</param>
+    /// <returns>The capacity in pages.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The capacity is not a valid pool size.</exception>
+    public static int GetBufferPoolPageCount(long capacityBytes, string paramName = "capacityBytes")
+    {
+        if (capacityBytes < MinimumBufferPoolBytes || capacityBytes % Page.Size != 0 || capacityBytes / Page.Size > int.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(paramName, capacityBytes,
+                $"A buffer pool capacity must be a whole number of {Page.Size}-byte pages, at least {MinimumBufferPoolBytes} bytes " +
+                $"({MinimumBufferPoolBytes / Page.Size} pages) and at most {(long)int.MaxValue * Page.Size} bytes.");
+        }
+
+        return (int)(capacityBytes / Page.Size);
+    }
+
     /// <summary>
     /// Initializes the storage with the specified backing streams for data, journal, and backup.
     /// </summary>
     /// <param name="data">The data stream providing page-level I/O for the <c>.dat</c> file.</param>
     /// <param name="journal">The journal stream for the <c>.log</c> file (write-ahead log).</param>
     /// <param name="backup">The backup stream for the <c>.bak</c> file.</param>
-    /// <param name="bufferPoolCapacity">Maximum number of pages to cache in memory.</param>
-    protected Storage(StorageStream data, StorageStream journal, StorageStream backup, int bufferPoolCapacity = 128)
+    /// <param name="bufferPoolCapacity">
+    /// Maximum number of pages to cache in memory; <see cref="DefaultBufferPoolCapacity"/>
+    /// (32 MiB) unless given. <see cref="BufferPoolCapacity"/> changes it later.
+    /// </param>
+    protected Storage(StorageStream data, StorageStream journal, StorageStream backup, int bufferPoolCapacity = DefaultBufferPoolCapacity)
     {
         ArgumentNullException.ThrowIfNull(data);
         ArgumentNullException.ThrowIfNull(journal);
@@ -115,7 +170,7 @@ public abstract class Storage : IStorage
         Data = data;
         Journal = journal;
         Backup = backup;
-        _bufferPool = new StorageBufferPool(bufferPoolCapacity);
+        _bufferPool = new StorageBufferPool(bufferPoolCapacity) { WriteGuard = ThrowIfOffline };
         _freeSpaceMap = new StorageFreeSpaceMap();
     }
 
@@ -148,6 +203,141 @@ public abstract class Storage : IStorage
     /// <inheritdoc />
     public IStorageFreeSpaceMap FreeSpaceMap =>
         _freeSpaceMap ?? throw new InvalidOperationException("Storage has not been initialized.");
+
+    /// <summary>
+    /// Gets or sets the number of pages the buffer pool may hold; 8 KiB each
+    /// (<see cref="DefaultBufferPoolCapacity"/> unless the constructor was given another).
+    /// </summary>
+    /// <remarks>
+    /// Growing takes effect at once. Shrinking evicts the least recently used unpinned pages,
+    /// writing dirty ones back first through the write-ahead gate, until the resident pages fit.
+    /// Engines set it from their buffer-pool option right after a storage is created or opened,
+    /// before any work runs on it.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">The value is less than one page.</exception>
+    /// <exception cref="StorageIOException">More pages than the new capacity are pinned; the pool is unchanged.</exception>
+    public int BufferPoolCapacity
+    {
+        get => _bufferPool.Capacity;
+        set => _bufferPool.Resize(value, Data);
+    }
+
+    /// <summary>
+    /// Gets the number of bytes the journal holds since its last truncation: what a recovery
+    /// would read, and what the next checkpoint discards. Zero before the storage is initialized.
+    /// </summary>
+    public long JournalLength => _journal?.Length ?? 0;
+
+    /// <summary>
+    /// Gets or sets the journal length, in bytes, at which the storage asks for a checkpoint
+    /// (#1254): the first append that takes <see cref="JournalLength"/> to this size or past it
+    /// invokes <see cref="OnCheckpointNeeded"/>, once per checkpoint cycle, and
+    /// <see cref="IsCheckpointDue"/> reports the storage due. Zero (the default) disables the
+    /// size trigger.
+    /// </summary>
+    /// <remarks>
+    /// PostgreSQL requests a checkpoint the same way once the WAL written since the last redo
+    /// point passes its share of <c>max_wal_size</c> (<c>XLogCheckpointNeeded</c> and
+    /// <c>RequestCheckpoint(CHECKPOINT_CAUSE_XLOG)</c> in <c>XLogWrite</c>,
+    /// <c>src/backend/access/transam/xlog.c:2358-2367</c>, <c>2579-2584</c>).
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public long CheckpointJournalSize
+    {
+        get => Volatile.Read(ref _checkpointJournalSize);
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            Volatile.Write(ref _checkpointJournalSize, value);
+            _journal?.ConfigureCheckpointTrigger(value, _onCheckpointNeeded);
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the hook invoked when an append takes the journal to
+    /// <see cref="CheckpointJournalSize"/> or past it, so an engine's checkpoint worker can be
+    /// woken. Invoked outside storage locks, at most once per checkpoint cycle.
+    /// </summary>
+    public Action? OnCheckpointNeeded
+    {
+        get => _onCheckpointNeeded;
+        set
+        {
+            _onCheckpointNeeded = value;
+            _journal?.ConfigureCheckpointTrigger(CheckpointJournalSize, value);
+        }
+    }
+
+    /// <summary>
+    /// Gets the error that took this storage offline, or null while it is online: a durable
+    /// flush of its journal or its data file failed (#1243). Once set it stays set for the life
+    /// of this instance; only reopening the storage, which runs recovery, brings the file set
+    /// back.
+    /// </summary>
+    /// <remarks>
+    /// While offline the storage writes nothing: every journal append, flush and checkpoint,
+    /// every page write-back and file extension, every header write, every new storage
+    /// transaction and every record change throws <see cref="StorageOfflineException"/>, and
+    /// closing it writes nothing either. Reads of resident and on-disk pages still work; the
+    /// engines refuse every operation of an offline database before it reaches the storage.
+    /// </remarks>
+    public StorageOfflineException? OfflineError => Volatile.Read(ref _offline) ?? _journal?.OfflineError;
+
+    /// <summary>
+    /// Gets whether a failed durable flush took this storage offline (see <see cref="OfflineError"/>).
+    /// </summary>
+    public bool IsOffline => OfflineError is not null;
+
+    /// <summary>
+    /// Takes this storage offline because another file set of the same database went offline:
+    /// an engine whose database spans several storages (a data set and a catalog set) stops
+    /// writing to all of them when one fails, so no file of the database changes after the
+    /// failure, closing included. Has no effect on a storage already offline.
+    /// </summary>
+    /// <param name="error">The error that took the other file set offline.</param>
+    public void TakeOffline(StorageOfflineException error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+
+        if (!IsOffline && Interlocked.CompareExchange(ref _offline, error, null) is null)
+        {
+            _journal?.TakeOffline(error);
+            _groupCommitGate.Abandon();
+        }
+    }
+
+    /// <summary>
+    /// Reports whether this storage should be checkpointed now: it is online, and either the
+    /// journal reached <see cref="CheckpointJournalSize"/> (when that is set), or
+    /// <paramref name="interval"/> has passed since the last checkpoint (or since the storage
+    /// was created or opened) and something was written to the journal since then.
+    /// </summary>
+    /// <param name="interval">The time backstop: the longest a written journal waits for a checkpoint.</param>
+    /// <returns>True when a checkpoint is due.</returns>
+    /// <remarks>
+    /// The size trigger bounds recovery time and journal disk use under load; the time backstop
+    /// bounds them for a slow trickle of writes, as PostgreSQL's <c>checkpoint_timeout</c> does
+    /// (<c>CheckpointerMain</c>, <c>src/backend/postmaster/checkpointer.c:405-412</c>). Like
+    /// PostgreSQL, which skips a checkpoint when no important WAL was written since the last one
+    /// (<c>CreateCheckPoint</c>, <c>src/backend/access/transam/xlog.c:7759-7775</c>), an idle
+    /// storage is not checkpointed by time alone.
+    /// </remarks>
+    public bool IsCheckpointDue(TimeSpan interval)
+    {
+        if (_journal is not { } journal || IsOffline)
+        {
+            return false;
+        }
+
+        long threshold = CheckpointJournalSize;
+        if (threshold > 0 && journal.Length >= threshold)
+        {
+            return true;
+        }
+
+        return journal.LastLsn > Volatile.Read(ref _lastCheckpointLsn)
+            && System.Diagnostics.Stopwatch.GetElapsedTime(Volatile.Read(ref _lastCheckpointTimestamp)) >= interval;
+    }
 
     /// <summary>
     /// Gets the write-ahead log for this storage instance.
@@ -339,8 +529,7 @@ public abstract class Storage : IStorage
         _name = name;
         _id = StorageId.NewId();
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap);
-        _journal = new StreamJournal(Journal, leaveOpen: true);
-        _bufferPool.WriteAheadGate = FlushWriteAhead;
+        AttachJournal();
 
         // Page 0: the identity block and header slot 0 at generation 1 (slot 1 stays zero,
         // which never verifies). Written directly — page 0 never enters the buffer pool, and
@@ -377,6 +566,31 @@ public abstract class Storage : IStorage
         dataHandle.Dispose();
 
         _pageManager.FlushAll();
+        MarkCheckpointed();
+    }
+
+    /// <summary>
+    /// Creates the journal over the journal stream and wires it to the storage: the buffer
+    /// pool's write-ahead gate, the group-commit waiters it releases when it goes offline, and
+    /// the checkpoint size trigger.
+    /// </summary>
+    private void AttachJournal()
+    {
+        var journal = new StreamJournal(Journal, leaveOpen: true);
+        journal.WentOffline = _groupCommitGate.Abandon;
+        journal.ConfigureCheckpointTrigger(CheckpointJournalSize, _onCheckpointNeeded);
+        _journal = journal;
+        _bufferPool.WriteAheadGate = FlushWriteAhead;
+    }
+
+    /// <summary>
+    /// Records that the journal holds nothing a checkpoint would need to make durable: after a
+    /// checkpoint, and when the storage was created or opened.
+    /// </summary>
+    private void MarkCheckpointed()
+    {
+        Volatile.Write(ref _lastCheckpointLsn, _journal?.LastLsn ?? 0);
+        Volatile.Write(ref _lastCheckpointTimestamp, System.Diagnostics.Stopwatch.GetTimestamp());
     }
 
     /// <summary>
@@ -409,9 +623,8 @@ public abstract class Storage : IStorage
 
         // Recover before anything reads pages: redo committed changes that never
         // reached the data file, undo stolen uncommitted writes that did.
-        _journal = new StreamJournal(Journal, leaveOpen: true);
-        _bufferPool.WriteAheadGate = FlushWriteAhead;
-        bool journalHadRecords = _journal.LastLsn > 0;
+        AttachJournal();
+        bool journalHadRecords = _journal!.LastLsn > 0;
 
         // LSNs resume above both the journal's last record and the floor the newest header
         // generation persisted: a checkpoint truncates the journal before it appends its
@@ -481,6 +694,14 @@ public abstract class Storage : IStorage
         }
 
         _openedAt = (_journal.LastLsn, _nextTransactionSequence);
+
+        // A deferred open-time checkpoint is the owner's to take (an engine's CompleteRecovery);
+        // the time backstop counts from the open either way.
+        Volatile.Write(ref _lastCheckpointTimestamp, System.Diagnostics.Stopwatch.GetTimestamp());
+        if (!journalHadRecords || checkpointOnOpen)
+        {
+            Volatile.Write(ref _lastCheckpointLsn, _journal.LastLsn);
+        }
     }
 
     /// <inheritdoc />
@@ -491,6 +712,7 @@ public abstract class Storage : IStorage
             throw new InvalidOperationException("Storage has not been initialized.");
         }
 
+        ThrowIfOffline();
         long sequence;
         lock (_transactionLock)
         {
@@ -529,6 +751,7 @@ public abstract class Storage : IStorage
             throw new InvalidOperationException("Storage has not been initialized.");
         }
 
+        ThrowIfOffline();
         lock (_transactionLock)
         {
             return ++_nextTransactionSequence;
@@ -545,6 +768,7 @@ public abstract class Storage : IStorage
             throw new InvalidOperationException("Storage has not been initialized.");
         }
 
+        ThrowIfOffline();
         lock (_transactionLock)
         {
             // Adopted sequences normally come from ReserveTransactionSequence, but
@@ -614,6 +838,9 @@ public abstract class Storage : IStorage
     /// A storage-level transaction is still active: the checkpoint changed nothing, and a
     /// later one can succeed.
     /// </exception>
+    /// <exception cref="StorageOfflineException">
+    /// The storage is offline, or a durable flush this checkpoint made failed and took it offline.
+    /// </exception>
     public void Checkpoint(ReadOnlySpan<long> activeTransactionSequences)
     {
         // The whole checkpoint runs under the transaction lock: BeginTransaction
@@ -623,6 +850,8 @@ public abstract class Storage : IStorage
         // journal; no other path takes them in the opposite order.
         lock (_transactionLock)
         {
+            ThrowIfOffline();
+
             if (_activeTransactionCount > 0)
             {
                 throw new StorageTransactionException("Checkpoint requires no active transactions.");
@@ -638,26 +867,39 @@ public abstract class Storage : IStorage
                 // Wake any group-commit bookkeeping past the truncation point.
                 _groupCommitGate.PublishDurable(checkpointLsn.Value);
             }
+
+            MarkCheckpointed();
         }
     }
 
     /// <inheritdoc />
+    /// <remarks>An offline storage flushes nothing and returns false.</remarks>
     public bool FlushPendingCommits()
     {
-        if (_journal is null || !RequiresDurableFlush)
+        if (_journal is null || !RequiresDurableFlush || IsOffline)
         {
             return false;
         }
 
-        return _groupCommitGate.FlushPending(_journal);
+        try
+        {
+            return _groupCommitGate.FlushPending(_journal);
+        }
+        catch (StorageOfflineException)
+        {
+            // This flush took the storage offline. The committers waiting on it are released
+            // (the journal abandoned the gate) and each gets the error from its own flush.
+            return false;
+        }
     }
 
     /// <inheritdoc />
+    /// <remarks>An offline storage writes nothing and returns zero.</remarks>
     public int WriteBackDirtyPages(int maxPages)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPages);
 
-        if (_pageManager is null || _disposed)
+        if (_pageManager is null || _disposed || IsOffline)
         {
             return 0;
         }
@@ -882,6 +1124,7 @@ public abstract class Storage : IStorage
     /// </summary>
     protected void Flush()
     {
+        ThrowIfOffline();
         WriteHeader(Volatile.Read(ref _checkpointActives));
         _journal?.Flush(forceDurable: RequiresDurableFlush);
     }
@@ -1043,13 +1286,35 @@ public abstract class Storage : IStorage
 
         long commitLsn = _journal!.AppendCommit(transaction.Sequence);
 
-        if (awaitDurability)
+        try
         {
-            // Durability only controls the flush after the same commit record.
-            // An outer logical commit may own this wait through its later record.
-            EnsureCommitDurable(commitLsn);
+            if (awaitDurability)
+            {
+                // Durability only controls the flush after the same commit record.
+                // An outer logical commit may own this wait through its later record.
+                EnsureCommitDurable(commitLsn);
+            }
+        }
+        catch (StorageOfflineException)
+        {
+            // The commit record is in the journal and its flush failed, which took the storage
+            // offline: nothing of this bracket is written again, and the reopen's recovery
+            // decides its outcome. The bracket ends committed in memory, as recovery reads it
+            // whenever the record reached stable storage; rolling its pages back would show this
+            // process the opposite (#1243).
+            CompleteCommitted(transaction);
+            throw;
         }
 
+        CompleteCommitted(transaction);
+    }
+
+    /// <summary>
+    /// Ends a bracket whose commit record is in the journal: its page releases take effect and
+    /// its page write locks and place in the active count are released.
+    /// </summary>
+    private void CompleteCommitted(StorageTransaction transaction)
+    {
         // Page releases become effective only now that the commit record exists:
         // the freed pages re-enter the allocator and leave their owner chains.
         ApplyPendingFrees(transaction);
@@ -1169,6 +1434,14 @@ public abstract class Storage : IStorage
             return;
         }
 
+        if (IsOffline)
+        {
+            // A durable flush failed: nothing may be written after it (#1243). The journal on the
+            // media is what the next open's recovery reads; it decides every unconfirmed commit,
+            // and pages left dirty in the pool are rebuilt from it or were never committed.
+            return;
+        }
+
         if (IsUnwrittenSinceOpen())
         {
             return;
@@ -1231,6 +1504,63 @@ public abstract class Storage : IStorage
 
     private bool RequiresDurableFlush => CommitDurability != StorageCommitDurability.None;
 
+    /// <summary>
+    /// Throws <see cref="StorageOfflineException"/> when a failed durable flush took the storage
+    /// offline.
+    /// </summary>
+    private void ThrowIfOffline()
+    {
+        if (OfflineError is { } offline)
+        {
+            throw StorageOfflineException.Refusal(offline);
+        }
+    }
+
+    /// <summary>
+    /// Takes the storage offline after a failed durable flush of its data file: the journal is
+    /// latched too, so nothing more is appended, and the group-commit waiters are released.
+    /// PostgreSQL panics on a failed data-file fsync unless <c>data_sync_retry</c> is on, because
+    /// the write-back may have been dropped while the pages left the buffer pool clean, and a
+    /// later fsync "might falsely report success" (<c>data_sync_elevel</c>,
+    /// <c>src/backend/storage/file/fd.c:3966-3987</c>); a later checkpoint here would then
+    /// truncate the journal over the lost pages.
+    /// </summary>
+    /// <param name="cause">The failed flush.</param>
+    /// <returns>The exception the caller throws.</returns>
+    private StorageOfflineException TakeOffline(Exception cause)
+    {
+        var offline = StorageOfflineException.Create("a durable flush of the data file", cause);
+        if (Interlocked.CompareExchange(ref _offline, offline, null) is null)
+        {
+            _journal?.TakeOffline(offline);
+            _groupCommitGate.Abandon();
+        }
+
+        return offline;
+    }
+
+    /// <summary>
+    /// Flushes the data file by the durability policy. A durable flush that fails takes the
+    /// storage offline (<see cref="TakeOffline"/>) and throws <see cref="StorageOfflineException"/>.
+    /// </summary>
+    private void FlushData()
+    {
+        if (!RequiresDurableFlush)
+        {
+            Data.Flush(durable: false);
+            return;
+        }
+
+        try
+        {
+            Data.Flush(durable: true);
+        }
+        catch (Exception exception) when (exception is not (StorageOfflineException or ObjectDisposedException or NotSupportedException))
+        {
+            throw TakeOffline(exception);
+        }
+    }
+
     private void FlushWriteAhead(long lsn)
     {
         if (RequiresDurableFlush)
@@ -1259,6 +1589,8 @@ public abstract class Storage : IStorage
             throw new StorageTransactionException($"Storage transaction {owner.Sequence} has already completed.");
         }
 
+        // A record change would extend the file or dirty a page that can never be written.
+        ThrowIfOffline();
         return owner;
     }
 
@@ -1451,6 +1783,8 @@ public abstract class Storage : IStorage
 
         lock (_headerLock)
         {
+            ThrowIfOffline();
+
             if (_headerFaulted)
             {
                 throw new StorageIOException(
@@ -1474,10 +1808,12 @@ public abstract class Storage : IStorage
             long lsnFloor = Math.Max(_lsnFloor, writeAheadLsn);
 
             // The journal first, then everything the new generation points at, durable before
-            // the generation is.
+            // the generation is. A durable flush that fails here takes the storage offline: the
+            // pages just written back are recorded clean, so a retry's flush could succeed over
+            // write-backs the operating system dropped and truncate the journal that holds them.
             FlushWriteAhead(writeAheadLsn);
             _pageManager.FlushAll();
-            Data.Flush(durable: RequiresDurableFlush);
+            FlushData();
 
             var state = new StorageHeaderSlot(
                 Generation: generation,
@@ -1515,11 +1851,12 @@ public abstract class Storage : IStorage
             try
             {
                 Data.Write(bytes, offset);
-                Data.Flush(durable: RequiresDurableFlush);
+                FlushData();
             }
             catch
             {
-                // Whatever failed, the slot may already be on the media (see the remarks).
+                // Whatever failed, the slot may already be on the media (see the remarks). A
+                // failed durable flush has also taken the storage offline (FlushData).
                 _headerFaulted = true;
                 throw;
             }
