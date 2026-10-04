@@ -77,8 +77,9 @@ protocol 1.0 has no frame for a successful statement's diagnostics, so the clien
 alone: for a required unknown name an empty `GraphResultSet` (its header's columns and an affected
 count of -1) or a path enumeration with no paths. The statement is not a failure, so the pooled
 session and any explicit transaction on it continue. Protocol 1.1 (#1105) negotiates a core
-Diagnostics frame that the server sends before `ResultComplete` or `PathsComplete`, and adds the
-received warnings to the client's result objects.
+Diagnostics frame that the server sends before `ResultComplete` (#1105 decision 2) and, as #1228
+proposes to #1105, before `PathsComplete`; the client adds the received warnings to its result
+objects.
 
 Graph transactions remain a deliberate limit: there are no connection transaction members;
 BEGIN, COMMIT, ROLLBACK, and the reserved Transaction message are unsupported. Mutations retain
