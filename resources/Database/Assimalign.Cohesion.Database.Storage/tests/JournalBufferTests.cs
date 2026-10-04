@@ -195,10 +195,14 @@ public sealed class JournalBufferTests
 
         // Act: the checkpoint's drain fails.
         medium.FailNextWrite = true;
-        Should.Throw<StorageOfflineException>(() => journal.Checkpoint([2]));
+        var offline = Should.Throw<StorageOfflineException>(() => journal.Checkpoint([2]));
 
         // Assert: nothing was truncated, so the records the checkpoint would have discarded are
-        // still on the medium; the buffered begin record never reached it.
+        // still on the medium; the buffered begin record never reached it. The failure reads as a
+        // journal flush (#1268's cause), and its message names the write.
+        offline.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        offline.Message.ShouldContain("a write of the journal");
+        journal.OfflineError.ShouldBeSameAs(offline);
         medium.Log.ShouldNotContain(entry => entry.StartsWith("SetLength", StringComparison.Ordinal));
         medium.Length.ShouldBe(written);
         Reopen(medium).Select(record => record.Lsn).ShouldBe([1L, 2L]);

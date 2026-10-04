@@ -125,7 +125,8 @@ public abstract class StorageJournal : IStorageJournal
     private bool _unflushed;
 
     // Set once, by the first failed drain or durable flush (or by the owning storage when a
-    // durable flush of its data file failed); never cleared. Guarded by _syncRoot for writes.
+    // durable flush of its data file or its header slot write failed, or another file set of the
+    // database went offline); never cleared. Guarded by _syncRoot for writes.
     private StorageOfflineException? _offline;
 
     // 1 once Offline was raised for the latch above, so it is raised exactly once.
@@ -262,8 +263,10 @@ public abstract class StorageJournal : IStorageJournal
 
     /// <summary>
     /// Takes the journal offline on behalf of its owner, when a durable flush of the owner's
-    /// data file failed: from now on the journal refuses every append, flush and checkpoint.
-    /// The first error to take the journal offline is kept.
+    /// data file failed (#1243), its header slot write failed (#1268), or another file set of
+    /// the database went offline: from now on the journal refuses every append, flush and
+    /// checkpoint, and the records still in the append buffer are never written. The first error
+    /// to take the journal offline is kept.
     /// </summary>
     /// <param name="error">The error that took the owner offline.</param>
     internal void TakeOffline(StorageOfflineException error)
