@@ -34,11 +34,15 @@ using Assimalign.Cohesion.Database.Storage;
 /// <para>
 /// <b>A failed checkpoint is one database's failure (#1268).</b> Any other failure — a page write
 /// the checkpoint's flush could not make, a deferred checkpoint's failure the coordinator hands
-/// back — is reported and the pass goes on to the next database; the worker backs off
-/// (<see cref="DatabaseEngineWorker.FailureBackoff"/>) and retries, since the journal is still
-/// due. A failure that took the database offline (a failed durable flush, or a header slot write
-/// that failed) is not the worker's: the database is skipped from then on and the engine lists
-/// it offline. Before #1268 any such exception escaped the pass and ended the worker for good.
+/// back — is reported for that database, and the pass goes on to the next one. Later passes skip
+/// the failing database for <see cref="DatabaseEngineWorker.FailureBackoff"/> and then retry it,
+/// since its journal is still due, while every other database keeps being checkpointed at the
+/// worker's full pace: one database's failing device never holds back another's truncation. The
+/// failure stays recorded until a pass checkpoints the database; a checkpoint deferred to a running
+/// statement keeps it recorded, and records nothing for a database without one. A failure that
+/// took the database offline (a failed durable flush, or a header slot write that failed) is not
+/// the worker's: the database is skipped from then on and the engine lists it offline. Before
+/// #1268 any such exception escaped the pass and ended the worker for good.
 /// </para>
 /// </remarks>
 internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
@@ -84,12 +88,11 @@ internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
     }
 
     /// <inheritdoc />
-    protected override bool RunIterationCore(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         // Reset before the pass: a journal that reaches the size mid-pass sets it again.
         _engine.CheckpointNeededSignal.Reset();
         var interval = Interval;
-        bool completed = true;
 
         foreach (SqlDatabaseInstance database in _engine.GetInstanceSnapshot())
         {
@@ -98,7 +101,9 @@ internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
                 break;
             }
 
-            if (database.IsOffline)
+            // An offline database is not begun: the engine reports it (#1243), and a failure the
+            // worker recorded for it ends. A database whose failure is backing off waits its turn.
+            if (database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }
@@ -129,7 +134,7 @@ internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
                 if (dataDue && !database.TryCheckpointDataStorage(cancellationToken))
                 {
                     // Deferred to the statement holding the apply gate, which runs it as it ends.
-                    completed = false;
+                    ReportUnfinished(database.Name);
                 }
 
                 if (catalogDue || database.CatalogStorage.IsCheckpointDue(interval))
@@ -140,7 +145,7 @@ internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
             catch (StorageTransactionException)
             {
                 // A transaction is active on this storage; retry on the next pass.
-                completed = false;
+                ReportUnfinished(database.Name);
             }
             catch (ObjectDisposedException) when (!_engine.IsOpen(database))
             {
@@ -157,11 +162,9 @@ internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
                 // this pass's failure, and the next pass retries the checkpoint.
                 if (!database.IsOffline)
                 {
-                    ReportFailure(exception);
+                    ReportFailure(database.Name, exception);
                 }
             }
         }
-
-        return completed;
     }
 }

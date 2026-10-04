@@ -21,9 +21,10 @@ using Assimalign.Cohesion.Database.Storage;
 /// <para>
 /// A durable flush that fails takes its database offline (#1243): the storage releases the
 /// committers waiting on it, each gets the refusal from its own flush, and the worker keeps
-/// flushing the engine's other databases. Any other failure of one storage is reported and the
-/// pass goes on to the next (#1268); its committers self-help within their window meanwhile, as
-/// they do whenever the worker is late.
+/// flushing the engine's other databases. Any other failure of one storage is reported for its
+/// database and the pass goes on to the next (#1268); the database is flushed again after
+/// <see cref="DatabaseEngineWorker.FailureBackoff"/>, and its committers self-help within their
+/// window meanwhile, as they do whenever the worker is late.
 /// </para>
 /// </remarks>
 internal sealed class DocumentWriteAheadFlushWorker : DatabaseEngineWorker
@@ -63,7 +64,7 @@ internal sealed class DocumentWriteAheadFlushWorker : DatabaseEngineWorker
     }
 
     /// <inheritdoc />
-    protected override bool RunIterationCore(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         // Reset before flushing: a commit that registers mid-pass sets the signal
         // again and is picked up by the next pass instead of being lost.
@@ -74,6 +75,13 @@ internal sealed class DocumentWriteAheadFlushWorker : DatabaseEngineWorker
             if (cancellationToken.IsCancellationRequested)
             {
                 break;
+            }
+
+            // A storage names its database. An offline one is not begun: nothing of it is written
+            // (#1243), the engine reports it, and a failure the worker recorded for it ends.
+            if (storage.IsOffline || !BeginDatabase(storage.Name))
+            {
+                continue;
             }
 
             try
@@ -91,12 +99,10 @@ internal sealed class DocumentWriteAheadFlushWorker : DatabaseEngineWorker
                 // pass flushes it again. An offline storage's refusal is not the worker's failure.
                 if (!storage.IsOffline)
                 {
-                    ReportFailure(exception);
+                    ReportFailure(storage.Name, exception);
                 }
             }
         }
-
-        return true;
     }
 }
 

@@ -35,9 +35,8 @@ internal sealed class KeyValueIndexMaintenanceWorker : DatabaseEngineWorker
     public override TimeSpan Interval => _engine.EngineOptions.MaintenanceInterval;
 
     /// <inheritdoc />
-    protected override bool RunIterationCore(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         // Stub: the index layer has no compaction to drive yet.
-        return true;
     }
 }

@@ -54,16 +54,22 @@ the kernel's bounded self-help window.
 A worker failure never ends a worker (#1268). Each worker catches per database: a failed
 checkpoint, page write-back or group flush of one database is reported
 (`DatabaseEngineWorker.ReportFailure`, the worker's `Fault`), the pass goes on to the next
-database, the loop sleeps `DatabaseEngineWorker.FailureBackoff` (one second, PostgreSQL's error
-sleep, `src/backend/postmaster/checkpointer.c:286-346`, `bgwriter.c:154-205`), and the first
-pass that completes its work clears the record. A failure that took a database offline — a
+database, and later passes skip that database for `DatabaseEngineWorker.FailureBackoff` (one
+second, PostgreSQL's error sleep, `src/backend/postmaster/checkpointer.c:286-346`,
+`bgwriter.c:154-205`) while every other database keeps the worker's full pace (#1268 review); the
+first pass that finishes that database's work clears its record. A failure that took a database offline — a
 failed durable flush (#1243), or a header slot write that failed (#1268), after which no
 checkpoint could truncate its journal — is not the worker's: every later operation is refused
 with `COHDBB002`, the workers skip the database, and the engine lists it in `OfflineDatabases`.
 The engine's pump runs a worker again after the backoff if its loop ever ends early (only an
 `IDatabaseEngineWorker` without the guided base can; the engine then reports Faulted until
 disposal). Before #1268 one unexpected exception ended a worker for good.
-`BlobWorkerResilienceTests` covers each case.
+`BlobWorkerResilienceTests` covers each case. It also checks that a database whose checkpoints keep
+failing leaves the other database at least half its no-fault checkpoint count, and that a writer
+queued for the database writer lock when the database goes offline gets the coded refusal at
+once instead of waiting for the reopen: an offline database undoes nothing, so the writer
+holding the lock keeps it, and the coordinator ends every lock wait instead
+(`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook).
 
 File-backed databases use `<RootPath>/<database>/blob.dat`, `blob.log`, and `blob.bak`.
 Database names are single file-name components, compared ignoring case; invalid path components

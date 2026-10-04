@@ -450,7 +450,7 @@ public abstract class StorageJournal : IStorageJournal
         {
             // NotSupportedException is a configuration error (a durable request on a handle that
             // cannot flush durably), raised before any byte is flushed, not a failed fsync.
-            var offline = StorageOfflineException.Create(StorageOfflineException.JournalFlushOperation, exception);
+            var offline = StorageOfflineException.Create(StorageOfflineCause.JournalFlush, exception);
             SetOfflineLocked(offline);
             throw offline;
         }

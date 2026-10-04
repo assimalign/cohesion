@@ -43,38 +43,23 @@ public sealed class StorageOfflineException : StorageException
     public const string ErrorCode = "COHDBS002";
 
     /// <summary>
-    /// What failed when a durable flush of the journal took the storage offline.
-    /// </summary>
-    internal const string JournalFlushOperation = "a durable flush of the journal";
-
-    /// <summary>
-    /// What failed when a durable flush of the data file took the storage offline.
-    /// </summary>
-    internal const string DataFlushOperation = "a durable flush of the data file";
-
-    /// <summary>
-    /// What failed when a file header write took the storage offline.
-    /// </summary>
-    internal const string HeaderWriteOperation = "a write of the file header";
-
-    /// <summary>
     /// Initializes a new <see cref="StorageOfflineException"/>.
     /// </summary>
     /// <param name="message">The message, which leads with <see cref="ErrorCode"/>.</param>
-    /// <param name="failedOperation">What failed, for <see cref="FailedOperation"/>.</param>
+    /// <param name="offlineCause">What failed, for <see cref="Cause"/>.</param>
     /// <param name="cause">The failure that took the storage offline.</param>
-    internal StorageOfflineException(string message, string failedOperation, Exception cause)
+    internal StorageOfflineException(string message, StorageOfflineCause offlineCause, Exception cause)
         : base(message, cause)
     {
-        FailedOperation = failedOperation;
+        Cause = offlineCause;
     }
 
     /// <summary>
-    /// Gets what failed and took the storage offline: <c>a durable flush of the journal</c>,
-    /// <c>a durable flush of the data file</c>, or <c>a write of the file header</c>. An engine's
-    /// offline refusal names it.
+    /// Gets what failed and took the storage offline: a durable flush of the journal or of the data
+    /// file, or a write of the file header. An engine's offline refusal names it; a caller that
+    /// tells the causes apart reads this, never the message.
     /// </summary>
-    public string FailedOperation { get; }
+    public StorageOfflineCause Cause { get; }
 
     /// <summary>
     /// Gets whether the storage commit record of the operation that threw this exception was
@@ -126,18 +111,31 @@ public sealed class StorageOfflineException : StorageException
     }
 
     /// <summary>
-    /// Creates the exception the first failure throws.
+    /// Creates the exception the first failure of a durable flush throws.
     /// </summary>
-    /// <param name="what">What failed, for the message (for example "a durable flush of the journal").</param>
+    /// <param name="offlineCause">What failed: <see cref="StorageOfflineCause.JournalFlush"/> or <see cref="StorageOfflineCause.DataFlush"/>.</param>
     /// <param name="cause">The failure.</param>
-    internal static StorageOfflineException Create(string what, Exception cause)
+    internal static StorageOfflineException Create(StorageOfflineCause offlineCause, Exception cause)
         => new(
-            $"{ErrorCode}: The storage is offline: {what} failed ({cause.Message}). Records written since the last successful " +
-            "durable flush may or may not have reached stable storage, and a retry could report success for writes the " +
-            "operating system already dropped, so nothing more is written to the journal or the data file. Reopen the " +
-            "storage: its recovery reads the journal and decides the outcome of every commit that was not confirmed.",
-            what,
+            $"{ErrorCode}: The storage is offline: {Describe(offlineCause)} failed ({cause.Message}). Records written since the " +
+            "last successful durable flush may or may not have reached stable storage, and a retry could report success for " +
+            "writes the operating system already dropped, so nothing more is written to the journal or the data file. Reopen " +
+            "the storage: its recovery reads the journal and decides the outcome of every commit that was not confirmed.",
+            offlineCause,
             cause);
+
+    /// <summary>
+    /// Describes what failed, for a message: the phrase each cause reads as in the storage's text.
+    /// </summary>
+    /// <param name="offlineCause">The cause.</param>
+    /// <returns>The phrase, such as <c>a durable flush of the journal</c>.</returns>
+    internal static string Describe(StorageOfflineCause offlineCause) => offlineCause switch
+    {
+        StorageOfflineCause.JournalFlush => "a durable flush of the journal",
+        StorageOfflineCause.DataFlush => "a durable flush of the data file",
+        StorageOfflineCause.HeaderWrite => "a write of the file header",
+        _ => "a write",
+    };
 
     /// <summary>
     /// Creates the exception a failed file header write throws once its header slot write was
@@ -147,12 +145,12 @@ public sealed class StorageOfflineException : StorageException
     /// <param name="cause">The failure of the slot write or of the flush after it.</param>
     internal static StorageOfflineException HeaderWriteFailed(Exception cause)
         => new(
-            $"{ErrorCode}: The storage is offline: {HeaderWriteOperation} failed after its header slot write was issued " +
+            $"{ErrorCode}: The storage is offline: {Describe(StorageOfflineCause.HeaderWrite)} failed after its header slot write was issued " +
             $"({cause.Message}). That slot may already be the newest generation on the media, so no header write may run " +
             "again in this process, and without one no checkpoint can truncate the journal; nothing more is written to the " +
             "journal or the data file. Reopen the storage: its recovery reads the journal and decides the outcome of every " +
             "commit that was not confirmed.",
-            HeaderWriteOperation,
+            StorageOfflineCause.HeaderWrite,
             cause);
 
     /// <summary>
@@ -160,7 +158,7 @@ public sealed class StorageOfflineException : StorageException
     /// </summary>
     /// <param name="offline">The exception the first failure threw.</param>
     internal static StorageOfflineException Refusal(StorageOfflineException offline)
-        => new(offline.Message, offline.FailedOperation, offline.InnerException!);
+        => new(offline.Message, offline.Cause, offline.InnerException!);
 
     /// <summary>
     /// Creates the exception a storage commit throws when its commit record was appended and its
@@ -168,5 +166,5 @@ public sealed class StorageOfflineException : StorageException
     /// </summary>
     /// <param name="offline">The exception the flush threw.</param>
     internal static StorageOfflineException CommitUnconfirmed(StorageOfflineException offline)
-        => new(offline.Message, offline.FailedOperation, offline.InnerException!) { CommitRecordWritten = true };
+        => new(offline.Message, offline.Cause, offline.InnerException!) { CommitRecordWritten = true };
 }

@@ -125,35 +125,13 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     /// <inheritdoc />
     /// <remarks>
     /// <see cref="EngineState.Faulted"/> while one of the engine's workers keeps failing: its
-    /// <see cref="DatabaseEngineWorker.Fault"/> is set from a failed pass until a pass completes its
-    /// work (#1268). An offline database is not a worker failure; <see cref="OfflineDatabases"/>
+    /// <see cref="DatabaseEngineWorker.Fault"/> is set by a failure until a pass finishes the work it
+    /// left (#1268). An offline database is not a worker failure; <see cref="OfflineDatabases"/>
     /// lists it.
     /// </remarks>
     public EngineState State
-    {
-        get
-        {
-            if (_disposed)
-            {
-                return EngineState.Disposed;
-            }
-
-            if (Volatile.Read(ref _workerRunFault) is not null)
-            {
-                return EngineState.Faulted;
-            }
-
-            foreach (var worker in Volatile.Read(ref _workerView))
-            {
-                if (worker is DatabaseEngineWorker { Fault: not null })
-                {
-                    return EngineState.Faulted;
-                }
-            }
-
-            return EngineState.Running;
-        }
-    }
+        => DatabaseEngineWorkerPump.Fold(_disposed, Volatile.Read(ref _workerRunFault),
+            Volatile.Read(ref _workerView));
 
     /// <inheritdoc />
     public IReadOnlyList<DatabaseName> OfflineDatabases
@@ -534,7 +512,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 throw new InvalidOperationException($"Worker name '{worker.Name}' is already registered.");
             }
         }
-        var thread = new Thread(() => PumpWorker(worker, _workerStopSource.Token))
+        var thread = new Thread(() => DatabaseEngineWorkerPump.Pump(worker, _workerStopSource.Token, ref _workerRunFault))
         {
             IsBackground = true,
             Name = worker.Name,
@@ -716,7 +694,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     {
         foreach (var worker in _workers)
         {
-            var thread = new Thread(() => PumpWorker(worker, _workerStopSource.Token))
+            var thread = new Thread(() => DatabaseEngineWorkerPump.Pump(worker, _workerStopSource.Token, ref _workerRunFault))
             {
                 IsBackground = true,
                 Name = worker.Name,
@@ -724,45 +702,6 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
 
             _workerThreads.Add(thread);
             thread.Start();
-        }
-    }
-
-    /// <summary>
-    /// The worker pump frame: runs the worker until the engine is disposed, and never lets it end
-    /// before that (#1268). A <see cref="DatabaseEngineWorker"/> catches every failure per pass,
-    /// records it and backs off, so its <see cref="IDatabaseEngineWorker.Run"/> returns only on
-    /// cancellation. A worker that implements the interface alone may let an exception escape, or
-    /// return early: the pump records that (the engine reports <see cref="EngineState.Faulted"/>
-    /// until disposal), sleeps <see cref="DatabaseEngineWorker.FailureBackoff"/>, and runs it again.
-    /// A faulted worker never compromises correctness: grouped commits self-help within their
-    /// window, and a checkpoint that cannot run leaves the journal untruncated. Only an
-    /// <see cref="OutOfMemoryException"/> escapes the thread, which ends the process.
-    /// </summary>
-    private void PumpWorker(IDatabaseEngineWorker worker, CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            try
-            {
-                worker.Run(cancellationToken);
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                Volatile.Write(ref _workerRunFault, new InvalidOperationException(
-                    $"Worker '{worker.Name}' returned from Run before its engine stopped it; the engine runs it again."));
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                Volatile.Write(ref _workerRunFault, exception);
-            }
-
-            cancellationToken.WaitHandle.WaitOne(DatabaseEngineWorker.FailureBackoff);
         }
     }
 

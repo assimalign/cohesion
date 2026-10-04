@@ -31,13 +31,14 @@ using Assimalign.Cohesion.Database.Storage;
 /// (<c>TransactionCoordinator.NextDeferredUndoRetry</c>).
 /// </para>
 /// <para>
-/// A failure is reported (<see cref="DatabaseEngineWorker.ReportFailure"/>) — the engine's
-/// observational state flips to Faulted — and the worker keeps running: an undo that fails again
-/// is retried at its next delay, and unpurged versions cost space, never consistency. A pass that
-/// leaves an undo deferred, or finds a storage busy, has not completed its work, so it keeps the
-/// record; the first pass after it with no failure and nothing left over clears it, so a
-/// transient fault does not leave the engine Faulted for good. An offline database (#1243) is
-/// skipped.
+/// A failure is reported for its database — the engine's observational state flips to Faulted —
+/// and the worker keeps running: an undo that fails again is retried at the delay its coordinator
+/// sets, and unpurged versions cost space, never consistency. The worker adds no backoff of its own
+/// to a database whose undo failed (the coordinator already doubles each retry's delay), and a
+/// failure of one database delays no other's retry. A database whose undo is still deferred, or
+/// whose storage was busy, keeps a failure recorded for it until a pass leaves nothing over; a
+/// failure of another database does not keep it, so a transient fault does not leave the engine
+/// Faulted for good. An offline database (#1243) is skipped.
 /// </para>
 /// </remarks>
 internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
@@ -96,7 +97,7 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
     }
 
     /// <inheritdoc />
-    protected override bool RunIterationCore(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         _engine.UndoDeferredSignal.Reset();
         bool fullPass = Stopwatch.GetElapsedTime(Volatile.Read(ref _lastFullPass)) >= Interval;
@@ -105,10 +106,6 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
             Volatile.Write(ref _lastFullPass, Stopwatch.GetTimestamp());
         }
 
-        // Completed: no database still has an undo deferred or a busy storage, so with no
-        // failure reported a fault reported by an earlier pass is over.
-        bool completed = true;
-
         foreach (GraphDatabaseInstance database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
@@ -116,7 +113,9 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
                 break;
             }
 
-            if (database.IsOffline)
+            // An offline database is not begun: the engine reports it (#1243), and a failure the
+            // worker recorded for it ends.
+            if (database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }
@@ -134,13 +133,13 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
 
                 if (database.Coordinator.NextDeferredUndoRetry is not null)
                 {
-                    completed = false;
+                    ReportUnfinished(database.Name);
                 }
             }
             catch (StorageTransactionException)
             {
                 // A storage bracket is active on this database; retry next pass.
-                completed = false;
+                ReportUnfinished(database.Name);
             }
             catch (ObjectDisposedException) when (!_engine.IsOpen(database))
             {
@@ -153,15 +152,14 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
                 // Recorded, not fatal: the writer whose undo failed again keeps its place in the
-                // retry schedule, and every other database keeps its maintenance. A database that
-                // went offline during the pass (#1243) is skipped by the next pass instead.
+                // retry schedule its coordinator paces (#1226), so the worker holds nothing back,
+                // and every other database keeps its maintenance. A database that went offline
+                // during the pass (#1243) is skipped by the next pass instead.
                 if (!database.IsOffline)
                 {
-                    ReportFailure(exception);
+                    ReportFailure(database.Name, exception, TimeSpan.Zero);
                 }
             }
         }
-
-        return completed && !cancellationToken.IsCancellationRequested;
     }
 }

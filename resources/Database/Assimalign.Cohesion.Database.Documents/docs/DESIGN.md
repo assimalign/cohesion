@@ -362,9 +362,10 @@ Faulted while a worker keeps failing, and Disposed after close.
 A worker failure never ends a worker (#1268). Each worker catches per database: a failed
 checkpoint, page write-back or group flush of one database is reported
 (`DatabaseEngineWorker.ReportFailure`, the worker's `Fault`), the pass goes on to the next
-database, the loop sleeps `DatabaseEngineWorker.FailureBackoff` (one second, PostgreSQL's error
-sleep, `src/backend/postmaster/checkpointer.c:286-346`, `bgwriter.c:154-205`), and the first
-pass that completes its work clears the record, so the engine is Faulted exactly while a worker
+database, and later passes skip that database for `DatabaseEngineWorker.FailureBackoff` (one
+second, PostgreSQL's error sleep, `src/backend/postmaster/checkpointer.c:286-346`,
+`bgwriter.c:154-205`) while every other database keeps the worker's full pace (#1268 review); the
+first pass that finishes that database's work clears its record, so the engine is Faulted exactly while a worker
 keeps failing. A failure that took a database offline (a failed durable flush, or a failed
 header slot write) is not the worker's: the workers skip the database and the engine lists it in
 `OfflineDatabases`. The engine's pump runs a worker again after the backoff if its loop ever ends
@@ -374,7 +375,12 @@ unexpected exception ended that worker for good. `DocumentWorkerResilienceTests`
 checkpoint's and a write-back's page writes (the worker reports, backs off and recovers while
 the other database's work goes on), a group flush's fsync on the flush worker's own thread (only
 its database goes offline), and a header slot write (the database goes offline with COHDBD002,
-naming "a write of the file header", and its files stop changing).
+naming "a write of the file header", and its files stop changing). It also checks
+that a database whose checkpoints keep failing leaves the other database at least half its
+no-fault checkpoint count, and that a writer queued for the database writer lock when the
+database goes offline gets COHDBD002 at once instead of waiting for the reopen: an offline
+database undoes nothing, so the writer holding the lock keeps it, and the coordinator ends every
+lock wait instead (`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook).
 Disposal is idempotent: stop/join workers, dispose coordinators (rolling back open
 transactions), then durably flush and close each storage file set. Close errors
 are aggregated after attempting every database.

@@ -46,10 +46,11 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     /// after disposal.
     /// </summary>
     /// <remarks>
-    /// A worker deriving from <see cref="DatabaseEngineWorker"/> sets the state with a failed pass
-    /// and clears it with the next pass that completes its work (<see cref="DatabaseEngineWorker.Fault"/>),
+    /// A worker deriving from <see cref="DatabaseEngineWorker"/> sets the state with a failure, and
+    /// clears it once a pass finishes the work every failure left (<see cref="DatabaseEngineWorker.Fault"/>),
     /// so a transient fault does not leave the engine <see cref="EngineState.Faulted"/> for good
-    /// (#1268). A worker's failures never stop the worker.
+    /// (#1268). A worker's failures never stop the worker, and one database's failure does not
+    /// slow the worker's work on the others.
     /// </remarks>
     EngineState State { get; }
 

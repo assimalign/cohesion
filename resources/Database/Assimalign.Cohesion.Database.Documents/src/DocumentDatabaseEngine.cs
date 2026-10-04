@@ -64,35 +64,13 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
     /// <inheritdoc />
     /// <remarks>
     /// <see cref="EngineState.Faulted"/> while one of the engine's workers keeps failing: its
-    /// <see cref="DatabaseEngineWorker.Fault"/> is set from a failed pass until a pass completes its
-    /// work (#1268). An offline database is not a worker failure; <see cref="OfflineDatabases"/>
+    /// <see cref="DatabaseEngineWorker.Fault"/> is set by a failure until a pass finishes the work it
+    /// left (#1268). An offline database is not a worker failure; <see cref="OfflineDatabases"/>
     /// lists it.
     /// </remarks>
     public EngineState State
-    {
-        get
-        {
-            if (Volatile.Read(ref _disposed) != 0)
-            {
-                return EngineState.Disposed;
-            }
-
-            if (Volatile.Read(ref _workerRunFault) is not null)
-            {
-                return EngineState.Faulted;
-            }
-
-            foreach (var worker in Volatile.Read(ref _workerView))
-            {
-                if (worker is DatabaseEngineWorker { Fault: not null })
-                {
-                    return EngineState.Faulted;
-                }
-            }
-
-            return EngineState.Running;
-        }
-    }
+        => DatabaseEngineWorkerPump.Fold(Volatile.Read(ref _disposed) != 0, Volatile.Read(ref _workerRunFault),
+            Volatile.Read(ref _workerView));
 
     /// <inheritdoc />
     public EngineModel Model => EngineModel.Document;
@@ -361,7 +339,7 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
     internal void AttachWorker(IDatabaseEngineWorker worker)
     {
         ThrowIfDisposed();
-        var thread = new Thread(() => Pump(worker)) { IsBackground = true, Name = Name + "/" + worker.Kind };
+        var thread = new Thread(() => DatabaseEngineWorkerPump.Pump(worker, _stop.Token, ref _workerRunFault)) { IsBackground = true, Name = Name + "/" + worker.Kind };
         _workers.Add(worker);
         _threads.Add(thread);
         try { thread.Start(); }
@@ -380,44 +358,6 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
     {
         ThrowIfDisposed();
         _servers.Add(server);
-    }
-
-    /// <summary>
-    /// The worker pump frame: runs the worker until the engine is disposed, and never lets it end
-    /// before that (#1268). A <see cref="DatabaseEngineWorker"/> catches every failure per pass,
-    /// records it and backs off, so its <see cref="IDatabaseEngineWorker.Run"/> returns only on
-    /// cancellation. A worker that implements the interface alone may let an exception escape, or
-    /// return early: the pump records that (the engine reports <see cref="EngineState.Faulted"/>
-    /// until disposal), sleeps <see cref="DatabaseEngineWorker.FailureBackoff"/>, and runs it again.
-    /// Only an <see cref="OutOfMemoryException"/> escapes the thread, which ends the process.
-    /// </summary>
-    private void Pump(IDatabaseEngineWorker worker)
-    {
-        var token = _stop.Token;
-        while (!token.IsCancellationRequested)
-        {
-            try
-            {
-                worker.Run(token);
-                if (token.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                Volatile.Write(ref _workerRunFault, new InvalidOperationException(
-                    $"Worker '{worker.Name}' returned from Run before its engine stopped it; the engine runs it again."));
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception error) when (error is not OutOfMemoryException)
-            {
-                Volatile.Write(ref _workerRunFault, error);
-            }
-
-            token.WaitHandle.WaitOne(DatabaseEngineWorker.FailureBackoff);
-        }
     }
 
     /// <inheritdoc />

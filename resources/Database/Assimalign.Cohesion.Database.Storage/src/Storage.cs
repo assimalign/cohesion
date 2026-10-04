@@ -334,7 +334,9 @@ public abstract class Storage : IStorage
     /// never wait on each other's journal. It may run while the failing call holds this
     /// storage's header, transaction or buffer-pool lock, so a handler must not call back into
     /// this storage, except <see cref="TakeOffline"/>, which returns at once on a storage
-    /// already offline. It should only take other storages offline and must not throw.
+    /// already offline. It should only take other storages offline, or end the database's lock
+    /// waits (the transaction coordinator's <c>AbandonLockWaits</c>, which does no lock-table work
+    /// on the calling thread), and must not throw.
     /// </para>
     /// <para>
     /// Set it before the storage does any work; a storage already offline when it is set does
@@ -1575,7 +1577,7 @@ public abstract class Storage : IStorage
     /// <param name="cause">The failed flush.</param>
     /// <returns>The exception the caller throws.</returns>
     private StorageOfflineException TakeOffline(Exception cause)
-        => GoOffline(StorageOfflineException.Create(StorageOfflineException.DataFlushOperation, cause));
+        => GoOffline(StorageOfflineException.Create(StorageOfflineCause.DataFlush, cause));
 
     /// <summary>
     /// Takes the storage offline with <paramref name="offline"/>, unless it already is: the journal

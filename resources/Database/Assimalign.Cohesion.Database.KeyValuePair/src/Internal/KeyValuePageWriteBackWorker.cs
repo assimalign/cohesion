@@ -13,10 +13,13 @@ using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 /// </summary>
 /// <remarks>
 /// A page write that fails leaves the page dirty in the pool (it is recorded clean only after
-/// its write), so the failure is reported, the pass goes on to the next file set, and a later
-/// pass writes the page (#1268). PostgreSQL's background writer treats a failed write the same
-/// way: the buffer stays dirty and the writer retries after its error sleep
-/// (<c>src/backend/postmaster/bgwriter.c:154-205</c>). An offline database is skipped.
+/// its write), so the failure is reported for its database, the pass goes on to the next one, and
+/// a pass after <see cref="DatabaseEngineWorker.FailureBackoff"/> writes the page (#1268); the
+/// other databases keep the worker's full pace meanwhile. PostgreSQL leaves a buffer whose write
+/// failed dirty for a later write (<c>AbortBufferIO</c>,
+/// <c>src/backend/storage/buffer/bufmgr.c:7469-7502</c>), and its background writer sleeps a
+/// second after the error before it writes again (<c>src/backend/postmaster/bgwriter.c:154-205</c>).
+/// An offline database is skipped.
 /// </remarks>
 internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
 {
@@ -37,7 +40,7 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
     public override TimeSpan Interval => _engine.EngineOptions.PageWriteBackInterval;
 
     /// <inheritdoc />
-    protected override bool RunIterationCore(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         int batchSize = _engine.EngineOptions.PageWriteBackBatchSize;
 
@@ -50,7 +53,7 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
 
             // Nothing of an offline database is written (#1243): neither file set, whichever
             // went offline. Each storage also refuses on its own.
-            if (database.IsOffline)
+            if (database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }
@@ -58,8 +61,6 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
             WriteBack(database, database.DataStorage, batchSize);
             WriteBack(database, database.CatalogStorage, batchSize);
         }
-
-        return true;
     }
 
     private void WriteBack(KeyValueDatabaseInstance database, KeyValueStorage storage, int batchSize)
@@ -78,7 +79,7 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
             // is not the worker's failure (the engine lists the database offline).
             if (!database.IsOffline)
             {
-                ReportFailure(exception);
+                ReportFailure(database.Name, exception);
             }
         }
     }

@@ -13,10 +13,13 @@ using Assimalign.Cohesion.Database.Documents.Storage;
 /// </summary>
 /// <remarks>
 /// A page write that fails leaves the page dirty in the pool (it is recorded clean only after
-/// its write), so the failure is reported, the pass goes on to the next file set, and a later
-/// pass writes the page (#1268). PostgreSQL's background writer treats a failed write the same
-/// way: the buffer stays dirty and the writer retries after its error sleep
-/// (<c>src/backend/postmaster/bgwriter.c:154-205</c>). An offline storage writes nothing.
+/// its write), so the failure is reported for its database, the pass goes on to the next one, and
+/// a pass after <see cref="DatabaseEngineWorker.FailureBackoff"/> writes the page (#1268); the
+/// other databases keep the worker's full pace meanwhile. PostgreSQL leaves a buffer whose write
+/// failed dirty for a later write (<c>AbortBufferIO</c>,
+/// <c>src/backend/storage/buffer/bufmgr.c:7469-7502</c>), and its background writer sleeps a
+/// second after the error before it writes again (<c>src/backend/postmaster/bgwriter.c:154-205</c>).
+/// An offline storage writes nothing.
 /// </remarks>
 internal sealed class DocumentPageWriteBackWorker : DatabaseEngineWorker
 {
@@ -37,7 +40,7 @@ internal sealed class DocumentPageWriteBackWorker : DatabaseEngineWorker
     public override TimeSpan Interval => _engine.EngineOptions.PageWriteBackInterval;
 
     /// <inheritdoc />
-    protected override bool RunIterationCore(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         int batchSize = _engine.EngineOptions.PageWriteBackBatchSize;
 
@@ -46,6 +49,13 @@ internal sealed class DocumentPageWriteBackWorker : DatabaseEngineWorker
             if (cancellationToken.IsCancellationRequested)
             {
                 break;
+            }
+
+            // A storage names its database. An offline one is not begun: nothing of it is written
+            // (#1243), the engine reports it, and a failure the worker recorded for it ends.
+            if (storage.IsOffline || !BeginDatabase(storage.Name))
+            {
+                continue;
             }
 
             try
@@ -62,12 +72,10 @@ internal sealed class DocumentPageWriteBackWorker : DatabaseEngineWorker
                 // is not the worker's failure (the engine lists its database offline).
                 if (!storage.IsOffline)
                 {
-                    ReportFailure(exception);
+                    ReportFailure(storage.Name, exception);
                 }
             }
         }
-
-        return true;
     }
 }
 

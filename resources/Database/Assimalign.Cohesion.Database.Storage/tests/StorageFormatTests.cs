@@ -453,9 +453,9 @@ public sealed class StorageFormatTests
         // after the failure, the close included; the reopen found the previous generation (this
         // failed write wrote nothing) with the journal that describes everything before it.
         error.Message.ShouldStartWith(StorageOfflineException.ErrorCode, Case.Sensitive);
-        error.FailedOperation.ShouldBe("a write of the file header");
+        error.Cause.ShouldBe(StorageOfflineCause.HeaderWrite);
         error.InnerException.ShouldBeOfType<IOException>();
-        new[] { refusal, flushRefusal, insertRefusal }.ShouldAllBe(e => e.InnerException == error.InnerException && e.FailedOperation == error.FailedOperation);
+        new[] { refusal, flushRefusal, insertRefusal }.ShouldAllBe(e => e.InnerException == error.InnerException && e.Cause == error.Cause);
         raised.Count.ShouldBe(1);
         storage.HeaderFaulted.ShouldBeTrue();
         storage.IsOffline.ShouldBeTrue();

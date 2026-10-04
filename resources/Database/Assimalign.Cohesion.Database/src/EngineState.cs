@@ -19,7 +19,8 @@ public enum EngineState : byte
     /// (grouped commits self-help within their window, a checkpoint that cannot run
     /// leaves the journal untruncated), but it runs degraded and the owner should
     /// learn why (<see cref="DatabaseEngineWorker.Fault"/>). The state returns to
-    /// <see cref="Running"/> once the failing worker completes a pass (#1268).
+    /// <see cref="Running"/> once the failing worker finishes the work its failures
+    /// left (#1268).
     /// </summary>
     Faulted,
 

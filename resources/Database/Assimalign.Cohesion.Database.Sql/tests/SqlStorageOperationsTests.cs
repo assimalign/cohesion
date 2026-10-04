@@ -79,7 +79,7 @@ public sealed class SqlStorageOperationsTests
         database.CatalogStorage.CheckpointJournalSize = 1;
         foreach (var worker in harness.Engine.Workers.OfType<DatabaseEngineWorker>())
         {
-            worker.RunIteration(CancellationToken.None);
+            worker.RunIteration(CancellationToken.None).ShouldBeTrue(worker.Fault?.ToString());
         }
 
         var dataAfterTheWorkers = strategy.Capture(name);
@@ -189,7 +189,7 @@ public sealed class SqlStorageOperationsTests
         database.CatalogStorage.CheckpointJournalSize = 1;
         foreach (var worker in engine.Workers.OfType<DatabaseEngineWorker>())
         {
-            worker.RunIteration(CancellationToken.None);
+            worker.RunIteration(CancellationToken.None).ShouldBeTrue(worker.Fault?.ToString());
         }
 
         var catalogAfterTheWorkers = strategy.Capture(name + SqlDatabaseEngine.CatalogSuffix);
@@ -240,7 +240,7 @@ public sealed class SqlStorageOperationsTests
         database.DataStorage.CheckpointJournalSize = 1;
         foreach (var worker in engine.Workers.OfType<DatabaseEngineWorker>())
         {
-            worker.RunIteration(CancellationToken.None);
+            worker.RunIteration(CancellationToken.None).ShouldBeTrue(worker.Fault?.ToString());
         }
 
         var dataAfterTheWorkers = strategy.Capture(name);

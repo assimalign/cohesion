@@ -216,12 +216,29 @@ of it (in practice a few hundred milliseconds). A failure that persists is retri
 0.4 … seconds, then once per maintenance interval, so it cannot spin. The purge workers record a
 retry that fails again as a worker fault and keep running; before, the exception escaped the
 worker's pump loop and stopped the worker for good, leaving every deferred writer stuck until
-the database closed. Since #1268 a failed retry is a failed worker pass like any other, so the
-worker's one-second failure backoff (`DatabaseEngineWorker.FailureBackoff`) floors the delay
-before the next retry: after a failed retry the schedule runs at 1 s, 1 s, 1 s, 1.6 s … rather
-than 0.2, 0.4, 0.8, 1.6 s. The first retry, which the deferral itself wakes, is unchanged. The schedule reads a `TimeProvider` (the coordinator's internal
-constructor), so `DeferredUndoBackoffTests` and the coordinator's tests drive it without
-waiting.
+the database closed. The purge workers report a failed retry for its database with no backoff of
+their own (`DatabaseEngineWorker.ReportFailure(name, exception, TimeSpan.Zero)`, #1268 review),
+so this schedule alone paces the retries, and one database's failing undo delays no other
+database's retry. (For a while #1268 slept the whole worker a second after any failed pass, which
+floored every database's retries at a second.) The schedule reads a `TimeProvider` (the
+coordinator's internal constructor), so `DeferredUndoBackoffTests` and the coordinator's tests
+drive it without waiting.
+
+**An offline storage ends every lock wait (#1268 review).** An offline database undoes nothing:
+a transaction that was writing when its storage went offline keeps its locks until the reopen,
+whose recovery aborts it, for the same reason a deferred undo keeps them (releasing them first
+would let the next holder build on versions that were never undone). A request queued behind
+such a transaction would wait for a release that never comes, and in every engine only the
+reopen ended it (reproduced with an explicit transaction holding the lock in all five engines).
+`TransactionCoordinator.AbandonLockWaits(cause)`, which each engine wires to its data storage's
+`OnOffline` hook, fails every wait in progress and every later one with
+`TransactionAbortedException` whose inner exception is the storage's offline error, which the
+engines translate into their coded offline refusal. A request the lock table can grant at once is
+still granted: the coordinator's lock view tries the grant first, so an uncontended request
+costs nothing more, and only a request that has to wait links its token with the abandonment.
+The waits are failed asynchronously (`CancellationTokenSource.CancelAsync`), because the hook
+may run under the storage's locks. Neo4j's lock client ends the waits of a stopped client the
+same way (`community/lock/src/main/java/org/neo4j/kernel/impl/locking/forseti/ForsetiClient.java:1081-1085`).
 
 A journal failure inside the undo is an undo failure like any other. The undo's
 storage bracket fails to begin, to touch a page or to commit, rolls itself back, and

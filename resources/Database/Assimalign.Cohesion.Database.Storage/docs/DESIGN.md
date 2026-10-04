@@ -538,9 +538,10 @@ The storage does the same without stopping the process. When a durable flush of 
 (`EnsureDurable`, `FlushPendingCommits`, any `Flush(forceDurable: true)`) or of the data file
 (the checkpoint's and the header write's data flush) throws, or a header slot write fails once
 it was issued (#1268, "A header write that fails after its slot write was issued" below), the
-storage goes **offline**. `StorageOfflineException.FailedOperation` names which of the three
-failed (`a durable flush of the journal`, `a durable flush of the data file`, `a write of the
-file header`), and the engines' coded refusals repeat it:
+storage goes **offline**. `StorageOfflineException.Cause` (`StorageOfflineCause`) names which of the
+three failed (`JournalFlush`, `DataFlush`, `HeaderWrite`), and the engines' coded refusals word it
+("a durable flush of the journal", "a durable flush of the data file", "a write of the file
+header"); a caller that tells the causes apart reads the enum, never the message:
 
 - **The failing call throws `StorageOfflineException`** (`COHDBS002`), carrying the I/O
   failure as its inner exception. The journal latches the error under its append lock, so no
@@ -747,8 +748,8 @@ which left the database accepting commits into a journal nothing could truncate:
 reproduction committed 200 rows after the fault and grew the journal from 16,688 to 3,339,088
 bytes, and the engines' checkpoint workers died on the refusal. Now the failing header write
 takes the storage offline exactly as a failed durable flush does ("A failed durable flush takes
-the storage offline"): it throws `StorageOfflineException` (`FailedOperation` is `a write of the
-file header`, the slot write's failure the inner exception), raises `OnOffline`, and every
+the storage offline"): it throws `StorageOfflineException` (`Cause` is `HeaderWrite`, the slot write's
+failure the inner exception), raises `OnOffline`, and every
 later write is refused, the close included, until the storage is reopened; the reopen finds a
 whole generation either way, and the untruncated journal describes everything before the
 failure. `Storage.HeaderFaulted` (internal) still records that the offline state came from a

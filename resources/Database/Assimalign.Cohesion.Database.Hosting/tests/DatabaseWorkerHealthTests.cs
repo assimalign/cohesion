@@ -70,15 +70,20 @@ public sealed class DatabaseWorkerHealthTests
         await engine.OpenDatabaseAsync("app");
         HealthContribution reopened = await application.Context.CheckAsync(CancellationToken.None);
 
-        // Assert: degraded names the worker and its failure, and the data carries it.
+        // Assert: degraded names the worker and the type of its failure, and the data carries it;
+        // the failure's message, which can carry file paths, stays out of the unauthenticated
+        // health output.
         before.Status.ShouldBe(HealthStatus.Healthy);
         faulted.ShouldBeTrue();
         degraded.Status.ShouldBe(HealthStatus.Degraded);
         degraded.Description.ShouldNotBeNull().ShouldContain("sql/checkpoint");
-        degraded.Description.ShouldContain("Injected page write failure");
+        degraded.Description.ShouldContain("IOException");
+        degraded.Description.ShouldContain("returns to Running");
+        degraded.Description.ShouldNotContain("Injected page write failure");
         IReadOnlyDictionary<string, object> data = degraded.Data.ShouldNotBeNull();
         string prefix = data.Single(entry => entry.Value is "sql/checkpoint").Key[..^".name".Length];
-        data[$"{prefix}.fault"].ShouldBeOfType<string>().ShouldContain("Injected page write failure");
+        data[$"{prefix}.fault"].ShouldBeOfType<string>().ShouldContain("IOException");
+        data.Values.OfType<string>().ShouldNotContain(value => value.Contains("Injected page write failure", StringComparison.Ordinal));
         ((int)data[$"{prefix}.consecutiveFailures"]).ShouldBeGreaterThanOrEqualTo(1);
         ((long)data[$"{prefix}.failureCount"]).ShouldBeGreaterThanOrEqualTo(1);
 
@@ -93,6 +98,31 @@ public sealed class DatabaseWorkerHealthTests
         unhealthy.Data.ShouldNotBeNull()["engine.0.state"].ShouldBe(nameof(EngineState.Running));
 
         reopened.Status.ShouldBe(HealthStatus.Healthy);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a registered worker whose loop failed is degraded until disposal, and says so")]
+    public async Task CheckAsync_RegisteredWorkerLoopFailed_ShouldSayTheEngineStaysFaultedUntilDisposed()
+    {
+        // Arrange: a worker without the guided base whose loop throws once.
+        var builder = SqlDatabaseEngine.CreateBuilder();
+        builder.AddWorker(_ => new EscapingWorker());
+        await using var engine = builder.Build();
+        var options = new DatabaseApplicationOptions();
+        options.Engines.Add(engine);
+        await using var application = new DatabaseApplication(options);
+
+        // Act
+        bool faulted = await Eventually(() => engine.State == EngineState.Faulted);
+        HealthContribution degraded = await application.Context.CheckAsync(CancellationToken.None);
+
+        // Assert: no guided worker holds a failure, so the description does not promise a return
+        // to Running; it says the engine stays Faulted until it is disposed.
+        faulted.ShouldBeTrue();
+        degraded.Status.ShouldBe(HealthStatus.Degraded);
+        degraded.Description.ShouldNotBeNull().ShouldContain("A registered worker's loop failed on");
+        degraded.Description.ShouldContain("until it is disposed");
+        degraded.Description.ShouldNotContain("returns to Running");
+        degraded.Description.ShouldNotContain("Failing workers");
     }
 
     private static async Task InsertAsync(IDatabase database, int first, int count)
@@ -118,5 +148,27 @@ public sealed class DatabaseWorkerHealthTests
         }
 
         return true;
+    }
+
+    /// <summary>A worker without the guided base whose first loop throws; later loops run until cancelled.</summary>
+    private sealed class EscapingWorker : IDatabaseEngineWorker
+    {
+        private int _runs;
+
+        public string Name => "escaping";
+
+        public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.IndexMaintenance;
+
+        public TimeSpan Interval => TimeSpan.FromSeconds(1);
+
+        public void Run(CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _runs) == 1)
+            {
+                throw new InvalidOperationException("The worker's loop failed.");
+            }
+
+            cancellationToken.WaitHandle.WaitOne();
+        }
     }
 }

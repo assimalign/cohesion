@@ -68,9 +68,23 @@ public class DatabaseOfflineException : DatabaseException
         string detail = cause.InnerException?.Message ?? cause.Message;
         return new DatabaseOfflineException(
             code,
-            $"{code}: Database '{database}' is offline: {cause.FailedOperation} of its storage failed ({detail}), so nothing " +
+            $"{code}: Database '{database}' is offline: {Describe(cause.Cause)} of its storage failed ({detail}), so nothing " +
             "more is written to it. Every operation is refused until the database is reopened (OpenDatabaseAsync); the " +
             "reopen's recovery reads the journal and decides the outcome of every commit that was not confirmed.",
             cause);
     }
+
+    /// <summary>
+    /// Describes what took a storage offline, for an engine's message: the root owns its own
+    /// wording of the storage's cause (the layer that owns both vocabularies translates).
+    /// </summary>
+    /// <param name="cause">The storage's offline cause.</param>
+    /// <returns>The phrase, such as <c>a durable flush of the journal</c>.</returns>
+    internal static string Describe(StorageOfflineCause cause) => cause switch
+    {
+        StorageOfflineCause.JournalFlush => "a durable flush of the journal",
+        StorageOfflineCause.DataFlush => "a durable flush of the data file",
+        StorageOfflineCause.HeaderWrite => "a write of the file header",
+        _ => "a write",
+    };
 }

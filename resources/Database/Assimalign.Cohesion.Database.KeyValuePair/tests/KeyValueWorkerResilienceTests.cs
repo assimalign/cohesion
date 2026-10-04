@@ -74,6 +74,28 @@ public sealed class KeyValueWorkerResilienceTests
         (await CountAsync(failing)).ShouldBe(20);
     }
 
+    /// <summary>
+    /// One database whose checkpoints keep failing must not slow the checkpoints of the engine's
+    /// other databases (#1268 review): only the failing database is backed off. Against the same
+    /// load with no fault, the healthy database keeps at least half its checkpoints and its journal
+    /// stays within a small multiple of the no-fault peak. A worker-wide backoff held it to one
+    /// checkpoint a second, and its journal grew to hundreds of times the trigger.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a database whose checkpoints keep failing does not slow the other database's checkpoints")]
+    public async Task CheckpointWorker_OneDatabaseKeepsFailing_ShouldKeepTheOthersAtFullPace()
+    {
+        // Act: the same load with no fault, then with the failing database's page writes failing.
+        var baseline = await MeasureHealthyCheckpointsAsync(fault: false);
+        var faulted = await MeasureHealthyCheckpointsAsync(fault: true);
+
+        // Assert: the fault fired and was retried, and the healthy database kept its pace.
+        string report = $"no fault: {baseline}; fault: {faulted}";
+        faulted.FailedPasses.ShouldBeGreaterThanOrEqualTo(1, report);
+        ((double)faulted.Checkpoints).ShouldBeGreaterThan(2 * (PaceWindow / DatabaseEngineWorker.FailureBackoff + 1), report);
+        ((double)faulted.Checkpoints / baseline.Checkpoints).ShouldBeGreaterThanOrEqualTo(0.5, report);
+        ((double)faulted.PeakJournal / Math.Max(baseline.PeakJournal, PacePeakFloor)).ShouldBeLessThanOrEqualTo(16, report);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a page write-back that fails is retried after a backoff, and the pages reach the file once the fault clears")]
     public async Task PageWriteBackWorker_PageWritesFail_ShouldRetryAndRecoverWhileOtherDatabasesAreWritten()
     {
@@ -154,7 +176,7 @@ public sealed class KeyValueWorkerResilienceTests
         faults.JournalFlushFailures.ShouldBeGreaterThanOrEqualTo(1);
         faults.JournalFlushFailureThread.ShouldBe(worker.Name);
         refusal.Code.ShouldBe("COHDBK002");
-        StorageOfflineException.Find(refusal)!.FailedOperation.ShouldBe("a durable flush of the journal");
+        StorageOfflineException.Find(refusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
         refusal.Message.ShouldContain("a durable flush of the journal");
         (latencies.Max() / window).ShouldBeLessThan(1.0, $"grouped commit latencies {string.Join(", ", latencies)}");
         worker.Fault.ShouldBeNull();
@@ -206,7 +228,7 @@ public sealed class KeyValueWorkerResilienceTests
         offline.ShouldBeTrue();
         refusals.ShouldAllBe(refusal => refusal.Code == "COHDBK002" && refusal.Message.StartsWith("COHDBK002", StringComparison.Ordinal));
         refusals.ShouldAllBe(refusal => refusal.Message.Contains("a write of the file header", StringComparison.Ordinal));
-        StorageOfflineException.Find(refusals[0])!.FailedOperation.ShouldBe("a write of the file header");
+        StorageOfflineException.Find(refusals[0])!.Cause.ShouldBe(StorageOfflineCause.HeaderWrite);
         faults.HeaderWriteFailures.ShouldBe(1);
         failing.DataStorage.JournalLength.ShouldBe(journalAtTheFault);
         dataAfter.Data.ShouldBe(dataAtTheFault.Data);
@@ -219,6 +241,62 @@ public sealed class KeyValueWorkerResilienceTests
         engine.State.ShouldBe(EngineState.Running);
         reopened.IsOffline.ShouldBeFalse();
         (await CountAsync(reopened)).ShouldBe(11);
+    }
+
+    /// <summary>
+    /// Two writers in flight when a failed header slot write or journal fsync takes the database
+    /// offline (#1268 review): the writer holding the database writer lock keeps it, because an
+    /// offline database undoes nothing and releasing the lock without the undo would hand the next
+    /// writer versions that were never undone, so the writer queued behind it must end with the
+    /// coded refusal instead. Before the review it waited until the database was reopened.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a writer queued for the writer lock when the database goes offline ends with the coded refusal")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task QueuedWriter_DatabaseGoesOffline_ShouldEndWithTheOfflineRefusal(bool headerWriteFails)
+    {
+        // Arrange: the checkpointer looks every 100 ms; one writer holds the database writer lock in
+        // an explicit transaction, and another queues behind it.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = KeyValueDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        var failing = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
+        var faults = strategy.Faults(Failing);
+        await using var holder = await failing.CreateSessionAsync();
+        await using var queued = await failing.CreateSessionAsync();
+        _ = await holder.BeginTransactionAsync();
+        await failing.PutAsync(holder, Bytes("key"), Bytes("held"));
+        var waiting = failing.PutAsync(queued, Bytes("key"), Bytes("queued")).AsTask();
+        await Task.Delay(TimeSpan.FromMilliseconds(100));
+        bool queuedWhileOnline = !waiting.IsCompleted;
+
+        // Act: the next checkpoint's header slot write, or its journal fsync, fails.
+        if (headerWriteFails)
+        {
+            faults.FailHeaderWrites = true;
+        }
+        else
+        {
+            faults.FailJournalFlushes = true;
+        }
+
+        // The holder writes again, so the next checkpoint is due (it may already be refused).
+        await Record.ExceptionAsync(async () => await failing.PutAsync(holder, Bytes("held-2"), Bytes("held-2")));
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        bool ended = await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromSeconds(5))) == waiting;
+        var queuedRefusal = ended ? await Record.ExceptionAsync(() => waiting) : null;
+        var holderRefusal = await Record.ExceptionAsync(async () => await failing.PutAsync(holder, Bytes("after"), Bytes("after")));
+
+        faults.Clear();
+        var reopened = (KeyValueDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+
+        // Assert: both writers got the coded refusal, and the reopen kept neither write.
+        queuedWhileOnline.ShouldBeTrue();
+        offline.ShouldBeTrue();
+        ended.ShouldBeTrue("the queued writer was still waiting five seconds after the database went offline");
+        queuedRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBK002");
+        holderRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBK002");
+        reopened.IsOffline.ShouldBeFalse();
+        (await CountAsync(reopened)).ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a registered worker whose loop throws is run again, and the engine reports Faulted")]
@@ -240,6 +318,66 @@ public sealed class KeyValueWorkerResilienceTests
         state.ShouldBe(EngineState.Faulted);
         worker.Stopped.ShouldBeTrue();
     }
+
+    // The checkpoint trigger and the load window of the pace test. The writer outpaces the
+    // checkpointer in memory, so even with no fault the journal peaks at many times the trigger;
+    // the peak is compared with the no-fault peak, floored at 1 MiB so a quiet baseline run does
+    // not make the bound tighter than the noise. A worker-wide backoff peaked above 150 MB.
+    private const long PacePeakFloor = 1024 * 1024;
+    private const long PaceJournalSize = 64 * 1024;
+    private static readonly TimeSpan PaceWindow = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Writes to the healthy database for <see cref="PaceWindow"/>, with checkpoints triggered by
+    /// journal size, while the failing database's checkpoint is due and, under the fault, fails.
+    /// </summary>
+    private static async Task<CheckpointPace> MeasureHealthyCheckpointsAsync(bool fault)
+    {
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.CheckpointJournalSize = PaceJournalSize;
+        await using var engine = KeyValueDatabaseEngine.Create(options);
+        var failing = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
+        var healthy = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var failingFaults = strategy.Faults(Failing);
+        var healthyFaults = strategy.Faults(Healthy);
+
+        failingFaults.FailPageWrites = fault;
+        try
+        {
+            // The failing database's journal reaches the trigger (or, with no fault, is checkpointed).
+            long failingCheckpoints = failingFaults.HeaderWrites;
+            for (int id = 0; failing.DataStorage.JournalLength < PaceJournalSize && failingFaults.HeaderWrites == failingCheckpoints; id += 10)
+            {
+                await PutAsync(failing, id, 10);
+            }
+
+            if (fault)
+            {
+                (await Eventually(() => worker.FailureCount >= 1)).ShouldBeTrue();
+            }
+
+            long checkpoints = healthyFaults.HeaderWrites;
+            long failedPasses = worker.FailureCount;
+            long peak = 0;
+            var watch = Stopwatch.StartNew();
+            for (int id = 0; watch.Elapsed < PaceWindow; id += 10)
+            {
+                await PutAsync(healthy, id, 10);
+                peak = Math.Max(peak, healthy.DataStorage.JournalLength);
+            }
+
+            return new CheckpointPace(healthyFaults.HeaderWrites - checkpoints, peak, worker.FailureCount - failedPasses);
+        }
+        finally
+        {
+            failingFaults.Clear();
+        }
+    }
+
+    /// <summary>The healthy database's checkpoints and journal peak over the window, and the worker's failed passes.</summary>
+    private readonly record struct CheckpointPace(long Checkpoints, long PeakJournal, long FailedPasses);
 
     private static KeyValueDatabaseEngineOptions Options(FaultInjectingJournalStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
     {

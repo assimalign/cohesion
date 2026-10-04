@@ -21,9 +21,10 @@ using Assimalign.Cohesion.Database.Storage;
 /// <para>
 /// A durable flush that fails takes its database offline (#1243): the storage releases the
 /// committers waiting on it, each gets the refusal from its own flush, and the worker keeps
-/// flushing the engine's other databases. Any other failure of one file set is reported and the
-/// pass goes on to the next (#1268); its committers self-help within their window meanwhile, as
-/// they do whenever the worker is late.
+/// flushing the engine's other databases. Any other failure of one file set is reported for its
+/// database and the pass goes on to the next (#1268); the database is flushed again after
+/// <see cref="DatabaseEngineWorker.FailureBackoff"/>, and its committers self-help within their
+/// window meanwhile, as they do whenever the worker is late.
 /// </para>
 /// </remarks>
 internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
@@ -63,7 +64,7 @@ internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
     }
 
     /// <inheritdoc />
-    protected override bool RunIterationCore(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         // Reset before flushing: a commit that registers mid-pass sets the signal
         // again and is picked up by the next pass instead of being lost.
@@ -78,7 +79,7 @@ internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
 
             // An offline database flushes nothing (#1243): its waiting committers were released
             // when it went offline, and each gets the refusal from its own flush.
-            if (database.IsOffline)
+            if (database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }
@@ -86,8 +87,6 @@ internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
             FlushPending(database, database.DataStorage);
             FlushPending(database, database.CatalogStorage);
         }
-
-        return true;
     }
 
     private void FlushPending(KeyValueDatabaseInstance database, KeyValueStorage storage)
@@ -107,7 +106,7 @@ internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
             // pass flushes it again. An offline database's refusal is not the worker's failure.
             if (!database.IsOffline)
             {
-                ReportFailure(exception);
+                ReportFailure(database.Name, exception);
             }
         }
     }

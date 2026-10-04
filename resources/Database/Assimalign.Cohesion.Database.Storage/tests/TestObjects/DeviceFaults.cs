@@ -81,6 +81,14 @@ internal sealed class DeviceFaults
     internal long PageWrites => Interlocked.Read(ref _pageWrites);
 
     /// <summary>
+    /// Gets the number of writes to page 0 that succeeded so far: each checkpoint writes the file
+    /// header once, so a test counts a file set's checkpoints with it.
+    /// </summary>
+    internal long HeaderWrites => Interlocked.Read(ref _headerWrites);
+
+    private long _headerWrites;
+
+    /// <summary>
     /// Switches every fault off.
     /// </summary>
     internal void Clear()
@@ -128,6 +136,10 @@ internal sealed class DeviceFaults
         if (offset >= Page.Size)
         {
             Interlocked.Increment(ref _pageWrites);
+        }
+        else
+        {
+            Interlocked.Increment(ref _headerWrites);
         }
     }
 
