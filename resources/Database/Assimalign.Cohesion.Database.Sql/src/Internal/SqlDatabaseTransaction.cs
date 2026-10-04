@@ -55,6 +55,12 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
         {
             await _coordinator.CommitAsync(_context, cancellationToken).ConfigureAwait(false);
         }
+        catch (TransactionCommitUnconfirmedException exception)
+        {
+            // Committed (the context reports Committed); only the commit record's durability
+            // is unconfirmed, so this is not an abort and the work must not be retried.
+            throw new DatabaseTransactionCommitUnconfirmedException(exception.Message, exception);
+        }
         catch (TransactionDeadlockException exception)
         {
             throw new DatabaseTransactionDeadlockException(exception.Message, exception);
@@ -68,8 +74,16 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The token is observed only before the rollback starts: a token canceled by
+    /// then leaves the transaction active. A started rollback runs to completion
+    /// and always ends the transaction (#1226) — a rollback stopped half way would
+    /// leave the writer holding its locks.
+    /// </remarks>
     public async ValueTask RollbackAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (_context.State != TransactionState.Active)
         {
             throw new DatabaseException($"Cannot rollback transaction in state '{_context.State}'.");
@@ -77,7 +91,7 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
 
         try
         {
-            await _coordinator.RollbackAsync(_context, cancellationToken).ConfigureAwait(false);
+            await _coordinator.RollbackAsync(_context, CancellationToken.None).ConfigureAwait(false);
         }
         catch (TransactionAbortedException exception)
         {

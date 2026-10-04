@@ -90,6 +90,67 @@ public sealed class KeyValueLifecycleTests
     }
 
     /// <summary>
+    /// The #1225 and #1226 end rules meet: a rollback whose undo the journal rejects ends the
+    /// transaction but defers the undo, so the transaction keeps the key locks of what it wrote
+    /// until the purge pass completes the undo (#1226). Its command parked on another key's lock
+    /// still fails at once (#1225): the deferred end fails the request it finds queued, as the
+    /// release at any other end does, instead of leaving it queued until the blocker ends.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Lifecycle: a rollback whose undo is deferred fails a parked command at once and keeps its written keys locked")]
+    public async Task PutAsync_RollbackDefersUndoWhileCommandWaitsForKeyLock_ShouldFailCommandAtOnceAndHoldWrittenKeys()
+    {
+        // Arrange: the blocker holds the lock of a fresh key; the waiter wrote another key first.
+        var (engine, database) = await CreateAsync(options =>
+        {
+            options.StorageStrategy = new FaultInjectingJournalStorageStrategy();
+            options.MaintenanceInterval = TimeSpan.FromHours(1);
+            options.CheckpointInterval = TimeSpan.FromHours(1);
+        });
+        await using var _ = engine;
+        var instance = (Internal.KeyValueDatabaseInstance)database;
+        await using var waitingSession = await database.CreateSessionAsync();
+        await using var blockingSession = await database.CreateSessionAsync();
+        await using var observer = await database.CreateSessionAsync();
+        var blocker = await blockingSession.BeginTransactionAsync(TestTimeout.Token());
+        await database.PutAsync(blockingSession, Bytes("hot"), Bytes("blocker"), cancellationToken: TestTimeout.Token());
+        var waiting = await waitingSession.BeginTransactionAsync(TestTimeout.Token());
+        await database.PutAsync(waitingSession, Bytes("earlier"), Bytes("waiter"), cancellationToken: TestTimeout.Token());
+        var pending = database.PutAsync(waitingSession, Bytes("hot"), Bytes("waiter"), cancellationToken: TestTimeout.Token(30)).AsTask();
+        bool parked = !pending.IsCompleted;
+
+        // Act: the undo's first journal write (its storage bracket's begin) fails, so the kernel
+        // ends the transaction and defers the undo.
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            await waiting.RollbackAsync(TestTimeout.Token());
+            unspent = failures.Remaining;
+        }
+        var error = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending.WaitAsync(TestTimeout.Token()));
+        var blockerStateWhenTheCommandFailed = blocker.State;
+        int deferred = instance.Coordinator.VersionStore.PendingAbortedPurges.Count;
+        var overwrite = database.PutAsync(observer, Bytes("earlier"), Bytes("observer"), cancellationToken: TestTimeout.Token(30)).AsTask();
+        await Task.WhenAny(overwrite, Task.Delay(TimeSpan.FromMilliseconds(250)));
+        bool overwroteBeforeTheUndo = overwrite.IsCompleted;
+        instance.Coordinator.RunVersionPurgePass(TestTimeout.Token());
+        (await overwrite.WaitAsync(TestTimeout.Token())).Applied.ShouldBeTrue();
+        await blocker.CommitAsync(TestTimeout.Token());
+
+        // Assert
+        parked.ShouldBeTrue();
+        unspent.ShouldBe(0);
+        deferred.ShouldBe(1);
+        waiting.State.ShouldBe(TransactionState.RolledBack);
+        error.InnerException.ShouldBeOfType<TransactionAbortedException>();
+        error.Message.ShouldContain("ended while it waited", Case.Sensitive);
+        blockerStateWhenTheCommandFailed.ShouldBe(TransactionState.Active);
+        overwroteBeforeTheUndo.ShouldBeFalse();
+        instance.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        Text((await database.GetAsync(observer, Bytes("earlier"), TestTimeout.Token())).ShouldNotBeNull().Value).ShouldBe("observer");
+        Text((await database.GetAsync(observer, Bytes("hot"), TestTimeout.Token())).ShouldNotBeNull().Value).ShouldBe("blocker");
+    }
+
+    /// <summary>
     /// A DELETE parked on a key lock when its transaction rolls back fails and leaves the key as
     /// the blocking transaction committed it, and the key's next writer is not blocked.
     /// </summary>

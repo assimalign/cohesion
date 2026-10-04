@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -34,7 +35,20 @@ internal sealed class JournalTransactionLog : ITransactionLog
     {
         cancellationToken.ThrowIfCancellationRequested();
         long lsn = _journal.AppendCommit((long)sequence.Value);
-        _journal.EnsureDurable(lsn);
+
+        try
+        {
+            _journal.EnsureDurable(lsn);
+        }
+        catch (Exception exception)
+        {
+            // The record is in the journal, which recovery reads as committed: the
+            // transaction can no longer abort, only its durability is open.
+            throw new TransactionCommitUnconfirmedException(
+                $"Transaction {sequence} committed, but its commit record could not be made durable; " +
+                "the commit is lost if the process stops before the journal is next flushed.", exception);
+        }
+
         return default;
     }
 

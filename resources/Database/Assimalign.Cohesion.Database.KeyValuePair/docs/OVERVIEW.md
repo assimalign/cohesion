@@ -22,10 +22,12 @@ keys order by unsigned lexicographic byte comparison.
   etag-conditional writes).
 - Explicit transactions: a failed command writes nothing and leaves the transaction
   active, so later commands stay inside it until the caller commits or rolls back. A
-  rollback can be repeated, and a commit or rollback that does not complete leaves the
-  transaction faulted, refusing commands with `COHDBK001` until a rollback completes. A
-  rollback or a closed session ends the transaction even under a running command, which
-  then fails and writes nothing; a commit while a command runs is refused.
+  rollback can be repeated, and a started rollback always ends the transaction, even when
+  the journal rejects its abort record or its undo (the kernel then keeps the written keys
+  locked until its purge pass completes the undo). A transaction the kernel ended under its
+  caller refuses commands and COMMIT with `COHDBK001`. A rollback or a closed session ends
+  the transaction even under a running command, which then fails and writes nothing; a
+  commit while a command runs is refused.
 - Sessions address exactly one database (A5). All five typed operations reject
   sessions from another database; text and typed requests execute only against
   the receiving session's database. Database/server administration stays on the

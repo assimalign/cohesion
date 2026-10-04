@@ -20,8 +20,8 @@ using static KeyValueTestHarness;
 /// explicit transaction active, as a failed SQL statement does; later commands stay inside the
 /// transaction and ROLLBACK undoes them. The transaction's own end follows the #1188 contract:
 /// a rollback can be repeated, a token is observed only before a commit or rollback starts, and a
-/// commit or rollback that does not complete leaves the transaction faulted, refusing commands and
-/// BEGIN with COHDBK001 until a rollback completes.
+/// transaction the kernel ended under its caller refuses COMMIT with COHDBK001. A started rollback
+/// always ends the transaction (#1226), even when its abort record cannot be written.
 /// </summary>
 public sealed class KeyValueTransactionFailureTests
 {
@@ -168,9 +168,55 @@ public sealed class KeyValueTransactionFailureTests
         (await Keys(database, session)).ShouldBe(["first", "second"]);
     }
 
-    /// <summary>A rollback that does not complete leaves the transaction faulted and refusing work until a rollback completes.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: a rollback that does not complete leaves the transaction faulted")]
-    public async Task RollbackAsync_ThatDoesNotComplete_ShouldLeaveTransactionFaultedUntilRetried()
+    /// <summary>
+    /// A rollback whose abort record cannot be written still ends the transaction and releases its
+    /// key locks, so another session's writer of the same key proceeds and the session runs
+    /// commands and BEGIN again (#1226). Until #1226 such a rollback failed and left the
+    /// transaction Faulted, refusing work with COHDBK001, until a later rollback completed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: a rollback whose abort record cannot be written still ends the transaction")]
+    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndReleaseKeyLocks()
+    {
+        // Arrange
+        var (engine, database) = await CreateAsync(options => options.StorageStrategy = new FaultInjectingJournalStorageStrategy());
+        await using var _ = engine;
+        await using var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        await database.PutAsync(session, Bytes("keep"), Bytes("v"), cancellationToken: TestTimeout.Token());
+        var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
+
+        // A delete of a missing key takes the key's lock and writes no version, so the abort
+        // record is the rollback's only journal write.
+        (await database.TryDeleteAsync(session, Bytes("missing"), cancellationToken: TestTimeout.Token())).ShouldBeFalse();
+
+        // Act
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            await transaction.RollbackAsync(TestTimeout.Token());
+            unspent = failures.Remaining;
+        }
+
+        // Assert: the record write failed, and the rollback ended the transaction anyway.
+        unspent.ShouldBe(0);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        session.CurrentTransaction.ShouldBeNull();
+        (await database.PutAsync(other, Bytes("missing"), Bytes("other"), cancellationToken: TestTimeout.Token(5))).Applied.ShouldBeTrue();
+        await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token());
+        await using (var next = await session.BeginTransactionAsync(TestTimeout.Token()))
+        {
+            await database.PutAsync(session, Bytes("after"), Bytes("v"), cancellationToken: TestTimeout.Token());
+            await next.CommitAsync(TestTimeout.Token());
+        }
+        (await Keys(database, session)).ShouldBe(["after", "keep", "missing"]);
+    }
+
+    /// <summary>
+    /// After a rollback whose abort record was lost, the transaction is rolled back like any other:
+    /// COMMIT is refused and commits nothing, and a repeated rollback raises nothing.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: COMMIT after a rollback whose abort record was lost is refused")]
+    public async Task CommitAsync_AfterRollbackWithLostAbortRecord_ShouldBeRefused()
     {
         // Arrange
         var (engine, database) = await CreateAsync(options => options.StorageStrategy = new FaultInjectingJournalStorageStrategy());
@@ -178,62 +224,21 @@ public sealed class KeyValueTransactionFailureTests
         await using var session = await database.CreateSessionAsync();
         await database.PutAsync(session, Bytes("keep"), Bytes("v"), cancellationToken: TestTimeout.Token());
         var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
-        (await database.GetAsync(session, Bytes("keep"), TestTimeout.Token())).ShouldNotBeNull();
-
-        // Act: the abort record is the rollback's only journal write, so failing it fails the rollback.
-        IOException rollbackFailure;
+        (await database.TryDeleteAsync(session, Bytes("missing"), cancellationToken: TestTimeout.Token())).ShouldBeFalse();
         using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
         {
-            rollbackFailure = await Should.ThrowAsync<IOException>(async () => await transaction.RollbackAsync(TestTimeout.Token()));
-        }
-        var faultedState = transaction.State;
-        var currentWhileFaulted = session.CurrentTransaction;
-        var refused = await Should.ThrowAsync<DatabaseException>(async () =>
-            await database.PutAsync(session, Bytes("late"), Bytes("v"), cancellationToken: TestTimeout.Token()));
-        var refusedText = await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token()));
-        var beginRefused = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(TestTimeout.Token()));
-        await transaction.RollbackAsync(TestTimeout.Token());
-
-        // Assert
-        faultedState.ShouldBe(TransactionState.Faulted);
-        currentWhileFaulted.ShouldBeSameAs(transaction);
-        refused.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
-        refused.Message.ShouldContain("did not complete", Case.Sensitive);
-        refused.InnerException.ShouldBeSameAs(rollbackFailure);
-        refusedText.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
-        beginRefused.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
-        transaction.State.ShouldBe(TransactionState.RolledBack);
-        session.CurrentTransaction.ShouldBeNull();
-        await database.PutAsync(session, Bytes("after"), Bytes("v"), cancellationToken: TestTimeout.Token());
-        (await Keys(database, session)).ShouldBe(["after", "keep"]);
-    }
-
-    /// <summary>COMMIT after a rollback that did not complete fails with COHDBK001, commits nothing, and ends the transaction.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: COMMIT after an incomplete rollback fails and ends the transaction")]
-    public async Task CommitAsync_AfterRollbackThatDidNotComplete_ShouldFailAndEndTransaction()
-    {
-        // Arrange
-        var (engine, database) = await CreateAsync(options => options.StorageStrategy = new FaultInjectingJournalStorageStrategy());
-        await using var _ = engine;
-        await using var session = await database.CreateSessionAsync();
-        var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
-        (await database.GetAsync(session, Bytes("missing"), TestTimeout.Token())).ShouldBeNull();
-        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
-        {
-            await Should.ThrowAsync<IOException>(async () => await transaction.RollbackAsync(TestTimeout.Token()));
+            await transaction.RollbackAsync(TestTimeout.Token());
         }
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(TestTimeout.Token()));
+        await transaction.RollbackAsync(TestTimeout.Token());
 
         // Assert
-        error.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
-        error.Message.ShouldContain("nothing was committed", Case.Sensitive);
-        error.InnerException.ShouldBeOfType<IOException>();
+        error.Message.ShouldBe("Cannot commit transaction in state 'RolledBack'.");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        await transaction.RollbackAsync(TestTimeout.Token());
+        (await Keys(database, session)).ShouldBe(["keep"]);
     }
 
     /// <summary>A commit the kernel aborts crosses the boundary translated, and a catch-block rollback afterwards raises nothing.</summary>

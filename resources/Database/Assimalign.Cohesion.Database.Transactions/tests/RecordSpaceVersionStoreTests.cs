@@ -161,6 +161,38 @@ public class RecordSpaceVersionStoreTests
         await coordinator.RollbackAsync(writer, CancellationToken.None);
     }
 
+    /// <summary>
+    /// A version the snapshot cannot see reads as no version, not as an empty payload.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Record visibility: an invisible version reads as null")]
+    public async Task GetVisibleVersion_WriterInFlight_ShouldReturnNull()
+    {
+        // Arrange
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        (PageId PageId, int SlotIndex) location = default;
+        await coordinator.ApplyStatementAsync(writer, bracket =>
+        {
+            location = storage.Insert(bracket, Stamped(writer.Sequence, TransactionSequence.None, 7));
+            coordinator.VersionStore.RecordCreated(writer.Sequence, location.PageId, location.SlotIndex);
+            return 0;
+        }, CancellationToken.None);
+        ulong packed = storage.PackLocation(location.PageId, location.SlotIndex);
+
+        // Act
+        var hidden = await coordinator.VersionStore.GetVisibleVersionAsync(0, packed, reader.Snapshot);
+        var own = await coordinator.VersionStore.GetVisibleVersionAsync(0, packed, writer.Snapshot);
+
+        // Assert
+        hidden.HasValue.ShouldBeFalse();
+        own.HasValue.ShouldBeTrue();
+        own!.Value.Span[RecordVersionStamp.HeaderSize].ShouldBe((byte)7);
+        await coordinator.RollbackAsync(writer, CancellationToken.None);
+        await coordinator.CommitAsync(reader, CancellationToken.None);
+    }
+
     private static byte[] Stamped(TransactionSequence writer, TransactionSequence deleter, byte payload)
     {
         byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];

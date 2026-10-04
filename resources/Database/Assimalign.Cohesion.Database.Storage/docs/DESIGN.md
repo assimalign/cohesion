@@ -43,8 +43,9 @@ the journal only — there are no side files.
 ### Why the file header lives in the page body
 
 `StorageFileHeader` (magic, format version, storage id/name, page counts, checkpoint
-LSN) sits in the **body** of page 0 — after the standard 96-byte page header — not at
-file offset 0. An earlier draft overlaid the file header on the page header, which made
+LSN, sequence floor, checkpoint anchor count) sits in the **body** of page 0 — after the
+standard 96-byte page header — not at file offset 0. The rest of the body after its 256
+bytes holds the checkpoint anchor's sequences ("Checkpoints"). An earlier draft overlaid the file header on the page header, which made
 page 0 un-checksummable and un-typed. Making page 0 a normal `PageType.FileHeader` page
 means one integrity rule covers every page in the file, including the header.
 
@@ -291,6 +292,43 @@ sequence — GUID identity belongs to the transaction layer above.
    conflict surface without ever weakening the invariant that makes page-image
    logging correct.
 
+### Failed appends (#1226)
+
+A journal append that fails must not leave the journal or the storage in a state that
+outlives the failure:
+
+- **A partial frame is cut back off.** A write that fails part way can leave the start
+  of its frame at the end of the stream, and the read scan stops at the first frame that
+  does not verify, so every frame appended after it, commit records included, would be
+  invisible to recovery. `StreamJournal` therefore truncates the stream back to where
+  the failed frame began before the failure propagates. When that truncation fails too,
+  the journal refuses every later append with `JournalException` until a checkpoint's
+  truncation removes the partial frame or the storage is reopened: a record that could
+  not reach recovery is never acknowledged. Flushing stays allowed, because everything
+  before the partial frame still reads. PostgreSQL stops the server on any failed WAL
+  write (`ereport(PANIC, "could not write to log file ...")`,
+  `src/backend/access/transam/xlog.c:2529-2531`, commit `85f55534e80`); this journal
+  stops only its appends.
+- **A page whose before image fails is not locked.** A first touch takes the page's
+  write lock, then appends the before image. When that append fails the page is still
+  unmodified and the transaction holds no before image of it, and commit and rollback
+  release page locks by before image, so the touch releases the lock itself before the
+  failure propagates. Otherwise the page would stay locked to a finished transaction,
+  and every later transaction touching it, the retry of a failed undo included, would be
+  refused until a restart.
+- **A bracket whose begin record fails is not counted.** `BeginTransaction` counts the
+  bracket as active before it appends the begin record (under the lock checkpoints
+  take), and returns the count when the append fails, since no scope exists for the
+  caller to complete. Otherwise every later checkpoint would refuse to run until a
+  restart.
+- **A rollback ends its bracket even when its rollback record fails.** The record is
+  advisory: recovery undoes every bracket without a commit record. Once the pages are
+  restored from their before images, the bracket's page write locks and its place in
+  the active count are released, and the scope is completed in the same step, before
+  the append failure propagates; disposing the scope afterwards does not roll it back
+  a second time. A failure while restoring the pages leaves the bracket active, so the
+  caller can retry it.
+
 ### The physical/logical bracket interplay (MVCC layering rules)
 
 The MVCC session binding (area DESIGN.md §3.8, first delivered by the SQL
@@ -316,9 +354,10 @@ engine) added three storage-side rules that keep the logical layer sound:
   (they predate row stamps).
 - **Checkpoints carry logical actives; the open-time checkpoint is deferrable.**
   `Checkpoint(ReadOnlySpan<long>)` embeds in-flight *logical* sequences in the
-  truncating checkpoint record (their begin records are being destroyed;
-  `TransactionRecovery.Analyze` reads them back so an unproven sequence still
-  classifies as aborted). Storage-level brackets must still be quiescent — the
+  truncating checkpoint record and, first, in the file header's checkpoint anchor
+  (their begin records are being destroyed; `TransactionRecovery.Analyze` reads them
+  back so an unproven sequence still classifies as aborted, even when the record itself
+  was lost; see "Checkpoints"). Storage-level brackets must still be quiescent — the
   active-count interlock is unchanged, and logical actives are the caller's to
   supply because storage cannot see above its own layer. Symmetrically,
   `OpenExisting(checkpointOnOpen: false)` lets an engine analyze the recovered
@@ -359,6 +398,26 @@ LSN comparisons depend on monotonicity across truncation). Checkpointing require
 active transactions — truncating live before-images would orphan stolen writes; fuzzy
 checkpoints are a later feature (the record already carries the active-transaction
 set). Clean shutdown checkpoints, so a clean reopen recovers instantly.
+
+**The checkpoint anchor (#1226 integration review).** `Checkpoint(ReadOnlySpan<long>)` also
+writes the logical sequences it is given into page 0, after `StorageFileHeader` (count in
+`CheckpointActiveCount`, the sequences as little-endian 64-bit values in the rest of the
+page body, at most `StorageFileHeader.CheckpointAnchorCapacity`, 980 with 8 KiB pages), and
+it does so before the data flush, so the anchor is durable before the journal is truncated.
+The journal's checkpoint record carries the same list, but it is appended after the
+truncation: a failed append there leaves an empty journal (the failed frame is cut back off,
+"Failed appends" above), and so does a crash between the truncation and the record's flush.
+Without the anchor nothing would then name the logical transactions whose begin records the
+truncation destroyed while their row versions sit in durable data pages, and the
+transaction layer would read those versions as committed. With it, `Storage.CheckpointActiveTransactions`
+returns the list at the next open and `TransactionRecovery.Analyze` classifies it like a
+checkpoint record's list (`Database.Transactions` DESIGN.md, "Recovery and checkpoint
+interlock"). Every checkpoint replaces the anchor; the non-idle shutdown path, which does
+not truncate, leaves it as the last checkpoint wrote it, so it always matches the journal's
+truncation point. A checkpoint given more sequences than the anchor holds is refused with
+`StorageTransactionException` before it writes anything, which background checkpointers
+already treat as busy; PostgreSQL keeps the equivalent outside its WAL too (`pg_control`
+holds the checkpoint location that survives WAL recycling).
 
 **Except when nothing was written since open.** An opened file set whose journal
 position and sequence counter are unchanged at shutdown (no transaction, no
@@ -427,8 +486,10 @@ here exactly as everywhere else.
 
 ### What is deliberately unlogged
 
-Page 0 (the file header) carries only recomputable bookkeeping and is rebuilt or
-revalidated on open; it is flushed but never journaled. Page allocation is likewise
+Page 0 (the file header) carries recomputable bookkeeping, rebuilt or revalidated on
+open, and the checkpoint anchor, which is not recomputable but needs no journal: every
+checkpoint writes it and makes it durable before it truncates the journal ("Checkpoints").
+Page 0 is flushed but never journaled. Page allocation is likewise
 not undone on rollback — a page allocated by an aborted transaction is restored to
 its empty initialized image and leaks safely until reused.
 

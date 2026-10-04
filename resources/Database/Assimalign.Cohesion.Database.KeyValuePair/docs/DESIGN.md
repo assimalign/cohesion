@@ -158,15 +158,28 @@ a different contract from Graph, Documents and Blob, deliberately:
   observes its cancellation token only before it starts, and one that started runs to completion:
   until #1225 a canceled commit token became a kernel abort ("the commit record could not be made
   durable"), and a canceled or failed rollback left the context active, usable and queued for the
-  version-purge worker, which would undo work the session went on writing in it. When a caller's
-  commit or rollback fails with the context still active, the transaction stays
-  `CurrentTransaction` and reports `Faulted`, and the session refuses commands (typed and text,
-  the text before it is parsed) and BEGIN with `COHDBK001` naming the failure until a
-  `RollbackAsync` completes; a `CommitAsync` then completes the rollback and fails with
-  `COHDBK001`, committing nothing. `CurrentTransaction` returns the transaction until the caller
-  ends it, and null after a commit, rollback or disposal (it used to return the ended
-  transaction). Disposing the session rolls back an open transaction, and a commit of that
-  transaction afterwards fails with `COHDBK001` naming the closure.
+  version-purge worker, which would undo work the session went on writing in it. A started
+  rollback also always ends the transaction (#1226, [Transactions DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#ending-a-transaction-a-started-rollback-always-completes-1226)):
+  the kernel ignores a lost abort record, and when the undo itself fails it ends the
+  transaction but keeps the key locks of what it wrote until the version-purge pass completes
+  the undo. So the end-failure state #1225 first gave this engine, where a commit or rollback
+  that failed with the context still active left the transaction `Faulted` and refusing work
+  with `COHDBK001` until a later rollback completed, is gone, as it is in Graph. The kernel still
+  refuses a rollback before it starts while the database closes (`ObjectDisposedException`: the
+  manager's disposal flags itself before it claims any end); the session then refuses commands
+  in the ended transaction ("being committed or rolled back"), another `RollbackAsync` fails the
+  same way while the close runs and is accepted once the close's abort ended the context, and a
+  `CommitAsync` commits nothing: it fails with `ObjectDisposedException` while the database
+  closes, or reports the `Faulted` state once disposal's abort ended the context. A commit whose
+  record was written but could not be made durable throws
+  `DatabaseTransactionCommitUnconfirmedException` and leaves the transaction `Committed`
+  (`Database.Transactions` DESIGN.md). A transaction the kernel ended under its caller (disposal's abort, or a
+  commit the kernel aborted) reports `Faulted` and refuses commands (typed and text, the text
+  before it is parsed) and BEGIN with `COHDBK001` until the caller ends it. `CurrentTransaction`
+  returns the transaction until the caller ends it, and null after a commit, rollback or disposal
+  (it used to return the ended transaction). Disposing the session rolls back an open
+  transaction, and a commit of that transaction afterwards fails with `COHDBK001` naming the
+  closure.
 - **A rollback leaves no write behind, even under a running command.** The transaction can end on
   another thread while one of its commands runs: the caller's rollback, the session closing, or a
   host rolling back a wire session's transaction while a wire command waits for a key lock. Until
@@ -177,9 +190,12 @@ a different contract from Graph, Documents and Blob, deliberately:
   until restart. Now three rules close it. The kernel admits no bracket of a transaction whose
   end has begun ([Transactions DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#ending-a-transaction-under-a-running-statement)).
   The end fails the transaction's queued lock requests, so the parked command fails at once with
-  `DatabaseTransactionAbortedException`. And a request queued just after the end is checked once
+  `DatabaseTransactionAbortedException`, even when the kernel defers the rollback's undo and the
+  transaction keeps the locks it was granted. And a request queued just after the end is checked once
   the grant arrives: the executor releases a grant made to an ended transaction and fails the
-  command, as the Graph, Documents and Blob engines do for their writer lock. A grant to a
+  command, as the Graph, Documents and Blob engines do for their writer lock; while the kernel
+  still tracks the transaction (its undo deferred), the coordinator's lock manager leaves that
+  release to the transaction manager, which makes it once the undo completes. A grant to a
   transaction that is still active is kept when the command then fails, because releasing all of
   the transaction's locks would expose the keys its earlier commands wrote.
 - **A commit waits for no command.** A commit that starts while a command of the transaction is

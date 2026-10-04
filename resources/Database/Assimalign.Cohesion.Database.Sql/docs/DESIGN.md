@@ -755,7 +755,11 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   exists (never run weaker than requested). Kernel aborts surface wrapped in
   the root's `DatabaseTransactionAbortedException` (deadlock victims:
   `DatabaseTransactionDeadlockException` — retryable by construction, an
-  `ExecutionFailure` on the wire, session stays usable). On every database
+  `ExecutionFailure` on the wire, session stays usable). A commit whose record
+  was written but could not be made durable is not an abort: the transaction
+  is `Committed`, and the commit throws the root's
+  `DatabaseTransactionCommitUnconfirmedException`, which is not retryable
+  (`Database.Transactions` DESIGN.md). On every database
   open the coordinator runs `TransactionRecovery.Analyze` over the recovered
   journal (the storage strategy defers the open-time checkpoint for exactly
   this) and scrubs every unproven writer's stamps out of the record space —
@@ -1129,7 +1133,10 @@ its visibility snapshot. `COMMIT` awaits the coordinator's durable commit;
 `ROLLBACK` undoes row and index versions and releases locks. Closing the session,
 including EOF, explicit wire termination, or server shutdown, rolls back an open
 transaction before releasing the session. The C# transaction API and SQL control
-commands operate on the same scope.
+commands operate on the same scope. A rollback observes the caller's token only
+before it starts; a started rollback always ends the transaction, even when the
+journal rejects its abort record (#1226, `Database.Transactions` DESIGN.md,
+"Ending a transaction").
 
 The session owns `Stack<SqlTransactionScope>`, with zero entries outside a
 transaction and exactly one root entry in B2. Each scope carries its transaction

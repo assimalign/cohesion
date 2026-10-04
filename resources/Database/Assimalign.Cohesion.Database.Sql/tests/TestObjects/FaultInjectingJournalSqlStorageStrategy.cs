@@ -3,21 +3,22 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 
-using Assimalign.Cohesion.Database.Graph.Storage;
+namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
+
+using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
-namespace Assimalign.Cohesion.Database.Graph.Tests;
-
 /// <summary>
-/// An in-memory graph storage strategy whose journal fails writes on demand. Writes fail only on
+/// An in-memory SQL storage strategy whose journals fail writes on demand. Writes fail only on
 /// the asynchronous flow that armed the failure, so a test can fail one journal append of its own
-/// call while the engine's background workers keep writing normally. A database the engine closed
-/// can be reopened from the bytes its storage left behind, as a file set would be.
+/// call while the engine's background workers keep writing normally. A file set the engine closed
+/// can be reopened from the bytes its storage left behind, as files on disk would be.
 /// </summary>
-internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrategy
+internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrategy
 {
     private static readonly AsyncLocal<Budget?> s_failures = new();
-    private readonly Dictionary<string, Files> _databases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Files> _storages = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
 
     /// <summary>
@@ -35,67 +36,60 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
         return new FailureScope(previous, budget);
     }
 
-    public GraphStorage CreateStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    /// <inheritdoc />
+    public SqlStorage CreateStorage(string databaseName)
     {
         var files = new Files(new MemoryStream(), new FaultInjectingStream(), new MemoryStream());
         lock (_sync)
         {
-            _databases[databaseName.ToString()] = files;
+            if (!_storages.TryAdd(databaseName, files))
+            {
+                throw new DatabaseException($"Fault-injecting storage for '{databaseName}' already exists.");
+            }
         }
 
-        return GraphStorage.Create(new StorageStream(files.Data), new StorageStream(files.Journal),
-            new StorageStream(files.Backup), databaseName, durability);
+        return SqlStorage.Create(new StorageStream(files.Data), new StorageStream(files.Journal),
+            new StorageStream(files.Backup), databaseName);
     }
 
     /// <summary>
-    /// Reopens a database from the bytes its last storage left behind. A memory stream keeps its
+    /// Reopens a file set from the bytes its last storage left behind. A memory stream keeps its
     /// bytes after disposal, so this works for a storage the engine closed.
     /// </summary>
-    public GraphStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    /// <inheritdoc />
+    public SqlStorage OpenStorage(string databaseName)
     {
         Files files;
         lock (_sync)
         {
-            if (!_databases.TryGetValue(databaseName.ToString(), out var closed))
+            if (!_storages.TryGetValue(databaseName, out var closed))
             {
                 throw new DatabaseNotFoundException($"Database '{databaseName}' does not exist.");
             }
 
             files = new Files(Copy(closed.Data, new MemoryStream()), Copy(closed.Journal, new FaultInjectingStream()), Copy(closed.Backup, new MemoryStream()));
-            _databases[databaseName.ToString()] = files;
+            _storages[databaseName] = files;
         }
 
-        return GraphStorage.Open(new StorageStream(files.Data), new StorageStream(files.Journal),
-            new StorageStream(files.Backup), checkpointOnOpen: false, durability);
+        return SqlStorage.Open(new StorageStream(files.Data), new StorageStream(files.Journal),
+            new StorageStream(files.Backup), checkpointOnOpen: false);
     }
 
-    public void DropStorage(DatabaseName databaseName)
+    /// <inheritdoc />
+    public void DropStorage(string databaseName)
     {
         lock (_sync)
         {
-            _databases.Remove(databaseName.ToString());
+            _storages.Remove(databaseName);
         }
     }
 
-    public bool StorageExists(DatabaseName databaseName)
+    /// <inheritdoc />
+    public bool StorageExists(string databaseName)
     {
         lock (_sync)
         {
-            return _databases.ContainsKey(databaseName.ToString());
-        }
-    }
-
-    public IEnumerable<DatabaseName> GetDatabaseNames()
-    {
-        string[] names;
-        lock (_sync)
-        {
-            names = [.. _databases.Keys];
-        }
-
-        foreach (string name in names)
-        {
-            yield return new DatabaseName(name);
+            return _storages.ContainsKey(databaseName);
         }
     }
 
@@ -138,7 +132,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
         public int Fail { get; set; }
     }
 
-    /// <summary>The data, journal and backup streams of one database.</summary>
+    /// <summary>The data, journal and backup streams of one file set.</summary>
     private sealed record Files(MemoryStream Data, FaultInjectingStream Journal, MemoryStream Backup);
 
     // Every write funnels through the array overload, so each journal frame is counted once: a

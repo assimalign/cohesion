@@ -77,6 +77,7 @@ internal sealed partial class GraphDatabaseInstance
     {
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
+        TransactionCommitUnconfirmedException => new DatabaseTransactionCommitUnconfirmedException(error.Message, error),
         // An element whose record or index key outgrows storage fails its statement; the store
         // wrote nothing for it. It derives from StorageException, so it is matched first.
         GraphElementTooLargeException => new DatabaseException("COHDBG009: " + error.Message, error),
@@ -92,10 +93,13 @@ internal sealed partial class GraphDatabaseInstance
         try
         {
             // A session may close or its transaction may roll back while this
-            // request waits. ReleaseAll at the end fails the requests it finds
-            // queued, but one queued just after it is granted later to the ended
-            // owner, which must release that grant before the operation leaves
-            // the wait. The kernel sets the state before it releases.
+            // request waits. The end fails the requests it finds queued, but one
+            // queued just after it is granted later to the ended owner, which
+            // must release that grant before the operation leaves the wait. The
+            // kernel sets the state before it releases. While the transaction
+            // manager still tracks the owner (a rollback whose undo is deferred),
+            // the coordinator's lock manager leaves that release to the manager,
+            // which makes it once the undo completes (#1226).
             token.ThrowIfCancellationRequested();
             ThrowIfDisposed();
             if (context.State != TransactionState.Active)
@@ -131,6 +135,8 @@ internal sealed partial class GraphDatabaseInstance
         }
         finally
         {
+            // Safe after a failed coordinator close: a writer whose undo still failed is kept in
+            // flight in the storage, so its close does not truncate the journal (#1226).
             DataStorage.Dispose();
         }
     }

@@ -11,5 +11,6 @@
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Transactions" />
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\SimulatedDurableFileHandle.cs" Link="TestObjects\SimulatedDurableFileHandle.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\FaultingMemoryStream.cs" Link="TestObjects\FaultingMemoryStream.cs" />
 	</ItemGroup>
 </Project>

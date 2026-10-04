@@ -26,9 +26,18 @@ internal sealed class DefaultLockManager : ILockManager
 
     private readonly Dictionary<LockResource, LockEntry> _table = new();
     private readonly Dictionary<ulong, HashSet<ulong>> _waitFor = new();
+
+    // Owners whose transaction ended while their grants stay held (AbandonPending), until
+    // ReleaseAll releases them. Such an owner gets nothing new: see RefuseAbandonedLocked.
+    private readonly HashSet<ulong> _abandoned = new();
     private readonly object _sync = new();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// An owner whose pending requests were abandoned (<see cref="AbandonPending"/>) is refused
+    /// with <see cref="TransactionAbortedException"/> unless it already holds the resource in a
+    /// mode at least as strong as the one requested.
+    /// </remarks>
     public async ValueTask AcquireAsync(
         TransactionSequence owner,
         LockResource resource,
@@ -40,6 +49,13 @@ internal sealed class DefaultLockManager : ILockManager
         lock (_sync)
         {
             var entry = GetEntryLocked(resource);
+
+            if (RefuseAbandonedLocked(entry, owner.Value, mode))
+            {
+                RemoveIfUnusedLocked(resource, entry);
+                throw new TransactionAbortedException(
+                    $"Transaction {owner} has ended; its request for {mode} on {resource} was refused.");
+            }
 
             if (TryGrantLocked(entry, owner.Value, mode))
             {
@@ -68,11 +84,24 @@ internal sealed class DefaultLockManager : ILockManager
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Returns false for an owner whose pending requests were abandoned
+    /// (<see cref="AbandonPending"/>), unless it already holds the resource in a mode at
+    /// least as strong as the one requested.
+    /// </remarks>
     public bool TryAcquire(TransactionSequence owner, LockResource resource, LockMode mode)
     {
         lock (_sync)
         {
-            return TryGrantLocked(GetEntryLocked(resource), owner.Value, mode);
+            var entry = GetEntryLocked(resource);
+
+            if (RefuseAbandonedLocked(entry, owner.Value, mode))
+            {
+                RemoveIfUnusedLocked(resource, entry);
+                return false;
+            }
+
+            return TryGrantLocked(entry, owner.Value, mode);
         }
     }
 
@@ -94,6 +123,7 @@ internal sealed class DefaultLockManager : ILockManager
         lock (_sync)
         {
             RemoveWaitEdgesLocked(owner.Value);
+            _abandoned.Remove(owner.Value);
 
             List<LockResource>? empty = null;
 
@@ -147,13 +177,66 @@ internal sealed class DefaultLockManager : ILockManager
             waiter.Completion.TrySetResult();
         }
 
-        if (ended is not null)
+        FailEnded(owner, ended);
+    }
+
+    /// <summary>
+    /// Fails the owner's queued requests with <see cref="TransactionAbortedException"/>,
+    /// as <see cref="ReleaseAll"/> does, but keeps every lock the owner holds.
+    /// </summary>
+    /// <param name="owner">The transaction that ended while its locks stay held.</param>
+    /// <remarks>
+    /// The end of a rolled-back writer whose undo is deferred (#1226): its transaction
+    /// has ended, so a request it still has queued must not wait for a grant, but its
+    /// granted locks protect versions the undo has not removed yet and stay until the
+    /// manager releases them. Removing a queued request grants nothing to anyone else:
+    /// a grant depends only on the modes held, never on the queue ahead of it.
+    /// <para>
+    /// The owner stays abandoned until <see cref="ReleaseAll"/>: a request it makes in the
+    /// meantime (a late operation of the ended transaction) is refused unless the owner
+    /// already holds the resource in a mode at least as strong, instead of queuing. A
+    /// queued request would join the wait-for graph, where a live transaction could be
+    /// chosen as the deadlock victim of a transaction that has already ended, and a new
+    /// grant would stay held until the deferred undo completes, because only the manager
+    /// releases a tracked transaction's locks.
+    /// </para>
+    /// </remarks>
+    internal void AbandonPending(TransactionSequence owner)
+    {
+        List<(LockResource Resource, Waiter Waiter)>? ended = null;
+
+        lock (_sync)
         {
-            foreach (var (resource, waiter) in ended)
+            _abandoned.Add(owner.Value);
+            RemoveWaitEdgesLocked(owner.Value);
+
+            foreach (var (resource, entry) in _table)
             {
-                waiter.Completion.TrySetException(new TransactionAbortedException(
-                    $"Transaction {owner} ended while it waited for {waiter.Mode} on {resource}; the request was not granted."));
+                for (int i = entry.Waiters.Count - 1; i >= 0; i--)
+                {
+                    if (entry.Waiters[i].Owner == owner.Value)
+                    {
+                        (ended ??= new()).Add((resource, entry.Waiters[i]));
+                        entry.Waiters.RemoveAt(i);
+                    }
+                }
             }
+        }
+
+        FailEnded(owner, ended);
+    }
+
+    private static void FailEnded(TransactionSequence owner, List<(LockResource Resource, Waiter Waiter)>? ended)
+    {
+        if (ended is null)
+        {
+            return;
+        }
+
+        foreach (var (resource, waiter) in ended)
+        {
+            waiter.Completion.TrySetException(new TransactionAbortedException(
+                $"Transaction {owner} ended while it waited for {waiter.Mode} on {resource}; the request was not granted."));
         }
     }
 
@@ -170,6 +253,25 @@ internal sealed class DefaultLockManager : ILockManager
         }
 
         waiter.Completion.TrySetCanceled();
+    }
+
+    /// <summary>
+    /// Whether a request of an abandoned owner must be refused: everything except a re-grant
+    /// of a resource the owner already holds in a mode at least as strong, which changes
+    /// nothing for anyone else (the engines' writer-lock helpers re-request the database lock
+    /// their transaction holds, then see the end and give the grant back).
+    /// </summary>
+    private bool RefuseAbandonedLocked(LockEntry entry, ulong owner, LockMode mode)
+        => _abandoned.Contains(owner)
+            && !(entry.Granted.TryGetValue(owner, out var held) && Strength(held) >= Strength(mode));
+
+    // A refused request may have created the entry it looked up.
+    private void RemoveIfUnusedLocked(LockResource resource, LockEntry entry)
+    {
+        if (entry.Granted.Count == 0 && entry.Waiters.Count == 0)
+        {
+            _table.Remove(resource);
+        }
     }
 
     private LockEntry GetEntryLocked(LockResource resource)

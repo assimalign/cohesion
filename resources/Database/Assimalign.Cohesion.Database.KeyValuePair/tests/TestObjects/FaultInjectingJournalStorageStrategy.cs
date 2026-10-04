@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.CompilerServices;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
@@ -12,24 +11,28 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 /// <summary>
 /// An in-memory key-value storage strategy whose journals fail writes on demand. Writes fail only
 /// on the asynchronous flow that armed the failure, so a test can fail one journal append of its
-/// own call while the engine's background workers keep writing normally.
+/// own call while the engine's background workers keep writing normally. The budget design (skip,
+/// then fail, with the unspent count reported) is the one the Graph, Documents, Blob and SQL
+/// test strategies share.
 /// </summary>
 internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStrategy
 {
-    private static readonly AsyncLocal<StrongBox<int>?> s_failures = new();
+    private static readonly AsyncLocal<Budget?> s_failures = new();
     private readonly HashSet<string> _databases = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Fails the next <paramref name="writes"/> journal writes made on the calling flow, until the
-    /// returned scope is disposed.
+    /// Fails <paramref name="writes"/> journal writes made on the calling flow, after letting the
+    /// next <paramref name="skip"/> writes through, until the returned scope is disposed.
     /// </summary>
     /// <param name="writes">The number of writes to fail.</param>
-    /// <returns>The scope that disarms the failure.</returns>
-    internal static IDisposable FailJournalWrites(int writes)
+    /// <param name="skip">The number of writes to let through before the first failure.</param>
+    /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
+    internal static FailureScope FailJournalWrites(int writes, int skip = 0)
     {
         var previous = s_failures.Value;
-        s_failures.Value = new StrongBox<int>(writes);
-        return new Scope(previous);
+        var budget = new Budget { Skip = skip, Fail = writes };
+        s_failures.Value = budget;
+        return new FailureScope(previous, budget);
     }
 
     public KeyValueStorage CreateStorage(string databaseName)
@@ -49,20 +52,39 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
 
     public bool StorageExists(string databaseName) => _databases.Contains(databaseName);
 
-    private sealed class Scope : IDisposable
+    /// <summary>The armed failure budget of one calling flow.</summary>
+    internal sealed class FailureScope : IDisposable
     {
-        private readonly StrongBox<int>? _previous;
+        private readonly Budget? _previous;
+        private readonly Budget _budget;
 
-        /// <summary>Initializes a new instance of the <see cref="Scope"/> class.</summary>
+        /// <summary>Initializes a new instance of the <see cref="FailureScope"/> class.</summary>
         /// <param name="previous">The failure budget the scope replaced, restored on disposal.</param>
-        public Scope(StrongBox<int>? previous)
+        /// <param name="budget">The failure budget the scope armed.</param>
+        public FailureScope(Budget? previous, Budget budget)
         {
             _previous = previous;
+            _budget = budget;
         }
+
+        /// <summary>Gets the number of armed failures no write has spent yet.</summary>
+        public int Remaining => _budget.Fail;
 
         public void Dispose() => s_failures.Value = _previous;
     }
 
+    /// <summary>The writes one calling flow lets through, then fails.</summary>
+    internal sealed class Budget
+    {
+        /// <summary>Gets or sets the number of writes still to let through.</summary>
+        public int Skip { get; set; }
+
+        /// <summary>Gets or sets the number of writes still to fail.</summary>
+        public int Fail { get; set; }
+    }
+
+    // Every write funnels through the array overload, so each journal frame is counted once: a
+    // MemoryStream subclass's span overload would otherwise call back into the array overload.
     private sealed class FaultInjectingStream : MemoryStream
     {
         public override void Write(byte[] buffer, int offset, int count)
@@ -71,11 +93,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
             base.Write(buffer, offset, count);
         }
 
-        public override void Write(ReadOnlySpan<byte> buffer)
-        {
-            ThrowIfArmed();
-            base.Write(buffer);
-        }
+        public override void Write(ReadOnlySpan<byte> buffer) => Write(buffer.ToArray(), 0, buffer.Length);
 
         public override void WriteByte(byte value)
         {
@@ -85,9 +103,20 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
 
         private static void ThrowIfArmed()
         {
-            if (s_failures.Value is { Value: > 0 } failures)
+            if (s_failures.Value is not { } budget)
             {
-                failures.Value--;
+                return;
+            }
+
+            if (budget.Skip > 0)
+            {
+                budget.Skip--;
+                return;
+            }
+
+            if (budget.Fail > 0)
+            {
+                budget.Fail--;
                 throw new IOException("Injected journal write failure.");
             }
         }

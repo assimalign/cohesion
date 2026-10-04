@@ -238,6 +238,11 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
             return result;
         }
+        catch (TransactionCommitUnconfirmedException exception)
+        {
+            // The statement committed; only the durability of its commit record is unconfirmed.
+            throw new DatabaseTransactionCommitUnconfirmedException(exception.Message, exception);
+        }
         catch (TransactionDeadlockException exception)
         {
             if (context.State == TransactionState.Active)

@@ -36,13 +36,42 @@ public interface ITransactionManager : IAsyncDisposable
     /// </summary>
     /// <param name="context">The transaction to commit.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <exception cref="TransactionAbortedException">Thrown when the transaction was aborted by conflict or deadlock resolution.</exception>
+    /// <exception cref="TransactionAbortedException">
+    /// Thrown when the transaction was aborted by conflict or deadlock resolution; when
+    /// the commit record could not be written, in which case the transaction was
+    /// rolled back and ends as <see cref="TransactionState.Faulted"/>; or, before the
+    /// commit starts, when the transaction is not active or its commit or rollback is
+    /// already running.
+    /// </exception>
+    /// <exception cref="TransactionCommitUnconfirmedException">
+    /// The commit record was written but could not be made durable. The transaction is
+    /// committed: it ends as <see cref="TransactionState.Committed"/>, leaves the active
+    /// table and releases its locks. Its commit is lost if the process stops before the log
+    /// is next flushed durably.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
     ValueTask CommitAsync(ITransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Rolls back the specified transaction, undoing its effects.
     /// </summary>
     /// <param name="context">The transaction to roll back.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <param name="cancellationToken">
+    /// Observed only before the rollback starts. A token canceled by then leaves the
+    /// transaction active and untouched.
+    /// </param>
+    /// <remarks>
+    /// A started rollback runs to completion, ends the transaction as
+    /// <see cref="TransactionState.RolledBack"/> and throws nothing, whatever fails or is
+    /// canceled. When the transaction's writes cannot be undone at once, the transaction
+    /// still ends, but it keeps its locks, and every snapshot keeps treating it as in
+    /// flight, until the manager completes the undo.
+    /// </remarks>
+    /// <exception cref="OperationCanceledException">The token was canceled before the rollback started.</exception>
+    /// <exception cref="TransactionAbortedException">
+    /// Thrown before the rollback starts, when the transaction is not active or its
+    /// commit or rollback is already running.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
     ValueTask RollbackAsync(ITransactionContext context, CancellationToken cancellationToken = default);
 }

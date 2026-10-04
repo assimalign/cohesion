@@ -22,13 +22,45 @@ public static class TransactionRecovery
     /// </summary>
     /// <param name="journal">The storage journal to analyze.</param>
     /// <returns>The committed and aborted sequences, and the highest sequence observed.</returns>
-    public static TransactionRecoveryPlan Analyze(IStorageJournal journal)
+    public static TransactionRecoveryPlan Analyze(IStorageJournal journal) => Analyze(journal, []);
+
+    /// <summary>
+    /// Reads the journal and classifies every transaction sequence it mentions, and every
+    /// sequence the storage's checkpoint anchor recorded as in flight.
+    /// </summary>
+    /// <param name="journal">The storage journal to analyze.</param>
+    /// <param name="checkpointActiveTransactions">
+    /// The sequences the last checkpoint recorded in the storage's file header
+    /// (<see cref="Storage.CheckpointActiveTransactions"/>). Each one is classified exactly
+    /// like a sequence a checkpoint record lists: aborted unless the journal holds its
+    /// commit record. The anchor is what still names them when the checkpoint's own record
+    /// was lost after the journal truncation.
+    /// </param>
+    /// <returns>The committed and aborted sequences, and the highest sequence observed.</returns>
+    public static TransactionRecoveryPlan Analyze(IStorageJournal journal, IEnumerable<long> checkpointActiveTransactions)
     {
         ArgumentNullException.ThrowIfNull(journal);
+        ArgumentNullException.ThrowIfNull(checkpointActiveTransactions);
 
         var committed = new HashSet<TransactionSequence>();
         var seen = new HashSet<TransactionSequence>();
         ulong maxSequence = 0;
+
+        foreach (long anchored in checkpointActiveTransactions)
+        {
+            if (anchored <= 0)
+            {
+                continue;
+            }
+
+            var anchoredSequence = new TransactionSequence((ulong)anchored);
+            seen.Add(anchoredSequence);
+
+            if (anchoredSequence.Value > maxSequence)
+            {
+                maxSequence = anchoredSequence.Value;
+            }
+        }
 
         IEnumerable<JournalRecord> records = journal is StorageJournal streaming
             ? streaming.ReadSequential()

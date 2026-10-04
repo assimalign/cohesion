@@ -136,7 +136,12 @@ the operation also checks its context once the grant arrives and releases the gr
 transaction has ended (`BlobLifecycleTests`); without that check the database writer lock stayed
 granted to an ended transaction and every later writer waited forever. The kernel sets an ended
 transaction's state before it releases its locks, which is what makes the check sufficient. The
-Documents and Graph engines have the same check, and KeyValuePair has it for key locks.
+Documents and Graph engines have the same check, and KeyValuePair has it for key locks. The
+release goes through the coordinator's lock manager, which leaves it to the transaction manager
+while the manager still tracks the transaction: a rolled-back transaction whose undo the kernel
+had to defer keeps the writer lock until the version-purge pass completes the undo, so a late
+operation's clean-up cannot hand the next writer the lock over blob versions the undo has not
+removed yet (#1226, `Database.Transactions` DESIGN.md, "Ending a transaction").
 
 ### Failed operations in explicit transactions (#1225)
 
@@ -152,7 +157,9 @@ and its [DESIGN.md](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#
 records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines follow.
 
 1. The failure rolls the transaction's work back at once and releases its locks, so the aborted
-   transaction blocks no other writer while it waits for the caller.
+   transaction blocks no other writer while it waits for the caller. (When the undo itself fails,
+   the kernel keeps the writer lock until its version-purge pass completes the undo; see
+   `Database.Transactions` DESIGN.md, "Ending a transaction".)
 2. The transaction stays the session's `CurrentTransaction` and reports `TransactionState.Faulted`.
    Every later operation on the session fails with `COHDBB001`: `OpenWriteAsync`,
    `OpenReadAsync`, `GetPropertiesAsync`, `DeleteAsync` and `GetBlobsAsync` on session-bound
@@ -190,14 +197,26 @@ records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines 
    statement language), and the refusal of a second concurrent operation on the session.
 6. Autocommit operations are unaffected: a failure ends only its own operation transaction.
 7. A rollback or commit observes its cancellation token only before it starts, and one that has
-   started runs to completion. When a caller's rollback or commit still fails with the
-   transaction's context active, the transaction stays `CurrentTransaction` and reports `Faulted`,
-   and the session refuses operations and BEGIN with `COHDBB001` naming that failure, until a
-   `RollbackAsync` completes.
+   started runs to completion and always ends the transaction (#1226): the transaction kernel
+   completes a started rollback whatever fails (a lost abort record is ignored, and a failed undo
+   is retried by the kernel with the writer lock held), and it aborts a commit it cannot complete.
+   Until #1226 a journal or storage failure could leave the context active behind a failed
+   rollback, and the session kept the transaction `Faulted`, refusing work with `COHDBB001`, until a
+   later rollback completed; that end-failure state is gone, as it is in Graph. The kernel still
+   refuses a rollback before it starts while the database closes (`ObjectDisposedException`: the
+   manager's disposal flags itself before it claims any end, so every end refused during the
+   close fails this way); the context then stays active only until disposal's own abort ends it,
+   the session refuses operations in the ended transaction ("being committed or rolled back"),
+   another `RollbackAsync` fails the same way while the close runs and is accepted once the
+   close's abort ended the context, and a `CommitAsync` commits nothing.
 
 Transaction-kernel failures cross the engine boundary translated (`DatabaseTransactionDeadlockException`,
-`DatabaseTransactionAbortedException`) for operations and for the explicit transaction's commit and
-rollback. The lifecycle is the Documents state diagram with operations in place of statements.
+`DatabaseTransactionAbortedException`, and `DatabaseTransactionCommitUnconfirmedException` for a
+commit whose record was written but could not be made durable, which leaves the transaction
+`Committed`), never as the kernel's own exception types, for operations
+and for every end of the explicit transaction: commit, rollback, disposal, the session's closure,
+and the abort an operation failure starts. One translation (`BlobDatabaseInstance.TranslateKernelFailure`)
+serves them all. The lifecycle is the Documents state diagram with operations in place of statements.
 
 Over the wire a failure is terminal (see "Server lifecycle and failure semantics"): the server
 writes `ExecutionFailure` and closes the connection, and the session's teardown disposes the
