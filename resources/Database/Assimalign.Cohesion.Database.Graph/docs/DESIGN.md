@@ -187,12 +187,15 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    kept the transaction `Faulted` until a later rollback completed. The transaction kernel now
    completes a started rollback whatever fails (a lost abort record is ignored, and a failed undo
    is retried by the kernel with the writer's locks held), and it aborts a commit it cannot
-   complete, so that branch could no longer run and was removed rather than kept as defense in
-   depth: no fault the kernel can raise reaches it, so no test could exercise it. One guard
-   stays, because it costs no state: should a kernel rollback ever throw with the context active,
-   the session still refuses statements in the ended transaction ("being committed or rolled
-   back"), accepts another `RollbackAsync`, and a `CommitAsync` completes the rollback and fails
-   with `COHDBG007`, so nothing the caller rolled back can commit.
+   complete. The kernel still refuses a rollback before it starts when the database is closing:
+   once the manager's disposal begins, a rollback fails with `ObjectDisposedException`, or with
+   `TransactionAbortedException` ("already ending") when disposal claimed the context's end first.
+   That refusal leaves the context active only until disposal's own abort ends it, so the
+   `Faulted` end-failure state and its `COHDBG007` message were removed, and the stateless guard
+   that remains covers the case: once a rollback throws with the context active, the session
+   refuses statements in the ended transaction ("being committed or rolled back"), accepts
+   another `RollbackAsync`, and a `CommitAsync` completes the rollback (or fails as the closing
+   database does) without committing anything the caller rolled back.
 
 The session's explicit-transaction lifecycle, where Faulted is the new state:
 

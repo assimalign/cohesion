@@ -3,18 +3,18 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 
-using Assimalign.Cohesion.Database.Graph.Storage;
+using Assimalign.Cohesion.Database.Blob.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
-namespace Assimalign.Cohesion.Database.Graph.Tests;
+namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 /// <summary>
-/// An in-memory graph storage strategy whose journal fails writes on demand. Writes fail only on
+/// An in-memory blob storage strategy whose journal fails writes on demand. Writes fail only on
 /// the asynchronous flow that armed the failure, so a test can fail one journal append of its own
 /// call while the engine's background workers keep writing normally. A database the engine closed
 /// can be reopened from the bytes its storage left behind, as a file set would be.
 /// </summary>
-internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrategy
+internal sealed class FaultInjectingJournalBlobStorageStrategy : IBlobStorageStrategy
 {
     private static readonly AsyncLocal<Budget?> s_failures = new();
     private readonly Dictionary<string, Files> _databases = new(StringComparer.Ordinal);
@@ -35,7 +35,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
         return new FailureScope(previous, budget);
     }
 
-    public GraphStorage CreateStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    public BlobStorage CreateStorage(DatabaseName databaseName, StorageCommitDurability? durability)
     {
         var files = new Files(new MemoryStream(), new FaultInjectingStream(), new MemoryStream());
         lock (_sync)
@@ -43,15 +43,15 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
             _databases[databaseName.ToString()] = files;
         }
 
-        return GraphStorage.Create(new StorageStream(files.Data), new StorageStream(files.Journal),
-            new StorageStream(files.Backup), databaseName, durability);
+        return BlobStorage.Create(new StorageStream(files.Data), new StorageStream(files.Journal),
+            new StorageStream(files.Backup), databaseName.ToString(), durability);
     }
 
     /// <summary>
     /// Reopens a database from the bytes its last storage left behind. A memory stream keeps its
     /// bytes after disposal, so this works for a storage the engine closed.
     /// </summary>
-    public GraphStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    public BlobStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
     {
         Files files;
         lock (_sync)
@@ -65,7 +65,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
             _databases[databaseName.ToString()] = files;
         }
 
-        return GraphStorage.Open(new StorageStream(files.Data), new StorageStream(files.Journal),
+        return BlobStorage.Open(new StorageStream(files.Data), new StorageStream(files.Journal),
             new StorageStream(files.Backup), checkpointOnOpen: false, durability);
     }
 

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Catalog;
+using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 using Shouldly;
@@ -508,6 +509,148 @@ public sealed class GraphTransactionFailureTests
         await session.ExecuteAsync("INSERT (:After)");
         (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["After"]);
     }
+
+    /// <summary>
+    /// A rollback whose undo cannot write its journal bracket still ends the transaction; the
+    /// writer keeps the database writer lock until the version-purge pass completes the undo, and
+    /// the failed bracket leaves nothing behind that would refuse a checkpoint (#1226).
+    /// </summary>
+    /// <param name="skip">
+    /// The undo's journal writes to let through before the failing one: 0 fails its storage
+    /// bracket's begin record, 1 the before image of the first page it changes.
+    /// </param>
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a rollback whose undo the journal rejects holds the writer lock until the purge pass")]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task RollbackAsync_JournalRejectsTheUndo_ShouldHoldWriterLockUntilThePurgePassAndKeepCheckpointsRunning(int skip)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var instance = (GraphDatabaseInstance)database;
+        await using var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
+        var transaction = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT (:Rolled {name: 'rolled'})");
+
+        // Act: the undo's storage bracket makes the rollback's first journal writes.
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip))
+        {
+            await transaction.RollbackAsync();
+            unspent = failures.Remaining;
+        }
+        var deferred = instance.Coordinator.VersionStore.PendingAbortedPurges.Count;
+        var waiting = other.ExecuteAsync("INSERT (:Other)").AsTask();
+        await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromMilliseconds(250)));
+        bool otherProceededBeforeTheUndo = waiting.IsCompleted;
+        instance.Coordinator.Checkpoint();
+        instance.Coordinator.RunVersionPurgePass(CancellationToken.None);
+        await waiting.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        unspent.ShouldBe(0);
+        deferred.ShouldBe(1);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        session.CurrentTransaction.ShouldBeNull();
+        otherProceededBeforeTheUndo.ShouldBeFalse();
+        instance.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        instance.Coordinator.Checkpoint();
+        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Keep", "Other"]);
+        (await Rows(session, "MATCH (n:Keep) RETURN n.name")).Select(row => row.GetString(0)).ShouldBe(["keep"]);
+    }
+
+    /// <summary>
+    /// An operation of a rolled-back transaction that reaches the writer lock after the end
+    /// releases nothing while the transaction's undo is deferred, so a waiting writer keeps
+    /// waiting for the undo (#1226).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a late operation of a rolled-back transaction does not release its deferred writer lock")]
+    public async Task LockWriterAsync_LateOperationOfRolledBackTransaction_ShouldNotReleaseItsDeferredWriterLock()
+    {
+        // Arrange: a rollback whose undo the journal rejected, and a writer waiting for the lock.
+        await using var engine = GraphDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var instance = (GraphDatabaseInstance)database;
+        await using var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        var transaction = (GraphDatabaseTransaction)await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT (:Rolled {name: 'rolled'})");
+        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            await transaction.RollbackAsync();
+        }
+        var waiting = other.ExecuteAsync("INSERT (:Other)").AsTask();
+
+        // Act: the late operation gets the lock its transaction still holds, finds the
+        // transaction ended, and cleans up.
+        var late = await Should.ThrowAsync<DatabaseException>(async () => await instance.LockWriterAsync(transaction.Context, CancellationToken.None));
+        await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromMilliseconds(250)));
+        bool otherProceededBeforeTheUndo = waiting.IsCompleted;
+        instance.Coordinator.RunVersionPurgePass(CancellationToken.None);
+        await waiting.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        late.Message.ShouldContain("ended while waiting for the writer lock");
+        otherProceededBeforeTheUndo.ShouldBeFalse();
+        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Other"]);
+    }
+
+    /// <summary>
+    /// A rolled-back transaction whose undo still fails when the engine closes is reported by the
+    /// close, and its writes do not come back as committed data at the next open: the close keeps
+    /// the journal's classification of the writer, and recovery scrubs it (#1226).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: an undo that still fails at close is scrubbed at the next open")]
+    public async Task Dispose_UndoStillFailsAtClose_ShouldLeaveNothingOfTheRolledBackTransactionAfterReopen()
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        await using (var session = await database.CreateSessionAsync())
+        {
+            await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
+            var transaction = await session.BeginTransactionAsync();
+            await session.ExecuteAsync("INSERT (:Rolled {name: 'rolled'})-[:LINK]->(:Rolled {name: 'also'})");
+
+            // The undo's storage bracket begins (the first write) and fails at its first page
+            // image (the second), so the bracket rolls itself back and the undo is deferred.
+            using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
+            {
+                await transaction.RollbackAsync();
+                failures.Remaining.ShouldBe(0);
+            }
+            transaction.State.ShouldBe(TransactionState.RolledBack);
+        }
+
+        // Act: the close retries the undo, which fails the same way.
+        AggregateException closeFailure;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
+        {
+            closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
+            failures.Remaining.ShouldBe(0);
+        }
+        await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
+        var recovered = (IGraphDatabase)await reopened.OpenDatabaseAsync("graph");
+        await using var observer = await recovered.CreateSessionAsync();
+
+        // Assert
+        closeFailure.InnerExceptions.ShouldContain(error => error is IOException);
+        (await Rows(observer, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Keep"]);
+        (await Rows(observer, "MATCH (n) RETURN n.name")).Select(row => row.GetString(0)).ShouldBe(["keep"]);
+        (await Rows(observer, "MATCH ()-[r]->() RETURN r")).ShouldBeEmpty();
+    }
+
+    // The engine's own maintenance workers stay out of the way: these tests drive the purge
+    // pass and the checkpoint themselves.
+    private static GraphDatabaseEngineOptions QuietOptions(FaultInjectingJournalStorageStrategy strategy) => new()
+    {
+        StorageStrategy = strategy,
+        MaintenanceInterval = TimeSpan.FromHours(1),
+        CheckpointInterval = TimeSpan.FromHours(1),
+    };
 
     private static async Task<List<QueryRow>> Rows(IDatabaseSession session, string gql)
     {

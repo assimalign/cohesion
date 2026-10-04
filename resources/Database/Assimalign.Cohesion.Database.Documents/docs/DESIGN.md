@@ -69,7 +69,13 @@ Serializable is rejected rather than silently weakened.
 The shared lock manager serializes writers per logical database. Before changing
 a document, collection, or index, the operation compares its snapshot with the
 latest state under that lock. An intervening change raises
-`DatabaseTransactionAbortedException`. Reads stay snapshot based. Catalog and
+`DatabaseTransactionAbortedException`. A commit or rollback the transaction kernel
+refuses or aborts crosses the model boundary the same way: the kernel's
+`TransactionAbortedException` and `TransactionDeadlockException` surface as
+`DatabaseTransactionAbortedException` and `DatabaseTransactionDeadlockException`.
+A rollback observes the caller's token only before it starts, and a started
+rollback always ends the transaction (#1226, `Database.Transactions` DESIGN.md,
+"Ending a transaction"). Reads stay snapshot based. Catalog and
 index writes use the same logical context as content chunks; rollback and crash
 recovery cannot publish a partial document.
 

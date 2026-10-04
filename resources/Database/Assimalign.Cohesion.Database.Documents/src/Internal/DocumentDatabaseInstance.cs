@@ -206,7 +206,10 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
             // A session may close or its transaction may roll back while this
             // request waits. ReleaseAll at rollback removes grants, not pending
             // requests, so a subsequently granted inactive owner must release
-            // its new grant before the operation leaves the wait.
+            // its new grant before the operation leaves the wait. While the
+            // transaction manager still tracks the owner (a rollback whose undo
+            // is deferred), the coordinator's lock manager leaves that release
+            // to the manager, which makes it once the undo completes (#1226).
             token.ThrowIfCancellationRequested();
             ThrowIfDisposed();
             if (context.State != TransactionState.Active)
@@ -246,6 +249,8 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
         }
         finally
         {
+            // Safe after a failed coordinator close: a writer whose undo still failed is kept in
+            // flight in the storage, so its close does not truncate the journal (#1226).
             DataStorage.Dispose();
         }
     }

@@ -90,11 +90,14 @@ public sealed class DocumentEngineTests
         (await collection.GetAsync(observer, "new")).ShouldBeNull();
     }
 
-    [Fact]
-    public async Task Rollback_canceled_before_it_starts_leaves_the_transaction_and_its_writes_intact()
+    /// <summary>
+    /// The token is observed only before the rollback starts (#1226), so nothing of a rollback
+    /// canceled by then ran, and no purge pass may undo the still-active writer.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Rollback: a token canceled before the rollback starts leaves the transaction and its writes intact")]
+    public async Task RollbackAsync_TokenCanceledBeforeStart_ShouldLeaveTransactionAndItsWritesIntact()
     {
-        // #1226: the token is observed only before the rollback starts, so nothing of it ran and
-        // no purge pass may undo the still-active writer.
+        // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
@@ -103,11 +106,18 @@ public sealed class DocumentEngineTests
         await collection.PutAsync(session, "kept", "1"u8.ToArray());
         using var canceled = new System.Threading.CancellationTokenSource();
         canceled.Cancel();
+
+        // Act
         await Should.ThrowAsync<OperationCanceledException>(async () => await transaction.RollbackAsync(canceled.Token));
-        transaction.State.ShouldBe(TransactionState.Active);
-        database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        var stateAfterRollback = transaction.State;
+        int pendingAfterRollback = database.Coordinator.VersionStore.PendingAbortedPurges.Count;
         database.Coordinator.RunVersionPurgePass(default);
         await transaction.CommitAsync();
+
+        // Assert
+        stateAfterRollback.ShouldBe(TransactionState.Active);
+        pendingAfterRollback.ShouldBe(0);
+        transaction.State.ShouldBe(TransactionState.Committed);
         (await collection.GetAsync(session, "kept")).ShouldNotBeNull();
     }
 

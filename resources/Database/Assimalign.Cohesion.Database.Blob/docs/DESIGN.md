@@ -125,6 +125,11 @@ This conservative first version serializes writers for the upload lifetime; snap
 continue concurrently. Under that lock, the engine compares snapshot-visible metadata with
 the latest state and rejects stale writes. A session admits only one active operation/stream.
 This avoids overlapping uploads in the same transaction replacing the same original version.
+A commit or rollback the transaction kernel refuses or aborts surfaces as
+`DatabaseTransactionAbortedException` (`DatabaseTransactionDeadlockException` for a deadlock
+victim), never as the kernel's own exception type. A rollback observes the caller's token
+only before it starts, and a started rollback always ends the transaction (#1226,
+`Database.Transactions` DESIGN.md, "Ending a transaction").
 
 Containers carry stable identities distinct from their names, so a dropped and recreated
 container cannot be addressed through an obsolete handle. Runtime creation marks them Adhoc.

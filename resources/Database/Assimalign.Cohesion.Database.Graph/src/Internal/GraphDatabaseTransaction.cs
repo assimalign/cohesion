@@ -115,8 +115,9 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
 
                 // Under the end gate an ended transaction whose context is still active had a
                 // rollback that threw before the kernel ended it. The kernel ends every started
-                // rollback (#1226), so this cannot happen today; if it ever does, nothing the
-                // caller rolled back may commit.
+                // rollback (#1226), but refuses one before it starts while the database closes
+                // (disposal claimed the end, or the manager is disposed); nothing the caller
+                // rolled back may commit then.
                 aborted = failure is not null || state != TransactionState.Active || _ended;
                 if (!aborted && Operations != 0)
                 {
@@ -266,8 +267,8 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
 
     // Runs under the end gate. A rollback that started runs to completion: the caller's token is
     // not passed on (PostgreSQL holds interrupts through AbortTransaction for the same reason), and
-    // the kernel ends the context whatever fails once it starts (#1226), so no failure can leave
-    // this transaction active behind the caller.
+    // the kernel ends the context whatever fails once it starts (#1226). Only a closing database
+    // refuses the rollback before it starts, and its disposal then aborts the context itself.
     private async ValueTask RollbackContextAsync()
     {
         if (_context.State != TransactionState.Active)

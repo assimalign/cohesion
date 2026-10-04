@@ -199,6 +199,8 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
         }
         finally
         {
+            // Safe after a failed coordinator close: a writer whose undo still failed is kept in
+            // flight in the storage, so its close does not truncate the journal (#1226).
             DataStorage.Dispose();
         }
     }

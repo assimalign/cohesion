@@ -25,7 +25,7 @@ internal sealed class DocumentDatabaseTransaction : IDatabaseTransaction
     public TransactionId Id => _context.Id;
     public TransactionState State => _context.State;
     public IsolationLevel IsolationLevel => _context.IsolationLevel;
-    public ValueTask CommitAsync(CancellationToken cancellationToken = default)
+    public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
         EnsureActive();
         if (Operations != 0)
@@ -33,7 +33,14 @@ internal sealed class DocumentDatabaseTransaction : IDatabaseTransaction
             throw new DatabaseException("Dispose every document operation before committing its transaction.");
         }
 
-        return _coordinator.CommitAsync(_context, cancellationToken);
+        try
+        {
+            await _coordinator.CommitAsync(_context, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TransactionAbortedException exception)
+        {
+            throw Translate(exception);
+        }
     }
     /// <summary>
     /// Rolls the transaction back. The token is observed only before the rollback
@@ -41,17 +48,44 @@ internal sealed class DocumentDatabaseTransaction : IDatabaseTransaction
     /// transaction (#1226).
     /// </summary>
     /// <param name="cancellationToken">Cancels the rollback before it starts.</param>
-    public ValueTask RollbackAsync(CancellationToken cancellationToken = default)
+    public async ValueTask RollbackAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         EnsureActive();
-        return _coordinator.RollbackAsync(_context, CancellationToken.None);
+        await RollbackContextAsync().ConfigureAwait(false);
     }
-    public ValueTask DisposeAsync() => State == TransactionState.Active ? _coordinator.RollbackAsync(_context) : default;
+    public async ValueTask DisposeAsync()
+    {
+        if (State == TransactionState.Active)
+        {
+            await RollbackContextAsync().ConfigureAwait(false);
+        }
+    }
     private void EnsureActive()
     { if (State != TransactionState.Active)
         {
             throw new DatabaseException($"The transaction is {State}.");
         }
     }
+
+    private async ValueTask RollbackContextAsync()
+    {
+        try
+        {
+            await _coordinator.RollbackAsync(_context, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (TransactionAbortedException exception)
+        {
+            // Raised only before the rollback starts: another commit or rollback of the
+            // transaction is already running.
+            throw Translate(exception);
+        }
+    }
+
+    // The transaction kernel is a child root with its own exception root; its aborts cross the
+    // model boundary as the area root's exceptions, as the SQL and KeyValuePair engines do.
+    private static DatabaseTransactionAbortedException Translate(TransactionAbortedException exception)
+        => exception is TransactionDeadlockException
+            ? new DatabaseTransactionDeadlockException(exception.Message, exception)
+            : new DatabaseTransactionAbortedException(exception.Message, exception);
 }
