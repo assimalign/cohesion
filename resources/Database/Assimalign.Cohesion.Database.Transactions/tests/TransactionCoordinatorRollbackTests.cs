@@ -22,6 +22,16 @@ public class TransactionCoordinatorRollbackTests
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
     private static readonly LockResource Row = LockResource.Entry(7, 7);
 
+    /// <summary>The journal writes of the undo's storage bracket a test fails.</summary>
+    public enum UndoJournalWrite
+    {
+        /// <summary>The bracket's begin record.</summary>
+        BracketBegin,
+
+        /// <summary>The before image of the first page the undo changes.</summary>
+        PageImage,
+    }
+
     /// <summary>The awaits inside the record-space undo a caller's token used to reach.</summary>
     public enum UndoAwait
     {
@@ -212,6 +222,119 @@ public class TransactionCoordinatorRollbackTests
 
         // Assert: no commit record, so the writer is aborted and nothing it wrote survives.
         journal.AppendedRollbacks.ShouldBeEmpty();
+        plan.Committed.ShouldNotContain(writer.Sequence);
+        plan.Aborted.ShouldContain(writer.Sequence);
+        RecordCount(reopened).ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator lock manager: releasing a deferred writer's locks waits for its undo")]
+    public async Task LockManager_ReleaseAllForWriterWithDeferredUndo_ShouldKeepItsLocksUntilTheUndoCompletes()
+    {
+        // Arrange: a rolled-back writer whose undo failed still holds the row lock.
+        using var storage = RollbackStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: 1));
+        var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        await coordinator.RollbackAsync(writer);
+        writer.State.ShouldBe(TransactionState.RolledBack);
+
+        // Act: an operation of the rolled-back transaction cleans up a grant it received after
+        // the end, as the engines' writer-lock helpers do.
+        await coordinator.LockManager.AcquireAsync(writer.Sequence, Row, LockMode.Exclusive);
+        coordinator.LockManager.ReleaseAll(writer.Sequence);
+
+        // Assert: the writer still holds the row, so the next writer cannot build on its
+        // versions before the undo removes them.
+        coordinator.LockManager.TryAcquire(next.Sequence, Row, LockMode.Exclusive).ShouldBeFalse();
+        RecordCount(storage).ShouldBe(1);
+
+        // Act: the purge pass completes the undo, and the manager releases the writer.
+        coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert
+        await waiting.WaitAsync(Timeout);
+        RecordCount(storage).ShouldBe(0);
+
+        // A transaction the manager no longer tracks releases through the same lock manager.
+        var other = LockResource.Entry(7, 8);
+        coordinator.LockManager.TryAcquire(writer.Sequence, other, LockMode.Exclusive).ShouldBeTrue();
+        coordinator.LockManager.TryAcquire(next.Sequence, other, LockMode.Exclusive).ShouldBeFalse();
+        coordinator.LockManager.ReleaseAll(writer.Sequence);
+        coordinator.LockManager.TryAcquire(next.Sequence, other, LockMode.Exclusive).ShouldBeTrue();
+
+        // An active transaction keeps its locks until it ends.
+        var probe = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        coordinator.LockManager.ReleaseAll(next.Sequence);
+        coordinator.LockManager.TryAcquire(probe.Sequence, Row, LockMode.Exclusive).ShouldBeFalse();
+        await coordinator.CommitAsync(next);
+        coordinator.LockManager.TryAcquire(probe.Sequence, Row, LockMode.Exclusive).ShouldBeTrue();
+        await coordinator.CommitAsync(probe);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator rollback: a journal that rejects the undo's own writes defers the undo and leaves checkpoints running")]
+    [InlineData(UndoJournalWrite.BracketBegin)]
+    [InlineData(UndoJournalWrite.PageImage)]
+    public async Task RollbackAsync_UndoBracketJournalWriteFails_ShouldDeferTheUndoAndLeaveCheckpointsRunning(UndoJournalWrite failing)
+    {
+        // Arrange
+        using var storage = RollbackStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await BeginWriterAsync(coordinator, storage);
+        var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+
+        // Act: the undo's storage bracket cannot write its begin record (its first write), or the
+        // before image of the page it undoes (its second).
+        storage.JournalStream.SkipWrites = failing == UndoJournalWrite.PageImage ? 1 : 0;
+        storage.JournalStream.FailWrites = 1;
+        await coordinator.RollbackAsync(writer);
+
+        // Assert: the transaction ended, its version and its lock wait for the undo, and the
+        // failed bracket left nothing active in the storage, so checkpoints still run.
+        storage.JournalStream.FailWrites.ShouldBe(0);
+        writer.State.ShouldBe(TransactionState.RolledBack);
+        RecordCount(storage).ShouldBe(1);
+        coordinator.LockManager.TryAcquire(next.Sequence, Row, LockMode.Exclusive).ShouldBeFalse();
+        Checkpoint(coordinator, storage).ShouldBe([(long)writer.Sequence.Value, (long)next.Sequence.Value], ignoreOrder: true);
+
+        // Act: the purge pass retries the undo.
+        coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert
+        await waiting.WaitAsync(Timeout);
+        RecordCount(storage).ShouldBe(0);
+        Checkpoint(coordinator, storage).ShouldBe([(long)next.Sequence.Value]);
+        await coordinator.CommitAsync(next);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator dispose: a writer whose undo still fails survives a clean close for recovery to scrub")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisposeAsync_UndoStillFailsAndStorageClosesCleanly_ShouldLeaveTheWriterForRecoveryToScrub(bool checkpointFirst)
+    {
+        // Arrange: a rolled-back writer whose undo fails at the rollback and at every retry.
+        var storage = RollbackStorage.Create();
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: int.MaxValue));
+        await coordinator.RollbackAsync(writer);
+        writer.State.ShouldBe(TransactionState.RolledBack);
+        if (checkpointFirst)
+        {
+            // The checkpoint truncates the writer's begin record and carries it in its active list.
+            Checkpoint(coordinator, storage).ShouldContain((long)writer.Sequence.Value);
+        }
+
+        // Act: the coordinator reports the undo it could not complete, and the owner closes the
+        // storage cleanly anyway, as every engine does.
+        await Should.ThrowAsync<IOException>(async () => await coordinator.DisposeAsync());
+        storage.Dispose();
+        var images = storage.CaptureClosedImages();
+        using var reopened = RollbackStorage.Open(images.Data, images.Journal);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        var plan = recovered.AnalyzeAndScrub();
+
+        // Assert: the close did not erase the writer's classification, so recovery scrubbed it.
         plan.Committed.ShouldNotContain(writer.Sequence);
         plan.Aborted.ShouldContain(writer.Sequence);
         RecordCount(reopened).ShouldBe(0);
@@ -416,9 +539,9 @@ public class TransactionCoordinatorRollbackTests
     private sealed class RollbackStorage : Storage.Storage, IStorage, ITransactionRecordSpace
     {
         private readonly MemoryStream _data;
-        private readonly MemoryStream _journal;
+        private readonly FaultingMemoryStream _journal;
 
-        private RollbackStorage(MemoryStream data, MemoryStream journal, bool reopen)
+        private RollbackStorage(MemoryStream data, FaultingMemoryStream journal, bool reopen)
             : base(new StorageStream(new SimulatedDurableFileHandle(data)), new StorageStream(new SimulatedDurableFileHandle(journal)), new StorageStream(new MemoryStream()))
         {
             _data = data;
@@ -437,11 +560,14 @@ public class TransactionCoordinatorRollbackTests
 
         internal IStorageJournal Log => WriteAheadLog;
 
+        /// <summary>Gets the journal's backing stream, whose writes a test can fail.</summary>
+        internal FaultingMemoryStream JournalStream => _journal;
+
         internal Action<long[]>? BeforeCheckpoint { get; set; }
 
         internal (PageId PageId, int SlotIndex) LastInserted { get; private set; }
 
-        internal static RollbackStorage Create() => new(new MemoryStream(), new MemoryStream(), reopen: false);
+        internal static RollbackStorage Create() => new(new MemoryStream(), new FaultingMemoryStream(), reopen: false);
 
         internal static RollbackStorage Open(byte[] data, byte[] journal) => new(Copy(data), Copy(journal), reopen: true);
 
@@ -450,6 +576,9 @@ public class TransactionCoordinatorRollbackTests
             Flush();
             return (_data.ToArray(), _journal.ToArray());
         }
+
+        /// <summary>Gets the bytes a closed storage left behind (a memory stream keeps them after disposal).</summary>
+        internal (byte[] Data, byte[] Journal) CaptureClosedImages() => (_data.ToArray(), _journal.ToArray());
 
         internal (PageId PageId, int SlotIndex) Insert(IStorageTransaction bracket, ReadOnlySpan<byte> data)
             => LastInserted = InsertRecord(bracket, data);
@@ -474,9 +603,9 @@ public class TransactionCoordinatorRollbackTests
             Checkpoint(sequences);
         }
 
-        private static MemoryStream Copy(byte[] bytes)
+        private static FaultingMemoryStream Copy(byte[] bytes)
         {
-            var stream = new MemoryStream();
+            var stream = new FaultingMemoryStream();
             stream.Write(bytes);
             stream.Position = 0;
             return stream;

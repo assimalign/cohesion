@@ -89,6 +89,16 @@ log drops the writer from the checkpoint's active list even when the append fail
 the manager appends the record only after the undo completed, so nothing of the
 writer is left for recovery to scrub.
 
+That presumption covers an abort record that never reached the log, not a write that
+failed part way. PostgreSQL treats any failed WAL write as fatal (`ereport(PANIC,
+"could not write to log file ...")`, `src/backend/access/transam/xlog.c:2529-2531`),
+because bytes a failed write left behind would end recovery's read of the log before
+every later record. This journal gives the same guarantee without stopping the
+process: a failed append cuts its partial frame back off, and when it cannot, the
+journal refuses every later append until a checkpoint truncates it or the storage is
+reopened (`Database.Storage` DESIGN.md, "The journal"). Ignoring a failed abort record
+therefore never hides a later commit record from recovery.
+
 **The token stops at the start.** A rollback stopped half way would keep the locks of
 a writer whose work it only partly undid, the zombie this rule removes. PostgreSQL
 holds interrupts through the whole of `AbortTransaction` ("Prevent cancel/die
@@ -104,12 +114,9 @@ is `RolledBack`. But the writer stays in the active table, keeps its locks, and 
 abort record, so checkpoints keep carrying it in their active list. The manager owns
 this deferred undo. The coordinator's `RunVersionPurgePass` retries it, and when the
 undo completes the manager appends the abort record, removes the writer from the
-active table and releases its locks. Disposal retries it once more and rethrows an
-undo that still fails, after every other transaction was aborted, because the
-writer's versions then survive the close and only the next open's recovery scrub
-removes them. Holding the locks until the undo completes follows PostgreSQL, which
-holds regular locks "till we finish aborting" (`xact.c:2873`). Neo4j releases them
-in a `finally` whether or not its rollback threw
+active table and releases its locks. Holding the locks until the undo completes follows
+PostgreSQL, which holds regular locks "till we finish aborting" (`xact.c:2873`). Neo4j
+releases them in a `finally` whether or not its rollback threw
 (`community/kernel/.../KernelTransactionImplementation.java:1216-1229`, `1614-1623`;
 commit `54a7dcf7c25`), but its rollback only discards in-memory transaction state and
 leaves nothing on disk to undo; this kernel's undo is physical. Releasing them first
@@ -117,7 +124,53 @@ would let the next lock holder build on versions about to be undone, and the Gra
 Documents and Blob engines' latest-state checks, which build a snapshot from the open
 contexts under the database writer lock, rely on no lock holder leaving effects
 unresolved. A manager composed directly through `TransactionManager.Create` has no
-version-purge pass, so its deferred undo is retried only at disposal.
+version-purge pass, so its deferred undo is retried only at disposal, and the writer's
+locks are held until then (the factory's remarks say so).
+
+The cost of that rule is an availability one, and it is a deliberate departure from the
+literal wording of #1226's first acceptance criterion ("always releases the context's
+locks"): while an undo keeps failing, every writer that conflicts with the rolled-back
+one waits, up to one `MaintenanceInterval` (60 seconds by default) per retry. Graph,
+Documents and Blob take one database writer lock, so there that is every writer. The
+alternative, releasing first, trades the wait for reading rolled-back writes as
+committed, which no engine may do.
+
+A journal failure inside the undo is an undo failure like any other. The undo's
+storage bracket fails to begin, to touch a page or to commit, rolls itself back, and
+the writer is deferred. A storage bracket ends even when its own begin or rollback
+record cannot be appended, and a page whose before image cannot be appended is left
+unlocked (`Database.Storage` DESIGN.md, "Failed appends"), so a failed undo leaves
+nothing behind in the storage: checkpoints keep running while the writer waits, and
+the retry can touch the same pages.
+
+**Only the manager releases a managed writer's locks.** The manager releases a
+transaction's locks as a set at the moment the transaction leaves its active table,
+which covers any grant the transaction received after it ended. The lock manager the
+coordinator hands to engine code (`TransactionCoordinator.LockManager`) therefore
+ignores `ReleaseAll` for a transaction the manager still tracks. Engine code calls it
+when an operation of a transaction that ended while the operation waited receives its
+grant late (the Graph and Documents writer-lock helpers and the graph store do). Before
+that rule, such a call released a deferred writer's database writer lock before its
+undo ran, and the next writer's latest-state snapshot, built from the open contexts,
+read the rolled-back versions as committed. For a transaction the manager no longer
+tracks, the call releases as before.
+
+**Closing with an undo that still fails.** Disposal aborts every transaction still
+active, waits for every commit or rollback already running (so storage never closes
+under one), retries every deferred undo once more, and rethrows an undo that still
+fails after everything else is done. That writer's versions survive the close, and only
+the next open's recovery can remove them, which it does only if the journal still
+classifies the writer at that open. A storage's clean close would not keep it so: an
+idle storage closes with a checkpoint that truncates the journal and lists no active
+transaction, which erases the writer's begin record and every checkpoint entry carrying
+it. So the coordinator, before it rethrows, begins one storage bracket per such writer
+under the writer's own sequence (`IStorage.BeginTransaction(long)`, which writes
+nothing). The writer is then in flight at the physical layer as well, the storage's
+close takes its non-idle path (flush pages and journal, no truncation), and the next
+open finds the writer without a commit record, classifies it as aborted and scrubs it,
+exactly as after a crash. Every engine closes its storage whether or not the
+coordinator's close threw: Graph, Documents and Blob already did; SQL and KeyValuePair
+now do too, where they used to leave their storages open.
 
 **The sequence allocator (why an external hook and not a seed).** An engine that
 pairs manager transactions with storage brackets passes the storage's own
@@ -204,7 +257,9 @@ work items under #862). The integration kept this package exactly as shaped:
 `TransactionCoordinator(storage, journal, records)` owns one manager, lock manager,
 record-space version store, gated transaction log, and statement apply semaphore
 per database. Pass the journal belonging to that same storage. The caller owns
-the storage/journal lifetime and disposes the coordinator before closing them.
+the storage/journal lifetime and disposes the coordinator before closing them,
+and closes them even when the coordinator's disposal throws ("Closing with an
+undo that still fails", above).
 SQL and KeyValuePair use this composition directly; there is no engine-specific
 copy of its ledger, recovery, prune-bound, or journal-gate mechanics.
 

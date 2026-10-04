@@ -33,6 +33,11 @@ namespace Assimalign.Cohesion.Database.Transactions.Internal;
 /// <see cref="RetryDeferredUndoAsync"/> (the coordinator's version-purge pass) and
 /// <see cref="DisposeAsync"/> retry it and release the writer once it completes.
 /// </para>
+/// <para>
+/// A writer's locks are released only when it leaves the active table, so
+/// <see cref="IsTracked"/> tells an owner of the lock manager whether a release is
+/// still the manager's to make.
+/// </para>
 /// </remarks>
 internal sealed class DefaultTransactionManager : ITransactionManager
 {
@@ -51,6 +56,12 @@ internal sealed class DefaultTransactionManager : ITransactionManager
     private readonly object _sync = new();
     private ulong _lastSequence;
     private bool _disposed;
+
+    // Commits and rollbacks that claimed their context's end and have not returned yet,
+    // guarded by _sync. Disposal waits for them, so the manager never reports a close
+    // while an end still runs against the storage its owner is about to close.
+    private int _runningEnds;
+    private TaskCompletionSource? _endsDrained;
 
     internal DefaultTransactionManager(
         ITransactionLog log,
@@ -102,6 +113,11 @@ internal sealed class DefaultTransactionManager : ITransactionManager
 
         lock (_sync)
         {
+            // Checked again under this lock, which disposal holds while it sets its flag and
+            // copies the active table, so no transaction begins after that copy and escapes
+            // disposal's abort.
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
             // Sequence assignment and active-table insertion are atomic under the
             // begin lock: a snapshot captured by any other transaction either sees
             // this sequence in the active set or was taken before it existed —
@@ -149,26 +165,33 @@ internal sealed class DefaultTransactionManager : ITransactionManager
 
         try
         {
-            // The write-ahead rule: the log returns only once the commit record is
-            // durable. Only then does the transaction leave the active table — no
-            // snapshot can observe it as committed before its record is on stable
-            // storage.
-            await _log.AppendCommitAsync(owned.Sequence, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            await EndAbortedAsync(owned, TransactionState.Faulted).ConfigureAwait(false);
-            throw new TransactionAbortedException(
-                $"Transaction {owned.Sequence} aborted: the commit record could not be made durable.", exception);
-        }
+            try
+            {
+                // The write-ahead rule: the log returns only once the commit record is
+                // durable. Only then does the transaction leave the active table — no
+                // snapshot can observe it as committed before its record is on stable
+                // storage.
+                await _log.AppendCommitAsync(owned.Sequence, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                await EndAbortedAsync(owned, TransactionState.Faulted).ConfigureAwait(false);
+                throw new TransactionAbortedException(
+                    $"Transaction {owned.Sequence} aborted: the commit record could not be made durable.", exception);
+            }
 
-        lock (_sync)
-        {
-            _active.Remove(owned.Sequence.Value);
-        }
+            lock (_sync)
+            {
+                _active.Remove(owned.Sequence.Value);
+            }
 
-        _lockManager.ReleaseAll(owned.Sequence);
-        owned.State = TransactionState.Committed;
+            _lockManager.ReleaseAll(owned.Sequence);
+            owned.State = TransactionState.Committed;
+        }
+        finally
+        {
+            ExitEnd();
+        }
     }
 
     /// <inheritdoc />
@@ -184,40 +207,61 @@ internal sealed class DefaultTransactionManager : ITransactionManager
         cancellationToken.ThrowIfCancellationRequested();
         var owned = ClaimEnd(context);
 
-        await EndAbortedAsync(owned, TransactionState.RolledBack).ConfigureAwait(false);
+        try
+        {
+            await EndAbortedAsync(owned, TransactionState.RolledBack).ConfigureAwait(false);
+        }
+        finally
+        {
+            ExitEnd();
+        }
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// Aborts every transaction still active, then retries every deferred undo once.
-    /// An undo that still fails is rethrown after everything else is done: its writer's
-    /// versions remain in the record space without a commit record, which only the
-    /// next open's recovery scrub can remove, so the owner must not treat the close as
-    /// clean.
+    /// Aborts every transaction still active, waits for every commit or rollback that
+    /// had already started, then retries every deferred undo once. An undo that still
+    /// fails is rethrown after everything else is done: its writer's versions remain in
+    /// the record space without a commit record, and its writer stays in the active
+    /// table (<see cref="GetDeferredUndoWriters"/>), so the owner must not treat the
+    /// close as clean. Only the next open's recovery can remove those versions, and only
+    /// if the journal still classifies the writer then; the coordinator keeps it so.
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-
         List<DefaultTransactionContext> remaining;
         lock (_sync)
         {
+            if (_disposed)
+            {
+                return;
+            }
+
+            // Every end claims under this lock (ClaimEnd), so each one either claimed before
+            // this point, and is counted in _runningEnds, or sees the flag and is refused.
+            _disposed = true;
             remaining = _active.Values.ToList();
         }
 
         foreach (var context in remaining)
         {
-            // A context whose commit or rollback is running is ended by that call.
-            if (context.State == TransactionState.Active && context.TryClaimEnd())
+            // A context whose commit or rollback claimed its end first is ended by that
+            // call, which the wait below covers; a deferred writer's end was claimed too.
+            if (context.TryClaimEnd())
             {
                 await EndAbortedAsync(context, TransactionState.Faulted).ConfigureAwait(false);
             }
         }
+
+        Task drained;
+        lock (_sync)
+        {
+            drained = _runningEnds == 0
+                ? Task.CompletedTask
+                : (_endsDrained ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+        }
+
+        await drained.ConfigureAwait(false);
 
         await _undoRetryGate.WaitAsync().ConfigureAwait(false);
         try
@@ -268,6 +312,36 @@ internal sealed class DefaultTransactionManager : ITransactionManager
         lock (_sync)
         {
             return _deferredUndo.Contains(writer);
+        }
+    }
+
+    /// <summary>
+    /// Gets the writers whose transaction ended while their undo did not complete.
+    /// </summary>
+    /// <returns>The sequences of the writers the manager still owns an undo for.</returns>
+    internal ulong[] GetDeferredUndoWriters()
+    {
+        lock (_sync)
+        {
+            return [.. _deferredUndo];
+        }
+    }
+
+    /// <summary>
+    /// Gets whether the specified transaction is still in the active table: running, ending,
+    /// or ended with its undo deferred.
+    /// </summary>
+    /// <param name="sequence">The transaction's sequence.</param>
+    /// <returns>
+    /// True while the manager still owes the transaction's lock release. The manager
+    /// releases every lock of a transaction, including one granted after its end, at the
+    /// moment the transaction leaves the active table.
+    /// </returns>
+    internal bool IsTracked(ulong sequence)
+    {
+        lock (_sync)
+        {
+            return _active.ContainsKey(sequence);
         }
     }
 
@@ -326,13 +400,15 @@ internal sealed class DefaultTransactionManager : ITransactionManager
             // build on them, so the writer stays in the active table with its locks, and
             // the manager owns the retry, which reports the failure if it recurs.
             // PostgreSQL likewise holds regular locks "till we finish aborting"
-            // (xact.c:2873).
+            // (xact.c:2873). The context ends before the writer is published to the
+            // retry, so no retry can release a writer whose context still reads Active.
+            context.State = outcome;
+
             lock (_sync)
             {
                 _deferredUndo.Add(sequence.Value);
             }
 
-            context.State = outcome;
             return;
         }
 
@@ -413,7 +489,8 @@ internal sealed class DefaultTransactionManager : ITransactionManager
     }
 
     /// <summary>
-    /// Validates a context and claims its end for the caller.
+    /// Validates a context and claims its end for the caller. Every successful claim is
+    /// paired with one <see cref="ExitEnd"/> when the end returns.
     /// </summary>
     private DefaultTransactionContext ClaimEnd(ITransactionContext context)
     {
@@ -425,18 +502,45 @@ internal sealed class DefaultTransactionManager : ITransactionManager
             throw new TransactionAbortedException("The transaction context was not created by this manager.");
         }
 
-        if (owned.State != TransactionState.Active)
+        lock (_sync)
         {
-            throw new TransactionAbortedException(
-                $"Transaction {owned.Sequence} is not active (state: {owned.State}).");
-        }
+            // Disposal sets its flag under this lock: an end claimed here is counted before
+            // disposal can look, so disposal waits for it.
+            ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!owned.TryClaimEnd())
-        {
-            throw new TransactionAbortedException(
-                $"Transaction {owned.Sequence} is already ending: its commit or rollback is running.");
+            if (owned.State != TransactionState.Active)
+            {
+                throw new TransactionAbortedException(
+                    $"Transaction {owned.Sequence} is not active (state: {owned.State}).");
+            }
+
+            if (!owned.TryClaimEnd())
+            {
+                throw new TransactionAbortedException(
+                    $"Transaction {owned.Sequence} is already ending: its commit or rollback is running.");
+            }
+
+            _runningEnds++;
         }
 
         return owned;
+    }
+
+    /// <summary>
+    /// Marks a claimed end as returned, and wakes a disposal waiting for the last one.
+    /// </summary>
+    private void ExitEnd()
+    {
+        TaskCompletionSource? drained = null;
+        lock (_sync)
+        {
+            if (--_runningEnds == 0)
+            {
+                drained = _endsDrained;
+                _endsDrained = null;
+            }
+        }
+
+        drained?.TrySetResult();
     }
 }

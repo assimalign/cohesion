@@ -243,6 +243,43 @@ public class TransactionManagerRollbackTests
         kernel.Versions.PurgeCalls.ShouldBe(1);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Dispose: disposal waits for a rollback that is already running")]
+    public async Task DisposeAsync_WhileARollbackIsRunning_ShouldWaitForTheRollbackToEnd()
+    {
+        // Arrange: a rollback blocked in its undo.
+        var kernel = Kernel.Create();
+        var block = new Blocker();
+        kernel.Versions.Block = block;
+        var writer = await kernel.BeginWriterAsync();
+        var rollback = kernel.Manager.RollbackAsync(writer).AsTask();
+        await block.Entered.WaitAsync(Timeout);
+        Task dispose;
+        bool disposedWhileRollbackRan;
+
+        // Act
+        try
+        {
+            dispose = kernel.Manager.DisposeAsync().AsTask();
+            await Should.ThrowAsync<ObjectDisposedException>(async () => await kernel.Manager.BeginAsync());
+            await Task.WhenAny(dispose, Task.Delay(TimeSpan.FromMilliseconds(250)));
+            disposedWhileRollbackRan = dispose.IsCompleted;
+        }
+        finally
+        {
+            block.Release();
+        }
+
+        await rollback.WaitAsync(Timeout);
+        await dispose.WaitAsync(Timeout);
+
+        // Assert: disposal neither returned under the running rollback nor aborted its writer a
+        // second time; the rollback ended the writer and appended its abort record.
+        disposedWhileRollbackRan.ShouldBeFalse();
+        writer.State.ShouldBe(TransactionState.RolledBack);
+        kernel.Versions.PurgeCalls.ShouldBe(1);
+        kernel.Log.AbortRecords.ShouldBe(1);
+    }
+
     private static byte[] Payload(string text) => Encoding.UTF8.GetBytes(text);
 
     /// <summary>A manager over controllable collaborators, with a writer helper.</summary>
