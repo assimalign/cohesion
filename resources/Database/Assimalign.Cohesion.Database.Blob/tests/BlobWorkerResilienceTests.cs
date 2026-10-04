@@ -11,6 +11,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -18,9 +19,9 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 /// The blob engine's background workers under device faults that fire on their own threads
 /// (#1268): a checkpoint or page write-back whose page writes fail is reported while the fault
 /// lasts, retried after the worker's backoff, and recovers when the fault clears, while the
-/// engine's other database keeps its work; a failed group-commit fsync and a failed header slot
-/// write take only their database offline, and every later operation on it is refused with
-/// COHDBB002 while nothing more is written to it.
+/// engine's other database keeps its work; a failed group-commit drain (#1252) or fsync and a
+/// failed header slot write take only their database offline, and every later operation on it is
+/// refused with COHDBB002 while nothing more is written to it.
 /// </summary>
 public sealed class BlobWorkerResilienceTests
 {
@@ -139,8 +140,16 @@ public sealed class BlobWorkerResilienceTests
         (await CountAsync(failing)).ShouldBe(20);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a group-commit fsync failure takes only its database offline, and the flush worker keeps serving the others")]
-    public async Task WriteAheadFlushWorker_FsyncFails_ShouldTakeOnlyItsDatabaseOfflineAndKeepFlushing()
+    /// <summary>
+    /// The flush worker's group flush fails in either of its two steps: the drain of the journal's
+    /// append buffer (#1252) or the fsync after it (#1243). Either takes only its database offline
+    /// with <see cref="StorageOfflineCause.JournalFlush"/>, on the worker's thread, while the worker
+    /// records no failure of its own and keeps flushing the other database (#1268).
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Workers: a group-commit drain or fsync failure takes only its database offline, and the flush worker keeps serving the others")]
+    [InlineData(DeviceFault.JournalFlush)]
+    [InlineData(DeviceFault.JournalWrite)]
+    public async Task WriteAheadFlushWorker_JournalFails_ShouldTakeOnlyItsDatabaseOfflineAndKeepFlushing(DeviceFault fault)
     {
         // Arrange: grouped commits wait up to two seconds for the flush worker before they flush
         // themselves, so a commit that returns sooner was flushed by the worker.
@@ -157,8 +166,9 @@ public sealed class BlobWorkerResilienceTests
         await using var session = await failing.CreateSessionAsync();
         var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
 
-        // Act: the failing database's journal fsync fails under the worker's group flush.
-        faults.FailJournalFlushes = true;
+        // Act: the failing database's journal drain, or its fsync, fails under the worker's group
+        // flush.
+        faults.SwitchOn(fault);
         var watch = Stopwatch.StartNew();
         var error = await Record.ExceptionAsync(async () => await WriteAsync(files, "lost", "lost"));
         var failedCommit = watch.Elapsed;
@@ -170,15 +180,17 @@ public sealed class BlobWorkerResilienceTests
         faults.Clear();
         var reopened = (BlobDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
 
-        // Assert
+        // Assert: a failed drain ends the group flush before its fsync.
+        bool drain = fault == DeviceFault.JournalWrite;
         StorageOfflineException.Find(error.ShouldNotBeNull()).ShouldNotBeNull();
         (failedCommit / window).ShouldBeLessThan(1.0);
-        faults.JournalFlushFailures.ShouldBeGreaterThanOrEqualTo(1);
-        faults.JournalFlushFailureThread.ShouldBe(engine.Name + "/" + DatabaseEngineWorkerKind.WriteAheadFlush);
+        (drain ? faults.JournalWriteFailures : faults.JournalFlushFailures).ShouldBeGreaterThanOrEqualTo(1);
+        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(engine.Name + "/" + DatabaseEngineWorkerKind.WriteAheadFlush);
+        (drain ? faults.JournalFlushFailures : faults.JournalWriteFailures).ShouldBe(0);
         refusal.Code.ShouldBe("COHDBB002");
         StorageOfflineException.Find(refusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
         refusal.Message.ShouldContain("a write or flush of the journal");
-        StorageOfflineException.Find(refusal)!.Message.ShouldContain("a durable flush of the journal");
+        StorageOfflineException.Find(refusal)!.Message.ShouldContain(drain ? "a write of the journal" : "a durable flush of the journal");
         (latencies.Max() / window).ShouldBeLessThan(1.0, $"grouped commit latencies {string.Join(", ", latencies)}");
         worker.Fault.ShouldBeNull();
         worker.FailureCount.ShouldBe(0);
@@ -242,16 +254,20 @@ public sealed class BlobWorkerResilienceTests
     }
 
     /// <summary>
-    /// Two writers in flight when a failed header slot write or journal fsync takes the database
-    /// offline (#1268 review): the writer holding the database writer lock keeps it, because an
-    /// offline database undoes nothing and releasing the lock without the undo would hand the next
-    /// writer versions that were never undone, so the writer queued behind it must end with the
-    /// coded refusal instead. Before the review it waited until the database was reopened.
+    /// Two writers in flight when a failed header slot write, journal fsync or journal drain takes
+    /// the database offline (#1268 review): the writer holding the database writer lock keeps it,
+    /// because an offline database undoes nothing and releasing the lock without the undo would
+    /// hand the next writer versions that were never undone, so the writer queued behind it must
+    /// end with the coded refusal instead. Before the review it waited until the database was
+    /// reopened. The drain of the journal's append buffer (#1252) goes offline through the same
+    /// hook, so it ends the wait too, with <see cref="StorageOfflineCause.JournalFlush"/> as the
+    /// cause.
     /// </summary>
     [Theory(DisplayName = "Cohesion Test [Database.Blob] - Workers: a writer queued for the writer lock when the database goes offline ends with the coded refusal")]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task QueuedWriter_DatabaseGoesOffline_ShouldEndWithTheOfflineRefusal(bool headerWriteFails)
+    [InlineData(DeviceFault.HeaderWrite)]
+    [InlineData(DeviceFault.JournalFlush)]
+    [InlineData(DeviceFault.JournalWrite)]
+    public async Task QueuedWriter_DatabaseGoesOffline_ShouldEndWithTheOfflineRefusal(DeviceFault fault)
     {
         // Arrange: the checkpointer looks every 100 ms; one writer holds the database writer lock in
         // an explicit transaction, and another queues behind it.
@@ -267,15 +283,9 @@ public sealed class BlobWorkerResilienceTests
         await Task.Delay(TimeSpan.FromMilliseconds(100));
         bool queuedWhileOnline = !waiting.IsCompleted;
 
-        // Act: the next checkpoint's header slot write, or its journal fsync, fails.
-        if (headerWriteFails)
-        {
-            faults.FailHeaderWrites = true;
-        }
-        else
-        {
-            faults.FailJournalFlushes = true;
-        }
+        // Act: the next checkpoint's header slot write, its journal fsync, or the drain of the
+        // journal's append buffer that leads it, fails.
+        faults.SwitchOn(fault);
 
         // The holder writes again, so the next checkpoint is due (it may already be refused).
         await Record.ExceptionAsync(async () => await WriteAsync(await ((IBlobDatabase)holder.Database).GetContainerAsync("files"), "held-2", "held-2"));
@@ -287,11 +297,13 @@ public sealed class BlobWorkerResilienceTests
         faults.Clear();
         var reopened = (BlobDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
 
-        // Assert: both writers got the coded refusal, and the reopen kept neither write.
+        // Assert: both writers got the coded refusal naming what failed, and the reopen kept
+        // neither write.
         queuedWhileOnline.ShouldBeTrue();
         offline.ShouldBeTrue();
         ended.ShouldBeTrue("the queued writer was still waiting five seconds after the database went offline");
         queuedRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBB002");
+        StorageOfflineException.Find(queuedRefusal)!.Cause.ShouldBe(fault == DeviceFault.HeaderWrite ? StorageOfflineCause.HeaderWrite : StorageOfflineCause.JournalFlush);
         holderRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBB002");
         reopened.IsOffline.ShouldBeFalse();
         (await CountAsync(reopened)).ShouldBe(0);

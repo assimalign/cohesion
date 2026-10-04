@@ -8,11 +8,28 @@ using Assimalign.Cohesion.FileSystem;
 namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 /// <summary>
+/// The faults a test switches on as one theory's cases (<see cref="DeviceFaults.SwitchOn"/>): each
+/// takes the database offline.
+/// </summary>
+public enum DeviceFault
+{
+    /// <summary>A write to page 0, the file header's slots, fails (#1268).</summary>
+    HeaderWrite,
+
+    /// <summary>A durable flush of the journal fails (#1243).</summary>
+    JournalFlush,
+
+    /// <summary>A write of the journal, the drain of its append buffer, fails (#1252).</summary>
+    JournalWrite,
+}
+
+/// <summary>
 /// Device faults of one file set that fire on every thread, the engine's background workers
 /// included, for as long as they are switched on: a data page write fails, a write to page 0 (the
-/// file header's slots) fails, or a durable flush of the journal fails. Each counts the failures it
-/// injected, so a test can wait for a worker to hit the fault. Linked into each engine's test
-/// project, whose fault-injecting storage strategy wraps a file set's handles with them (#1268).
+/// file header's slots) fails, a write of the journal (since #1252 the drain of its append buffer)
+/// fails, or a durable flush of the journal fails. Each counts the failures it injected, so a test
+/// can wait for a worker to hit the fault. Linked into each engine's test project, whose
+/// fault-injecting storage strategy wraps a file set's handles with them (#1268).
 /// </summary>
 /// <remarks>
 /// A failed write writes nothing, and a failed flush leaves the bytes written before it where they
@@ -23,9 +40,11 @@ internal sealed class DeviceFaults
     private int _failPageWrites;
     private int _failHeaderWrites;
     private int _failJournalFlushes;
+    private int _failJournalWrites;
     private long _pageWriteFailures;
     private long _headerWriteFailures;
     private long _journalFlushFailures;
+    private long _journalWriteFailures;
     private long _pageWrites;
 
     /// <summary>
@@ -57,8 +76,30 @@ internal sealed class DeviceFaults
         set => Volatile.Write(ref _failJournalFlushes, value ? 1 : 0);
     }
 
+    /// <summary>
+    /// Gets or sets whether every write of the journal fails: since #1252 a write is a drain of the
+    /// append buffer (at a commit, a group flush, a checkpoint, the write-ahead gate), and a failed
+    /// one takes the storage offline.
+    /// </summary>
+    internal bool FailJournalWrites
+    {
+        get => Volatile.Read(ref _failJournalWrites) != 0;
+        set => Volatile.Write(ref _failJournalWrites, value ? 1 : 0);
+    }
+
     /// <summary>Gets the number of data page writes failed so far.</summary>
     internal long PageWriteFailures => Interlocked.Read(ref _pageWriteFailures);
+
+    /// <summary>Gets the number of journal writes failed so far.</summary>
+    internal long JournalWriteFailures => Interlocked.Read(ref _journalWriteFailures);
+
+    /// <summary>
+    /// Gets the name of the thread the last failed journal write ran on (an engine names its worker
+    /// threads), or null before one failed.
+    /// </summary>
+    internal string? JournalWriteFailureThread => Volatile.Read(ref _journalWriteFailureThread);
+
+    private string? _journalWriteFailureThread;
 
     /// <summary>Gets the number of header writes failed so far.</summary>
     internal long HeaderWriteFailures => Interlocked.Read(ref _headerWriteFailures);
@@ -96,6 +137,29 @@ internal sealed class DeviceFaults
         FailPageWrites = false;
         FailHeaderWrites = false;
         FailJournalFlushes = false;
+        FailJournalWrites = false;
+    }
+
+    /// <summary>
+    /// Switches one fault on.
+    /// </summary>
+    /// <param name="fault">The fault.</param>
+    internal void SwitchOn(DeviceFault fault)
+    {
+        switch (fault)
+        {
+            case DeviceFault.HeaderWrite:
+                FailHeaderWrites = true;
+                break;
+            case DeviceFault.JournalFlush:
+                FailJournalFlushes = true;
+                break;
+            case DeviceFault.JournalWrite:
+                FailJournalWrites = true;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(fault), fault, null);
+        }
     }
 
     /// <summary>
@@ -107,8 +171,8 @@ internal sealed class DeviceFaults
     internal IFileSystemFileHandle WrapData(IFileSystemFileHandle inner) => new FaultingHandle(this, inner, journal: false);
 
     /// <summary>
-    /// Wraps a file set's journal handle: its durable flushes fail while
-    /// <see cref="FailJournalFlushes"/> is on.
+    /// Wraps a file set's journal handle: its writes fail while <see cref="FailJournalWrites"/> is
+    /// on, and its durable flushes while <see cref="FailJournalFlushes"/> is.
     /// </summary>
     /// <param name="inner">The handle the flushes reach when no fault fires.</param>
     /// <returns>The faulting handle.</returns>
@@ -140,6 +204,16 @@ internal sealed class DeviceFaults
         else
         {
             Interlocked.Increment(ref _headerWrites);
+        }
+    }
+
+    private void BeforeJournalWrite()
+    {
+        if (FailJournalWrites)
+        {
+            Volatile.Write(ref _journalWriteFailureThread, Thread.CurrentThread.Name ?? $"unnamed thread {Environment.CurrentManagedThreadId}");
+            Interlocked.Increment(ref _journalWriteFailures);
+            throw new System.IO.IOException("Injected journal write failure.");
         }
     }
 
@@ -179,6 +253,7 @@ internal sealed class DeviceFaults
         {
             if (_journal)
             {
+                _faults.BeforeJournalWrite();
                 _inner.Write(buffer, offset);
                 return;
             }
@@ -192,6 +267,7 @@ internal sealed class DeviceFaults
         {
             if (_journal)
             {
+                _faults.BeforeJournalWrite();
                 await _inner.WriteAsync(buffer, offset, cancellationToken).ConfigureAwait(false);
                 return;
             }

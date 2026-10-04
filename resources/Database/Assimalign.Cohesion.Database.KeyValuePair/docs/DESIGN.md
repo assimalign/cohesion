@@ -354,10 +354,11 @@ worker's: the engine lists the database in `OfflineDatabases`. The engine's pump
 again after the backoff if its loop ever ends early (only an `IDatabaseEngineWorker` without the
 guided base can, and the engine then reports `Faulted` until disposal). Before #1268 one
 unexpected exception ended a worker for good. `KeyValueWorkerResilienceTests` covers a
-checkpoint's and a write-back's page-write failures, a group flush's fsync failure, a header slot
-write failure, a registered worker whose loop throws, a database whose checkpoints keep failing
-(the other database keeps at least half its no-fault checkpoint count), and a writer queued for a
-key lock when the database goes offline: it gets `COHDBK002` at once instead of waiting for the
+checkpoint's and a write-back's page-write failures, a group flush's drain (#1252) or fsync
+failure, a header slot write failure, a registered worker whose loop throws, a database whose
+checkpoints keep failing (the other database keeps at least half its no-fault checkpoint count),
+and a writer queued for a key lock when the database goes offline (by any of the three device
+faults): it gets `COHDBK002` at once instead of waiting for the
 reopen, because the coordinator ends every lock wait of an offline database
 (`TransactionCoordinator.AbandonLockWaits`, wired to the data file set's offline hook), while
 the writer that holds the lock keeps it, since an offline database undoes nothing.

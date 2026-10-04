@@ -1158,9 +1158,10 @@ offline hook now calls `TransactionCoordinator.AbandonLockWaits`, which fails ev
 the database, and every later one, with the storage's offline error, which the session translates
 into `COHSQLT004`; a lock the table can grant at once is still granted, and the storage refuses
 the work. `SqlWorkerResilienceTests` holds a row in an explicit transaction, queues an update of
-the same row, takes the database offline with a header slot write or a journal fsync failure,
-and checks that the queued writer is refused within five seconds (before: it waited until the
-reopen in every run).
+the same row, takes the database offline with a header slot write, journal fsync or journal
+drain failure (#1252: the drain goes offline through the same hook), and checks that the queued
+writer is refused within five seconds, naming the cause (before: it waited until the reopen in
+every run).
 
 **Buffer pool and checkpoint options (#1254).**
 

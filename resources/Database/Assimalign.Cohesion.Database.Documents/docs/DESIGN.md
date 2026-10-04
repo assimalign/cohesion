@@ -366,19 +366,21 @@ database, and later passes skip that database for `DatabaseEngineWorker.FailureB
 second, PostgreSQL's error sleep, `src/backend/postmaster/checkpointer.c:286-346`,
 `bgwriter.c:154-205`) while every other database keeps the worker's full pace (#1268 review); the
 first pass that finishes that database's work clears its record, so the engine is Faulted exactly while a worker
-keeps failing. A failure that took a database offline (a failed durable flush, or a failed
-header slot write) is not the worker's: the workers skip the database and the engine lists it in
+keeps failing. A failure that took a database offline (a failed durable flush, a failed drain of
+the journal's append buffer, #1252, or a failed header slot write) is not the worker's: the
+workers skip the database and the engine lists it in
 `OfflineDatabases`. The engine's pump runs a worker again after the backoff if its loop ever ends
 early (only an `IDatabaseEngineWorker` without the guided base can; the engine then reports
 Faulted until disposal). Before #1268 the pump caught outside the worker's loop, so one
 unexpected exception ended that worker for good. `DocumentWorkerResilienceTests` fails a
 checkpoint's and a write-back's page writes (the worker reports, backs off and recovers while
-the other database's work goes on), a group flush's fsync on the flush worker's own thread (only
-its database goes offline), and a header slot write (the database goes offline with COHDBD002,
-naming "a write of the file header", and its files stop changing). It also checks
-that a database whose checkpoints keep failing leaves the other database at least half its
-no-fault checkpoint count, and that a writer queued for the database writer lock when the
-database goes offline gets COHDBD002 at once instead of waiting for the reopen: an offline
+the other database's work goes on), a group flush's drain or fsync on the flush worker's own
+thread (only its database goes offline, `StorageOfflineCause.JournalFlush` either way), and a
+header slot write (the database goes offline with COHDBD002, naming "a write of the file
+header", and its files stop changing). It also checks that a database whose checkpoints keep
+failing leaves the other database at least half its no-fault checkpoint count, and that a writer
+queued for the database writer lock when the database goes offline (a header slot write, a
+journal fsync or a journal drain failing) gets COHDBD002 at once instead of waiting for the reopen: an offline
 database undoes nothing, so the writer holding the lock keeps it, and the coordinator ends every
 lock wait instead (`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook).
 Disposal is idempotent: stop/join workers, dispose coordinators (rolling back open

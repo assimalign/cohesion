@@ -12,6 +12,7 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -19,11 +20,11 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// The SQL engine's background workers under device faults that fire on their own threads
 /// (#1268): a checkpoint or page write-back whose page writes fail is reported while the fault
 /// lasts, retried after the worker's backoff, and recovers when the fault clears, while the
-/// engine's other database keeps its work; a failed group-commit fsync and a failed header slot
-/// write take only their database offline, and every later operation on it is refused with
-/// COHSQLT004 while nothing more is written to it. Before #1268 the first page write failure ended
-/// the checkpoint worker for good, and a failed header write left the database accepting commits
-/// whose journal no checkpoint could truncate.
+/// engine's other database keeps its work; a failed group-commit drain (#1252) or fsync and a
+/// failed header slot write take only their database offline, and every later operation on it is
+/// refused with COHSQLT004 while nothing more is written to it. Before #1268 the first page write
+/// failure ended the checkpoint worker for good, and a failed header write left the database
+/// accepting commits whose journal no checkpoint could truncate.
 /// </summary>
 public sealed class SqlWorkerResilienceTests
 {
@@ -143,8 +144,16 @@ public sealed class SqlWorkerResilienceTests
         (await CountAsync(failing)).ShouldBe(20);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Workers: a group-commit fsync failure takes only its database offline, and the flush worker keeps serving the others")]
-    public async Task WriteAheadFlushWorker_FsyncFails_ShouldTakeOnlyItsDatabaseOfflineAndKeepFlushing()
+    /// <summary>
+    /// The flush worker's group flush fails in either of its two steps: the drain of the journal's
+    /// append buffer (#1252) or the fsync after it (#1243). Either takes only its database offline
+    /// with <see cref="StorageOfflineCause.JournalFlush"/>, on the worker's thread, while the worker
+    /// records no failure of its own and keeps flushing the other database (#1268).
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Workers: a group-commit drain or fsync failure takes only its database offline, and the flush worker keeps serving the others")]
+    [InlineData(DeviceFault.JournalFlush)]
+    [InlineData(DeviceFault.JournalWrite)]
+    public async Task WriteAheadFlushWorker_JournalFails_ShouldTakeOnlyItsDatabaseOfflineAndKeepFlushing(DeviceFault fault)
     {
         // Arrange: grouped commits wait up to two seconds for the flush worker before they flush
         // themselves, so a commit that returns sooner was flushed by the worker.
@@ -160,8 +169,9 @@ public sealed class SqlWorkerResilienceTests
         var faults = strategy.Faults(Failing);
         await using var session = await failing.CreateSessionAsync();
 
-        // Act: the failing database's journal fsync fails under the worker's group flush.
-        faults.FailJournalFlushes = true;
+        // Act: the failing database's journal drain, or its fsync, fails under the worker's group
+        // flush.
+        faults.SwitchOn(fault);
         var watch = Stopwatch.StartNew();
         var error = await Record.ExceptionAsync(async () => await session.ExecuteAsync("INSERT INTO t (id, payload) VALUES (1, 'lost')"));
         var failedCommit = watch.Elapsed;
@@ -174,15 +184,18 @@ public sealed class SqlWorkerResilienceTests
         var reopened = (SqlDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
 
         // Assert: the commit failed fast (the worker's flush failed and released it), only its
-        // database went offline, and the worker reported no failure of its own.
+        // database went offline, and the worker reported no failure of its own. A failed drain
+        // ends the flush before its fsync.
+        bool drain = fault == DeviceFault.JournalWrite;
         StorageOfflineException.Find(error.ShouldNotBeNull()).ShouldNotBeNull();
         (failedCommit / window).ShouldBeLessThan(1.0);
-        faults.JournalFlushFailures.ShouldBeGreaterThanOrEqualTo(1);
-        faults.JournalFlushFailureThread.ShouldBe(worker.Name);
+        (drain ? faults.JournalWriteFailures : faults.JournalFlushFailures).ShouldBeGreaterThanOrEqualTo(1);
+        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name);
+        (drain ? faults.JournalFlushFailures : faults.JournalWriteFailures).ShouldBe(0);
         refusal.Code.ShouldBe("COHSQLT004");
         refusal.Message.ShouldContain("a write or flush of the journal");
-        StorageOfflineException.Find(refusal)!.Message.ShouldContain("a durable flush of the journal");
         StorageOfflineException.Find(refusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        StorageOfflineException.Find(refusal)!.Message.ShouldContain(drain ? "a write of the journal" : "a durable flush of the journal");
         (latencies.Max() / window).ShouldBeLessThan(1.0, $"grouped commit latencies {string.Join(", ", latencies)}");
         worker.Fault.ShouldBeNull();
         worker.FailureCount.ShouldBe(0);
@@ -250,22 +263,19 @@ public sealed class SqlWorkerResilienceTests
     }
 
     /// <summary>
-    /// A worker registered through the builder that implements the interface without the guided
-    /// base, and lets an exception escape its loop: the engine's pump runs it again after the
-    /// backoff instead of letting the thread end, and reports the engine Faulted until disposal,
-    /// since nothing tells it when such a worker is healthy again.
-    /// </summary>
-    /// <summary>
-    /// Two writers in flight when a failed header slot write or journal fsync takes the database
-    /// offline (#1268 review): the writer holding the database writer lock keeps it, because an
+    /// Two writers in flight when a failed header slot write, journal fsync or journal drain takes
+    /// the database offline (#1268 review): the writer holding the row lock keeps it, because an
     /// offline database undoes nothing and releasing the lock without the undo would hand the next
     /// writer versions that were never undone, so the writer queued behind it must end with the
-    /// coded refusal instead. Before the review it waited until the database was reopened.
+    /// coded refusal instead. Before the review it waited until the database was reopened. The
+    /// drain of the journal's append buffer (#1252) goes offline through the same hook, so it ends
+    /// the wait too, with <see cref="StorageOfflineCause.JournalFlush"/> as the cause.
     /// </summary>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Workers: a writer queued for the writer lock when the database goes offline ends with the coded refusal")]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task QueuedWriter_DatabaseGoesOffline_ShouldEndWithTheOfflineRefusal(bool headerWriteFails)
+    [InlineData(DeviceFault.HeaderWrite)]
+    [InlineData(DeviceFault.JournalFlush)]
+    [InlineData(DeviceFault.JournalWrite)]
+    public async Task QueuedWriter_DatabaseGoesOffline_ShouldEndWithTheOfflineRefusal(DeviceFault fault)
     {
         // Arrange: the checkpointer looks every 100 ms; one writer holds a row lock in
         // an explicit transaction, and another queues behind it.
@@ -282,15 +292,9 @@ public sealed class SqlWorkerResilienceTests
         await Task.Delay(TimeSpan.FromMilliseconds(100));
         bool queuedWhileOnline = !waiting.IsCompleted;
 
-        // Act: the next checkpoint's header slot write, or its journal fsync, fails.
-        if (headerWriteFails)
-        {
-            faults.FailHeaderWrites = true;
-        }
-        else
-        {
-            faults.FailJournalFlushes = true;
-        }
+        // Act: the next checkpoint's header slot write, its journal fsync, or the drain of the
+        // journal's append buffer that leads it, fails.
+        faults.SwitchOn(fault);
 
         // The holder writes again, so the next checkpoint is due (it may already be refused).
         await Record.ExceptionAsync(async () => await holder.ExecuteAsync("INSERT INTO t (id, payload) VALUES (2, 'held-2')"));
@@ -302,16 +306,24 @@ public sealed class SqlWorkerResilienceTests
         faults.Clear();
         var reopened = (SqlDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
 
-        // Assert: both writers got the coded refusal, and the reopen kept neither write.
+        // Assert: both writers got the coded refusal naming what failed, and the reopen kept
+        // neither write.
         queuedWhileOnline.ShouldBeTrue();
         offline.ShouldBeTrue();
         ended.ShouldBeTrue("the queued writer was still waiting five seconds after the database went offline");
         queuedRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHSQLT004");
+        StorageOfflineException.Find(queuedRefusal)!.Cause.ShouldBe(fault == DeviceFault.HeaderWrite ? StorageOfflineCause.HeaderWrite : StorageOfflineCause.JournalFlush);
         holderRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHSQLT004");
         reopened.IsOffline.ShouldBeFalse();
         (await CountAsync(reopened)).ShouldBe(1);
     }
 
+    /// <summary>
+    /// A worker registered through the builder that implements the interface without the guided
+    /// base, and lets an exception escape its loop: the engine's pump runs it again after the
+    /// backoff instead of letting the thread end, and reports the engine Faulted until disposal,
+    /// since nothing tells it when such a worker is healthy again.
+    /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Workers: a registered worker whose loop throws is run again, and the engine reports Faulted")]
     public async Task Pump_InterfaceWorkerThrows_ShouldRunItAgainAndReportFaulted()
     {
