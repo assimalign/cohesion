@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Storage;
+
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
@@ -40,4 +42,30 @@ public class DatabaseTransactionCommitUnconfirmedException : DatabaseException
     /// <param name="innerException">The underlying cause.</param>
     public DatabaseTransactionCommitUnconfirmedException(string message, Exception? innerException)
         : base(message, innerException) { }
+
+    /// <summary>
+    /// Creates the exception an engine raises for an operation that committed by itself, outside
+    /// a transaction's commit, and whose storage commit record was written before the durable
+    /// flush that took the database offline failed (<see cref="StorageOfflineException.CommitRecordWritten"/>),
+    /// or for a self-committing statement that may already have committed part of its work when
+    /// the database went offline. Either way the effect survives the reopen exactly when its
+    /// records reached stable storage.
+    /// </summary>
+    /// <param name="code">The model's offline code that leads the message, for example <c>COHSQLT004</c>.</param>
+    /// <param name="database">The database's name.</param>
+    /// <param name="cause">The storage's offline error.</param>
+    /// <returns>The exception to throw.</returns>
+    public static DatabaseTransactionCommitUnconfirmedException Create(string code, string database, StorageOfflineException cause)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(code);
+        ArgumentNullException.ThrowIfNull(cause);
+
+        string detail = cause.InnerException?.Message ?? cause.Message;
+        return new DatabaseTransactionCommitUnconfirmedException(
+            $"{code}: Database '{database}' went offline while the operation was committing: a durable flush of its storage " +
+            $"failed ({detail}) after the operation's work reached the journal. The operation may or may not have been " +
+            "applied; do not retry it. Reopen the database (OpenDatabaseAsync): its recovery keeps the work if its records " +
+            "reached stable storage and discards it if not, and reading the data back then tells which.",
+            cause);
+    }
 }

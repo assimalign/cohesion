@@ -182,8 +182,6 @@ public sealed class SqlTransactionRollbackTests
             .ShouldBe([(1L, 10L)]);
     }
 
-    // The engine's own maintenance workers stay out of the way: these tests drive the purge
-    // pass and the checkpoint themselves.
     // The engine's own maintenance workers stay out of the way, the deferred-undo retry included:
     // these tests drive the purge pass and the checkpoint themselves.
     private static SqlDatabaseEngineOptions QuietOptions(string name, FaultInjectingJournalSqlStorageStrategy strategy) => new()

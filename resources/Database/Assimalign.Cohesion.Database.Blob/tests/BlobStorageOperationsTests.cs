@@ -240,18 +240,20 @@ public sealed class BlobStorageOperationsTests
     /// A rollback's undo fails once. The undo is retried on its own backoff, about 100 ms later,
     /// so the writer waiting for the rolled-back transaction's writer lock proceeds within about a
     /// second although the maintenance interval is an hour (#1226 owner decision of 2026-10-04).
-    /// The bound is a ratio to the maintenance interval.
+    /// The engine's wiring is checked exactly (the first retry is due within 100 ms of the
+    /// deferral), and the release end to end as a ratio to that first delay.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Deferred undo: a transient undo failure releases the writer within about a second")]
     public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterWithinAboutASecond()
     {
         // Arrange
         var maintenance = TimeSpan.FromHours(1);
-        await using var engine = BlobDatabaseEngine.Create(new()
+        var options = new BlobDatabaseEngineOptions
         {
             StorageStrategy = new FaultInjectingJournalStorageStrategy(),
             MaintenanceInterval = maintenance,
-        });
+        };
+        await using var engine = BlobDatabaseEngine.Create(options);
         var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("blobs");
         var container = await database.CreateContainerAsync("files");
         await Write(container, "keep", "original");
@@ -273,6 +275,9 @@ public sealed class BlobStorageOperationsTests
             unspent = failures.Remaining;
         }
 
+        // The engine handed the coordinator its first retry delay: the retry is due within it.
+        var firstRetry = database.Coordinator.NextDeferredUndoRetry;
+
         await Write(otherFiles, "other", "other").WaitAsync(Timeout);
         watch.Stop();
 
@@ -282,7 +287,9 @@ public sealed class BlobStorageOperationsTests
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
         (await Names(container)).ShouldBe(["keep", "other"]);
         (await Read(container, "keep")).ShouldBe("original");
-        (watch.Elapsed / maintenance).ShouldBeLessThan(0.01);
+        options.DeferredUndoRetryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
+        firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(options.DeferredUndoRetryDelay);
+        (watch.Elapsed / options.DeferredUndoRetryDelay).ShouldBeLessThan(20);
         engine.State.ShouldBe(EngineState.Running);
     }
 

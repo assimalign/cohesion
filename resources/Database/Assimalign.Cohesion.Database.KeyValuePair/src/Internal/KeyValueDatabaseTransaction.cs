@@ -387,7 +387,7 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     private Exception Translate(Exception error) => error switch
     {
         TransactionCommitUnconfirmedException => new DatabaseTransactionCommitUnconfirmedException(error.Message, error),
-        _ when _database?.TranslateOffline(error) is DatabaseOfflineException offline => offline,
+        _ when _database?.TranslateOffline(error) is { } offline && !ReferenceEquals(offline, error) => offline,
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         _ => error,

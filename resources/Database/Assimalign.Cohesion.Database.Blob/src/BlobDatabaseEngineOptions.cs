@@ -47,9 +47,13 @@ public sealed class BlobDatabaseEngineOptions
     /// <remarks>
     /// PostgreSQL triggers on WAL volume too (<c>max_wal_size</c>, 1 GB, about eight times its
     /// 128 MB <c>shared_buffers</c>). Cohesion keeps that ratio to its 32 MiB pool, and its sharp
-    /// checkpoint truncates at once rather than spreading over the next cycle, so the size is the
-    /// journal's bound; a recovery replays about 20 ms per MB from a warm file cache
-    /// (Storage DESIGN.md, "Measurements"), about 5 seconds at the bound.
+    /// checkpoint truncates at once rather than spreading over the next cycle, so the size is close
+    /// to the journal's bound: writes that land before the checkpoint runs overshoot it, and a
+    /// single statement that journals more than the size overshoots it by that much. A recovery
+    /// replays about 20 ms per MB from a warm file cache (Storage DESIGN.md, "Measurements"), about
+    /// 5 seconds at the bound. An in-memory database holds its journal in memory: up to the size,
+    /// and briefly up to twice the size while the in-memory buffer doubles past it, until the
+    /// checkpoint's truncation releases the buffer.
     /// </remarks>
     public long CheckpointJournalSize { get; set; } = 256L * 1024 * 1024;
 

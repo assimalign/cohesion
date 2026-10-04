@@ -56,6 +56,19 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     IReadOnlyList<IDatabaseEngineWorker> Workers { get; }
 
     /// <summary>
+    /// Gets the names of the open databases that are offline: a durable flush of one of their
+    /// files failed, and every operation on them is refused with
+    /// <see cref="DatabaseOfflineException"/> until <see cref="OpenDatabaseAsync"/> reopens
+    /// them (#1243). Empty while every open database is online; a point-in-time snapshot.
+    /// </summary>
+    /// <remarks>
+    /// An offline database is a database the engine cannot serve, not a degraded engine, so it
+    /// does not change <see cref="State"/>; a host reports it through its health contribution
+    /// (Database.Hosting reports the application unhealthy).
+    /// </remarks>
+    IReadOnlyList<DatabaseName> OfflineDatabases { get; }
+
+    /// <summary>
     /// Gets the servers composed beneath this engine. The engine owns disposal;
     /// the application snapshots this list at Build and drives start and stop.
     /// </summary>

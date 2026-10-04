@@ -32,6 +32,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
     private readonly Dictionary<string, Files> _storages = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
     private readonly bool _durable;
+    private bool _failEveryJournalWrite;
 
     /// <summary>Initializes a new instance of the <see cref="FaultInjectingJournalSqlStorageStrategy"/> class.</summary>
     /// <param name="durable">True for file sets that support durable flushes.</param>
@@ -44,6 +45,16 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
     /// Gets or sets whether a reopen keeps only the journal bytes a durable flush confirmed.
     /// </summary>
     internal bool LoseUnconfirmedJournalOnReopen { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether every journal write of this strategy's file sets fails, on every flow:
+    /// the engine's background workers included, as a device that refuses writes for a while.
+    /// </summary>
+    internal bool FailEveryJournalWrite
+    {
+        get => Volatile.Read(ref _failEveryJournalWrite);
+        set => Volatile.Write(ref _failEveryJournalWrite, value);
+    }
 
     /// <summary>
     /// Fails <paramref name="writes"/> journal writes made on the calling flow, after letting the
@@ -67,11 +78,15 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
     /// </summary>
     /// <param name="flushes">The number of durable flushes to fail.</param>
     /// <param name="skip">The number of durable flushes to let through before the first failure.</param>
+    /// <param name="storageName">
+    /// Only the journal of this file set (the database name, or with <c>.catalog</c>) fails and
+    /// counts; null for every journal.
+    /// </param>
     /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
-    internal static FailureScope FailJournalFlushes(int flushes, int skip = 0)
+    internal static FailureScope FailJournalFlushes(int flushes, int skip = 0, string? storageName = null)
     {
         var previous = s_flushFailures.Value;
-        var budget = new Budget { Skip = skip, Fail = flushes };
+        var budget = new Budget { Skip = skip, Fail = flushes, StorageName = storageName };
         s_flushFailures.Value = budget;
         return new FailureScope(s_flushFailures, previous, budget);
     }
@@ -92,7 +107,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
     /// <inheritdoc />
     public SqlStorage CreateStorage(string databaseName)
     {
-        var files = new Files(new MemoryStream(), new FaultInjectingStream(), new MemoryStream());
+        var files = new Files(new MemoryStream(), new FaultInjectingStream(this), new MemoryStream());
         lock (_sync)
         {
             if (!_storages.TryAdd(databaseName, files))
@@ -101,7 +116,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
             }
         }
 
-        return SqlStorage.Create(DataStream(files), JournalStream(files), new StorageStream(files.Backup), databaseName);
+        return SqlStorage.Create(DataStream(files), JournalStream(files, databaseName), new StorageStream(files.Backup), databaseName);
     }
 
     /// <summary>
@@ -119,7 +134,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
                 throw new DatabaseNotFoundException($"Database '{databaseName}' does not exist.");
             }
 
-            var journal = Copy(closed.Journal, new FaultInjectingStream());
+            var journal = Copy(closed.Journal, new FaultInjectingStream(this));
             if (LoseUnconfirmedJournalOnReopen)
             {
                 journal.SetLength(closed.Journal.ConfirmedLength);
@@ -130,7 +145,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
             _storages[databaseName] = files;
         }
 
-        return SqlStorage.Open(DataStream(files), JournalStream(files), new StorageStream(files.Backup), checkpointOnOpen: false);
+        return SqlStorage.Open(DataStream(files), JournalStream(files, databaseName), new StorageStream(files.Backup), checkpointOnOpen: false);
     }
 
     /// <inheritdoc />
@@ -152,10 +167,10 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
     }
 
     private StorageStream DataStream(Files files)
-        => _durable ? new StorageStream(new DurableMemoryHandle(files.Data, null)) : new StorageStream(files.Data);
+        => _durable ? new StorageStream(new DurableMemoryHandle(files.Data, null, null)) : new StorageStream(files.Data);
 
-    private StorageStream JournalStream(Files files)
-        => _durable ? new StorageStream(new DurableMemoryHandle(files.Journal, files.Journal)) : new StorageStream(files.Journal);
+    private StorageStream JournalStream(Files files, string storageName)
+        => _durable ? new StorageStream(new DurableMemoryHandle(files.Journal, files.Journal, storageName)) : new StorageStream(files.Journal);
 
     private static T Copy<T>(MemoryStream source, T target)
         where T : MemoryStream
@@ -165,9 +180,10 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
         return target;
     }
 
-    private static bool Spend(AsyncLocal<Budget?> failures)
+    private static bool Spend(AsyncLocal<Budget?> failures, string? storageName = null)
     {
-        if (failures.Value is not { } budget)
+        if (failures.Value is not { } budget
+            || (budget.StorageName is not null && !string.Equals(budget.StorageName, storageName, StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }
@@ -219,6 +235,9 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
 
         /// <summary>Gets or sets the number still to fail.</summary>
         public int Fail { get; set; }
+
+        /// <summary>Gets or sets the only file set whose journal the budget fails, or null for every one.</summary>
+        public string? StorageName { get; set; }
     }
 
     /// <summary>The data, journal and backup streams of one file set.</summary>
@@ -228,12 +247,19 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
     // MemoryStream subclass's span overload would otherwise call back into the array overload.
     private sealed class FaultInjectingStream : MemoryStream
     {
+        private readonly FaultInjectingJournalSqlStorageStrategy _owner;
+
+        public FaultInjectingStream(FaultInjectingJournalSqlStorageStrategy owner)
+        {
+            _owner = owner;
+        }
+
         /// <summary>Gets or sets the length the last successful durable flush confirmed.</summary>
         public long ConfirmedLength { get; set; }
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            if (Spend(s_failures))
+            if (_owner.FailEveryJournalWrite || Spend(s_failures))
             {
                 throw new IOException("Injected journal write failure.");
             }
@@ -256,12 +282,14 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
     {
         private readonly MemoryStream _stream;
         private readonly FaultInjectingStream? _journal;
+        private readonly string? _storageName;
         private readonly object _gate = new();
 
-        public DurableMemoryHandle(MemoryStream stream, FaultInjectingStream? journal)
+        public DurableMemoryHandle(MemoryStream stream, FaultInjectingStream? journal, string? storageName)
         {
             _stream = stream;
             _journal = journal;
+            _storageName = storageName;
         }
 
         public long Length { get { lock (_gate) { return _stream.Length; } } }
@@ -310,7 +338,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
                 return;
             }
 
-            if (Spend(s_flushFailures))
+            if (Spend(s_flushFailures, _storageName))
             {
                 throw new IOException("Injected journal fsync failure.");
             }

@@ -88,7 +88,8 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// <param name="cancellationToken">Signals that the health evaluation should be abandoned.</param>
     /// <returns>
     /// A healthy result when every engine is running, a degraded result when an engine reports a
-    /// worker fault, or an unhealthy result when an engine is disposed or reports an unknown state.
+    /// worker fault, or an unhealthy result when an engine is disposed or reports an unknown state,
+    /// or when an open database is offline after a failed durable flush (#1243).
     /// </returns>
     public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
     {
@@ -118,6 +119,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         };
         var faultedEngines = new List<string>();
         var unavailableEngines = new List<string>();
+        var offlineDatabases = new List<string>();
         int workerCount = 0;
 
         for (int engineIndex = 0; engineIndex < engines.Count; engineIndex++)
@@ -157,15 +159,42 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     unavailableEngines.Add(engine.Name);
                     break;
             }
+
+            // A database that went offline after a failed durable flush refuses every request
+            // until it is reopened (#1243); the engine itself keeps running, so its state does not
+            // show it. A disposed engine has no databases to report.
+            if (state != EngineState.Disposed)
+            {
+                IReadOnlyList<DatabaseName> offline = engine.OfflineDatabases;
+                data[$"engine.{engineIndex}.offlineDatabaseCount"] = offline.Count;
+                if (offline.Count > 0)
+                {
+                    string names = string.Join(", ", offline);
+                    data[$"engine.{engineIndex}.offlineDatabases"] = names;
+                    foreach (DatabaseName database in offline)
+                    {
+                        offlineDatabases.Add($"{engine.Name}/{database}");
+                    }
+                }
+            }
         }
 
         data["workerCount"] = workerCount;
+        data["offlineDatabaseCount"] = offlineDatabases.Count;
 
         HealthContribution contribution;
         if (unavailableEngines.Count > 0)
         {
             contribution = HealthContribution.Unhealthy(
                 $"Unavailable database engines: {string.Join(", ", unavailableEngines)}.",
+                data);
+        }
+        else if (offlineDatabases.Count > 0)
+        {
+            contribution = HealthContribution.Unhealthy(
+                $"Offline databases: {string.Join(", ", offlineDatabases)}. A durable flush of their storage failed, so every " +
+                "operation on them is refused until each is reopened (OpenDatabaseAsync), or the process restarts and opens " +
+                "them again; either runs recovery.",
                 data);
         }
         else if (faultedEngines.Count > 0)

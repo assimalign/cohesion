@@ -24,6 +24,8 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
   fails takes the storage offline (`StorageOfflineException`, `COHDBS002`): nothing more is
   written to either file, closing included, until the file set is reopened and its recovery
   decides every unconfirmed commit (#1243, PostgreSQL's PANIC on a failed WAL fsync).
+  `OnOffline` is raised once when it happens, so an engine takes a database's other file sets
+  offline in the same moment, and `CommitRecordWritten` marks a commit that may survive.
 - **Checkpoint triggers** — `CheckpointJournalSize` asks for a checkpoint when the journal
   reaches a size (`OnCheckpointNeeded`), and `IsCheckpointDue(interval)` adds a time backstop
   that skips idle journals; engines default to 256 MiB and 5 minutes (#1254).

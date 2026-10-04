@@ -90,6 +90,8 @@ public class EmbeddedDatabaseTests
 
         public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
 
+        public IReadOnlyList<DatabaseName> OfflineDatabases => [];
+
         public IReadOnlyList<IDatabaseServer> Servers => [];
 
         public ValueTask<IDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)

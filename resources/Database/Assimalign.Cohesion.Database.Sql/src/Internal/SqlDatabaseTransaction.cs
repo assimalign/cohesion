@@ -48,12 +48,15 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
     /// <inheritdoc />
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
+        // The offline refusal comes first (#1243): a transaction of an instance that went offline
+        // and was then closed by a reopen reports the coded refusal, not the state its close
+        // left it in.
+        _database?.ThrowIfOffline();
+
         if (_context.State != TransactionState.Active)
         {
             throw new DatabaseException($"Cannot commit transaction in state '{_context.State}'.");
         }
-
-        _database?.ThrowIfOffline();
 
         try
         {
@@ -66,9 +69,9 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
             // survives (#1243). Not an abort: the work must not be retried.
             throw new DatabaseTransactionCommitUnconfirmedException(exception.Message, exception);
         }
-        catch (Exception exception) when (_database?.TranslateOffline(exception) is DatabaseOfflineException offline)
+        catch (Exception exception) when (_database?.TranslateOffline(exception) is { } translated && !ReferenceEquals(translated, exception))
         {
-            throw offline;
+            throw translated;
         }
         catch (TransactionDeadlockException exception)
         {
@@ -93,14 +96,15 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        // An offline database undoes nothing (#1243): the reopen's recovery aborts every
+        // transaction without a commit record. The refusal comes before the state check, as in
+        // CommitAsync.
+        _database?.ThrowIfOffline();
+
         if (_context.State != TransactionState.Active)
         {
             throw new DatabaseException($"Cannot rollback transaction in state '{_context.State}'.");
         }
-
-        // An offline database undoes nothing (#1243): the reopen's recovery aborts every
-        // transaction without a commit record.
-        _database?.ThrowIfOffline();
 
         try
         {

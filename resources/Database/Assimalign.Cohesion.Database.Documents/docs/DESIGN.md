@@ -392,7 +392,11 @@ commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`. Every 
 a new session, an OQL statement or typed request, a collection call, BEGIN, and the COMMIT or
 ROLLBACK of a transaction open at the failure — is refused with `DatabaseOfflineException`, code
 `COHDBD002`, carrying the storage's `StorageOfflineException`. The engine has no wire server.
-The workers skip the database; closing its sessions and transactions writes nothing.
+The workers skip the database; closing its sessions and transactions writes nothing. A storage
+bracket whose commit record was written before its flush failed is reported as unconfirmed,
+never refused (`StorageOfflineException.CommitRecordWritten`). The engine stays `Running`;
+`DocumentDatabaseEngine.OfflineDatabases` names the database, and `Database.Hosting` reports the
+application unhealthy while it is listed.
 `DocumentDatabaseEngine.OpenDatabaseAsync(name)` disposes the offline instance without writing
 and reopens the file set, whose recovery keeps the unconfirmed commit if its record's bytes
 reached the media and aborts every transaction that was open. `DocumentStorageOperationsTests`
@@ -408,16 +412,21 @@ the failing commit.
 `CheckpointInterval` (5 minutes, was 30 seconds), all validated by `Create`. The checkpoint
 worker checkpoints a database when its journal reaches the size (its storage wakes the worker
 at once) or when the interval passed and its journal received records, looking at most once a
-second otherwise; it checkpoints through the transaction coordinator, which takes the statement
-apply gate, so a sustained load cannot keep it out. An open database costs up to about 33 MiB of
-pool memory once it touched that many pages; an in-memory one also holds its data and journal.
-The reasoning is in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint triggers").
+second otherwise; it checkpoints through the transaction coordinator, under the statement apply
+gate, so a sustained load cannot keep it out, and it never waits for the gate: a statement that
+holds it runs the checkpoint as it ends (`TransactionCoordinator.TryCheckpoint`), so a long
+statement in one database cannot stop the other databases' checkpoints. An open database costs
+up to about 33 MiB of pool memory once it touched that many pages; an in-memory one also holds
+its data and its journal (up to the checkpoint size, briefly twice that while the buffer doubles
+past it, released by the checkpoint). The reasoning is in `Database.Storage` DESIGN.md
+("Capacity", "Checkpoint triggers").
 
 **Deferred undo is retried on its own backoff (#1226).** The version-purge worker retries a
 rollback's failed undo about 100 ms after the deferral, then at doubling delays up to
 `MaintenanceInterval`, so a transient failure releases the database writer lock within about a
 second; a failure that persists is recorded as a worker fault and retried without stopping the
-worker (`Database.Transactions` DESIGN.md).
+worker, and the first pass with no failure and no undo still deferred clears the fault
+(`Database.Transactions` DESIGN.md).
 
 ## Limits and verification
 

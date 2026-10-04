@@ -231,18 +231,20 @@ public sealed class GraphStorageOperationsTests
     /// A rollback's undo fails once. The undo is retried on its own backoff, about 100 ms later,
     /// so the writer waiting for the rolled-back transaction's writer lock proceeds within about a
     /// second although the maintenance interval is an hour (#1226 owner decision of 2026-10-04).
-    /// The bound is a ratio to the maintenance interval.
+    /// The engine's wiring is checked exactly (the first retry is due within 100 ms of the
+    /// deferral), and the release end to end as a ratio to that first delay.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Deferred undo: a transient undo failure releases the writer within about a second")]
     public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterWithinAboutASecond()
     {
         // Arrange
         var maintenance = TimeSpan.FromHours(1);
-        await using var engine = GraphDatabaseEngine.Create(new()
+        var options = new GraphDatabaseEngineOptions
         {
             StorageStrategy = new FaultInjectingJournalStorageStrategy(),
             MaintenanceInterval = maintenance,
-        });
+        };
+        await using var engine = GraphDatabaseEngine.Create(options);
         var database = (GraphDatabaseInstance)await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -259,6 +261,9 @@ public sealed class GraphStorageOperationsTests
             unspent = failures.Remaining;
         }
 
+        // The engine handed the coordinator its first retry delay: the retry is due within it.
+        var firstRetry = database.Coordinator.NextDeferredUndoRetry;
+
         await other.ExecuteAsync("INSERT (:Item {name: 'other'})").AsTask().WaitAsync(Timeout);
         watch.Stop();
 
@@ -267,7 +272,9 @@ public sealed class GraphStorageOperationsTests
         transaction.State.ShouldBe(TransactionState.RolledBack);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
         (await Names(other)).ShouldBe(["other"]);
-        (watch.Elapsed / maintenance).ShouldBeLessThan(0.01);
+        options.DeferredUndoRetryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
+        firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(options.DeferredUndoRetryDelay);
+        (watch.Elapsed / options.DeferredUndoRetryDelay).ShouldBeLessThan(20);
         engine.State.ShouldBe(EngineState.Running);
     }
 

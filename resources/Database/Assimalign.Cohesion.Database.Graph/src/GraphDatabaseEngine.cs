@@ -32,7 +32,12 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
     private readonly string? _rootPath;
     private GraphDatabaseInstance[] _instances = [];
     private GraphStorage[] _storages = [];
+    // A worker that died (its pump ended on an exception): kept for the engine's lifetime.
     private Exception? _workerFault;
+
+    // The last failure a running worker reported (the version-purge worker's failed retry of a
+    // deferred undo); cleared by that worker's next clean pass.
+    private Exception? _maintenanceFault;
     private int _disposed;
 
     private GraphDatabaseEngine(GraphDatabaseEngineOptions options)
@@ -55,7 +60,7 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
     public string Name { get; }
     /// <inheritdoc />
     public EngineState State => Volatile.Read(ref _disposed) != 0 ? EngineState.Disposed :
-        Volatile.Read(ref _workerFault) is null ? EngineState.Running : EngineState.Faulted;
+        Volatile.Read(ref _workerFault) is null && Volatile.Read(ref _maintenanceFault) is null ? EngineState.Running : EngineState.Faulted;
     /// <inheritdoc />
     public EngineModel Model => EngineModel.Graph;
     /// <inheritdoc />
@@ -80,10 +85,37 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
 
     /// <summary>
     /// Records a background worker's failure without stopping the worker: the engine reports
-    /// <see cref="EngineState.Faulted"/> and the worker's next pass runs as usual.
+    /// <see cref="EngineState.Faulted"/> and the worker's next pass runs as usual. The version-purge
+    /// worker reports a failed retry of a deferred undo here, and clears it
+    /// (<see cref="ClearWorkerFault"/>) once a pass runs clean.
     /// </summary>
     /// <param name="exception">The failure.</param>
-    internal void ReportWorkerFault(Exception exception) => Interlocked.CompareExchange(ref _workerFault, exception, null);
+    internal void ReportWorkerFault(Exception exception) => Volatile.Write(ref _maintenanceFault, exception);
+
+    /// <summary>
+    /// Clears the failure <see cref="ReportWorkerFault"/> recorded, after the reporting worker's
+    /// next pass ran without one: a deferred undo that failed while its fault lasted and then
+    /// completed leaves nothing degraded (#1226 review). A worker that died stays recorded.
+    /// </summary>
+    internal void ClearWorkerFault() => Volatile.Write(ref _maintenanceFault, null);
+
+    /// <inheritdoc />
+    public IReadOnlyList<DatabaseName> OfflineDatabases
+    {
+        get
+        {
+            List<DatabaseName>? offline = null;
+            foreach (var database in GetInstanceSnapshot())
+            {
+                if (database.IsOffline)
+                {
+                    (offline ??= []).Add(database.Name);
+                }
+            }
+
+            return offline is null ? [] : offline.AsReadOnly();
+        }
+    }
 
     /// <summary>Creates a dependency-free builder for an engine and its deferred workers and servers.</summary>
     /// <returns>A one-shot model builder; constructing the builder starts no components.</returns>

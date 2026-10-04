@@ -34,21 +34,34 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
     {
         int batchSize = _engine.EngineOptions.PageWriteBackBatchSize;
 
-        foreach (KeyValueStorage storage in _engine.GetStorageSnapshot())
+        foreach (KeyValueDatabaseInstance database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {
                 break;
             }
 
-            try
+            // Nothing of an offline database is written (#1243): neither file set, whichever
+            // went offline. Each storage also refuses on its own.
+            if (database.IsOffline)
             {
-                storage.WriteBackDirtyPages(batchSize);
+                continue;
             }
-            catch (ObjectDisposedException)
-            {
-                // The snapshot can race a database drop; nothing to write back.
-            }
+
+            WriteBack(database.DataStorage, batchSize);
+            WriteBack(database.CatalogStorage, batchSize);
+        }
+    }
+
+    private static void WriteBack(KeyValueStorage storage, int batchSize)
+    {
+        try
+        {
+            storage.WriteBackDirtyPages(batchSize);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The snapshot can race a database drop; nothing to write back.
         }
     }
 }

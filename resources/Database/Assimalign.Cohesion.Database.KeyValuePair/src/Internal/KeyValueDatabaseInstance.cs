@@ -37,6 +37,18 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         Engine = engine;
         _storage = storage;
         _catalogStorage = catalogStorage;
+
+        // The two file sets go offline together, the moment either does (#1243): a worker that
+        // writes back the other set's pages or flushes its journal would otherwise change a
+        // file of the database after the failure, until something next read the offline state.
+        _storage.OnOffline = _catalogStorage.TakeOffline;
+        _catalogStorage.OnOffline = _storage.TakeOffline;
+        if ((_storage.OfflineError ?? _catalogStorage.OfflineError) is { } alreadyOffline)
+        {
+            _storage.TakeOffline(alreadyOffline);
+            _catalogStorage.TakeOffline(alreadyOffline);
+        }
+
         _catalog = KeyValueCatalog.Open(catalogStorage);
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new KeyValueTransactionRecordSpace(storage));
 
@@ -300,6 +312,16 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     internal void CheckpointDataStorage(CancellationToken cancellationToken = default) => _coordinator.Checkpoint(cancellationToken);
 
     /// <summary>
+    /// Checkpoints the data storage through the coordinator without waiting for a statement:
+    /// when one holds the apply gate, the checkpoint is deferred to its end
+    /// (<see cref="TransactionCoordinator.TryCheckpoint"/>), so the checkpoint worker never
+    /// waits on one database while the others' journals grow.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the attempt.</param>
+    /// <returns>True when the checkpoint ran; false when it was deferred to the statement applying.</returns>
+    internal bool TryCheckpointDataStorage(CancellationToken cancellationToken) => _coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken);
+
+    /// <summary>
     /// The code that leads the message of every operation refused because the database is
     /// offline (#1243).
     /// </summary>
@@ -308,12 +330,13 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     /// <summary>
     /// Gets whether a failed durable flush of either file set took the database offline.
     /// </summary>
-    internal bool IsOffline => _storage.IsOffline || _catalogStorage.IsOffline;
+    internal bool IsOffline => OfflineError is not null;
 
     /// <summary>
-    /// Gets the storage error that took the database offline, or null while it is online. The
-    /// first time either file set is found offline, the other is taken offline with it, so no
-    /// file of the database is written after the failure.
+    /// Gets the storage error that took the database offline, or null while it is online. Each
+    /// file set's <see cref="Assimalign.Cohesion.Database.Storage.Storage.OnOffline"/> takes the other offline the moment it goes
+    /// offline; reading the state takes both offline too, a backstop that costs nothing once
+    /// they are.
     /// </summary>
     internal StorageOfflineException? OfflineError
     {
@@ -345,17 +368,27 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     }
 
     /// <summary>
-    /// Translates a failure the storage's offline state caused into the coded refusal, unless it
-    /// is the unconfirmed commit itself, which keeps its own type; any other failure is returned
-    /// unchanged.
+    /// Translates a failure the storage's offline state caused into the coded refusal
+    /// (<see cref="DatabaseOfflineException"/>), or into
+    /// <see cref="DatabaseTransactionCommitUnconfirmedException"/> when a storage commit record
+    /// was written before its flush failed (<see cref="StorageOfflineException.CommitRecordWritten"/>),
+    /// so the work may survive the reopen. An unconfirmed commit that already has its own type is
+    /// returned unchanged, and so is any other failure.
     /// </summary>
     /// <param name="error">The failure to translate.</param>
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error)
-        => error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
-            || StorageOfflineException.Find(error) is not { } offline
-            ? error
+    {
+        if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
+            || StorageOfflineException.Find(error) is not { } offline)
+        {
+            return error;
+        }
+
+        return offline.CommitRecordWritten
+            ? DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, offline)
             : DatabaseOfflineException.Create(OfflineCode, Name, OfflineError ?? offline);
+    }
 
     /// <inheritdoc />
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)

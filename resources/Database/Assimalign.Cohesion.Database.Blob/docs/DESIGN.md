@@ -494,6 +494,10 @@ off, `src/backend/storage/file/fd.c:3966-3987`), scoped to the database.
   `DatabaseOfflineException`, code `COHDBB002`, carrying the storage's `StorageOfflineException`.
 - `BlobDatabaseServer` answers an operation on an existing session, and a handshake for the
   database, with `Unavailable` and the coded message.
+- A storage bracket whose commit record was written before its flush failed is reported as
+  unconfirmed, never refused (`StorageOfflineException.CommitRecordWritten`).
+- The engine stays `Running`; `BlobDatabaseEngine.OfflineDatabases` names the database, and
+  `Database.Hosting` reports the application unhealthy while it is listed.
 - The workers skip the database; closing its sessions, transactions and streams writes nothing.
   `BlobDatabaseEngine.OpenDatabaseAsync(name)` disposes the offline instance without writing and
   reopens the file set, whose recovery keeps the unconfirmed upload if its commit record's bytes
@@ -510,20 +514,25 @@ writer lock would otherwise block the failing upload.
 `CheckpointInterval` (5 minutes, was 30 seconds), all validated by `Create`. The checkpoint worker
 checkpoints a database when its journal reaches the size (its storage wakes the worker at once)
 or when the interval passed and its journal received records, looking at most once a second
-otherwise, through the transaction coordinator's apply gate. An upload of one large object is a
+otherwise, through the transaction coordinator's apply gate. The worker never waits for the gate:
+a statement that holds it runs the checkpoint as it ends (`TransactionCoordinator.TryCheckpoint`),
+so a long upload bracket in one database cannot stop the other databases' checkpoints. An upload
+of one large object is a
 single transaction whose chunk brackets journal at least twice the object's size (the 128 MiB
 streaming fixture's upload reached the 256 MiB default), so a size-triggered checkpoint can run
 in the middle of it (a sharp checkpoint keeps the in-flight writer in its
 anchor); the streaming fixture, whose recovery image must keep a 128 MiB object's whole journal,
 sets `CheckpointJournalSize = 0`. An open database costs up to about 33 MiB of pool memory once it
-touched that many pages; the constrained-heap wire round trip (a 256 MiB object through a 64 MiB
-heap) passes with the default pool. The reasoning is in `Database.Storage` DESIGN.md
-("Capacity", "Checkpoint triggers").
+touched that many pages, plus, in memory, its data and its journal (up to the checkpoint size,
+briefly twice that while the buffer doubles past it, released by the checkpoint); the
+constrained-heap wire round trip (a 256 MiB object through a 64 MiB heap) passes with the default
+pool. The reasoning is in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint triggers").
 
 **Deferred undo is retried on its own backoff (#1226).** The version-purge worker retries a
 rollback's failed undo about 100 ms after the deferral, then at doubling delays up to
 `MaintenanceInterval`, so a transient failure releases the database writer lock within about a
-second (`Database.Transactions` DESIGN.md).
+second (`Database.Transactions` DESIGN.md). A retry that fails makes the engine report
+`Faulted`; the first pass with no failure and no undo still deferred clears it.
 
 
 ## Phase 29: deferred hosting composition

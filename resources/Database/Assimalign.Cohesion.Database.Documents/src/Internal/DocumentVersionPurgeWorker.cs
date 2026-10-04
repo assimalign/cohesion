@@ -33,11 +33,16 @@ using Assimalign.Cohesion.Database.Storage;
 /// <para>
 /// A failure is recorded — the engine's observational state flips to Faulted — and the worker
 /// keeps running: an undo that fails again is retried at its next delay, and unpurged versions
-/// cost space, never consistency. An offline database (#1243) is skipped.
+/// cost space, never consistency. The first pass after it with no failure and no undo still
+/// deferred clears the record, so a transient fault does not leave the engine Faulted for good.
+/// An offline database (#1243) is skipped.
 /// </para>
 /// </remarks>
 internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
 {
+    // A WaitHandle wait takes at most int.MaxValue milliseconds.
+    private static readonly TimeSpan _maximumWait = TimeSpan.FromMilliseconds(int.MaxValue);
+
     private readonly DocumentDatabaseEngine _engine;
     private long _lastFullPass = Stopwatch.GetTimestamp();
 
@@ -76,7 +81,7 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
         try
         {
             // A new deferral sets the signal, so its first retry is not left to this wait.
-            _engine.UndoDeferredSignal.Wait(wait > MaximumWait ? MaximumWait : wait, cancellationToken);
+            _engine.UndoDeferredSignal.Wait(wait > _maximumWait ? _maximumWait : wait, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -97,6 +102,10 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
         {
             Volatile.Write(ref _lastFullPass, Stopwatch.GetTimestamp());
         }
+
+        // Clean: no database failed this pass and none still has an undo deferred, so a fault
+        // reported by an earlier pass is over.
+        bool clean = true;
 
         foreach (DocumentDatabaseInstance database in _engine.GetInstanceSnapshot())
         {
@@ -120,10 +129,16 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
                 {
                     database.Coordinator.RetryDeferredUndo(cancellationToken);
                 }
+
+                if (database.Coordinator.NextDeferredUndoRetry is not null)
+                {
+                    clean = false;
+                }
             }
             catch (StorageTransactionException)
             {
                 // A storage bracket is active on this database; retry next pass.
+                clean = false;
             }
             catch (ObjectDisposedException)
             {
@@ -138,14 +153,17 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
                 // Recorded, not fatal: the writer whose undo failed again keeps its place in the
                 // retry schedule, and every other database keeps its maintenance.
                 _engine.ReportWorkerFault(exception);
+                clean = false;
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
                 // The database went offline during the pass (#1243); the next pass skips it.
             }
         }
-    }
 
-    // A WaitHandle wait takes at most int.MaxValue milliseconds.
-    private static readonly TimeSpan MaximumWait = TimeSpan.FromMilliseconds(int.MaxValue);
+        if (clean && !cancellationToken.IsCancellationRequested)
+        {
+            _engine.ClearWorkerFault();
+        }
+    }
 }

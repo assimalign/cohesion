@@ -60,6 +60,9 @@ public abstract class StorageJournal : IStorageJournal
     // flush of its data file failed); never cleared. Guarded by _syncRoot for writes.
     private StorageOfflineException? _offline;
 
+    // 1 once Offline was raised for the latch above, so it is raised exactly once.
+    private int _offlineRaised;
+
     // The bytes of verified frames the journal holds since its last truncation, and the bytes
     // the last full read scan verified.
     private long _length;
@@ -130,9 +133,16 @@ public abstract class StorageJournal : IStorageJournal
     /// <param name="error">The error that took the owner offline.</param>
     internal void TakeOffline(StorageOfflineException error)
     {
-        lock (_syncRoot)
+        try
         {
-            SetOfflineLocked(error);
+            lock (_syncRoot)
+            {
+                SetOfflineLocked(error);
+            }
+        }
+        finally
+        {
+            RaiseOffline();
         }
     }
 
@@ -142,6 +152,26 @@ public abstract class StorageJournal : IStorageJournal
     /// not call back into the journal.
     /// </summary>
     internal Action? WentOffline;
+
+    /// <summary>
+    /// Invoked exactly once, with the error that took the journal offline, after the call that
+    /// took it offline released the journal's lock and before that call returns or throws: so a
+    /// caller that sees the failure sees it after the owner was told. The owning storage uses it
+    /// to raise <see cref="Storage.OnOffline"/>; the handler may take other journals' locks.
+    /// </summary>
+    internal Action<StorageOfflineException>? Offline;
+
+    /// <summary>
+    /// Raises <see cref="Offline"/> once the journal is offline and it was not raised yet. Called
+    /// outside the journal's lock, in the <c>finally</c> of every call that can take it offline.
+    /// </summary>
+    private void RaiseOffline()
+    {
+        if (Volatile.Read(ref _offline) is { } offline && Interlocked.Exchange(ref _offlineRaised, 1) == 0)
+        {
+            Offline?.Invoke(offline);
+        }
+    }
 
     private void SetOfflineLocked(StorageOfflineException error)
     {
@@ -219,19 +249,26 @@ public abstract class StorageJournal : IStorageJournal
             BinaryPrimitives.WriteInt64LittleEndian(payload.Slice(i * sizeof(long), sizeof(long)), activeTransactions[i]);
         }
 
-        lock (_syncRoot)
+        try
         {
-            ThrowIfOfflineLocked();
-            TruncateCore();
-            _length = 0;
-            _checkpointSignaled = false;
-            long lsn = AppendLocked(0, JournalRecordType.Checkpoint, default, payload);
-            FlushLocked(forceDurable);
-            if (forceDurable)
+            lock (_syncRoot)
             {
-                _durableLsn = _lastLsn;
+                ThrowIfOfflineLocked();
+                TruncateCore();
+                _length = 0;
+                _checkpointSignaled = false;
+                long lsn = AppendLocked(0, JournalRecordType.Checkpoint, default, payload);
+                FlushLocked(forceDurable);
+                if (forceDurable)
+                {
+                    _durableLsn = _lastLsn;
+                }
+                return lsn;
             }
-            return lsn;
+        }
+        finally
+        {
+            RaiseOffline();
         }
     }
 
@@ -269,16 +306,23 @@ public abstract class StorageJournal : IStorageJournal
         ThrowIfDisposed();
         EnsureInitialized();
 
-        lock (_syncRoot)
+        try
         {
-            if (_durableLsn >= lsn)
+            lock (_syncRoot)
             {
-                return;
-            }
+                if (_durableLsn >= lsn)
+                {
+                    return;
+                }
 
-            ThrowIfOfflineLocked();
-            FlushLocked(forceDurable: true);
-            _durableLsn = _lastLsn;
+                ThrowIfOfflineLocked();
+                FlushLocked(forceDurable: true);
+                _durableLsn = _lastLsn;
+            }
+        }
+        finally
+        {
+            RaiseOffline();
         }
     }
 
@@ -292,15 +336,22 @@ public abstract class StorageJournal : IStorageJournal
         ThrowIfDisposed();
         EnsureInitialized();
 
-        lock (_syncRoot)
+        try
         {
-            ThrowIfOfflineLocked();
-            FlushLocked(forceDurable);
-
-            if (forceDurable)
+            lock (_syncRoot)
             {
-                _durableLsn = _lastLsn;
+                ThrowIfOfflineLocked();
+                FlushLocked(forceDurable);
+
+                if (forceDurable)
+                {
+                    _durableLsn = _lastLsn;
+                }
             }
+        }
+        finally
+        {
+            RaiseOffline();
         }
     }
 

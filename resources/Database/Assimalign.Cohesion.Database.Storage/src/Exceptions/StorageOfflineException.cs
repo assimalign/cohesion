@@ -45,6 +45,19 @@ public sealed class StorageOfflineException : StorageException
     }
 
     /// <summary>
+    /// Gets whether the storage commit record of the operation that threw this exception was
+    /// appended before the durable flush failed. Such a commit ended committed in memory and is
+    /// decided by the reopen's recovery: it survives exactly when the record reached stable
+    /// storage. An engine reports it as unconfirmed, never as refused, because a caller told
+    /// "refused" would not look for effects that can survive (#1243).
+    /// </summary>
+    /// <remarks>
+    /// Only a storage bracket that commits durably by itself raises it (a catalog write, or a
+    /// self-committing statement's bracket); a refusal of a later operation is never flagged.
+    /// </remarks>
+    public bool CommitRecordWritten { get; private init; }
+
+    /// <summary>
     /// Finds the <see cref="StorageOfflineException"/> in a failure: the failure itself, an
     /// exception in its chain of inner exceptions, or one an <see cref="AggregateException"/>
     /// on that chain carries.
@@ -99,4 +112,12 @@ public sealed class StorageOfflineException : StorageException
     /// <param name="offline">The exception the first failure threw.</param>
     internal static StorageOfflineException Refusal(StorageOfflineException offline)
         => new(offline.Message, offline.InnerException!);
+
+    /// <summary>
+    /// Creates the exception a storage commit throws when its commit record was appended and its
+    /// durable flush then failed or was refused: <see cref="CommitRecordWritten"/> is set.
+    /// </summary>
+    /// <param name="offline">The exception the flush threw.</param>
+    internal static StorageOfflineException CommitUnconfirmed(StorageOfflineException offline)
+        => new(offline.Message, offline.InnerException!) { CommitRecordWritten = true };
 }

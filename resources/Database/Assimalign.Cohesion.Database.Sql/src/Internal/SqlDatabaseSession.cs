@@ -157,12 +157,15 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         {
             return await ExecuteCoreAsync(request, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (Instance is { } instance && instance.TranslateOffline(exception) is DatabaseOfflineException offline
-            && !ReferenceEquals(offline, exception))
+        catch (Exception exception) when (Instance is { } instance
+            && instance.TranslateOffline(exception, selfCommitting: IsSelfCommitting(request)) is var translated
+            && !ReferenceEquals(translated, exception))
         {
-            // A statement that met the offline storage (#1243) gets the coded refusal; the
-            // unconfirmed commit that took it offline keeps its own type.
-            throw offline;
+            // A statement that met the offline storage (#1243) gets the coded refusal, unless its
+            // work may survive the reopen: a self-committing DDL statement, or a bracket whose
+            // commit record was written, is unconfirmed instead. The unconfirmed commit that took
+            // the database offline keeps its own type.
+            throw translated;
         }
         catch (InsufficientExecutionStackException exception)
         {
@@ -179,6 +182,17 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             throw SqlEvaluationException.StatementTooComplex(exception);
         }
     }
+
+    /// <summary>
+    /// Reports whether a request is a self-committing statement: DDL, which runs only in
+    /// auto-commit mode and commits durable brackets in the catalog and data file sets as it
+    /// goes, before and independently of its transaction's commit record.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <returns>True for a <c>CREATE</c>, <c>ALTER</c> or <c>DROP</c> statement.</returns>
+    private static bool IsSelfCommitting(QueryRequest request)
+        => request is SqlQueryRequest { Statement.SqlExpression.CommandType:
+            SqlQueryCommandType.Create or SqlQueryCommandType.Alter or SqlQueryCommandType.Drop };
 
     private async ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
     {
@@ -251,7 +265,16 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
         // Auto-commit semantics: a one-statement manager transaction, so
         // visibility and conflict semantics are identical to the explicit path.
-        var context = await _coordinator.BeginAsync(_isolationLevel, cancellationToken).ConfigureAwait(false);
+        ITransactionContext context;
+        try
+        {
+            context = await _coordinator.BeginAsync(_isolationLevel, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (Instance is { } instance && instance.TranslateOffline(exception) is DatabaseOfflineException offline)
+        {
+            // Refused before the statement wrote anything, a self-committing one included.
+            throw offline;
+        }
 
         try
         {
@@ -269,30 +292,32 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         }
         catch (TransactionDeadlockException exception)
         {
-            if (context.State == TransactionState.Active)
-            {
-                await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false);
-            }
-
+            await RollbackAutoCommitAsync(context).ConfigureAwait(false);
             throw new DatabaseTransactionDeadlockException(exception.Message, exception);
         }
         catch (TransactionAbortedException exception)
         {
-            if (context.State == TransactionState.Active)
-            {
-                await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false);
-            }
-
+            await RollbackAutoCommitAsync(context).ConfigureAwait(false);
             throw new DatabaseTransactionAbortedException(exception.Message, exception);
         }
         catch
         {
-            if (context.State == TransactionState.Active)
-            {
-                await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false);
-            }
-
+            await RollbackAutoCommitAsync(context).ConfigureAwait(false);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Rolls a failed auto-commit statement's transaction back while it is still active. On an
+    /// offline database it touches nothing (#1243): the undo could write nothing, its refusal
+    /// would replace the statement's own failure, and the reopen's recovery aborts the
+    /// transaction, which has no commit record.
+    /// </summary>
+    private async ValueTask RollbackAutoCommitAsync(ITransactionContext context)
+    {
+        if (context.State == TransactionState.Active && Instance?.IsOffline != true)
+        {
+            await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

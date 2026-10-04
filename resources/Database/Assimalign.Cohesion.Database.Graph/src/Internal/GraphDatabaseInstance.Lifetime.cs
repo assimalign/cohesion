@@ -62,7 +62,7 @@ internal sealed partial class GraphDatabaseInstance
     // Child-root failures cross the engine boundary as the area root's exceptions. A failure the
     // offline storage caused is the database's coded refusal (#1243), checked first: the offline
     // error is a StorageException, which the kernel translation would report as COHDBG006.
-    private Exception Translate(Exception error) => TranslateOffline(error) is DatabaseOfflineException offline && !ReferenceEquals(offline, error)
+    private Exception Translate(Exception error) => TranslateOffline(error) is var offline && !ReferenceEquals(offline, error)
         ? offline
         : TranslateStatementFailure(error);
 

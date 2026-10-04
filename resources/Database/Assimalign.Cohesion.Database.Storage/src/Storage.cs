@@ -103,6 +103,10 @@ public abstract class Storage : IStorage
     // for a failed durable flush of the journal, and OfflineError reads both (#1243).
     private StorageOfflineException? _offline;
 
+    // The hook raised once when the storage goes offline, and 1 once it was raised.
+    private Action<StorageOfflineException>? _onOffline;
+    private int _offlineRaised;
+
     // The checkpoint size trigger (forwarded to the journal once it exists) and the bookkeeping
     // IsCheckpointDue reads: when the last checkpoint completed (or the storage was created or
     // opened), and the journal's last LSN at that moment.
@@ -295,6 +299,10 @@ public abstract class Storage : IStorage
     /// failure, closing included. Has no effect on a storage already offline.
     /// </summary>
     /// <param name="error">The error that took the other file set offline.</param>
+    /// <remarks>
+    /// Engines call it from the other storage's <see cref="OnOffline"/>, so the second file set
+    /// goes offline when the first does, not when something next reads either state.
+    /// </remarks>
     public void TakeOffline(StorageOfflineException error)
     {
         ArgumentNullException.ThrowIfNull(error);
@@ -303,6 +311,47 @@ public abstract class Storage : IStorage
         {
             _journal?.TakeOffline(error);
             _groupCommitGate.Abandon();
+            RaiseOffline(error);
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the hook invoked once, with the error, when this storage goes offline: a
+    /// durable flush of its journal or its data file failed, or <see cref="TakeOffline"/> was
+    /// called (#1243). An engine whose database spans several storages takes the others offline
+    /// from it, so none of them is written after the failure.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Raised by the call that took the storage offline, before that call returns or throws, so
+    /// whoever sees the failure sees it after the hook ran. It runs outside this storage's
+    /// journal lock and group-commit lock, which is what lets a handler take another storage
+    /// offline even while that storage is going offline through its own hook: the two storages
+    /// never wait on each other's journal. It may run while the failing call holds this
+    /// storage's header, transaction or buffer-pool lock, so a handler must not call back into
+    /// this storage, except <see cref="TakeOffline"/>, which returns at once on a storage
+    /// already offline. It should only take other storages offline and must not throw.
+    /// </para>
+    /// <para>
+    /// Set it before the storage does any work; a storage already offline when it is set does
+    /// not raise it again.
+    /// </para>
+    /// </remarks>
+    public Action<StorageOfflineException>? OnOffline
+    {
+        get => Volatile.Read(ref _onOffline);
+        set => Volatile.Write(ref _onOffline, value);
+    }
+
+    /// <summary>
+    /// Raises <see cref="OnOffline"/> once, whichever path took the storage offline first.
+    /// </summary>
+    /// <param name="error">The error that took the storage offline.</param>
+    private void RaiseOffline(StorageOfflineException error)
+    {
+        if (Interlocked.Exchange(ref _offlineRaised, 1) == 0)
+        {
+            OnOffline?.Invoke(error);
         }
     }
 
@@ -578,6 +627,7 @@ public abstract class Storage : IStorage
     {
         var journal = new StreamJournal(Journal, leaveOpen: true);
         journal.WentOffline = _groupCommitGate.Abandon;
+        journal.Offline = RaiseOffline;
         journal.ConfigureCheckpointTrigger(CheckpointJournalSize, _onCheckpointNeeded);
         _journal = journal;
         _bufferPool.WriteAheadGate = FlushWriteAhead;
@@ -1295,15 +1345,17 @@ public abstract class Storage : IStorage
                 EnsureCommitDurable(commitLsn);
             }
         }
-        catch (StorageOfflineException)
+        catch (StorageOfflineException offline)
         {
             // The commit record is in the journal and its flush failed, which took the storage
             // offline: nothing of this bracket is written again, and the reopen's recovery
             // decides its outcome. The bracket ends committed in memory, as recovery reads it
             // whenever the record reached stable storage; rolling its pages back would show this
-            // process the opposite (#1243).
+            // process the opposite (#1243). The exception says the record was written, so an
+            // engine reports the operation as unconfirmed, not refused: a self-committing
+            // statement whose bracket this was survives the reopen when the record did.
             CompleteCommitted(transaction);
-            throw;
+            throw StorageOfflineException.CommitUnconfirmed(offline);
         }
 
         CompleteCommitted(transaction);
@@ -1534,6 +1586,7 @@ public abstract class Storage : IStorage
         {
             _journal?.TakeOffline(offline);
             _groupCommitGate.Abandon();
+            RaiseOffline(offline);
         }
 
         return offline;

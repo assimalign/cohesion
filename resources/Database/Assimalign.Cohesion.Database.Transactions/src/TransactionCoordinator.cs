@@ -58,6 +58,17 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     private readonly RecordSpaceVersionStore _versionStore;
     private readonly GatedJournalLog _log;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
+
+    // True in the async flow of a statement apply that holds the apply gate, which is not
+    // reentrant: a checkpoint asked for from inside the apply is refused instead of waiting for
+    // the gate its own caller holds.
+    private readonly AsyncLocal<bool> _insideApply = new();
+
+    // 1 when TryCheckpoint found the apply gate held: the statement that releases the gate next
+    // runs the checkpoint first. A failure of that checkpoint is kept for the next TryCheckpoint
+    // to throw, because the statement that ran it must not fail for it.
+    private int _checkpointDeferred;
+    private ExceptionDispatchInfo? _deferredCheckpointFailure;
     private readonly Dictionary<ulong, IStorageTransaction> _statementBrackets = new();
     private readonly Dictionary<ulong, ITransactionContext> _openContexts = new();
     private readonly object _sync = new();
@@ -399,6 +410,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(apply);
 
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        _insideApply.Value = true;
 
         try
         {
@@ -468,6 +480,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
         finally
         {
+            if (Volatile.Read(ref _checkpointDeferred) != 0)
+            {
+                RunDeferredCheckpoint();
+            }
+
+            _insideApply.Value = false;
             _applyGate.Release();
         }
     }
@@ -528,7 +546,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// first announced again with a begin record, so the journal names it before its
     /// first stamp exists.
     /// </summary>
-    /// <exception cref="StorageTransactionException">A storage-level bracket is still active.</exception>
+    /// <exception cref="StorageTransactionException">
+    /// A storage-level bracket is still active, or the call came from inside a statement apply
+    /// of this coordinator (<see cref="ApplyStatementAsync{T}(ITransactionContext, Func{IStorageTransaction, ValueTask{T}}, bool, CancellationToken)"/>),
+    /// whose apply gate the checkpoint would wait for forever.
+    /// </exception>
     public void Checkpoint() => Checkpoint(CancellationToken.None);
 
     /// <summary>
@@ -538,7 +560,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">Cancels the wait for the apply gate.</param>
     /// <exception cref="StorageTransactionException">
-    /// A storage-level bracket that does not go through the apply gate is still active.
+    /// A storage-level bracket that does not go through the apply gate is still active, or the
+    /// call came from inside a statement apply of this coordinator.
     /// </exception>
     /// <exception cref="OperationCanceledException">The wait for the apply gate was canceled.</exception>
     /// <remarks>
@@ -546,19 +569,140 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// statement, undo, prune and recovery-scrub bracket of the coordinator runs under the apply
     /// gate, so without taking it a checkpoint under a sustained write load found a bracket
     /// open nearly every time, was refused as busy, and the journal grew without bound. Taking
-    /// the gate waits for at most the statement already applying, the bounded wait a
-    /// size-triggered checkpoint needs (#1254).
+    /// the gate waits for the statement already applying, however long it runs (an index build
+    /// or an <c>INSERT ... SELECT</c> applies in one bracket); a caller that checkpoints several
+    /// databases in turn uses <see cref="TryCheckpoint"/>, so one long statement does not hold
+    /// up the others (#1254).
     /// </remarks>
     public void Checkpoint(CancellationToken cancellationToken)
     {
+        ThrowIfInsideApply();
         _applyGate.Wait(cancellationToken);
         try
         {
+            Volatile.Write(ref _checkpointDeferred, 0);
             _log.CheckpointUnderGate(_storage);
         }
         finally
         {
             _applyGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Checkpoints the data storage (see <see cref="Checkpoint()"/>) if the statement apply gate
+    /// can be taken within <paramref name="gateTimeout"/>. Otherwise the checkpoint is deferred
+    /// to the statement holding the gate, which runs it before it releases the gate, and the call
+    /// returns false at once: it never waits longer than <paramref name="gateTimeout"/>.
+    /// </summary>
+    /// <param name="gateTimeout">
+    /// The longest the call waits for the gate; <see cref="TimeSpan.Zero"/> takes it only when it
+    /// is free.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the wait for the apply gate.</param>
+    /// <returns>
+    /// True when the checkpoint ran on this call; false when a statement held the gate, which then
+    /// runs the checkpoint as it ends.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="gateTimeout"/> is negative (other than <see cref="Timeout.InfiniteTimeSpan"/>) or exceeds
+    /// <see cref="int.MaxValue"/> milliseconds.
+    /// </exception>
+    /// <exception cref="StorageTransactionException">
+    /// A storage-level bracket that does not go through the apply gate is still active, or the
+    /// call came from inside a statement apply of this coordinator.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">The wait for the apply gate was canceled.</exception>
+    /// <exception cref="Exception">
+    /// The failure of a checkpoint a statement ran for an earlier deferred request, thrown once,
+    /// before this call does anything else.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The engines' checkpoint workers visit every database of an engine in turn on one thread.
+    /// Waiting for the gate without a bound let one database's long statement (a large
+    /// <c>CREATE INDEX</c>, <c>UPDATE</c> or <c>INSERT ... SELECT</c>) park that thread, and every
+    /// other database's journal grew past its size meanwhile (#1254 review: 130 times a 4 MiB
+    /// size in six seconds). Any bounded wait fixes that, but trades the busy database against
+    /// the others: a short one rarely catches the end of a long statement, a long one lets the
+    /// others overshoot. Deferring needs no trade: the worker moves on at once, and the busy
+    /// database is checkpointed the moment its statement ends, before the next statement takes
+    /// the gate, whether the statement ran for a millisecond or a minute.
+    /// </para>
+    /// <para>
+    /// The deferred checkpoint runs on the thread of the statement that ends, which waits for it
+    /// as the next statement would have waited at the gate. It never fails that statement: a
+    /// storage bracket still open outside the gate leaves the request for the next statement, an
+    /// offline storage drops it, and any other failure is thrown by the next call of this method,
+    /// so the engine's worker records it.
+    /// </para>
+    /// </remarks>
+    public bool TryCheckpoint(TimeSpan gateTimeout, CancellationToken cancellationToken)
+    {
+        ThrowIfInsideApply();
+        Interlocked.Exchange(ref _deferredCheckpointFailure, null)?.Throw();
+
+        if (!_applyGate.Wait(gateTimeout, cancellationToken))
+        {
+            // Set after the failed wait: a statement that releases the gate before this write is
+            // seen leaves the request for the next statement, or for the worker's next look.
+            Volatile.Write(ref _checkpointDeferred, 1);
+            return false;
+        }
+
+        try
+        {
+            Volatile.Write(ref _checkpointDeferred, 0);
+            _log.CheckpointUnderGate(_storage);
+            return true;
+        }
+        finally
+        {
+            _applyGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Runs the checkpoint <see cref="TryCheckpoint"/> deferred to the statement that holds the
+    /// apply gate, under that gate, as the statement ends. Never throws: the statement's own
+    /// outcome is already decided.
+    /// </summary>
+    private void RunDeferredCheckpoint()
+    {
+        try
+        {
+            _log.CheckpointUnderGate(_storage);
+            Volatile.Write(ref _checkpointDeferred, 0);
+        }
+        catch (StorageTransactionException)
+        {
+            // A storage bracket outside the apply gate is open; the next statement to end, or
+            // the worker's next look, retries.
+        }
+        catch (StorageOfflineException)
+        {
+            // A durable flush failed and took the storage offline (#1243): nothing more is
+            // written, and every later operation on the database is refused.
+            Volatile.Write(ref _checkpointDeferred, 0);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Volatile.Write(ref _checkpointDeferred, 0);
+            Volatile.Write(ref _deferredCheckpointFailure, ExceptionDispatchInfo.Capture(exception));
+        }
+    }
+
+    /// <summary>
+    /// Refuses a checkpoint asked for from inside one of this coordinator's statement applies:
+    /// the apply gate is not reentrant, so waiting for it there would never end.
+    /// </summary>
+    private void ThrowIfInsideApply()
+    {
+        if (_insideApply.Value)
+        {
+            throw new StorageTransactionException(
+                "A checkpoint cannot run inside a statement apply: the statement holds the apply gate the checkpoint waits for. " +
+                "Checkpoint after the statement completes.");
         }
     }
 

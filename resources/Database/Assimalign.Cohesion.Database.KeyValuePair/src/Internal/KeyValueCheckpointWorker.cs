@@ -22,10 +22,13 @@ using Assimalign.Cohesion.Database.Storage;
 /// <c>checkpoint_timeout</c> (<c>src/backend/postmaster/checkpointer.c:405-412</c>).
 /// </para>
 /// <para>
-/// The data set checkpoints through the transaction coordinator, which waits for its statement
-/// apply gate, so a sustained statement load cannot keep the checkpoint out. A storage still
-/// busy (<see cref="StorageTransactionException"/>) is retried at the next poll. An offline
-/// database (#1243) is skipped: nothing may be written to it until it is reopened.
+/// The data set checkpoints through the transaction coordinator, under its statement apply gate,
+/// so a sustained statement load cannot keep the checkpoint out. The worker never waits for the
+/// gate: when a statement holds it, the coordinator defers the checkpoint to that statement's
+/// end (<c>TransactionCoordinator.TryCheckpoint</c>), so one database's long statement does not
+/// stall the checkpoints of the engine's other databases. A storage still busy
+/// (<see cref="StorageTransactionException"/>) is retried at the next poll. An offline database
+/// (#1243) is skipped: nothing may be written to it until it is reopened.
 /// </para>
 /// </remarks>
 internal sealed class KeyValueCheckpointWorker : DatabaseEngineWorker
@@ -107,11 +110,14 @@ internal sealed class KeyValueCheckpointWorker : DatabaseEngineWorker
                 // The data storage checkpoints through the transaction
                 // coordinator: the truncating checkpoint record carries every
                 // in-flight logical transaction's sequence, so recovery
-                // classification survives the truncation. The catalog storage
-                // has no logical transactions above it and checkpoints directly.
+                // classification survives the truncation. A statement holding the
+                // apply gate takes the checkpoint over and runs it as it ends, so
+                // the worker never waits on one database's statement while the
+                // others' journals grow. The catalog storage has no logical
+                // transactions above it and checkpoints directly.
                 if (dataDue)
                 {
-                    database.CheckpointDataStorage(cancellationToken);
+                    database.TryCheckpointDataStorage(cancellationToken);
                 }
 
                 if (catalogDue || database.CatalogStorage.IsCheckpointDue(interval))

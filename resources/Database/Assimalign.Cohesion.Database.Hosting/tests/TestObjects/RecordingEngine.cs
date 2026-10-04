@@ -34,6 +34,11 @@ internal sealed class RecordingEngine : IDatabaseEngine
 
     public IReadOnlyList<IDatabaseEngineWorker> Workers => _workers;
 
+    public IReadOnlyList<DatabaseName> OfflineDatabases => Offline;
+
+    /// <summary>Gets or sets the databases the engine reports offline.</summary>
+    internal IReadOnlyList<DatabaseName> Offline { get; set; } = [];
+
     public IReadOnlyList<IDatabaseServer> Servers => _servers;
 
     internal int DisposeCount { get; private set; }

@@ -586,7 +586,11 @@ of a transaction open at the failure — is refused with `DatabaseOfflineExcepti
 generic storage translation, so it is never reported as `COHDBG006`. `GraphDatabaseServer`
 answers a statement on an existing session, and a handshake for the database, with
 `Unavailable` and the coded message. The workers skip the database; closing its sessions and
-transactions writes nothing. `GraphDatabaseEngine.OpenDatabaseAsync(name)` disposes the offline
+transactions writes nothing. A storage bracket whose commit record was written before its flush
+failed is reported as unconfirmed, never refused (`StorageOfflineException.CommitRecordWritten`).
+The engine stays `Running`; `GraphDatabaseEngine.OfflineDatabases` names the database, and
+`Database.Hosting` reports the application unhealthy while it is listed.
+`GraphDatabaseEngine.OpenDatabaseAsync(name)` disposes the offline
 instance without writing and reopens the file set, whose recovery keeps the unconfirmed commit if
 its record's bytes reached the media and aborts every transaction that was open.
 `GraphStorageOperationsTests` covers it in process and over the wire, with a fault-injecting
@@ -600,14 +604,19 @@ bytes.
 checkpoints a database when its journal reaches the size (its storage wakes the worker at once)
 or when the interval passed and its journal received records, looking at most once a second
 otherwise, through the transaction coordinator's apply gate so a sustained load cannot keep it
-out. An open database costs up to about 33 MiB of pool memory once it touched that many pages;
-an in-memory one also holds its data and journal. The reasoning is in `Database.Storage`
-DESIGN.md ("Capacity", "Checkpoint triggers").
+out. The worker never waits for the gate: a statement that holds it runs the checkpoint as it
+ends (`TransactionCoordinator.TryCheckpoint`), so a long statement in one database cannot stop
+the other databases' checkpoints. An open database costs up to about 33 MiB of pool memory once
+it touched that many pages; an in-memory one also holds its data and its journal (up to the
+checkpoint size, briefly twice that while the buffer doubles past it, released by the
+checkpoint). The reasoning is in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint
+triggers").
 
 **Deferred undo is retried on its own backoff (#1226).** The version-purge worker retries a
 rollback's failed undo about 100 ms after the deferral, then at doubling delays up to
 `MaintenanceInterval`, so a transient failure releases the database writer lock within about a
-second (`Database.Transactions` DESIGN.md).
+second (`Database.Transactions` DESIGN.md). A retry that fails makes the engine report
+`Faulted`; the first pass with no failure and no undo still deferred clears it.
 
 ## Graph wire family
 

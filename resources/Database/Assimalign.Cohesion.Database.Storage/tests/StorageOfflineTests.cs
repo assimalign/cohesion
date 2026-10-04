@@ -70,11 +70,14 @@ public sealed class StorageOfflineTests
         // nothing reached either file after the failure, the close included.
         error.Message.ShouldStartWith(StorageOfflineException.ErrorCode, Case.Sensitive);
         error.InnerException.ShouldBeOfType<IOException>();
+        error.CommitRecordWritten.ShouldBeTrue();
         activeAfterTheFailure.ShouldBeFalse();
         storage.IsOffline.ShouldBeTrue();
-        storage.OfflineError.ShouldBeSameAs(error);
+        storage.OfflineError.ShouldNotBeNull().InnerException.ShouldBeSameAs(error.InnerException);
+        storage.OfflineError!.CommitRecordWritten.ShouldBeFalse();
         refusals.ShouldAllBe(refusal => refusal.Message.StartsWith(StorageOfflineException.ErrorCode, StringComparison.Ordinal)
-            && refusal.InnerException == error.InnerException);
+            && refusal.InnerException == error.InnerException
+            && !((StorageOfflineException)refusal).CommitRecordWritten);
         writtenBack.ShouldBe(0);
         flushedCommits.ShouldBeFalse();
         point.Writes.ShouldBe(writesAtTheFailure);
@@ -242,5 +245,86 @@ public sealed class StorageOfflineTests
         StorageOfflineException.Find(wrapped).ShouldBeSameAs(offline);
         StorageOfflineException.Find(new IOException("unrelated")).ShouldBeNull();
         StorageOfflineException.Find(null).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// Two storages of one database (a data and a catalog file set) are wired to take each other
+    /// offline from <see cref="Storage.OnOffline"/>. A journal fsync of the first fails: the second
+    /// is offline before the failing call returns, each hook runs exactly once, and the hook runs
+    /// outside the failing journal's lock, so another thread can take that lock meanwhile (the
+    /// handlers of two storages failing together cannot deadlock). Nothing more reaches the
+    /// second storage's files (#1243 review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Offline: OnOffline takes a second file set offline at once, once, outside the journal lock")]
+    public void OnOffline_JournalFlushFails_ShouldTakeTheOtherFileSetOfflineAtOnce()
+    {
+        // Arrange: the second storage holds a dirty page its write-back would write.
+        var firstPoint = new CrashPoint();
+        var secondPoint = new CrashPoint();
+        var first = TornStorage.Create(firstPoint, journalWriteThrough: false);
+        var second = TornStorage.Create(secondPoint, journalWriteThrough: false);
+        second.Insert("dirty");
+        int firstRaised = 0;
+        int secondRaised = 0;
+        bool secondOfflineInTheHook = false;
+        bool journalLockFreeInTheHook = false;
+        first.OnOffline = error =>
+        {
+            firstRaised++;
+            second.TakeOffline(error);
+            secondOfflineInTheHook = second.IsOffline;
+            // A flush takes the journal's lock (and is refused): it completes only if the hook
+            // does not hold that lock.
+            journalLockFreeInTheHook = Task.Run(() => Record.Exception(() => first.Log.Flush())).Wait(TimeSpan.FromSeconds(10));
+        };
+        second.OnOffline = error =>
+        {
+            secondRaised++;
+            first.TakeOffline(error);
+        };
+        long lsn = first.Log.AppendBegin(7);
+        first.JournalFaults.FailNextFlush();
+
+        // Act
+        var error = Should.Throw<StorageOfflineException>(() => first.Log.EnsureDurable(lsn));
+        int secondWritesAtTheFailure = secondPoint.Writes;
+        int writtenBack = second.WriteBackDirtyPages(64);
+        var refusal = Should.Throw<StorageOfflineException>(() => second.BeginTransaction());
+        second.Dispose();
+
+        // Assert
+        firstRaised.ShouldBe(1);
+        secondRaised.ShouldBe(1);
+        secondOfflineInTheHook.ShouldBeTrue();
+        journalLockFreeInTheHook.ShouldBeTrue();
+        second.OfflineError.ShouldBeSameAs(error);
+        refusal.InnerException.ShouldBeSameAs(error.InnerException);
+        writtenBack.ShouldBe(0);
+        secondPoint.Writes.ShouldBe(secondWritesAtTheFailure);
+    }
+
+    /// <summary>
+    /// A durable flush of the data file fails at a checkpoint: <see cref="Storage.OnOffline"/> is
+    /// raised exactly once with that error, although the data-file path also latches the journal.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Offline: OnOffline is raised once for a failed data-file flush")]
+    public void OnOffline_DataFlushFails_ShouldBeRaisedOnce()
+    {
+        // Arrange
+        var storage = TornStorage.Create(new CrashPoint());
+        var pages = storage.FillPages(1);
+        storage.DataFaults.FailFlushAfterWriteAt = pages[0] * Page.Size;
+        var raised = new System.Collections.Generic.List<StorageOfflineException>();
+        storage.OnOffline = raised.Add;
+
+        // Act
+        var error = Should.Throw<StorageOfflineException>(() => storage.Checkpoint());
+        Should.Throw<StorageOfflineException>(() => storage.Checkpoint());
+        storage.TakeOffline(error);
+        storage.Dispose();
+
+        // Assert
+        raised.ShouldHaveSingleItem().ShouldBeSameAs(error);
+        error.CommitRecordWritten.ShouldBeFalse();
     }
 }

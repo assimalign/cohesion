@@ -61,8 +61,9 @@ the whole base surface — including child-owned vocabulary the contracts speak
   outcome of `IDatabaseEngine.OpenDatabaseAsync`; `DatabaseParseException` for
   statement text a session's language rejects; `DatabaseOfflineException` (with a model
   `Code`) for every operation on a database whose journal or data fsync failed, until it is
-  reopened (#1243). Child roots own independent exception roots (see
-  [DESIGN.md](DESIGN.md)).
+  reopened (#1243), and `DatabaseTransactionCommitUnconfirmedException` for work that may
+  have committed when it did. `IDatabaseEngine.OfflineDatabases` lists the offline databases
+  for health. Child roots own independent exception roots (see [DESIGN.md](DESIGN.md)).
 
 ## Dependencies
 

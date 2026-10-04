@@ -76,17 +76,28 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
     }
 
     /// <summary>
-    /// Translates a failure the storage's offline state caused into the coded refusal, unless it
-    /// is the unconfirmed commit itself, which keeps its own type; any other failure is returned
-    /// unchanged.
+    /// Translates a failure the storage's offline state caused into the coded refusal
+    /// (<see cref="DatabaseOfflineException"/>), or into
+    /// <see cref="DatabaseTransactionCommitUnconfirmedException"/> when a storage commit record
+    /// was written before its flush failed
+    /// (<see cref="Assimalign.Cohesion.Database.Storage.StorageOfflineException.CommitRecordWritten"/>),
+    /// so the work may survive the reopen. An unconfirmed commit that already has its own type is
+    /// returned unchanged, and so is any other failure.
     /// </summary>
     /// <param name="error">The failure to translate.</param>
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error)
-        => error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
-            || Assimalign.Cohesion.Database.Storage.StorageOfflineException.Find(error) is not { } offline
-            ? error
+    {
+        if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
+            || Assimalign.Cohesion.Database.Storage.StorageOfflineException.Find(error) is not { } offline)
+        {
+            return error;
+        }
+
+        return offline.CommitRecordWritten
+            ? DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, offline)
             : DatabaseOfflineException.Create(OfflineCode, Name, DataStorage.OfflineError ?? offline);
+    }
 
     public ValueTask<IBlobContainer> CreateContainerAsync(string name, CancellationToken cancellationToken = default)
         => CreateContainerAsync(name, null, cancellationToken);

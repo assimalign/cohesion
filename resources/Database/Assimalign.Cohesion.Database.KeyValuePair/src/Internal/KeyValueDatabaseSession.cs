@@ -115,12 +115,13 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
         {
             return await ExecuteCoreAsync(request, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (Instance is { } instance && instance.TranslateOffline(exception) is DatabaseOfflineException offline
-            && !ReferenceEquals(offline, exception))
+        catch (Exception exception) when (Instance is { } instance && instance.TranslateOffline(exception) is var translated
+            && !ReferenceEquals(translated, exception))
         {
-            // A command that met the offline storage (#1243) gets the coded refusal; the
+            // A command that met the offline storage (#1243) gets the coded refusal, or is
+            // unconfirmed when a storage commit record was written before the flush failed; the
             // unconfirmed commit that took it offline keeps its own type.
-            throw offline;
+            throw translated;
         }
     }
 

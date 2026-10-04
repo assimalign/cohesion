@@ -32,8 +32,11 @@ maintenance interval (`DeferredUndoRetryDelay`, `DeferredUndoRetryLimit`, `OnUnd
 A commit whose record was appended but whose durable flush failed is committed in memory and
 reported as `TransactionCommitUnconfirmedException`; the failed flush took the storage offline
 (#1243), so nothing more is written until the database is reopened, and the reopen's recovery
-decides whether the commit survived. The coordinator's `Checkpoint` takes the statement apply
-gate, so a size-triggered checkpoint cannot be starved by a sustained write load (#1254).
+decides whether the commit survived. The coordinator's checkpoint runs under the statement
+apply gate, so a size-triggered checkpoint cannot be starved by a sustained write load (#1254).
+`TryCheckpoint` never waits for a statement: when one holds the gate, it runs the checkpoint as
+it ends, so an engine's checkpoint worker is not held up by one database's long statement. A
+checkpoint asked for inside a statement apply is refused instead of waiting forever.
 
 ## Dependencies
 

@@ -560,11 +560,37 @@ sustained statement load kept a bracket open almost all the time, the engines' c
 workers were refused as busy on nearly every pass, and the journal grew without bound; the
 engines' sustained-write tests (journal under four times a 4 MiB size) and the 1.5 GiB SQL
 measurement (peak 256.4 MiB at the 256 MiB default, `Database.Storage` DESIGN.md,
-"Measurements (#1254)") rest on it. The wait is bounded by one statement, because nothing
-awaited inside the semaphore may wait on another transaction. Statement brackets commit
-non-durably unless the caller selects the existing durable DDL/bootstrap path;
-the logical commit makes earlier statement records durable by journal ordering.
-Open-time scrub remains ungated because no sessions exist yet.
+"Measurements (#1254)") rest on it. Statement brackets commit non-durably unless the caller
+selects the existing durable DDL/bootstrap path; the logical commit makes earlier statement
+records durable by journal ordering. Open-time scrub remains ungated because no sessions exist
+yet.
+
+**The engines' checkpoint workers never wait for the semaphore (#1254 review).**
+`Checkpoint(CancellationToken)` waits for the statement applying now, and one statement can run
+for minutes (an index build or an `INSERT ... SELECT` applies in one bracket). Each engine has
+one checkpoint worker that visits its databases in turn, so that wait stopped every other
+database's checkpoints for as long as the statement ran; a review probe grew a second database's
+journal to 130 times a 4 MiB size in six seconds. The workers call
+`TryCheckpoint(TimeSpan.Zero, …)` instead. It checkpoints at once when the semaphore is free.
+When a statement holds it, it records a deferred request and returns false, and the statement
+runs the checkpoint as it ends, in `ApplyStatementAsync`'s `finally`, before it releases the
+semaphore: the busy database is checkpointed the moment its statement ends, whatever the
+statement's length, and the worker moves on to the others at once. The deferred checkpoint never
+fails the statement that runs it, whose outcome is already decided: a storage bracket still open
+outside the semaphore leaves the request for the next statement or the worker's next look, an
+offline storage drops it, and any other failure is kept and thrown by the next `TryCheckpoint`,
+so the worker records it. Short statements still cannot keep a checkpoint out, since every one
+of them ends by running the deferred request. `TransactionCoordinatorRecoveryTests` covers the
+deferral and the failure hand-off, and the SQL engine's
+`CheckpointJournalSize_LongStatementInAnotherDatabase_ShouldKeepTheJournalBounded` holds one
+database's gate while another is written past ten sizes, with the written database's journal
+under four sizes and the held one checkpointed as its statement ends.
+
+**A checkpoint is refused inside a statement apply.** The semaphore is not reentrant, so a
+checkpoint asked for from an `ApplyStatementAsync` callback would wait forever for the semaphore
+its own caller holds. The coordinator marks the apply's asynchronous flow (an `AsyncLocal`) and
+`Checkpoint` and `TryCheckpoint` throw `StorageTransactionException` there instead; before the
+review the call hung.
 
 Logical undo, pruning, and recovery scrub apply at most 64 record/index mutations
 per physical bracket. A blob transaction can contain many thousands of chunks;

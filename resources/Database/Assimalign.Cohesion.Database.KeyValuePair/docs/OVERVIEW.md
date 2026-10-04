@@ -43,10 +43,10 @@ keys order by unsigned lexicographic byte comparison.
   wire-protocol server, carrying its own full copy of the server machinery
   (servers are per-model and each model package owns its copy — owner decision
   2026-07-14; see DESIGN.md for the placement history).
-- Storage operations: a failed journal or data fsync takes the database offline, and every
-  later operation, in process and over the server, is refused with `DatabaseOfflineException`
-  (`COHDBK002`) until `OpenDatabaseAsync` reopens it and recovery decides the unconfirmed
-  commit (#1243). `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and
+- Storage operations: a failed journal or data fsync takes the database offline, both file
+  sets at once, and every later operation, in process and over the server, is refused with
+  `DatabaseOfflineException` (`COHDBK002`) until `OpenDatabaseAsync` reopens it and recovery
+  decides the unconfirmed commit (#1243); `OfflineDatabases` feeds health. `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and
   `CheckpointInterval` (5 minutes) size the pool and trigger checkpoints (#1254). See
   DESIGN.md, "Storage operations".
 

@@ -992,8 +992,11 @@ loop, so cadence is engine configuration; observers read it through
 **A failed fsync takes the database offline (#1243).** When a durable flush of either file
 set fails — the commit's journal fsync, a group flush, a checkpoint's data flush — the storage
 goes offline (`Database.Storage` DESIGN.md, "A failed durable flush takes the storage
-offline"), and the engine takes the database's other file set offline with it
-(`Storage.TakeOffline`), so no file of the database changes after the failure. This is
+offline"), and the other file set goes offline in the same moment: each storage's `OnOffline`
+hook calls the other's `Storage.TakeOffline` before the failing call returns, so no file of the
+database changes after the failure. (Until the #1243 review the other set followed only when
+something next read the database's offline state, and in between the page write-back worker
+rewrote the catalog's data file after a data-journal fsync failure.) This is
 PostgreSQL's rule: a failed WAL fsync is `PANIC` (`issue_xlog_fsync`,
 `src/backend/access/transam/xlog.c:9877-9937`), the commit record's flush runs in a critical
 section (`RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`), and with
@@ -1004,6 +1007,15 @@ writes the operating system already dropped. The engine stops the database, not 
 - The statement whose commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`
   (the kernel's `TransactionCommitUnconfirmedException` inside it, and the storage's
   `StorageOfflineException` inside that).
+- A DDL statement that was running when the database went offline gets
+  `DatabaseTransactionCommitUnconfirmedException` too, led by `COHSQLT004`, never the refusal.
+  DDL commits durable brackets in the catalog and data file sets as it goes (catalog writes, and
+  `ApplyStatementAsync(..., durable: true)` for index builds and column changes), so any prefix
+  of it may survive the reopen; a bracket whose commit record was appended before its flush
+  failed is flagged (`StorageOfflineException.CommitRecordWritten`), and a statement the
+  database was online for when it started is never reported as refused. Only a DDL statement
+  refused before it wrote anything (the database already offline, or its transaction's begin
+  refused) gets `DatabaseOfflineException`.
 - Every later operation on the database is refused with `DatabaseOfflineException`, code
   `COHSQLT004` (`Code`, and the message leads with it), carrying the storage's
   `StorageOfflineException`: a new session, every statement on an existing one, BEGIN, and the
@@ -1012,17 +1024,29 @@ writes the operating system already dropped. The engine stops the database, not 
 - `SqlDatabaseServer` answers a statement on a session opened before the failure, and a
   handshake for the database, with `Unavailable` and the coded message.
 - The workers skip the database, and closing its sessions and transactions writes nothing: an
-  open transaction's rollback is left to recovery.
+  open transaction's rollback is left to recovery. A handle of the closed instance keeps getting
+  the coded refusal after a reopen: a transaction's `CommitAsync` and `RollbackAsync` check the
+  offline state before its own state.
+- The engine stays `Running`; `SqlDatabaseEngine.OfflineDatabases` names the database, and
+  `Database.Hosting` reports the application unhealthy while it is listed.
 - `SqlDatabaseEngine.OpenDatabaseAsync(name)` is the way back: on an offline database it
   disposes the offline instance (which writes nothing) and opens the file sets again. Recovery
   keeps the unconfirmed commit if its commit record's bytes reached the media and undoes it
-  otherwise, and aborts every transaction that was open.
+  otherwise, and aborts every transaction that was open. A process restart does the same, since
+  the server opens a database on its first handshake.
 
 `SqlStorageOperationsTests` fails the commit's journal fsync through a fault-injecting storage
-strategy whose handles support durable flushes, checks every refusal in process and over the
-wire, runs every worker's pass with a checkpoint due and closes the sessions, checks that
-neither file set changed byte for byte, and reopens twice: once with the journal as written
-(the commit survives) and once with only the bytes a durable flush confirmed (it does not).
+strategy whose handles support durable flushes, runs every worker's pass with a checkpoint due
+before any session operation, checks every refusal in process and over the wire, closes the
+sessions, checks that neither file set changed byte for byte, and reopens twice: once with the
+journal as written (the commit survives) and once with only the bytes a durable flush confirmed
+(it does not). Two more tests fail one file set's journal fsync — the data set's on a commit,
+the catalog set's inside `CREATE TABLE` — and check, with no engine call in between, that the
+other set is already offline and that a pass of every worker leaves its files byte for byte
+unchanged (a second database in the same engine shows the pass would have written). A theory
+fails each fsync of `CREATE TABLE`, `CREATE INDEX`, `DROP TABLE` and `ALTER TABLE ADD COLUMN` in
+turn, reopens, and checks the caller was told unconfirmed every time, including the cases whose
+effect survived.
 
 **Buffer pool and checkpoint options (#1254).**
 
@@ -1035,15 +1059,28 @@ neither file set changed byte for byte, and reopens twice: once with the journal
 The catalog file set keeps a 128-page (1 MiB) pool (`SqlDatabaseEngine.CatalogBufferPoolPages`):
 catalogs are small and hot. So an open database costs up to about 34 MiB of pool memory once it
 has touched that many pages (buffers are allocated on first load), plus the data and journal
-themselves for an in-memory database. The defaults and their reasoning — PostgreSQL's 128 MB
-`shared_buffers`, 1 GB `max_wal_size` and 5-minute `checkpoint_timeout` — are in
-`Database.Storage` DESIGN.md ("Capacity", "Checkpoint triggers"). The same options are on
-`ISqlDatabaseEngineBuilder`. The configured capacity applies to databases created and reopened.
+themselves for an in-memory database: its journal up to the checkpoint size, briefly up to twice
+that while the in-memory buffer doubles past it, released when the checkpoint truncates it. The
+defaults and their reasoning — PostgreSQL's 128 MB `shared_buffers`, 1 GB `max_wal_size` and
+5-minute `checkpoint_timeout` — are in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint
+triggers"). The same options are on `ISqlDatabaseEngineBuilder`. The configured capacity applies
+to databases created and reopened.
+
+The checkpoint worker visits the engine's databases in turn on one thread and never waits for a
+statement: when one holds a database's apply gate, `TransactionCoordinator.TryCheckpoint` defers
+that database's checkpoint to the statement's end, and the worker moves on. Before the #1254
+review it waited for the gate without a bound, so a long statement in one database (an index
+build, an `INSERT ... SELECT`) stopped every other database's checkpoints, and a probe's second
+database grew its journal to 130 times a 4 MiB size in six seconds. A checkpoint stalls every
+reader and writer of its database while it flushes ("Checkpoint triggers" in `Database.Storage`
+DESIGN.md has the scale).
 
 **Deferred undo is retried on its own backoff (#1226).** A rollback whose undo fails keeps the
 writer's locks until a retry completes it; the version-purge worker retries about 100 ms later,
 then at doubling delays up to `MaintenanceInterval` (`Database.Transactions` DESIGN.md). A
-transient failure releases a waiting writer in a few hundred milliseconds.
+transient failure releases a waiting writer in a few hundred milliseconds. A retry that fails
+makes the engine report `Faulted`; the first purge pass with no failure and no undo still
+deferred clears it, so a fault that passes leaves the engine `Running`.
 
 ## The SQL server runtime (`SqlDatabaseServer`)
 
@@ -1254,8 +1291,10 @@ This limitation and the unavailable interface seam are recorded in
 
 `COHSQLT004` means the database is offline (#1243): a durable flush of its journal or data
 file failed, and every operation is refused with `DatabaseOfflineException` until the
-database is reopened ("Storage operations", below). Unlike the three state codes it is an
-exception, not a diagnostic, and the wire maps it to `Unavailable`.
+database is reopened ("Storage operations", above). Unlike the three state codes it is an
+exception, not a diagnostic, and the wire maps it to `Unavailable`. A DDL statement that was
+running when the database went offline is reported as `DatabaseTransactionCommitUnconfirmedException`
+led by `COHSQLT004` instead, because part or all of it may survive the reopen.
 
 ## Integrity constraints
 

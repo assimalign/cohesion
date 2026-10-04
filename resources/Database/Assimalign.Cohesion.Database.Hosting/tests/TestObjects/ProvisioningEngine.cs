@@ -31,6 +31,8 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
 
     public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
 
+    public IReadOnlyList<DatabaseName> OfflineDatabases => Array.Empty<DatabaseName>();
+
     public IReadOnlyList<IDatabaseServer> Servers => Array.Empty<IDatabaseServer>();
 
     public ValueTask<IDatabase> CreateDatabaseAsync(

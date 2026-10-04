@@ -21,8 +21,11 @@ using Assimalign.Cohesion.Database.Storage;
 /// <c>checkpoint_timeout</c> (<c>src/backend/postmaster/checkpointer.c:405-412</c>).
 /// </para>
 /// <para>
-/// The checkpoint runs through the transaction coordinator, which waits for its statement apply
-/// gate, so a sustained statement load cannot keep the checkpoint out. A storage still busy
+/// The checkpoint runs through the transaction coordinator, under its statement apply gate, so a
+/// sustained statement load cannot keep the checkpoint out. The worker never waits for the gate:
+/// when a statement holds it, the coordinator defers the checkpoint to that statement's end
+/// (<c>TransactionCoordinator.TryCheckpoint</c>), so one database's long statement does not stall
+/// the checkpoints of the engine's other databases. A storage still busy
 /// (<see cref="StorageTransactionException"/>) is retried at the next poll. An offline database
 /// (#1243) is skipped: nothing may be written to it until it is reopened.
 /// </para>
@@ -94,7 +97,9 @@ internal sealed class BlobCheckpointWorker : DatabaseEngineWorker
 
             try
             {
-                database.Coordinator.Checkpoint(cancellationToken);
+                // A statement holding the apply gate takes the checkpoint over and runs it as it
+                // ends, so the worker never waits on one database while the others' journals grow.
+                database.Coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken);
             }
             catch (StorageTransactionException)
             {

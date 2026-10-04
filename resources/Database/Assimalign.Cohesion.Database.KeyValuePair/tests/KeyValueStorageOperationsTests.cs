@@ -72,6 +72,20 @@ public sealed class KeyValueStorageOperationsTests
 
         var dataAtTheFailure = strategy.Capture(name);
         var catalogAtTheFailure = strategy.Capture(name + KeyValueDatabaseEngine.CatalogSuffix);
+
+        // The catalog file set went offline with the data set, before anything read either
+        // state: the storage's own flag, not the instance's. Every worker then runs a pass, with a
+        // checkpoint due by size, before any session operation.
+        bool catalogOfflineAtOnce = database.CatalogStorage.IsOffline;
+        database.DataStorage.CheckpointJournalSize = 1;
+        database.CatalogStorage.CheckpointJournalSize = 1;
+        foreach (var worker in harness.Engine.Workers.OfType<DatabaseEngineWorker>())
+        {
+            worker.RunIteration(CancellationToken.None);
+        }
+
+        var dataAfterTheWorkers = strategy.Capture(name);
+        var catalogAfterTheWorkers = strategy.Capture(name + KeyValueDatabaseEngine.CatalogSuffix);
         var refusals = new List<DatabaseOfflineException>
         {
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateSessionAsync()),
@@ -92,14 +106,7 @@ public sealed class KeyValueStorageOperationsTests
         await late.SendAsync(ProtocolMessageType.AuthenticateResponse);
         var handshakeError = ProtocolErrorMessage.Decode((await late.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
 
-        // Every worker runs a pass, with a checkpoint due by size; then the sessions close.
-        database.DataStorage.CheckpointJournalSize = 1;
-        database.CatalogStorage.CheckpointJournalSize = 1;
-        foreach (var worker in harness.Engine.Workers.OfType<DatabaseEngineWorker>())
-        {
-            worker.RunIteration(CancellationToken.None);
-        }
-
+        // Then the sessions close.
         await other.DisposeAsync();
         await session.DisposeAsync();
         var dataBeforeTheReopen = strategy.Capture(name);
@@ -123,7 +130,12 @@ public sealed class KeyValueStorageOperationsTests
         handshakeError.Message.ShouldStartWith("COHDBK002", Case.Sensitive);
         harness.Engine.State.ShouldBe(EngineState.Running);
 
-        // Assert: nothing reached either file set after the failure.
+        // Assert: nothing reached either file set after the failure, from the workers or the close.
+        catalogOfflineAtOnce.ShouldBeTrue();
+        dataAfterTheWorkers.Data.ShouldBe(dataAtTheFailure.Data);
+        dataAfterTheWorkers.Journal.ShouldBe(dataAtTheFailure.Journal);
+        catalogAfterTheWorkers.Data.ShouldBe(catalogAtTheFailure.Data);
+        catalogAfterTheWorkers.Journal.ShouldBe(catalogAtTheFailure.Journal);
         dataBeforeTheReopen.Data.ShouldBe(dataAtTheFailure.Data);
         dataBeforeTheReopen.Journal.ShouldBe(dataAtTheFailure.Journal);
         catalogBeforeTheReopen.Data.ShouldBe(catalogAtTheFailure.Data);
@@ -133,6 +145,102 @@ public sealed class KeyValueStorageOperationsTests
         reopened.ShouldNotBeSameAs(database);
         reopened.IsOffline.ShouldBeFalse();
         keys.Order(StringComparer.Ordinal).ShouldBe(recordSurvives ? ["kept", "unconfirmed"] : ["kept"]);
+    }
+
+    /// <summary>
+    /// The data set's journal fsync fails on a commit while the catalog set still holds the pages
+    /// the database's creation wrote. With no engine call in between, the catalog set is already
+    /// offline, and a pass of every worker changes neither of its files. A second database of the
+    /// same engine shows the pass would have written such pages (#1243 review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Offline: a failed data journal fsync stops the catalog file set at once, before any engine call")]
+    public async Task Commit_DataJournalFsyncFails_ShouldStopTheCatalogFileSetAtOnce()
+    {
+        // Arrange: quiet workers, so only the passes the test runs write anything back.
+        const string name = "data-fails";
+        const string control = "control";
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = KeyValueDatabaseEngine.Create(QuietOptions(strategy));
+        var database = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        var controlDatabase = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(control);
+        await using var session = await database.CreateSessionAsync();
+
+        // Act: the data journal's fsync fails on the commit.
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalFlushes(1, storageName: name))
+        {
+            await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
+                await database.PutAsync(session, Bytes("key"), Bytes("value")));
+            unspent = failures.Remaining;
+        }
+
+        bool catalogOfflineAtOnce = database.CatalogStorage.IsOffline;
+        var catalogAtTheFailure = strategy.Capture(name + KeyValueDatabaseEngine.CatalogSuffix);
+        var controlCatalogBefore = strategy.Capture(control + KeyValueDatabaseEngine.CatalogSuffix);
+        database.CatalogStorage.CheckpointJournalSize = 1;
+        foreach (var worker in engine.Workers.OfType<DatabaseEngineWorker>())
+        {
+            worker.RunIteration(CancellationToken.None);
+        }
+
+        var catalogAfterTheWorkers = strategy.Capture(name + KeyValueDatabaseEngine.CatalogSuffix);
+        var controlCatalogAfter = strategy.Capture(control + KeyValueDatabaseEngine.CatalogSuffix);
+
+        // Assert
+        unspent.ShouldBe(0);
+        catalogOfflineAtOnce.ShouldBeTrue();
+        catalogAfterTheWorkers.Data.ShouldBe(catalogAtTheFailure.Data);
+        catalogAfterTheWorkers.Journal.ShouldBe(catalogAtTheFailure.Journal);
+        controlCatalogAfter.Data.ShouldNotBe(controlCatalogBefore.Data);
+        controlDatabase.IsOffline.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The catalog set's journal fsync fails during its checkpoint. The data set goes offline in
+    /// the same moment: with no engine call in between a pass of every worker changes neither of
+    /// its files, and a transaction that wrote before the failure cannot commit (#1243 review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Offline: a failed catalog journal fsync stops the data file set at once and refuses a pending commit")]
+    public async Task Checkpoint_CatalogJournalFsyncFails_ShouldStopTheDataFileSetAtOnce()
+    {
+        // Arrange: dirty data pages, and a transaction with a pending write.
+        const string name = "catalog-fails";
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = KeyValueDatabaseEngine.Create(QuietOptions(strategy));
+        var database = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        await using var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        await database.PutAsync(session, Bytes("a"), Bytes("1"));
+        await database.PutAsync(session, Bytes("b"), Bytes("2"));
+        var pending = await other.BeginTransactionAsync();
+        await database.PutAsync(other, Bytes("c"), Bytes("3"));
+
+        // Act: the catalog journal's fsync fails as its checkpoint flushes the checkpoint record.
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalFlushes(1, storageName: name + KeyValueDatabaseEngine.CatalogSuffix))
+        {
+            Should.Throw<StorageOfflineException>(() => database.CatalogStorage.Checkpoint());
+            unspent = failures.Remaining;
+        }
+
+        bool dataOfflineAtOnce = database.DataStorage.IsOffline;
+        var dataAtTheFailure = strategy.Capture(name);
+        database.DataStorage.CheckpointJournalSize = 1;
+        foreach (var worker in engine.Workers.OfType<DatabaseEngineWorker>())
+        {
+            worker.RunIteration(CancellationToken.None);
+        }
+
+        var dataAfterTheWorkers = strategy.Capture(name);
+        var commit = await Should.ThrowAsync<DatabaseOfflineException>(async () => await pending.CommitAsync());
+
+        // Assert
+        unspent.ShouldBe(0);
+        dataOfflineAtOnce.ShouldBeTrue();
+        dataAfterTheWorkers.Data.ShouldBe(dataAtTheFailure.Data);
+        dataAfterTheWorkers.Journal.ShouldBe(dataAtTheFailure.Journal);
+        commit.Code.ShouldBe("COHDBK002");
+        engine.OfflineDatabases.ShouldBe([(DatabaseName)name]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Buffer pool: the data file set gets the 32 MiB default and the catalog a 1 MiB pool")]
@@ -257,26 +365,32 @@ public sealed class KeyValueStorageOperationsTests
         await Task.WhenAll(writers).WaitAsync(Timeout);
 
         // Assert: tens of journal sizes were written, and the journal never held more than a few.
-        written.ShouldBeGreaterThanOrEqualTo(40 * size);
-        ((double)largest / size).ShouldBeLessThan(4.0);
-        engine.State.ShouldBe(EngineState.Running);
+        // The measured values are in the messages, so a failure on a loaded machine says which.
+        string measured = $"written {written} bytes in {watch.Elapsed}, largest journal {largest} bytes for a size of {size}, " +
+            $"engine {engine.State}";
+        written.ShouldBeGreaterThanOrEqualTo(40 * size, measured);
+        ((double)largest / size).ShouldBeLessThan(4.0, measured);
+        engine.State.ShouldBe(EngineState.Running, measured);
     }
 
     /// <summary>
     /// A rollback's undo fails once. The undo is retried on its own backoff, about 100 ms later,
     /// so the writer waiting for the rolled-back transaction's key lock proceeds within about a
     /// second although the maintenance interval is an hour (#1226 owner decision of 2026-10-04).
-    /// The bound is a ratio to the maintenance interval.
+    /// The engine's wiring is checked exactly (the first retry is due within 100 ms of the
+    /// deferral), and the release end to end as a ratio to that first delay.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Deferred undo: a transient undo failure releases the writer within about a second")]
     public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterWithinAboutASecond()
     {
         // Arrange
         var maintenance = TimeSpan.FromHours(1);
+        KeyValueDatabaseEngineOptions? configured = null;
         var (engine, database) = await CreateAsync(options =>
         {
             options.StorageStrategy = new FaultInjectingJournalStorageStrategy();
             options.MaintenanceInterval = maintenance;
+            configured = options;
         });
         await using var _ = engine;
         var instance = (KeyValueDatabaseInstance)database;
@@ -295,15 +409,31 @@ public sealed class KeyValueStorageOperationsTests
             unspent = failures.Remaining;
         }
 
+        // The engine handed the coordinator its first retry delay: the retry is due within it.
+        var firstRetry = instance.Coordinator.NextDeferredUndoRetry;
+
         var put = await database.PutAsync(other, Bytes("hot"), Bytes("next")).AsTask().WaitAsync(Timeout);
         watch.Stop();
 
         // Assert
+        var retryDelay = configured.ShouldNotBeNull().DeferredUndoRetryDelay;
         unspent.ShouldBe(0);
+        retryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
+        firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(retryDelay);
         put.Applied.ShouldBeTrue();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         instance.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        (watch.Elapsed / maintenance).ShouldBeLessThan(0.01);
+        (watch.Elapsed / retryDelay).ShouldBeLessThan(20);
         engine.State.ShouldBe(EngineState.Running);
     }
+
+    // Options whose background workers stay out of the way: only the passes a test runs itself
+    // write anything back or checkpoint.
+    private static KeyValueDatabaseEngineOptions QuietOptions(FaultInjectingJournalStorageStrategy strategy) => new()
+    {
+        StorageStrategy = strategy,
+        CheckpointInterval = TimeSpan.FromHours(1),
+        PageWriteBackInterval = TimeSpan.FromHours(1),
+        MaintenanceInterval = TimeSpan.FromHours(1),
+    };
 }
