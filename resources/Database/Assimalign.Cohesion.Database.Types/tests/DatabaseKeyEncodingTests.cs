@@ -295,56 +295,109 @@ public class DatabaseKeyEncodingTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Types] - Reader: BytesConsumed brackets exactly the bytes of each component read")]
-    public void Reader_BytesConsumed_ShouldBracketEachComponent()
+    /// <summary>One component of every type the writer appends, and the legacy invariant string.</summary>
+    public static TheoryData<string> SkippableComponents => new()
     {
-        // Arrange: each component also encoded on its own, so its exact bytes are known.
-        var components = new List<Action<DatabaseKeyWriter>>
-        {
-            w => w.AppendInt64(42),
-            w => w.AppendNull(),
-            w => w.AppendString("embedded\0zero and ünïcode", Collation.Binary),
-            w => w.AppendDecimal(-1234.5678m),
-            w => w.AppendBinary(new byte[] { 0x00, 0xFF, 0x00, 0x01 }),
-            w => w.AppendDateTimeOffset(new DateTimeOffset(2026, 10, 3, 8, 0, 0, TimeSpan.FromHours(2))),
-            w => w.AppendBoolean(false),
-        };
-        var writer = new DatabaseKeyWriter();
-        var expected = new List<byte[]>();
-        foreach (var append in components)
-        {
-            append(writer);
-            expected.Add(Encode(append));
-        }
+        "null", "boolean", "int8", "int16", "int32", "int64", "float32", "float64", "decimal-zero", "decimal-positive",
+        "decimal-negative", "string-binary", "string-folded", "string-legacy-invariant", "binary", "date", "time",
+        "datetime", "datetimeoffset", "timespan", "guid",
+    };
 
-        byte[] key = writer.ToArray();
+    [Theory(DisplayName = "Cohesion Test [Database.Types] - Reader: Skip consumes exactly one component of every type")]
+    [MemberData(nameof(SkippableComponents))]
+    public void Reader_Skip_ShouldConsumeExactlyOneComponent(string component)
+    {
+        // Arrange: the component between two sentinels.
+        byte[] key = [.. Encode(w => w.AppendInt32(-17)), .. ComponentBytes(component), .. Encode(w => w.AppendInt32(4242))];
         var reader = new DatabaseKeyReader(key);
-        reader.BytesConsumed.ShouldBe(0);
+        reader.ReadInt32().ShouldBe(-17);
 
-        // Act / Assert: the bytes between two readings are the component, byte for byte.
-        int index = 0;
-        while (!reader.IsAtEnd)
-        {
-            int start = reader.BytesConsumed;
-            switch (reader.PeekType())
-            {
-                case DatabaseType.Null: reader.ReadNull(); break;
-                case DatabaseType.Int64: reader.ReadInt64(); break;
-                case DatabaseType.String: reader.ReadString(out _); break;
-                case DatabaseType.Decimal: reader.ReadDecimal(); break;
-                case DatabaseType.Binary: reader.ReadBinary(); break;
-                case DatabaseType.DateTimeOffset: reader.ReadDateTimeOffset(); break;
-                case DatabaseType.Boolean: reader.ReadBoolean(); break;
-                default: throw new InvalidOperationException("Unexpected component.");
-            }
+        // Act
+        reader.Skip();
 
-            key.AsSpan(start, reader.BytesConsumed - start).ToArray().ShouldBe(expected[index], $"component {index}");
-            index++;
-        }
-
-        index.ShouldBe(components.Count);
-        reader.BytesConsumed.ShouldBe(key.Length);
+        // Assert: the reader stands on the next component.
+        reader.ReadInt32().ShouldBe(4242);
+        reader.IsAtEnd.ShouldBeTrue();
     }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Types] - Reader: Skip walks past a large string or binary payload without copying it")]
+    public void Reader_SkipLargePayloads_ShouldNotAllocateThem()
+    {
+        // Arrange: about 1 MiB of string and 1 MiB of binary payload, zero bytes included so
+        // every escape sequence is walked.
+        string text = string.Concat(Enumerable.Repeat("dropped\0column ", 70_000));
+        byte[] bytes = Enumerable.Range(0, 1 << 20).Select(value => (byte)(value % 7)).ToArray();
+        byte[] key = new DatabaseKeyWriter().AppendString(text, Collation.Binary).AppendBinary(bytes).AppendNull().ToArray();
+        var warmUp = new DatabaseKeyReader(key);
+        warmUp.Skip();
+        warmUp.Skip();
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var reader = new DatabaseKeyReader(key);
+        reader.Skip();
+        reader.Skip();
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        reader.ReadNull().ShouldBeNull();
+        reader.IsAtEnd.ShouldBeTrue();
+        allocated.ShouldBeLessThan(1024);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Types] - Reader: Skip refuses a malformed or truncated component")]
+    [InlineData(new byte[] { }, "no further components")]
+    [InlineData(new byte[] { 0xEE }, "unexpected component type")]
+    [InlineData(new byte[] { (byte)DatabaseType.Int64, 1, 2, 3 }, "truncated component")]
+    [InlineData(new byte[] { (byte)DatabaseType.DateTime, 1, 2, 3, 4, 5, 6, 7, 8 }, "truncated component")]
+    [InlineData(new byte[] { (byte)DatabaseType.String, 9, (byte)'a', 0, 0 }, "Unknown collation identifier 9")]
+    [InlineData(new byte[] { (byte)DatabaseType.String, 0, (byte)'a', (byte)'b' }, "unterminated variable-length component")]
+    [InlineData(new byte[] { (byte)DatabaseType.Binary, (byte)'a', 0 }, "truncated escape sequence")]
+    [InlineData(new byte[] { (byte)DatabaseType.Binary, (byte)'a', 0, 0x07 }, "invalid escape marker 0x07")]
+    [InlineData(new byte[] { (byte)DatabaseType.String, 1, (byte)'a', 0, 0, 0, 0, 0, 9, (byte)'a' }, "invalid string payload length")]
+    [InlineData(new byte[] { (byte)DatabaseType.Decimal, 7 }, "invalid decimal sign byte 0x07")]
+    [InlineData(new byte[] { (byte)DatabaseType.Decimal, 2 }, "truncated decimal exponent")]
+    [InlineData(new byte[] { (byte)DatabaseType.Decimal, 2, 65, 3, 4 }, "unterminated decimal digits")]
+    [InlineData(new byte[] { (byte)DatabaseType.Decimal, 2, 65, 12, 0 }, "invalid decimal digit byte 0x0C")]
+    [InlineData(new byte[] { (byte)DatabaseType.Decimal, 2, 65, 0 }, "decimal component has no digits")]
+    public void Reader_SkipMalformedComponent_ShouldThrow(byte[] key, string message)
+    {
+        Should.Throw<DatabaseTypeException>(() =>
+        {
+            var reader = new DatabaseKeyReader(key);
+            reader.Skip();
+        }).Message.ShouldContain(message);
+    }
+
+    private static byte[] ComponentBytes(string component) => component switch
+    {
+        "null" => Encode(w => w.AppendNull()),
+        "boolean" => Encode(w => w.AppendBoolean(true)),
+        "int8" => Encode(w => w.AppendInt8(-5)),
+        "int16" => Encode(w => w.AppendInt16(-1234)),
+        "int32" => Encode(w => w.AppendInt32(int.MinValue)),
+        "int64" => Encode(w => w.AppendInt64(long.MaxValue)),
+        "float32" => Encode(w => w.AppendFloat32(-1.5f)),
+        "float64" => Encode(w => w.AppendFloat64(double.NaN)),
+        "decimal-zero" => Encode(w => w.AppendDecimal(0m)),
+        "decimal-positive" => Encode(w => w.AppendDecimal(1234.5678m)),
+        "decimal-negative" => Encode(w => w.AppendDecimal(-0.000123m)),
+        "string-binary" => Encode(w => w.AppendString("embedded\0zero and ünïcode", Collation.Binary)),
+        "string-folded" => Encode(w => w.AppendString("Café", Collation.CaseAccentInsensitive)),
+        // What a writer before the invariant collation was retired left behind: the tag,
+        // the invariant collation, an escaped sort key, then the original bytes,
+        // length-prefixed (see ReadString). Writers refuse to produce it today.
+        "string-legacy-invariant" => [(byte)DatabaseType.String, Collation.Invariant.Id,
+            (byte)'a', 0x00, 0xFF, (byte)'b', 0x00, 0x00, 0, 0, 0, 3, (byte)'a', 0x00, (byte)'b'],
+        "binary" => Encode(w => w.AppendBinary(new byte[] { 0x00, 0xFF, 0x00, 0x01 })),
+        "date" => Encode(w => w.AppendDate(new DateOnly(2026, 10, 4))),
+        "time" => Encode(w => w.AppendTime(new TimeOnly(23, 59, 58))),
+        "datetime" => Encode(w => w.AppendDateTime(new DateTime(2026, 10, 4, 8, 0, 0, DateTimeKind.Utc))),
+        "datetimeoffset" => Encode(w => w.AppendDateTimeOffset(new DateTimeOffset(2026, 10, 3, 8, 0, 0, TimeSpan.FromHours(2)))),
+        "timespan" => Encode(w => w.AppendTimeSpan(TimeSpan.FromMinutes(-90))),
+        "guid" => Encode(w => w.AppendGuid(Guid.Parse("5b8f8a59-7a2c-4b45-9d55-0a4d3a5f0c11"))),
+        _ => throw new ArgumentOutOfRangeException(nameof(component), component, null),
+    };
 
     [Fact(DisplayName = "Cohesion Test [Database.Types] - Reader: type mismatches and truncation fail loudly")]
     public void Reader_TypeMismatchOrTruncation_ShouldThrow()

@@ -80,25 +80,37 @@ public interface ISqlCatalog
     ValueTask DropTableAsync(string schema, string name, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Adds a column to a table.
+    /// Adds a column to a table. The column takes the next physical ordinal, after every
+    /// live and dropped one (<see cref="SqlCatalogTable.PhysicalColumnCount"/>), so versions
+    /// stored before the addition read it from their missing tail.
     /// </summary>
     /// <param name="schema">The schema name.</param>
     /// <param name="name">The table name.</param>
     /// <param name="column">The column to add.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The updated table description.</returns>
-    /// <exception cref="SqlCatalogException">The table does not exist or already has the column.</exception>
+    /// <exception cref="SqlCatalogException">
+    /// The table does not exist or already has the column, or the definition no longer fits
+    /// one catalog record.
+    /// </exception>
     ValueTask<SqlCatalogTable> AddColumnAsync(string schema, string name, SqlCatalogColumn column, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Drops a column from a table.
+    /// Drops a column from a table: the column leaves <see cref="SqlCatalogTable.Columns"/>
+    /// and its physical ordinal joins <see cref="SqlCatalogTable.DroppedColumnOrdinals"/>,
+    /// never to be reused. This is the whole of the drop: stored rows keep the column's
+    /// component, which every read skips.
     /// </summary>
     /// <param name="schema">The schema name.</param>
     /// <param name="name">The table name.</param>
     /// <param name="columnName">The column to drop.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The updated table description.</returns>
-    /// <exception cref="SqlCatalogException">The table or column does not exist, or the column is part of the primary key.</exception>
+    /// <exception cref="SqlCatalogException">
+    /// The table or column does not exist; the column is part of the primary key, a
+    /// constraint or an index; it is the table's last column; or the definition, which keeps
+    /// every dropped column's physical ordinal, no longer fits one catalog record.
+    /// </exception>
     ValueTask<SqlCatalogTable> DropColumnAsync(string schema, string name, string columnName, CancellationToken cancellationToken = default);
 
     /// <summary>

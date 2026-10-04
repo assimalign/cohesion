@@ -172,7 +172,8 @@ internal sealed partial class SqlPlanExecutor
         var columns = plan.Table.Columns.Select(column => primary.Contains(column.Name, StringComparer.OrdinalIgnoreCase)
             ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation) : column).ToArray();
         var replacement = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
-            primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray());
+            primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray(),
+            plan.Table.DroppedColumnOrdinals);
         var rows = Scan(plan.Table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
         foreach (var row in rows)
         {
@@ -214,12 +215,16 @@ internal sealed partial class SqlPlanExecutor
         }
 
         var primary = primaryDefinition?.Columns ?? table.PrimaryKeyColumns;
-        var provisional = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema, table.Constraints);
+        // The added column takes the next physical ordinal: the replacement keeps the
+        // table's dropped ordinals, so every existing column keeps its own (the catalog
+        // refuses a replacement that does not).
+        var provisional = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema,
+            table.Constraints, table.DroppedColumnOrdinals);
         var constraints = BindConstraints(provisional, plan.Constraints);
         await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
         constraints = BindConstraints(provisional, plan.Constraints);
         var replacement = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema,
-            table.Constraints.Concat(constraints).ToArray());
+            table.Constraints.Concat(constraints).ToArray(), table.DroppedColumnOrdinals);
         // Backfill is logical: missing trailing fields resolve from the immutable
         // replacement metadata. Existing row bytes and MVCC stamps never change;
         // one durable catalog publication makes the complete addition visible.
@@ -276,21 +281,68 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+    /// <summary>
+    /// Refuses to drop a column a constraint uses, naming the constraint to drop first, with
+    /// the catalog's wording. A missing column and a primary-key column are left to the
+    /// catalog's own refusals, which name them as such.
+    /// </summary>
     private void EnsureCanDropColumn(SqlCatalogTable table, string columnName)
     {
-        if (table.Constraints.Any(c => c.Columns.Contains(columnName, StringComparer.OrdinalIgnoreCase)) ||
-            IncomingReferences(table).Any(reference => reference.Constraint.ReferencedColumns!.Contains(columnName, StringComparer.OrdinalIgnoreCase)))
+        int ordinal = -1;
+        for (int index = 0; index < table.Columns.Count; index++)
         {
-            throw new DatabaseException($"Column '{columnName}' participates in a constraint and cannot be dropped.");
+            if (string.Equals(table.Columns[index].Name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                ordinal = index;
+                break;
+            }
         }
 
-        // A table-level CHECK lists no columns, so a check that reads the column is found by
-        // binding its predicate against the remaining ones — binding only, as at load, so a
-        // declaration rule tightened since the check was stored cannot block an unrelated drop.
-        var columns = table.Columns.Where(column => !string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (ordinal < 0 || table.PrimaryKeyColumns.Contains(columnName, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        foreach (var constraint in table.Constraints)
+        {
+            if (constraint.Columns.Contains(columnName, StringComparer.OrdinalIgnoreCase))
+            {
+                throw UsedByConstraint(constraint);
+            }
+        }
+
+        foreach (var reference in IncomingReferences(table))
+        {
+            if (reference.Constraint.ReferencedColumns!.Contains(columnName, StringComparer.OrdinalIgnoreCase))
+            {
+                throw UsedByConstraint(reference.Constraint);
+            }
+        }
+
+        // A table-level CHECK lists no columns; its bound predicate records every column it
+        // reads. Binding the predicate without the column (binding only, as at load, so a
+        // declaration rule tightened since the check was stored cannot block an unrelated
+        // drop) backs that up, and either way the refusal names the CHECK, not the binder's
+        // unknown column.
+        var columns = table.Columns.Where((_, index) => index != ordinal).ToArray();
         foreach (var check in _definitions.Get(table).Checks)
         {
-            SqlPersistedExpression.Bind(check.Predicate, new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation));
+            if (check.ColumnOrdinals.Contains(ordinal))
+            {
+                throw UsedByConstraint(check.Constraint);
+            }
+
+            try
+            {
+                SqlPersistedExpression.Bind(check.Predicate, new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation));
+            }
+            catch (DatabaseException exception)
+            {
+                throw UsedByConstraint(check.Constraint, exception);
+            }
         }
+
+        DatabaseException UsedByConstraint(SqlCatalogConstraint constraint, Exception? cause = null)
+            => new($"Column '{columnName}' is referenced by constraint '{constraint.Name}'. Drop the constraint first.", cause);
     }
 }

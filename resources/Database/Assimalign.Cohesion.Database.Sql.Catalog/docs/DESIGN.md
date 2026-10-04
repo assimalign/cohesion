@@ -31,6 +31,62 @@ drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
 uses those same transforms for uniqueness enforcement.
 
+## Physical column layout and dropped columns (#1241)
+
+A table record describes the physical layout its rows are stored in, not just its
+columns. `SqlCatalogTable.Columns` are the live columns, in order: what every name,
+`SELECT *`, INSERT without a column list and the system views see. A stored row
+version holds one component per *physical ordinal*, up to its last live column (the
+SQL engine stores nothing for a dropped ordinal behind it); `PhysicalColumnCount` is
+their number, `DroppedColumnOrdinals` lists the ones whose column was dropped (ascending),
+and `GetPhysicalOrdinal(i)` maps a live column to its component. The live columns
+take the non-dropped ordinals in order, so the layout is fully described by the
+dropped list.
+
+- **DROP COLUMN marks; it never renumbers.** `DropColumnAsync` removes the column
+  from `Columns` and appends its physical ordinal to `DroppedColumnOrdinals`, in the
+  same single-record, self-committing replacement as every other alteration. No
+  other column's ordinal changes, so the SQL engine rewrites no row: a stored
+  version keeps the dropped component, which every decode skips. This is
+  PostgreSQL's `pg_attribute.attisdropped`
+  (`src/include/catalog/pg_attribute.h:139-140`, set by `RemoveAttributeById`,
+  `src/backend/catalog/heap.c:1692-1732`). The guards are unchanged: an unknown,
+  primary-key, constrained, referenced or indexed column, or the last live column,
+  cannot be dropped.
+- **ADD COLUMN appends.** `AddColumnAsync` gives the new column ordinal
+  `PhysicalColumnCount`, after every live and dropped ordinal (PostgreSQL:
+  `relnatts + 1`, `src/backend/commands/tablecmds.c:7445-7446`), so a column
+  re-added under a dropped column's name never shares the dropped column's
+  component.
+- **Ordinals are never reclaimed.** Reusing a dropped ordinal would decode the
+  dropped value, still stored in older versions, into another column. PostgreSQL
+  keeps a dropped attribute's number for good and counts it against its column limit
+  (`doc/src/sgml/limits.sgml:133-134`); here each dropped ordinal costs the table
+  record one five-byte integer component and counts against the one-record limit
+  below. When a table that has dropped columns outgrows the record, the refusal
+  counts them and says that recreating the table and copying its rows reclaims them,
+  since only a new table starts without dropped ordinals (`EncodeTable`; a
+  two-column table reaches the limit after 1,588 ADD/DROP cycles).
+  Compacting the layout would take a table rewrite that moves every row version and
+  rebuilds its indexes; none exists, and one added later must replace the layout in
+  the same recoverable unit as the versions (the SQL engine's DESIGN, "DROP COLUMN
+  marks the column dropped").
+- **Every alteration carries the layout.** ADD/DROP COLUMN and ADD/DROP CONSTRAINT
+  copy the dropped ordinals into the replacement, and `PublishTableAsync` refuses,
+  with `SqlCatalogException`, a replacement that does not keep the current layout as
+  its prefix (the same dropped ordinals, every existing live column in place by
+  name; it may only append) and a new table published with dropped columns. A
+  layout change is the one catalog mistake that corrupts every read silently, so the
+  catalog checks it rather than trusting each caller.
+- **Persistence: table extension version 3.** The table record's trailing extension
+  (constraints in version 1, column collations from version 2) appends the dropped
+  ordinals' count and values from version 3, which this catalog always writes.
+  Versions 1 and 2 still load, with no dropped column, so that the SQL engine's
+  data-storage format gate (format 6 for this layout) refuses a database written
+  before it with its own message rather than a decode error. A persisted layout
+  that cannot describe the table (a negative count, an ordinal outside the physical
+  columns, a repeated ordinal) fails the load with `SqlCatalogException`.
+
 ## Why-this-not-that decisions
 
 - **A dedicated catalog storage file set** — not catalog rows mixed into the data
@@ -91,12 +147,14 @@ uses those same transforms for uniqueness enforcement.
   carries, and version 3 vs 4 (index keys with or without the temporal kind and
   offset, #1099) and 4 vs 5 (index trees in B-tree page format 1, ordered by key
   alone, or format 2, ordered by key, entry reference and writer, #1194) are
-  properties of the index trees — so the database-grain marker is catalog
+  properties of the index trees, and 5 vs 6 (whether rows are decoded through
+  the table records' physical layout, #1241) is a property of these records
+  themselves — so the database-grain marker is catalog
   metadata. (`Database.Indexing` also stamps and checks its own page format on
-  each tree, behind this marker.) The engine writes its version (5) when it
+  each tree, behind this marker.) The engine writes its version (6) when it
   creates a database and refuses to open one whose marker reads anything else; it
   has no upgrade path (owner decisions of 2026-10-01 and 2026-10-02; upgrades are
-  #1152). Version 5 is stored as a kind-8 record like version 4. Absent marker
+  #1152). Versions 5 and 6 are stored as a kind-8 record like version 4. Absent marker
   reads as version 1 (pre-marker databases, or a creation interrupted before the
   engine stamped the marker).
 - **From version 4 the marker is a kind-8 record (downgrade fence, #1099).**

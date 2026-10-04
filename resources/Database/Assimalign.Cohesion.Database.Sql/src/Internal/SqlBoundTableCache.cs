@@ -66,8 +66,8 @@ internal sealed class SqlBoundTableCache
 
     /// <summary>
     /// Registers the version a catalog mutation published, reusing the bindings of the version
-    /// it was derived from when the published one carries the very same column instances and a
-    /// subset of the same constraint instances — a column appended by the catalog's own copy
+    /// it was derived from when the published one carries the very same column instances, the same
+    /// dropped column ordinals and a subset of the same constraint instances — a column appended by the catalog's own copy
     /// of a definition this cache already bound, or a dropped constraint. Anything else binds.
     /// </summary>
     /// <param name="published">The table version the catalog published.</param>
@@ -122,7 +122,7 @@ internal sealed class SqlBoundTableCache
 
     private static bool SameColumns(SqlCatalogTable left, SqlCatalogTable right)
     {
-        if (left.Columns.Count != right.Columns.Count)
+        if (left.Columns.Count != right.Columns.Count || !left.DroppedColumnOrdinals.SequenceEqual(right.DroppedColumnOrdinals))
         {
             return false;
         }

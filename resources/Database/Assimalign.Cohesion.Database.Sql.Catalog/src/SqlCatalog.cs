@@ -124,16 +124,22 @@ public static class SqlCatalog
     /// <returns>A task representing durable publication of all supplied metadata.</returns>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="InvalidCastException"><paramref name="catalog"/> was not produced by this class.</exception>
-    /// <exception cref="SqlCatalogException">The identity was not reserved, or the identity, table definition, or index registrations are inconsistent.</exception>
+    /// <exception cref="SqlCatalogException">
+    /// The identity was not reserved; the identity, table definition, or index registrations are
+    /// inconsistent; or the definition does not keep the table's physical column layout.
+    /// </exception>
     /// <exception cref="DatabaseTypeException">Metadata text contains invalid UTF-16.</exception>
     /// <exception cref="StorageException">The backing storage cannot persist the metadata change.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     /// <remarks>
     /// New definitions require a nonzero identity already allocated by this catalog.
     /// Callers serialize DDL and commit enforcing index trees before publication.
-    /// Existing index descriptions are retained during replacement. The catalog
-    /// owns metadata persistence; physical tree creation and row validation remain
-    /// the caller's responsibility.
+    /// Existing index descriptions are retained during replacement. A new definition has no
+    /// dropped columns, and a replacement keeps the physical column layout of the definition it
+    /// replaces (<see cref="SqlCatalogTable.DroppedColumnOrdinals"/> unchanged, every existing
+    /// live column in place); it may only append columns, so no stored row is decoded onto
+    /// another column. The catalog owns metadata persistence; physical tree creation and row
+    /// validation remain the caller's responsibility.
     /// </remarks>
     public static ValueTask PublishTableAsync(
         ISqlCatalog catalog, SqlCatalogTable table, IReadOnlyList<SqlCatalogIndex> indexes,
