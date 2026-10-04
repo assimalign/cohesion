@@ -755,7 +755,11 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   exists (never run weaker than requested). Kernel aborts surface wrapped in
   the root's `DatabaseTransactionAbortedException` (deadlock victims:
   `DatabaseTransactionDeadlockException` — retryable by construction, an
-  `ExecutionFailure` on the wire, session stays usable). On every database
+  `ExecutionFailure` on the wire, session stays usable). A commit whose record
+  was written but could not be made durable is not an abort: the transaction
+  is `Committed`, and the commit throws the root's
+  `DatabaseTransactionCommitUnconfirmedException`, which is not retryable
+  (`Database.Transactions` DESIGN.md). On every database
   open the coordinator runs `TransactionRecovery.Analyze` over the recovered
   journal (the storage strategy defers the open-time checkpoint for exactly
   this) and scrubs every unproven writer's stamps out of the record space —

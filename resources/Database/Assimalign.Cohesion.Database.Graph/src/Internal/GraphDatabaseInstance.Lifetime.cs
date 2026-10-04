@@ -77,6 +77,7 @@ internal sealed partial class GraphDatabaseInstance
     {
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
+        TransactionCommitUnconfirmedException => new DatabaseTransactionCommitUnconfirmedException(error.Message, error),
         // An element whose record or index key outgrows storage fails its statement; the store
         // wrote nothing for it. It derives from StorageException, so it is matched first.
         GraphElementTooLargeException => new DatabaseException("COHDBG009: " + error.Message, error),

@@ -1,6 +1,8 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Storage;
@@ -32,7 +34,9 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// </para>
 /// <para>
 /// The file-header page (page 0) is deliberately unlogged: it carries recomputable
-/// bookkeeping only, and every field in it is reconstructed or revalidated on open.
+/// bookkeeping, which is reconstructed or revalidated on open, and the checkpoint anchor
+/// (<see cref="CheckpointActiveTransactions"/>), which needs no journal because every
+/// checkpoint makes it durable with the data pages before it truncates the journal.
 /// </para>
 /// </remarks>
 public abstract class Storage : IStorage
@@ -63,6 +67,9 @@ public abstract class Storage : IStorage
     // once recovery finished; null for a file set this instance created. Shutdown
     // compares against it to recognize a storage nothing was written through.
     private (long Lsn, long Sequence)? _openedAt;
+
+    // The checkpoint anchor page 0 holds: read at open, replaced by every checkpoint.
+    private long[] _checkpointActives = [];
 
     /// <summary>
     /// Initializes the storage with the specified backing streams for data, journal, and backup.
@@ -125,6 +132,39 @@ public abstract class Storage : IStorage
     /// </remarks>
     protected IStorageJournal WriteAheadLog =>
         _journal ?? throw new InvalidOperationException("Storage has not been initialized.");
+
+    /// <summary>
+    /// The most logical transaction sequences one checkpoint can record as in flight:
+    /// the capacity of the file header's checkpoint anchor
+    /// (<see cref="StorageFileHeader.CheckpointAnchorCapacity"/>).
+    /// <see cref="Checkpoint(ReadOnlySpan{long})"/> refuses a longer list.
+    /// </summary>
+    public const int MaxCheckpointActiveTransactions = StorageFileHeader.CheckpointAnchorCapacity;
+
+    /// <summary>
+    /// Gets the logical transaction sequences the last checkpoint recorded as in flight,
+    /// as the file header's checkpoint anchor holds them: read when an existing file set
+    /// opens, and replaced by every checkpoint.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A checkpoint truncates the journal, which destroys the begin records of the logical
+    /// transactions still in flight while their row versions stay in the data pages. Its
+    /// checkpoint record lists those transactions, but the record is appended after the
+    /// truncation: when that append fails, or the process stops between the truncation and
+    /// the record's flush, the journal no longer names them, and a reader would take their
+    /// versions for committed ones. So the checkpoint first writes the same list into page 0,
+    /// which the data flush makes durable before the truncation starts.
+    /// </para>
+    /// <para>
+    /// The transaction layer's recovery treats every sequence listed here exactly like one
+    /// listed in a checkpoint record: aborted, unless the journal holds its commit record
+    /// (<c>TransactionRecovery.Analyze</c> in <c>Database.Transactions</c>). Page 0 is not
+    /// journaled, so the list survives only through that flush; an open whose checkpoint is
+    /// not deferred replaces it before anyone reads it, as it truncates the journal.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<long> CheckpointActiveTransactions => Volatile.Read(ref _checkpointActives);
 
     /// <summary>
     /// Gets or sets how commits reach stable storage. The default,
@@ -304,6 +344,22 @@ public abstract class Storage : IStorage
                 : (Name)"";
 
             sequenceFloor = header->LastTransactionSequence;
+
+            int anchored = header->CheckpointActiveCount;
+            if (anchored < 0 || anchored > StorageFileHeader.CheckpointAnchorCapacity)
+            {
+                throw new StorageCorruptionException((PageId)0L,
+                    $"Invalid storage file: the checkpoint anchor claims {anchored} transactions; it holds at most {StorageFileHeader.CheckpointAnchorCapacity}.");
+            }
+
+            var actives = new long[anchored];
+            var anchor = new ReadOnlySpan<byte>(ptr + Page.HeaderSize + StorageFileHeader.ByteSize, anchored * sizeof(long));
+            for (int i = 0; i < anchored; i++)
+            {
+                actives[i] = BinaryPrimitives.ReadInt64LittleEndian(anchor.Slice(i * sizeof(long), sizeof(long)));
+            }
+
+            _checkpointActives = actives;
         }
 
         // Recover before anything reads pages: redo committed changes that never
@@ -479,6 +535,17 @@ public abstract class Storage : IStorage
     public void Checkpoint() => Checkpoint(ReadOnlySpan<long>.Empty);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The sequences are written into the file header's checkpoint anchor
+    /// (<see cref="CheckpointActiveTransactions"/>) and made durable with the data pages
+    /// before the journal is truncated, so their classification survives a checkpoint
+    /// record that is lost after the truncation.
+    /// </remarks>
+    /// <exception cref="StorageTransactionException">
+    /// A storage-level transaction is still active, or more than
+    /// <see cref="MaxCheckpointActiveTransactions"/> logical transactions are in flight:
+    /// the checkpoint changed nothing, and a later one can succeed.
+    /// </exception>
     public void Checkpoint(ReadOnlySpan<long> activeTransactionSequences)
     {
         // The whole checkpoint runs under the transaction lock: BeginTransaction
@@ -493,7 +560,21 @@ public abstract class Storage : IStorage
                 throw new StorageTransactionException("Checkpoint requires no active transactions.");
             }
 
+            // Refused before anything is written: a list the anchor cannot hold would be
+            // classified only by the checkpoint record, which is exactly what the anchor
+            // exists to back up. Background checkpointers treat this as "busy".
+            if (activeTransactionSequences.Length > MaxCheckpointActiveTransactions)
+            {
+                throw new StorageTransactionException(
+                    $"Checkpoint deferred: {activeTransactionSequences.Length} logical transactions are in flight, " +
+                    $"more than the {MaxCheckpointActiveTransactions} the file header's checkpoint anchor records.");
+            }
+
             UpdateFileHeader();
+
+            // The anchor goes into page 0 before the flush below, which makes it durable
+            // before the journal truncation destroys the begin records it stands in for.
+            WriteCheckpointAnchor(activeTransactionSequences);
             _pageManager?.FlushAll();
             Data.Flush(durable: RequiresDurableFlush);
             long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences, forceDurable: RequiresDurableFlush);
@@ -1268,6 +1349,7 @@ public abstract class Storage : IStorage
         header->RootSegmentPageId = 1;
         header->CreatedAtUtcTicks = DateTime.UtcNow.Ticks;
         header->ModifiedAtUtcTicks = DateTime.UtcNow.Ticks;
+        header->CheckpointActiveCount = 0;
 
         var guidBytes = ((Guid)_id).ToByteArray();
         for (int i = 0; i < 16; i++)
@@ -1315,5 +1397,35 @@ public abstract class Storage : IStorage
         }
 
         handle.MarkDirty();
+    }
+
+    /// <summary>
+    /// Replaces the checkpoint anchor in page 0 with the logical sequences a checkpoint is
+    /// about to truncate the begin records of. Called by the checkpoint only, under the
+    /// transaction lock, before the data flush that makes it durable.
+    /// </summary>
+    private unsafe void WriteCheckpointAnchor(ReadOnlySpan<long> activeTransactionSequences)
+    {
+        if (_pageManager == null || _disposed)
+        {
+            return;
+        }
+
+        using var handle = _pageManager.GetPage((PageId)0L);
+        var header = (StorageFileHeader*)(handle.Page.Pointer + Page.HeaderSize);
+        var anchor = new Span<byte>(
+            handle.Page.Pointer + Page.HeaderSize + StorageFileHeader.ByteSize,
+            StorageFileHeader.CheckpointAnchorCapacity * sizeof(long));
+
+        // Unused slots are zeroed so page 0 never carries a stale sequence past the count.
+        anchor.Clear();
+        for (int i = 0; i < activeTransactionSequences.Length; i++)
+        {
+            BinaryPrimitives.WriteInt64LittleEndian(anchor.Slice(i * sizeof(long), sizeof(long)), activeTransactionSequences[i]);
+        }
+
+        header->CheckpointActiveCount = activeTransactionSequences.Length;
+        handle.MarkDirty();
+        Volatile.Write(ref _checkpointActives, activeTransactionSequences.ToArray());
     }
 }

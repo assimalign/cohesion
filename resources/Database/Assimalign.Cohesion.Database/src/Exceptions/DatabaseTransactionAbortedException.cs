@@ -5,9 +5,10 @@ namespace Assimalign.Cohesion.Database;
 /// <summary>
 /// Thrown when the engine aborts a transaction rather than the caller — a
 /// write-write conflict, a deadlock resolution, or a commit whose record could
-/// not be made durable. The transaction's effects are undone and the operation
+/// not be written. The transaction's effects are undone and the operation
 /// is retryable by construction: a fresh transaction re-attempting the same work
-/// can succeed.
+/// can succeed. A commit whose record was written but could not be made durable
+/// is not an abort: it throws <see cref="DatabaseTransactionCommitUnconfirmedException"/>.
 /// </summary>
 /// <remarks>
 /// This is the area-root surface of the transaction kernel's independent

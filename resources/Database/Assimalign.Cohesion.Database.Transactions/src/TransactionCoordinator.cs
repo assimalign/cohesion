@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -208,12 +209,22 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <param name="context">The transaction to commit.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <exception cref="TransactionAbortedException">The transaction was aborted instead of committed.</exception>
+    /// <exception cref="TransactionCommitUnconfirmedException">
+    /// The transaction committed, but its commit record could not be made durable (see
+    /// <see cref="ITransactionManager.CommitAsync"/>). Its tombstones are retained for
+    /// pruning like those of any committed writer.
+    /// </exception>
     public async ValueTask CommitAsync(ITransactionContext context, CancellationToken cancellationToken = default)
     {
         try
         {
             await _manager.CommitAsync(context, cancellationToken).ConfigureAwait(false);
             _versionStore.OnCommitted(context.Sequence);
+        }
+        catch (TransactionCommitUnconfirmedException)
+        {
+            _versionStore.OnCommitted(context.Sequence);
+            throw;
         }
         finally
         {
@@ -339,7 +350,24 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 {
                     if (bracket.IsActive)
                     {
-                        bracket.Rollback();
+                        try
+                        {
+                            bracket.Rollback();
+                        }
+                        catch
+                        {
+                            // Checked in the handler, not in an exception filter: a filter runs
+                            // before the storage's finally block ends the bracket, so it would
+                            // still see the bracket active.
+                            if (bracket.IsActive)
+                            {
+                                throw;
+                            }
+
+                            // The bracket ended: its pages are restored and its locks released,
+                            // and only its rollback record, which is advisory, was lost. The
+                            // statement's own failure is the error the caller must see.
+                        }
                     }
 
                     throw;
@@ -376,9 +404,16 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// the truncation destroys the lifecycle records classification reads.
     /// </summary>
     /// <returns>The recovery classification, for the caller's own scrub passes.</returns>
+    /// <remarks>
+    /// The classification also covers the sequences the storage's checkpoint anchor names
+    /// (<see cref="Storage.CheckpointActiveTransactions"/>, for a storage derived from
+    /// the shared <see cref="Storage"/>): the writers a checkpoint truncated the begin
+    /// records of, which stay classified when the checkpoint's own record was lost.
+    /// </remarks>
     public TransactionRecoveryPlan AnalyzeAndScrub()
     {
-        var plan = TransactionRecovery.Analyze(_journal);
+        IEnumerable<long> anchored = _storage is Storage shared ? shared.CheckpointActiveTransactions : [];
+        var plan = TransactionRecovery.Analyze(_journal, anchored);
 
         _versionStore.ScrubRecovered(plan.Aborted);
 
@@ -427,12 +462,27 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// A rollback whose undo failed ended its transaction but left the writer in
     /// flight, holding its locks. The pass retries that undo through the manager,
     /// which releases the writer — abort record, active table, locks — as soon as
-    /// the undo completes. A retry that fails again is rethrown after every deferred
-    /// writer was attempted, and the writer waits for the next pass.
+    /// the undo completes. A retry that fails again is rethrown at the end of the pass,
+    /// after every deferred writer was attempted and the rest of the pass ran, so a
+    /// writer whose undo keeps failing does not stop the reclamation of committed
+    /// tombstones below it; the writer waits for the next pass.
     /// </remarks>
     public long RunVersionPurgePass(CancellationToken cancellationToken)
     {
-        long total = _manager.RetryDeferredUndoAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
+        long total = 0;
+        ExceptionDispatchInfo? deferredFailure = null;
+
+        try
+        {
+            total += _manager.RetryDeferredUndoAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception exception) when (exception is not ObjectDisposedException && !cancellationToken.IsCancellationRequested)
+        {
+            // The writers still deferred keep their place in the active table, so the safe
+            // prune bound below stays under their sequences: pruning cannot reach their
+            // versions, only committed tombstones older than them.
+            deferredFailure = ExceptionDispatchInfo.Capture(exception);
+        }
 
         // Writers queued by a direct PurgeWriterAsync caller; the manager owns the rest.
         foreach (ulong writer in _versionStore.PendingAbortedPurges)
@@ -452,6 +502,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         total += _versionStore.PruneAsync(GetSafePruneBound(), cancellationToken)
             .AsTask().GetAwaiter().GetResult();
 
+        deferredFailure?.Throw();
         return total;
     }
 
@@ -651,7 +702,20 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             // an already-durable LSN is a no-op. By journal ordering this flush
             // also covers every statement bracket the transaction committed
             // non-durably.
-            _coordinator._storage.EnsureCommitDurable(lsn, _coordinator._journal);
+            try
+            {
+                _coordinator._storage.EnsureCommitDurable(lsn, _coordinator._journal);
+            }
+            catch (Exception exception)
+            {
+                // The record is in the journal and the sequence has left the checkpoint
+                // list, so recovery and every later checkpoint read the transaction as
+                // committed: it can no longer abort, only its durability is open.
+                throw new TransactionCommitUnconfirmedException(
+                    $"Transaction {sequence} committed, but its commit record could not be made durable; " +
+                    "the commit is lost if the database stops before its journal is next flushed.", exception);
+            }
+
             return default;
         }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Shouldly;
@@ -436,6 +437,295 @@ public class TransactionCoordinatorRollbackTests
         RecordCount(storage).ShouldBe(0);
         await coordinator.CommitAsync(next);
     }
+
+    /// <summary>
+    /// The drain is the first await of a started rollback (#1225), and like the undo and the abort
+    /// record it observes no token: a token canceled while the rollback waits for the writer's
+    /// running statement does not stop the rollback (#1226).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator rollback: a token canceled while the rollback waits for a running statement does not stop it")]
+    public async Task RollbackAsync_TokenCanceledWhileDrainingARunningStatement_ShouldRunToCompletion()
+    {
+        // Arrange: a statement of the writer held inside the apply gate, and a transaction waiting for the writer's row.
+        using var storage = RollbackStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await BeginWriterAsync(coordinator, storage);
+        var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var running = StartHeldInsert(coordinator, storage, writer, entered, release);
+        entered.Wait(Timeout).ShouldBeTrue();
+        using var canceled = new CancellationTokenSource();
+
+        // Act: the rollback starts, waits for the statement, and its token is canceled meanwhile.
+        var rollingBack = coordinator.RollbackAsync(writer, canceled.Token).AsTask();
+        canceled.Cancel();
+        bool waitedForStatement = !rollingBack.IsCompleted;
+        release.Set();
+        await running.WaitAsync(Timeout);
+        await rollingBack.WaitAsync(Timeout);
+
+        // Assert: the rollback ran to completion and undid both statements.
+        waitedForStatement.ShouldBeTrue();
+        writer.State.ShouldBe(TransactionState.RolledBack);
+        await waiting.WaitAsync(Timeout);
+        RecordCount(storage).ShouldBe(0);
+        await coordinator.CommitAsync(next);
+    }
+
+    /// <summary>
+    /// A checkpoint truncates the journal before it appends its own record, which lists the
+    /// transactions whose begin records the truncation destroyed. When that append fails, the
+    /// journal no longer names a rolled-back writer whose undo is deferred, while its version sits
+    /// in the flushed data pages. The storage's checkpoint anchor, written into the file header
+    /// before the truncation, still names it, so recovery scrubs it after a crash and after a clean
+    /// close alike (#1226 integration review).
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a lost checkpoint record does not resurrect a writer whose undo is deferred")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Checkpoint_RecordLostWhileUndoIsDeferred_ShouldStillScrubTheWriterAtTheNextOpen(bool cleanClose)
+    {
+        // Arrange: a rolled-back writer whose undo keeps failing.
+        var storage = RollbackStorage.Create();
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: int.MaxValue));
+        var location = storage.PackLocation(storage.LastInserted.PageId, storage.LastInserted.SlotIndex);
+        await coordinator.RollbackAsync(writer);
+        writer.State.ShouldBe(TransactionState.RolledBack);
+
+        // Act: the checkpoint truncates the journal, then cannot append its record.
+        storage.JournalStream.FailWrites = 1;
+        Should.Throw<IOException>(() => coordinator.Checkpoint());
+        storage.JournalStream.FailWrites.ShouldBe(0);
+        bool journalNamesTheWriter = storage.Log.ReadAll().Any(record => record.TransactionSequence == (long)writer.Sequence.Value);
+        (byte[] Data, byte[] Journal) images;
+        if (cleanClose)
+        {
+            await Should.ThrowAsync<IOException>(async () => await coordinator.DisposeAsync());
+            storage.Dispose();
+            images = storage.CaptureClosedImages();
+        }
+        else
+        {
+            images = storage.CaptureImages();
+        }
+
+        using var reopened = RollbackStorage.Open(images.Data, images.Journal);
+        var anchored = reopened.CheckpointActiveTransactions;
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        var plan = recovered.AnalyzeAndScrub();
+        recovered.CompleteRecovery();
+        var reader = await recovered.BeginAsync(IsolationLevel.Snapshot);
+
+        // Assert: the journal lost the writer, the anchor did not, and nothing of it survives;
+        // the open's own checkpoint then replaced the anchor.
+        journalNamesTheWriter.ShouldBeFalse();
+        anchored.ShouldBe([(long)writer.Sequence.Value]);
+        reopened.CheckpointActiveTransactions.ShouldBeEmpty();
+        plan.Committed.ShouldNotContain(writer.Sequence);
+        plan.Aborted.ShouldContain(writer.Sequence);
+        RecordCount(reopened).ShouldBe(0);
+        (await recovered.VersionStore.GetVisibleVersionAsync(0, location, reader.Snapshot)).ShouldBeNull();
+        await recovered.CommitAsync(reader);
+        if (!cleanClose)
+        {
+            await Should.ThrowAsync<IOException>(async () => await coordinator.DisposeAsync());
+            storage.Dispose();
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a lost checkpoint record does not commit a writer still in flight at a crash")]
+    public async Task Checkpoint_RecordLostWhileAWriterIsActive_ShouldClassifyTheWriterAbortedAfterACrash()
+    {
+        // Arrange
+        var storage = RollbackStorage.Create();
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await BeginWriterAsync(coordinator, storage);
+        var location = storage.PackLocation(storage.LastInserted.PageId, storage.LastInserted.SlotIndex);
+
+        // Act: the checkpoint loses its record, then the process stops.
+        storage.JournalStream.FailWrites = 1;
+        Should.Throw<IOException>(() => coordinator.Checkpoint());
+        storage.CheckpointActiveTransactions.ShouldBe([(long)writer.Sequence.Value]);
+        var images = storage.CaptureImages();
+        using var reopened = RollbackStorage.Open(images.Data, images.Journal);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        var plan = recovered.AnalyzeAndScrub();
+        recovered.CompleteRecovery();
+        var reader = await recovered.BeginAsync(IsolationLevel.Snapshot);
+
+        // Assert: the journal the crash left was empty, the anchor survived, and the uncommitted
+        // version is scrubbed.
+        images.Journal.ShouldBeEmpty();
+        plan.Aborted.ShouldContain(writer.Sequence);
+        RecordCount(reopened).ShouldBe(0);
+        (await recovered.VersionStore.GetVisibleVersionAsync(0, location, reader.Snapshot)).ShouldBeNull();
+        await recovered.CommitAsync(reader);
+        await coordinator.DisposeAsync();
+        storage.Dispose();
+    }
+
+    /// <summary>
+    /// A commit record that reached the journal cannot be taken back, so a commit whose durable
+    /// flush fails after the append is reported as committed but unconfirmed, never as aborted:
+    /// the writer is not undone (its undo could not even succeed here), and the next open reads it
+    /// as committed, as the commit record says (#1226 integration review).
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator commit: a commit record that cannot be made durable commits, unconfirmed")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CommitAsync_CommitRecordFlushFails_ShouldCommitAndReportTheDurabilityUnconfirmed(bool cleanClose)
+    {
+        // Arrange: a writer whose undo would fail, and a transaction waiting for its row.
+        var storage = RollbackStorage.Create();
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: int.MaxValue));
+        var location = storage.PackLocation(storage.LastInserted.PageId, storage.LastInserted.SlotIndex);
+        var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+
+        // Act: the commit record is appended, and its durable flush fails.
+        storage.JournalStream.FailFlushes = 1;
+        var error = await Should.ThrowAsync<TransactionCommitUnconfirmedException>(async () => await coordinator.CommitAsync(writer));
+        int unspentFlushFailures = storage.JournalStream.FailFlushes;
+        storage.JournalStream.FailFlushes = 0;
+
+        // Assert: committed and released, not undone.
+        unspentFlushFailures.ShouldBe(0);
+        error.InnerException.ShouldBeOfType<IOException>();
+        writer.State.ShouldBe(TransactionState.Committed);
+        coordinator.GetOpenContexts().ShouldNotContain(writer);
+        coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        await waiting.WaitAsync(Timeout);
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        (await coordinator.VersionStore.GetVisibleVersionAsync(0, location, reader.Snapshot)).ShouldNotBeNull();
+        await coordinator.CommitAsync(reader);
+        await coordinator.CommitAsync(next);
+
+        // Act: crash, or close cleanly, and reopen.
+        (byte[] Data, byte[] Journal) images;
+        if (cleanClose)
+        {
+            await coordinator.DisposeAsync();
+            storage.Dispose();
+            images = storage.CaptureClosedImages();
+        }
+        else
+        {
+            images = storage.CaptureImages();
+        }
+
+        using var reopened = RollbackStorage.Open(images.Data, images.Journal);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        var plan = recovered.AnalyzeAndScrub();
+        recovered.CompleteRecovery();
+        var after = await recovered.BeginAsync(IsolationLevel.Snapshot);
+
+        // Assert: the outcome the caller was told, committed.
+        plan.Aborted.ShouldNotContain(writer.Sequence);
+        RecordCount(reopened).ShouldBe(1);
+        (await recovered.VersionStore.GetVisibleVersionAsync(0, location, after.Snapshot)).ShouldNotBeNull();
+        await recovered.CommitAsync(after);
+        if (!cleanClose)
+        {
+            await coordinator.DisposeAsync();
+            storage.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// A deferred undo that keeps failing must not stop the version-purge pass from reclaiming
+    /// committed tombstones below the writer: the pass still prunes, then reports the failure.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator purge pass: an undo that keeps failing does not stop pruning")]
+    public async Task RunVersionPurgePass_DeferredUndoKeepsFailing_ShouldStillPruneAndThenReportTheFailure()
+    {
+        // Arrange: a committed delete leaves a prunable tombstone, then a later writer's rollback
+        // defers an undo that keeps failing.
+        using var storage = RollbackStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var creator = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await InsertAsync(coordinator, storage, creator);
+        var (pageId, slotIndex) = storage.LastInserted;
+        await coordinator.CommitAsync(creator);
+        var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await coordinator.ApplyStatementAsync(deleter, bracket =>
+        {
+            var record = storage.Read(pageId, slotIndex).ToArray();
+            storage.Update(bracket, pageId, slotIndex, RecordVersionStamp.WithDeleter(record, deleter.Sequence));
+            coordinator.VersionStore.RecordTombstoned(deleter.Sequence, pageId, slotIndex);
+            return 0;
+        });
+        await coordinator.CommitAsync(deleter);
+        var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: int.MaxValue));
+        await coordinator.RollbackAsync(writer);
+        int before = RecordCount(storage);
+
+        // Act
+        var error = Should.Throw<IOException>(() => coordinator.RunVersionPurgePass(CancellationToken.None));
+
+        // Assert: the tombstone was reclaimed, the deferred writer's version was not, and the
+        // writer still bounds the prune and waits for the next pass.
+        before.ShouldBe(2);
+        error.Message.ShouldBe("Injected index undo failure.");
+        RecordCount(storage).ShouldBe(1);
+        RecordVersionStamp.ReadStamps(storage.Read(storage.LastInserted.PageId, storage.LastInserted.SlotIndex).Span).Writer.ShouldBe(writer.Sequence);
+        coordinator.VersionStore.PendingAbortedPurges.ShouldBe([writer.Sequence.Value]);
+        coordinator.Manager.OldestActive.ShouldBe(writer.Sequence);
+        await Should.ThrowAsync<IOException>(async () => await coordinator.DisposeAsync());
+    }
+
+    /// <summary>
+    /// A statement bracket ends even when its advisory rollback record cannot be appended, and the
+    /// statement's own failure is the error its caller sees: the engines name it as the cause of an
+    /// aborted transaction, so a journal error must not replace it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator apply: a failed statement keeps its own error when the bracket's rollback record is lost")]
+    public async Task ApplyStatementAsync_StatementFailsAndRollbackRecordIsLost_ShouldSurfaceTheStatementsError()
+    {
+        // Arrange
+        using var storage = RollbackStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // Act: the statement writes a record, then fails while the journal rejects the next write,
+        // which is its bracket's rollback record.
+        Func<IStorageTransaction, int> failingStatement = bracket =>
+        {
+            byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];
+            RecordVersionStamp.WriteWriter(record, writer.Sequence);
+            storage.Insert(bracket, record);
+            storage.JournalStream.FailWrites = 1;
+            throw new InvalidOperationException("The statement's own failure.");
+        };
+        var error = await Should.ThrowAsync<InvalidOperationException>(async () => await coordinator.ApplyStatementAsync(writer, failingStatement));
+
+        // Assert: the rollback record was the write that failed, the bracket still ended, and the
+        // statement wrote nothing; the transaction goes on.
+        error.Message.ShouldBe("The statement's own failure.");
+        storage.JournalStream.FailWrites.ShouldBe(0);
+        coordinator.PairedTransactionCount.ShouldBe(0);
+        RecordCount(storage).ShouldBe(0);
+        coordinator.Checkpoint();
+        await InsertAsync(coordinator, storage, writer);
+        await coordinator.CommitAsync(writer);
+        RecordCount(storage).ShouldBe(1);
+    }
+
+    private static Task StartHeldInsert(
+        TransactionCoordinator coordinator, RollbackStorage storage, ITransactionContext writer, ManualResetEventSlim entered, ManualResetEventSlim release)
+        => Task.Factory.StartNew(() => coordinator.ApplyStatementAsync(writer, bracket =>
+        {
+            entered.Set();
+            release.Wait(Timeout).ShouldBeTrue();
+            byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];
+            RecordVersionStamp.WriteWriter(record, writer.Sequence);
+            var (pageId, slotIndex) = storage.Insert(bracket, record);
+            coordinator.VersionStore.RecordCreated(writer.Sequence, pageId, slotIndex);
+            return 0;
+        }).AsTask().GetAwaiter().GetResult(), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
     private static long[] Checkpoint(TransactionCoordinator coordinator, RollbackStorage storage)
     {

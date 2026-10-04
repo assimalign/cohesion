@@ -185,6 +185,7 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
     {
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
+        TransactionCommitUnconfirmedException => new DatabaseTransactionCommitUnconfirmedException(error.Message, error),
         _ => error,
     };
 

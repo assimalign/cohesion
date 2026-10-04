@@ -643,6 +643,22 @@ public sealed class GraphTransactionFailureTests
         (await Rows(observer, "MATCH ()-[r]->() RETURN r")).ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed")]
+    public void TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheAreaRootsCommitUnconfirmedException()
+    {
+        // Arrange
+        var kernel = new TransactionCommitUnconfirmedException("Transaction 7 committed, but its commit record could not be made durable.", new IOException("flush"));
+
+        // Act
+        var translated = GraphDatabaseInstance.TranslateKernelFailure(kernel);
+
+        // Assert: not an abort, so a caller never retries work that committed.
+        var unconfirmed = translated.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
+        unconfirmed.ShouldNotBeAssignableTo<DatabaseTransactionAbortedException>();
+        unconfirmed.Message.ShouldBe(kernel.Message);
+        unconfirmed.InnerException.ShouldBeSameAs(kernel);
+    }
+
     // The engine's own maintenance workers stay out of the way: these tests drive the purge
     // pass and the checkpoint themselves.
     private static GraphDatabaseEngineOptions QuietOptions(FaultInjectingJournalStorageStrategy strategy) => new()

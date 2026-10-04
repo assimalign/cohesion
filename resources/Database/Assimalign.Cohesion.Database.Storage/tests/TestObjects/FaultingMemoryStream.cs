@@ -5,9 +5,9 @@ using System.Threading;
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
-/// A memory stream whose writes and truncations fail on demand: a write can fail before
+/// A memory stream whose writes, truncations and flushes fail on demand: a write can fail before
 /// it writes anything, or tear (write the first half of its bytes, then fail), and a
-/// <see cref="SetLength"/> can fail. Its bytes stay readable through <see cref="MemoryStream.ToArray"/>
+/// <see cref="SetLength"/> or a <see cref="Flush"/> can fail. Its bytes stay readable through <see cref="MemoryStream.ToArray"/>
 /// after it is disposed, so a test can reopen what a closed storage left behind.
 /// </summary>
 internal sealed class FaultingMemoryStream : MemoryStream
@@ -16,6 +16,7 @@ internal sealed class FaultingMemoryStream : MemoryStream
     private int _failWrites;
     private int _tearWrites;
     private int _failTruncations;
+    private int _failFlushes;
 
     /// <summary>
     /// Gets or sets the number of upcoming writes that succeed before <see cref="FailWrites"/> and
@@ -46,6 +47,27 @@ internal sealed class FaultingMemoryStream : MemoryStream
     {
         get => Volatile.Read(ref _failTruncations);
         set => Volatile.Write(ref _failTruncations, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the number of upcoming <see cref="Flush"/> calls that fail. The bytes written
+    /// before stay in the stream, as an operating system's cache keeps them after a failed flush.
+    /// </summary>
+    internal int FailFlushes
+    {
+        get => Volatile.Read(ref _failFlushes);
+        set => Volatile.Write(ref _failFlushes, value);
+    }
+
+    /// <inheritdoc />
+    public override void Flush()
+    {
+        if (TrySpend(ref _failFlushes))
+        {
+            throw new IOException("Injected flush failure.");
+        }
+
+        base.Flush();
     }
 
     // Every write funnels through the array overload: a MemoryStream subclass's span overload

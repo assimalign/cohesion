@@ -165,10 +165,15 @@ a different contract from Graph, Documents and Blob, deliberately:
   the undo. So the end-failure state #1225 first gave this engine, where a commit or rollback
   that failed with the context still active left the transaction `Faulted` and refusing work
   with `COHDBK001` until a later rollback completed, is gone, as it is in Graph. The kernel still
-  refuses a rollback before it starts while the database closes; the session then refuses
-  commands in the ended transaction ("being committed or rolled back"), accepts another
-  `RollbackAsync`, and a `CommitAsync` completes the rollback and fails with `COHDBK001`,
-  committing nothing. A transaction the kernel ended under its caller (disposal's abort, or a
+  refuses a rollback before it starts while the database closes (`ObjectDisposedException`: the
+  manager's disposal flags itself before it claims any end); the session then refuses commands
+  in the ended transaction ("being committed or rolled back"), another `RollbackAsync` fails the
+  same way while the close runs and is accepted once the close's abort ended the context, and a
+  `CommitAsync` commits nothing: it fails with `ObjectDisposedException` while the database
+  closes, or reports the `Faulted` state once disposal's abort ended the context. A commit whose
+  record was written but could not be made durable throws
+  `DatabaseTransactionCommitUnconfirmedException` and leaves the transaction `Committed`
+  (`Database.Transactions` DESIGN.md). A transaction the kernel ended under its caller (disposal's abort, or a
   commit the kernel aborted) reports `Faulted` and refuses commands (typed and text, the text
   before it is parsed) and BEGIN with `COHDBK001` until the caller ends it. `CurrentTransaction`
   returns the transaction until the caller ends it, and null after a commit, rollback or disposal

@@ -50,11 +50,42 @@ returns the default manager. Lifecycle ordering encodes the write-ahead rule: co
 appends the commit record and awaits durability *while the transaction is still in
 the active table* — no snapshot can observe it as committed before its record is on
 stable storage; only then does it leave the table and release its locks as a set. A
-commit whose record cannot be made durable aborts, ending the transaction the way a
+commit whose record cannot be written aborts, ending the transaction the way a
 rollback does (state `Faulted`; see "Ending a transaction" below), and surfaces
-`TransactionAbortedException`. `OldestActive` is the
+`TransactionAbortedException`. A commit whose record was written but whose durable
+flush failed is different, and is described next. `OldestActive` is the
 pruning bound: `min(active)` or `lastAssigned + 1` when idle. A manager rejects a
 context begun on a different manager instance (identity check, not just type check).
+
+### A commit record that was written but not made durable
+
+The log's `AppendCommitAsync` appends the commit record and then flushes it. When the
+append succeeds and only the flush fails, the journal-bound logs throw
+`TransactionCommitUnconfirmedException`, and the manager ends the transaction as
+**committed**: it leaves the active table, its state becomes `Committed`, its locks are
+released, and the exception reaches the caller. Any other failure of `AppendCommitAsync`
+still means the record was not written, and the transaction aborts as above.
+
+A written commit record cannot be taken back. Recovery classifies a writer as committed
+whenever its commit record is in the journal, and the gated log drops the writer from the
+checkpoint's active list as soon as the record is appended, so a later checkpoint presumes
+it committed. Until the #1226 integration review the manager treated the flush failure as an
+abort and undid the writer. That was false whenever the record reached stable storage
+anyway: after a crash the writer came back committed, and when the undo was deferred
+("Ending a transaction", below) its versions stayed in the record space beside a commit
+record, so even a clean close brought back a transaction its caller had been told was
+aborted. The outcome is now the one a crash decides: committed if the record survives,
+nothing at all if it does not. No later transaction can be durable without it, because its
+own commit record follows this one in the journal and a flush covers everything before the
+record it flushes.
+
+The cost is that other transactions can read the writer's effects before its record is
+known to be durable, which the write-ahead rule above otherwise excludes; it is the
+visibility PostgreSQL's asynchronous commit accepts (`synchronous_commit = off`). On a WAL
+flush that fails, PostgreSQL stops the server instead (`issue_xlog_fsync` raises `PANIC`,
+`src/backend/access/transam/xlog.c`), which leaves no session to read anything; this kernel
+keeps running and reports the uncertainty to the one caller it concerns. The area root carries the same outcome as `DatabaseTransactionCommitUnconfirmedException`,
+which every engine translates the kernel exception to, and which is not retryable.
 
 ## Ending a transaction: a started rollback always completes (#1226)
 
@@ -75,10 +106,11 @@ rollback, and it throws nothing:
    awaited inside the apply gate may actually wait), so it cannot stop a started
    rollback; a commit drains the same way before its commit record.
 2. **Undo.** `IVersionStore.PurgeWriterAsync(writer)` removes the writer's versions.
-3. **Abort record.** `ITransactionLog.AppendAbortAsync(writer)`. A failure is ignored.
-4. **Release.** The state becomes `RolledBack` (or `Faulted` for an abort a failed
-   commit or disposal forced), then the writer leaves the active table and its locks
-   are released, which also fails any lock request of it still queued.
+3. **State.** The state becomes `RolledBack`, or `Faulted` for an abort a failed commit
+   or disposal forced.
+4. **Abort record.** `ITransactionLog.AppendAbortAsync(writer)`. A failure is ignored.
+5. **Release.** The writer leaves the active table, then its locks are released, which
+   also fails any lock request of it still queued.
 
 **The abort record is advisory.** Recovery classifies by commit records alone:
 `TransactionRecovery.Analyze` puts every sequence it meets (in a begin, page image or
@@ -123,8 +155,11 @@ gets no abort record, so checkpoints keep carrying it in their active list. Its 
 lock requests fail at once, exactly as the release at any other end fails them: the
 transaction has ended, so a statement of it parked on a lock must not wait for a grant
 it could only give back (the default lock manager's internal `AbandonPending` fails the
-queue without releasing a grant). Its end claim keeps refusing its statement applies
-even though the active table still holds it. The manager owns
+queue without releasing a grant). A request it makes after that point is refused at once
+too, unless it re-requests a lock it already holds as strongly: queued, it would join the
+wait-for graph, where a live transaction could be chosen as the deadlock victim of one that
+has already ended, and granted, it would be held until the undo completes. Its end claim
+keeps refusing its statement applies even though the active table still holds it. The manager owns
 this deferred undo. The coordinator's `RunVersionPurgePass` retries it, and when the
 undo completes the manager appends the abort record, removes the writer from the
 active table and releases its locks. Holding the locks until the undo completes follows
@@ -155,6 +190,18 @@ record cannot be appended, and a page whose before image cannot be appended is l
 unlocked (`Database.Storage` DESIGN.md, "Failed appends"), so a failed undo leaves
 nothing behind in the storage: checkpoints keep running while the writer waits, and
 the retry can touch the same pages.
+
+Each of those checkpoints truncates the journal, the writer's begin record with it, while
+the writer's versions stay in the data pages, so the writer's classification at the next
+open rests on the checkpoint's own list of active transactions. The journal's copy of that
+list is appended after the truncation, and an append that fails there, or a crash between
+the truncation and the record's flush, would leave the journal empty and the writer
+unnamed: recovery would then read its versions as committed (#1226 integration review). The
+storage therefore also writes the list into its file header before the truncation, and the
+checkpoint's data flush makes it durable first (`Database.Storage` DESIGN.md, "Checkpoints").
+`AnalyzeAndScrub` adds that anchor to the journal's classification, so the writer is aborted
+and scrubbed at the next open whether the checkpoint record survived or not. The same holds
+for any writer still in flight at a checkpoint, deferred or not.
 
 **Only the manager releases a managed writer's locks.** The manager releases a
 transaction's locks as a set at the moment the transaction leaves its active table,
@@ -191,7 +238,10 @@ under the writer's own sequence (`IStorage.BeginTransaction(long)`, which writes
 nothing). The writer is then in flight at the physical layer as well, the storage's
 close takes its non-idle path (flush pages and journal, no truncation), and the next
 open finds the writer without a commit record, classifies it as aborted and scrubs it,
-exactly as after a crash. Every engine closes its storage whether or not the
+exactly as after a crash. When an earlier checkpoint already truncated the writer's begin
+record and lost its own record, the journal no longer names the writer at all; the
+storage's checkpoint anchor still does, and the non-idle close leaves the anchor as that
+checkpoint wrote it. Every engine closes its storage whether or not the
 coordinator's close threw: Graph, Documents and Blob already did; SQL and KeyValuePair
 now do too, where they used to leave their storages open.
 
@@ -227,7 +277,10 @@ the resource for a transaction that can never release it (see "Ending a transact
 under a running statement"). The default lock manager also has an internal
 `AbandonPending(owner)`, the first half alone: it fails the owner's queued requests and
 keeps its grants, for the end of a rollback whose undo is deferred ("Ending a
-transaction"). No public member was added for it; a lock manager of another type passed
+transaction"). Until `ReleaseAll` the owner stays abandoned: `AcquireAsync` refuses its new
+requests with `TransactionAbortedException` and `TryAcquire` returns false, except for a
+resource it already holds in a mode at least as strong, which changes nothing for anyone
+else. No public member was added for it; a lock manager of another type passed
 to `TransactionManager.Create` leaves such a writer's queued requests queued until its
 deferred undo completes.
 
@@ -237,7 +290,7 @@ Storage owns the physical journal (`Database.Storage`); `ITransactionLog` is the
 
 ## Error model
 
-`TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). Caller-initiated rollback is not an error: once started it throws nothing (#1226); before the start it throws only for a canceled token or a context it cannot end.
+`TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). `TransactionCommitUnconfirmedException : Exception`, a second independent root, for a commit whose record was written but not made durable: the transaction is committed, so it is deliberately not an abort and not retryable ("A commit record that was written but not made durable", above); engines wrap it in the area's `DatabaseTransactionCommitUnconfirmedException`. Caller-initiated rollback is not an error: once started it throws nothing (#1226); before the start it throws only for a canceled token or a context it cannot end, and `ObjectDisposedException` once the manager's disposal began.
 
 ## The engine binding (first adopter: the SQL engine)
 
@@ -369,6 +422,14 @@ a request waiting in the lock loop checks the stopped flag and throws (`ForsetiC
 `1081-1085`), and every later operation of the transaction is refused by `assertOpen`
 (`KernelTransactionImplementation.java:1168-1174`). Citations are to Neo4j `54a7dcf7c25`.
 
+A statement that fails keeps its own error. Its bracket rolls back before the failure
+propagates, and when only the bracket's rollback record cannot be appended (the bracket still
+ends, `Database.Storage` DESIGN.md, "Failed appends"), that advisory record's failure is
+dropped rather than thrown in place of the statement's. The engines name the statement's
+failure as the cause of an aborted transaction (`COHDBD001`, `COHDBB001`, `COHDBG007`), so a
+journal error must not take its place. A failure that leaves the bracket active (restoring
+its pages failed) still propagates.
+
 Operation-level atomicity stays the engines' job: the kernel guarantees that no bracket lands
 after an end begins, not that a multi-bracket operation commits whole. Documents and Blob
 refuse a commit while an operation or stream is open, and KeyValuePair refuses one while a
@@ -402,10 +463,12 @@ The ordering is deliberately the same as in both original engines:
 1. Open storage with its automatic open-time checkpoint deferred, allowing
    physical WAL recovery without discarding logical transaction classification.
 2. Attach the engine's persisted indexes.
-3. `AnalyzeAndScrub` analyzes the recovered journal once, removes records created
-   by unproven writers, clears their tombstones, and seeds surviving committed
-   tombstones for pruning. It then reserves a storage sequence as the recovered
-   floor, above every pre-restart stamp.
+3. `AnalyzeAndScrub` analyzes the recovered journal once, together with the storage's
+   checkpoint anchor (`Storage.CheckpointActiveTransactions`, the active list the last
+   checkpoint wrote into the file header before it truncated the journal), removes
+   records created by unproven writers, clears their tombstones, and seeds surviving
+   committed tombstones for pruning. It then reserves a storage sequence as the
+   recovered floor, above every pre-restart stamp.
 4. The engine scrubs its attached indexes with that same plan in a durable
    storage bracket.
 5. `CompleteRecovery` checkpoints last, before sessions can begin. Truncating
@@ -414,10 +477,15 @@ The ordering is deliberately the same as in both original engines:
 During normal operation, begin/commit/abort appends and changes to the log's
 active-sequence set share one monitor with checkpoint capture and truncation.
 A begin cannot land between capturing the checkpoint's active list and truncating
-the journal. Commit appends and removes its active sequence under that monitor,
+the journal. The storage writes that list twice: into its file header, flushed with the
+data pages before the truncation, and into the checkpoint record appended after it. The
+header copy is the one that survives a lost checkpoint record; a checkpoint with more
+active transactions than the header holds (`Storage.MaxCheckpointActiveTransactions`) is
+refused as busy before it writes anything. Commit appends and removes its active sequence under that monitor,
 then calls `EnsureDurable` outside it; a checkpoint that truncates first has
 already durably flushed the outcome. The manager keeps the transaction active
-until durability completes. This ordering has not been replaced with an
+until durability completes, or ends it as committed when the flush fails after the
+append ("A commit record that was written but not made durable", above). This ordering has not been replaced with an
 independent manager-table snapshot.
 
 Statement apply, logical undo, and pruning share one semaphore. Engine conflict
@@ -445,7 +513,11 @@ The safe prune bound starts at `max(manager.OldestActive, recoveredSequenceFloor
 and is reduced to every open context's `Snapshot.Minimum`. A snapshot captured
 while an older writer was active can retain a floor below the current oldest
 active transaction, so using only the manager's bound would reclaim visible data.
-The purge pass retries failed abort undo before pruning, exactly as before.
+The purge pass retries failed abort undo before pruning, exactly as before. A retry that
+fails again no longer ends the pass: the pass still prunes, and rethrows the retry's
+failure at its end. A writer still deferred stays in the active table, so the bound never
+passes its sequence and the prune reaches only committed tombstones older than it; before
+this, one undo that kept failing stopped all reclamation.
 
 ## Non-goals
 

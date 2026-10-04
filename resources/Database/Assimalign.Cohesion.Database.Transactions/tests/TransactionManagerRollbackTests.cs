@@ -257,6 +257,81 @@ public class TransactionManagerRollbackTests
         kernel.Versions.PurgeCalls.ShouldBe(3);
     }
 
+    /// <summary>
+    /// A rolled-back writer whose undo is deferred has ended, so a lock request it makes afterwards
+    /// (a late operation of the ended transaction) is refused at once instead of queuing: queued, it
+    /// would join the wait-for graph, and a live transaction asking for a lock the writer still
+    /// holds would be chosen as the deadlock victim of a transaction that no longer runs.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Rollback: a writer whose undo is deferred gets no new lock, so it cannot deadlock a live transaction")]
+    public async Task RollbackAsync_UndoDeferred_ShouldRefuseTheWritersLaterLockRequests()
+    {
+        // Arrange: the writer holds Row, a live transaction holds OtherRow, and the undo fails once.
+        var kernel = Kernel.Create();
+        kernel.Versions.FailPurges = 1;
+        var writer = await kernel.BeginWriterAsync();
+        var live = await kernel.Manager.BeginAsync();
+        await kernel.Locks.AcquireAsync(live.Sequence, OtherRow, LockMode.Exclusive);
+        await kernel.Manager.RollbackAsync(writer);
+        writer.State.ShouldBe(TransactionState.RolledBack);
+
+        // Act: a late request of the ended writer for the live transaction's row, then the live
+        // transaction's request for the row the writer still holds.
+        var late = kernel.Locks.AcquireAsync(writer.Sequence, OtherRow, LockMode.Exclusive).AsTask();
+        bool lateFailedAtOnce = late.IsFaulted;
+        bool tryAcquired = kernel.Locks.TryAcquire(writer.Sequence, LockResource.Entry(1, 3), LockMode.Shared);
+        var regrant = kernel.Locks.AcquireAsync(writer.Sequence, Row, LockMode.Shared).AsTask();
+        var liveWaiting = kernel.Locks.AcquireAsync(live.Sequence, Row, LockMode.Exclusive).AsTask();
+        await Task.WhenAny(liveWaiting, Task.Delay(TimeSpan.FromMilliseconds(100)));
+        bool liveStillWaiting = !liveWaiting.IsCompleted;
+
+        // Act: disposal aborts the live transaction and completes the writer's undo.
+        await kernel.Manager.DisposeAsync();
+
+        // Assert: the late request failed without queuing, nothing new was granted, a re-grant of
+        // the lock the writer holds still succeeds, and the live transaction waited for the undo
+        // instead of being chosen as a deadlock victim; disposal's abort then ended its wait.
+        lateFailedAtOnce.ShouldBeTrue();
+        var refused = await Should.ThrowAsync<TransactionAbortedException>(async () => await late);
+        refused.Message.ShouldStartWith($"Transaction {writer.Sequence} has ended", Case.Sensitive);
+        tryAcquired.ShouldBeFalse();
+        regrant.IsCompletedSuccessfully.ShouldBeTrue();
+        liveStillWaiting.ShouldBeTrue();
+        var ended = await Should.ThrowAsync<TransactionAbortedException>(async () => await liveWaiting.WaitAsync(Timeout));
+        ended.ShouldNotBeOfType<TransactionDeadlockException>();
+        kernel.Locks.TryAcquire(Outsider, Row, LockMode.Exclusive).ShouldBeTrue();
+        kernel.Locks.TryAcquire(writer.Sequence, OtherRow, LockMode.Exclusive).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Commit: a commit record written but not made durable ends the transaction as committed")]
+    public async Task CommitAsync_CommitRecordWrittenButNotDurable_ShouldEndCommittedAndReportItUnconfirmed()
+    {
+        // Arrange: the log appends the commit record, then fails its flush.
+        var kernel = Kernel.Create();
+        await using var _ = kernel.Manager;
+        kernel.Log.UnconfirmCommit = true;
+        kernel.Versions.FailPurges = int.MaxValue;
+        var writer = await kernel.BeginWriterAsync();
+        var waiting = kernel.Locks.AcquireAsync(Outsider, Row, LockMode.Exclusive).AsTask();
+
+        // Act
+        var error = await Should.ThrowAsync<TransactionCommitUnconfirmedException>(async () => await kernel.Manager.CommitAsync(writer));
+
+        // Assert: committed, visible and released; nothing tried to undo it, and no abort record
+        // contradicts the commit record.
+        error.InnerException.ShouldBeOfType<IOException>();
+        writer.State.ShouldBe(TransactionState.Committed);
+        await waiting.WaitAsync(Timeout);
+        kernel.Versions.PurgeCalls.ShouldBe(0);
+        kernel.Log.AbortAttempts.ShouldBe(0);
+        var reader = await kernel.Manager.BeginAsync();
+        reader.Snapshot.IsVisible(writer.Sequence).ShouldBeTrue();
+        (await kernel.Versions.GetVisibleVersionAsync(1, 1, reader.Snapshot)).ShouldNotBeNull();
+        await Should.ThrowAsync<TransactionAbortedException>(async () => await kernel.Manager.RollbackAsync(writer));
+        kernel.Log.UnconfirmCommit = false;
+        await kernel.Manager.CommitAsync(reader);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Rollback: a second end of a transaction whose rollback is running is refused")]
     public async Task RollbackAsync_WhileItsRollbackIsRunning_ShouldRefuseAnotherEnd()
     {
@@ -462,6 +537,9 @@ public class TransactionManagerRollbackTests
 
         internal bool FailCommit { get; set; }
 
+        /// <summary>Appends the commit record, then fails its durable flush.</summary>
+        internal bool UnconfirmCommit { get; set; }
+
         internal Blocker? BlockAbort { get; set; }
 
         internal int AbortAttempts => Volatile.Read(ref _abortAttempts);
@@ -491,6 +569,13 @@ public class TransactionManagerRollbackTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Interlocked.Increment(ref _commitAttempts);
+            if (UnconfirmCommit)
+            {
+                throw new TransactionCommitUnconfirmedException(
+                    $"Transaction {sequence} committed, but its commit record could not be made durable.",
+                    new IOException("Injected flush failure."));
+            }
+
             return FailCommit ? throw new IOException("Injected commit-record failure.") : default;
         }
 

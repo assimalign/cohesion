@@ -188,28 +188,49 @@ internal sealed class DefaultTransactionManager : ITransactionManager
                 // storage.
                 await _log.AppendCommitAsync(owned.Sequence, cancellationToken).ConfigureAwait(false);
             }
+            catch (TransactionCommitUnconfirmedException)
+            {
+                // The commit record was written; only its flush failed. A written record
+                // cannot be taken back: recovery reads the writer as committed whenever the
+                // record reaches stable storage, and a checkpoint presumes it committed once
+                // it truncates past it. Undoing the writer now would be a lie the next crash
+                // may expose, and an undo deferred to a retry would leave its versions for
+                // recovery to read as committed. So the transaction ends as committed, and
+                // the caller learns that its durability is unconfirmed.
+                EndCommitted(owned);
+                throw;
+            }
             catch (Exception exception)
             {
                 await EndAbortedAsync(owned, TransactionState.Faulted).ConfigureAwait(false);
                 throw new TransactionAbortedException(
-                    $"Transaction {owned.Sequence} aborted: the commit record could not be made durable.", exception);
+                    $"Transaction {owned.Sequence} aborted: the commit record could not be written.", exception);
             }
 
-            lock (_sync)
-            {
-                _active.Remove(owned.Sequence.Value);
-            }
-
-            // The state changes before the locks release: a request granted after the
-            // release then sees an ended owner and must give the grant back (the engines'
-            // post-grant check), and one granted before it is released here.
-            owned.State = TransactionState.Committed;
-            _lockManager.ReleaseAll(owned.Sequence);
+            EndCommitted(owned);
         }
         finally
         {
             ExitEnd();
         }
+    }
+
+    /// <summary>
+    /// Ends a context whose commit record is in the log: it leaves the active table, its
+    /// state becomes <see cref="TransactionState.Committed"/>, and its locks are released.
+    /// </summary>
+    private void EndCommitted(DefaultTransactionContext context)
+    {
+        lock (_sync)
+        {
+            _active.Remove(context.Sequence.Value);
+        }
+
+        // The state changes before the locks release: a request granted after the
+        // release then sees an ended owner and must give the grant back (the engines'
+        // post-grant check), and one granted before it is released here.
+        context.State = TransactionState.Committed;
+        _lockManager.ReleaseAll(context.Sequence);
     }
 
     /// <inheritdoc />

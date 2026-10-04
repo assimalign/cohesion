@@ -38,10 +38,16 @@ public interface ITransactionManager : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <exception cref="TransactionAbortedException">
     /// Thrown when the transaction was aborted by conflict or deadlock resolution; when
-    /// the commit record could not be made durable, in which case the transaction was
+    /// the commit record could not be written, in which case the transaction was
     /// rolled back and ends as <see cref="TransactionState.Faulted"/>; or, before the
     /// commit starts, when the transaction is not active or its commit or rollback is
     /// already running.
+    /// </exception>
+    /// <exception cref="TransactionCommitUnconfirmedException">
+    /// The commit record was written but could not be made durable. The transaction is
+    /// committed: it ends as <see cref="TransactionState.Committed"/>, leaves the active
+    /// table and releases its locks. Its commit is lost if the process stops before the log
+    /// is next flushed durably.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
     ValueTask CommitAsync(ITransactionContext context, CancellationToken cancellationToken = default);

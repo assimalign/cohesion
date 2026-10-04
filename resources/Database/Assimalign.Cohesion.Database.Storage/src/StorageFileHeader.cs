@@ -24,8 +24,10 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// </code>
 /// Free pages are stamped <see cref="PageType.Free"/> in their page headers; the
 /// free-space map is reconstructed by scanning page headers when the file is opened.
+/// The rest of page 0's body after this header holds the checkpoint anchor
+/// (<see cref="CheckpointActiveCount"/>).
 /// </remarks>
-[StructLayout(LayoutKind.Explicit, Size = 256, Pack = 1)]
+[StructLayout(LayoutKind.Explicit, Size = ByteSize, Pack = 1)]
 public unsafe struct StorageFileHeader
 {
     /// <summary>
@@ -129,10 +131,40 @@ public unsafe struct StorageFileHeader
     public long LastTransactionSequence;
 
     /// <summary>
+    /// The number of logical transaction sequences in the checkpoint anchor: the
+    /// sequences the last checkpoint recorded as still in flight above the storage.
+    /// The sequences follow this header in the page body, as little-endian 64-bit
+    /// values starting <see cref="ByteSize"/> bytes into it, at most
+    /// <see cref="CheckpointAnchorCapacity"/> of them.
+    /// </summary>
+    /// <remarks>
+    /// A checkpoint writes the anchor and makes it durable with the data pages before it
+    /// truncates the journal, so the classification of those transactions survives a
+    /// checkpoint whose own journal record is lost (see
+    /// <see cref="Storage.CheckpointActiveTransactions"/>). Zero in files written before
+    /// the field existed, which is the anchor of a checkpoint with no logical transaction
+    /// in flight.
+    /// </remarks>
+    [FieldOffset(224)]
+    public int CheckpointActiveCount;
+
+    /// <summary>
     /// Reserved bytes for future use.
     /// </summary>
-    [FieldOffset(224)]
-    public fixed byte Reserved[32];
+    [FieldOffset(228)]
+    public fixed byte Reserved[28];
+
+    /// <summary>
+    /// The size of the header in bytes: the header occupies the first
+    /// <see cref="ByteSize"/> bytes of page 0's body.
+    /// </summary>
+    public const int ByteSize = 256;
+
+    /// <summary>
+    /// The most logical transaction sequences the checkpoint anchor holds: the rest of
+    /// page 0's body after the header, in 64-bit values.
+    /// </summary>
+    public const int CheckpointAnchorCapacity = (Units.Page.Size - Units.Page.HeaderSize - ByteSize) / sizeof(long);
 
     /// <summary>
     /// The expected magic number value for valid Cohesion storage files.

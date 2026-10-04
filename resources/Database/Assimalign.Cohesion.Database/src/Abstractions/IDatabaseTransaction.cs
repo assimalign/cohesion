@@ -40,6 +40,17 @@ public interface IDatabaseTransaction : IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <exception cref="DatabaseException">Thrown when the transaction is not in an active state.</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">
+    /// The engine aborted the transaction instead of committing it; nothing was committed.
+    /// </exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">
+    /// The commit record was written but could not be made durable: the transaction is
+    /// committed, and only its durability is unconfirmed. Do not retry its work.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">
+    /// The database is closed or closing; nothing was committed, and the close aborts the
+    /// transaction.
+    /// </exception>
     ValueTask CommitAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -58,5 +69,9 @@ public interface IDatabaseTransaction : IAsyncDisposable
     /// </remarks>
     /// <exception cref="OperationCanceledException">The token was canceled before the rollback started.</exception>
     /// <exception cref="DatabaseException">The rollback was refused before it started.</exception>
+    /// <exception cref="ObjectDisposedException">
+    /// The database is closed or closing, so the rollback did not start; the close aborts the
+    /// transaction itself.
+    /// </exception>
     ValueTask RollbackAsync(CancellationToken cancellationToken = default);
 }

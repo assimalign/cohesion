@@ -160,12 +160,15 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    autocommit. Disposing the transaction or the session ends it the same way. A rollback of any
    transaction that did not commit may be repeated and raises nothing: one already rolled back,
    one a failed statement aborted, and one whose commit the kernel aborted (a commit record that
-   could not be made durable). So a catch-block rollback after a failed commit never hides the
+   could not be written). So a catch-block rollback after a failed commit never hides the
    commit's error. A rollback of a committed transaction is refused, because it cannot do what it
    says.
 4. `CommitAsync` fails with `COHDBG007`, commits nothing, and ends the transaction (`RolledBack`).
    A commit the kernel aborts throws `DatabaseTransactionAbortedException`, as a statement's kernel
-   abort does, and leaves the transaction `Faulted` and ended.
+   abort does, and leaves the transaction `Faulted` and ended. A commit whose record was written
+   but could not be made durable is not an abort: it throws
+   `DatabaseTransactionCommitUnconfirmedException` and leaves the transaction `Committed`
+   (`Database.Transactions` DESIGN.md, "A commit record that was written but not made durable").
 5. Every failure of a statement that started counts: parse diagnostics, planning and execution
    errors, ownership refusals, kernel aborts such as conflicts and deadlocks, cancellation while
    the statement runs, and (on the wire) a result the server cannot encode or deliver. Failures
@@ -190,14 +193,16 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    completes a started rollback whatever fails (a lost abort record is ignored, and a failed undo
    is retried by the kernel with the writer's locks held), and it aborts a commit it cannot
    complete. The kernel still refuses a rollback before it starts when the database is closing:
-   once the manager's disposal begins, a rollback fails with `ObjectDisposedException`, or with
-   `TransactionAbortedException` ("already ending") when disposal claimed the context's end first.
-   That refusal leaves the context active only until disposal's own abort ends it, so the
+   once the manager's disposal begins, a rollback fails with `ObjectDisposedException` (the
+   disposal flags itself before it claims any end, so no end refused during the close fails any
+   other way). That refusal leaves the context active only until disposal's own abort ends it, so the
    `Faulted` end-failure state and its `COHDBG007` message were removed, and the stateless guard
    that remains covers the case: once a rollback throws with the context active, the session
-   refuses statements in the ended transaction ("being committed or rolled back"), accepts
-   another `RollbackAsync`, and a `CommitAsync` completes the rollback (or fails as the closing
-   database does) without committing anything the caller rolled back.
+   refuses statements in the ended transaction ("being committed or rolled back"), another
+   `RollbackAsync` fails the same way while the close runs and is accepted once the close's abort
+   ended the context, and a `CommitAsync` commits nothing the caller rolled back: it fails with
+   `ObjectDisposedException` while the database closes, or reports the `Faulted` state once
+   disposal's abort ended the context.
 
 The session's explicit-transaction lifecycle, where Faulted is the new state:
 

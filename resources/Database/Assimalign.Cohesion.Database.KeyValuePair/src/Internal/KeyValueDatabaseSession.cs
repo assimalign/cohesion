@@ -149,6 +149,11 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
             return result;
         }
+        catch (TransactionCommitUnconfirmedException exception)
+        {
+            // The command committed; only the durability of its commit record is unconfirmed.
+            throw new DatabaseTransactionCommitUnconfirmedException(exception.Message, exception);
+        }
         catch (TransactionDeadlockException exception)
         {
             if (context.State == TransactionState.Active)

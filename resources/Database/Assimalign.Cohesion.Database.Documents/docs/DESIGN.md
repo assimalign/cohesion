@@ -143,17 +143,21 @@ with its own code, `COHDBD001`:
    a failed rollback, and the session kept the transaction `Faulted`, refusing work with
    `COHDBD001`, until a later rollback completed; that end-failure state is gone, as it is in Graph.
    The kernel still refuses a rollback before it starts while the database closes
-   (`ObjectDisposedException`, or `DatabaseTransactionAbortedException` when disposal claimed the
-   transaction's end first). The context then stays active only until disposal's own abort ends
-   it: the session refuses statements in the ended transaction ("being committed or rolled
-   back"), another `RollbackAsync` is accepted, and a `CommitAsync` completes the rollback and
-   fails with `COHDBD001` without committing anything the caller rolled back.
+   (`ObjectDisposedException`: the manager's disposal flags itself before it claims any end, so
+   every end refused during the close fails this way). The context then stays active only until
+   disposal's own abort ends it: the session refuses statements in the ended transaction ("being
+   committed or rolled back"), another `RollbackAsync` fails the same way while the close runs
+   and is accepted once the close's abort ended the context, and a `CommitAsync` commits nothing:
+   it fails with `ObjectDisposedException` while the database closes, or reports the `Faulted`
+   state once disposal's abort ended the context.
 
 Kernel failures cross the engine boundary translated (the area error policy): a deadlock as
-`DatabaseTransactionDeadlockException` and a kernel abort as `DatabaseTransactionAbortedException`,
-never as the kernel's own exception types, for statements and for every end of the explicit
-transaction alike: commit, rollback, disposal, the session's closure, and the abort a statement
-failure starts. One translation (`DocumentDatabaseInstance.TranslateKernelFailure`) serves them
+`DatabaseTransactionDeadlockException`, a kernel abort as `DatabaseTransactionAbortedException`,
+and a commit whose record was written but could not be made durable as
+`DatabaseTransactionCommitUnconfirmedException` (the transaction is `Committed`; only its
+durability is unconfirmed, `Database.Transactions` DESIGN.md), never as the kernel's own
+exception types, for statements and for every end of the explicit transaction alike: commit,
+rollback, disposal, the session's closure, and the abort a statement failure starts. One translation (`DocumentDatabaseInstance.TranslateKernelFailure`) serves them
 all. Storage failures still surface as the storage child root's exceptions.
 
 The explicit-transaction lifecycle, where Faulted is the new state:

@@ -162,9 +162,14 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     /// only turn into a kernel abort of work the caller asked to keep. A commit while a command of
     /// the transaction still runs is refused before it starts and leaves the transaction active. A
     /// commit after the session's teardown ended the transaction fails with <c>COHDBK001</c>
-    /// naming the teardown, and a commit after the kernel ended it, or after an earlier commit or
-    /// rollback the kernel refused before it started (the database closing), fails with
-    /// <c>COHDBK001</c> and commits nothing.
+    /// naming the teardown, and a commit after the kernel ended it under its caller fails with
+    /// <c>COHDBK001</c> and commits nothing. While the database closes, the kernel refuses every
+    /// end before it starts: a commit after such a refused rollback commits nothing, failing
+    /// with <see cref="ObjectDisposedException"/> while the close runs, or reporting the
+    /// <c>Faulted</c> state once the close's abort ended the context. A commit whose record was
+    /// written but could not be made durable throws
+    /// <see cref="DatabaseTransactionCommitUnconfirmedException"/> and leaves the transaction
+    /// <c>Committed</c>.
     /// </remarks>
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
@@ -192,8 +197,9 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
                 // Under the end gate an ended transaction whose context is still active had a
                 // commit or rollback that threw before the kernel started it. The kernel ends every
                 // started rollback (#1226), but refuses one before it starts while the database
-                // closes (disposal claimed the end, or the manager is disposed); nothing the caller
-                // rolled back may commit then.
+                // closes (the manager is disposed: every end it refuses then is an ObjectDisposedException,
+                // because its disposal flags itself before it claims any end); nothing the caller rolled
+                // back may commit then.
                 aborted = _ended;
                 if (!aborted && _commands != 0)
                 {
@@ -366,6 +372,7 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     {
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
+        TransactionCommitUnconfirmedException => new DatabaseTransactionCommitUnconfirmedException(error.Message, error),
         _ => error,
     };
 }

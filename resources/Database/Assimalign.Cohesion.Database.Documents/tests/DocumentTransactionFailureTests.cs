@@ -637,6 +637,76 @@ public sealed class DocumentTransactionFailureTests
     }
 
     /// <summary>
+    /// A checkpoint truncates the journal before it appends the record that lists the transactions
+    /// still in flight. When that append fails while a rolled-back transaction's undo is deferred,
+    /// the journal no longer names the transaction, and its document sits in the flushed data pages.
+    /// The storage's checkpoint anchor, written before the truncation, still names it, so the next
+    /// open scrubs it after a clean close (#1226 integration review; before the anchor the
+    /// rolled-back document came back as committed).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Rollback: a checkpoint record lost while the undo is deferred does not resurrect the document")]
+    public async Task Checkpoint_RecordLostWhileTheUndoIsDeferred_ShouldLeaveNothingOfTheRolledBackTransactionAfterReopen()
+    {
+        // Arrange: a rolled-back transaction whose undo's first journal write fails.
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using (var session = await database.CreateSessionAsync())
+        {
+            await collection.PutAsync(session, "kept", Doc("kept"));
+            var transaction = await session.BeginTransactionAsync();
+            await collection.PutAsync(session, "rolled", Doc("rolled"));
+            using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+            {
+                await transaction.RollbackAsync();
+            }
+
+            transaction.State.ShouldBe(TransactionState.RolledBack);
+        }
+
+        // Act: the checkpoint truncates the journal and loses its own record; the close then
+        // retries the undo, which fails again at its first page image.
+        int checkpointFailuresLeft;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            Should.Throw<IOException>(() => database.Coordinator.Checkpoint());
+            checkpointFailuresLeft = failures.Remaining;
+        }
+
+        AggregateException closeFailure;
+        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
+        {
+            closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
+        }
+
+        await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+        await using var observer = await recovered.CreateSessionAsync();
+
+        // Assert: only the committed document is there.
+        checkpointFailuresLeft.ShouldBe(0);
+        closeFailure.InnerExceptions.ShouldContain(error => error is IOException);
+        (await Ids(observer)).ShouldBe(["kept"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed")]
+    public void TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheAreaRootsCommitUnconfirmedException()
+    {
+        // Arrange
+        var kernel = new TransactionCommitUnconfirmedException("Transaction 7 committed, but its commit record could not be made durable.", new IOException("flush"));
+
+        // Act
+        var translated = DocumentDatabaseInstance.TranslateKernelFailure(kernel);
+
+        // Assert: not an abort, so a caller never retries work that committed.
+        var unconfirmed = translated.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
+        unconfirmed.ShouldNotBeAssignableTo<DatabaseTransactionAbortedException>();
+        unconfirmed.Message.ShouldBe(kernel.Message);
+        unconfirmed.InnerException.ShouldBeSameAs(kernel);
+    }
+
+    /// <summary>
     /// The two end rules meet (#1225 with #1226): a statement applying when its transaction's
     /// rollback starts finishes its bracket first, the rollback's undo then fails and is deferred,
     /// and the ended transaction's next statement is refused even though the kernel still tracks

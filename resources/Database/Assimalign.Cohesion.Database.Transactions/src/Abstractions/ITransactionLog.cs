@@ -29,6 +29,12 @@ public interface ITransactionLog
     /// </summary>
     /// <param name="sequence">The transaction's sequence.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <exception cref="TransactionCommitUnconfirmedException">
+    /// The record was appended but could not be made durable. The transaction manager then
+    /// ends the transaction as committed, because a written commit record cannot be taken
+    /// back. Any other exception means the record was not appended, and the manager aborts
+    /// the transaction.
+    /// </exception>
     ValueTask AppendCommitAsync(TransactionSequence sequence, CancellationToken cancellationToken = default);
 
     /// <summary>

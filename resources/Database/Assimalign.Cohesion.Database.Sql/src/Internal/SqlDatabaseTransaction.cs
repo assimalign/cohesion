@@ -55,6 +55,12 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
         {
             await _coordinator.CommitAsync(_context, cancellationToken).ConfigureAwait(false);
         }
+        catch (TransactionCommitUnconfirmedException exception)
+        {
+            // Committed (the context reports Committed); only the commit record's durability
+            // is unconfirmed, so this is not an abort and the work must not be retried.
+            throw new DatabaseTransactionCommitUnconfirmedException(exception.Message, exception);
+        }
         catch (TransactionDeadlockException exception)
         {
             throw new DatabaseTransactionDeadlockException(exception.Message, exception);

@@ -181,10 +181,16 @@ public interface IStorage : IAsyncDisposable, IDisposable
     /// flight above it: the truncating checkpoint record carries the given active
     /// sequences, so recovery classification still sees them even though their
     /// begin records were truncated. Storage-level transactions must still be
-    /// quiescent — the active-count interlock is unchanged.
+    /// quiescent — the active-count interlock is unchanged. The shared
+    /// <see cref="Storage"/> also records the sequences in its file header before the
+    /// truncation (<see cref="Storage.CheckpointActiveTransactions"/>), so they stay
+    /// classified when the checkpoint record itself is lost.
     /// </summary>
     /// <param name="activeTransactionSequences">The logical transaction sequences still active above the storage.</param>
-    /// <exception cref="StorageTransactionException">A storage-level transaction is still active.</exception>
+    /// <exception cref="StorageTransactionException">
+    /// A storage-level transaction is still active, or the shared <see cref="Storage"/>
+    /// cannot record that many sequences (<see cref="Storage.MaxCheckpointActiveTransactions"/>).
+    /// </exception>
     void Checkpoint(ReadOnlySpan<long> activeTransactionSequences);
 
     /// <summary>

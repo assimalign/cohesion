@@ -116,8 +116,9 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
                 // Under the end gate an ended transaction whose context is still active had a
                 // rollback that threw before the kernel ended it. The kernel ends every started
                 // rollback (#1226), but refuses one before it starts while the database closes
-                // (disposal claimed the end, or the manager is disposed); nothing the caller
-                // rolled back may commit then.
+                // (the manager is disposed: every end it refuses then is an ObjectDisposedException,
+                // because its disposal flags itself before it claims any end); nothing the caller rolled
+                // back may commit then.
                 aborted = failure is not null || state != TransactionState.Active || _ended;
                 if (!aborted && Operations != 0)
                 {

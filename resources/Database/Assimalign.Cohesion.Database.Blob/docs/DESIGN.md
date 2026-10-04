@@ -203,14 +203,17 @@ records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines 
    Until #1226 a journal or storage failure could leave the context active behind a failed
    rollback, and the session kept the transaction `Faulted`, refusing work with `COHDBB001`, until a
    later rollback completed; that end-failure state is gone, as it is in Graph. The kernel still
-   refuses a rollback before it starts while the database closes (`ObjectDisposedException`, or
-   `DatabaseTransactionAbortedException` when disposal claimed the transaction's end first); the
-   context then stays active only until disposal's own abort ends it, the session refuses
-   operations in the ended transaction ("being committed or rolled back"), another `RollbackAsync`
-   is accepted, and a `CommitAsync` commits nothing.
+   refuses a rollback before it starts while the database closes (`ObjectDisposedException`: the
+   manager's disposal flags itself before it claims any end, so every end refused during the
+   close fails this way); the context then stays active only until disposal's own abort ends it,
+   the session refuses operations in the ended transaction ("being committed or rolled back"),
+   another `RollbackAsync` fails the same way while the close runs and is accepted once the
+   close's abort ended the context, and a `CommitAsync` commits nothing.
 
 Transaction-kernel failures cross the engine boundary translated (`DatabaseTransactionDeadlockException`,
-`DatabaseTransactionAbortedException`), never as the kernel's own exception types, for operations
+`DatabaseTransactionAbortedException`, and `DatabaseTransactionCommitUnconfirmedException` for a
+commit whose record was written but could not be made durable, which leaves the transaction
+`Committed`), never as the kernel's own exception types, for operations
 and for every end of the explicit transaction: commit, rollback, disposal, the session's closure,
 and the abort an operation failure starts. One translation (`BlobDatabaseInstance.TranslateKernelFailure`)
 serves them all. The lifecycle is the Documents state diagram with operations in place of statements.
