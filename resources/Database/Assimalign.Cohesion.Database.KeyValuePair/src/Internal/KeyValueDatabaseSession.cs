@@ -39,8 +39,8 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
     /// <inheritdoc />
     /// <remarks>
     /// The transaction stays current until the caller commits, rolls back or disposes it, including
-    /// one whose commit or rollback did not complete (<see cref="TransactionState.Faulted"/>), which
-    /// waits for the caller's rollback. A failed command never ends it.
+    /// one the kernel ended under its caller (<see cref="TransactionState.Faulted"/>), which waits
+    /// for the caller's rollback. A failed command never ends it.
     /// </remarks>
     public IDatabaseTransaction? CurrentTransaction => OpenTransaction;
 
@@ -75,7 +75,7 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
 
         if (OpenTransaction is { } open)
         {
-            // BEGIN is refused while a transaction whose end did not complete waits for its
+            // BEGIN is refused while a transaction the kernel ended under its caller waits for its
             // rollback, as in PostgreSQL's failed transaction block.
             throw open.IsUsable
                 ? new DatabaseException("A transaction is already active on this session.")
@@ -103,8 +103,9 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
         // Inside an explicit transaction, the command rides its context. A command is
         // statement-atomic: its writes share one physical bracket that a failure rolls back, so a
         // failed command writes nothing and the transaction stays active, as a failed SQL
-        // statement does. Only a transaction whose own end did not complete refuses commands, so
-        // a command never runs in a half-rolled-back transaction or silently autocommits (#1225).
+        // statement does. Only a transaction that is ending, or that the kernel ended under its
+        // caller, refuses commands, so a command never runs in a half-rolled-back transaction or
+        // silently autocommits (#1225).
         if (OpenTransaction is { } transaction)
         {
             // The admission also keeps a commit from starting while the command runs. A rollback

@@ -45,6 +45,18 @@ public interface IDatabaseTransaction : IAsyncDisposable
     /// <summary>
     /// Rolls back all operations performed within this transaction.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <param name="cancellationToken">
+    /// Observed only before the rollback starts. A token canceled by then leaves the
+    /// transaction as it was.
+    /// </param>
+    /// <remarks>
+    /// A started rollback runs to completion and ends the transaction whatever fails or is
+    /// canceled; it throws nothing. When the engine cannot undo the transaction's writes at
+    /// once, the transaction still ends, and its locks stay held until the engine completes
+    /// the undo. Before it starts, a rollback fails when the transaction cannot be rolled
+    /// back in its current state or when its commit or rollback is already running.
+    /// </remarks>
+    /// <exception cref="OperationCanceledException">The token was canceled before the rollback started.</exception>
+    /// <exception cref="DatabaseException">The rollback was refused before it started.</exception>
     ValueTask RollbackAsync(CancellationToken cancellationToken = default);
 }

@@ -356,11 +356,26 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         // still open. Synchronous over the ValueTask by design — the in-process
         // implementations complete synchronously. Registrations re-export after
         // the aborts (a rollback never moves roots, but the order costs nothing)
-        // and before the storages close.
-        _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        SaveIndexRegistrationsIfChanged();
-        _storage.Dispose();
-        _catalogStorage.Dispose();
+        // and before the storages close. The storages close even when the
+        // coordinator reports a writer whose undo still failed: it kept that
+        // writer in flight in the data storage, so the close does not truncate
+        // the journal recovery classifies the writer from (#1226).
+        try
+        {
+            _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            SaveIndexRegistrationsIfChanged();
+        }
+        finally
+        {
+            try
+            {
+                _storage.Dispose();
+            }
+            finally
+            {
+                _catalogStorage.Dispose();
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -372,10 +387,22 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         }
 
         _disposed = true;
-        await _coordinator.DisposeAsync().ConfigureAwait(false);
-        SaveIndexRegistrationsIfChanged();
-        await _storage.DisposeAsync().ConfigureAwait(false);
-        await _catalogStorage.DisposeAsync().ConfigureAwait(false);
+        try
+        {
+            await _coordinator.DisposeAsync().ConfigureAwait(false);
+            SaveIndexRegistrationsIfChanged();
+        }
+        finally
+        {
+            try
+            {
+                await _storage.DisposeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                await _catalogStorage.DisposeAsync().ConfigureAwait(false);
+            }
+        }
     }
 
     /// <summary>

@@ -147,13 +147,56 @@ internal sealed class DefaultLockManager : ILockManager
             waiter.Completion.TrySetResult();
         }
 
-        if (ended is not null)
+        FailEnded(owner, ended);
+    }
+
+    /// <summary>
+    /// Fails the owner's queued requests with <see cref="TransactionAbortedException"/>,
+    /// as <see cref="ReleaseAll"/> does, but keeps every lock the owner holds.
+    /// </summary>
+    /// <param name="owner">The transaction that ended while its locks stay held.</param>
+    /// <remarks>
+    /// The end of a rolled-back writer whose undo is deferred (#1226): its transaction
+    /// has ended, so a request it still has queued must not wait for a grant, but its
+    /// granted locks protect versions the undo has not removed yet and stay until the
+    /// manager releases them. Removing a queued request grants nothing to anyone else:
+    /// a grant depends only on the modes held, never on the queue ahead of it.
+    /// </remarks>
+    internal void AbandonPending(TransactionSequence owner)
+    {
+        List<(LockResource Resource, Waiter Waiter)>? ended = null;
+
+        lock (_sync)
         {
-            foreach (var (resource, waiter) in ended)
+            RemoveWaitEdgesLocked(owner.Value);
+
+            foreach (var (resource, entry) in _table)
             {
-                waiter.Completion.TrySetException(new TransactionAbortedException(
-                    $"Transaction {owner} ended while it waited for {waiter.Mode} on {resource}; the request was not granted."));
+                for (int i = entry.Waiters.Count - 1; i >= 0; i--)
+                {
+                    if (entry.Waiters[i].Owner == owner.Value)
+                    {
+                        (ended ??= new()).Add((resource, entry.Waiters[i]));
+                        entry.Waiters.RemoveAt(i);
+                    }
+                }
             }
+        }
+
+        FailEnded(owner, ended);
+    }
+
+    private static void FailEnded(TransactionSequence owner, List<(LockResource Resource, Waiter Waiter)>? ended)
+    {
+        if (ended is null)
+        {
+            return;
+        }
+
+        foreach (var (resource, waiter) in ended)
+        {
+            waiter.Completion.TrySetException(new TransactionAbortedException(
+                $"Transaction {owner} ended while it waited for {waiter.Mode} on {resource}; the request was not granted."));
         }
     }
 

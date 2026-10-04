@@ -27,6 +27,16 @@ public static class TransactionManager
     /// null, the manager assigns from its own private counter.
     /// </param>
     /// <returns>The transaction manager.</returns>
+    /// <remarks>
+    /// A rollback whose undo fails (<see cref="IVersionStore.PurgeWriterAsync"/> throws)
+    /// still ends its transaction, but the writer stays in the active table and keeps its
+    /// locks until its undo completes, because its versions are still in the store (#1226).
+    /// A manager created here has no version-purge pass to retry that undo: only its
+    /// disposal does. Until then every writer that conflicts with the rolled-back one
+    /// waits, and <see cref="ITransactionManager.OldestActive"/> stays at or below it.
+    /// <see cref="TransactionCoordinator"/>, which composes a manager over a database's
+    /// storage, retries the undo on every <see cref="TransactionCoordinator.RunVersionPurgePass"/>.
+    /// </remarks>
     public static ITransactionManager Create(
         ITransactionLog log,
         ILockManager lockManager,

@@ -14,7 +14,10 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 /// An operation that fails inside an explicit transaction aborts the whole transaction (#1225, the
 /// contract #1188 set for Graph): the session keeps it as <see cref="TransactionState.Faulted"/> and
 /// refuses every later operation and BEGIN with COHDBB001 until the caller rolls back, and nothing
-/// the transaction wrote survives. The wire cases are in <c>Blob.Client</c>'s
+/// the transaction wrote survives. A started rollback always ends the transaction (#1226): a lost
+/// abort record changes nothing, an undo the journal rejects is deferred with the writer lock held
+/// until the version-purge pass completes it, and one that still fails when the engine closes is
+/// scrubbed at the next open. The wire cases are in <c>Blob.Client</c>'s
 /// <c>BlobTransactionFailureWireTests</c>.
 /// </summary>
 public sealed class BlobTransactionFailureTests
@@ -518,9 +521,57 @@ public sealed class BlobTransactionFailureTests
         (await Names(container)).ShouldBe(["first", "second"]);
     }
 
-    /// <summary>A rollback that does not complete leaves the transaction faulted and refusing work until a rollback completes.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a rollback that does not complete leaves the transaction faulted")]
-    public async Task RollbackAsync_ThatDoesNotComplete_ShouldLeaveTransactionFaultedUntilRetried()
+    /// <summary>
+    /// A rollback whose abort record cannot be written still ends the transaction and releases the
+    /// database writer lock, so another session's writer proceeds (#1226). Until #1226 such a
+    /// rollback failed and left the transaction Faulted until a later rollback completed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a rollback whose abort record cannot be written still ends the transaction")]
+    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndReleaseWriterLock()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
+        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var container = await database.CreateContainerAsync("files");
+        await Write(container, "keep", "original");
+        await using var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var otherFiles = await ((IBlobDatabase)other.Database).GetContainerAsync("files");
+        var transaction = await session.BeginTransactionAsync();
+
+        // A delete that matches nothing takes the database writer lock and writes no version, so
+        // the abort record is the rollback's only journal write.
+        (await files.DeleteAsync("missing")).ShouldBeFalse();
+
+        // Act
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            await transaction.RollbackAsync();
+            unspent = failures.Remaining;
+        }
+
+        // Assert: the record write failed, and the rollback ended the transaction anyway.
+        unspent.ShouldBe(0);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        session.CurrentTransaction.ShouldBeNull();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await Write(otherFiles, "other", "other", timeout.Token);
+        await using (var next = await session.BeginTransactionAsync())
+        {
+            await Write(files, "after", "after");
+            await next.CommitAsync();
+        }
+        (await Names(container)).ShouldBe(["after", "keep", "other"]);
+    }
+
+    /// <summary>
+    /// After a rollback whose abort record was lost, the transaction is rolled back like any other:
+    /// COMMIT is refused and commits nothing, and a repeated rollback raises nothing.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: COMMIT after a rollback whose abort record was lost is refused")]
+    public async Task CommitAsync_AfterRollbackWithLostAbortRecord_ShouldBeRefused()
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
@@ -530,61 +581,123 @@ public sealed class BlobTransactionFailureTests
         await using var session = await database.CreateSessionAsync();
         var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        (await files.GetPropertiesAsync("keep")).ShouldNotBeNull();
-
-        // Act: the abort record is the rollback's only journal write, so failing it fails the rollback.
-        IOException rollbackFailure;
+        (await files.DeleteAsync("missing")).ShouldBeFalse();
         using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
         {
-            rollbackFailure = await Should.ThrowAsync<IOException>(async () => await transaction.RollbackAsync());
-        }
-        var faultedState = transaction.State;
-        var currentWhileFaulted = session.CurrentTransaction;
-        var refused = await Should.ThrowAsync<DatabaseException>(async () => await files.DeleteAsync("keep"));
-        var beginRefused = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
-        await transaction.RollbackAsync();
-
-        // Assert
-        faultedState.ShouldBe(TransactionState.Faulted);
-        currentWhileFaulted.ShouldBeSameAs(transaction);
-        refused.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
-        refused.Message.ShouldContain("did not complete", Case.Sensitive);
-        refused.InnerException.ShouldBeSameAs(rollbackFailure);
-        beginRefused.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
-        transaction.State.ShouldBe(TransactionState.RolledBack);
-        session.CurrentTransaction.ShouldBeNull();
-        await Write(files, "after", "after");
-        (await Names(container)).ShouldBe(["after", "keep"]);
-    }
-
-    /// <summary>COMMIT after a rollback that did not complete fails with COHDBB001, commits nothing, and ends the transaction.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: COMMIT after an incomplete rollback fails and ends the transaction")]
-    public async Task CommitAsync_AfterRollbackThatDidNotComplete_ShouldFailAndEndTransaction()
-    {
-        // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
-        await database.CreateContainerAsync("files");
-        await using var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
-        var transaction = await session.BeginTransactionAsync();
-        (await files.GetPropertiesAsync("missing")).ShouldBeNull();
-        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
-        {
-            await Should.ThrowAsync<IOException>(async () => await transaction.RollbackAsync());
+            await transaction.RollbackAsync();
         }
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        await transaction.RollbackAsync();
 
         // Assert
-        error.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
-        error.Message.ShouldContain("nothing was committed", Case.Sensitive);
-        error.InnerException.ShouldBeOfType<IOException>();
+        error.Message.ShouldBe("The transaction is RolledBack.");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        await transaction.RollbackAsync();
+        (await Names(container)).ShouldBe(["keep"]);
     }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Rollback: an undo that still fails at close is scrubbed at the next open")]
+    public async Task Dispose_UndoStillFailsAtClose_ShouldLeaveNothingOfTheRolledBackTransactionAfterReopen()
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        var engine = BlobDatabaseEngine.Create(QuietOptions(strategy));
+        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        await database.CreateContainerAsync("files");
+        await using (var session = await database.CreateSessionAsync())
+        {
+            var scoped = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+            await BlobEngineTests.Write(scoped, "kept", "kept"u8.ToArray());
+            var transaction = await session.BeginTransactionAsync();
+            await BlobEngineTests.Write(scoped, "rolled", "rolled"u8.ToArray());
+            await BlobEngineTests.Write(scoped, "kept", "overwritten"u8.ToArray());
+
+            // The undo's storage bracket begins (the first write) and fails at its first page
+            // image (the second), so the bracket rolls itself back and the undo is deferred.
+            using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
+            {
+                await transaction.RollbackAsync();
+                failures.Remaining.ShouldBe(0);
+            }
+
+            transaction.State.ShouldBe(TransactionState.RolledBack);
+        }
+
+        // Act: the close retries the undo, which fails the same way.
+        AggregateException closeFailure;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
+        {
+            closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
+            failures.Remaining.ShouldBe(0);
+        }
+
+        await using var reopened = BlobDatabaseEngine.Create(QuietOptions(strategy));
+        var recovered = (IBlobDatabase)await reopened.OpenDatabaseAsync("test");
+        var files = await recovered.GetContainerAsync("files");
+
+        // Assert: the new blob is gone and the overwrite is undone.
+        closeFailure.InnerExceptions.ShouldContain(error => error is IOException);
+        (await files.GetPropertiesAsync("rolled")).ShouldBeNull();
+        (await BlobEngineTests.Read(files, "kept")).ShouldBe("kept"u8.ToArray());
+    }
+
+    /// <summary>
+    /// The two end rules meet (#1225 with #1226): a rollback whose undo the journal rejects still
+    /// ends the transaction, so it is no longer the session's transaction, but it keeps the
+    /// database writer lock; the next writer waits for the purge pass, after which nothing the
+    /// transaction wrote survives.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Rollback: a deferred undo holds the writer lock until the purge pass and then leaves nothing")]
+    public async Task RollbackAsync_UndoDeferred_ShouldHoldWriterLockUntilThePurgePassAndLeaveNothing()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
+        var database = (Internal.BlobDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var container = await database.CreateContainerAsync("files");
+        await Write(container, "keep", "original");
+        await using var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var otherFiles = await ((IBlobDatabase)other.Database).GetContainerAsync("files");
+        var transaction = await session.BeginTransactionAsync();
+        await Write(files, "rolled", "rolled");
+        await Write(files, "keep", "overwritten");
+
+        // Act: the undo's first journal write (its storage bracket's begin) fails.
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            await transaction.RollbackAsync();
+            unspent = failures.Remaining;
+        }
+        int deferred = database.Coordinator.VersionStore.PendingAbortedPurges.Count;
+        var waiting = Write(otherFiles, "other", "other");
+        await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromMilliseconds(250)));
+        bool otherProceededBeforeTheUndo = waiting.IsCompleted;
+        database.Coordinator.RunVersionPurgePass(CancellationToken.None);
+        await waiting.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        unspent.ShouldBe(0);
+        deferred.ShouldBe(1);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        session.CurrentTransaction.ShouldBeNull();
+        otherProceededBeforeTheUndo.ShouldBeFalse();
+        database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        (await Names(container)).ShouldBe(["keep", "other"]);
+        (await Read(container, "keep")).ShouldBe("original");
+    }
+
+    // The engine's own maintenance workers stay out of the way: these tests drive the purge pass
+    // and the close themselves.
+    private static BlobDatabaseEngineOptions QuietOptions(FaultInjectingJournalStorageStrategy strategy) => new()
+    {
+        StorageStrategy = strategy,
+        MaintenanceInterval = TimeSpan.FromHours(1),
+        CheckpointInterval = TimeSpan.FromHours(1),
+    };
 
     /// <summary>A commit the kernel aborts crosses the boundary translated, and a catch-block rollback afterwards raises nothing.</summary>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a kernel-aborted commit is translated and a later rollback is a no-op")]

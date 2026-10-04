@@ -56,6 +56,13 @@ internal sealed class StorageTransaction : IStorageTransaction
     internal void RegisterPendingFree(long pageId, ulong ownerId)
         => (_pendingFrees ??= new List<(long, ulong)>()).Add((pageId, ownerId));
 
+    /// <summary>
+    /// Marks the transaction completed. The storage calls it in the step that releases the
+    /// transaction's page write locks and active count, so a rollback whose record append
+    /// then fails is complete already, and <see cref="Dispose"/> does not roll it back again.
+    /// </summary>
+    internal void MarkCompleted() => _active = false;
+
     /// <inheritdoc />
     public void Commit() => Commit(awaitDurability: true);
 
@@ -64,7 +71,6 @@ internal sealed class StorageTransaction : IStorageTransaction
     {
         ThrowIfCompleted();
         _owner.CommitTransaction(this, awaitDurability);
-        _active = false;
     }
 
     /// <inheritdoc />
@@ -72,7 +78,6 @@ internal sealed class StorageTransaction : IStorageTransaction
     {
         ThrowIfCompleted();
         _owner.RollbackTransaction(this);
-        _active = false;
     }
 
     /// <inheritdoc />

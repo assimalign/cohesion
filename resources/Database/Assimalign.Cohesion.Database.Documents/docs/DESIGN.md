@@ -72,7 +72,15 @@ Serializable is rejected rather than silently weakened.
 The shared lock manager serializes writers per logical database. Before changing
 a document, collection, or index, the operation compares its snapshot with the
 latest state under that lock. An intervening change raises
-`DatabaseTransactionAbortedException`. Reads stay snapshot based. Catalog and
+`DatabaseTransactionAbortedException`. A commit or rollback the transaction kernel
+refuses or aborts crosses the model boundary the same way (see "Failed statements in
+explicit transactions" below for the end contract). An operation that ends up granted
+the writer lock after its transaction ended gives the grant back through the
+coordinator's lock manager, which leaves that release to the transaction manager while
+the manager still tracks the transaction: a rolled-back transaction whose undo the
+kernel had to defer keeps the writer lock until the version-purge pass completes the
+undo (#1226, `Database.Transactions` DESIGN.md, "Ending a transaction"). Reads stay
+snapshot based. Catalog and
 index writes use the same logical context as content chunks; rollback and crash
 recovery cannot publish a partial document.
 
@@ -88,7 +96,9 @@ contract the Graph engine set in #1188 (Graph [DESIGN.md](../../Assimalign.Cohes
 with its own code, `COHDBD001`:
 
 1. The failure rolls the transaction's work back at once and releases its locks, so the aborted
-   transaction blocks no other writer while it waits for the caller.
+   transaction blocks no other writer while it waits for the caller. (When the undo itself fails,
+   the kernel keeps the writer lock until its version-purge pass completes the undo; see
+   `Database.Transactions` DESIGN.md, "Ending a transaction".)
 2. The transaction stays the session's `CurrentTransaction` and reports `TransactionState.Faulted`.
    Every later statement on the session fails with `COHDBD001`: OQL text or requests, collection
    `GetAsync`/`PutAsync`/`DeleteAsync`, and the session-bound `IDocumentDatabase` verbs
@@ -126,16 +136,25 @@ with its own code, `COHDBD001`:
 7. A rollback or commit observes its cancellation token only before it starts: a token canceled by
    then throws `OperationCanceledException` and leaves the transaction as it was. One that has
    started runs to completion (PostgreSQL holds interrupts through `AbortTransaction`,
-   `backend/access/transam/xact.c:2854-2861`). When a caller's rollback or commit still fails with
-   the transaction's context active (a journal or storage failure), the transaction stays
-   `CurrentTransaction` and reports `Faulted`, and the session refuses statements and BEGIN with
-   `COHDBD001` naming that failure, until a `RollbackAsync` completes. `CommitAsync` then completes
-   the rollback and fails with `COHDBD001`.
+   `backend/access/transam/xact.c:2854-2861`), and it always ends the transaction (#1226): the
+   transaction kernel completes a started rollback whatever fails (a lost abort record is ignored,
+   and a failed undo is retried by the kernel with the writer lock held), and it aborts a commit it
+   cannot complete. Until #1226 a journal or storage failure could leave the context active behind
+   a failed rollback, and the session kept the transaction `Faulted`, refusing work with
+   `COHDBD001`, until a later rollback completed; that end-failure state is gone, as it is in Graph.
+   The kernel still refuses a rollback before it starts while the database closes
+   (`ObjectDisposedException`, or `DatabaseTransactionAbortedException` when disposal claimed the
+   transaction's end first). The context then stays active only until disposal's own abort ends
+   it: the session refuses statements in the ended transaction ("being committed or rolled
+   back"), another `RollbackAsync` is accepted, and a `CommitAsync` completes the rollback and
+   fails with `COHDBD001` without committing anything the caller rolled back.
 
 Kernel failures cross the engine boundary translated (the area error policy): a deadlock as
 `DatabaseTransactionDeadlockException` and a kernel abort as `DatabaseTransactionAbortedException`,
-for statements and for the explicit transaction's commit and rollback alike. Storage failures
-still surface as the storage child root's exceptions.
+never as the kernel's own exception types, for statements and for every end of the explicit
+transaction alike: commit, rollback, disposal, the session's closure, and the abort a statement
+failure starts. One translation (`DocumentDatabaseInstance.TranslateKernelFailure`) serves them
+all. Storage failures still surface as the storage child root's exceptions.
 
 The explicit-transaction lifecycle, where Faulted is the new state:
 
@@ -146,8 +165,7 @@ stateDiagram-v2
     Idle --> Active: BeginTransactionAsync
     Active --> Active: statement succeeds, or fails before it starts
     Active --> Faulted: statement fails and its transaction's work is rolled back
-    Active --> Faulted: RollbackAsync or CommitAsync fails with the context still active
-    Faulted --> Faulted: statement or BEGIN refused with COHDBD001, or a rollback that fails again
+    Faulted --> Faulted: statement or BEGIN refused with COHDBD001
     Active --> Idle: CommitAsync (committed, or aborted by the kernel), RollbackAsync, or DisposeAsync
     Faulted --> Idle: RollbackAsync, DisposeAsync, or CommitAsync failing with COHDBD001
 ```

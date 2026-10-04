@@ -1129,7 +1129,10 @@ its visibility snapshot. `COMMIT` awaits the coordinator's durable commit;
 `ROLLBACK` undoes row and index versions and releases locks. Closing the session,
 including EOF, explicit wire termination, or server shutdown, rolls back an open
 transaction before releasing the session. The C# transaction API and SQL control
-commands operate on the same scope.
+commands operate on the same scope. A rollback observes the caller's token only
+before it starts; a started rollback always ends the transaction, even when the
+journal rejects its abort record (#1226, `Database.Transactions` DESIGN.md,
+"Ending a transaction").
 
 The session owns `Stack<SqlTransactionScope>`, with zero entries outside a
 transaction and exactly one root entry in B2. Each scope carries its transaction

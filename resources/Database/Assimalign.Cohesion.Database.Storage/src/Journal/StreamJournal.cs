@@ -19,6 +19,10 @@ public sealed class StreamJournal : StorageJournal
     private readonly IFileSystemFileHandle _handle;
     private readonly bool _leaveOpen;
 
+    // Set when a failed append may have left part of its frame at the end of the stream
+    // and cutting it back off failed too. Appends are refused until a truncation removes it.
+    private bool _faulted;
+
     /// <summary>
     /// Initializes a non-durable stream-backed journal. Use a handle or
     /// <see cref="StorageStream"/> to supply an explicit durability contract.
@@ -83,10 +87,47 @@ public sealed class StreamJournal : StorageJournal
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A write that fails part way can leave the start of the frame at the end of the
+    /// stream. Recovery's read scan stops at the first frame that does not verify, so a
+    /// later frame appended after those bytes would be unreadable, and with it every commit
+    /// record acknowledged after the failure. The failed append therefore cuts the stream
+    /// back to where its frame began before the failure propagates. When that cut fails
+    /// too, the journal refuses every later append with <see cref="JournalException"/>
+    /// until a checkpoint's truncation removes the partial frame or the storage is
+    /// reopened: a write that cannot reach recovery must fail rather than be acknowledged.
+    /// PostgreSQL stops on any failed WAL write for the same reason (<c>ereport(PANIC,
+    /// "could not write to log file ...")</c>, <c>src/backend/access/transam/xlog.c:2529-2531</c>,
+    /// commit <c>85f55534e80</c>); this journal stops only its appends.
+    /// </remarks>
     protected override void AppendFrame(ReadOnlySpan<byte> frame)
     {
-        _stream.Seek(0, SeekOrigin.End);
-        _stream.Write(frame);
+        if (_faulted)
+        {
+            throw new JournalException(
+                "The journal refuses appends: an earlier append failed part way and its partial frame could not be removed. " +
+                "A checkpoint or a reopen of the storage clears the condition.");
+        }
+
+        long start = _stream.Seek(0, SeekOrigin.End);
+
+        try
+        {
+            _stream.Write(frame);
+        }
+        catch
+        {
+            try
+            {
+                _stream.SetLength(start);
+            }
+            catch
+            {
+                _faulted = true;
+            }
+
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -148,6 +189,9 @@ public sealed class StreamJournal : StorageJournal
     protected override void TruncateCore()
     {
         _stream.SetLength(0);
+
+        // Nothing is left of a partial frame a failed append could not remove.
+        _faulted = false;
     }
 
     /// <inheritdoc />

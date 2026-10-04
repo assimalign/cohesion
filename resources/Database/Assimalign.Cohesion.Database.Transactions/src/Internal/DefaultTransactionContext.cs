@@ -8,19 +8,31 @@ namespace Assimalign.Cohesion.Database.Transactions.Internal;
 /// under snapshot and serializable isolation it is fixed at begin.
 /// </summary>
 /// <remarks>
-/// The context also admits its statement applies. Once an end has begun (commit,
-/// rollback or abort), it admits no further apply, and the end waits for the applies
-/// already running. A rollback therefore undoes a ledger no later bracket can add to,
-/// and no bracket stamped with the sequence lands after the transaction ended (Neo4j
-/// stops a terminated transaction's lock client the same way: it marks the client
-/// stopped, waits for the operations in flight, then releases its locks,
+/// <para>
+/// The context carries one end flag with two jobs. It is the claim exactly one
+/// commit, rollback or abort wins (#1226): the claim is the point after which a
+/// rollback runs to completion whatever fails or is canceled, and it keeps a commit
+/// from racing a rollback of the same writer. It is also the admission gate of the
+/// context's statement applies (#1225): once the end is claimed, no further apply is
+/// admitted, and the end waits for the applies already running. A rollback therefore
+/// undoes a ledger no later bracket can add to, and no bracket stamped with the
+/// sequence lands after the transaction ended (Neo4j stops a terminated
+/// transaction's lock client the same way: it marks the client stopped, waits for the
+/// operations in flight, then releases its locks,
 /// <c>community/lock/.../forseti/ForsetiClient.java:578-593</c>).
+/// </para>
+/// <para>
+/// One flag, not two, because the two jobs must agree: an end that won the claim but
+/// still admitted applies would undo a ledger a later bracket extends, and an apply
+/// refused by an end that lost the claim would fail a statement of a transaction
+/// that is not ending.
+/// </para>
 /// </remarks>
 internal sealed class DefaultTransactionContext : ITransactionContext
 {
     private readonly DefaultTransactionManager _manager;
     private readonly TransactionSnapshot _beginSnapshot;
-    private readonly object _applySync = new();
+    private readonly object _endSync = new();
     private int _applying;
     private bool _ending;
     private TaskCompletionSource? _drained;
@@ -65,13 +77,34 @@ internal sealed class DefaultTransactionContext : ITransactionContext
             : _beginSnapshot;
 
     /// <summary>
-    /// Admits one statement apply, unless the context's end has begun or it is no longer active.
+    /// Claims the end of this context for one commit, rollback or abort. Exactly
+    /// one caller wins; from the claim on, no statement apply is admitted. The
+    /// winner awaits <see cref="WaitForAppliesAsync"/> before it touches the
+    /// writer's versions or log records.
+    /// </summary>
+    /// <returns>True for the one caller that claimed the end.</returns>
+    internal bool TryClaimEnd()
+    {
+        lock (_endSync)
+        {
+            if (_ending)
+            {
+                return false;
+            }
+
+            _ending = true;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Admits one statement apply, unless the context's end is claimed or it is no longer active.
     /// Every admitted apply is paired with <see cref="ExitApply"/>.
     /// </summary>
     /// <returns>True when the apply may run.</returns>
     internal bool TryEnterApply()
     {
-        lock (_applySync)
+        lock (_endSync)
         {
             if (_ending || State != TransactionState.Active)
             {
@@ -90,7 +123,7 @@ internal sealed class DefaultTransactionContext : ITransactionContext
     {
         TaskCompletionSource? drained = null;
 
-        lock (_applySync)
+        lock (_endSync)
         {
             if (--_applying == 0 && _drained is not null)
             {
@@ -103,20 +136,19 @@ internal sealed class DefaultTransactionContext : ITransactionContext
     }
 
     /// <summary>
-    /// Begins the context's end: no further apply is admitted, and the returned task
-    /// completes once every apply already admitted has exited. Idempotent.
+    /// Waits for every statement apply admitted before the end was claimed. Called by
+    /// the end's claimant only, after <see cref="TryClaimEnd"/>; idempotent.
     /// </summary>
     /// <returns>A task that completes when no apply of the context is running.</returns>
     /// <remarks>
-    /// The wait is bounded: an apply runs inside the coordinator's apply gate, where
-    /// nothing it awaits may actually wait (the gate's own invariant).
+    /// The wait observes no token and is bounded: an apply runs inside the
+    /// coordinator's apply gate, where nothing it awaits may actually wait (the gate's
+    /// own invariant). A started rollback therefore still always completes.
     /// </remarks>
-    internal Task BeginEndAsync()
+    internal Task WaitForAppliesAsync()
     {
-        lock (_applySync)
+        lock (_endSync)
         {
-            _ending = true;
-
             if (_applying == 0)
             {
                 return Task.CompletedTask;

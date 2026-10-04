@@ -19,12 +19,15 @@ using Assimalign.Cohesion.Database.Transactions;
 /// A command is statement-atomic, so a failed command leaves the transaction active (DESIGN.md,
 /// "Failed commands in explicit transactions"). The transaction's own end follows the #1188
 /// contract: a transaction that did not commit accepts any number of rollbacks, a token is
-/// observed only before a commit or rollback starts, and a commit or rollback that does not
-/// complete leaves the transaction <see cref="TransactionState.Faulted"/>, refusing commands and
-/// BEGIN with <c>COHDBK001</c> until a rollback completes. A commit waits for no command: one that
-/// starts while a command of the transaction runs is refused. A rollback ends the transaction
-/// even under a running command, which then fails and writes nothing (the kernel refuses its
-/// bracket, and a key lock granted to the ended transaction is released).
+/// observed only before a commit or rollback starts, and a transaction the kernel ended under its
+/// caller reports <see cref="TransactionState.Faulted"/> and refuses commands, BEGIN and COMMIT
+/// with <c>COHDBK001</c> until the caller ends it. A commit or rollback that started always ends
+/// the context (#1226): the kernel completes a started rollback whatever fails, keeping the key
+/// locks of a writer whose undo it must defer, and aborts a commit it cannot complete. A commit
+/// waits for no command: one that starts while a command of the transaction runs is refused. A
+/// rollback ends the transaction even under a running command, which then fails and writes
+/// nothing (the kernel refuses its bracket, fails a key-lock request it still has queued, and a
+/// key lock granted to the ended transaction is given back).
 /// </remarks>
 internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
 {
@@ -36,7 +39,6 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     // race into the coordinator and each one sees the outcome of the one before it: a host's
     // rollback can meet the server session's teardown disposing the same transaction.
     private readonly SemaphoreSlim _endGate = new(1, 1);
-    private Exception? _endFailure;
 
     // Why the session's teardown ended the transaction under its caller, so the caller's
     // commit afterwards reports COHDBK001 with the cause, not a bare state.
@@ -66,9 +68,9 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
                     // The kernel ended the context under the caller: Faulted until the caller ends it.
                     return _ended ? state : TransactionState.Faulted;
                 }
-                // An active context whose commit or rollback did not complete refuses commands;
-                // only a rollback can end it. A commit or rollback still in flight reports Active.
-                return _endFailure is not null ? TransactionState.Faulted : state;
+                // A failed command leaves the transaction active, and a commit or rollback still
+                // in flight reports Active.
+                return state;
             }
         }
     }
@@ -86,7 +88,7 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
 
     /// <summary>
     /// Gets whether the transaction is still the session's transaction: the caller has not ended
-    /// it, or its rollback has not completed.
+    /// it, or the caller's commit or rollback is still running.
     /// </summary>
     internal bool IsOpen
     {
@@ -99,7 +101,7 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
         }
     }
 
-    /// <summary>Gets whether commands may run in the transaction: it is open, active and its end did not fail.</summary>
+    /// <summary>Gets whether commands may run in the transaction: the caller has not ended it and its context is active.</summary>
     internal bool IsUsable
     {
         get
@@ -111,7 +113,7 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
         }
     }
 
-    private bool IsUsableLocked => !_ended && _endFailure is null && _context.State == TransactionState.Active;
+    private bool IsUsableLocked => !_ended && _context.State == TransactionState.Active;
 
     /// <summary>
     /// Admits one command into the transaction, so a commit cannot start while it runs. Every
@@ -157,11 +159,12 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     /// <remarks>
     /// The token is observed only until the commit starts; a token canceled by then leaves the
     /// transaction as it was. A commit that started runs to completion: a cancellation there could
-    /// only turn into a kernel abort of work the caller asked to keep. When a rollback did not
-    /// complete, the commit completes it and fails with <c>COHDBK001</c>, committing nothing. A
-    /// commit while a command of the transaction still runs is refused before it starts and leaves
-    /// the transaction active. A commit after the session's teardown ended the transaction fails
-    /// with <c>COHDBK001</c> naming the teardown.
+    /// only turn into a kernel abort of work the caller asked to keep. A commit while a command of
+    /// the transaction still runs is refused before it starts and leaves the transaction active. A
+    /// commit after the session's teardown ended the transaction fails with <c>COHDBK001</c>
+    /// naming the teardown, and a commit after the kernel ended it, or after an earlier commit or
+    /// rollback the kernel refused before it started (the database closing), fails with
+    /// <c>COHDBK001</c> and commits nothing.
     /// </remarks>
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
@@ -169,7 +172,7 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
         await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            Exception? failure;
+            bool aborted;
             lock (_sync)
             {
                 var state = _context.State;
@@ -185,10 +188,14 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
                     _ended = true;
                     throw CreateAbortedException(null, commit: true);
                 }
-                // Under the end gate an ended transaction whose context is still active is one whose
-                // commit or rollback did not complete, so it carries an end failure.
-                failure = _endFailure;
-                if (failure is null && _commands != 0)
+
+                // Under the end gate an ended transaction whose context is still active had a
+                // commit or rollback that threw before the kernel started it. The kernel ends every
+                // started rollback (#1226), but refuses one before it starts while the database
+                // closes (disposal claimed the end, or the manager is disposed); nothing the caller
+                // rolled back may commit then.
+                aborted = _ended;
+                if (!aborted && _commands != 0)
                 {
                     // The command's bracket would race the commit record. The caller awaits its
                     // command first, as with any statement of an explicit transaction.
@@ -196,7 +203,7 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
                 }
                 _ended = true;
             }
-            if (failure is null)
+            if (!aborted)
             {
                 try
                 {
@@ -205,7 +212,6 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
                 catch (Exception error)
                 {
                     // A kernel abort of the commit crosses the engine boundary as the area root's exception.
-                    RecordEndFailure(error);
                     var translated = Translate(error);
                     if (ReferenceEquals(translated, error)) { throw; }
                     throw translated;
@@ -213,7 +219,7 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
                 return;
             }
             await RollbackContextAsync().ConfigureAwait(false);
-            throw CreateAbortedException(failure, commit: true);
+            throw CreateAbortedException(null, commit: true);
         }
         finally
         {
@@ -300,20 +306,14 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
 
     /// <summary>
     /// Creates the error for a command or BEGIN the session refuses because the transaction is not
-    /// usable: <c>COHDBK001</c> when its end did not complete or the kernel ended it, or a plain
-    /// error while the caller's own commit or rollback is still in flight.
+    /// usable: <c>COHDBK001</c> when the kernel ended it under its caller, or a plain error while
+    /// the caller's own commit or rollback is still in flight or has ended it.
     /// </summary>
     /// <returns>The refusal.</returns>
     internal DatabaseException CreateRefusal()
     {
         lock (_sync)
         {
-            if (_endFailure is not null)
-            {
-                return new DatabaseException(
-                    "COHDBK001: The session's transaction is aborted: its commit or rollback did not complete, and commands are " +
-                    "refused until RollbackAsync completes. Cause: " + _endFailure.Message, _endFailure);
-            }
             if (_ended)
             {
                 return _context.State == TransactionState.Active
@@ -339,7 +339,9 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     }
 
     // Runs under the end gate. A rollback that started runs to completion: the caller's token is
-    // not passed on (PostgreSQL holds interrupts through AbortTransaction for the same reason).
+    // not passed on (PostgreSQL holds interrupts through AbortTransaction for the same reason), and
+    // the kernel ends the context whatever fails once it starts (#1226). Only a closing database
+    // refuses the rollback before it starts, and its disposal then aborts the context itself.
     private async ValueTask RollbackContextAsync()
     {
         if (_context.State != TransactionState.Active)
@@ -352,23 +354,9 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
         }
         catch (Exception error)
         {
-            RecordEndFailure(error);
             var translated = Translate(error);
             if (ReferenceEquals(translated, error)) { throw; }
             throw translated;
-        }
-    }
-
-    // A commit or rollback that failed while the context stayed active leaves a transaction that
-    // only a rollback can end; State reports it Faulted and the session refuses commands in it.
-    private void RecordEndFailure(Exception error)
-    {
-        lock (_sync)
-        {
-            if (_context.State == TransactionState.Active)
-            {
-                _endFailure = error;
-            }
         }
     }
 

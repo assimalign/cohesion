@@ -83,6 +83,38 @@ public sealed class BlobEngineTests
         (await Read(container, "item")).ShouldBe("committed"u8.ToArray());
     }
 
+    /// <summary>
+    /// The token is observed only before the rollback starts (#1226), so nothing of a rollback
+    /// canceled by then ran, and no purge pass may undo the still-active writer.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Rollback: a token canceled before the rollback starts leaves the transaction and its writes intact")]
+    public async Task RollbackAsync_TokenCanceledBeforeStart_ShouldLeaveTransactionAndItsWritesIntact()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        await database.CreateContainerAsync("files");
+        await using var session = await database.CreateSessionAsync();
+        var scoped = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var transaction = await session.BeginTransactionAsync();
+        await Write(scoped, "item", "kept"u8.ToArray());
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act
+        await Should.ThrowAsync<OperationCanceledException>(async () => await transaction.RollbackAsync(canceled.Token));
+        var stateAfterRollback = transaction.State;
+        int pendingAfterRollback = database.Coordinator.VersionStore.PendingAbortedPurges.Count;
+        database.Coordinator.RunVersionPurgePass(CancellationToken.None);
+        await transaction.CommitAsync();
+
+        // Assert
+        stateAfterRollback.ShouldBe(TransactionState.Active);
+        pendingAfterRollback.ShouldBe(0);
+        transaction.State.ShouldBe(TransactionState.Committed);
+        (await Read(await database.GetContainerAsync("files"), "item")).ShouldBe("kept"u8.ToArray());
+    }
+
     [Theory]
     [InlineData(IsolationLevel.Snapshot, "before")]
     [InlineData(IsolationLevel.ReadCommitted, "after")]

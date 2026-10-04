@@ -310,7 +310,10 @@ internal sealed class KeyValueOperationExecutor
     /// never release it again, so every later writer of the key would wait forever. The
     /// kernel already refuses the command's bracket for an ended transaction; this check
     /// releases the late grant, as the Graph, Documents and Blob engines do for their writer
-    /// lock. A grant to a transaction that is still active is kept even when the command
+    /// lock. While the transaction manager still tracks the transaction (a rollback whose undo
+    /// is deferred, #1226), the coordinator's lock manager leaves that release to the manager,
+    /// which makes it once the undo completes; the end still failed the requests it found
+    /// queued. A grant to a transaction that is still active is kept even when the command
     /// then fails: the transaction stays usable (a command is statement-atomic), and
     /// releasing all of its locks would expose the keys its earlier commands wrote.
     /// </remarks>

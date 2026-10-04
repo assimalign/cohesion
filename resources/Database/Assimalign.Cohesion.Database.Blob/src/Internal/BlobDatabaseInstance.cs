@@ -201,6 +201,9 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
             // owner, which must release that grant before the operation leaves
             // the wait; otherwise the database writer lock stays granted to an
             // ended transaction. The kernel sets the state before it releases.
+            // While the transaction manager still tracks the owner (a rollback
+            // whose undo is deferred), the coordinator's lock manager leaves that
+            // release to the manager, which makes it once the undo completes (#1226).
             token.ThrowIfCancellationRequested();
             ThrowIfDisposed();
             if (context.State != TransactionState.Active)
@@ -239,6 +242,8 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
         }
         finally
         {
+            // Safe after a failed coordinator close: a writer whose undo still failed is kept in
+            // flight in the storage, so its close does not truncate the journal (#1226).
             DataStorage.Dispose();
         }
     }

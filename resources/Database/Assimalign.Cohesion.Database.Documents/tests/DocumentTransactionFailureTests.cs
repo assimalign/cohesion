@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
@@ -15,10 +16,16 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 /// A statement that fails inside an explicit transaction aborts the whole transaction (#1225, the
 /// contract #1188 set for Graph): the session keeps it as <see cref="TransactionState.Faulted"/> and
 /// refuses every later statement and BEGIN with COHDBD001 until the caller rolls back, and nothing
-/// the transaction wrote survives. Documents has no wire server or client, so every case runs in process.
+/// the transaction wrote survives. A started rollback always ends the transaction (#1226): a lost
+/// abort record changes nothing, and an undo the journal rejects is deferred with the writer lock
+/// held until the version-purge pass completes it, even against a late operation of the ended
+/// transaction, and is scrubbed at the next open when it still fails at close. Documents has no
+/// wire server or client, so every case runs in process.
 /// </summary>
 public sealed class DocumentTransactionFailureTests
 {
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+
     /// <summary>The issue's reproduction: a failure, then a write, then ROLLBACK leaves the documents unchanged.</summary>
     /// <param name="failure">The kind of statement that fails inside the transaction.</param>
     /// <param name="isolation">The isolation level the explicit transaction runs under.</param>
@@ -441,9 +448,54 @@ public sealed class DocumentTransactionFailureTests
         (await Ids(session)).ShouldBe(["first", "second"]);
     }
 
-    /// <summary>A rollback that does not complete leaves the transaction faulted and refusing work until a rollback completes.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a rollback that does not complete leaves the transaction faulted")]
-    public async Task RollbackAsync_ThatDoesNotComplete_ShouldLeaveTransactionFaultedUntilRetried()
+    /// <summary>
+    /// A rollback whose abort record cannot be written still ends the transaction and releases the
+    /// database writer lock, so another session's writer proceeds (#1226). Until #1226 such a
+    /// rollback failed and left the transaction Faulted until a later rollback completed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a rollback whose abort record cannot be written still ends the transaction")]
+    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndReleaseWriterLock()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
+        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        await collection.PutAsync(session, "keep", Doc("keep"));
+        var transaction = await session.BeginTransactionAsync();
+
+        // A delete that matches nothing takes the database writer lock and writes no version, so
+        // the abort record is the rollback's only journal write.
+        (await collection.DeleteAsync(session, "missing")).ShouldBeFalse();
+
+        // Act
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            await transaction.RollbackAsync();
+            unspent = failures.Remaining;
+        }
+
+        // Assert: the record write failed, and the rollback ended the transaction anyway.
+        unspent.ShouldBe(0);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        session.CurrentTransaction.ShouldBeNull();
+        await collection.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(Timeout);
+        await using (var next = await session.BeginTransactionAsync())
+        {
+            await collection.PutAsync(session, "after", Doc("after"));
+            await next.CommitAsync();
+        }
+        (await Ids(session)).ShouldBe(["after", "keep", "other"]);
+    }
+
+    /// <summary>
+    /// After a rollback whose abort record was lost, the transaction is rolled back like any other:
+    /// COMMIT is refused and commits nothing, and a repeated rollback raises nothing.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT after a rollback whose abort record was lost is refused")]
+    public async Task CommitAsync_AfterRollbackWithLostAbortRecord_ShouldBeRefused()
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
@@ -452,59 +504,21 @@ public sealed class DocumentTransactionFailureTests
         await using var session = await database.CreateSessionAsync();
         await collection.PutAsync(session, "keep", Doc("keep"));
         var transaction = await session.BeginTransactionAsync();
-        (await collection.GetAsync(session, "keep")).ShouldNotBeNull();
-
-        // Act: the abort record is the rollback's only journal write, so failing it fails the rollback.
-        IOException rollbackFailure;
+        (await collection.DeleteAsync(session, "missing")).ShouldBeFalse();
         using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
         {
-            rollbackFailure = await Should.ThrowAsync<IOException>(async () => await transaction.RollbackAsync());
-        }
-        var faultedState = transaction.State;
-        var currentWhileFaulted = session.CurrentTransaction;
-        var refused = await Should.ThrowAsync<DatabaseException>(async () => await collection.PutAsync(session, "late", Doc("late")));
-        var beginRefused = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
-        await transaction.RollbackAsync();
-
-        // Assert
-        faultedState.ShouldBe(TransactionState.Faulted);
-        currentWhileFaulted.ShouldBeSameAs(transaction);
-        refused.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
-        refused.Message.ShouldContain("did not complete", Case.Sensitive);
-        refused.InnerException.ShouldBeSameAs(rollbackFailure);
-        beginRefused.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
-        transaction.State.ShouldBe(TransactionState.RolledBack);
-        session.CurrentTransaction.ShouldBeNull();
-        await collection.PutAsync(session, "after", Doc("after"));
-        (await Ids(session)).ShouldBe(["after", "keep"]);
-    }
-
-    /// <summary>COMMIT after a rollback that did not complete fails with COHDBD001, commits nothing, and ends the transaction.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT after an incomplete rollback fails and ends the transaction")]
-    public async Task CommitAsync_AfterRollbackThatDidNotComplete_ShouldFailAndEndTransaction()
-    {
-        // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
-        await using var session = await database.CreateSessionAsync();
-        var transaction = await session.BeginTransactionAsync();
-        (await collection.GetAsync(session, "missing")).ShouldBeNull();
-        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
-        {
-            await Should.ThrowAsync<IOException>(async () => await transaction.RollbackAsync());
+            await transaction.RollbackAsync();
         }
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        await transaction.RollbackAsync();
 
         // Assert
-        error.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
-        error.Message.ShouldContain("nothing was committed", Case.Sensitive);
-        error.InnerException.ShouldBeOfType<IOException>();
+        error.Message.ShouldBe("The transaction is RolledBack.");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        await transaction.RollbackAsync();
+        (await Ids(session)).ShouldBe(["keep"]);
     }
 
     /// <summary>A commit the kernel aborts crosses the boundary translated, and a catch-block rollback afterwards raises nothing.</summary>
@@ -536,6 +550,159 @@ public sealed class DocumentTransactionFailureTests
         await collection.PutAsync(session, "after", Doc("after"));
         (await Ids(session)).ShouldBe(["after"]);
     }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Rollback: a late operation of a rolled-back transaction does not release its deferred writer lock")]
+    public async Task LockWriterAsync_LateOperationOfRolledBackTransaction_ShouldNotReleaseItsDeferredWriterLock()
+    {
+        // Arrange: a rollback whose undo cannot write its journal bracket, and a waiting writer.
+        await using var engine = DocumentDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
+        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        var transaction = (DocumentDatabaseTransaction)await session.BeginTransactionAsync();
+        await collection.PutAsync(session, "rolled", "1"u8.ToArray());
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            await transaction.RollbackAsync();
+            unspent = failures.Remaining;
+        }
+
+        int deferred = database.Coordinator.VersionStore.PendingAbortedPurges.Count;
+        var waiting = collection.PutAsync(other, "other", "2"u8.ToArray()).AsTask();
+
+        // Act: the late operation gets the lock its transaction still holds, finds the
+        // transaction ended, and cleans up; then the purge pass completes the undo.
+        var late = await Should.ThrowAsync<DatabaseException>(async () => await database.LockWriterAsync(transaction.Context, CancellationToken.None));
+        await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromMilliseconds(250)));
+        bool otherProceededBeforeTheUndo = waiting.IsCompleted;
+        database.Coordinator.Checkpoint();
+        database.Coordinator.RunVersionPurgePass(CancellationToken.None);
+        await waiting.WaitAsync(Timeout);
+
+        // Assert
+        unspent.ShouldBe(0);
+        deferred.ShouldBe(1);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        late.Message.ShouldContain("ended while waiting for the writer lock");
+        otherProceededBeforeTheUndo.ShouldBeFalse();
+        (await collection.GetAsync(other, "rolled")).ShouldBeNull();
+        (await collection.GetAsync(other, "other")).ShouldNotBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Rollback: an undo that still fails at close is scrubbed at the next open")]
+    public async Task Dispose_UndoStillFailsAtClose_ShouldLeaveNothingOfTheRolledBackTransactionAfterReopen()
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using (var session = await database.CreateSessionAsync())
+        {
+            await collection.PutAsync(session, "kept", "1"u8.ToArray());
+            var transaction = await session.BeginTransactionAsync();
+            await collection.PutAsync(session, "rolled", "2"u8.ToArray());
+            await collection.DeleteAsync(session, "kept");
+
+            // The undo's storage bracket begins (the first write) and fails at its first page
+            // image (the second), so the bracket rolls itself back and the undo is deferred.
+            using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
+            {
+                await transaction.RollbackAsync();
+                failures.Remaining.ShouldBe(0);
+            }
+
+            transaction.State.ShouldBe(TransactionState.RolledBack);
+        }
+
+        // Act: the close retries the undo, which fails the same way.
+        AggregateException closeFailure;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
+        {
+            closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
+            failures.Remaining.ShouldBe(0);
+        }
+
+        await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+        var items = await recovered.GetCollectionAsync("items");
+        await using var observer = await recovered.CreateSessionAsync();
+
+        // Assert: the insert is gone and the delete is undone.
+        closeFailure.InnerExceptions.ShouldContain(error => error is IOException);
+        (await items.GetAsync(observer, "rolled")).ShouldBeNull();
+        (await items.GetAsync(observer, "kept")).ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// The two end rules meet (#1225 with #1226): a statement applying when its transaction's
+    /// rollback starts finishes its bracket first, the rollback's undo then fails and is deferred,
+    /// and the ended transaction's next statement is refused even though the kernel still tracks
+    /// its writer. Nothing the transaction wrote, including the statement the rollback waited
+    /// for, survives the purge pass.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Rollback: a deferred undo still refuses the ended transaction's statements and undoes the one it waited for")]
+    public async Task RollbackAsync_DeferredUndoUnderARunningStatement_ShouldRefuseLaterStatementsAndUndoEverything()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
+        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        var transaction = (DocumentDatabaseTransaction)await session.BeginTransactionAsync();
+        await collection.PutAsync(session, "first", Doc("first"));
+
+        // A statement of the transaction is inside the apply gate when the rollback starts.
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var applying = database.Coordinator.ApplyStatementAsync<bool>(transaction.Context, async _ =>
+        {
+            entered.SetResult();
+            await release.Task.ConfigureAwait(false);
+            return true;
+        }, durable: false).AsTask();
+        await entered.Task.WaitAsync(Timeout);
+
+        // Act: the rollback waits for the apply, then its undo's first journal write fails.
+        Task rollback;
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            rollback = transaction.RollbackAsync().AsTask();
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+            bool rollbackWaitedForTheApply = !rollback.IsCompleted;
+            release.SetResult();
+            (await applying.WaitAsync(Timeout)).ShouldBeTrue();
+            await rollback.WaitAsync(Timeout);
+            unspent = failures.Remaining;
+            rollbackWaitedForTheApply.ShouldBeTrue();
+        }
+        bool trackedWhileDeferred = database.Coordinator.VersionStore.PendingAbortedPurges.Count == 1;
+        var refused = await Should.ThrowAsync<TransactionAbortedException>(async () =>
+            await database.Coordinator.ApplyStatementAsync<bool>(transaction.Context, _ => true, CancellationToken.None));
+        database.Coordinator.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert
+        unspent.ShouldBe(0);
+        trackedWhileDeferred.ShouldBeTrue();
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        refused.Message.ShouldContain("the statement was not applied", Case.Sensitive);
+        database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        await collection.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(Timeout);
+        (await Ids(other)).ShouldBe(["other"]);
+    }
+
+    // The engine's own maintenance workers stay out of the way: these tests drive the purge
+    // pass and the checkpoint themselves.
+    private static DocumentDatabaseEngineOptions QuietOptions(FaultInjectingJournalStorageStrategy strategy) => new()
+    {
+        StorageStrategy = strategy,
+        MaintenanceInterval = TimeSpan.FromHours(1),
+        CheckpointInterval = TimeSpan.FromHours(1),
+    };
 
     private static async ValueTask FailAsync(string failure, IDocumentCollection collection, IDatabaseSession session, Document keep)
     {
