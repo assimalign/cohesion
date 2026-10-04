@@ -11,14 +11,15 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// header — the writer and deleter <see cref="TransactionSequence"/> stamps, the
 /// B+Tree leaf-entry design adopted for the record space — followed by the
 /// owning table's object id and one self-describing component per physical
-/// column (<see cref="SqlCatalogTable.PhysicalColumnCount"/>), live or dropped, in
-/// physical-ordinal order. The object-id prefix is what lets multiple tables share
+/// column, live or dropped, in physical-ordinal order, up to the last live column.
+/// The object-id prefix is what lets multiple tables share
 /// one record space (scans filter by it); the fixed-width stamp header is what
 /// makes tombstoning an in-place, same-length update (a deleter stamp never
 /// relocates a record) and keeps ADD COLUMN's missing-tail decode intact
 /// (stamps sit in front of the tuple, never after the columns).
 /// </summary>
 /// <remarks>
+/// <para>
 /// A dropped column keeps its physical ordinal (#1241): a version written before the
 /// drop still stores its value there, and one written after stores NULL, as
 /// PostgreSQL's INSERT and UPDATE store a null for a dropped attribute
@@ -27,8 +28,23 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// materializing them, as <c>heap_deform_tuple</c> walks a dropped attribute by its
 /// stored length (<c>src/backend/access/common/heaptuple.c:1254</c>). Because a physical
 /// ordinal is never reused, a version decodes onto the right columns under every
-/// definition of its table: one written before or after a drop or an addition, read
-/// through a definition bound before or after it.
+/// definition of its table that a statement able to see the version can bind: one
+/// written before or after a drop or an addition, read through a definition bound
+/// before or after it.
+/// </para>
+/// <para>
+/// A version stores nothing past its last live column. A dropped ordinal at the end of
+/// the layout needs no NULL: a record that ends early is read as a missing tail, and every
+/// column added later takes an ordinal past the dropped ones, so it is that version's
+/// missing tail too. A dropped ordinal ahead of a live column costs every version written
+/// afterwards one byte, the NULL component, and lowers the largest row the table can store
+/// by as much; PostgreSQL pays a null-bitmap bit for each dropped attribute in every new
+/// tuple (<c>doc/src/sgml/limits.sgml:133-136</c>). The one definition that reads such a
+/// version differently is one bound before a trailing drop, which reads the dropped column
+/// from the missing tail rather than as a stored NULL; no statement does, because a
+/// statement's snapshot is taken before it binds, and every version written after a drop
+/// commits after it.
+/// </para>
 /// </remarks>
 internal static class SqlRowCodec
 {
@@ -58,8 +74,9 @@ internal static class SqlRowCodec
     internal const int StampHeaderSize = RecordVersionStamp.HeaderSize;
 
     /// <summary>
-    /// Encodes a row version under a table definition: one component per physical column,
-    /// the value of each live column and NULL at each dropped ordinal.
+    /// Encodes a row version under a table definition: one component per physical column up
+    /// to the last live one, the value of each live column and NULL at each dropped ordinal
+    /// ahead of it.
     /// </summary>
     /// <param name="table">The definition the version is written under.</param>
     /// <param name="values">The live columns' values, by position in <see cref="SqlCatalogTable.Columns"/>.</param>
@@ -70,8 +87,10 @@ internal static class SqlRowCodec
         var writerCodec = new DatabaseKeyWriter();
         writerCodec.AppendInt64((long)table.ObjectId);
 
+        // Dropped ordinals behind the last live column store nothing (see the remarks).
+        int stored = table.GetPhysicalOrdinal(table.Columns.Count - 1) + 1;
         var dropped = table.DroppedColumnOrdinals;
-        for (int physical = 0, column = 0, next = 0; physical < table.PhysicalColumnCount; physical++)
+        for (int physical = 0, column = 0, next = 0; physical < stored; physical++)
         {
             if (next < dropped.Count && dropped[next] == physical)
             {
@@ -117,9 +136,9 @@ internal static class SqlRowCodec
     /// Decodes a stamped record through a table definition when it belongs to that
     /// table; returns null when the record belongs to a different object or is too short
     /// to carry a stamp header. Every physical component up to the definition's
-    /// <see cref="SqlCatalogTable.PhysicalColumnCount"/> is walked; a component at a
-    /// dropped ordinal is skipped without being materialized, and components past the
-    /// definition's physical columns (written under a later definition) are ignored.
+    /// <see cref="SqlCatalogTable.PhysicalColumnCount"/> that the record stores is walked; a
+    /// component at a dropped ordinal is skipped without being materialized, and components
+    /// past the definition's physical columns (written under a later definition) are ignored.
     /// Returns how many live columns the record stores, so the caller can resolve absent
     /// trailing fields from its bound catalog definition without confusing them with
     /// explicitly stored NULLs: physical ordinals ascend with the live columns, so the

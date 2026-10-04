@@ -89,7 +89,10 @@ public interface ISqlCatalog
     /// <param name="column">The column to add.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The updated table description.</returns>
-    /// <exception cref="SqlCatalogException">The table does not exist or already has the column.</exception>
+    /// <exception cref="SqlCatalogException">
+    /// The table does not exist or already has the column, or the definition no longer fits
+    /// one catalog record.
+    /// </exception>
     ValueTask<SqlCatalogTable> AddColumnAsync(string schema, string name, SqlCatalogColumn column, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -105,7 +108,8 @@ public interface ISqlCatalog
     /// <returns>The updated table description.</returns>
     /// <exception cref="SqlCatalogException">
     /// The table or column does not exist; the column is part of the primary key, a
-    /// constraint or an index; or it is the table's last column.
+    /// constraint or an index; it is the table's last column; or the definition, which keeps
+    /// every dropped column's physical ordinal, no longer fits one catalog record.
     /// </exception>
     ValueTask<SqlCatalogTable> DropColumnAsync(string schema, string name, string columnName, CancellationToken cancellationToken = default);
 

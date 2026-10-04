@@ -384,7 +384,8 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             // The whole of DROP COLUMN: the column leaves the live list and its physical
             // ordinal is marked dropped, in one catalog record. No row is rewritten — every
             // stored version keeps the dropped component, which every read skips, and later
-            // writes store NULL there. PostgreSQL's RemoveAttributeById, "the guts of ALTER
+            // writes store NULL there (or nothing, behind the last live column). PostgreSQL's
+            // RemoveAttributeById, "the guts of ALTER
             // TABLE DROP COLUMN", likewise only marks the attribute (attisdropped,
             // src/backend/catalog/heap.c:1692-1732) and leaves the tuples alone.
             var columns = slot.Table.Columns.Where((_, index) => index != ordinal).ToList();
@@ -803,21 +804,33 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     /// </summary>
     /// <param name="record">The encoded record.</param>
     /// <param name="description">What the record describes, for the message.</param>
+    /// <param name="remedy">A sentence the message ends with, or null.</param>
     /// <returns><paramref name="record"/>.</returns>
     /// <exception cref="SqlCatalogException">The record exceeds the maximum record size.</exception>
-    private static byte[] EnsureStorable(byte[] record, string description)
+    private static byte[] EnsureStorable(byte[] record, string description, string? remedy = null)
     {
         if (record.Length > SlottedPage.MaxRecordSize)
         {
             throw new SqlCatalogException(
-                $"The definition of {description} encodes to {record.Length} bytes, more than the {SlottedPage.MaxRecordSize} bytes a catalog record can hold.");
+                $"The definition of {description} encodes to {record.Length} bytes, more than the {SlottedPage.MaxRecordSize} bytes a catalog record can hold." +
+                (remedy is null ? string.Empty : " " + remedy));
         }
 
         return record;
     }
 
     private static byte[] EncodeTable(SqlCatalogTable table)
-        => EnsureStorable(EncodeTableRecord(table), $"table '{table.Schema}.{table.Name}'");
+    {
+        byte[] record = EncodeTableRecord(table);
+
+        // A dropped column's physical ordinal stays in the record for the life of the table
+        // (#1241), so a table that has dropped many columns can refuse ADD or DROP COLUMN with
+        // few live ones. Only a new table starts without them; say so.
+        int dropped = table.DroppedColumnOrdinals.Count;
+        return EnsureStorable(record, $"table '{table.Schema}.{table.Name}'", dropped == 0 ? null :
+            $"It keeps the physical positions of {dropped} dropped columns, which are never reused (#1241); " +
+            "recreating the table and copying its rows (CREATE TABLE, INSERT ... SELECT) reclaims them.");
+    }
 
     private static byte[] EncodeTableRecord(SqlCatalogTable table)
     {

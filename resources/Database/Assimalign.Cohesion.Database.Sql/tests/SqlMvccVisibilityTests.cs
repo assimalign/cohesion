@@ -289,7 +289,7 @@ public sealed class SqlMvccVisibilityTests
         await engine.DisposeAsync();
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - MVCC visibility: ADD COLUMN null-tail decode and DROP COLUMN rewrite hold on stamped records")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - MVCC visibility: ADD COLUMN null-tail decode and DROP COLUMN's dropped ordinal hold on stamped records")]
     public async Task SchemaEvolution_OnStampedRecords_ShouldKeepWorking()
     {
         // Arrange
@@ -306,8 +306,9 @@ public sealed class SqlMvccVisibilityTests
         afterAdd.Count.ShouldBe(1);
         afterAdd[0][2].ShouldBeNull();
 
-        // Act 2: create version chains, then DROP COLUMN — the rewrite walks
-        // every version (visible or tombstoned) and preserves stamps.
+        // Act 2: create version chains, then DROP COLUMN — it marks tag's ordinal
+        // dropped and rewrites no version, so every version (visible or tombstoned)
+        // keeps its stamps and decodes past the dropped component (#1241).
         await session.ExecuteAsync("INSERT INTO t (id, tag, extra) VALUES (2, 'b', 5)");
         await session.ExecuteAsync("UPDATE t SET extra = 7 WHERE id = 2");
         await session.ExecuteAsync("ALTER TABLE t DROP COLUMN tag");

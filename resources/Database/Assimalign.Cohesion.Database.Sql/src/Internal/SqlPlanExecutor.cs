@@ -739,7 +739,7 @@ internal sealed partial class SqlPlanExecutor
     /// physical ordinal dropped in one self-committed record and no stored version is
     /// read or written. Every version keeps the dropped component, which every decode
     /// skips (<see cref="SqlRowCodec.TryDecode"/>), and versions written afterwards store
-    /// NULL there. This is PostgreSQL's DROP COLUMN: <c>ATExecDropColumn</c>
+    /// NULL there, or nothing when no live column follows. This is PostgreSQL's DROP COLUMN: <c>ATExecDropColumn</c>
     /// (<c>src/backend/commands/tablecmds.c:9355</c>) reaches <c>RemoveAttributeById</c>,
     /// which sets <c>attisdropped</c> and rewrites no tuple
     /// (<c>src/backend/catalog/heap.c:1692-1732</c>).
@@ -757,8 +757,11 @@ internal sealed partial class SqlPlanExecutor
     /// definition, one after it the new one, and every stored version decodes correctly
     /// under either, because no physical ordinal is reused. For the same reason a SELECT
     /// that takes no table lock and overlaps the drop reads every value in its own
-    /// column whichever definition it bound; one bound before the drop reads NULL for the
-    /// dropped column in a version written after it.
+    /// column whichever definition it bound. One bound before the drop still sees the
+    /// dropped column, with the values of the versions its snapshot sees; a version written
+    /// after the drop is never visible to it, because the statement's snapshot is taken
+    /// before it binds (<see cref="SqlStatementContext"/>) and every later writer waits for
+    /// this statement's Exclusive lock.
     /// </para>
     /// </remarks>
     private async Task<QueryResult> ExecuteDropColumnAsync(SqlDropColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)

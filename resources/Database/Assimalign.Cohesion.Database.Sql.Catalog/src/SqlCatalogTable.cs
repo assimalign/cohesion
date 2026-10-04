@@ -153,17 +153,19 @@ public sealed class SqlCatalogTable
     public IReadOnlyList<SqlCatalogColumn> Columns { get; }
 
     /// <summary>
-    /// Gets the number of physical columns: the components a row version written under
-    /// this definition stores, one per live column and one per dropped column. A version
-    /// written under an earlier definition can store fewer (the columns added since are its
-    /// missing tail) and one written under a later definition can store more.
+    /// Gets the number of physical columns: one per live column and one per dropped column.
+    /// A row version written under this definition stores a component for each of them up to
+    /// the last live column; dropped ordinals behind it store nothing. A version written under
+    /// an earlier definition can store fewer (the columns added since are its missing tail)
+    /// and one written under a later definition can store more.
     /// </summary>
     public int PhysicalColumnCount { get; }
 
     /// <summary>
     /// Gets the physical ordinals of the dropped columns, ascending. A version stores a
-    /// component at each of them (the dropped value, or NULL when written after the drop)
-    /// that every read skips; the ordinals are never reused.
+    /// component at each of them that comes before one of its live columns (the dropped
+    /// value, or NULL when written after the drop), which every read skips; the ordinals
+    /// are never reused.
     /// </summary>
     public IReadOnlyList<int> DroppedColumnOrdinals { get; }
 

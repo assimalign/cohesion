@@ -13,7 +13,7 @@ using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// The row codec's physical layout (#1241): a version stores one component per physical
-/// column, a dropped column keeps its physical ordinal, and every definition of a table
+/// column up to its last live one, a dropped column keeps its physical ordinal, and every definition of a table
 /// decodes every version of it onto the right columns. The definitions below are the
 /// life of one table: created, a middle column dropped, the name re-added (a new physical
 /// ordinal at the end), then the last physical column dropped.
@@ -81,6 +81,30 @@ public sealed class SqlRowCodecTests
         record.ShouldBe(SqlRowCodec.Encode(Created, [7, null, 12.50m, TokenValue], new TransactionSequence(5)));
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Row codec: a version stores nothing past its last live column, and a later column reads as its missing tail")]
+    public void Encode_AfterTrailingDrop_ShouldStoreNothingPastTheLastLiveColumn()
+    {
+        // Arrange: the re-added note (physical 4) dropped again, then another column added at 5.
+        var extra = new SqlCatalogColumn("extra", new DatabaseTypeInfo(DatabaseType.Int32));
+        var extraAdded = new SqlCatalogTable(ObjectId, "dbo", "t", [Id, Amount, Token, extra], droppedColumnOrdinals: [1, 4]);
+
+        // Act
+        byte[] record = SqlRowCodec.Encode(BothDropped, [4, 5.00m, TokenValue], new TransactionSequence(6));
+
+        // Assert: no component for the trailing dropped ordinal, so the version is the one the
+        // layout without it writes, and a column added afterwards is the version's missing tail.
+        record.ShouldBe(SqlRowCodec.Encode(NoteDropped, [4, 5.00m, TokenValue], new TransactionSequence(6)));
+        Decode(record, BothDropped, out int stored).ShouldBe(new object?[] { 4, 5.00m, TokenValue });
+        stored.ShouldBe(3);
+        Decode(record, extraAdded, out stored).ShouldBe(new object?[] { 4, 5.00m, TokenValue, null });
+        stored.ShouldBe(3, "extra was added after the version was written, so it reads its default");
+
+        byte[] withExtra = SqlRowCodec.Encode(extraAdded, [4, 5.00m, TokenValue, 11], new TransactionSequence(7));
+        withExtra.Length.ShouldBe(record.Length + 1 + 5, "a one-byte NULL at the now-inner dropped ordinal 4, then extra's INT");
+        Decode(withExtra, extraAdded, out stored).ShouldBe(new object?[] { 4, 5.00m, TokenValue, 11 });
+        stored.ShouldBe(4);
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Row codec: every definition decodes every version of the table onto the right columns")]
     public void TryDecode_EveryDefinitionOverEveryVersion_ShouldReadEachValueInItsColumn()
     {
@@ -91,8 +115,9 @@ public sealed class SqlRowCodecTests
         byte[] afterBoth = SqlRowCodec.Encode(BothDropped, [4, 5.00m, TokenValue], new TransactionSequence(6));
 
         // Act / Assert: the dropped note's value is never read again, the re-added note
-        // never reads it, and a definition bound before a drop reads NULL where a later
-        // version stored no value.
+        // never reads it, and a definition bound before a drop reads nothing for the dropped
+        // column from a later version: a stored NULL, or the missing tail past a trailing
+        // drop. (No statement decodes that pairing: its snapshot predates its binding.)
         Decode(beforeDrop, Created).ShouldBe(new object?[] { 1, "dropped text", 1.25m, TokenValue });
         Decode(afterDrop, Created).ShouldBe(new object?[] { 2, null, 2.50m, TokenValue });
         Decode(afterReAdd, Created).ShouldBe(new object?[] { 3, null, 3.75m, TokenValue });
@@ -107,7 +132,7 @@ public sealed class SqlRowCodecTests
         Decode(afterReAdd, NoteReadded, out stored).ShouldBe(new object?[] { 3, 3.75m, TokenValue, 99L });
         stored.ShouldBe(4);
         Decode(afterBoth, NoteReadded, out stored).ShouldBe(new object?[] { 4, 5.00m, TokenValue, null });
-        stored.ShouldBe(4, "a version written after the second drop stores NULL for the re-added note");
+        stored.ShouldBe(3, "a version written after the second drop stores nothing past token, its last live column");
 
         Decode(afterReAdd, BothDropped).ShouldBe(new object?[] { 3, 3.75m, TokenValue });
         Decode(afterBoth, BothDropped).ShouldBe(new object?[] { 4, 5.00m, TokenValue });

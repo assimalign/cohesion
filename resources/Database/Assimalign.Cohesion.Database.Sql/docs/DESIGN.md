@@ -501,8 +501,8 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   The catalog keeps each table's physical column layout (`SqlCatalogTable`): the
   live columns, in order (`Columns`), and the physical ordinals of the dropped
   ones (`DroppedColumnOrdinals`). A row version stores one component per
-  physical ordinal (`PhysicalColumnCount`), and a live column's component sits
-  at `GetPhysicalOrdinal(i)`. DROP COLUMN removes the column from the live list
+  physical ordinal (`PhysicalColumnCount`) up to its last live column, and a
+  live column's component sits at `GetPhysicalOrdinal(i)`. DROP COLUMN removes the column from the live list
   and adds its physical ordinal to the dropped list, in one self-committed
   catalog record (`DefaultSqlCatalog.DropColumnAsync`). The executor takes the
   table's Exclusive lock, runs the constraint checks and calls the catalog
@@ -540,11 +540,25 @@ declared dialect and retain their existing unsupported-clause diagnostics.
     included (`information_schema.sql:672`), and that is the one place this
     engine does not follow it.
   - *Writes store NULL at a dropped ordinal.* `SqlRowCodec.Encode` writes a
-    one-byte NULL component for every dropped ordinal, as PostgreSQL's INSERT and
-    UPDATE target lists carry a NULL for a dropped attribute
-    (`src/backend/optimizer/prep/preptlist.c:446-455`). A dropped value's space
+    one-byte NULL component for every dropped ordinal ahead of the last live
+    column, as PostgreSQL's INSERT and UPDATE target lists carry a NULL for a
+    dropped attribute (`src/backend/optimizer/prep/preptlist.c:446-455`), and
+    stops after the last live column: a dropped ordinal behind it needs no
+    component, because a record that ends early decodes as a missing tail and
+    every column added later takes an ordinal past it. A dropped value's space
     comes back as its rows are updated and the versions that hold it are purged,
-    the behaviour `alter_table.sgml:1546-1552` documents.
+    the behaviour `alter_table.sgml:1546-1552` documents. The NULL is a per-row
+    cost: each dropped ordinal ahead of a live column adds one byte to every
+    version written afterwards and lowers the largest storable row
+    (`SlottedPage.MaxRecordSize`) by as much, as PostgreSQL's dropped attributes
+    keep their null-bitmap bits in every new tuple (`doc/src/sgml/limits.sgml:133-136`).
+    Stopping at the last live column keeps repeated ADD/DROP of a trailing
+    column free for rows (`SqlDropColumnTests`' row-size test: a row 58 bytes
+    under the limit stays writable after a hundred such cycles, where a NULL per
+    dropped ordinal made its UPDATE fail at 8,134 bytes). A definition bound
+    before a trailing drop reads that column from the missing tail of a version
+    written after it, rather than from a stored NULL; no statement decodes that
+    pairing (next items).
   - *ADD COLUMN appends a physical ordinal.* A new column takes
     `PhysicalColumnCount`, after every live and dropped ordinal (PostgreSQL:
     `relnatts + 1`, `tablecmds.c:7445-7446`). A column re-added under a dropped
@@ -557,8 +571,13 @@ declared dialect and retain their existing unsupported-clause diagnostics.
     or pinned by an older snapshot. PostgreSQL keeps a dropped `pg_attribute`
     row and its `attnum` for good and counts it against the column limit
     (`doc/src/sgml/limits.sgml:133-134`). Here the bound is the catalog record:
-    each dropped ordinal costs the table record one integer component, and a
-    definition that outgrows one record is refused (`EnsureStorable`).
+    each dropped ordinal costs the table record one five-byte integer component,
+    and a definition that outgrows one record is refused (`EnsureStorable`). For a
+    table with dropped columns the refusal counts them and names the remedy,
+    recreating the table and copying its rows, since only a new table starts
+    without dropped ordinals (`SqlCatalogDroppedColumnTests`: a two-column table
+    reaches the bound after 1,588 ADD/DROP cycles, where PostgreSQL stops at
+    "tables can have at most 1600 columns", `tablecmds.c:7445-7452`).
     Compacting the layout would need a rewrite that moves every version to the
     new layout and rebuilds every index and version-store location, which is
     what PostgreSQL's rewriting forms do (`tablecmds.c:6041-6066`, and why they
@@ -587,17 +606,20 @@ declared dialect and retain their existing unsupported-clause diagnostics.
     overlap a DROP COLUMN, bound to either definition, and both decode every
     version onto the right columns: one bound after the drop skips the dropped
     component of a version written before it, and one bound before the drop
-    reads NULL for the dropped column in a version written after it. No value of
-    another column ever appears in a column. PostgreSQL takes
+    still sees the dropped column, with the values of the versions its snapshot
+    sees. A version written after the drop is never visible to it: the
+    statement's snapshot is captured when its `SqlStatementContext` is built,
+    before `SqlQueryExecutor` plans it, and every later writer of the table waits
+    for the drop's Exclusive lock, so it commits after the drop's catalog commit.
+    No value of another column ever appears in a column. PostgreSQL takes
     AccessExclusiveLock for DROP COLUMN as a change "visible to concurrent
     SELECTs" (`tablecmds.c:4714-4724`), which waits for the AccessShareLock every
     SELECT holds (`parse_relation.c:1533`). The layout makes that wait
     unnecessary for correctness here, so DROP COLUMN does not block readers.
     Run against the former rewrite, `SqlDropColumnTests`' concurrent readers
-    read 24,230 rows with values in the wrong columns in 203 SELECTs over four
-    drops, and 4 more SELECTs failed on a misplaced value (base 3f379cca, with
-    the readers' window around each drop fixed at 20 ms before and 40 ms after;
-    the issue's reviewers measured 12,495 wrong rows in 11 SELECTs). Writers and
+    read 20,821 rows with values in the wrong columns, and 5 more statements
+    failed, in 243 SELECTs over four drops (base 3f379cca; the counts vary by
+    run, and the issue's reviewers measured 12,495 wrong rows in 11 SELECTs). Writers and
     joins take intent locks, which wait for DROP COLUMN's Exclusive lock; one
     bound to the old definition then fails with "changed while the statement was
     waiting".

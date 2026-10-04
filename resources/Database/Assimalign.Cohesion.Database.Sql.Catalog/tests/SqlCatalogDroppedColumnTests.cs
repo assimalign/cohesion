@@ -162,6 +162,51 @@ public sealed class SqlCatalogDroppedColumnTests
         catalog.TryGetTable("dbo", "fresh", out _).ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Dropped columns: a definition outgrown by its dropped ordinals is refused with the cause and the remedy, the table intact")]
+    public async Task AddDropColumn_DroppedOrdinalsOutgrowTheRecord_ShouldRefuseWithTheRemedy()
+    {
+        // Arrange: each ADD/DROP cycle leaves one dropped ordinal, an integer component in the
+        // table record, which is never reclaimed.
+        using var data = new MemoryStream();
+        using var journal = new MemoryStream();
+        using var storage = SqlStorage.Create(new NonClosingStream(data), new NonClosingStream(journal), new MemoryStream(), "outgrown");
+        ISqlCatalog catalog = SqlCatalog.Open(storage);
+        await catalog.CreateTableAsync("dbo", "t", [Column("id", nullable: false), Column("note", DatabaseType.String)], ["id"]);
+        SqlCatalogException? failure = null;
+        int cycles = 0;
+
+        // Act
+        while (failure is null && cycles < 5_000)
+        {
+            try
+            {
+                await catalog.AddColumnAsync("dbo", "t", Column("x"));
+                await catalog.DropColumnAsync("dbo", "t", "x");
+                cycles++;
+            }
+            catch (SqlCatalogException exception)
+            {
+                failure = exception;
+            }
+        }
+
+        // Assert: refused for the record size, naming the dropped columns and the remedy.
+        failure.ShouldNotBeNull();
+        cycles.ShouldBeGreaterThan(1_000);
+        failure.Message.ShouldStartWith("The definition of table 'dbo.t' encodes to ", Case.Sensitive);
+        failure.Message.ShouldContain($"It keeps the physical positions of {cycles} dropped columns, which are never reused (#1241); " +
+            "recreating the table and copying its rows (CREATE TABLE, INSERT ... SELECT) reclaims them.", Case.Sensitive);
+
+        // The refused alteration changed nothing, in memory or on reopen.
+        catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+        table.Columns.Select(column => column.Name).ShouldBe(["id", "note"]);
+        table.DroppedColumnOrdinals.Count.ShouldBe(cycles);
+        using var reopenedStorage = SqlStorage.Open(Copy(data), Copy(journal), new MemoryStream());
+        SqlCatalog.Open(reopenedStorage).TryGetTable("dbo", "t", out var persisted).ShouldBeTrue();
+        persisted.Columns.Select(column => column.Name).ShouldBe(["id", "note"]);
+        persisted.DroppedColumnOrdinals.ShouldBe(Enumerable.Range(0, cycles).Select(cycle => cycle + 2));
+    }
+
     /// <summary>The fields of a table record before its versioned extension.</summary>
     private static DatabaseKeyWriter TableRecordPrefix(long objectId, string schema, string name, params (string Name, bool Nullable)[] columns)
     {

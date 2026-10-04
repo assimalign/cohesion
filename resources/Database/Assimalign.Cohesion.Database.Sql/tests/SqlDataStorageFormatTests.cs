@@ -150,7 +150,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: index pages in another B-tree page format are refused at open with COHDBI001 (#1194)")]
     public async Task Open_IndexPagesInFormatOne_ShouldBeRefusedByTheIndexManager()
     {
-        // Arrange: a format-5 marker over index trees in B-tree page format 1 — a
+        // Arrange: the current format-6 marker over index trees in B-tree page format 1 — a
         // marker that does not describe its trees (damage, or a forged marker). The
         // gate passes; the index manager's own check must not.
         await CreateDatabaseAsync(formatVersion: null);

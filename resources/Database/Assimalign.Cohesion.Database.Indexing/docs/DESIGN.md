@@ -326,7 +326,7 @@ upgrades are #1152). How each model surfaces the refusal:
 
 | Model | Where its open checks | Error |
 |---|---|---|
-| SQL | Its catalog's data-storage format marker, bumped from 4 to 5, before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 5"; a marker that does not describe its trees, the attach check's `COHDBI001` |
+| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (now 6, #1241), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 6"; a marker that does not describe its trees, the attach check's `COHDBI001` |
 | Key-value | Its catalog's entry-space format marker, bumped from 1 to 2, before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 2"; a marker that does not describe its tree, "Database 'x' cannot be opened. COHDBI001: …" |
 | Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | "Database 'x' cannot be opened. COHDBI001: …" |
 | Graph | `GraphStore.EnsureIndexFormat`, before the recovery scrub; the attach check again in the store's open | the same |

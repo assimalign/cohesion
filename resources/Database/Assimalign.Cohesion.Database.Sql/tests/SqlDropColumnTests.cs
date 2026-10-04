@@ -425,6 +425,39 @@ public sealed class SqlDropColumnTests : IDisposable
         rows.Select(row => row[3]).ShouldAllBe(value => Equals(value, 42), "the fourth generation reads its default for every version");
     }
 
+    // ── Row size ───────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DROP COLUMN: dropped columns behind the last live one cost later versions nothing, so a row near the size limit stays writable")]
+    public async Task DropColumn_RepeatedTrailingDrops_ShouldNotGrowLaterVersions()
+    {
+        // Arrange: one row a few dozen bytes under the largest record a page holds.
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "drop-column-row-size" });
+        var database = await engine.CreateDatabaseAsync("row-size-db");
+        await using var session = await database.CreateSessionAsync();
+        var instance = (SqlDatabaseInstance)database;
+        string big = new('x', 8000);
+        await ExecuteAsync(session, "CREATE TABLE t (id INT NOT NULL PRIMARY KEY, big VARCHAR(8000))");
+        await ExecuteAsync(session, $"INSERT INTO t VALUES (1, '{big}')");
+        ulong objectId = ObjectIdOf(instance, "t");
+        int length = StoredVersions(instance, objectId).Values.ShouldHaveSingleItem().Bytes.Length;
+        (Assimalign.Cohesion.Database.Storage.Units.SlottedPage.MaxRecordSize - length).ShouldBeLessThan(100);
+
+        // Act: a hundred columns added and dropped behind the last live one, then writes.
+        for (int cycle = 0; cycle < 100; cycle++)
+        {
+            await ExecuteAsync(session, "ALTER TABLE t ADD COLUMN e INT");
+            await ExecuteAsync(session, "ALTER TABLE t DROP COLUMN e");
+        }
+
+        await ExecuteAsync(session, "UPDATE t SET big = big WHERE id = 1");
+        await ExecuteAsync(session, $"INSERT INTO t VALUES (2, '{big}')");
+
+        // Assert: the new versions store no component for the hundred dropped ordinals.
+        StoredVersions(instance, objectId).Values.Where(version => version.Deleter == TransactionSequence.None)
+            .Select(version => version.Bytes.Length).ShouldBe([length, length]);
+        ShouldBeRows((await RowsAsync(session, "SELECT id, big FROM t ORDER BY id")).Rows, [[1, big], [2, big]]);
+    }
+
     // ── Neighbouring indexes and constraints ───────────────────────────
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - DROP COLUMN: indexes and constraints on the neighbouring columns keep answering and enforcing what they did")]
@@ -494,7 +527,9 @@ public sealed class SqlDropColumnTests : IDisposable
         var database = await engine.CreateDatabaseAsync("refused-db");
         await using var session = await database.CreateSessionAsync();
 
-        await ExecuteAsync(session, "CREATE TABLE t (id INT NOT NULL PRIMARY KEY, note VARCHAR(40), code VARCHAR(20) NOT NULL)");
+        // The table-level CHECK reads the key, so it must not displace the key's own refusal.
+        await ExecuteAsync(session,
+            "CREATE TABLE t (id INT NOT NULL PRIMARY KEY, note VARCHAR(40), code VARCHAR(20) NOT NULL, CONSTRAINT ck_t_id CHECK (id > 0))");
         await ExecuteAsync(session, "CREATE INDEX ix_code ON t (code)");
         await ExecuteAsync(session, "INSERT INTO t (id, note, code) VALUES (1, 'n1', 'c1'), (2, 'n2', 'c2')");
         await ExecuteAsync(session, "CREATE TABLE solo (sole INT)");
@@ -718,12 +753,14 @@ public sealed class SqlDropColumnTests : IDisposable
             "INSERT INTO ch VALUES (9, 'd-00003', 0)"))).Message.ShouldContain("ck_ch_qty");
         (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "DELETE FROM p WHERE id = 1"))).Message.ShouldContain("fk_ch_p");
-        // A table-level CHECK lists no columns; the drop finds it by binding the CHECK
-        // against the remaining columns, and that binding names the column it misses.
+        // A table-level CHECK lists no columns; the drop finds it through the columns its
+        // bound predicate reads and names it, as it names a foreign key on either side.
         (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
-            "ALTER TABLE p DROP COLUMN c"))).Message.ShouldContain("'c'");
+            "ALTER TABLE p DROP COLUMN c"))).Message.ShouldBe("Column 'c' is referenced by constraint 'ck_p_ca'. Drop the constraint first.");
         (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
-            "ALTER TABLE ch DROP COLUMN parent_d"))).Message.ShouldContain("participates in a constraint");
+            "ALTER TABLE ch DROP COLUMN parent_d"))).Message.ShouldBe("Column 'parent_d' is referenced by constraint 'fk_ch_p'. Drop the constraint first.");
+        (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            "ALTER TABLE p DROP COLUMN d"))).Message.ShouldBe("Column 'd' is referenced by constraint 'fk_ch_p'. Drop the constraint first.");
         (await CheckTableAsync(session, "p", model, seeks: false)).ShouldBeEmpty();
     }
 

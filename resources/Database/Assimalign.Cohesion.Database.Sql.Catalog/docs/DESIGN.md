@@ -36,8 +36,9 @@ uses those same transforms for uniqueness enforcement.
 A table record describes the physical layout its rows are stored in, not just its
 columns. `SqlCatalogTable.Columns` are the live columns, in order: what every name,
 `SELECT *`, INSERT without a column list and the system views see. A stored row
-version holds one component per *physical ordinal*; `PhysicalColumnCount` is their
-number, `DroppedColumnOrdinals` lists the ones whose column was dropped (ascending),
+version holds one component per *physical ordinal*, up to its last live column (the
+SQL engine stores nothing for a dropped ordinal behind it); `PhysicalColumnCount` is
+their number, `DroppedColumnOrdinals` lists the ones whose column was dropped (ascending),
 and `GetPhysicalOrdinal(i)` maps a live column to its component. The live columns
 take the non-dropped ordinals in order, so the layout is fully described by the
 dropped list.
@@ -61,7 +62,11 @@ dropped list.
   dropped value, still stored in older versions, into another column. PostgreSQL
   keeps a dropped attribute's number for good and counts it against its column limit
   (`doc/src/sgml/limits.sgml:133-134`); here each dropped ordinal costs the table
-  record one integer component and counts against the one-record limit below.
+  record one five-byte integer component and counts against the one-record limit
+  below. When a table that has dropped columns outgrows the record, the refusal
+  counts them and says that recreating the table and copying its rows reclaims them,
+  since only a new table starts without dropped ordinals (`EncodeTable`; a
+  two-column table reaches the limit after 1,588 ADD/DROP cycles).
   Compacting the layout would take a table rewrite that moves every row version and
   rebuilds its indexes; none exists, and one added later must replace the layout in
   the same recoverable unit as the versions (the SQL engine's DESIGN, "DROP COLUMN

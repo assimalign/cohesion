@@ -440,35 +440,46 @@ owning schema deployment.
 INSERT without a column list, name resolution, the wire result header and the
 system views no longer see it. It is refused, with nothing changed, for an unknown
 column, a primary-key column, a column an index covers (drop the index first), a
-column a foreign key, UNIQUE or CHECK constraint uses or references (drop the
-constraint first; a table-level CHECK that reads the column is found by binding it
-without the column, and the refusal names the column it misses), and a table's
-last column.
+column a foreign key, UNIQUE or CHECK constraint uses or references, and a table's
+last column. A refusal for a constraint names it, a table-level CHECK that reads the
+column included: "Column 'c' is referenced by constraint 'ck_t'. Drop the constraint
+first."
 
 The drop is **a catalog-only change**, as in PostgreSQL: the column's physical
 position is marked dropped and no stored row is read or rewritten, so the statement
 takes the same time on an empty table and a large one and holds up no other
-table's writes. The dropped values stay in the rows that hold them, unreadable;
-rows written afterwards store NULL there, and the space returns as rows are
-updated and their old versions purged. A crash at any point leaves either the
+table's writes. The dropped values stay in the rows that hold them, unreadable,
+and the space returns as rows are updated and their old versions purged. Rows
+written afterwards store a one-byte NULL in the dropped column's place when a
+live column follows it, and nothing when none does, so each dropped column with
+a live column after it lowers the largest row the table can store by one byte.
+(PostgreSQL likewise keeps a null-bitmap bit for each dropped column in every
+new row.) A crash at any point leaves either the
 table as it was or the column dropped, with every value in its own column either
 way. DDL stays self-committing (above).
 
 Statements running beside the drop: a write or a join waits for it, and one planned
 on the old definition then fails with "changed while the statement was waiting" and
 can be retried. A single-table SELECT does not wait. Whichever definition it was
-planned on, every value it returns is in its own column; one planned before the
-drop reads NULL for the dropped column in rows written after the drop. Snapshots
-older than the drop keep reading their rows, without the dropped column once a
-statement is planned on the new definition.
+planned on, every value it returns is in its own column. One planned before the
+drop still sees the dropped column, with the values of the rows its snapshot
+sees; rows written after the drop are never visible to it, because a statement's
+snapshot is taken before it is planned. Snapshots older than the drop keep
+reading their rows, without the dropped column once a statement is planned on
+the new definition.
 
 `ADD COLUMN` after a drop adds a new column, even under the dropped column's name:
 existing rows read the new column's default (or NULL), never the dropped values.
 `INFORMATION_SCHEMA.COLUMNS.ORDINAL_POSITION` numbers the live columns 1..n, so a
 column behind a dropped one moves up by one, as the SQL standard specifies;
 PostgreSQL instead reports its internal attribute number, with gaps. A table's
-dropped positions are never reused; each one keeps a few bytes in the table's
-catalog definition, which is limited to one catalog record.
+dropped positions are never reused; each one keeps five bytes in the table's
+catalog definition, which is limited to one catalog record, so once a table has
+dropped about 1,590 columns (fewer when its live columns are many or have long
+names) ADD and DROP COLUMN on it are refused with a message that counts the
+dropped columns. Only a new table starts without them: recreate the
+table and copy its rows (`CREATE TABLE`, `INSERT ... SELECT`). PostgreSQL counts
+dropped columns against its 1,600-column limit in the same way.
 
 ## Collation (#1025)
 
@@ -650,8 +661,11 @@ data-storage format 3 (written through 10.0.0-preview.1) stored the kind and
 the offset inside index keys, and format 4 does not. Format 5 (#1194) keeps
 format 4's rows and key encoding but stores index trees in B-tree page format 2,
 whose entries are ordered by key, entry reference and writer, so a format-4
-database is refused too. The engine has no upgrade path (#1152). It refuses to
-open a database on any format but 5 — older or newer — with an error that names
+database is refused too. Format 6 (#1241) keeps format 5's rows and index trees
+but records each table's dropped-column positions in the catalog and decodes
+rows through them, so a format-5 database is refused too. The engine has no
+upgrade path (#1152). It refuses to
+open a database on any format but 6 — older or newer — with an error that names
 the database, the format it found and the format it supports. The check reads
 only the database's catalog and runs before the engine opens the data files, so
 a refused open never touches them. A cleanly
@@ -662,7 +676,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases are created on format 5.
+is tracked by #1152. New databases are created on format 6.
 
 From format 4 on, the catalog stores the format marker in a record that engines
 before format 4 do not recognize, so those engines refuse to open a format-4
