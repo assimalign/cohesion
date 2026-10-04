@@ -29,6 +29,19 @@ using Assimalign.Cohesion.Database.Storage;
 /// (<see cref="StorageTransactionException"/>) is retried at the next poll. An offline database
 /// (#1243) is skipped: nothing may be written to it until it is reopened.
 /// </para>
+/// <para>
+/// <b>A failed checkpoint is one database's failure (#1268).</b> Any other failure — a page write
+/// the checkpoint's flush could not make, a deferred checkpoint's failure the coordinator hands
+/// back — is reported for that database, and the pass goes on to the next one. Later passes skip
+/// the failing database for <see cref="DatabaseEngineWorker.FailureBackoff"/> and then retry it,
+/// since its journal is still due, while every other database keeps being checkpointed at the
+/// worker's full pace: one database's failing device never holds back another's truncation. The
+/// failure stays recorded until a pass checkpoints the database; a checkpoint deferred to a running
+/// statement keeps it recorded, and records nothing for a database without one. A failure that
+/// took the database offline (a failed durable flush, or a header slot write that failed) is not
+/// the worker's: the database is skipped from then on and the engine lists it offline. Before
+/// #1268 any such exception escaped the pass and ended the worker for good.
+/// </para>
 /// </remarks>
 internal sealed class DocumentCheckpointWorker : DatabaseEngineWorker
 {
@@ -77,7 +90,7 @@ internal sealed class DocumentCheckpointWorker : DatabaseEngineWorker
     }
 
     /// <inheritdoc />
-    public override void RunIteration(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         // Reset before the pass: a journal that reaches the size mid-pass sets it again.
         _engine.CheckpointNeededSignal.Reset();
@@ -90,29 +103,44 @@ internal sealed class DocumentCheckpointWorker : DatabaseEngineWorker
                 break;
             }
 
-            if (database.IsOffline || !database.DataStorage.IsCheckpointDue(interval))
-            {
-                continue;
-            }
-
             try
             {
+                // An offline database is not begun: the engine reports it (#1243), and a failure
+                // the worker recorded for it ends. A database whose failure is backing off waits.
+                if (database.IsOffline || !BeginDatabase(database.Name) || !database.DataStorage.IsCheckpointDue(interval))
+                {
+                    continue;
+                }
+
                 // A statement holding the apply gate takes the checkpoint over and runs it as it
                 // ends, so the worker never waits on one database while the others' journals grow.
-                database.Coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken);
+                if (!database.Coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken))
+                {
+                    ReportUnfinished(database.Name);
+                }
             }
             catch (StorageTransactionException)
             {
                 // A transaction is active on this storage; retry on the next pass.
+                ReportUnfinished(database.Name);
             }
-            catch (StorageOfflineException)
-            {
-                // A durable flush failed and took the database offline (#1243); the next pass
-                // skips it, and only a reopen brings it back.
-            }
-            catch (ObjectDisposedException)
+            catch (ObjectDisposedException) when (!_engine.IsOpen(database))
             {
                 // The snapshot can race a database drop; nothing left to checkpoint.
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // A failure that took the database offline (#1243, #1268) is reported through
+                // the engine's offline list, and the next pass skips the database; any other is
+                // this pass's failure, and the next pass retries the checkpoint.
+                if (!database.IsOffline)
+                {
+                    ReportFailure(database.Name, exception);
+                }
             }
         }
     }

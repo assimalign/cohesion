@@ -18,6 +18,14 @@ using Assimalign.Cohesion.Database.Storage;
 /// group-commit window. The signal is reset <em>before</em> the flush pass, so a
 /// commit arriving mid-pass re-sets it and is served by the next pass. In the
 /// synchronous durability mode there is never anything pending and the worker idles.
+/// <para>
+/// A durable flush that fails takes its database offline (#1243): the storage releases the
+/// committers waiting on it, each gets the refusal from its own flush, and the worker keeps
+/// flushing the engine's other databases. Any other failure of one storage is reported for its
+/// database and the pass goes on to the next (#1268); the database is flushed again after
+/// <see cref="DatabaseEngineWorker.FailureBackoff"/>, and its committers self-help within their
+/// window meanwhile, as they do whenever the worker is late.
+/// </para>
 /// </remarks>
 internal sealed class BlobWriteAheadFlushWorker : DatabaseEngineWorker
 {
@@ -56,7 +64,7 @@ internal sealed class BlobWriteAheadFlushWorker : DatabaseEngineWorker
     }
 
     /// <inheritdoc />
-    public override void RunIteration(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         // Reset before flushing: a commit that registers mid-pass sets the signal
         // again and is picked up by the next pass instead of being lost.
@@ -69,14 +77,30 @@ internal sealed class BlobWriteAheadFlushWorker : DatabaseEngineWorker
                 break;
             }
 
+            // A storage names its database. An offline one is not begun: nothing of it is written
+            // (#1243), the engine reports it, and a failure the worker recorded for it ends.
+            if (storage.IsOffline || !BeginDatabase(storage.Name))
+            {
+                continue;
+            }
+
             try
             {
                 storage.FlushPendingCommits();
             }
-            catch (ObjectDisposedException)
+            catch (ObjectDisposedException) when (!_engine.IsOpen(storage))
             {
                 // The snapshot can race a database drop; a disposed storage has no
                 // committers left to serve.
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // The committers waiting on this storage self-help within their window; the next
+                // pass flushes it again. An offline storage's refusal is not the worker's failure.
+                if (!storage.IsOffline)
+                {
+                    ReportFailure(storage.Name, exception);
+                }
             }
         }
     }

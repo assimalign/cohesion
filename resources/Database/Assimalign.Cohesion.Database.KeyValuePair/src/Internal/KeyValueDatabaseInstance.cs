@@ -52,6 +52,20 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         _catalog = KeyValueCatalog.Open(catalogStorage);
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new KeyValueTransactionRecordSpace(storage));
 
+        // A wait for a lock of the database ends when it goes offline (#1268 review): an offline
+        // database undoes nothing, so a writer that holds a lock keeps it until the reopen, and a
+        // writer queued behind it would otherwise wait that long. The catalog file set's hook takes
+        // the data set offline, whose hook ends the waits, so both paths end them.
+        _storage.OnOffline = error =>
+        {
+            _catalogStorage.TakeOffline(error);
+            _coordinator.AbandonLockWaits(error);
+        };
+        if (OfflineError is { } offlineAtOpen)
+        {
+            _coordinator.AbandonLockWaits(offlineAtOpen);
+        }
+
         if (engine is KeyValueDatabaseEngine owner)
         {
             // A deferred undo is retried on its own backoff, from about 100 ms up to the

@@ -22,6 +22,8 @@
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\StorageFormatFiles.cs" Link="TestObjects\StorageFormatFiles.cs" />
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalFrames.cs" Link="TestObjects\JournalFrames.cs" />
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\PageWriteLockHolder.cs" Link="TestObjects\PageWriteLockHolder.cs" />
+		<!-- Device faults that fire on the engine's worker threads, for the worker resilience tests (#1268). -->
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DeviceFaults.cs" Link="TestObjects\DeviceFaults.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />

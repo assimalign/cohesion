@@ -796,9 +796,18 @@ public abstract class StorageJournal : IStorageJournal
         }
     }
 
+    /// <summary>
+    /// Takes the journal offline with a failure of its own medium. Every such failure, a drain of
+    /// the append buffer (#1252) or a flush of the medium, durable (#1243) or not, reports
+    /// <see cref="StorageOfflineCause.JournalFlush"/>: getting the journal's records onto its file
+    /// failed. <paramref name="what"/> keeps the exact operation in the message.
+    /// </summary>
+    /// <param name="what">What failed, for the message (for example "a write of the journal").</param>
+    /// <param name="cause">The failure.</param>
+    /// <returns>The exception the caller throws.</returns>
     private StorageOfflineException TakeOfflineLocked(string what, Exception cause)
     {
-        var offline = StorageOfflineException.Create(what, cause);
+        var offline = StorageOfflineException.Create(StorageOfflineCause.JournalFlush, what, cause);
         SetOfflineLocked(offline);
         return offline;
     }

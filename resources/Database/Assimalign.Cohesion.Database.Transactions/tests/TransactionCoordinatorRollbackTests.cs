@@ -799,6 +799,72 @@ public class TransactionCoordinatorRollbackTests
     }
 
     /// <summary>
+    /// A storage that went offline releases no lock until the reopen: a writer holding one keeps
+    /// it, since its undo cannot run. Wired the way the engines wire it, the storage's offline hook
+    /// ends every lock wait with the offline error as the cause, and every later wait fails at
+    /// once, while a request the table can grant is still granted (#1268 review). Before, a
+    /// request queued behind the holder waited until the reopen. Both journal failures a commit
+    /// can meet take that path: the durable flush (#1243), and the drain of the append buffer
+    /// that runs ahead of it (#1252), which reports the same
+    /// <see cref="StorageOfflineCause.JournalFlush"/> and names the write in its message.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator offline: the offline hook ends every lock wait, and later waits fail at once")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AbandonLockWaits_StorageGoesOffline_ShouldEndEveryWaitWithTheOfflineError(bool drainFails)
+    {
+        // Arrange: a holder of the row, a request queued behind it, and a transaction that will
+        // ask later.
+        var storage = RollbackStorage.Create();
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        storage.OnOffline = coordinator.AbandonLockWaits;
+        var holder = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await coordinator.LockManager.AcquireAsync(holder.Sequence, Row, LockMode.Exclusive);
+        var queued = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var late = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var waiting = coordinator.LockManager.AcquireAsync(queued.Sequence, Row, LockMode.Exclusive).AsTask();
+        bool queuedWhileOnline = !waiting.IsCompleted;
+
+        // Act: a commit's drain of the append buffer, or its durable flush after the drain, fails,
+        // which takes the storage offline.
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await InsertAsync(coordinator, storage, writer);
+        if (drainFails)
+        {
+            storage.JournalStream.FailWrites = 1;
+        }
+        else
+        {
+            storage.JournalStream.FailFlushes = 1;
+        }
+
+        await Should.ThrowAsync<TransactionCommitUnconfirmedException>(async () => await coordinator.CommitAsync(writer));
+        var offline = storage.OfflineError.ShouldNotBeNull();
+        var queuedFailure = await Should.ThrowAsync<TransactionAbortedException>(() => waiting.WaitAsync(Timeout));
+        var lateWait = coordinator.LockManager.AcquireAsync(late.Sequence, Row, LockMode.Exclusive);
+        bool lateFailedAtOnce = lateWait.IsCompleted;
+        var lateFailure = await Should.ThrowAsync<TransactionAbortedException>(async () => await lateWait);
+        var granted = coordinator.LockManager.AcquireAsync(late.Sequence, LockResource.Entry(8, 8), LockMode.Exclusive);
+        bool grantedAtOnce = granted.IsCompletedSuccessfully;
+        bool holderStillHolds = !coordinator.LockManager.TryAcquire(late.Sequence, Row, LockMode.Shared);
+        await coordinator.DisposeAsync();
+        storage.Dispose();
+
+        // Assert
+        queuedWhileOnline.ShouldBeTrue();
+        offline.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        offline.Message.ShouldContain(drainFails ? "a write of the journal" : "a durable flush of the journal");
+        storage.JournalStream.FailWrites.ShouldBe(0);
+        storage.JournalStream.FailFlushes.ShouldBe(0);
+        queuedFailure.InnerException.ShouldBeSameAs(offline);
+        lateFailedAtOnce.ShouldBeTrue();
+        lateFailure.InnerException.ShouldBeSameAs(offline);
+        StorageOfflineException.Find(lateFailure).ShouldBeSameAs(offline);
+        grantedAtOnce.ShouldBeTrue();
+        holderStillHolds.ShouldBeTrue();
+    }
+
+    /// <summary>
     /// A transient undo failure is retried on its own backoff (#1226 owner decision of
     /// 2026-10-04): the first retry is due 100 ms after the deferral, not a maintenance interval
     /// later, and the retry that succeeds releases the writer's locks to the transaction waiting

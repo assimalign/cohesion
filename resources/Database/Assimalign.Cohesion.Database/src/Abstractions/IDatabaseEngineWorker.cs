@@ -37,5 +37,13 @@ public interface IDatabaseEngineWorker
 
     /// <summary>Runs the worker pump on the owning engine's dedicated thread until cancellation.</summary>
     /// <param name="cancellationToken">Signaled when the engine quiesces its workers.</param>
+    /// <remarks>
+    /// <see cref="DatabaseEngineWorker"/>'s loop never lets a failure escape: it records each failed
+    /// pass and backs off (#1268). A worker that implements this interface without the base and
+    /// lets an exception escape, or returns before cancellation, is restarted by its engine after
+    /// <see cref="DatabaseEngineWorker.FailureBackoff"/>, and the engine reports
+    /// <see cref="EngineState.Faulted"/> from then until it is disposed: without the base's pass
+    /// record the engine cannot tell when such a worker is healthy again.
+    /// </remarks>
     void Run(CancellationToken cancellationToken);
 }

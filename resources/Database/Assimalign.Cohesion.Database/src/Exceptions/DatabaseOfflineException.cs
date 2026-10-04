@@ -6,7 +6,9 @@ namespace Assimalign.Cohesion.Database;
 
 /// <summary>
 /// Thrown by every operation on a database that went offline: a durable flush of its journal
-/// or of one of its data files failed (#1243). Nothing more is written to the database, and
+/// or of one of its data files failed (#1243), a write of a journal's append buffer failed (#1252),
+/// or a write of a file header failed after its header slot write was issued (#1268). Nothing more
+/// is written to the database, and
 /// every later operation, in process and over every wire server, is refused with this
 /// exception until the database is reopened (<see cref="IDatabaseEngine.OpenDatabaseAsync"/>),
 /// whose recovery reads the journal and decides the outcome of every commit that was not
@@ -67,9 +69,28 @@ public class DatabaseOfflineException : DatabaseException
         string detail = cause.InnerException?.Message ?? cause.Message;
         return new DatabaseOfflineException(
             code,
-            $"{code}: Database '{database}' is offline: a durable flush of its storage failed ({detail}), so nothing more is " +
-            "written to it. Every operation is refused until the database is reopened (OpenDatabaseAsync); the reopen's " +
-            "recovery reads the journal and decides the outcome of every commit that was not confirmed.",
+            $"{code}: Database '{database}' is offline: {Describe(cause.Cause)} of its storage failed ({detail}), so nothing " +
+            "more is written to it. Every operation is refused until the database is reopened (OpenDatabaseAsync); the " +
+            "reopen's recovery reads the journal and decides the outcome of every commit that was not confirmed.",
             cause);
     }
+
+    /// <summary>
+    /// Describes what took a storage offline, for an engine's message: the root owns its own
+    /// wording of the storage's cause (the layer that owns both vocabularies translates).
+    /// </summary>
+    /// <param name="cause">The storage's offline cause.</param>
+    /// <returns>The phrase, such as <c>a durable flush of the data file</c>.</returns>
+    /// <remarks>
+    /// <see cref="StorageOfflineCause.JournalFlush"/> covers both a failed fsync of the journal
+    /// (#1243) and a failed drain of its append buffer (#1252), so it reads as either; the inner
+    /// storage exception's message names the exact operation.
+    /// </remarks>
+    internal static string Describe(StorageOfflineCause cause) => cause switch
+    {
+        StorageOfflineCause.JournalFlush => "a write or flush of the journal",
+        StorageOfflineCause.DataFlush => "a durable flush of the data file",
+        StorageOfflineCause.HeaderWrite => "a write of the file header",
+        _ => "a write",
+    };
 }

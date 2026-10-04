@@ -31,6 +31,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
     private static readonly AsyncLocal<Budget?> s_flushFailures = new();
     private static readonly AsyncLocal<Budget?> s_recordFailures = new();
     private readonly Dictionary<string, Files> _storages = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DeviceFaults> _faults = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
     private readonly bool _durable;
 
@@ -134,7 +135,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
             }
         }
 
-        return KeyValueStorage.Create(DataStream(files), JournalStream(files, databaseName), new StorageStream(files.Backup), databaseName);
+        return KeyValueStorage.Create(DataStream(files, databaseName), JournalStream(files, databaseName), new StorageStream(files.Backup), databaseName);
     }
 
     /// <summary>
@@ -163,7 +164,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
             _storages[databaseName] = files;
         }
 
-        return KeyValueStorage.Open(DataStream(files), JournalStream(files, databaseName), new StorageStream(files.Backup), checkpointOnOpen: false);
+        return KeyValueStorage.Open(DataStream(files, databaseName), JournalStream(files, databaseName), new StorageStream(files.Backup), checkpointOnOpen: false);
     }
 
     /// <inheritdoc />
@@ -184,11 +185,31 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
         }
     }
 
-    private StorageStream DataStream(Files files)
-        => _durable ? new StorageStream(new DurableMemoryHandle(files.Data, null, null)) : new StorageStream(files.Data);
+    /// <summary>
+    /// Gets the device faults of a file set, which fire on every thread, the engine's background
+    /// workers included (#1268). They apply to the file sets of a durable strategy, and survive a
+    /// reopen of the file set.
+    /// </summary>
+    /// <param name="storageName">The file set's storage name (the database name, or with <c>.catalog</c>).</param>
+    internal DeviceFaults Faults(string storageName)
+    {
+        lock (_sync)
+        {
+            if (!_faults.TryGetValue(storageName, out var faults))
+            {
+                faults = new DeviceFaults();
+                _faults.Add(storageName, faults);
+            }
+
+            return faults;
+        }
+    }
+
+    private StorageStream DataStream(Files files, string storageName)
+        => _durable ? new StorageStream(Faults(storageName).WrapData(new DurableMemoryHandle(files.Data, null, null))) : new StorageStream(files.Data);
 
     private StorageStream JournalStream(Files files, string storageName)
-        => _durable ? new StorageStream(new DurableMemoryHandle(files.Journal, files.Journal, storageName)) : new StorageStream(files.Journal);
+        => _durable ? new StorageStream(Faults(storageName).WrapJournal(new DurableMemoryHandle(files.Journal, files.Journal, storageName))) : new StorageStream(files.Journal);
 
     private static T Copy<T>(MemoryStream source, T target)
         where T : MemoryStream

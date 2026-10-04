@@ -11,6 +11,16 @@ using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 /// batch per open storage file set; the buffer pool's write-ahead gate guarantees
 /// the journal is durable past a page's LSN before the page reaches the data file.
 /// </summary>
+/// <remarks>
+/// A page write that fails leaves the page dirty in the pool (it is recorded clean only after
+/// its write), so the failure is reported for its database, the pass goes on to the next one, and
+/// a pass after <see cref="DatabaseEngineWorker.FailureBackoff"/> writes the page (#1268); the
+/// other databases keep the worker's full pace meanwhile. PostgreSQL leaves a buffer whose write
+/// failed dirty for a later write (<c>AbortBufferIO</c>,
+/// <c>src/backend/storage/buffer/bufmgr.c:7469-7502</c>), and its background writer sleeps a
+/// second after the error before it writes again (<c>src/backend/postmaster/bgwriter.c:154-205</c>).
+/// An offline database is skipped.
+/// </remarks>
 internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
 {
     private readonly KeyValueDatabaseEngine _engine;
@@ -30,7 +40,7 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
     public override TimeSpan Interval => _engine.EngineOptions.PageWriteBackInterval;
 
     /// <inheritdoc />
-    public override void RunIteration(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         int batchSize = _engine.EngineOptions.PageWriteBackBatchSize;
 
@@ -43,25 +53,34 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
 
             // Nothing of an offline database is written (#1243): neither file set, whichever
             // went offline. Each storage also refuses on its own.
-            if (database.IsOffline)
+            if (database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }
 
-            WriteBack(database.DataStorage, batchSize);
-            WriteBack(database.CatalogStorage, batchSize);
+            WriteBack(database, database.DataStorage, batchSize);
+            WriteBack(database, database.CatalogStorage, batchSize);
         }
     }
 
-    private static void WriteBack(KeyValueStorage storage, int batchSize)
+    private void WriteBack(KeyValueDatabaseInstance database, KeyValueStorage storage, int batchSize)
     {
         try
         {
             storage.WriteBackDirtyPages(batchSize);
         }
-        catch (ObjectDisposedException)
+        catch (ObjectDisposedException) when (!_engine.IsOpen(database))
         {
             // The snapshot can race a database drop; nothing to write back.
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The pages stay dirty and a later pass writes them; an offline database's refusal
+            // is not the worker's failure (the engine lists the database offline).
+            if (!database.IsOffline)
+            {
+                ReportFailure(database.Name, exception);
+            }
         }
     }
 }

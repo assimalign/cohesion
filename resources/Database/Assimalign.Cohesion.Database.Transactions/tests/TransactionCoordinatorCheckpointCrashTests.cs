@@ -41,7 +41,7 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
                 var scenario = await ArrangeAsync(point); // abandoned after its simulated power loss
                 point.CrashAtWrite = point.Writes + write;
                 point.DurableSectors = sectors;
-                SimulatedPowerLossException.ShouldBeThrownBy(() => scenario.Coordinator.Checkpoint());
+                SimulatedPowerLossException.ShouldBeThrownBy(() => scenario.Coordinator.Checkpoint(), $"write {write}, {sectors} sectors");
                 string at = $"crash at checkpoint write {write} ({point.Log[point.CrashAtWrite - 1]}), {sectors} sectors";
 
                 using var reopened = CrashStorage.Open(scenario.Storage.CaptureDurable());
@@ -80,7 +80,7 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
             point.DurableSectors = sectors;
 
             // Act
-            SimulatedPowerLossException.ShouldBeThrownBy(() => scenario.Coordinator.Checkpoint());
+            SimulatedPowerLossException.ShouldBeThrownBy(() => scenario.Coordinator.Checkpoint(), $"leading drain, {sectors} sectors");
             string at = $"crash at {point.Log[point.CrashAtWrite - 1]}, {sectors} sectors";
             using var reopened = CrashStorage.Open(scenario.Storage.CaptureDurable());
             await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);

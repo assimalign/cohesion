@@ -90,11 +90,67 @@ classDiagram
   grouped commits self-help, checkpoints just stop truncating — but the owner
   should learn it runs degraded), `Disposed`. The default control-plane health
   aggregate delivered by #973 reads this surface; nothing drives transitions
-  from outside. A fault a running worker reports (a failed retry of a deferred
-  undo) is cleared by that worker's next clean pass; a worker that died stays
-  recorded.
+  from outside. Since #1268 `Faulted` means a worker *holds a failure it has not
+  worked off*: the guided base keeps a failure record per database
+  (`DatabaseEngineWorker.Fault`, `ConsecutiveFailures`, `FailureCount`), and a
+  database's record ends with the first pass that finishes that database's work, so a
+  transient fault does not leave the engine `Faulted` for good, and one database's
+  deferred or busy work never keeps another database's resolved failure reported. Only
+  a worker that implements `IDatabaseEngineWorker` without the base and lets its loop
+  end early is recorded until disposal: the engine cannot tell when such a worker is
+  healthy again (the hosting health description says so).
+- **A worker failure never ends a worker, and one database's failure slows no other
+  (#1268 and its review).** `DatabaseEngineWorker.Run` is a non-virtual loop over the
+  non-virtual pass `RunIteration` and the protected `void RunIterationCore`. A pass
+  visits the engine's databases one by one: it asks `BeginDatabase(name)` first, and
+  catches and reports a database's failure (`ReportFailure(name, exception)`) before
+  going on to the next database. A database whose failure was reported is skipped by
+  later passes until `DatabaseEngineWorker.FailureBackoff` (one second) has passed,
+  while every other database keeps the worker's full pace; work a pass leaves for later
+  without failing (a busy storage, a checkpoint deferred to a running statement, an undo
+  still deferred) is reported with `ReportUnfinished(name)`, which keeps an earlier
+  failure of that database recorded until the work is done. A database a pass does not
+  begin (dropped, closed, offline) has its record forgotten. Only a pass that fails as a
+  whole (its work threw, or its trigger wait did) makes the loop sleep the backoff, so it
+  cannot spin. The version-purge workers report an undo failure with no extra backoff
+  (`ReportFailure(name, exception, TimeSpan.Zero)`): the coordinator already paces each
+  retry, about 100 ms after the deferral and then doubling (#1226). Passes never
+  overlap; a test that calls `RunIteration` beside the worker's thread waits for the
+  running pass. Only cancellation and `OutOfMemoryException` leave the loop. The
+  engines' pumps (one shared copy, `shared/DatabaseEngineWorkerPump.cs`, until the
+  phase-3 engine base takes it over) also run a worker's `Run` again after the backoff
+  if it ever throws or returns early. This is PostgreSQL's recovery for its background
+  writer, checkpointer and WAL writer, which catch an error per cycle, report it,
+  release what the cycle held and sleep a second before the loop continues ("A write
+  error is likely to be repeated", `src/backend/postmaster/bgwriter.c:154-205`,
+  `checkpointer.c:286-346`, `walwriter.c:147-193`); Neo4j's checkpoint scheduler
+  likewise counts consecutive failures and clears them on the next success
+  (`community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:51-84`).
+  A PostgreSQL checkpointer serves one cluster, so its sleep holds back no other
+  database; a worker here serves every database of its engine, which is why the
+  backoff is per database. Before the review the backoff was the worker's: while one
+  database kept failing, every other database got at most one checkpoint a second (a
+  probe measured 6 truncations in 6 s instead of 458, and a journal peak of 700-884
+  times the size trigger).
+  A failure the worker cannot recover from is not the worker's: a failed durable flush
+  (#1243), drain of the journal's append buffer (#1252) or header slot write (#1268) takes
+  the database offline, the workers skip it, and `OfflineDatabases` reports it. A drain
+  fails on whichever thread needs the records on the file, a worker's group flush,
+  checkpoint or page write-back included, and its cause is `StorageOfflineCause.JournalFlush`
+  like the fsync's. Before #1268 the engines' pumps caught outside
+  `Run`'s loop, so one unexpected exception (a page write the checkpoint could not
+  make) ended a checkpoint, write-back or flush worker for the life of the engine.
+- **A failure that never clears is retried forever (owner decision pending).** A page
+  write the checkpoint can never make leaves its database's journal untruncated, so the
+  journal grows until the fault clears or the disk fills, with the engine `Faulted` and
+  the application `Degraded` meanwhile. That is PostgreSQL's behavior (its checkpointer
+  keeps retrying); Neo4j instead panics the database after ten consecutive checkpoint
+  failures (`CheckPointScheduler.java:38-42`, `67-75`). The escalation, if any (offline
+  after N failures, or past a journal ceiling), is an owner decision recorded as a
+  follow-up of #1268.
 - **An offline database is reported beside the state, not in it** (#1243 review).
-  A database whose fsync failed refuses every request while its engine keeps
+  A database whose fsync, or since #1268 whose header slot write, failed refuses every
+  request while its engine keeps
   serving the others, so `EngineState` does not change; `IDatabaseEngine.OfflineDatabases`
   lists the open databases that are offline, and the hosting health aggregate
   reports the application unhealthy while the list is not empty. Before this an
@@ -276,7 +332,10 @@ or data files: the storage stopped writing (the storage's `StorageOfflineExcepti
 commit — PostgreSQL's `PANIC` on a failed WAL fsync, scoped to one database instead of
 the process. Its `Code` leads the message and names the model: `COHSQLT004`,
 `COHDBK002`, `COHDBD002`, `COHDBG012`, `COHDBB002`. Every wire server reports it as
-`Unavailable`. `DatabaseOfflineException.Create` builds it from the storage error. An
+`Unavailable`. `DatabaseOfflineException.Create` builds it from the storage error, and its
+message names what failed from the storage's typed `StorageOfflineException.Cause`
+(`JournalFlush`, `DataFlush`, `HeaderWrite`; the root words each cause itself, so callers
+tell the causes apart by the enum, never by the text). An
 operation that committed by itself (a self-committing statement such as SQL DDL, or any
 storage bracket whose commit record was written before the flush failed,
 `StorageOfflineException.CommitRecordWritten`) is never reported as refused, because its
@@ -319,10 +378,34 @@ as `DatabaseException`, so the inversion changed no live wire mapping.
   interface; sessions must never commit implicitly on dispose).
 - Transactions: disposing an uncommitted transaction rolls it back.
 
+## Diagnostics
+
+The root raises its own events through one internal event source, named for the assembly:
+`Assimalign.Cohesion.Database` (`src/Internal/EventSource/DatabaseEventSource.cs`, #1268
+review). Every engine model's workers derive from `DatabaseEngineWorker`, which writes these
+events, so the one source covers the workers of all five engines. A worker's failure is retried,
+so it is a `Warning`; a failure that repeats is written at most once per `FailureBackoff` per
+database (once per coordinator retry for a deferred undo), and the recovery that ends it is
+`Informational`. PostgreSQL reports every error of a background worker's cycle the same way
+before it sleeps and retries (`src/backend/postmaster/checkpointer.c:294-295`).
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `WorkerFailed` | Warning | `workerName`, `workerKind`, `database` (empty for a failure of the whole pass or of its trigger wait), `exceptionType` (full name), `exceptionMessage`, `consecutiveFailures` |
+| 2 | `WorkerRecovered` | Informational | `workerName`, `workerKind`, `database` (empty for the worker's passes), `failures` |
+
+No counters: a worker's counts are on the worker (`FailureCount`, `ConsecutiveFailures`), and
+the hosting health aggregate reports them. The health output names a failing worker and the
+type of its failure only, because the health endpoint is unauthenticated and an exception's
+message can carry file paths; the event carries the message. A database going offline is not a
+worker event: the engines report it through `IDatabaseEngine.OfflineDatabases` and health.
+
 ## AOT posture
 
 Contracts, enums, value objects, and canonical-document hashing only. The root does not inspect
-model schemas or discover types dynamically. SQL declaration compilation and source-generated
+model schemas or discover types dynamically. The event source writes only strings and integers,
+which bind to the trim-safe `WriteEvent` overloads; a NativeAOT application receives its events
+only with `<EventSourceSupport>true</EventSourceSupport>`, and nothing depends on delivery. SQL declaration compilation and source-generated
 JSON serialization live in `Database.Sql.Schema`.
 
 ## Non-goals

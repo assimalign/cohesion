@@ -225,13 +225,38 @@ failed undo journal write, which now takes the storage offline instead, so a jou
 longer one a retry can outlive. A failure that persists is retried at 0.1, 0.2,
 0.4 … seconds, then once per maintenance interval, so it cannot spin. The purge workers record a
 retry that fails again with anything other than a busy page or bracket as a worker fault and
-keep running; a busy page or bracket (`StorageTransactionException`, which the page write lock
-above raises) they retry on the next pass without reporting it, so an undo that a held page
-keeps failing is retried on the schedule but never surfaces as a fault. Before, the exception
-escaped the worker's pump loop and stopped the worker for good, leaving every deferred writer
-stuck until the database closed. The schedule reads a `TimeProvider` (the coordinator's internal
-constructor), so `DeferredUndoBackoffTests` and the coordinator's tests drive it without
-waiting.
+keep running; before, the exception escaped the worker's pump loop and stopped the worker for
+good, leaving every deferred writer stuck until the database closed. The purge workers report
+such a failure for its database with no backoff of their own
+(`DatabaseEngineWorker.ReportFailure(name, exception, TimeSpan.Zero)`, #1268 review), so this
+schedule alone paces the retries, and one database's failing undo delays no other database's
+retry. (For a while #1268 slept the whole worker a second after any failed pass, which floored
+every database's retries at a second.) A busy page or bracket (`StorageTransactionException`,
+which the page write lock above raises) is no failure: the workers retry it on the next pass and
+report it only as unfinished work (`ReportUnfinished`), which keeps an earlier failure of the
+database recorded but never records one, so an undo that a held page keeps failing is retried on
+the schedule and never surfaces as a fault. The schedule reads a `TimeProvider` (the
+coordinator's internal constructor), so `DeferredUndoBackoffTests` and the coordinator's tests
+drive it without waiting.
+
+**An offline storage ends every lock wait (#1268 review).** An offline database undoes nothing:
+a transaction that was writing when its storage went offline keeps its locks until the reopen,
+whose recovery aborts it, for the same reason a deferred undo keeps them (releasing them first
+would let the next holder build on versions that were never undone). A request queued behind
+such a transaction would wait for a release that never comes, and in every engine only the
+reopen ended it (reproduced with an explicit transaction holding the lock in all five engines).
+`TransactionCoordinator.AbandonLockWaits(cause)`, which each engine wires to its data storage's
+`OnOffline` hook, fails every wait in progress and every later one with
+`TransactionAbortedException` whose inner exception is the storage's offline error, which the
+engines translate into their coded offline refusal. Every way a storage goes offline raises that
+hook: a failed durable flush (#1243), a failed drain of the journal's append buffer (#1252,
+`StorageOfflineCause.JournalFlush` like the fsync) and a failed header slot write (#1268); the
+coordinator's tests end the waits on both journal failures. A request the lock table can grant
+at once is still granted: the coordinator's lock view tries the grant first, so an uncontended request
+costs nothing more, and only a request that has to wait links its token with the abandonment.
+The waits are failed asynchronously (`CancellationTokenSource.CancelAsync`), because the hook
+may run under the storage's locks. Neo4j's lock client ends the waits of a stopped client the
+same way (`community/lock/src/main/java/org/neo4j/kernel/impl/locking/forseti/ForsetiClient.java:1081-1085`).
 
 Any failure inside the undo is an undo failure like any other. The undo's
 storage bracket fails to begin, to touch a page or to commit, rolls itself back, and
@@ -594,7 +619,10 @@ statement's length, and the worker moves on to the others at once. The deferred 
 fails the statement that runs it, whose outcome is already decided: a storage bracket still open
 outside the semaphore leaves the request for the next statement or the worker's next look, an
 offline storage drops it, and any other failure is kept and thrown by the next `TryCheckpoint`,
-so the worker records it. Short statements still cannot keep a checkpoint out, since every one
+so the worker records it (since #1268 the workers catch it per database, report it and retry;
+before, it escaped the worker's loop and ended the worker). A deferred request reported as
+`false` leaves an earlier failure of the worker recorded until a checkpoint of that database
+completes. Short statements still cannot keep a checkpoint out, since every one
 of them ends by running the deferred request. `TransactionCoordinatorRecoveryTests` covers the
 deferral and the failure hand-off, and the SQL engine's
 `CheckpointJournalSize_LongStatementInAnotherDatabase_ShouldKeepTheJournalBounded` holds one
