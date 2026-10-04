@@ -46,6 +46,12 @@ active explicit transaction when present; otherwise they also use automatic tran
 An operation that fails inside an explicit transaction aborts the whole transaction: the session
 refuses further operations and BEGIN with `COHDBB001` until the caller rolls back, and a commit
 fails without committing.
+A failed journal or data fsync takes the database offline: every later operation, streams and
+the server included, is refused with `DatabaseOfflineException` (`COHDBB002`) until
+`OpenDatabaseAsync` reopens it and recovery decides the unconfirmed upload (#1243).
+`BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and `CheckpointInterval`
+(5 minutes) size the buffer pool and trigger checkpoints (#1254); a failed undo is retried on a
+100 ms backoff (#1226). See DESIGN.md, "Storage operations".
 Close each stream before starting another operation on the same session or committing.
 Disposing a session aborts its pending work. Blob has no statement or query language:
 `ExecuteAsync` rejects commands, including database switching and server administration.

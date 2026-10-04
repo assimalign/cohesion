@@ -59,8 +59,11 @@ the whole base surface — including child-owned vocabulary the contracts speak
 - **Error root** — `DatabaseException` for the contract root and everything
   built above it; `DatabaseNotFoundException` for the exact missing-database
   outcome of `IDatabaseEngine.OpenDatabaseAsync`; `DatabaseParseException` for
-  statement text a session's language rejects. Child roots own independent exception roots (see
-  [DESIGN.md](DESIGN.md)).
+  statement text a session's language rejects; `DatabaseOfflineException` (with a model
+  `Code`) for every operation on a database whose journal or data fsync failed, until it is
+  reopened (#1243), and `DatabaseTransactionCommitUnconfirmedException` for work that may
+  have committed when it did. `IDatabaseEngine.OfflineDatabases` lists the offline databases
+  for health. Child roots own independent exception roots (see [DESIGN.md](DESIGN.md)).
 
 ## Dependencies
 

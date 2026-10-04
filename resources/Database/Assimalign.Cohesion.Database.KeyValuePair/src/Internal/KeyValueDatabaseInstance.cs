@@ -37,8 +37,29 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         Engine = engine;
         _storage = storage;
         _catalogStorage = catalogStorage;
+
+        // The two file sets go offline together, the moment either does (#1243): a worker that
+        // writes back the other set's pages or flushes its journal would otherwise change a
+        // file of the database after the failure, until something next read the offline state.
+        _storage.OnOffline = _catalogStorage.TakeOffline;
+        _catalogStorage.OnOffline = _storage.TakeOffline;
+        if ((_storage.OfflineError ?? _catalogStorage.OfflineError) is { } alreadyOffline)
+        {
+            _storage.TakeOffline(alreadyOffline);
+            _catalogStorage.TakeOffline(alreadyOffline);
+        }
+
         _catalog = KeyValueCatalog.Open(catalogStorage);
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new KeyValueTransactionRecordSpace(storage));
+
+        if (engine is KeyValueDatabaseEngine owner)
+        {
+            // A deferred undo is retried on its own backoff, from about 100 ms up to the
+            // maintenance interval, and the purge worker wakes for it (#1226).
+            _coordinator.DeferredUndoRetryLimit = owner.EngineOptions.MaintenanceInterval;
+            _coordinator.DeferredUndoRetryDelay = owner.EngineOptions.DeferredUndoRetryDelay;
+            _coordinator.OnUndoDeferred = owner.UndoDeferredSignal.Set;
+        }
 
         // The format gate reads the catalog alone, before the primary index is
         // attached or recovery writes anything.
@@ -287,12 +308,93 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     /// (recovery classification stays sound). The catalog storage has no logical
     /// transactions above it and checkpoints directly.
     /// </summary>
-    internal void CheckpointDataStorage() => _coordinator.Checkpoint();
+    /// <param name="cancellationToken">Cancels the wait for the coordinator's apply gate.</param>
+    internal void CheckpointDataStorage(CancellationToken cancellationToken = default) => _coordinator.Checkpoint(cancellationToken);
+
+    /// <summary>
+    /// Checkpoints the data storage through the coordinator without waiting for a statement:
+    /// when one holds the apply gate, the checkpoint is deferred to its end
+    /// (<see cref="TransactionCoordinator.TryCheckpoint"/>), so the checkpoint worker never
+    /// waits on one database while the others' journals grow.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the attempt.</param>
+    /// <returns>True when the checkpoint ran; false when it was deferred to the statement applying.</returns>
+    internal bool TryCheckpointDataStorage(CancellationToken cancellationToken) => _coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken);
+
+    /// <summary>
+    /// The code that leads the message of every operation refused because the database is
+    /// offline (#1243).
+    /// </summary>
+    internal const string OfflineCode = "COHDBK002";
+
+    /// <summary>
+    /// Gets whether a failed durable flush of either file set took the database offline.
+    /// </summary>
+    internal bool IsOffline => OfflineError is not null;
+
+    /// <summary>
+    /// Gets the storage error that took the database offline, or null while it is online. Each
+    /// file set's <see cref="Assimalign.Cohesion.Database.Storage.Storage.OnOffline"/> takes the other offline the moment it goes
+    /// offline; reading the state takes both offline too, a backstop that costs nothing once
+    /// they are.
+    /// </summary>
+    internal StorageOfflineException? OfflineError
+    {
+        get
+        {
+            var error = _storage.OfflineError ?? _catalogStorage.OfflineError;
+            if (error is not null)
+            {
+                _storage.TakeOffline(error);
+                _catalogStorage.TakeOffline(error);
+            }
+
+            return error;
+        }
+    }
+
+    /// <summary>
+    /// Refuses an operation on an offline database with <see cref="DatabaseOfflineException"/>
+    /// (<see cref="OfflineCode"/>): every operation, in process and over the wire server, until
+    /// the database is reopened.
+    /// </summary>
+    /// <exception cref="DatabaseOfflineException">The database is offline.</exception>
+    internal void ThrowIfOffline()
+    {
+        if (OfflineError is { } error)
+        {
+            throw DatabaseOfflineException.Create(OfflineCode, Name, error);
+        }
+    }
+
+    /// <summary>
+    /// Translates a failure the storage's offline state caused into the coded refusal
+    /// (<see cref="DatabaseOfflineException"/>), or into
+    /// <see cref="DatabaseTransactionCommitUnconfirmedException"/> when a storage commit record
+    /// was written before its flush failed (<see cref="StorageOfflineException.CommitRecordWritten"/>),
+    /// so the work may survive the reopen. An unconfirmed commit that already has its own type is
+    /// returned unchanged, and so is any other failure.
+    /// </summary>
+    /// <param name="error">The failure to translate.</param>
+    /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
+    internal Exception TranslateOffline(Exception error)
+    {
+        if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
+            || StorageOfflineException.Find(error) is not { } offline)
+        {
+            return error;
+        }
+
+        return offline.CommitRecordWritten
+            ? DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, offline)
+            : DatabaseOfflineException.Create(OfflineCode, Name, OfflineError ?? offline);
+    }
 
     /// <inheritdoc />
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
 
         var executor = new KeyValueOperationExecutor(Name, _catalog, _storage, _primaryIndex);
@@ -401,6 +503,11 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
 
         _disposed = true;
 
+        // An offline database closes without writing anything (#1243): both file sets are
+        // taken offline, so the coordinator's aborts undo nothing, no registration is saved,
+        // and neither storage flushes at its close.
+        bool offline = OfflineError is not null;
+
         // The coordinator first: the manager aborts every still-active logical
         // transaction (undoing its stamps through the version store's ledger)
         // while the storage is still open. Synchronous over the ValueTask by
@@ -413,7 +520,10 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         try
         {
             _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            SaveIndexRegistrationsIfChanged();
+            if (!offline && !IsOffline)
+            {
+                SaveIndexRegistrationsIfChanged();
+            }
         }
         finally
         {
@@ -437,10 +547,16 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         }
 
         _disposed = true;
+
+        // See Dispose: an offline database closes without writing anything (#1243).
+        bool offline = OfflineError is not null;
         try
         {
             await _coordinator.DisposeAsync().ConfigureAwait(false);
-            SaveIndexRegistrationsIfChanged();
+            if (!offline && !IsOffline)
+            {
+                SaveIndexRegistrationsIfChanged();
+            }
         }
         finally
         {

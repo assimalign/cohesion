@@ -765,13 +765,14 @@ public sealed class DocumentTransactionFailureTests
         (await Ids(other)).ShouldBe(["other"]);
     }
 
-    // The engine's own maintenance workers stay out of the way: these tests drive the purge
-    // pass and the checkpoint themselves.
+    // The engine's own maintenance workers stay out of the way, the deferred-undo retry included:
+    // these tests drive the purge pass and the checkpoint themselves.
     private static DocumentDatabaseEngineOptions QuietOptions(FaultInjectingJournalStorageStrategy strategy) => new()
     {
         StorageStrategy = strategy,
         MaintenanceInterval = TimeSpan.FromHours(1),
         CheckpointInterval = TimeSpan.FromHours(1),
+        DeferredUndoRetryDelay = TimeSpan.FromHours(1),
     };
 
     private static async ValueTask FailAsync(string failure, IDocumentCollection collection, IDatabaseSession session, Document keep)

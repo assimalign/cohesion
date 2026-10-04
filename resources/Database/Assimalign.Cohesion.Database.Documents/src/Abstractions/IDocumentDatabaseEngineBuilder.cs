@@ -27,6 +27,12 @@ public interface IDocumentDatabaseEngineBuilder : IDatabaseEngineBuilder
     /// <inheritdoc cref="DocumentDatabaseEngineOptions.CheckpointInterval" />
     TimeSpan CheckpointInterval { get; set; }
 
+    /// <inheritdoc cref="DocumentDatabaseEngineOptions.CheckpointJournalSize" />
+    long CheckpointJournalSize { get; set; }
+
+    /// <inheritdoc cref="DocumentDatabaseEngineOptions.BufferPoolCapacity" />
+    long BufferPoolCapacity { get; set; }
+
     /// <inheritdoc cref="DocumentDatabaseEngineOptions.PageWriteBackInterval" />
     TimeSpan PageWriteBackInterval { get; set; }
 

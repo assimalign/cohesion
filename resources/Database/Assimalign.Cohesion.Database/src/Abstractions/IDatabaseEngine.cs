@@ -56,6 +56,19 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     IReadOnlyList<IDatabaseEngineWorker> Workers { get; }
 
     /// <summary>
+    /// Gets the names of the open databases that are offline: a durable flush of one of their
+    /// files failed, and every operation on them is refused with
+    /// <see cref="DatabaseOfflineException"/> until <see cref="OpenDatabaseAsync"/> reopens
+    /// them (#1243). Empty while every open database is online; a point-in-time snapshot.
+    /// </summary>
+    /// <remarks>
+    /// An offline database is a database the engine cannot serve, not a degraded engine, so it
+    /// does not change <see cref="State"/>; a host reports it through its health contribution
+    /// (Database.Hosting reports the application unhealthy).
+    /// </remarks>
+    IReadOnlyList<DatabaseName> OfflineDatabases { get; }
+
+    /// <summary>
     /// Gets the servers composed beneath this engine. The engine owns disposal;
     /// the application snapshots this list at Build and drives start and stop.
     /// </summary>
@@ -74,6 +87,13 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     /// <summary>
     /// Opens an existing logical database by name.
     /// </summary>
+    /// <remarks>
+    /// A database that went offline after a failed durable flush (every operation on it throws
+    /// <see cref="DatabaseOfflineException"/>) is reopened: the offline instance is closed without
+    /// writing anything, and the database is opened again from its files, whose recovery decides
+    /// the outcome of every commit that was not confirmed (#1243). The returned instance is a new
+    /// one; the offline instance stays refused.
+    /// </remarks>
     /// <param name="name">The name of the database to open.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The opened database instance.</returns>

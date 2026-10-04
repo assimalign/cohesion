@@ -14,6 +14,13 @@ members. A statement that fails inside an explicit transaction aborts the whole 
 the session refuses further statements and BEGIN with `COHDBD001` until the caller rolls back,
 and a commit fails without committing.
 
+A failed journal or data fsync takes the database offline: every later operation is refused
+with `DatabaseOfflineException` (`COHDBD002`) until `OpenDatabaseAsync` reopens it and recovery
+decides the unconfirmed commit (#1243). `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize`
+(256 MiB) and `CheckpointInterval` (5 minutes) size the buffer pool and trigger checkpoints
+(#1254); a failed undo is retried on a 100 ms backoff (#1226). See DESIGN.md, "Storage
+operations".
+
 ```csharp
 await using var engine = DocumentDatabaseEngine.Create(new());
 var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("shop");

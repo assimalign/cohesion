@@ -472,6 +472,68 @@ matching names, authenticator evidence, session limits, idle/authentication time
 lifecycle, engine-state rejection, both drain phases, and a blocked over-limit rejection. The
 client suite supplies in-memory end-to-end failure cases and the constrained-heap wire round trip.
 
+## Storage operations (#1243, #1254, #1226)
+
+**A failed fsync takes the database offline (#1243).** When a durable flush of the
+database's journal or data file fails, the storage goes offline (`Database.Storage`
+DESIGN.md, "A failed durable flush takes the storage offline") and nothing more is written to
+the file set, closing included — PostgreSQL's `PANIC` on a failed WAL fsync (`issue_xlog_fsync`,
+`src/backend/access/transam/xlog.c:9877-9937`; the commit critical section in
+`RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`; and `data_sync_retry`
+off, `src/backend/storage/file/fd.c:3966-3987`), scoped to the database.
+
+- The upload whose commit flush failed gets `DatabaseTransactionCommitUnconfirmedException` from
+  its stream's disposal. Before #1243 an upload's completion failures reached the caller
+  untranslated (the kernel's own exception types) because the upload stream's callbacks bypassed
+  the engine's translation; `BlobGuardedStream` now translates every write, flush, read and
+  disposal failure the way the other operations' failures are translated, and the upload's abort
+  records the translated cause.
+- Every later operation — a new session, a container call, `OpenWriteAsync`, `OpenReadAsync`, a
+  read from a download stream opened before the failure, that stream's disposal, BEGIN, and the
+  COMMIT or ROLLBACK of a transaction open at the failure — is refused with
+  `DatabaseOfflineException`, code `COHDBB002`, carrying the storage's `StorageOfflineException`.
+- `BlobDatabaseServer` answers an operation on an existing session, and a handshake for the
+  database, with `Unavailable` and the coded message.
+- A storage bracket whose commit record was written before its flush failed is reported as
+  unconfirmed, never refused (`StorageOfflineException.CommitRecordWritten`).
+- The engine stays `Running`; `BlobDatabaseEngine.OfflineDatabases` names the database, and
+  `Database.Hosting` reports the application unhealthy while it is listed.
+- The workers skip the database; closing its sessions, transactions and streams writes nothing.
+  `BlobDatabaseEngine.OpenDatabaseAsync(name)` disposes the offline instance without writing and
+  reopens the file set, whose recovery keeps the unconfirmed upload if its commit record's bytes
+  reached the media and aborts every transaction that was open.
+
+`BlobStorageOperationsTests` covers it in process and over the wire with a fault-injecting
+strategy over durable in-memory handles, reopening with and without the unconfirmed record's
+bytes; the open transaction and the download are readers, because the engine's single database
+writer lock would otherwise block the failing upload.
+
+**Buffer pool and checkpoint options (#1254).** `BlobDatabaseEngineOptions` (and
+`IBlobDatabaseEngineBuilder`) carry `BufferPoolCapacity` (32 MiB; whole 8 KiB pages, at least
+1 MiB), `CheckpointJournalSize` (256 MiB; zero for time only; not negative) and
+`CheckpointInterval` (5 minutes, was 30 seconds), all validated by `Create`. The checkpoint worker
+checkpoints a database when its journal reaches the size (its storage wakes the worker at once)
+or when the interval passed and its journal received records, looking at most once a second
+otherwise, through the transaction coordinator's apply gate. The worker never waits for the gate:
+a statement that holds it runs the checkpoint as it ends (`TransactionCoordinator.TryCheckpoint`),
+so a long upload bracket in one database cannot stop the other databases' checkpoints. An upload
+of one large object is a
+single transaction whose chunk brackets journal at least twice the object's size (the 128 MiB
+streaming fixture's upload reached the 256 MiB default), so a size-triggered checkpoint can run
+in the middle of it (a sharp checkpoint keeps the in-flight writer in its
+anchor); the streaming fixture, whose recovery image must keep a 128 MiB object's whole journal,
+sets `CheckpointJournalSize = 0`. An open database costs up to about 33 MiB of pool memory once it
+touched that many pages, plus, in memory, its data and its journal (up to the checkpoint size,
+briefly twice that while the buffer doubles past it, released by the checkpoint); the
+constrained-heap wire round trip (a 256 MiB object through a 64 MiB heap) passes with the default
+pool. The reasoning is in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint triggers").
+
+**Deferred undo is retried on its own backoff (#1226).** The version-purge worker retries a
+rollback's failed undo about 100 ms after the deferral, then at doubling delays up to
+`MaintenanceInterval`, so a transient failure releases the database writer lock within about a
+second (`Database.Transactions` DESIGN.md). A retry that fails makes the engine report
+`Faulted`; the first pass with no failure and no undo still deferred clears it.
+
 
 ## Phase 29: deferred hosting composition
 

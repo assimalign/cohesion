@@ -228,7 +228,18 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
         }
 
         // The server fronts one GraphDatabaseEngine, whose databases create graph sessions.
-        IDatabaseSession session = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
+        IDatabaseSession session;
+        try
+        {
+            session = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
+        }
+        catch (DatabaseOfflineException exception)
+        {
+            // The database went offline after a failed durable flush (#1243): every session is
+            // refused, with the coded reason, until it is reopened.
+            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message).ConfigureAwait(false);
+            return false;
+        }
         if (session is not GraphDatabaseSession graphSession)
         {
             await session.DisposeAsync().ConfigureAwait(false);
@@ -364,6 +375,13 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
         {
             // Statement-level failures keep the session in the ready state.
             await WriteErrorAsync(ProtocolErrorCode.ParseFailure, exception.Message, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        catch (DatabaseOfflineException exception)
+        {
+            // The database is offline (#1243): every statement is refused, with the coded
+            // reason, until it is reopened; the session stays ready to report it.
+            await WriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message, cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (DatabaseException exception)

@@ -41,6 +41,7 @@ internal sealed class GraphOperation
     internal void EnsureActive()
     {
         _database.ThrowIfDisposed();
+        _database.ThrowIfOffline();
         _session?.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
@@ -86,8 +87,10 @@ internal sealed class GraphOperation
                     // and refuses later statements until the caller rolls back (#1188).
                     await _transaction.AbortAsync(cause).ConfigureAwait(false);
                 }
-                else if (Context.State == TransactionState.Active)
+                else if (Context.State == TransactionState.Active && !_database.IsOffline)
                 {
+                    // An offline database undoes nothing (#1243): the reopen's recovery aborts
+                    // the operation's transaction.
                     await _database.Coordinator.RollbackAsync(_context).ConfigureAwait(false);
                 }
             }
@@ -121,7 +124,7 @@ internal sealed class GraphOperation
     private async ValueTask ReleaseSnapshotPinAsync()
     {
         var pin = Interlocked.Exchange(ref _snapshotPin, null);
-        if (pin?.State == TransactionState.Active)
+        if (pin?.State == TransactionState.Active && !_database.IsOffline)
         {
             await _database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
         }

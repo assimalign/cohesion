@@ -24,8 +24,19 @@ already applying, and the transaction's queued lock requests fail
 another thread therefore fails with `TransactionAbortedException` and leaves nothing
 stamped with the ended sequence. A started rollback always ends its transaction, even
 when its abort record or its undo fails (#1226); a writer whose undo failed keeps its
-granted locks, and stays in flight for every snapshot, until the coordinator's
-`RunVersionPurgePass` completes the undo.
+granted locks, and stays in flight for every snapshot, until a retry completes the undo.
+The retry runs on its own backoff — 100 ms after the deferral, doubling up to the engine's
+maintenance interval (`DeferredUndoRetryDelay`, `DeferredUndoRetryLimit`, `OnUndoDeferred`,
+`RetryDeferredUndo`) — so a transient failure releases the writer within about a second.
+
+A commit whose record was appended but whose durable flush failed is committed in memory and
+reported as `TransactionCommitUnconfirmedException`; the failed flush took the storage offline
+(#1243), so nothing more is written until the database is reopened, and the reopen's recovery
+decides whether the commit survived. The coordinator's checkpoint runs under the statement
+apply gate, so a size-triggered checkpoint cannot be starved by a sustained write load (#1254).
+`TryCheckpoint` never waits for a statement: when one holds the gate, it runs the checkpoint as
+it ends, so an engine's checkpoint worker is not held up by one database's long statement. A
+checkpoint asked for inside a statement apply is refused instead of waiting forever.
 
 ## Dependencies
 

@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Storage;
@@ -35,6 +36,17 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// (<see cref="RaiseLsnFloor"/>), because a checkpoint truncates the records that would
 /// otherwise witness the LSNs already stamped on data pages.
 /// </para>
+/// <para>
+/// <b>A failed durable flush takes the journal offline (#1243).</b> When a durable flush
+/// fails, the records appended since the last successful one may or may not be on stable
+/// storage, and a retry may report success for bytes the operating system already dropped
+/// (PostgreSQL's "fsyncgate"). The failing call throws <see cref="StorageOfflineException"/>,
+/// and every later append, flush and checkpoint of this instance throws it too, so nothing is
+/// written after the failure; only reads and the confirmation of an LSN that was already
+/// durable still succeed. Reopening the storage runs recovery, which decides what the journal
+/// holds. PostgreSQL raises <c>PANIC</c> on a failed WAL fsync for the same reason
+/// (<c>issue_xlog_fsync</c>, <c>src/backend/access/transam/xlog.c:9877-9937</c>).
+/// </para>
 /// </remarks>
 public abstract class StorageJournal : IStorageJournal
 {
@@ -43,6 +55,25 @@ public abstract class StorageJournal : IStorageJournal
     private long _durableLsn;
     private bool _initialized;
     private bool _disposed;
+
+    // Set once, by the first failed durable flush (or by the owning storage when a durable
+    // flush of its data file failed); never cleared. Guarded by _syncRoot for writes.
+    private StorageOfflineException? _offline;
+
+    // 1 once Offline was raised for the latch above, so it is raised exactly once.
+    private int _offlineRaised;
+
+    // The bytes of verified frames the journal holds since its last truncation, and the bytes
+    // the last full read scan verified.
+    private long _length;
+    private long _scannedLength;
+
+    // The size trigger: when an append takes the journal to _checkpointThreshold bytes or
+    // more, _checkpointNeeded is invoked once (outside the lock), and again only after the
+    // next checkpoint. Guarded by _syncRoot.
+    private long _checkpointThreshold;
+    private Action? _checkpointNeeded;
+    private bool _checkpointSignaled;
 
     /// <summary>
     /// Initializes a new journal instance.
@@ -66,6 +97,106 @@ public abstract class StorageJournal : IStorageJournal
         {
             EnsureInitialized();
             return _durableLsn;
+        }
+    }
+
+    /// <summary>
+    /// Gets the number of bytes of verified frames the journal holds since its last
+    /// truncation: what a recovery would read, and what a checkpoint would discard.
+    /// </summary>
+    public long Length
+    {
+        get
+        {
+            EnsureInitialized();
+            return Volatile.Read(ref _length);
+        }
+    }
+
+    /// <summary>
+    /// Gets the error that took this journal offline, or null while it is online. Once set it
+    /// stays set: every later append, flush and checkpoint throws a
+    /// <see cref="StorageOfflineException"/> carrying the same cause.
+    /// </summary>
+    public StorageOfflineException? OfflineError => Volatile.Read(ref _offline);
+
+    /// <summary>
+    /// Gets whether a failed durable flush took this journal offline.
+    /// </summary>
+    public bool IsOffline => OfflineError is not null;
+
+    /// <summary>
+    /// Takes the journal offline on behalf of its owner, when a durable flush of the owner's
+    /// data file failed: from now on the journal refuses every append, flush and checkpoint.
+    /// The first error to take the journal offline is kept.
+    /// </summary>
+    /// <param name="error">The error that took the owner offline.</param>
+    internal void TakeOffline(StorageOfflineException error)
+    {
+        try
+        {
+            lock (_syncRoot)
+            {
+                SetOfflineLocked(error);
+            }
+        }
+        finally
+        {
+            RaiseOffline();
+        }
+    }
+
+    /// <summary>
+    /// Invoked once, under the journal's lock, when the journal goes offline, so the owning
+    /// storage can release anything waiting for a flush that will never come. The handler must
+    /// not call back into the journal.
+    /// </summary>
+    internal Action? WentOffline;
+
+    /// <summary>
+    /// Invoked exactly once, with the error that took the journal offline, after the call that
+    /// took it offline released the journal's lock and before that call returns or throws: so a
+    /// caller that sees the failure sees it after the owner was told. The owning storage uses it
+    /// to raise <see cref="Storage.OnOffline"/>; the handler may take other journals' locks.
+    /// </summary>
+    internal Action<StorageOfflineException>? Offline;
+
+    /// <summary>
+    /// Raises <see cref="Offline"/> once the journal is offline and it was not raised yet. Called
+    /// outside the journal's lock, in the <c>finally</c> of every call that can take it offline.
+    /// </summary>
+    private void RaiseOffline()
+    {
+        if (Volatile.Read(ref _offline) is { } offline && Interlocked.Exchange(ref _offlineRaised, 1) == 0)
+        {
+            Offline?.Invoke(offline);
+        }
+    }
+
+    private void SetOfflineLocked(StorageOfflineException error)
+    {
+        if (_offline is null)
+        {
+            Volatile.Write(ref _offline, error);
+            WentOffline?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Arms the size trigger: once an append takes <see cref="Length"/> to
+    /// <paramref name="threshold"/> bytes or more, <paramref name="checkpointNeeded"/> is invoked
+    /// once, outside the journal's lock, and again only after the next checkpoint truncated the
+    /// journal. A threshold of zero or less disarms it.
+    /// </summary>
+    /// <param name="threshold">The journal length that asks for a checkpoint, in bytes.</param>
+    /// <param name="checkpointNeeded">The hook to invoke, or null.</param>
+    internal void ConfigureCheckpointTrigger(long threshold, Action? checkpointNeeded)
+    {
+        lock (_syncRoot)
+        {
+            _checkpointThreshold = threshold;
+            _checkpointNeeded = checkpointNeeded;
+            _checkpointSignaled = false;
         }
     }
 
@@ -118,16 +249,26 @@ public abstract class StorageJournal : IStorageJournal
             BinaryPrimitives.WriteInt64LittleEndian(payload.Slice(i * sizeof(long), sizeof(long)), activeTransactions[i]);
         }
 
-        lock (_syncRoot)
+        try
         {
-            TruncateCore();
-            long lsn = AppendLocked(0, JournalRecordType.Checkpoint, default, payload);
-            FlushCore(forceDurable);
-            if (forceDurable)
+            lock (_syncRoot)
             {
-                _durableLsn = _lastLsn;
+                ThrowIfOfflineLocked();
+                TruncateCore();
+                _length = 0;
+                _checkpointSignaled = false;
+                long lsn = AppendLocked(0, JournalRecordType.Checkpoint, default, payload);
+                FlushLocked(forceDurable);
+                if (forceDurable)
+                {
+                    _durableLsn = _lastLsn;
+                }
+                return lsn;
             }
-            return lsn;
+        }
+        finally
+        {
+            RaiseOffline();
         }
     }
 
@@ -154,37 +295,63 @@ public abstract class StorageJournal : IStorageJournal
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// An LSN that was already durable is confirmed even after the journal went offline: its
+    /// durability was established before the failure. Any other request on an offline journal
+    /// throws <see cref="StorageOfflineException"/>, and a durable flush that fails takes the
+    /// journal offline.
+    /// </remarks>
     public void EnsureDurable(long lsn)
     {
         ThrowIfDisposed();
         EnsureInitialized();
 
-        lock (_syncRoot)
+        try
         {
-            if (_durableLsn >= lsn)
+            lock (_syncRoot)
             {
-                return;
-            }
+                if (_durableLsn >= lsn)
+                {
+                    return;
+                }
 
-            FlushCore(forceDurable: true);
-            _durableLsn = _lastLsn;
+                ThrowIfOfflineLocked();
+                FlushLocked(forceDurable: true);
+                _durableLsn = _lastLsn;
+            }
+        }
+        finally
+        {
+            RaiseOffline();
         }
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// An offline journal refuses every flush with <see cref="StorageOfflineException"/>, and a
+    /// durable flush that fails takes the journal offline.
+    /// </remarks>
     public void Flush(bool forceDurable = false)
     {
         ThrowIfDisposed();
         EnsureInitialized();
 
-        lock (_syncRoot)
+        try
         {
-            FlushCore(forceDurable);
-
-            if (forceDurable)
+            lock (_syncRoot)
             {
-                _durableLsn = _lastLsn;
+                ThrowIfOfflineLocked();
+                FlushLocked(forceDurable);
+
+                if (forceDurable)
+                {
+                    _durableLsn = _lastLsn;
+                }
             }
+        }
+        finally
+        {
+            RaiseOffline();
         }
     }
 
@@ -244,9 +411,56 @@ public abstract class StorageJournal : IStorageJournal
         ThrowIfDisposed();
         EnsureInitialized();
 
+        long lsn;
+        Action? checkpointNeeded = null;
         lock (_syncRoot)
         {
-            return AppendLocked(transactionSequence, type, pageId, payload);
+            ThrowIfOfflineLocked();
+            lsn = AppendLocked(transactionSequence, type, pageId, payload);
+
+            if (_checkpointThreshold > 0 && _length >= _checkpointThreshold && !_checkpointSignaled)
+            {
+                _checkpointSignaled = true;
+                checkpointNeeded = _checkpointNeeded;
+            }
+        }
+
+        // Outside the lock: the hook only wakes a worker, which takes its own locks.
+        checkpointNeeded?.Invoke();
+        return lsn;
+    }
+
+    /// <summary>
+    /// Flushes under the append lock; a durable flush that fails takes the journal offline and
+    /// throws <see cref="StorageOfflineException"/> carrying the failure.
+    /// </summary>
+    private void FlushLocked(bool forceDurable)
+    {
+        if (!forceDurable)
+        {
+            FlushCore(forceDurable: false);
+            return;
+        }
+
+        try
+        {
+            FlushCore(forceDurable: true);
+        }
+        catch (Exception exception) when (exception is not (StorageOfflineException or ObjectDisposedException or NotSupportedException))
+        {
+            // NotSupportedException is a configuration error (a durable request on a handle that
+            // cannot flush durably), raised before any byte is flushed, not a failed fsync.
+            var offline = StorageOfflineException.Create("a durable flush of the journal", exception);
+            SetOfflineLocked(offline);
+            throw offline;
+        }
+    }
+
+    private void ThrowIfOfflineLocked()
+    {
+        if (_offline is { } offline)
+        {
+            throw StorageOfflineException.Refusal(offline);
         }
     }
 
@@ -274,6 +488,7 @@ public abstract class StorageJournal : IStorageJournal
 
         AppendFrame(frame);
         _lastLsn = lsn;
+        _length += frame.Length;
         return lsn;
     }
 
@@ -290,6 +505,7 @@ public abstract class StorageJournal : IStorageJournal
     private IEnumerable<JournalRecord> ReadRecordsCore()
     {
         long frameNumber = 0;
+        long verifiedLength = 0;
 
         foreach (var frame in ReadFrames())
         {
@@ -313,9 +529,13 @@ public abstract class StorageJournal : IStorageJournal
             var type = (JournalRecordType)body[17];
             long pageId = BinaryPrimitives.ReadInt64LittleEndian(body[18..]);
             var payload = frame[BodyHeaderSize..];
+            verifiedLength += FramePrefixSize + body.Length + sizeof(uint);
 
             yield return new JournalRecord(lsn, transactionSequence, type, (PageId)pageId, payload);
         }
+
+        // Reached only when the scan ran to the end of the verified frames.
+        _scannedLength = verifiedLength;
     }
 
     private void EnsureInitialized()
@@ -341,6 +561,7 @@ public abstract class StorageJournal : IStorageJournal
             }
 
             _lastLsn = lastLsn;
+            _length = _scannedLength;
             _initialized = true;
             // Reading existing bytes does not prove a durable flush occurred:
             // a reopened memory store or live OS cache may contain the same bytes.

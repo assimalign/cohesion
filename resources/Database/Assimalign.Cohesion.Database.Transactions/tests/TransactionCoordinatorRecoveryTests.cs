@@ -365,6 +365,118 @@ public class TransactionCoordinatorRecoveryTests
         announced.ShouldBe([JournalRecordType.BeginTransaction]);
     }
 
+    /// <summary>
+    /// A statement holds the apply gate. The bounded checkpoint does not wait for it: it returns
+    /// at once, and the statement runs the checkpoint as it ends, before it releases the gate, so
+    /// a long statement in one database never parks the engine's checkpoint worker (#1254 review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a held gate defers the checkpoint to the statement's end")]
+    public async Task TryCheckpoint_GateHeldByAStatement_ShouldDeferTheCheckpointToTheStatementsEnd()
+    {
+        // Arrange: a statement that holds the gate until the test releases it.
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        int checkpoints = 0;
+        storage.BeforeCheckpoint = _ => checkpoints++;
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var statement = coordinator.ApplyStatementAsync<int>(writer, async bracket =>
+        {
+            int slot = storage.Insert(bracket, Stamped(writer.Sequence, TransactionSequence.None)).SlotIndex;
+            entered.SetResult();
+            await release.Task;
+            return slot;
+        }, durable: false).AsTask();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Act
+        bool ranWhileHeld = coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None);
+        int checkpointsWhileHeld = checkpoints;
+        release.SetResult();
+        await statement.WaitAsync(TimeSpan.FromSeconds(10));
+        int checkpointsAtTheStatementsEnd = checkpoints;
+        bool ranWhenFree = coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None);
+
+        // Assert: deferred, run once by the statement's end, and run directly once the gate is free.
+        ranWhileHeld.ShouldBeFalse();
+        checkpointsWhileHeld.ShouldBe(0);
+        checkpointsAtTheStatementsEnd.ShouldBe(1);
+        ranWhenFree.ShouldBeTrue();
+        checkpoints.ShouldBe(2);
+        storage.CheckpointActiveTransactions.ShouldBe([(long)writer.Sequence.Value]);
+        await coordinator.CommitAsync(writer);
+    }
+
+    /// <summary>
+    /// The checkpoint a statement ran for a deferred request fails. The statement does not fail
+    /// for it: its own outcome was decided. The failure is thrown by the next bounded checkpoint,
+    /// so the engine's checkpoint worker learns of it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a deferred checkpoint's failure reaches the next checkpoint call, not the statement")]
+    public async Task TryCheckpoint_DeferredCheckpointFails_ShouldThrowFromTheNextCallNotTheStatement()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var failure = new InvalidOperationException("Injected checkpoint failure.");
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var statement = coordinator.ApplyStatementAsync<int>(writer, async bracket =>
+        {
+            int slot = storage.Insert(bracket, Stamped(writer.Sequence, TransactionSequence.None)).SlotIndex;
+            entered.SetResult();
+            await release.Task;
+            return slot;
+        }, durable: false).AsTask();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None).ShouldBeFalse();
+        storage.BeforeCheckpoint = _ => throw failure;
+
+        // Act
+        release.SetResult();
+        var statementError = await Record.ExceptionAsync(() => statement.WaitAsync(TimeSpan.FromSeconds(10)));
+        storage.BeforeCheckpoint = null;
+        var reported = Should.Throw<InvalidOperationException>(() => coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None));
+        bool ranAfterTheReport = coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None);
+
+        // Assert
+        statementError.ShouldBeNull();
+        reported.ShouldBeSameAs(failure);
+        ranAfterTheReport.ShouldBeTrue();
+        await coordinator.CommitAsync(writer);
+    }
+
+    /// <summary>
+    /// The apply gate is not reentrant. A checkpoint asked for from inside a statement apply would
+    /// wait for the gate its own caller holds, forever; it is refused at once instead (#1254 review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a checkpoint inside a statement apply is refused, not deadlocked")]
+    public async Task Checkpoint_InsideAStatementApply_ShouldBeRefusedNotDeadlocked()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        Exception? direct = null;
+        Exception? bounded = null;
+
+        // Act
+        await coordinator.ApplyStatementAsync<int>(writer, bracket =>
+        {
+            direct = Record.Exception(() => coordinator.Checkpoint());
+            bounded = Record.Exception(() => coordinator.TryCheckpoint(TimeSpan.FromSeconds(1), CancellationToken.None));
+            return ValueTask.FromResult(0);
+        }, durable: false).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        coordinator.Checkpoint();
+
+        // Assert: both refused inside; the same call succeeds once the statement completed.
+        direct.ShouldBeOfType<StorageTransactionException>();
+        bounded.ShouldBeOfType<StorageTransactionException>();
+        await coordinator.CommitAsync(writer);
+    }
+
     private static byte[] Stamped(TransactionSequence writer, TransactionSequence deleter)
     {
         var bytes = new byte[17];

@@ -79,13 +79,31 @@ nothing at all if it does not. No later transaction can be durable without it, b
 own commit record follows this one in the journal and a flush covers everything before the
 record it flushes.
 
-The cost is that other transactions can read the writer's effects before its record is
-known to be durable, which the write-ahead rule above otherwise excludes; it is the
-visibility PostgreSQL's asynchronous commit accepts (`synchronous_commit = off`). On a WAL
-flush that fails, PostgreSQL stops the server instead (`issue_xlog_fsync` raises `PANIC`,
-`src/backend/access/transam/xlog.c`), which leaves no session to read anything; this kernel
-keeps running and reports the uncertainty to the one caller it concerns. The area root carries the same outcome as `DatabaseTransactionCommitUnconfirmedException`,
-which every engine translates the kernel exception to, and which is not retryable.
+**The failed flush takes the database offline (#1243).** On a WAL flush that fails,
+PostgreSQL stops the server (`issue_xlog_fsync` raises `PANIC`,
+`src/backend/access/transam/xlog.c:9877-9937`; `RecordTransactionCommit` flushes the commit
+record inside a critical section, so any failure there is `PANIC` too,
+`src/backend/access/transam/xact.c:1470-1583`), because a retried fsync can report success for
+bytes the operating system already dropped. The storage does the equivalent without stopping
+the process: the failing flush latches the journal and the storage offline
+(`StorageOfflineException`, `COHDBS002`; `Database.Storage` DESIGN.md, "A failed durable flush
+takes the storage offline"), and the unconfirmed commit carries that exception as its inner
+exception (`StorageOfflineException.Find` locates it). From then on nothing is written to the
+database's files — no append, no checkpoint, no undo, no write-back, not even at close — and
+every engine refuses every operation on it, in process and over its wire server, with
+`DatabaseOfflineException` and the engine's own code, until the database is reopened. The
+reopen runs recovery over the journal as the media holds it, which keeps the commit if its
+record's bytes survived and undoes it if they did not: the caller's "unconfirmed" is decided
+exactly as a crash at that moment would decide it.
+
+So no other transaction reads the writer's effects before the outcome is known: the database
+refuses every statement once the flush failed, and the coordinator's close skips the undo of
+the transactions still active (`DisposeAsync` treats a refused abort on an offline storage as
+expected; the reopen's recovery aborts and scrubs them). Before #1243 the kernel kept running
+after the failure, other transactions could read the writer's effects, and the next commit's
+flush could succeed over records the failed one had lost. The area root carries the outcome as
+`DatabaseTransactionCommitUnconfirmedException`, which every engine translates the kernel
+exception to, and which is not retryable.
 
 ## Ending a transaction: a started rollback always completes (#1226)
 
@@ -160,9 +178,9 @@ too, unless it re-requests a lock it already holds as strongly: queued, it would
 wait-for graph, where a live transaction could be chosen as the deadlock victim of one that
 has already ended, and granted, it would be held until the undo completes. Its end claim
 keeps refusing its statement applies even though the active table still holds it. The manager owns
-this deferred undo. The coordinator's `RunVersionPurgePass` retries it, and when the
-undo completes the manager appends the abort record, removes the writer from the
-active table and releases its locks. Holding the locks until the undo completes follows
+this deferred undo. The coordinator retries it — `RetryDeferredUndo` when the retry schedule
+below says one is due, and every `RunVersionPurgePass` — and when the undo completes the manager
+appends the abort record, removes the writer from the active table and releases its locks. Holding the locks until the undo completes follows
 PostgreSQL, which holds regular locks "till we finish aborting" (`xact.c:2873`). Neo4j
 releases them in a `finally` whether or not its rollback threw
 (`community/kernel/.../KernelTransactionImplementation.java:1216-1229`, `1614-1623`;
@@ -178,10 +196,29 @@ locks are held until then (the factory's remarks say so).
 The cost of that rule is an availability one, and it is a deliberate departure from the
 literal wording of #1226's first acceptance criterion ("always releases the context's
 locks"): while an undo keeps failing, every writer that conflicts with the rolled-back
-one waits, up to one `MaintenanceInterval` (60 seconds by default) per retry. Graph,
-Documents and Blob take one database writer lock, so there that is every writer. The
-alternative, releasing first, trades the wait for reading rolled-back writes as
+one waits. Graph, Documents and Blob take one database writer lock, so there that is every
+writer. The alternative, releasing first, trades the wait for reading rolled-back writes as
 committed, which no engine may do.
+
+**The retry runs on its own backoff (#1226, owner decision of 2026-10-04).** Until then the
+only retry was the version-purge pass, one `MaintenanceInterval` (60 seconds by default) after
+the failure, so even a transient failure — one journal write refused — held every conflicting
+writer for a minute. Now the manager schedules the retry itself (`DeferredUndoBackoff`): the
+first is due `DeferredUndoRetryDelay` (100 ms) after the deferral, each retry that leaves a
+writer deferred doubles the delay up to `DeferredUndoRetryLimit` (the engine's maintenance
+interval), a new deferral starts the schedule over, and the schedule stops once nothing is
+deferred. The coordinator invokes `OnUndoDeferred` when an undo is deferred, which wakes the
+engine's version-purge worker; the worker sleeps no longer than `NextDeferredUndoRetry` and calls
+`RetryDeferredUndo`, which does nothing until a retry is due. A transient failure therefore
+releases the writer about 100 ms later: every engine's storage-operations test fails one undo
+journal write with an hour-long maintenance interval and has the next writer proceed within 1%
+of it (in practice a few hundred milliseconds). A failure that persists is retried at 0.1, 0.2,
+0.4 … seconds, then once per maintenance interval, so it cannot spin. The purge workers record a
+retry that fails again as a worker fault and keep running; before, the exception escaped the
+worker's pump loop and stopped the worker for good, leaving every deferred writer stuck until
+the database closed. The schedule reads a `TimeProvider` (the coordinator's internal
+constructor), so `DeferredUndoBackoffTests` and the coordinator's tests drive it without
+waiting.
 
 A journal failure inside the undo is an undo failure like any other. The undo's
 storage bracket fails to begin, to touch a page or to commit, rolls itself back, and
@@ -515,10 +552,45 @@ independent manager-table snapshot.
 
 Statement apply, logical undo, and pruning share one semaphore. Engine conflict
 locks are acquired before statement apply, keeping genuine lock waits outside
-that semaphore and visible to deadlock detection. Statement brackets commit
-non-durably unless the caller selects the existing durable DDL/bootstrap path;
-the logical commit makes earlier statement records durable by journal ordering.
-Open-time scrub remains ungated because no sessions exist yet.
+that semaphore and visible to deadlock detection. **The coordinator's checkpoint takes it
+too (#1254).** A storage checkpoint runs only while no storage bracket is active, and every
+bracket the coordinator opens runs under the semaphore, so `Checkpoint(CancellationToken)`
+waits for the statement applying now and runs before the next one is admitted. Without it a
+sustained statement load kept a bracket open almost all the time, the engines' checkpoint
+workers were refused as busy on nearly every pass, and the journal grew without bound; the
+engines' sustained-write tests (journal under four times a 4 MiB size) and the 1.5 GiB SQL
+measurement (peak 256.4 MiB at the 256 MiB default, `Database.Storage` DESIGN.md,
+"Measurements (#1254)") rest on it. Statement brackets commit non-durably unless the caller
+selects the existing durable DDL/bootstrap path; the logical commit makes earlier statement
+records durable by journal ordering. Open-time scrub remains ungated because no sessions exist
+yet.
+
+**The engines' checkpoint workers never wait for the semaphore (#1254 review).**
+`Checkpoint(CancellationToken)` waits for the statement applying now, and one statement can run
+for minutes (an index build or an `INSERT ... SELECT` applies in one bracket). Each engine has
+one checkpoint worker that visits its databases in turn, so that wait stopped every other
+database's checkpoints for as long as the statement ran; a review probe grew a second database's
+journal to 130 times a 4 MiB size in six seconds. The workers call
+`TryCheckpoint(TimeSpan.Zero, …)` instead. It checkpoints at once when the semaphore is free.
+When a statement holds it, it records a deferred request and returns false, and the statement
+runs the checkpoint as it ends, in `ApplyStatementAsync`'s `finally`, before it releases the
+semaphore: the busy database is checkpointed the moment its statement ends, whatever the
+statement's length, and the worker moves on to the others at once. The deferred checkpoint never
+fails the statement that runs it, whose outcome is already decided: a storage bracket still open
+outside the semaphore leaves the request for the next statement or the worker's next look, an
+offline storage drops it, and any other failure is kept and thrown by the next `TryCheckpoint`,
+so the worker records it. Short statements still cannot keep a checkpoint out, since every one
+of them ends by running the deferred request. `TransactionCoordinatorRecoveryTests` covers the
+deferral and the failure hand-off, and the SQL engine's
+`CheckpointJournalSize_LongStatementInAnotherDatabase_ShouldKeepTheJournalBounded` holds one
+database's gate while another is written past ten sizes, with the written database's journal
+under four sizes and the held one checkpointed as its statement ends.
+
+**A checkpoint is refused inside a statement apply.** The semaphore is not reentrant, so a
+checkpoint asked for from an `ApplyStatementAsync` callback would wait forever for the semaphore
+its own caller holds. The coordinator marks the apply's asynchronous flow (an `AsyncLocal`) and
+`Checkpoint` and `TryCheckpoint` throw `StorageTransactionException` there instead; before the
+review the call hung.
 
 Logical undo, pruning, and recovery scrub apply at most 64 record/index mutations
 per physical bracket. A blob transaction can contain many thousands of chunks;

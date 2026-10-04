@@ -49,6 +49,10 @@ internal static class Program
             EngineName = "blob-process-fixture",
             RootPath = root,
             CheckpointInterval = TimeSpan.FromHours(1),
+
+            // No size-triggered checkpoint either (#1254): the round trip's recovery image must
+            // keep the large object's whole journal, which outgrows the 256 MiB default.
+            CheckpointJournalSize = 0,
             PageWriteBackInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
             PageWriteBackBatchSize = 4096

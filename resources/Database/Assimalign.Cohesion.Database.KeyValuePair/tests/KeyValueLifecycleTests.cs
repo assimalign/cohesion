@@ -102,9 +102,12 @@ public sealed class KeyValueLifecycleTests
         // Arrange: the blocker holds the lock of a fresh key; the waiter wrote another key first.
         var (engine, database) = await CreateAsync(options =>
         {
+            // The engine's maintenance stays out of the way, the deferred-undo retry included:
+            // the test drives the purge pass itself.
             options.StorageStrategy = new FaultInjectingJournalStorageStrategy();
             options.MaintenanceInterval = TimeSpan.FromHours(1);
             options.CheckpointInterval = TimeSpan.FromHours(1);
+            options.DeferredUndoRetryDelay = TimeSpan.FromHours(1);
         });
         await using var _ = engine;
         var instance = (Internal.KeyValueDatabaseInstance)database;

@@ -46,6 +46,18 @@ internal sealed class GraphDatabaseEngineBuilder : IGraphDatabaseEngineBuilder
         set { _state.EnsureMutable(); _options.CheckpointInterval = value; }
     }
 
+    public long CheckpointJournalSize
+    {
+        get => _options.CheckpointJournalSize;
+        set { _state.EnsureMutable(); _options.CheckpointJournalSize = value; }
+    }
+
+    public long BufferPoolCapacity
+    {
+        get => _options.BufferPoolCapacity;
+        set { _state.EnsureMutable(); _options.BufferPoolCapacity = value; }
+    }
+
     public TimeSpan PageWriteBackInterval
     {
         get => _options.PageWriteBackInterval;

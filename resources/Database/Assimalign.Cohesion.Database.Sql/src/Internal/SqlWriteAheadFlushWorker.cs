@@ -62,22 +62,35 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseEngineWorker
         // again and is picked up by the next pass instead of being lost.
         _commitPending.Reset();
 
-        foreach (SqlStorage storage in _engine.GetStorageSnapshot())
+        foreach (SqlDatabaseInstance database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {
                 break;
             }
 
-            try
+            // An offline database flushes nothing (#1243): its waiting committers were released
+            // when it went offline, and each gets the refusal from its own flush.
+            if (database.IsOffline)
             {
-                storage.FlushPendingCommits();
+                continue;
             }
-            catch (ObjectDisposedException)
-            {
-                // The snapshot can race a database drop; a disposed storage has no
-                // committers left to serve.
-            }
+
+            FlushPending(database.DataStorage);
+            FlushPending(database.CatalogStorage);
+        }
+    }
+
+    private static void FlushPending(SqlStorage storage)
+    {
+        try
+        {
+            storage.FlushPendingCommits();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The snapshot can race a database drop; a disposed storage has no
+            // committers left to serve.
         }
     }
 }

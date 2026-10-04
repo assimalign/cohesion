@@ -43,6 +43,12 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     private readonly List<IDatabaseEngineWorker> _customWorkers = [];
     private readonly ManualResetEventSlim _commitPendingSignal = new();
     private readonly Action _signalCommitPending;
+
+    // Woken by a storage whose journal reached the checkpoint size, and by a coordinator that
+    // deferred an undo, so the checkpoint and version-purge workers act at once (#1254, #1226).
+    private readonly ManualResetEventSlim _checkpointNeededSignal = new();
+    private readonly ManualResetEventSlim _undoDeferredSignal = new();
+    private readonly int _bufferPoolPages;
     private readonly List<Thread> _workerThreads = new();
     private readonly CancellationTokenSource _workerStopSource = new();
     private readonly ISqlStorageStrategy _strategy;
@@ -50,7 +56,13 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
 
     private SqlStorage[] _storageSnapshot = [];
     private SqlDatabaseInstance[] _instanceSnapshot = [];
+
+    // A worker that died (its pump ended on an exception): kept for the engine's lifetime.
     private Exception? _workerFault;
+
+    // The last failure a running worker reported (the version-purge worker's failed retry of a
+    // deferred undo); cleared by that worker's next clean pass.
+    private Exception? _maintenanceFault;
     private bool _disposed;
 
     /// <summary>
@@ -58,11 +70,19 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     /// </summary>
     internal const string CatalogSuffix = ".catalog";
 
+    /// <summary>
+    /// The buffer pool of a catalog file set, in pages (1 MiB): a catalog holds table and index
+    /// definitions, a handful of pages, so <see cref="SqlDatabaseEngineOptions.BufferPoolCapacity"/>
+    /// sizes the data file set alone.
+    /// </summary>
+    internal const int CatalogBufferPoolPages = 128;
+
     private SqlDatabaseEngine(SqlDatabaseEngineOptions options)
     {
         _options = options;
         Name = options.EngineName ?? "sql-engine";
         _signalCommitPending = _commitPendingSignal.Set;
+        _bufferPoolPages = Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
 
         // Captured once, already validated by Create: a later change to the options object
         // never changes what the running engine accepts.
@@ -109,7 +129,27 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 return EngineState.Disposed;
             }
 
-            return Volatile.Read(ref _workerFault) is null ? EngineState.Running : EngineState.Faulted;
+            return Volatile.Read(ref _workerFault) is null && Volatile.Read(ref _maintenanceFault) is null
+                ? EngineState.Running
+                : EngineState.Faulted;
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<DatabaseName> OfflineDatabases
+    {
+        get
+        {
+            List<DatabaseName>? offline = null;
+            foreach (var database in GetInstanceSnapshot())
+            {
+                if (database.IsOffline)
+                {
+                    (offline ??= []).Add(database.Name);
+                }
+            }
+
+            return offline is null ? [] : offline.AsReadOnly();
         }
     }
 
@@ -151,6 +191,34 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     internal SqlDatabaseInstance[] GetInstanceSnapshot() => Volatile.Read(ref _instanceSnapshot);
 
     /// <summary>
+    /// Gets the signal a storage sets when its journal reaches
+    /// <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/>; the checkpoint worker waits on it.
+    /// </summary>
+    internal ManualResetEventSlim CheckpointNeededSignal => _checkpointNeededSignal;
+
+    /// <summary>
+    /// Gets the signal a database's coordinator sets when it defers an undo; the version-purge
+    /// worker waits on it so the first retry runs about 100 ms later, not a maintenance interval.
+    /// </summary>
+    internal ManualResetEventSlim UndoDeferredSignal => _undoDeferredSignal;
+
+    /// <summary>
+    /// Records a background worker's failure without stopping the worker: the engine reports
+    /// <see cref="EngineState.Faulted"/> and the worker's next pass runs as usual. The version-purge
+    /// worker reports a failed retry of a deferred undo here, and clears it
+    /// (<see cref="ClearWorkerFault"/>) once a pass runs clean.
+    /// </summary>
+    /// <param name="exception">The failure.</param>
+    internal void ReportWorkerFault(Exception exception) => Volatile.Write(ref _maintenanceFault, exception);
+
+    /// <summary>
+    /// Clears the failure <see cref="ReportWorkerFault"/> recorded, after the reporting worker's
+    /// next pass ran without one: a deferred undo that failed while its fault lasted and then
+    /// completed leaves nothing degraded (#1226 review). A worker that died stays recorded.
+    /// </summary>
+    internal void ClearWorkerFault() => Volatile.Write(ref _maintenanceFault, null);
+
+    /// <summary>
     /// Creates a new SQL database engine from options. The engine is operational —
     /// background workers running — when this method returns.
     /// </summary>
@@ -159,7 +227,11 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <see cref="SqlDatabaseEngineOptions.ExpressionNestingLimit"/> is outside
-    /// <see cref="SqlQueryParserOptions.MinimumExpressionNestingLimit"/>..<see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>.
+    /// <see cref="SqlQueryParserOptions.MinimumExpressionNestingLimit"/>..<see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>;
+    /// <see cref="SqlDatabaseEngineOptions.BufferPoolCapacity"/> is not a whole number of 8 KiB pages of at
+    /// least 1 MiB; <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/> is negative; or
+    /// <see cref="SqlDatabaseEngineOptions.CheckpointInterval"/> or
+    /// <see cref="SqlDatabaseEngineOptions.MaintenanceInterval"/> is not positive.
     /// </exception>
     public static SqlDatabaseEngine Create(SqlDatabaseEngineOptions options)
     {
@@ -173,6 +245,11 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 $"{nameof(SqlDatabaseEngineOptions.ExpressionNestingLimit)} must be between " +
                 $"{SqlQueryParserOptions.MinimumExpressionNestingLimit} and {SqlQueryParserOptions.MaximumExpressionNestingLimit} levels.");
         }
+
+        Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
+        ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.CheckpointInterval, TimeSpan.Zero, nameof(options.CheckpointInterval));
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaintenanceInterval, TimeSpan.Zero, nameof(options.MaintenanceInterval));
 
         return new SqlDatabaseEngine(options);
     }
@@ -218,9 +295,9 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             // the whole self-help window.
             try
             {
-                ConfigureStorage(storage, name);
+                ConfigureStorage(storage, name, catalog: false);
                 catalogStorage = _strategy.CreateStorage(name + CatalogSuffix);
-                ConfigureStorage(catalogStorage, name + CatalogSuffix);
+                ConfigureStorage(catalogStorage, name + CatalogSuffix, catalog: true);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
                 var catalog = SqlCatalog.Open(catalogStorage, defaultCollation);
                 var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, catalog, recover: false);
@@ -260,7 +337,17 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         {
             if (_databases.TryGetValue(name, out var existing))
             {
-                return new ValueTask<IDatabase>(existing);
+                if (existing is not SqlDatabaseInstance { IsOffline: true } offline)
+                {
+                    return new ValueTask<IDatabase>(existing);
+                }
+
+                // The database went offline after a failed durable flush (#1243): reopening it
+                // is the one way back. Its close writes nothing, and the open below runs
+                // recovery, which decides the outcome of every commit that was not confirmed.
+                _databases.Remove(name);
+                RebuildStorageSnapshotLocked();
+                offline.Dispose();
             }
 
             if (!_strategy.StorageExists(name))
@@ -305,7 +392,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             // nothing, so it may run before the snapshot is published.
             try
             {
-                ConfigureStorage(catalogStorage, name + CatalogSuffix);
+                ConfigureStorage(catalogStorage, name + CatalogSuffix, catalog: true);
                 var catalog = SqlCatalog.Open(catalogStorage);
                 SqlDatabaseInstance.ThrowIfFormatIsNotCurrent(name, catalog);
 
@@ -318,7 +405,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                     throw RefuseStorageFormat(name, "data", name, exception);
                 }
 
-                ConfigureStorage(storage, name);
+                ConfigureStorage(storage, name, catalog: false);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
                 var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, catalog, recover: true);
                 _databases[name] = database;
@@ -536,6 +623,8 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         }
         _workerStopSource.Dispose();
         _commitPendingSignal.Dispose();
+        _checkpointNeededSignal.Dispose();
+        _undoDeferredSignal.Dispose();
         if (failures.Count != 0)
         {
             throw new AggregateException("Engine disposal encountered failures.", failures);
@@ -543,14 +632,21 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     }
     /// <summary>
     /// Configures a freshly created or opened storage file set with the engine's
-    /// durability policy and wires its commit-pending hook to the engine's flush
-    /// worker signal.
+    /// durability policy, its buffer pool capacity and checkpoint size (#1254), and wires
+    /// its commit-pending and checkpoint-needed hooks to the engine's worker signals.
     /// </summary>
-    private void ConfigureStorage(SqlStorage storage, string storageName)
+    /// <remarks>
+    /// The engine sets the pool on whatever storage its strategy returns, so a custom
+    /// <see cref="ISqlStorageStrategy"/> needs no knowledge of the option.
+    /// </remarks>
+    private void ConfigureStorage(SqlStorage storage, string storageName, bool catalog)
     {
         storage.ConfigureCommitDurability(_options.Durability, $"{_strategy.GetType().Name} ({storageName})");
         storage.GroupCommitWindow = _options.GroupCommitWindow;
         storage.OnCommitPending = _signalCommitPending;
+        storage.BufferPoolCapacity = catalog ? CatalogBufferPoolPages : _bufferPoolPages;
+        storage.CheckpointJournalSize = _options.CheckpointJournalSize;
+        storage.OnCheckpointNeeded = _checkpointNeededSignal.Set;
     }
 
     /// <summary>

@@ -27,6 +27,12 @@ public interface IGraphDatabaseEngineBuilder : IDatabaseEngineBuilder
     /// <inheritdoc cref="GraphDatabaseEngineOptions.CheckpointInterval" />
     TimeSpan CheckpointInterval { get; set; }
 
+    /// <inheritdoc cref="GraphDatabaseEngineOptions.CheckpointJournalSize" />
+    long CheckpointJournalSize { get; set; }
+
+    /// <inheritdoc cref="GraphDatabaseEngineOptions.BufferPoolCapacity" />
+    long BufferPoolCapacity { get; set; }
+
     /// <inheritdoc cref="GraphDatabaseEngineOptions.PageWriteBackInterval" />
     TimeSpan PageWriteBackInterval { get; set; }
 

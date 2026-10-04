@@ -19,6 +19,15 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
         Engine = engine;
         DataStorage = storage;
         Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        if (engine is BlobDatabaseEngine owner)
+        {
+            // A deferred undo is retried on its own backoff, from about 100 ms up to the
+            // maintenance interval, and the purge worker wakes for it (#1226).
+            Coordinator.DeferredUndoRetryLimit = owner.EngineOptions.MaintenanceInterval;
+            Coordinator.DeferredUndoRetryDelay = owner.EngineOptions.DeferredUndoRetryDelay;
+            Coordinator.OnUndoDeferred = owner.UndoDeferredSignal.Set;
+        }
+
         if (recover)
         {
             Coordinator.AnalyzeAndScrub();
@@ -36,8 +45,58 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
         return new ValueTask<IDatabaseSession>(new BlobDatabaseSession(this));
+    }
+
+    /// <summary>
+    /// The code that leads the message of every operation refused because the database is
+    /// offline (#1243).
+    /// </summary>
+    internal const string OfflineCode = "COHDBB002";
+
+    /// <summary>
+    /// Gets whether a failed durable flush took the database offline.
+    /// </summary>
+    internal bool IsOffline => DataStorage.IsOffline;
+
+    /// <summary>
+    /// Refuses an operation on an offline database with <see cref="DatabaseOfflineException"/>
+    /// (<see cref="OfflineCode"/>): every operation, in process and over the wire server, until
+    /// the database is reopened.
+    /// </summary>
+    /// <exception cref="DatabaseOfflineException">The database is offline.</exception>
+    internal void ThrowIfOffline()
+    {
+        if (DataStorage.OfflineError is { } error)
+        {
+            throw DatabaseOfflineException.Create(OfflineCode, Name, error);
+        }
+    }
+
+    /// <summary>
+    /// Translates a failure the storage's offline state caused into the coded refusal
+    /// (<see cref="DatabaseOfflineException"/>), or into
+    /// <see cref="DatabaseTransactionCommitUnconfirmedException"/> when a storage commit record
+    /// was written before its flush failed
+    /// (<see cref="Assimalign.Cohesion.Database.Storage.StorageOfflineException.CommitRecordWritten"/>),
+    /// so the work may survive the reopen. An unconfirmed commit that already has its own type is
+    /// returned unchanged, and so is any other failure.
+    /// </summary>
+    /// <param name="error">The failure to translate.</param>
+    /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
+    internal Exception TranslateOffline(Exception error)
+    {
+        if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
+            || Assimalign.Cohesion.Database.Storage.StorageOfflineException.Find(error) is not { } offline)
+        {
+            return error;
+        }
+
+        return offline.CommitRecordWritten
+            ? DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, offline)
+            : DatabaseOfflineException.Create(OfflineCode, Name, DataStorage.OfflineError ?? offline);
     }
 
     public ValueTask<IBlobContainer> CreateContainerAsync(string name, CancellationToken cancellationToken = default)
@@ -129,6 +188,7 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
     internal async ValueTask<BlobOperation> BeginOperationAsync(BlobDatabaseSession? session, CancellationToken token)
     {
         ThrowIfDisposed();
+        ThrowIfOffline();
         token.ThrowIfCancellationRequested();
         var explicitTransaction = session?.ReserveOperation();
         BlobOperation? operation = null;
@@ -142,11 +202,14 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
         }
         catch (Exception error)
         {
+            var reported = TranslateOffline(error);
             if (operation is not null)
             {
-                await operation.AbortAsync(error).ConfigureAwait(false);
+                await operation.AbortAsync(reported).ConfigureAwait(false);
             }
-            throw;
+
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
         }
         finally
         {
@@ -166,11 +229,25 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
         catch (Exception error)
         {
             // An explicit transaction records the error its caller sees as the cause of its abort.
-            var reported = TranslateKernelFailure(error);
+            // A failure the offline storage caused is reported with the database's offline code
+            // (#1243); the unconfirmed commit that took it offline keeps its own type.
+            var reported = TranslateFailure(error);
             await operation.AbortAsync(reported).ConfigureAwait(false);
             if (ReferenceEquals(reported, error)) { throw; }
             throw reported;
         }
+    }
+
+    /// <summary>
+    /// Translates an operation's failure: one the offline storage caused becomes the coded
+    /// refusal (#1243), any other kernel failure the area root's exception.
+    /// </summary>
+    /// <param name="error">The failure to translate.</param>
+    /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
+    internal Exception TranslateFailure(Exception error)
+    {
+        var offline = TranslateOffline(error);
+        return ReferenceEquals(offline, error) ? TranslateKernelFailure(error) : offline;
     }
 
     /// <summary>

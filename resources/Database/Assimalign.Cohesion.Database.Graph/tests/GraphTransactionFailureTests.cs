@@ -666,6 +666,9 @@ public sealed class GraphTransactionFailureTests
         StorageStrategy = strategy,
         MaintenanceInterval = TimeSpan.FromHours(1),
         CheckpointInterval = TimeSpan.FromHours(1),
+
+        // The deferred-undo retry stays out of the way too: these tests drive the purge pass.
+        DeferredUndoRetryDelay = TimeSpan.FromHours(1),
     };
 
     private static async Task<List<QueryRow>> Rows(IDatabaseSession session, string gql)

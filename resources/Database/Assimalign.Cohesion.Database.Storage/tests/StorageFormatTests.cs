@@ -412,14 +412,14 @@ public sealed class StorageFormatTests
     }
 
     /// <summary>
-    /// A header write whose slot write was issued and then failed — an fsync that reports an
-    /// error, say — may have left that slot on the media as the newest generation. A retry would
+    /// A header write whose slot write was issued and then failed — the write itself reported an
+    /// error — may have left that slot on the media as the newest generation. A retry would
     /// rewrite the slot's anchor chain in place under it, so the storage refuses every later
     /// header write until it is reopened, and its close flushes the journal without one; the
     /// reopen finds a whole generation either way.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a failure after the slot write was issued stops header writes until a reopen")]
-    public void Checkpoint_SlotFlushFailsAfterTheWrite_ShouldRefuseLaterHeaderWritesUntilReopened()
+    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a failed slot write stops header writes until a reopen")]
+    public void Checkpoint_SlotWriteFails_ShouldRefuseLaterHeaderWritesUntilReopened()
     {
         // Arrange: both slots chain anchor pages (generation 2 in slot 1, 3 in slot 0).
         long[] Anchor(int salt) => [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + 50).Select(i => (long)(i * 10) + salt)];
@@ -428,7 +428,7 @@ public sealed class StorageFormatTests
         storage.Checkpoint(Anchor(1));
         storage.Checkpoint(Anchor(2));
         int target = 1 - storage.HeaderState.Slot;
-        storage.DataFaults.FailFlushAfterWriteAt = StorageHeaderPage.SlotOffset(target);
+        storage.DataFaults.FailWriteAt = StorageHeaderPage.SlotOffset(target);
 
         // Act
         Should.Throw<IOException>(() => storage.Checkpoint(Anchor(3)));
@@ -443,26 +443,66 @@ public sealed class StorageFormatTests
         using var reopened = TornStorage.Open(storage.CaptureDurable());
 
         // Assert: nothing was written for the refused header writes, the close wrote no header,
-        // and the reopen found the failed attempt's whole generation (the write landed).
-        storage.DataFaults.FailedFlushes.ShouldBe(1);
+        // and the reopen found the previous generation (this failed write wrote nothing) with the
+        // journal that describes everything since.
         storage.HeaderFaulted.ShouldBeTrue();
+        storage.IsOffline.ShouldBeFalse();
         refusal.Message.ShouldContain("Reopen the storage");
         flushRefusal.Message.ShouldContain("Reopen the storage");
         writesAfterTheRefusals.ShouldBe(writesAfterTheFault);
         dataWritesAtClose.ShouldBe(0);
-        reopened.HeaderState.Generation.ShouldBe(4L);
-        reopened.CheckpointActiveTransactions.ShouldBe(Anchor(3));
+        reopened.HeaderState.Generation.ShouldBe(3L);
+        reopened.CheckpointActiveTransactions.ShouldBe(Anchor(2));
         reopened.Read(pageId, slot).ShouldBe("after the fault");
         reopened.HeaderFaulted.ShouldBeFalse();
     }
 
     /// <summary>
-    /// A failure before the slot write is issued leaves the slot it targets older than the
-    /// newest one on the media, so its chain may be rewritten: only a failure after the slot
-    /// write stops header writes.
+    /// The durable flush after a slot write fails: the slot may be on the media as the newest
+    /// generation, and the write-backs before it may have been dropped. The storage goes offline
+    /// (#1243), which refuses every later header write and every other write too, and its close
+    /// writes nothing; the reopen finds the failed attempt's whole generation (the write landed).
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a failure before the slot write leaves header writes allowed")]
-    public void Checkpoint_FlushFailsBeforeTheSlotWrite_ShouldAllowTheRetry()
+    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a failed flush after the slot write takes the storage offline")]
+    public void Checkpoint_SlotFlushFailsAfterTheWrite_ShouldTakeTheStorageOffline()
+    {
+        // Arrange: both slots chain anchor pages (generation 2 in slot 1, 3 in slot 0).
+        long[] Anchor(int salt) => [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + 50).Select(i => (long)(i * 10) + salt)];
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point);
+        storage.Checkpoint(Anchor(1));
+        storage.Checkpoint(Anchor(2));
+        int target = 1 - storage.HeaderState.Slot;
+        storage.DataFaults.FailFlushAfterWriteAt = StorageHeaderPage.SlotOffset(target);
+
+        // Act
+        var error = Should.Throw<StorageOfflineException>(() => storage.Checkpoint(Anchor(3)));
+        int writesAfterTheFault = point.Writes;
+        var refusal = Should.Throw<StorageOfflineException>(() => storage.Checkpoint(Anchor(4)));
+        var flushRefusal = Should.Throw<StorageOfflineException>(() => storage.FlushHeader());
+        var insertRefusal = Should.Throw<StorageOfflineException>(() => storage.Insert("after the fault"));
+        storage.Dispose();
+        using var reopened = TornStorage.Open(storage.CaptureDurable());
+
+        // Assert
+        error.InnerException.ShouldBeOfType<IOException>();
+        storage.DataFaults.FailedFlushes.ShouldBe(1);
+        storage.HeaderFaulted.ShouldBeTrue();
+        new[] { refusal, flushRefusal, insertRefusal }.ShouldAllBe(e => e.InnerException == error.InnerException);
+        point.Writes.ShouldBe(writesAfterTheFault);
+        reopened.HeaderState.Generation.ShouldBe(4L);
+        reopened.CheckpointActiveTransactions.ShouldBe(Anchor(3));
+        reopened.HeaderFaulted.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A write that fails before the slot write is issued leaves the slot it targets older than
+    /// the newest one on the media, so its chain may be rewritten: only a failure after the slot
+    /// write stops header writes. (A failed durable flush is different at any point: it takes the
+    /// storage offline, <see cref="StorageOfflineTests"/>.)
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a write failure before the slot write leaves header writes allowed")]
+    public void Checkpoint_WriteFailsBeforeTheSlotWrite_ShouldAllowTheRetry()
     {
         // Arrange: slot 1's chain is the one the third checkpoint rewrites.
         long[] Anchor(int salt) => [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + 50).Select(i => (long)(i * 10) + salt)];
@@ -470,7 +510,7 @@ public sealed class StorageFormatTests
         storage.Checkpoint(Anchor(1));
         long chainPage = storage.AnchorChainPages[0];
         storage.Checkpoint(Anchor(2));
-        storage.DataFaults.FailFlushAfterWriteAt = chainPage * Page.Size;
+        storage.DataFaults.FailWriteAt = chainPage * Page.Size;
 
         // Act
         Should.Throw<IOException>(() => storage.Checkpoint(Anchor(3)));
@@ -479,10 +519,40 @@ public sealed class StorageFormatTests
         using var reopened = TornStorage.Open(storage.CaptureDurable());
 
         // Assert
-        storage.DataFaults.FailedFlushes.ShouldBe(1);
         faulted.ShouldBeFalse();
+        storage.IsOffline.ShouldBeFalse();
         reopened.HeaderState.Generation.ShouldBe(4L);
         reopened.CheckpointActiveTransactions.ShouldBe(Anchor(4));
+    }
+
+    /// <summary>
+    /// The durable flush of the anchor chain fails before the slot write: the chain pages are
+    /// recorded clean although the operating system may have dropped them, so a retry could not
+    /// rewrite them. The storage goes offline, and the reopen finds the previous generation.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a failed flush before the slot write takes the storage offline")]
+    public void Checkpoint_FlushFailsBeforeTheSlotWrite_ShouldTakeTheStorageOffline()
+    {
+        // Arrange: slot 1's chain is the one the third checkpoint rewrites.
+        long[] Anchor(int salt) => [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + 50).Select(i => (long)(i * 10) + salt)];
+        var storage = TornStorage.Create();
+        storage.Checkpoint(Anchor(1));
+        long chainPage = storage.AnchorChainPages[0];
+        storage.Checkpoint(Anchor(2));
+        storage.DataFaults.FailFlushAfterWriteAt = chainPage * Page.Size;
+
+        // Act
+        Should.Throw<StorageOfflineException>(() => storage.Checkpoint(Anchor(3)));
+        var retry = Should.Throw<StorageOfflineException>(() => storage.Checkpoint(Anchor(4)));
+        storage.Dispose();
+        using var reopened = TornStorage.Open(storage.CaptureDurable());
+
+        // Assert
+        retry.Message.ShouldStartWith(StorageOfflineException.ErrorCode, Case.Sensitive);
+        storage.DataFaults.FailedFlushes.ShouldBe(1);
+        storage.HeaderFaulted.ShouldBeFalse();
+        reopened.HeaderState.Generation.ShouldBe(3L);
+        reopened.CheckpointActiveTransactions.ShouldBe(Anchor(2));
     }
 
     // ---------------------------------------------------------------- torn data pages

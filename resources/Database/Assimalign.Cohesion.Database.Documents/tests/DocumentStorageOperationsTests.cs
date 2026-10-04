@@ -1,0 +1,270 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
+using Shouldly;
+using Xunit;
+
+namespace Assimalign.Cohesion.Database.Documents.Tests;
+
+/// <summary>
+/// Storage operations of the document engine: a failed journal fsync takes the database offline
+/// until it is reopened (#1243), the buffer pool and the checkpoint triggers are options (#1254),
+/// and a deferred undo is retried on its own backoff (#1226). Documents has no wire server, so
+/// every refusal is checked in process.
+/// </summary>
+public sealed class DocumentStorageOperationsTests
+{
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
+    /// every operation — a new session, a read, a write, a query, BEGIN, COMMIT and ROLLBACK of an
+    /// open transaction — is refused with COHDBD002, and nothing reaches the file set, through the
+    /// workers' passes and the sessions' close included. Reopening the database runs recovery,
+    /// which keeps the commit when its record's bytes survived and drops it when they were lost
+    /// with the failed fsync.
+    /// </summary>
+    /// <param name="recordSurvives">False to reopen with only the journal bytes a durable flush confirmed.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Offline: a failed journal fsync refuses every operation until the reopen, whose recovery decides")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Commit_JournalFsyncFails_ShouldRefuseEveryOperationUntilReopened(bool recordSurvives)
+    {
+        // Arrange: quiet workers, so none of them makes the commit record durable before the
+        // committer's own fsync; the test runs their passes itself after the failure.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true) { LoseUnconfirmedJournalOnReopen = !recordSurvives };
+        await using var engine = DocumentDatabaseEngine.Create(new()
+        {
+            StorageStrategy = strategy,
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        });
+        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        var session = await database.CreateSessionAsync();
+        var other = await database.CreateSessionAsync();
+        await collection.PutAsync(session, "kept", Doc("kept"));
+
+        // A reader: the database has one writer at a time, so an open writer would block the
+        // commit below.
+        var open = await other.BeginTransactionAsync();
+        (await collection.GetAsync(other, "kept")).ShouldNotBeNull();
+
+        // Act: the commit record is appended and its fsync fails.
+        DatabaseTransactionCommitUnconfirmedException unconfirmed;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalFlushes(1))
+        {
+            unconfirmed = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
+                await collection.PutAsync(session, "unconfirmed", Doc("unconfirmed")));
+            failures.Remaining.ShouldBe(0);
+        }
+
+        var atTheFailure = strategy.Capture("test");
+        var refusals = new List<DatabaseOfflineException>
+        {
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateSessionAsync()),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await collection.GetAsync(session, "kept")),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await collection.PutAsync(session, "late", Doc("late"))),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.ExecuteAsync("SELECT id FROM items")),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.BeginTransactionAsync()),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateCollectionAsync("late")),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.CommitAsync()),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.RollbackAsync()),
+        };
+
+        // Every worker runs a pass, with a checkpoint due by size; then the sessions close.
+        database.DataStorage.CheckpointJournalSize = 1;
+        foreach (var worker in engine.Workers.OfType<DatabaseEngineWorker>())
+        {
+            worker.RunIteration(CancellationToken.None);
+        }
+
+        await other.DisposeAsync();
+        await session.DisposeAsync();
+        var beforeTheReopen = strategy.Capture("test");
+
+        var reopened = (DocumentDatabaseInstance)await engine.OpenDatabaseAsync("test");
+        await using var observer = await reopened.CreateSessionAsync();
+        var ids = await Ids(observer);
+
+        // Assert
+        unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
+        StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
+        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBD002" && refusal.Message.StartsWith("COHDBD002", StringComparison.Ordinal));
+        engine.State.ShouldBe(EngineState.Running);
+        beforeTheReopen.Data.ShouldBe(atTheFailure.Data);
+        beforeTheReopen.Journal.ShouldBe(atTheFailure.Journal);
+        reopened.ShouldNotBeSameAs(database);
+        reopened.IsOffline.ShouldBeFalse();
+        ids.ShouldBe(recordSurvives ? ["kept", "unconfirmed"] : ["kept"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Buffer pool: a database gets the 32 MiB default, and the options are validated")]
+    public async Task BufferPoolCapacity_DefaultAndInvalidOptions_ShouldSizeThePoolAndRefuseBadValues()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("pool");
+
+        // Act & Assert
+        database.DataStorage.BufferPoolCapacity.ShouldBe(4096);
+        database.DataStorage.CheckpointJournalSize.ShouldBe(256L * 1024 * 1024);
+        new DocumentDatabaseEngineOptions().CheckpointInterval.ShouldBe(TimeSpan.FromMinutes(5));
+        Should.Throw<ArgumentOutOfRangeException>(() => DocumentDatabaseEngine.Create(new() { BufferPoolCapacity = 512 * 1024 }))
+            .ParamName.ShouldBe(nameof(DocumentDatabaseEngineOptions.BufferPoolCapacity));
+        Should.Throw<ArgumentOutOfRangeException>(() => DocumentDatabaseEngine.Create(new() { BufferPoolCapacity = 1024 * 1024 + 1 }))
+            .ParamName.ShouldBe(nameof(DocumentDatabaseEngineOptions.BufferPoolCapacity));
+        Should.Throw<ArgumentOutOfRangeException>(() => DocumentDatabaseEngine.Create(new() { CheckpointJournalSize = -1 }))
+            .ParamName.ShouldBe(nameof(DocumentDatabaseEngineOptions.CheckpointJournalSize));
+        await using var sized = DocumentDatabaseEngine.Create(new() { BufferPoolCapacity = 2 * 1024 * 1024 });
+        ((DocumentDatabaseInstance)await sized.CreateDatabaseAsync("sized")).DataStorage.BufferPoolCapacity.ShouldBe(256);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Builder: the engine builder carries the buffer pool and checkpoint size to the engine it builds")]
+    public async Task CreateBuilder_StorageOptions_ShouldReachTheBuiltEngine()
+    {
+        // Arrange
+        var builder = DocumentDatabaseEngine.CreateBuilder();
+        long defaultPool = builder.BufferPoolCapacity;
+        long defaultSize = builder.CheckpointJournalSize;
+        builder.BufferPoolCapacity = 2 * 1024 * 1024;
+        builder.CheckpointJournalSize = 8 * 1024 * 1024;
+
+        // Act
+        await using var engine = (DocumentDatabaseEngine)builder.Build();
+        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("built");
+
+        // Assert
+        defaultPool.ShouldBe(32L * 1024 * 1024);
+        defaultSize.ShouldBe(256L * 1024 * 1024);
+        database.DataStorage.BufferPoolCapacity.ShouldBe(256);
+        database.DataStorage.CheckpointJournalSize.ShouldBe(8L * 1024 * 1024);
+    }
+
+    /// <summary>
+    /// Under a sustained write load the journal-size trigger keeps the journal near its
+    /// configured size (#1254). The bound is a ratio to the configured size.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Checkpoint trigger: the journal stays bounded under a sustained write load")]
+    public async Task CheckpointJournalSize_SustainedWrites_ShouldKeepTheJournalBounded()
+    {
+        // Arrange: a time backstop far out of the way, so only the size can trigger.
+        const long size = 4 * 1024 * 1024;
+        await using var engine = DocumentDatabaseEngine.Create(new()
+        {
+            CheckpointJournalSize = size,
+            CheckpointInterval = TimeSpan.FromHours(1),
+        });
+        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("bounded");
+        var collection = await database.CreateCollectionAsync("items");
+        using var stop = new CancellationTokenSource();
+        var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
+        {
+            await using var session = await database.CreateSessionAsync();
+            for (int i = 0; !stop.IsCancellationRequested; i++)
+            {
+                await collection.PutAsync(session, $"{writer}-{i}", Doc($"{writer}-{i}", "\"payload\":\"" + new string('x', 150) + "\""));
+            }
+        })).ToArray();
+
+        // Act: sample the journal while the writers push well past the size many times over.
+        long largest = 0;
+        long written = 0;
+        long previous = 0;
+        var watch = Stopwatch.StartNew();
+        while (written < 40 * size && watch.Elapsed < TimeSpan.FromSeconds(60))
+        {
+            long length = database.DataStorage.JournalLength;
+            largest = Math.Max(largest, length);
+            written += length >= previous ? length - previous : length;
+            previous = length;
+            await Task.Delay(1);
+        }
+
+        stop.Cancel();
+        await Task.WhenAll(writers).WaitAsync(Timeout);
+
+        // Assert: tens of journal sizes were written, and the journal never held more than a few.
+        written.ShouldBeGreaterThanOrEqualTo(40 * size);
+        ((double)largest / size).ShouldBeLessThan(4.0);
+        engine.State.ShouldBe(EngineState.Running);
+    }
+
+    /// <summary>
+    /// A rollback's undo fails once. The undo is retried on its own backoff, about 100 ms later,
+    /// so the writer waiting for the rolled-back transaction's writer lock proceeds within about a
+    /// second although the maintenance interval is an hour (#1226 owner decision of 2026-10-04).
+    /// The engine's wiring is checked exactly (the first retry is due within 100 ms of the
+    /// deferral), and the release end to end as a ratio to that first delay.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Deferred undo: a transient undo failure releases the writer within about a second")]
+    public async Task RollbackAsync_TransientUndoFailure_ShouldReleaseTheWriterWithinAboutASecond()
+    {
+        // Arrange
+        var maintenance = TimeSpan.FromHours(1);
+        var options = new DocumentDatabaseEngineOptions
+        {
+            StorageStrategy = new FaultInjectingJournalStorageStrategy(),
+            MaintenanceInterval = maintenance,
+        };
+        await using var engine = DocumentDatabaseEngine.Create(options);
+        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await collection.PutAsync(session, "rolled", Doc("rolled"));
+
+        // Act: the rollback's first journal write is its undo bracket's begin record, which fails
+        // once, so the undo is deferred with the database writer lock held.
+        int unspent;
+        var watch = Stopwatch.StartNew();
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            await transaction.RollbackAsync();
+            unspent = failures.Remaining;
+        }
+
+        // The engine handed the coordinator its first retry delay: the retry is due within it.
+        var firstRetry = database.Coordinator.NextDeferredUndoRetry;
+
+        await collection.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(Timeout);
+        watch.Stop();
+
+        // Assert
+        unspent.ShouldBe(0);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        (await collection.GetAsync(other, "rolled")).ShouldBeNull();
+        options.DeferredUndoRetryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
+        firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(options.DeferredUndoRetryDelay);
+        (watch.Elapsed / options.DeferredUndoRetryDelay).ShouldBeLessThan(20);
+        engine.State.ShouldBe(EngineState.Running);
+    }
+
+    private static ReadOnlyMemory<byte> Doc(string id, string? members = null)
+        => Encoding.UTF8.GetBytes(members is null ? $"{{\"id\":\"{id}\"}}" : $"{{\"id\":\"{id}\",{members}}}");
+
+    private static async Task<List<string>> Ids(IDatabaseSession session)
+    {
+        var ids = new List<string>();
+        var result = await session.ExecuteAsync("SELECT id FROM items");
+        if (result is not QueryResultSet set) { return ids; }
+        await using (set)
+        {
+            await foreach (var row in set.GetRowsAsync()) { ids.Add(row.GetString(0) ?? "<null>"); }
+        }
+        ids.Sort(StringComparer.Ordinal);
+        return ids;
+    }
+}

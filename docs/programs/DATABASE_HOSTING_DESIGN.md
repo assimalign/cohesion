@@ -54,7 +54,8 @@ on area roots. This proposal preserves those commitments.
 The five options types are `SqlDatabaseEngineOptions`, `KeyValueDatabaseEngineOptions`,
 `DocumentDatabaseEngineOptions`, `GraphDatabaseEngineOptions`, and `BlobDatabaseEngineOptions`.
 Each currently carries `EngineName`, `RootPath` (`FileSystemPath?` in the reviewed working tree),
-`Durability`, `GroupCommitWindow`, `CheckpointInterval`, `PageWriteBackInterval`,
+`Durability`, `GroupCommitWindow`, `CheckpointInterval`, `CheckpointJournalSize`,
+`BufferPoolCapacity` (the last two since #1254), `PageWriteBackInterval`,
 `PageWriteBackBatchSize`, and `MaintenanceInterval`. SQL and KeyValue additionally accept
 model-specific storage strategies. All five `*DatabaseEngine.Create(options)` factories create
 live engines with workers; no engine Start/Stop stage is missing. The SQL forwarding
@@ -1041,7 +1042,8 @@ Each model supplies an options-bearing interface extending IDatabaseEngineBuilde
 `ISqlDatabaseEngineBuilder`, `IKeyValueDatabaseEngineBuilder`, `IDocumentDatabaseEngineBuilder`,
 `IGraphDatabaseEngineBuilder`, and `IBlobDatabaseEngineBuilder`. Each carries EngineName, RootPath
 (`FileSystemPath?`), Durability, StorageStrategy, MaintenanceInterval and the existing group-commit,
-checkpoint and page-write-back options. No strongly typed worker/server factory overloads were
+checkpoint and page-write-back options, including `CheckpointJournalSize` and `BufferPoolCapacity`
+(#1254). No strongly typed worker/server factory overloads were
 added: the common engine factory works, and an explicit SQL/KeyValue cast avoids duplicate overload
 vocabulary. No production algorithm consumes model options generically; the base earns its place
 because worker registration is genuinely model-agnostic. Internal one-shot attachment/compensation

@@ -11,6 +11,7 @@ internal sealed partial class GraphDatabaseInstance
     internal async ValueTask<GraphOperation> BeginOperationAsync(GraphDatabaseSession? session, CancellationToken token)
     {
         ThrowIfDisposed();
+        ThrowIfOffline();
         token.ThrowIfCancellationRequested();
         var explicitTransaction = session?.ReserveOperation();
         GraphOperation? operation = null;
@@ -24,11 +25,14 @@ internal sealed partial class GraphDatabaseInstance
         }
         catch (Exception error)
         {
+            var reported = TranslateOffline(error);
             if (operation is not null)
             {
-                await operation.AbortAsync(error).ConfigureAwait(false);
+                await operation.AbortAsync(reported).ConfigureAwait(false);
             }
-            throw;
+
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
         }
         finally
         {
@@ -55,8 +59,14 @@ internal sealed partial class GraphDatabaseInstance
         }
     }
 
-    // Child-root failures cross the engine boundary as the area root's exceptions.
-    private static Exception Translate(Exception error) => TranslateKernelFailure(error) switch
+    // Child-root failures cross the engine boundary as the area root's exceptions. A failure the
+    // offline storage caused is the database's coded refusal (#1243), checked first: the offline
+    // error is a StorageException, which the kernel translation would report as COHDBG006.
+    private Exception Translate(Exception error) => TranslateOffline(error) is var offline && !ReferenceEquals(offline, error)
+        ? offline
+        : TranslateStatementFailure(error);
+
+    private static Exception TranslateStatementFailure(Exception error) => TranslateKernelFailure(error) switch
     {
         var translated when !ReferenceEquals(translated, error) => translated,
         _ when error is InvalidOperationException => new DatabaseException("COHDBG003: " + error.Message, error),

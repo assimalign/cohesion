@@ -98,6 +98,23 @@ internal sealed class StreamFileHandle : IFileSystemFileHandle
         try
         {
             _stream.SetLength(length);
+
+            // A checkpoint truncates an in-memory journal to zero. A MemoryStream keeps its buffer
+            // through SetLength, and the buffer doubles as the stream grows, so an in-memory
+            // database would otherwise hold up to twice its checkpoint journal size for its
+            // lifetime once its journal first passed it (#1254 review).
+            if (length == 0 && _stream is MemoryStream { Capacity: > 0 } memory)
+            {
+                try
+                {
+                    memory.Capacity = 0;
+                }
+                catch (NotSupportedException)
+                {
+                    // A MemoryStream over a caller's fixed array cannot grow, so it has nothing
+                    // to release.
+                }
+            }
         }
         finally { _gate.Release(); }
     }

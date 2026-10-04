@@ -90,7 +90,16 @@ classDiagram
   grouped commits self-help, checkpoints just stop truncating — but the owner
   should learn it runs degraded), `Disposed`. The default control-plane health
   aggregate delivered by #973 reads this surface; nothing drives transitions
-  from outside.
+  from outside. A fault a running worker reports (a failed retry of a deferred
+  undo) is cleared by that worker's next clean pass; a worker that died stays
+  recorded.
+- **An offline database is reported beside the state, not in it** (#1243 review).
+  A database whose fsync failed refuses every request while its engine keeps
+  serving the others, so `EngineState` does not change; `IDatabaseEngine.OfflineDatabases`
+  lists the open databases that are offline, and the hosting health aggregate
+  reports the application unhealthy while the list is not empty. Before this an
+  offline database left health `Healthy`, so neither an operator nor an
+  orchestrator acting on health learned of it.
 - **The application exposes its composition through `IDatabaseApplicationContext`,
   and the context is plural** (owner direction, 2026-07-13 — the Database
   instance of the Web area's `IWebApplicationContext` pattern, converged with
@@ -257,6 +266,22 @@ not confuse an operational failure with a missing database),
 conflict or deadlock victim is retryable by construction, and in-process
 consumers deserve to catch that kind precisely rather than parse messages; on
 the wire both remain `ExecutionFailure` with a precise message).
+`DatabaseTransactionCommitUnconfirmedException` is the non-retryable outcome of a
+commit whose record was written but whose fsync failed: the work may have committed,
+so retrying it could apply it twice. `DatabaseOfflineException` (#1243) is what every
+operation gets after such a failure, or after any failed fsync of a database's journal
+or data files: the storage stopped writing (the storage's `StorageOfflineException`,
+`COHDBS002`, is its inner exception), and the database refuses everything until
+`IDatabaseEngine.OpenDatabaseAsync` reopens it and recovery decides the unconfirmed
+commit — PostgreSQL's `PANIC` on a failed WAL fsync, scoped to one database instead of
+the process. Its `Code` leads the message and names the model: `COHSQLT004`,
+`COHDBK002`, `COHDBD002`, `COHDBG012`, `COHDBB002`. Every wire server reports it as
+`Unavailable`. `DatabaseOfflineException.Create` builds it from the storage error. An
+operation that committed by itself (a self-committing statement such as SQL DDL, or any
+storage bracket whose commit record was written before the flush failed,
+`StorageOfflineException.CommitRecordWritten`) is never reported as refused, because its
+work can survive the reopen: `DatabaseTransactionCommitUnconfirmedException.Create` builds the
+code-led unconfirmed error for it.
 
 **Child roots own independent exception roots** — `StorageException`,
 `DatabaseTypeException`, `QueryExecutionException`, `ProtocolException`,

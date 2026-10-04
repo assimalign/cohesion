@@ -27,6 +27,12 @@ public interface IBlobDatabaseEngineBuilder : IDatabaseEngineBuilder
     /// <inheritdoc cref="BlobDatabaseEngineOptions.CheckpointInterval" />
     TimeSpan CheckpointInterval { get; set; }
 
+    /// <inheritdoc cref="BlobDatabaseEngineOptions.CheckpointJournalSize" />
+    long CheckpointJournalSize { get; set; }
+
+    /// <inheritdoc cref="BlobDatabaseEngineOptions.BufferPoolCapacity" />
+    long BufferPoolCapacity { get; set; }
+
     /// <inheritdoc cref="BlobDatabaseEngineOptions.PageWriteBackInterval" />
     TimeSpan PageWriteBackInterval { get; set; }
 

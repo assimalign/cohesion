@@ -202,4 +202,36 @@ public class StorageStreamTests
         stream.Length.ShouldBe(3L * Page.Size);
         memory.Length.ShouldBe(3L * Page.Size);
     }
+
+    /// <summary>
+    /// A checkpoint truncates an in-memory journal to zero. A memory stream keeps its buffer
+    /// through SetLength, and the buffer doubles as it grows, so without releasing it an in-memory
+    /// database would hold up to twice its checkpoint journal size for its lifetime (#1254 review).
+    /// A stream over a caller's fixed array cannot grow and keeps it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [StorageStream] - SetLength: truncating an in-memory stream to zero releases its buffer")]
+    public void SetLength_ToZeroOverMemory_ShouldReleaseTheBuffer()
+    {
+        // Arrange: a growable memory stream that grew to megabytes, and one over a fixed array.
+        using var memory = new MemoryStream();
+        using var stream = new StorageStream(memory);
+        stream.Write(new byte[3 * 1024 * 1024], 0);
+        int grown = memory.Capacity;
+        var fixedArray = new byte[Page.Size];
+        using var fixedMemory = new MemoryStream(fixedArray);
+        using var fixedStream = new StorageStream(fixedMemory);
+        fixedStream.Write(new byte[16], 0);
+
+        // Act
+        stream.SetLength(0);
+        fixedStream.SetLength(0);
+        stream.Write(new byte[16], 0);
+
+        // Assert
+        grown.ShouldBeGreaterThanOrEqualTo(3 * 1024 * 1024);
+        memory.Capacity.ShouldBeLessThan(Page.Size);
+        stream.Length.ShouldBe(16);
+        fixedMemory.Capacity.ShouldBe(Page.Size);
+        fixedStream.Length.ShouldBe(0);
+    }
 }

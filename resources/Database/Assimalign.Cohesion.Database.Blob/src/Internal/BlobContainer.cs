@@ -83,13 +83,13 @@ internal sealed class BlobContainer : IBlobContainer
                 await _database.Catalog.SaveBlobAsync(new BlobCatalogEntry(_container.Id, name, content.Length, contentType,
                     etag, previous?.CreatedAt ?? now, now, content.Checksum, content.Head), operation.Context, cancellationToken).ConfigureAwait(false);
                 await operation.CompleteAsync().ConfigureAwait(false);
-            }, operation.AbortAsync, cancellationToken);
+            }, error => operation.AbortAsync(operation.TranslateFailure(error)), cancellationToken);
             return new BlobGuardedStream(stream, operation);
         }
         catch (Exception error)
         {
             // An explicit transaction records the error its caller sees as the cause of its abort.
-            var reported = BlobDatabaseInstance.TranslateKernelFailure(error);
+            var reported = _database.TranslateFailure(error);
             await operation.AbortAsync(reported).ConfigureAwait(false);
             if (ReferenceEquals(reported, error)) { throw; }
             throw reported;
@@ -109,7 +109,7 @@ internal sealed class BlobContainer : IBlobContainer
         }
         catch (Exception error)
         {
-            var reported = BlobDatabaseInstance.TranslateKernelFailure(error);
+            var reported = _database.TranslateFailure(error);
             await operation.AbortAsync(reported).ConfigureAwait(false);
             if (ReferenceEquals(reported, error)) { throw; }
             throw reported;
@@ -212,8 +212,41 @@ internal sealed class BlobGuardedStream : Stream
     public override bool CanWrite => !_disposed && _inner.CanWrite;
     public override long Length { get { Check(); return _inner.Length; } }
     public override long Position { get { Check(); return _inner.Position; } set => throw new NotSupportedException(); }
-    public override void Flush() { Check(); _inner.Flush(); }
-    public override Task FlushAsync(CancellationToken cancellationToken) { Check(); return _inner.FlushAsync(cancellationToken); }
+
+    // An upload's write, flush and completion failures already ended the operation through the
+    // storage stream's abort callback; what reaches the caller is translated the way every other
+    // operation's failure is (#1243): the offline storage's coded refusal, or the area root's
+    // exception for a kernel failure such as the upload's unconfirmed commit.
+    public override void Flush()
+    {
+        Check();
+        try
+        {
+            _inner.Flush();
+        }
+        catch (Exception error)
+        {
+            var reported = _operation.TranslateFailure(error);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
+    }
+
+    public override async Task FlushAsync(CancellationToken cancellationToken)
+    {
+        Check();
+        try
+        {
+            await _inner.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error)
+        {
+            var reported = _operation.TranslateFailure(error);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
+    }
+
     public override int Read(byte[] buffer, int offset, int count)
     {
         ValidateBufferArguments(buffer, offset, count);
@@ -230,8 +263,10 @@ internal sealed class BlobGuardedStream : Stream
         catch (Exception error)
         {
             _readFailed = true;
-            _operation.AbortAsync(error).AsTask().GetAwaiter().GetResult();
-            throw;
+            var reported = _operation.TranslateFailure(error);
+            _operation.AbortAsync(reported).AsTask().GetAwaiter().GetResult();
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
         }
     }
 
@@ -245,8 +280,10 @@ internal sealed class BlobGuardedStream : Stream
         catch (Exception error)
         {
             _readFailed = true;
-            await _operation.AbortAsync(error).ConfigureAwait(false);
-            throw;
+            var reported = _operation.TranslateFailure(error);
+            await _operation.AbortAsync(reported).ConfigureAwait(false);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
         }
     }
 
@@ -255,10 +292,48 @@ internal sealed class BlobGuardedStream : Stream
         ValidateBufferArguments(buffer, offset, count);
         return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
     }
-    public override void Write(byte[] buffer, int offset, int count) { Check(); _inner.Write(buffer, offset, count); }
-    public override void Write(ReadOnlySpan<byte> buffer) { Check(); _inner.Write(buffer); }
-    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
-    { Check(); return _inner.WriteAsync(buffer, cancellationToken); }
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        Write(buffer.AsSpan(offset, count));
+    }
+
+    public override void Write(ReadOnlySpan<byte> buffer)
+    {
+        Check();
+        try
+        {
+            _inner.Write(buffer);
+        }
+        catch (Exception error)
+        {
+            var reported = _operation.TranslateFailure(error);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
+    }
+
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        Check();
+        try
+        {
+            await _inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error)
+        {
+            var reported = _operation.TranslateFailure(error);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
+    }
+
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        return WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+    }
+
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
     private void Check() { ObjectDisposedException.ThrowIf(_disposed, this); _operation.EnsureActive(); }
@@ -280,7 +355,13 @@ internal sealed class BlobGuardedStream : Stream
         {
             _disposed = true;
             try { _inner.Dispose(); }
-            catch (Exception error) when (!_readFailed) { _operation.AbortAsync(error).AsTask().GetAwaiter().GetResult(); throw; }
+            catch (Exception error) when (!_readFailed)
+            {
+                var reported = _operation.TranslateFailure(error);
+                _operation.AbortAsync(reported).AsTask().GetAwaiter().GetResult();
+                if (ReferenceEquals(reported, error)) { throw; }
+                throw reported;
+            }
             catch (Exception) when (_readFailed)
             {
                 // The failed read already ended the operation and threw to the caller; the
@@ -298,7 +379,13 @@ internal sealed class BlobGuardedStream : Stream
 
         _disposed = true;
         try { await _inner.DisposeAsync().ConfigureAwait(false); }
-        catch (Exception error) when (!_readFailed) { await _operation.AbortAsync(error).ConfigureAwait(false); throw; }
+        catch (Exception error) when (!_readFailed)
+        {
+            var reported = _operation.TranslateFailure(error);
+            await _operation.AbortAsync(reported).ConfigureAwait(false);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
         catch (Exception) when (_readFailed)
         {
             // See Dispose: the failed read already ended the operation and threw to the caller.

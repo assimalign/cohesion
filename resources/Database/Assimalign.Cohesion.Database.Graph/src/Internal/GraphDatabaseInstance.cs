@@ -20,6 +20,15 @@ internal sealed partial class GraphDatabaseInstance : IGraphDatabase
         Engine = engine;
         DataStorage = storage;
         Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        if (engine is GraphDatabaseEngine owner)
+        {
+            // A deferred undo is retried on its own backoff, from about 100 ms up to the
+            // maintenance interval, and the purge worker wakes for it (#1226).
+            Coordinator.DeferredUndoRetryLimit = owner.EngineOptions.MaintenanceInterval;
+            Coordinator.DeferredUndoRetryDelay = owner.EngineOptions.DeferredUndoRetryDelay;
+            Coordinator.OnUndoDeferred = owner.UndoDeferredSignal.Set;
+        }
+
         // Indexing owns the B-tree page format (#1194) and checks each tree's root
         // page as it attaches the tree. That happens inside the store's open, after
         // the recovery scrub has written to the database, so the check runs here
@@ -55,8 +64,58 @@ internal sealed partial class GraphDatabaseInstance : IGraphDatabase
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
         return new ValueTask<IDatabaseSession>(new GraphDatabaseSession(this));
+    }
+
+    /// <summary>
+    /// The code that leads the message of every operation refused because the database is
+    /// offline (#1243).
+    /// </summary>
+    internal const string OfflineCode = "COHDBG012";
+
+    /// <summary>
+    /// Gets whether a failed durable flush took the database offline.
+    /// </summary>
+    internal bool IsOffline => DataStorage.IsOffline;
+
+    /// <summary>
+    /// Refuses an operation on an offline database with <see cref="DatabaseOfflineException"/>
+    /// (<see cref="OfflineCode"/>): every operation, in process and over the wire server, until
+    /// the database is reopened.
+    /// </summary>
+    /// <exception cref="DatabaseOfflineException">The database is offline.</exception>
+    internal void ThrowIfOffline()
+    {
+        if (DataStorage.OfflineError is { } error)
+        {
+            throw DatabaseOfflineException.Create(OfflineCode, Name, error);
+        }
+    }
+
+    /// <summary>
+    /// Translates a failure the storage's offline state caused into the coded refusal
+    /// (<see cref="DatabaseOfflineException"/>), or into
+    /// <see cref="DatabaseTransactionCommitUnconfirmedException"/> when a storage commit record
+    /// was written before its flush failed
+    /// (<see cref="Assimalign.Cohesion.Database.Storage.StorageOfflineException.CommitRecordWritten"/>),
+    /// so the work may survive the reopen. An unconfirmed commit that already has its own type is
+    /// returned unchanged, and so is any other failure.
+    /// </summary>
+    /// <param name="error">The failure to translate.</param>
+    /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
+    internal Exception TranslateOffline(Exception error)
+    {
+        if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
+            || Assimalign.Cohesion.Database.Storage.StorageOfflineException.Find(error) is not { } offline)
+        {
+            return error;
+        }
+
+        return offline.CommitRecordWritten
+            ? DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, offline)
+            : DatabaseOfflineException.Create(OfflineCode, Name, DataStorage.OfflineError ?? offline);
     }
 
     internal GraphDatabaseSession RequireSession(IDatabaseSession session)

@@ -22,6 +22,11 @@ internal sealed class StorageGroupCommitGate
     private long _requestedLsn;
     private long _durableLsn;
 
+    // Set when the storage went offline: no group flush will ever come, so waiters stop
+    // waiting for one and go straight to their own flush, which the offline journal refuses
+    // (or confirms, for an LSN that was already durable).
+    private bool _abandoned;
+
     /// <summary>
     /// Invoked (outside the gate lock) when a committer registers a new pending
     /// commit, so an engine-level flush worker can be woken. Set by the owning
@@ -62,7 +67,7 @@ internal sealed class StorageGroupCommitGate
 
         lock (_syncRoot)
         {
-            while (_durableLsn < lsn)
+            while (_durableLsn < lsn && !_abandoned)
             {
                 TimeSpan remaining = window - Stopwatch.GetElapsedTime(start);
 
@@ -107,6 +112,20 @@ internal sealed class StorageGroupCommitGate
         journal.EnsureDurable(target);
         PublishDurable(journal.DurableLsn);
         return true;
+    }
+
+    /// <summary>
+    /// Wakes every waiter for good: the storage went offline, so no group flush will come. Each
+    /// waiter then makes its own flush request, which the offline journal refuses unless the
+    /// waiter's LSN was already durable.
+    /// </summary>
+    internal void Abandon()
+    {
+        lock (_syncRoot)
+        {
+            _abandoned = true;
+            Monitor.PulseAll(_syncRoot);
+        }
     }
 
     /// <summary>

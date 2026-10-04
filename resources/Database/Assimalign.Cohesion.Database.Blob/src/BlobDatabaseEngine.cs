@@ -20,6 +20,11 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
     private readonly Dictionary<string, BlobDatabaseInstance> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
     private readonly ManualResetEventSlim _commitPending = new();
+
+    // Woken by a storage whose journal reached the checkpoint size, and by a coordinator that
+    // deferred an undo, so the checkpoint and version-purge workers act at once (#1254, #1226).
+    private readonly ManualResetEventSlim _checkpointNeeded = new();
+    private readonly ManualResetEventSlim _undoDeferred = new();
     private readonly CancellationTokenSource _stop = new();
     private readonly List<IDatabaseEngineWorker> _workers = [];
     private readonly List<IDatabaseServer> _servers = [];
@@ -27,7 +32,12 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
     private readonly string? _rootPath;
     private BlobDatabaseInstance[] _instances = [];
     private BlobStorage[] _storages = [];
+    // A worker that died (its pump ended on an exception): kept for the engine's lifetime.
     private Exception? _workerFault;
+
+    // The last failure a running worker reported (the version-purge worker's failed retry of a
+    // deferred undo); cleared by that worker's next clean pass.
+    private Exception? _maintenanceFault;
     private int _disposed;
 
     private BlobDatabaseEngine(BlobDatabaseEngineOptions options)
@@ -50,7 +60,7 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
     public string Name { get; }
     /// <inheritdoc />
     public EngineState State => Volatile.Read(ref _disposed) != 0 ? EngineState.Disposed :
-        Volatile.Read(ref _workerFault) is null ? EngineState.Running : EngineState.Faulted;
+        Volatile.Read(ref _workerFault) is null && Volatile.Read(ref _maintenanceFault) is null ? EngineState.Running : EngineState.Faulted;
     /// <inheritdoc />
     public EngineModel Model => EngineModel.Blob;
     /// <inheritdoc />
@@ -61,6 +71,52 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
     internal BlobStorage[] GetStorageSnapshot() => Volatile.Read(ref _storages);
     internal BlobDatabaseInstance[] GetInstanceSnapshot() => Volatile.Read(ref _instances);
 
+    /// <summary>
+    /// Gets the signal a storage sets when its journal reaches
+    /// <see cref="BlobDatabaseEngineOptions.CheckpointJournalSize"/>; the checkpoint worker waits on it.
+    /// </summary>
+    internal ManualResetEventSlim CheckpointNeededSignal => _checkpointNeeded;
+
+    /// <summary>
+    /// Gets the signal a database's coordinator sets when it defers an undo; the version-purge
+    /// worker waits on it so the first retry runs about 100 ms later, not a maintenance interval.
+    /// </summary>
+    internal ManualResetEventSlim UndoDeferredSignal => _undoDeferred;
+
+    /// <summary>
+    /// Records a background worker's failure without stopping the worker: the engine reports
+    /// <see cref="EngineState.Faulted"/> and the worker's next pass runs as usual. The version-purge
+    /// worker reports a failed retry of a deferred undo here, and clears it
+    /// (<see cref="ClearWorkerFault"/>) once a pass runs clean.
+    /// </summary>
+    /// <param name="exception">The failure.</param>
+    internal void ReportWorkerFault(Exception exception) => Volatile.Write(ref _maintenanceFault, exception);
+
+    /// <summary>
+    /// Clears the failure <see cref="ReportWorkerFault"/> recorded, after the reporting worker's
+    /// next pass ran without one: a deferred undo that failed while its fault lasted and then
+    /// completed leaves nothing degraded (#1226 review). A worker that died stays recorded.
+    /// </summary>
+    internal void ClearWorkerFault() => Volatile.Write(ref _maintenanceFault, null);
+
+    /// <inheritdoc />
+    public IReadOnlyList<DatabaseName> OfflineDatabases
+    {
+        get
+        {
+            List<DatabaseName>? offline = null;
+            foreach (var database in GetInstanceSnapshot())
+            {
+                if (database.IsOffline)
+                {
+                    (offline ??= []).Add(database.Name);
+                }
+            }
+
+            return offline is null ? [] : offline.AsReadOnly();
+        }
+    }
+
     /// <summary>Creates a dependency-free builder for an engine and its deferred workers and servers.</summary>
     /// <returns>A one-shot model builder; constructing the builder starts no components.</returns>
     /// <remarks>Use this entry point inside hosting-aware factories to assign already resolved values before Build.</remarks>
@@ -70,7 +126,10 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
     /// <param name="options">The engine configuration.</param>
     /// <returns>The running engine.</returns>
     /// <exception cref="ArgumentNullException">The options are null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">A worker interval or batch size is not positive.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A worker interval or batch size is not positive, the buffer pool capacity is not a whole
+    /// number of 8 KiB pages of at least 1 MiB, or the checkpoint journal size is negative.
+    /// </exception>
     public static BlobDatabaseEngine Create(BlobDatabaseEngineOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -79,6 +138,8 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaintenanceInterval, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.GroupCommitWindow, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.PageWriteBackBatchSize);
+        Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
+        ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
         return new BlobDatabaseEngine(options);
     }
 
@@ -105,7 +166,17 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
                 }
 
                 existing.ThrowIfDisposed();
-                return new ValueTask<IDatabase>(existing);
+                if (!existing.IsOffline)
+                {
+                    return new ValueTask<IDatabase>(existing);
+                }
+
+                // The database went offline after a failed durable flush (#1243): reopening it
+                // is the one way back. Its close writes nothing, and the open below runs
+                // recovery, which decides the outcome of every commit that was not confirmed.
+                _databases.Remove(name);
+                RebuildSnapshot();
+                existing.Dispose();
             }
             var directory = FindDirectory(name);
             bool exists = _options.StorageStrategy?.StorageExists(name) ?? directory is not null;
@@ -136,6 +207,12 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
                 }
                 storage.GroupCommitWindow = _options.GroupCommitWindow;
                 storage.OnCommitPending = _commitPending.Set;
+
+                // The engine sizes the pool and arms the checkpoint trigger on whatever storage
+                // the strategy returned, so a custom strategy needs no knowledge of them (#1254).
+                storage.BufferPoolCapacity = Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(_options.BufferPoolCapacity, nameof(_options.BufferPoolCapacity));
+                storage.CheckpointJournalSize = _options.CheckpointJournalSize;
+                storage.OnCheckpointNeeded = _checkpointNeeded.Set;
                 Volatile.Write(ref _storages, [.. _storages, storage]);
                 var database = new BlobDatabaseInstance(name, this, storage, recover: !create);
                 _databases.Add(name, database);
@@ -325,6 +402,8 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
             RebuildSnapshot();
         }
         _commitPending.Dispose();
+        _checkpointNeeded.Dispose();
+        _undoDeferred.Dispose();
         _stop.Dispose();
         if (errors is not null)
         {

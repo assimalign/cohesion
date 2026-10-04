@@ -44,10 +44,10 @@ public interface ITransactionManager : IAsyncDisposable
     /// already running.
     /// </exception>
     /// <exception cref="TransactionCommitUnconfirmedException">
-    /// The commit record was written but could not be made durable. The transaction is
-    /// committed: it ends as <see cref="TransactionState.Committed"/>, leaves the active
-    /// table and releases its locks. Its commit is lost if the process stops before the log
-    /// is next flushed durably.
+    /// The commit record was written but could not be made durable. The transaction ends as
+    /// <see cref="TransactionState.Committed"/>, leaves the active table and releases its locks,
+    /// but its outcome is unknown: a journal-bound log's storage is offline after the failed
+    /// flush, and the reopen's recovery decides it.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
     ValueTask CommitAsync(ITransactionContext context, CancellationToken cancellationToken = default);

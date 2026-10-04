@@ -48,6 +48,7 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
         lock (_sync)
         {
             ThrowIfNotOpen();
+            _database.ThrowIfOffline();
             if (OpenTransaction is { } open)
             {
                 // BEGIN is refused while an aborted transaction waits for its rollback, as in
@@ -69,17 +70,21 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
             lock (_sync)
             {
                 ThrowIfNotOpen();
-                _transaction = new DocumentDatabaseTransaction(_database.Coordinator, context);
+                _transaction = new DocumentDatabaseTransaction(_database.Coordinator, context, _database);
                 return _transaction;
             }
         }
-        catch
+        catch (Exception error)
         {
-            if (context?.State == TransactionState.Active)
+            if (context?.State == TransactionState.Active && !_database.IsOffline)
             {
                 await _database.Coordinator.RollbackAsync(context).ConfigureAwait(false);
             }
-            throw;
+
+            // A begin that met the offline storage (#1243) gets the coded refusal.
+            var reported = _database.TranslateOffline(error);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
         }
         finally
         {
@@ -89,6 +94,7 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
     public ValueTask<QueryResult> ExecuteAsync(QueryRequest request, CancellationToken cancellationToken = default)
     {
         ThrowIfNotOpen();
+        _database.ThrowIfOffline();
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
         if (request.Statement is not OqlQueryStatement statement)
@@ -100,6 +106,7 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
     public ValueTask<QueryResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {
         ThrowIfNotOpen();
+        _database.ThrowIfOffline();
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
         cancellationToken.ThrowIfCancellationRequested();
         return ExecuteStatementAsync(() => DocumentQueryRequest.FromOql(statement, parameters), cancellationToken);

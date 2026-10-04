@@ -8,8 +8,9 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 /// <summary>
 /// A pass-through file handle whose flush fails with an <see cref="IOException"/> once a write
-/// at a chosen offset reached the inner handle: an fsync that reports failure for a write the
-/// device may already hold. Everything else goes straight to the inner handle.
+/// at a chosen offset reached the inner handle, or on demand: an fsync that reports failure for a
+/// write the device may already hold. A write at a chosen offset can fail before it writes
+/// anything. Everything else goes straight to the inner handle.
 /// </summary>
 public sealed class FlushFaultingHandle : IFileSystemFileHandle
 {
@@ -31,6 +32,21 @@ public sealed class FlushFaultingHandle : IFileSystemFileHandle
     public long? FailFlushAfterWriteAt { get; set; }
 
     /// <summary>
+    /// Gets or sets the offset whose next write fails before writing anything; null fails none.
+    /// </summary>
+    public long? FailWriteAt { get; set; }
+
+    /// <summary>
+    /// Gets the number of flushes that succeeded, durable or not.
+    /// </summary>
+    public int Flushes { get; private set; }
+
+    /// <summary>
+    /// Arms the next flush to fail, whatever was written before it.
+    /// </summary>
+    public void FailNextFlush() => _failNextFlush = true;
+
+    /// <summary>
     /// Gets the number of flushes that failed.
     /// </summary>
     public int FailedFlushes { get; private set; }
@@ -44,7 +60,9 @@ public sealed class FlushFaultingHandle : IFileSystemFileHandle
     /// <inheritdoc />
     public void Flush(bool durable = false)
     {
-        if (_failNextFlush)
+        // Only a durable flush fails: an fsync, not the ordinary flush that hands bytes to the
+        // operating system.
+        if (_failNextFlush && durable)
         {
             _failNextFlush = false;
             FailedFlushes++;
@@ -52,6 +70,7 @@ public sealed class FlushFaultingHandle : IFileSystemFileHandle
         }
 
         _inner.Flush(durable);
+        Flushes++;
     }
 
     /// <inheritdoc />
@@ -75,6 +94,12 @@ public sealed class FlushFaultingHandle : IFileSystemFileHandle
     /// <inheritdoc />
     public void Write(ReadOnlySpan<byte> buffer, long offset)
     {
+        if (FailWriteAt == offset)
+        {
+            FailWriteAt = null;
+            throw new IOException("Injected write failure before any byte was written.");
+        }
+
         _inner.Write(buffer, offset);
 
         if (FailFlushAfterWriteAt == offset)

@@ -58,6 +58,17 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     private readonly RecordSpaceVersionStore _versionStore;
     private readonly GatedJournalLog _log;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
+
+    // True in the async flow of a statement apply that holds the apply gate, which is not
+    // reentrant: a checkpoint asked for from inside the apply is refused instead of waiting for
+    // the gate its own caller holds.
+    private readonly AsyncLocal<bool> _insideApply = new();
+
+    // 1 when TryCheckpoint found the apply gate held: the statement that releases the gate next
+    // runs the checkpoint first. A failure of that checkpoint is kept for the next TryCheckpoint
+    // to throw, because the statement that ran it must not fail for it.
+    private int _checkpointDeferred;
+    private ExceptionDispatchInfo? _deferredCheckpointFailure;
     private readonly Dictionary<ulong, IStorageTransaction> _statementBrackets = new();
     private readonly Dictionary<ulong, ITransactionContext> _openContexts = new();
     private readonly object _sync = new();
@@ -75,6 +86,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// and call <see cref="CompleteRecovery"/> before admitting any sessions.
     /// </remarks>
     public TransactionCoordinator(IStorage storage, IStorageJournal journal, ITransactionRecordSpace records)
+        : this(storage, journal, records, TimeProvider.System)
+    {
+    }
+
+    /// <summary>
+    /// Creates the composition with the clock the deferred-undo retry schedule reads (tests).
+    /// </summary>
+    internal TransactionCoordinator(IStorage storage, IStorageJournal journal, ITransactionRecordSpace records, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(journal);
@@ -96,9 +115,77 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             _log,
             locks,
             _versionStore,
-            () => new TransactionSequence((ulong)storage.ReserveTransactionSequence()));
+            () => new TransactionSequence((ulong)storage.ReserveTransactionSequence()),
+            time);
         _lockManager = new EngineLockManager(locks, _manager);
     }
+
+    /// <summary>
+    /// Gets or sets the longest delay between two retries of a deferred undo; engines set it to
+    /// their maintenance interval (60 seconds unless set).
+    /// </summary>
+    /// <remarks>
+    /// A rolled-back writer whose undo failed keeps its locks until a retry completes the undo
+    /// (#1226), so the retry runs on its own backoff: due about 100 ms after the deferral, then
+    /// doubling after each failed retry up to this limit, and starting over with every new
+    /// deferral. Before the owner decision of 2026-10-04 each retry waited a whole maintenance
+    /// interval, which held every conflicting writer for 60 seconds per failed attempt.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not positive.</exception>
+    public TimeSpan DeferredUndoRetryLimit
+    {
+        get => _manager.DeferredUndoRetryLimit;
+        set => _manager.DeferredUndoRetryLimit = value;
+    }
+
+    /// <summary>
+    /// Gets or sets the delay before the first retry of a deferred undo: 100 ms unless set, and
+    /// never more than <see cref="DeferredUndoRetryLimit"/>. Each failed retry doubles it.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not positive.</exception>
+    public TimeSpan DeferredUndoRetryDelay
+    {
+        get => _manager.DeferredUndoRetryDelay;
+        set => _manager.DeferredUndoRetryDelay = value;
+    }
+
+    /// <summary>
+    /// Gets or sets the hook invoked when a rollback's undo is deferred, so the engine's
+    /// version-purge worker wakes for the first retry. Invoked outside the coordinator's locks;
+    /// it should only signal.
+    /// </summary>
+    public Action? OnUndoDeferred
+    {
+        get => _manager.UndoDeferred;
+        set => _manager.UndoDeferred = value;
+    }
+
+    /// <summary>
+    /// Gets the time until the next retry of a deferred undo is due: zero when it is due now,
+    /// null when no undo is deferred. The version-purge worker sleeps no longer than this.
+    /// </summary>
+    public TimeSpan? NextDeferredUndoRetry => _manager.DeferredUndoRetryDueIn;
+
+    /// <summary>
+    /// Retries every deferred undo when the retry backoff says one is due
+    /// (<see cref="NextDeferredUndoRetry"/>), and does nothing otherwise. Each writer whose undo
+    /// now completes gets its abort record, leaves the active table and releases its locks.
+    /// </summary>
+    /// <param name="cancellationToken">Observed between writers; a started undo runs to completion.</param>
+    /// <returns>The number of versions and index entries the completed undos changed.</returns>
+    /// <exception cref="ObjectDisposedException">The coordinator was disposed.</exception>
+    /// <remarks>
+    /// A retry that fails again doubles the delay and rethrows the first failure, after every
+    /// deferred writer was attempted; the writers still deferred wait for the next retry.
+    /// </remarks>
+    public long RetryDeferredUndo(CancellationToken cancellationToken)
+        => _manager.RetryDeferredUndoIfDueAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Gets whether the storage this coordinator composes went offline after a failed durable
+    /// flush (#1243): nothing more may be written to it, and only a reopen brings it back.
+    /// </summary>
+    public bool IsStorageOffline => _storage is Storage shared ? shared.IsOffline : _journal is StorageJournal journal && journal.IsOffline;
 
     /// <summary>
     /// Gets the transaction manager sessions begin their contexts on.
@@ -323,6 +410,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(apply);
 
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        _insideApply.Value = true;
 
         try
         {
@@ -392,6 +480,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
         finally
         {
+            if (Volatile.Read(ref _checkpointDeferred) != 0)
+            {
+                RunDeferredCheckpoint();
+            }
+
+            _insideApply.Value = false;
             _applyGate.Release();
         }
     }
@@ -452,8 +546,165 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// first announced again with a begin record, so the journal names it before its
     /// first stamp exists.
     /// </summary>
-    /// <exception cref="StorageTransactionException">A storage-level bracket is still active.</exception>
-    public void Checkpoint() => _log.CheckpointUnderGate(_storage);
+    /// <exception cref="StorageTransactionException">
+    /// A storage-level bracket is still active, or the call came from inside a statement apply
+    /// of this coordinator (<see cref="ApplyStatementAsync{T}(ITransactionContext, Func{IStorageTransaction, ValueTask{T}}, bool, CancellationToken)"/>),
+    /// whose apply gate the checkpoint would wait for forever.
+    /// </exception>
+    public void Checkpoint() => Checkpoint(CancellationToken.None);
+
+    /// <summary>
+    /// Checkpoints the data storage (see <see cref="Checkpoint()"/>), first waiting for the
+    /// statement apply gate, so no statement bracket of this coordinator is open when the
+    /// storage counts its active brackets.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the wait for the apply gate.</param>
+    /// <exception cref="StorageTransactionException">
+    /// A storage-level bracket that does not go through the apply gate is still active, or the
+    /// call came from inside a statement apply of this coordinator.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">The wait for the apply gate was canceled.</exception>
+    /// <remarks>
+    /// A checkpoint truncates the journal only while no storage bracket is active. Every
+    /// statement, undo, prune and recovery-scrub bracket of the coordinator runs under the apply
+    /// gate, so without taking it a checkpoint under a sustained write load found a bracket
+    /// open nearly every time, was refused as busy, and the journal grew without bound. Taking
+    /// the gate waits for the statement already applying, however long it runs (an index build
+    /// or an <c>INSERT ... SELECT</c> applies in one bracket); a caller that checkpoints several
+    /// databases in turn uses <see cref="TryCheckpoint"/>, so one long statement does not hold
+    /// up the others (#1254).
+    /// </remarks>
+    public void Checkpoint(CancellationToken cancellationToken)
+    {
+        ThrowIfInsideApply();
+        _applyGate.Wait(cancellationToken);
+        try
+        {
+            Volatile.Write(ref _checkpointDeferred, 0);
+            _log.CheckpointUnderGate(_storage);
+        }
+        finally
+        {
+            _applyGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Checkpoints the data storage (see <see cref="Checkpoint()"/>) if the statement apply gate
+    /// can be taken within <paramref name="gateTimeout"/>. Otherwise the checkpoint is deferred
+    /// to the statement holding the gate, which runs it before it releases the gate, and the call
+    /// returns false at once: it never waits longer than <paramref name="gateTimeout"/>.
+    /// </summary>
+    /// <param name="gateTimeout">
+    /// The longest the call waits for the gate; <see cref="TimeSpan.Zero"/> takes it only when it
+    /// is free.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the wait for the apply gate.</param>
+    /// <returns>
+    /// True when the checkpoint ran on this call; false when a statement held the gate, which then
+    /// runs the checkpoint as it ends.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="gateTimeout"/> is negative (other than <see cref="Timeout.InfiniteTimeSpan"/>) or exceeds
+    /// <see cref="int.MaxValue"/> milliseconds.
+    /// </exception>
+    /// <exception cref="StorageTransactionException">
+    /// A storage-level bracket that does not go through the apply gate is still active, or the
+    /// call came from inside a statement apply of this coordinator.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">The wait for the apply gate was canceled.</exception>
+    /// <exception cref="Exception">
+    /// The failure of a checkpoint a statement ran for an earlier deferred request, thrown once,
+    /// before this call does anything else.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The engines' checkpoint workers visit every database of an engine in turn on one thread.
+    /// Waiting for the gate without a bound let one database's long statement (a large
+    /// <c>CREATE INDEX</c>, <c>UPDATE</c> or <c>INSERT ... SELECT</c>) park that thread, and every
+    /// other database's journal grew past its size meanwhile (#1254 review: 130 times a 4 MiB
+    /// size in six seconds). Any bounded wait fixes that, but trades the busy database against
+    /// the others: a short one rarely catches the end of a long statement, a long one lets the
+    /// others overshoot. Deferring needs no trade: the worker moves on at once, and the busy
+    /// database is checkpointed the moment its statement ends, before the next statement takes
+    /// the gate, whether the statement ran for a millisecond or a minute.
+    /// </para>
+    /// <para>
+    /// The deferred checkpoint runs on the thread of the statement that ends, which waits for it
+    /// as the next statement would have waited at the gate. It never fails that statement: a
+    /// storage bracket still open outside the gate leaves the request for the next statement, an
+    /// offline storage drops it, and any other failure is thrown by the next call of this method,
+    /// so the engine's worker records it.
+    /// </para>
+    /// </remarks>
+    public bool TryCheckpoint(TimeSpan gateTimeout, CancellationToken cancellationToken)
+    {
+        ThrowIfInsideApply();
+        Interlocked.Exchange(ref _deferredCheckpointFailure, null)?.Throw();
+
+        if (!_applyGate.Wait(gateTimeout, cancellationToken))
+        {
+            // Set after the failed wait: a statement that releases the gate before this write is
+            // seen leaves the request for the next statement, or for the worker's next look.
+            Volatile.Write(ref _checkpointDeferred, 1);
+            return false;
+        }
+
+        try
+        {
+            Volatile.Write(ref _checkpointDeferred, 0);
+            _log.CheckpointUnderGate(_storage);
+            return true;
+        }
+        finally
+        {
+            _applyGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Runs the checkpoint <see cref="TryCheckpoint"/> deferred to the statement that holds the
+    /// apply gate, under that gate, as the statement ends. Never throws: the statement's own
+    /// outcome is already decided.
+    /// </summary>
+    private void RunDeferredCheckpoint()
+    {
+        try
+        {
+            _log.CheckpointUnderGate(_storage);
+            Volatile.Write(ref _checkpointDeferred, 0);
+        }
+        catch (StorageTransactionException)
+        {
+            // A storage bracket outside the apply gate is open; the next statement to end, or
+            // the worker's next look, retries.
+        }
+        catch (StorageOfflineException)
+        {
+            // A durable flush failed and took the storage offline (#1243): nothing more is
+            // written, and every later operation on the database is refused.
+            Volatile.Write(ref _checkpointDeferred, 0);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Volatile.Write(ref _checkpointDeferred, 0);
+            Volatile.Write(ref _deferredCheckpointFailure, ExceptionDispatchInfo.Capture(exception));
+        }
+    }
+
+    /// <summary>
+    /// Refuses a checkpoint asked for from inside one of this coordinator's statement applies:
+    /// the apply gate is not reentrant, so waiting for it there would never end.
+    /// </summary>
+    private void ThrowIfInsideApply()
+    {
+        if (_insideApply.Value)
+        {
+            throw new StorageTransactionException(
+                "A checkpoint cannot run inside a statement apply: the statement holds the apply gate the checkpoint waits for. " +
+                "Checkpoint after the statement completes.");
+        }
+    }
 
     /// <summary>
     /// Runs one maintenance pass for the version-purge worker: retries any
@@ -581,6 +832,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         try
         {
             await _manager.DisposeAsync().ConfigureAwait(false);
+        }
+        catch when (IsStorageOffline)
+        {
+            // The storage went offline after a failed durable flush (#1243): it refuses every
+            // write, so the aborts' undo could not run, and none is needed. The storage closes
+            // without writing, and the next open's recovery classifies every writer without a
+            // commit record, from the journal and the checkpoint anchor, as aborted and scrubs it.
         }
         catch
         {
@@ -772,10 +1030,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             {
                 // The record is in the journal and the sequence has left the checkpoint
                 // list, so recovery and every later checkpoint read the transaction as
-                // committed: it can no longer abort, only its durability is open.
-                throw new TransactionCommitUnconfirmedException(
-                    $"Transaction {sequence} committed, but its commit record could not be made durable; " +
-                    "the commit is lost if the database stops before its journal is next flushed.", exception);
+                // committed: it can no longer abort. The failed flush took the storage
+                // offline, so the reopen's recovery decides whether it survives (#1243).
+                throw new TransactionCommitUnconfirmedException(JournalTransactionLog.UnconfirmedMessage(sequence), exception);
             }
 
             return default;

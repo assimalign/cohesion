@@ -41,12 +41,25 @@ internal sealed class BlobOperation
     internal void EnsureActive()
     {
         _database.ThrowIfDisposed();
+
+        // A blob stream checks here before every read and write, and an upload before its
+        // completion: an offline database refuses them with its coded error (#1243).
+        _database.ThrowIfOffline();
         _session?.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
             throw new DatabaseException("The blob operation's transaction is no longer active.");
         }
     }
+    /// <summary>
+    /// Translates a failure the operation's stream observed the way every other operation's
+    /// failure is translated: the offline storage's coded refusal (#1243), or the area root's
+    /// exception for a kernel failure such as the upload's unconfirmed commit.
+    /// </summary>
+    /// <param name="error">The failure to translate.</param>
+    /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
+    internal Exception TranslateFailure(Exception error) => _database.TranslateFailure(error);
+
     internal async ValueTask CompleteAsync()
     {
         // A stream's disposal, its failure path and session disposal can all
@@ -88,8 +101,10 @@ internal sealed class BlobOperation
                     // caller rolls back (#1225).
                     await _transaction.AbortAsync(cause).ConfigureAwait(false);
                 }
-                else if (Context.State == TransactionState.Active)
+                else if (Context.State == TransactionState.Active && !_database.IsOffline)
                 {
+                    // An offline database undoes nothing (#1243): the reopen's recovery aborts
+                    // the operation's transaction.
                     await _database.Coordinator.RollbackAsync(_context).ConfigureAwait(false);
                 }
             }
@@ -123,7 +138,7 @@ internal sealed class BlobOperation
     private async ValueTask ReleaseSnapshotPinAsync()
     {
         var pin = Interlocked.Exchange(ref _snapshotPin, null);
-        if (pin?.State == TransactionState.Active)
+        if (pin?.State == TransactionState.Active && !_database.IsOffline)
         {
             await _database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
         }

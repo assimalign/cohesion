@@ -44,13 +44,21 @@ internal sealed class JournalTransactionLog : ITransactionLog
         {
             // The record is in the journal, which recovery reads as committed: the
             // transaction can no longer abort, only its durability is open.
-            throw new TransactionCommitUnconfirmedException(
-                $"Transaction {sequence} committed, but its commit record could not be made durable; " +
-                "the commit is lost if the process stops before the journal is next flushed.", exception);
+            throw new TransactionCommitUnconfirmedException(UnconfirmedMessage(sequence), exception);
         }
 
         return default;
     }
+
+    /// <summary>
+    /// The message of a commit whose record was appended but whose durable flush failed, which
+    /// took the journal's storage offline (#1243).
+    /// </summary>
+    /// <param name="sequence">The transaction's sequence.</param>
+    internal static string UnconfirmedMessage(TransactionSequence sequence)
+        => $"Transaction {sequence} committed in this process, but its commit record could not be made durable, so its " +
+           "outcome is unknown: the failed flush took the storage offline, and nothing more is written to it. Reopen the " +
+           "database; its recovery keeps the commit if the record reached stable storage and discards it if not.";
 
     /// <inheritdoc />
     public ValueTask AppendAbortAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)

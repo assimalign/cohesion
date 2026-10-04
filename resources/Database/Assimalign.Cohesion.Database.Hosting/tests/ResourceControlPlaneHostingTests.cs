@@ -306,6 +306,62 @@ public sealed class ResourceControlPlaneHostingTests
         data["engine.0.worker.0.kind"].ShouldBe(nameof(DatabaseEngineWorkerKind.WriteAheadFlush));
     }
 
+    /// <summary>
+    /// A commit's journal fsync fails, and the database goes offline: it refuses every request
+    /// while its engine keeps running. The application's health is unhealthy and names the
+    /// database, so an operator or an orchestrator acting on health learns of it; reopening the
+    /// database brings health back (#1243 review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a database offline after a failed fsync is unhealthy until reopened")]
+    public async Task CheckAsync_WithDatabaseOfflineAfterFailedFsync_ShouldReportUnhealthyUntilReopened()
+    {
+        // Arrange: a SQL engine whose journals can fail an fsync, with quiet workers.
+        var strategy = new Assimalign.Cohesion.Database.Sql.Tests.TestObjects.FaultInjectingJournalSqlStorageStrategy(durable: true);
+        await using var engine = Assimalign.Cohesion.Database.Sql.SqlDatabaseEngine.Create(new Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineOptions
+        {
+            EngineName = "sql",
+            StorageStrategy = strategy,
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        });
+        IDatabase database = await engine.CreateDatabaseAsync("app");
+        await using (IDatabaseSession setup = await database.CreateSessionAsync())
+        {
+            await setup.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
+        }
+
+        var options = new DatabaseApplicationOptions();
+        options.Engines.Add(engine);
+        await using var application = new DatabaseApplication(options);
+        HealthContribution before = await application.Context.CheckAsync(CancellationToken.None);
+
+        // Act: the commit's journal fsync fails.
+        IDatabaseSession session = await database.CreateSessionAsync();
+        using (Assimalign.Cohesion.Database.Sql.Tests.TestObjects.FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1))
+        {
+            await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
+                await session.ExecuteAsync("INSERT INTO t (id) VALUES (1)"));
+        }
+
+        HealthContribution offline = await application.Context.CheckAsync(CancellationToken.None);
+        await session.DisposeAsync();
+        await engine.OpenDatabaseAsync("app");
+        HealthContribution reopened = await application.Context.CheckAsync(CancellationToken.None);
+
+        // Assert
+        before.Status.ShouldBe(HealthStatus.Healthy);
+        offline.Status.ShouldBe(HealthStatus.Unhealthy);
+        offline.Description.ShouldNotBeNull().ShouldContain("sql/app");
+        IReadOnlyDictionary<string, object> data = offline.Data.ShouldNotBeNull();
+        data["engine.0.state"].ShouldBe(nameof(EngineState.Running));
+        data["engine.0.offlineDatabaseCount"].ShouldBe(1);
+        data["engine.0.offlineDatabases"].ShouldBe("app");
+        data["offlineDatabaseCount"].ShouldBe(1);
+        reopened.Status.ShouldBe(HealthStatus.Healthy);
+        reopened.Data.ShouldNotBeNull()["offlineDatabaseCount"].ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a disposed engine is unhealthy")]
     public async Task CheckAsync_WithDisposedEngine_ShouldReportUnhealthy()
     {

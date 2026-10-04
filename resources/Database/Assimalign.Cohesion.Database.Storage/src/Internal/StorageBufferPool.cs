@@ -45,7 +45,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     private readonly LinkedList<long> _accessOrder = new(); // head = least recently used
     private readonly Stack<BufferEntry> _recycled = new();
     private readonly object _syncRoot = new();
-    private readonly int _capacity;
+    private int _capacity;
 
     // The image a write-back stamps and writes; guarded by _syncRoot like every write-back.
     private readonly byte[] _writeBackImage = new byte[Page.Size];
@@ -61,18 +61,95 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     /// </summary>
     internal Action<long>? WriteAheadGate;
 
+    /// <summary>
+    /// Invoked before every write the pool makes to the storage stream — a page write-back or
+    /// an extension of the stream — whatever the page's LSN: the owning storage throws from it
+    /// once it is offline, so no data write follows a failed durable flush (#1243).
+    /// </summary>
+    internal Action? WriteGuard;
+
     internal StorageBufferPool(int capacity)
+    {
+        ValidateCapacity(capacity);
+        _capacity = capacity;
+    }
+
+    /// <inheritdoc />
+    public int Capacity
+    {
+        get
+        {
+            lock (_syncRoot)
+            {
+                return _capacity;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Changes the number of pages the pool may hold. Growing takes effect at once; shrinking
+    /// evicts least recently used unpinned pages (writing dirty ones back first, through the
+    /// write-ahead gate) until the resident pages fit the new capacity.
+    /// </summary>
+    /// <param name="capacity">The new capacity in pages; at least one.</param>
+    /// <param name="stream">The stream evicted dirty pages are written to.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="capacity"/> is less than one page.</exception>
+    /// <exception cref="StorageIOException">
+    /// More pages than the new capacity are pinned; the pool is unchanged.
+    /// </exception>
+    /// <remarks>
+    /// When the write-back of an evicted page fails, the failure propagates and the pool keeps
+    /// the smallest capacity that still holds every resident page, so its invariants hold.
+    /// </remarks>
+    internal void Resize(int capacity, StorageStream stream)
+    {
+        ValidateCapacity(capacity);
+
+        lock (_syncRoot)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            int pinned = 0;
+            foreach (var entry in _entries.Values)
+            {
+                if (entry.PinCount > 0)
+                {
+                    pinned++;
+                }
+            }
+
+            if (pinned > capacity)
+            {
+                throw new StorageIOException(
+                    $"Cannot shrink the buffer pool to {capacity} pages: {pinned} pages are pinned.");
+            }
+
+            _capacity = capacity;
+
+            try
+            {
+                while (_entries.Count > _capacity)
+                {
+                    EvictOneLocked(stream);
+                }
+            }
+            catch
+            {
+                _capacity = Math.Max(_capacity, _entries.Count);
+                throw;
+            }
+
+            AssertInvariantsLocked();
+        }
+    }
+
+    private static void ValidateCapacity(int capacity)
     {
         if (capacity < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(capacity), "Buffer pool capacity must be at least one page.");
         }
-
-        _capacity = capacity;
     }
-
-    /// <inheritdoc />
-    public int Capacity => _capacity;
 
     /// <inheritdoc />
     public int Count
@@ -273,6 +350,8 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     {
         lock (_syncRoot)
         {
+            WriteGuard?.Invoke();
+
             foreach (var kvp in _entries)
             {
                 if (kvp.Value.IsDirty)
@@ -327,6 +406,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
 
             if (stream.Length < requiredLength)
             {
+                WriteGuard?.Invoke();
                 stream.SetLength(requiredLength);
             }
         }
@@ -543,6 +623,9 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     /// </remarks>
     private void WriteBack(StorageStream stream, PageId pageId, BufferEntry entry)
     {
+        // Before anything else: an offline storage writes no page, whatever its LSN.
+        WriteGuard?.Invoke();
+
         long version = Volatile.Read(ref entry.Version);
         new ReadOnlySpan<byte>(entry.Page.Pointer, Page.Size).CopyTo(_writeBackImage);
 

@@ -28,15 +28,21 @@ internal sealed class BlobDatabaseTransaction : IDatabaseTransaction
     private Exception? _failure;
     private bool _ended;
 
+    // The database whose offline state (#1243) refuses the transaction's commit and rollback and
+    // makes its disposal touch nothing; null for a transaction composed without one.
+    private readonly BlobDatabaseInstance? _database;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="BlobDatabaseTransaction"/> class.
     /// </summary>
     /// <param name="coordinator">The transaction coordinator that commits and rolls back the transaction.</param>
     /// <param name="context">The transaction context this transaction wraps.</param>
-    public BlobDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context)
+    /// <param name="database">The database the transaction runs on, whose offline state it observes.</param>
+    public BlobDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context, BlobDatabaseInstance? database = null)
     {
         _coordinator = coordinator;
         _context = context;
+        _database = database;
     }
 
     internal ITransactionContext Context => _context;
@@ -101,6 +107,10 @@ internal sealed class BlobDatabaseTransaction : IDatabaseTransaction
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        // An offline database refuses the commit before it starts (#1243): nothing is written,
+        // and the reopen's recovery aborts the transaction, which has no commit record.
+        _database?.ThrowIfOffline();
         await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -147,7 +157,7 @@ internal sealed class BlobDatabaseTransaction : IDatabaseTransaction
                     // A kernel abort of the commit crosses the engine boundary as the area root's
                     // exception; this one translation serves every end path (commit, rollback,
                     // dispose, close and abort).
-                    var translated = BlobDatabaseInstance.TranslateKernelFailure(error);
+                    var translated = Translate(error);
                     if (ReferenceEquals(translated, error)) { throw; }
                     throw translated;
                 }
@@ -176,6 +186,10 @@ internal sealed class BlobDatabaseTransaction : IDatabaseTransaction
     public async ValueTask RollbackAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        // An offline database refuses the rollback too (#1243): its undo could write nothing,
+        // and the reopen's recovery aborts the transaction.
+        _database?.ThrowIfOffline();
         await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -312,7 +326,9 @@ internal sealed class BlobDatabaseTransaction : IDatabaseTransaction
     // never as the kernel's own exception type.
     private async ValueTask RollbackContextAsync()
     {
-        if (_context.State != TransactionState.Active)
+        // On an offline database the disposal, the session's teardown and an operation's abort
+        // touch nothing (#1243): the reopen's recovery aborts the transaction.
+        if (_context.State != TransactionState.Active || _database?.IsOffline == true)
         {
             return;
         }
@@ -322,9 +338,14 @@ internal sealed class BlobDatabaseTransaction : IDatabaseTransaction
         }
         catch (Exception error)
         {
-            var translated = BlobDatabaseInstance.TranslateKernelFailure(error);
+            var translated = Translate(error);
             if (ReferenceEquals(translated, error)) { throw; }
             throw translated;
         }
     }
+
+    // A failure the offline storage caused is the database's coded refusal (#1243); any other
+    // kernel failure crosses the boundary as the area root's exception.
+    private Exception Translate(Exception error)
+        => _database?.TranslateFailure(error) ?? BlobDatabaseInstance.TranslateKernelFailure(error);
 }

@@ -230,7 +230,18 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
             return false;
         }
 
-        _databaseSession = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
+        try
+        {
+            _databaseSession = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
+        }
+        catch (DatabaseOfflineException exception)
+        {
+            // The database went offline after a failed durable flush (#1243): every session is
+            // refused, with the coded reason, until it is reopened.
+            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message).ConfigureAwait(false);
+            return false;
+        }
+
         Principal = startup.Principal;
 
         await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
@@ -371,7 +382,9 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
                     // teardown retries the rollback; the client still gets the original failure.
                 }
             }
-            await TryWriteErrorAsync(ProtocolErrorCode.ExecutionFailure, exception.Message).ConfigureAwait(false);
+            // An offline database (#1243) refuses every exchange with its coded reason.
+            var code = exception is DatabaseOfflineException ? ProtocolErrorCode.Unavailable : ProtocolErrorCode.ExecutionFailure;
+            await TryWriteErrorAsync(code, exception.Message).ConfigureAwait(false);
             return false;
         }
     }

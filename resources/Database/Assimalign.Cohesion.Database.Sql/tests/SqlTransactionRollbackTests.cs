@@ -182,14 +182,15 @@ public sealed class SqlTransactionRollbackTests
             .ShouldBe([(1L, 10L)]);
     }
 
-    // The engine's own maintenance workers stay out of the way: these tests drive the purge
-    // pass and the checkpoint themselves.
+    // The engine's own maintenance workers stay out of the way, the deferred-undo retry included:
+    // these tests drive the purge pass and the checkpoint themselves.
     private static SqlDatabaseEngineOptions QuietOptions(string name, FaultInjectingJournalSqlStorageStrategy strategy) => new()
     {
         EngineName = name,
         StorageStrategy = strategy,
         MaintenanceInterval = TimeSpan.FromHours(1),
         CheckpointInterval = TimeSpan.FromHours(1),
+        DeferredUndoRetryDelay = TimeSpan.FromHours(1),
     };
 
     private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
