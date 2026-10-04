@@ -21,6 +21,7 @@ public sealed class JournalTests
         journal.AppendBegin(7);
         journal.AppendOperation(7, new byte[8192]);
         journal.AppendCommit(7);
+        journal.Flush();
         long position = stream.Position;
 
         using (var records = journal.ReadSequential().GetEnumerator())

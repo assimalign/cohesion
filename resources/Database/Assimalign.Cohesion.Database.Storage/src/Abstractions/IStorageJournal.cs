@@ -21,6 +21,14 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// the same records and uses ordinary flushes without a persistence guarantee.
 /// </para>
 /// <para>
+/// <b>Buffered appends (#1252).</b> An append assigns its LSN and encodes its frame in a
+/// user-space buffer; <see cref="LastLsn"/> may be ahead of what the medium holds. The buffer
+/// drains to the operating system before a commit is acknowledged in every durability mode,
+/// before every read (<see cref="ReadAll"/>), before the write-ahead gate lets a page reach the
+/// data file, before a checkpoint truncates, and on <see cref="Flush"/> and disposal. A drain
+/// that fails takes the journal offline, like a failed durable flush.
+/// </para>
+/// <para>
 /// <b>Recovery.</b> On open, recovery replays the journal: committed after-images
 /// are redone, and before-images of transactions without a durable commit record are
 /// applied to undo stolen writes. Corrupted or torn records at the tail of the

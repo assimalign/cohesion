@@ -11,6 +11,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -399,14 +400,14 @@ public sealed class KeyValueStorageOperationsTests
         var transaction = await session.BeginTransactionAsync();
         await database.PutAsync(session, Bytes("hot"), Bytes("rolled back"));
 
-        // Act: the rollback's first journal write is its undo bracket's begin record, which fails
-        // once, so the undo is deferred with the writer's key lock held.
-        int unspent;
+        // Act: another storage bracket holds every page while the rollback runs, so the undo's
+        // bracket cannot touch the first page it undoes and the undo is deferred with
+        // the writer's key lock held; the pages are released at once. (Until #1252 a failed journal
+        // write was the transient fault; a journal write failure now takes the database offline.)
         var watch = Stopwatch.StartNew();
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        using (PageWriteLockHolder.LockEveryPage(instance.DataStorage))
         {
             await transaction.RollbackAsync();
-            unspent = failures.Remaining;
         }
 
         // The engine handed the coordinator its first retry delay: the retry is due within it.
@@ -417,7 +418,6 @@ public sealed class KeyValueStorageOperationsTests
 
         // Assert
         var retryDelay = configured.ShouldNotBeNull().DeferredUndoRetryDelay;
-        unspent.ShouldBe(0);
         retryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
         firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(retryDelay);
         put.Applied.ShouldBeTrue();

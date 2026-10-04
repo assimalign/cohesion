@@ -19,6 +19,8 @@
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Indexing\tests\TestObjects\LegacyBTreePages.cs" Link="TestObjects\LegacyBTreePages.cs" />
 		<!-- Rewrites a data file's storage format version for the storage-format refusal tests (#1251). -->
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\StorageFormatFiles.cs" Link="TestObjects\StorageFormatFiles.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalFrames.cs" Link="TestObjects\JournalFrames.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\PageWriteLockHolder.cs" Link="TestObjects\PageWriteLockHolder.cs" />
 	</ItemGroup>
 	<Target Name="CopyGraphRecoveryFixture" AfterTargets="Build">
 		<ItemGroup>

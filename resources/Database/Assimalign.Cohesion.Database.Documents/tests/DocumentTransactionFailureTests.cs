@@ -6,6 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
 using Xunit;
@@ -450,111 +452,155 @@ public sealed class DocumentTransactionFailureTests
 
     /// <summary>
     /// A rollback whose abort record cannot be written still ends the transaction and releases the
-    /// database writer lock, so another session's writer proceeds (#1226). Until #1226 such a
-    /// rollback failed and left the transaction Faulted until a later rollback completed.
+    /// database writer lock (#1226). Since #1252 the rollback appends the record to the journal's
+    /// append buffer, and it reaches the file with the next drain: here the commit of another
+    /// session's write, which proceeds because the writer lock is free. That drain fails, which
+    /// takes the database offline (#1243's rule): the write is reported unconfirmed, the next
+    /// operation is refused as offline, and the reopen keeps what committed before and nothing of
+    /// either transaction.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a rollback whose abort record cannot be written still ends the transaction")]
-    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndReleaseWriterLock()
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a rollback whose abort record cannot be written still ends the transaction, and the database goes offline")]
+    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndGoOffline()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
-        await using var session = await database.CreateSessionAsync();
-        await using var other = await database.CreateSessionAsync();
+        var session = await database.CreateSessionAsync();
+        var other = await database.CreateSessionAsync();
         await collection.PutAsync(session, "keep", Doc("keep"));
         var transaction = await session.BeginTransactionAsync();
 
         // A delete that matches nothing takes the database writer lock and writes no version, so
-        // the abort record is the rollback's only journal write.
+        // the abort record is the rollback's only journal append.
         (await collection.DeleteAsync(session, "missing")).ShouldBeFalse();
 
-        // Act
+        // Act: the rollback buffers the abort record; the other session's write needs the writer
+        // lock, and its commit drains the record, which fails.
+        int unspentAfterTheRollback;
         int unspent;
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        DatabaseTransactionCommitUnconfirmedException lost;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWritesContaining(JournalRecordType.RollbackTransaction))
         {
             await transaction.RollbackAsync();
+            unspentAfterTheRollback = failures.Remaining;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            lost = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(
+                async () => await collection.PutAsync(other, "other", Doc("other"), cancellationToken: timeout.Token));
             unspent = failures.Remaining;
         }
 
-        // Assert: the record write failed, and the rollback ended the transaction anyway.
+        var refused = await Should.ThrowAsync<DatabaseOfflineException>(async () => await collection.PutAsync(other, "after", Doc("after")));
+        await other.DisposeAsync();
+        await session.DisposeAsync();
+        engine.Dispose();
+        await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+        await using var observer = await recovered.CreateSessionAsync();
+
+        // Assert: the rollback wrote nothing and ended the transaction; the drain that carried its
+        // record failed.
+        unspentAfterTheRollback.ShouldBe(1);
         unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        await collection.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(Timeout);
-        await using (var next = await session.BeginTransactionAsync())
-        {
-            await collection.PutAsync(session, "after", Doc("after"));
-            await next.CommitAsync();
-        }
-        (await Ids(session)).ShouldBe(["after", "keep", "other"]);
+        StorageOfflineException.Find(lost).ShouldNotBeNull();
+        refused.InnerException.ShouldNotBeNull();
+        (await Ids(observer)).ShouldBe(["keep"]);
     }
 
     /// <summary>
-    /// After a rollback whose abort record was lost, the transaction is rolled back like any other:
-    /// COMMIT is refused and commits nothing, and a repeated rollback raises nothing.
+    /// After a rollback whose abort record was lost, the transaction is rolled back like any other
+    /// and COMMIT commits nothing. The record is lost with the drain that carries it (#1252), here
+    /// the commit of the session's next write, which takes the database offline: the COMMIT and a
+    /// repeated rollback are then refused as offline before they start.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT after a rollback whose abort record was lost is refused")]
     public async Task CommitAsync_AfterRollbackWithLostAbortRecord_ShouldBeRefused()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
-        await using var session = await database.CreateSessionAsync();
+        var session = await database.CreateSessionAsync();
         await collection.PutAsync(session, "keep", Doc("keep"));
         var transaction = await session.BeginTransactionAsync();
         (await collection.DeleteAsync(session, "missing")).ShouldBeFalse();
-        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWritesContaining(JournalRecordType.RollbackTransaction))
         {
             await transaction.RollbackAsync();
+            await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await collection.PutAsync(session, "next", Doc("next")));
+            unspent = failures.Remaining;
         }
 
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
-        await transaction.RollbackAsync();
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.CommitAsync());
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
+        await session.DisposeAsync();
+        engine.Dispose();
+        await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+        await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
-        error.Message.ShouldBe("The transaction is RolledBack.");
+        unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        (await Ids(session)).ShouldBe(["keep"]);
+        (await Ids(observer)).ShouldBe(["keep"]);
     }
 
-    /// <summary>A commit the kernel aborts crosses the boundary translated, and a catch-block rollback afterwards raises nothing.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a kernel-aborted commit is translated and a later rollback is a no-op")]
-    public async Task CommitAsync_KernelAbortsCommit_ShouldTranslateAndAcceptRollback()
+    /// <summary>
+    /// A commit whose record cannot be written is never acknowledged (#1252): the commit drains the
+    /// journal's append buffer through its record before it returns, in every durability mode, and
+    /// when that drain fails the database goes offline (#1243's rule) and the commit crosses the
+    /// boundary as committed-unconfirmed, its outcome left to the reopen's recovery. The record
+    /// never reached the file here, so the reopen holds nothing of the transaction, and a later
+    /// rollback is refused as offline.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a commit whose record cannot be written is unconfirmed, and the database goes offline")]
+    public async Task CommitAsync_CommitRecordCannotBeWritten_ShouldBeUnconfirmedAndGoOffline()
     {
         // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
-        await using var session = await database.CreateSessionAsync();
+        var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "pending", Doc("pending"));
 
-        // Act: the commit record is the commit's first journal write; the kernel then aborts the transaction.
-        DatabaseTransactionAbortedException error;
-        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        // Act: the commit's drain carries its commit record, and that write fails.
+        DatabaseTransactionCommitUnconfirmedException error;
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWritesContaining(JournalRecordType.CommitTransaction))
         {
-            error = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await transaction.CommitAsync());
+            error = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await transaction.CommitAsync());
+            unspent = failures.Remaining;
         }
         var stateAfterCommit = transaction.State;
-        await transaction.RollbackAsync();
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
+        await session.DisposeAsync();
+        engine.Dispose();
+        await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
+        var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+        await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
-        error.InnerException.ShouldBeOfType<TransactionAbortedException>();
-        stateAfterCommit.ShouldBe(TransactionState.Faulted);
-        transaction.State.ShouldBe(TransactionState.Faulted);
+        unspent.ShouldBe(0);
+        StorageOfflineException.Find(error).ShouldNotBeNull();
+        stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
-        await collection.PutAsync(session, "after", Doc("after"));
-        (await Ids(session)).ShouldBe(["after"]);
+        (await Ids(observer)).ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Rollback: a late operation of a rolled-back transaction does not release its deferred writer lock")]
     public async Task LockWriterAsync_LateOperationOfRolledBackTransaction_ShouldNotReleaseItsDeferredWriterLock()
     {
-        // Arrange: a rollback whose undo cannot write its journal bracket, and a waiting writer.
+        // Arrange: a rollback whose undo cannot touch the pages another storage bracket holds,
+        // and a waiting writer.
         await using var engine = DocumentDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
         var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
@@ -562,11 +608,11 @@ public sealed class DocumentTransactionFailureTests
         await using var other = await database.CreateSessionAsync();
         var transaction = (DocumentDatabaseTransaction)await session.BeginTransactionAsync();
         await collection.PutAsync(session, "rolled", "1"u8.ToArray());
-        int unspent;
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        int locked;
+        using (var holder = PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
-            unspent = failures.Remaining;
+            locked = holder.Pages;
         }
 
         int deferred = database.Coordinator.VersionStore.PendingAbortedPurges.Count;
@@ -582,7 +628,7 @@ public sealed class DocumentTransactionFailureTests
         await waiting.WaitAsync(Timeout);
 
         // Assert
-        unspent.ShouldBe(0);
+        locked.ShouldBeGreaterThan(0);
         deferred.ShouldBe(1);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         late.Message.ShouldContain("ended while waiting for the writer lock");
@@ -597,7 +643,7 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using (var session = await database.CreateSessionAsync())
         {
@@ -606,24 +652,17 @@ public sealed class DocumentTransactionFailureTests
             await collection.PutAsync(session, "rolled", "2"u8.ToArray());
             await collection.DeleteAsync(session, "kept");
 
-            // The undo's storage bracket begins (the first write) and fails at its first page
-            // image (the second), so the bracket rolls itself back and the undo is deferred.
-            using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
-            {
-                await transaction.RollbackAsync();
-                failures.Remaining.ShouldBe(0);
-            }
-
+            // Another storage bracket holds every page, through the close: the undo's bracket
+            // cannot touch the first page it undoes, so it rolls itself back and the undo is
+            // deferred. (Until #1252 a failed journal write was the fault; a journal write
+            // failure now takes the database offline.)
+            _ = PageWriteLockHolder.LockEveryPage(database.DataStorage); // abandoned with the storage
+            await transaction.RollbackAsync();
             transaction.State.ShouldBe(TransactionState.RolledBack);
         }
 
         // Act: the close retries the undo, which fails the same way.
-        AggregateException closeFailure;
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
-        {
-            closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
-            failures.Remaining.ShouldBe(0);
-        }
+        var closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
 
         await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
@@ -631,23 +670,25 @@ public sealed class DocumentTransactionFailureTests
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert: the insert is gone and the delete is undone.
-        closeFailure.InnerExceptions.ShouldContain(error => error is IOException);
+        closeFailure.Flatten().InnerExceptions.ShouldContain(error => error is StorageTransactionException);
         (await items.GetAsync(observer, "rolled")).ShouldBeNull();
         (await items.GetAsync(observer, "kept")).ShouldNotBeNull();
     }
 
     /// <summary>
     /// A checkpoint truncates the journal before it appends the record that lists the transactions
-    /// still in flight. When that append fails while a rolled-back transaction's undo is deferred,
-    /// the journal no longer names the transaction, and its document sits in the flushed data pages.
-    /// The storage's checkpoint anchor, written before the truncation, still names it, so the next
-    /// open scrubs it after a clean close (#1226 integration review; before the anchor the
-    /// rolled-back document came back as committed).
+    /// still in flight. When that record's write fails while a rolled-back transaction's undo is
+    /// deferred, the journal no longer names the transaction, and its document sits in the flushed
+    /// data pages. The storage's checkpoint anchor, written before the truncation, still names it,
+    /// so the next open scrubs it (#1226 integration review; before the anchor the rolled-back
+    /// document came back as committed). Since #1252 the failed write also takes the database
+    /// offline, so the close writes nothing and cannot retry the undo.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Rollback: a checkpoint record lost while the undo is deferred does not resurrect the document")]
     public async Task Checkpoint_RecordLostWhileTheUndoIsDeferred_ShouldLeaveNothingOfTheRolledBackTransactionAfterReopen()
     {
-        // Arrange: a rolled-back transaction whose undo's first journal write fails.
+        // Arrange: a rolled-back transaction whose undo could not touch the pages another storage
+        // bracket held, so it is deferred.
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
@@ -657,7 +698,7 @@ public sealed class DocumentTransactionFailureTests
             await collection.PutAsync(session, "kept", Doc("kept"));
             var transaction = await session.BeginTransactionAsync();
             await collection.PutAsync(session, "rolled", Doc("rolled"));
-            using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+            using (PageWriteLockHolder.LockEveryPage(database.DataStorage))
             {
                 await transaction.RollbackAsync();
             }
@@ -665,20 +706,19 @@ public sealed class DocumentTransactionFailureTests
             transaction.State.ShouldBe(TransactionState.RolledBack);
         }
 
-        // Act: the checkpoint truncates the journal and loses its own record; the close then
-        // retries the undo, which fails again at its first page image.
+        // Act: the journal holds every record, so the checkpoint's first journal write is its own
+        // record after the truncation, which fails and takes the database offline; the close then
+        // writes nothing.
+        database.DataStorage.WriteAheadJournal.Flush();
         int checkpointFailuresLeft;
         using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
         {
-            Should.Throw<IOException>(() => database.Coordinator.Checkpoint());
+            Should.Throw<StorageOfflineException>(() => database.Coordinator.Checkpoint());
             checkpointFailuresLeft = failures.Remaining;
         }
 
-        AggregateException closeFailure;
-        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
-        {
-            closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
-        }
+        bool offline = database.IsOffline;
+        engine.Dispose();
 
         await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
@@ -686,7 +726,7 @@ public sealed class DocumentTransactionFailureTests
 
         // Assert: only the committed document is there.
         checkpointFailuresLeft.ShouldBe(0);
-        closeFailure.InnerExceptions.ShouldContain(error => error is IOException);
+        offline.ShouldBeTrue();
         (await Ids(observer)).ShouldBe(["kept"]);
     }
 
@@ -736,10 +776,11 @@ public sealed class DocumentTransactionFailureTests
         }, durable: false).AsTask();
         await entered.Task.WaitAsync(Timeout);
 
-        // Act: the rollback waits for the apply, then its undo's first journal write fails.
+        // Act: the rollback waits for the apply, then its undo cannot touch the pages another
+        // storage bracket holds.
         Task rollback;
-        int unspent;
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        int locked;
+        using (var holder = PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             rollback = transaction.RollbackAsync().AsTask();
             await Task.Delay(TimeSpan.FromMilliseconds(100));
@@ -747,7 +788,7 @@ public sealed class DocumentTransactionFailureTests
             release.SetResult();
             (await applying.WaitAsync(Timeout)).ShouldBeTrue();
             await rollback.WaitAsync(Timeout);
-            unspent = failures.Remaining;
+            locked = holder.Pages;
             rollbackWaitedForTheApply.ShouldBeTrue();
         }
         bool trackedWhileDeferred = database.Coordinator.VersionStore.PendingAbortedPurges.Count == 1;
@@ -756,7 +797,7 @@ public sealed class DocumentTransactionFailureTests
         database.Coordinator.RunVersionPurgePass(CancellationToken.None);
 
         // Assert
-        unspent.ShouldBe(0);
+        locked.ShouldBeGreaterThan(0);
         trackedWhileDeferred.ShouldBeTrue();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         refused.Message.ShouldContain("the statement was not applied", Case.Sensitive);

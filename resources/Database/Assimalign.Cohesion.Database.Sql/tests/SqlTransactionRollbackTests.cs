@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
@@ -48,55 +50,85 @@ public sealed class SqlTransactionRollbackTests
         (await Rows(session, "SELECT id FROM t")).Select(row => Convert.ToInt64(row[0])).OrderBy(id => id).ShouldBe([1L, 2L]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Rollback: a journal that rejects the abort record still ends the transaction and releases its locks")]
-    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndReleaseItsLocks()
+    /// <summary>
+    /// A started rollback ends the transaction and releases its locks even when the journal
+    /// rejects its abort record (#1226). Since #1252 the rollback appends the record to the
+    /// journal's append buffer, and it reaches the file with the next drain: here the commit of
+    /// another session's insert. That drain fails, which takes the database offline (#1243's
+    /// rule): the insert is reported unconfirmed, the next statement is refused as offline, and the
+    /// reopen keeps what committed before and nothing of either transaction.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Rollback: a journal that rejects the abort record still ends the transaction and releases its locks, and the database goes offline")]
+    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndGoOffline()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
-        {
-            EngineName = "rollback-journal",
-            StorageStrategy = new FaultInjectingJournalSqlStorageStrategy(),
-        });
+        var strategy = new FaultInjectingJournalSqlStorageStrategy();
+        var engine = SqlDatabaseEngine.Create(QuietOptions("rollback-journal", strategy));
         var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("journal-db");
-        await using var session = await database.CreateSessionAsync();
-        await using var other = await database.CreateSessionAsync();
+        var session = await database.CreateSessionAsync();
+        var other = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
         await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (1, 10)");
+        database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
         var transaction = await session.BeginTransactionAsync();
 
         // An update that matches no row takes the table's intent-exclusive lock and writes no
-        // version, so the abort record is the rollback's only journal write.
+        // version, so the abort record is the rollback's only journal append.
         await session.ExecuteAsync("UPDATE t SET val = 11 WHERE id = 999");
 
-        // Act
+        // Act: the rollback buffers the abort record; the other session's insert commits, and its
+        // drain carries the record, which fails.
+        int unspentAfterTheRollback;
         int unspent;
-        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalWrites(1))
+        bool tableLockFree;
+        bool openContextsAfterTheRollback;
+        DatabaseTransactionCommitUnconfirmedException lost;
+        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalWritesContaining(JournalRecordType.RollbackTransaction))
         {
             await transaction.RollbackAsync();
+            unspentAfterTheRollback = failures.Remaining;
+            openContextsAfterTheRollback = database.Coordinator.GetOpenContexts().Count > 0;
+
+            // The table's exclusive lock, which the writer's intent-exclusive lock would block, is
+            // granted at once to an owner no transaction uses, and given back.
+            var probe = new TransactionSequence(ulong.MaxValue);
+            tableLockFree = database.Coordinator.LockManager.TryAcquire(probe, LockResource.Object(table.ObjectId), LockMode.Exclusive);
+            database.Coordinator.LockManager.ReleaseAll(probe);
+
+            lost = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
+                await other.ExecuteAsync("INSERT INTO t (id, val) VALUES (2, 20)"));
             unspent = failures.Remaining;
         }
 
-        // Assert: the record write failed, and the rollback ended the transaction anyway. DROP
-        // TABLE needs the table's exclusive lock, which a held intent lock would block.
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await other.ExecuteAsync("INSERT INTO t (id, val) VALUES (3, 30)"));
+        await other.DisposeAsync();
+        await session.DisposeAsync();
+        await engine.DisposeAsync();
+        await using var reopened = SqlDatabaseEngine.Create(QuietOptions("rollback-journal", strategy));
+        var recovered = await reopened.OpenDatabaseAsync("journal-db");
+        await using var observer = await recovered.CreateSessionAsync();
+
+        // Assert: the rollback wrote nothing, ended the transaction and released its locks; the
+        // drain that carried its record failed.
+        unspentAfterTheRollback.ShouldBe(1);
         unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
-        await other.ExecuteAsync("DROP TABLE t").AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        openContextsAfterTheRollback.ShouldBeFalse();
+        tableLockFree.ShouldBeTrue();
+        StorageOfflineException.Find(lost).ShouldNotBeNull();
+        (await Rows(observer, "SELECT id, val FROM t")).Select(row => (Convert.ToInt64(row[0]), Convert.ToInt64(row[1])))
+            .ShouldBe([(1L, 10L)]);
     }
 
     /// <summary>
-    /// A rollback whose undo the journal rejects still ends the transaction; its locks wait for the
+    /// A rollback whose undo cannot run still ends the transaction; its locks wait for the
     /// version-purge pass to complete the undo, and the failed storage bracket leaves nothing that
-    /// refuses a checkpoint or the retry (#1226).
+    /// refuses a checkpoint or the retry (#1226). Another storage bracket holds every data page
+    /// while the rollback runs; until #1252 a failed journal write was the fault, and a journal
+    /// write failure now takes the database offline.
     /// </summary>
-    /// <param name="skip">
-    /// The undo's journal writes to let through before the failing one: 0 fails its storage
-    /// bracket's begin record, 1 the before image of the first page it changes.
-    /// </param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Rollback: a rollback whose undo the journal rejects holds its locks until the purge pass, and checkpoints keep running")]
-    [InlineData(0)]
-    [InlineData(1)]
-    public async Task RollbackAsync_JournalRejectsTheUndo_ShouldHoldLocksUntilThePurgePassAndKeepCheckpointsRunning(int skip)
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Rollback: a rollback whose undo is deferred holds its locks until the purge pass, and checkpoints keep running")]
+    public async Task RollbackAsync_UndoDeferred_ShouldHoldLocksUntilThePurgePassAndKeepCheckpointsRunning()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create(QuietOptions("rollback-undo-journal", new FaultInjectingJournalSqlStorageStrategy()));
@@ -108,12 +140,12 @@ public sealed class SqlTransactionRollbackTests
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (2, 20)");
 
-        // Act: the undo's storage bracket makes the rollback's first journal writes.
-        int unspent;
-        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalWrites(1, skip))
+        // Act: the undo's storage bracket cannot touch the first page it undoes.
+        int locked;
+        using (var holder = PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
-            unspent = failures.Remaining;
+            locked = holder.Pages;
         }
 
         int deferred = database.Coordinator.VersionStore.PendingAbortedPurges.Count;
@@ -129,7 +161,7 @@ public sealed class SqlTransactionRollbackTests
 
         // Assert: the transaction ended at once, its row stayed invisible, and its locks waited for
         // the undo; the failed bracket left nothing that refuses a checkpoint.
-        unspent.ShouldBe(0);
+        locked.ShouldBeGreaterThan(0);
         deferred.ShouldBe(1);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         droppedBeforeTheUndo.ShouldBeFalse();
@@ -144,7 +176,7 @@ public sealed class SqlTransactionRollbackTests
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy();
         var engine = SqlDatabaseEngine.Create(QuietOptions("rollback-close", strategy));
-        var database = await engine.CreateDatabaseAsync("close-db");
+        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("close-db");
         await using (var session = await database.CreateSessionAsync())
         {
             await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
@@ -153,31 +185,24 @@ public sealed class SqlTransactionRollbackTests
             await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (2, 20)");
             await session.ExecuteAsync("UPDATE t SET val = 11 WHERE id = 1");
 
-            // The undo's storage bracket begins (the first write) and fails at its first page
-            // image (the second), so the bracket rolls itself back and the undo is deferred.
-            using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalWrites(1, skip: 1))
-            {
-                await transaction.RollbackAsync();
-                failures.Remaining.ShouldBe(0);
-            }
-
+            // Another storage bracket holds every data page, through the close: the undo's bracket
+            // cannot touch the first page it undoes, so it rolls itself back and the undo is
+            // deferred. (Until #1252 a failed journal write was the fault; a journal write
+            // failure now takes the database offline.)
+            _ = PageWriteLockHolder.LockEveryPage(database.DataStorage); // abandoned with the storage
+            await transaction.RollbackAsync();
             transaction.State.ShouldBe(TransactionState.RolledBack);
         }
 
-        // Act: the close's first journal writes are the undo's retry, which fails the same way.
-        AggregateException closeFailure;
-        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalWrites(1, skip: 1))
-        {
-            closeFailure = await Should.ThrowAsync<AggregateException>(async () => await engine.DisposeAsync());
-            failures.Remaining.ShouldBe(0);
-        }
+        // Act: the close retries the undo, which fails the same way.
+        var closeFailure = await Should.ThrowAsync<AggregateException>(async () => await engine.DisposeAsync());
 
         await using var reopened = SqlDatabaseEngine.Create(QuietOptions("rollback-close", strategy));
         var recovered = await reopened.OpenDatabaseAsync("close-db");
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert: the insert is gone and the update is undone.
-        closeFailure.InnerExceptions.ShouldContain(error => error is IOException);
+        closeFailure.Flatten().InnerExceptions.ShouldContain(error => error is Assimalign.Cohesion.Database.Storage.StorageTransactionException);
         (await Rows(observer, "SELECT id, val FROM t")).Select(row => (Convert.ToInt64(row[0]), Convert.ToInt64(row[1])))
             .ShouldBe([(1L, 10L)]);
     }

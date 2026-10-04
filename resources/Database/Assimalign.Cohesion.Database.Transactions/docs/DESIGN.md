@@ -149,13 +149,20 @@ writer is left for recovery to scrub.
 
 That presumption covers an abort record that never reached the log, not a write that
 failed part way. PostgreSQL treats any failed WAL write as fatal (`ereport(PANIC,
-"could not write to log file ...")`, `src/backend/access/transam/xlog.c:2529-2531`),
+"could not write to log file ...")`, `src/backend/access/transam/xlog.c:2529-2532`),
 because bytes a failed write left behind would end recovery's read of the log before
 every later record. This journal gives the same guarantee without stopping the
-process: a failed append cuts its partial frame back off, and when it cannot, the
-journal refuses every later append until a checkpoint truncates it or the storage is
-reopened (`Database.Storage` DESIGN.md, "The journal"). Ignoring a failed abort record
-therefore never hides a later commit record from recovery.
+process. Since #1252 an append writes nothing: records wait in the journal's append buffer
+until it drains. The abort record's append itself fails only when the journal is already
+offline, or when it has to drain a full buffer and that write fails; otherwise the record is
+lost, if at all, with the later drain that carries it (the next commit's, a checkpoint's),
+after the rollback returned. Either way the failed write takes the storage offline, so nothing
+is written behind the bytes it left (`Database.Storage` DESIGN.md, "The append buffer"). The
+rollback still ends; the reopen's recovery reads the writer as aborted. The engines' rollback
+tests lose the record that second way, failing the drain that carries it
+(`FailJournalWritesContaining`). Ignoring a failed
+abort record therefore never hides a later commit record from recovery. (Until #1252 a
+failed append cut its partial frame back off and the storage stayed online.)
 
 **The token stops at the start.** A rollback stopped half way would keep the locks of
 a writer whose work it only partly undid, the zombie this rule removes. PostgreSQL
@@ -202,31 +209,39 @@ committed, which no engine may do.
 
 **The retry runs on its own backoff (#1226, owner decision of 2026-10-04).** Until then the
 only retry was the version-purge pass, one `MaintenanceInterval` (60 seconds by default) after
-the failure, so even a transient failure — one journal write refused — held every conflicting
-writer for a minute. Now the manager schedules the retry itself (`DeferredUndoBackoff`): the
+the failure, so even a transient failure — one journal write refused, before #1252 — held every
+conflicting writer for a minute. Now the manager schedules the retry itself (`DeferredUndoBackoff`): the
 first is due `DeferredUndoRetryDelay` (100 ms) after the deferral, each retry that leaves a
 writer deferred doubles the delay up to `DeferredUndoRetryLimit` (the engine's maintenance
 interval), a new deferral starts the schedule over, and the schedule stops once nothing is
 deferred. The coordinator invokes `OnUndoDeferred` when an undo is deferred, which wakes the
 engine's version-purge worker; the worker sleeps no longer than `NextDeferredUndoRetry` and calls
 `RetryDeferredUndo`, which does nothing until a retry is due. A transient failure therefore
-releases the writer about 100 ms later: every engine's storage-operations test fails one undo
-journal write with an hour-long maintenance interval and has the next writer proceed within 1%
-of it (in practice a few hundred milliseconds). A failure that persists is retried at 0.1, 0.2,
+releases the writer about 100 ms later: every engine's storage-operations test makes one undo
+fail with an hour-long maintenance interval and has the next writer proceed within 1% of it (in
+practice a few hundred milliseconds). The failure is a page write lock another storage bracket
+holds while the rollback runs (the shared test object `PageWriteLockHolder`); until #1252 it was a
+failed undo journal write, which now takes the storage offline instead, so a journal fault is no
+longer one a retry can outlive. A failure that persists is retried at 0.1, 0.2,
 0.4 … seconds, then once per maintenance interval, so it cannot spin. The purge workers record a
-retry that fails again as a worker fault and keep running; before, the exception escaped the
-worker's pump loop and stopped the worker for good, leaving every deferred writer stuck until
-the database closed. The schedule reads a `TimeProvider` (the coordinator's internal
+retry that fails again with anything other than a busy page or bracket as a worker fault and
+keep running; a busy page or bracket (`StorageTransactionException`, which the page write lock
+above raises) they retry on the next pass without reporting it, so an undo that a held page
+keeps failing is retried on the schedule but never surfaces as a fault. Before, the exception
+escaped the worker's pump loop and stopped the worker for good, leaving every deferred writer
+stuck until the database closed. The schedule reads a `TimeProvider` (the coordinator's internal
 constructor), so `DeferredUndoBackoffTests` and the coordinator's tests drive it without
 waiting.
 
-A journal failure inside the undo is an undo failure like any other. The undo's
+Any failure inside the undo is an undo failure like any other. The undo's
 storage bracket fails to begin, to touch a page or to commit, rolls itself back, and
 the writer is deferred. A storage bracket ends even when its own begin or rollback
 record cannot be appended, and a page whose before image cannot be appended is left
 unlocked (`Database.Storage` DESIGN.md, "Failed appends"), so a failed undo leaves
 nothing behind in the storage: checkpoints keep running while the writer waits, and
-the retry can touch the same pages.
+the retry can touch the same pages. A failure that is a journal write takes the storage
+offline since #1252 ("The append buffer" there): the retry is then refused like every other
+write, and the reopen's recovery scrubs the writer.
 
 Each of those checkpoints truncates the journal, the writer's begin record with it, while
 the writer's versions stay in the data pages, so the writer's classification at the next

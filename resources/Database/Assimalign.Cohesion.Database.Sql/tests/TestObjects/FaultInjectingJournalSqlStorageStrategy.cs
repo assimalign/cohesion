@@ -9,6 +9,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.FileSystem;
 
 /// <summary>
@@ -29,10 +30,11 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
 {
     private static readonly AsyncLocal<Budget?> s_failures = new();
     private static readonly AsyncLocal<Budget?> s_flushFailures = new();
+    private static readonly AsyncLocal<Budget?> s_recordFailures = new();
     private readonly Dictionary<string, Files> _storages = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
     private readonly bool _durable;
-    private bool _failEveryJournalWrite;
+    private bool _failEveryDataRead;
 
     /// <summary>Initializes a new instance of the <see cref="FaultInjectingJournalSqlStorageStrategy"/> class.</summary>
     /// <param name="durable">True for file sets that support durable flushes.</param>
@@ -47,13 +49,15 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
     internal bool LoseUnconfirmedJournalOnReopen { get; set; }
 
     /// <summary>
-    /// Gets or sets whether every journal write of this strategy's file sets fails, on every flow:
-    /// the engine's background workers included, as a device that refuses writes for a while.
+    /// Gets or sets whether every read of this strategy's data files fails, on every flow: the
+    /// engine's background workers included, as a device that refuses reads for a while. A page the
+    /// buffer pool holds is not read. (Until #1252 a device refusing journal writes played this
+    /// part; a failed journal write now takes the storage offline.)
     /// </summary>
-    internal bool FailEveryJournalWrite
+    internal bool FailEveryDataRead
     {
-        get => Volatile.Read(ref _failEveryJournalWrite);
-        set => Volatile.Write(ref _failEveryJournalWrite, value);
+        get => Volatile.Read(ref _failEveryDataRead);
+        set => Volatile.Write(ref _failEveryDataRead, value);
     }
 
     /// <summary>
@@ -62,6 +66,12 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
     /// </summary>
     /// <param name="writes">The number of writes to fail.</param>
     /// <param name="skip">The number of writes to let through before the first failure.</param>
+    /// <remarks>
+    /// Since #1252 an append writes nothing: the journal's append buffer drains at a commit, a
+    /// reader, the write-ahead gate, a checkpoint, a full buffer and a close, and each drain is one
+    /// write. A failed one takes the storage offline. To lose a given record, fail the drain that
+    /// carries it with <see cref="FailJournalWritesContaining"/>.
+    /// </remarks>
     /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
     internal static FailureScope FailJournalWrites(int writes, int skip = 0)
     {
@@ -69,6 +79,28 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
         var budget = new Budget { Skip = skip, Fail = writes };
         s_failures.Value = budget;
         return new FailureScope(s_failures, previous, budget);
+    }
+
+    /// <summary>
+    /// Fails the next <paramref name="writes"/> journal writes made on the calling flow that carry a
+    /// record of <paramref name="type"/>, until the returned scope is disposed; every other write
+    /// goes through.
+    /// </summary>
+    /// <param name="type">The record type a failing write carries.</param>
+    /// <param name="writes">The number of such writes to fail.</param>
+    /// <remarks>
+    /// Since #1252 a record reaches the journal file with the drain of the append buffer that
+    /// carries it, wherever that drain happens, so a test loses one record by failing that drain.
+    /// The record is read off the frames on the wire (<see cref="JournalFrames"/>); the failed
+    /// write takes the storage offline.
+    /// </remarks>
+    /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
+    internal static FailureScope FailJournalWritesContaining(JournalRecordType type, int writes = 1)
+    {
+        var previous = s_recordFailures.Value;
+        var budget = new Budget { Fail = writes, RecordType = type };
+        s_recordFailures.Value = budget;
+        return new FailureScope(s_recordFailures, previous, budget);
     }
 
     /// <summary>
@@ -107,7 +139,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
     /// <inheritdoc />
     public SqlStorage CreateStorage(string databaseName)
     {
-        var files = new Files(new MemoryStream(), new FaultInjectingStream(this), new MemoryStream());
+        var files = new Files(new FaultInjectingDataStream(this), new FaultInjectingStream(), new MemoryStream());
         lock (_sync)
         {
             if (!_storages.TryAdd(databaseName, files))
@@ -134,14 +166,14 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
                 throw new DatabaseNotFoundException($"Database '{databaseName}' does not exist.");
             }
 
-            var journal = Copy(closed.Journal, new FaultInjectingStream(this));
+            var journal = Copy(closed.Journal, new FaultInjectingStream());
             if (LoseUnconfirmedJournalOnReopen)
             {
                 journal.SetLength(closed.Journal.ConfirmedLength);
             }
 
             journal.ConfirmedLength = journal.Length;
-            files = new Files(Copy(closed.Data, new MemoryStream()), journal, Copy(closed.Backup, new MemoryStream()));
+            files = new Files(Copy(closed.Data, new FaultInjectingDataStream(this)), journal, Copy(closed.Backup, new MemoryStream()));
             _storages[databaseName] = files;
         }
 
@@ -203,6 +235,18 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
         return false;
     }
 
+    // Spends the calling flow's record budget when the write carries a record of its type.
+    private static bool SpendCarrying(ReadOnlySpan<byte> written)
+    {
+        if (s_recordFailures.Value is not { RecordType: { } type, Fail: > 0 } budget || !JournalFrames.Carries(written, type))
+        {
+            return false;
+        }
+
+        budget.Fail--;
+        return true;
+    }
+
     /// <summary>The armed failure budget of one calling flow.</summary>
     internal sealed class FailureScope : IDisposable
     {
@@ -238,28 +282,24 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
 
         /// <summary>Gets or sets the only file set whose journal the budget fails, or null for every one.</summary>
         public string? StorageName { get; set; }
+
+        /// <summary>Gets or sets the record type a failing write carries, or null for any write.</summary>
+        public JournalRecordType? RecordType { get; set; }
     }
 
     /// <summary>The data, journal and backup streams of one file set.</summary>
-    private sealed record Files(MemoryStream Data, FaultInjectingStream Journal, MemoryStream Backup);
+    private sealed record Files(FaultInjectingDataStream Data, FaultInjectingStream Journal, MemoryStream Backup);
 
-    // Every write funnels through the array overload, so each journal frame is counted once: a
+    // Every write funnels through the array overload, so each journal write is counted once: a
     // MemoryStream subclass's span overload would otherwise call back into the array overload.
     private sealed class FaultInjectingStream : MemoryStream
     {
-        private readonly FaultInjectingJournalSqlStorageStrategy _owner;
-
-        public FaultInjectingStream(FaultInjectingJournalSqlStorageStrategy owner)
-        {
-            _owner = owner;
-        }
-
         /// <summary>Gets or sets the length the last successful durable flush confirmed.</summary>
         public long ConfirmedLength { get; set; }
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            if (_owner.FailEveryJournalWrite || Spend(s_failures))
+            if (Spend(s_failures) || SpendCarrying(buffer.AsSpan(offset, count)))
             {
                 throw new IOException("Injected journal write failure.");
             }
@@ -270,6 +310,42 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrat
         public override void Write(ReadOnlySpan<byte> buffer) => Write(buffer.ToArray(), 0, buffer.Length);
 
         public override void WriteByte(byte value) => Write([value], 0, 1);
+    }
+
+    // A data file whose reads fail while the strategy says so. Every read funnels through the
+    // array overload: a MemoryStream subclass's span overload calls back into it.
+    private sealed class FaultInjectingDataStream : MemoryStream
+    {
+        private readonly FaultInjectingJournalSqlStorageStrategy _owner;
+
+        public FaultInjectingDataStream(FaultInjectingJournalSqlStorageStrategy owner)
+        {
+            _owner = owner;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_owner.FailEveryDataRead)
+            {
+                throw new IOException("Injected data read failure.");
+            }
+
+            return base.Read(buffer, offset, count);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            var array = new byte[buffer.Length];
+            int read = Read(array, 0, array.Length);
+            array.AsSpan(0, read).CopyTo(buffer);
+            return read;
+        }
+
+        public override int ReadByte()
+        {
+            var one = new byte[1];
+            return Read(one, 0, 1) == 0 ? -1 : one[0];
+        }
     }
 
     /// <summary>
