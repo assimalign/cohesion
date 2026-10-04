@@ -208,8 +208,7 @@ internal sealed class KeyValueOperationExecutor
 
         // Phase one: the key's exclusive lock — the model's single conflict
         // arbiter — acquired before the gate, per the lock-ordering rule.
-        await context.Coordinator.LockManager.AcquireAsync(
-            context.Transaction.Sequence, LockResource.Entry(KeySpaceObjectId, indexKey.Hash()), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        await AcquireKeyLockAsync(context, indexKey, cancellationToken).ConfigureAwait(false);
 
         // Resolve the visible version and re-validate it as latest under the
         // lock: a set deleter from another transaction is a concurrently
@@ -272,8 +271,7 @@ internal sealed class KeyValueOperationExecutor
     {
         var indexKey = new IndexKey(request.Key);
 
-        await context.Coordinator.LockManager.AcquireAsync(
-            context.Transaction.Sequence, LockResource.Entry(KeySpaceObjectId, indexKey.Hash()), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        await AcquireKeyLockAsync(context, indexKey, cancellationToken).ConfigureAwait(false);
 
         var current = await ResolveCurrentAsync(request.Key, context, cancellationToken).ConfigureAwait(false);
 
@@ -298,6 +296,40 @@ internal sealed class KeyValueOperationExecutor
         }, durable: false, cancellationToken).ConfigureAwait(false);
 
         return new KeyValueQueryResult(QueryResultStatus.Success, affectedCount: 1);
+    }
+
+    /// <summary>
+    /// Acquires the key's exclusive lock for the command's transaction, and gives the grant
+    /// back when the transaction ended while the request waited.
+    /// </summary>
+    /// <remarks>
+    /// The transaction can end on another thread while its command waits: a caller's
+    /// rollback, the session closing, or a host rolling back a wire session's transaction.
+    /// The end fails the requests it finds queued (<c>ILockManager.ReleaseAll</c>), but a
+    /// request queued just after that release is granted later, to a transaction that will
+    /// never release it again, so every later writer of the key would wait forever. The
+    /// kernel already refuses the command's bracket for an ended transaction; this check
+    /// releases the late grant, as the Graph, Documents and Blob engines do for their writer
+    /// lock. A grant to a transaction that is still active is kept even when the command
+    /// then fails: the transaction stays usable (a command is statement-atomic), and
+    /// releasing all of its locks would expose the keys its earlier commands wrote.
+    /// </remarks>
+    /// <exception cref="TransactionAbortedException">The command's transaction ended while the request waited.</exception>
+    private static async ValueTask AcquireKeyLockAsync(KeyValueStatementContext context, IndexKey indexKey, CancellationToken cancellationToken)
+    {
+        var owner = context.Transaction.Sequence;
+
+        await context.Coordinator.LockManager.AcquireAsync(
+            owner, LockResource.Entry(KeySpaceObjectId, indexKey.Hash()), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+
+        // The kernel sets an ended transaction's state before it releases its locks, so a
+        // grant made after that release always observes the end here.
+        if (context.Transaction.State != TransactionState.Active)
+        {
+            context.Coordinator.LockManager.ReleaseAll(owner);
+            throw new TransactionAbortedException(
+                $"Transaction {owner} ended while the command waited for the key lock; the command was not applied.");
+        }
     }
 
     // ── Version resolution and validation ──────────────────────────────

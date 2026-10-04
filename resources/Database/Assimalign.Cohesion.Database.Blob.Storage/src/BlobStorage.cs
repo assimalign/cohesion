@@ -134,11 +134,14 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="coordinator">The database's coordinator.</param>
     /// <param name="context">The logical transaction spanning all chunks and metadata.</param>
     /// <param name="complete">Publishes metadata and, for an automatic transaction, commits after successful disposal.</param>
-    /// <param name="abort">Aborts the logical transaction after any upload failure.</param>
+    /// <param name="abort">
+    /// Aborts the logical transaction after any upload failure, given the failure the stream then
+    /// throws to its caller, so an explicit transaction can report what aborted it.
+    /// </param>
     /// <param name="cancellationToken">Cancellation retained for the upload's entire lifetime.</param>
     /// <returns>A non-seekable writable stream holding one chunk buffer.</returns>
     public Stream OpenWrite(TransactionCoordinator coordinator, ITransactionContext context,
-        Func<BlobContentReference, ValueTask> complete, Func<ValueTask> abort, CancellationToken cancellationToken = default)
+        Func<BlobContentReference, ValueTask> complete, Func<Exception, ValueTask> abort, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(coordinator);
         ArgumentNullException.ThrowIfNull(context);

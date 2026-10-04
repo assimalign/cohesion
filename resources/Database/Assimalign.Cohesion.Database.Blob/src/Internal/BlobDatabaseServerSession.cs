@@ -356,7 +356,21 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         catch (Exception exception) when (exception is not (ProtocolException or OperationCanceledException or OutOfMemoryException))
         {
             // A transfer may already be in progress. An error is terminal: no uncertain frame
-            // boundary or partially consumed content is returned to the connection pool.
+            // boundary or partially consumed content is returned to the connection pool. The
+            // teardown ends the session's transaction; a host-opened one is aborted first, so the
+            // host's commit names this failure whenever it runs (#1225).
+            if (_databaseSession is BlobDatabaseSession session)
+            {
+                try
+                {
+                    await session.AbortTransactionAsync(exception).ConfigureAwait(false);
+                }
+                catch (Exception abortError) when (abortError is not OutOfMemoryException)
+                {
+                    // The transaction stays Faulted with the rollback failure recorded, and the
+                    // teardown retries the rollback; the client still gets the original failure.
+                }
+            }
             await TryWriteErrorAsync(ProtocolErrorCode.ExecutionFailure, exception.Message).ConfigureAwait(false);
             return false;
         }
@@ -392,7 +406,9 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         {
             // Roll back BEFORE successful disposal can finalize the storage stream. Explicit
             // transactions keep even successfully disposed destinations invisible until commit.
-            if (transaction.State == TransactionState.Active)
+            // A failed operation leaves the transaction Faulted until it is rolled back (#1225);
+            // only a committed transaction refuses the rollback.
+            if (transaction.State is TransactionState.Active or TransactionState.Faulted)
             {
                 await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             }

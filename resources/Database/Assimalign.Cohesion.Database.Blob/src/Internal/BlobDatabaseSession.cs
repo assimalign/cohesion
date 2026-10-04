@@ -7,6 +7,12 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Internal;
 
+/// <summary>
+/// A blob session. Its explicit transaction stays the session's transaction until the caller
+/// commits, rolls back or disposes it; an operation that fails inside it aborts it, and the session
+/// then refuses every operation and BEGIN with <c>COHDBB001</c> until the caller rolls back. A
+/// failure never turns later operations into autocommit writes (#1225).
+/// </summary>
 internal sealed class BlobDatabaseSession : IDatabaseSession
 {
     private readonly BlobDatabaseInstance _database;
@@ -21,8 +27,13 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
     }
     public IDatabase Database { get; }
     public SessionState State { get; private set; } = SessionState.Open;
-    public IDatabaseTransaction? CurrentTransaction => _transaction;
-    internal BlobDatabaseTransaction? ActiveTransaction => _transaction?.State == TransactionState.Active ? _transaction : null;
+
+    /// <summary>
+    /// Gets the session's transaction until the caller ends it, including an aborted transaction
+    /// (<see cref="TransactionState.Faulted"/>) that still waits for the caller's rollback.
+    /// </summary>
+    public IDatabaseTransaction? CurrentTransaction => OpenTransaction;
+    private BlobDatabaseTransaction? OpenTransaction => _transaction is { IsOpen: true } transaction ? transaction : null;
     public ValueTask<IDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         => BeginTransactionAsync(IsolationLevel.Snapshot, cancellationToken);
     public async ValueTask<IDatabaseTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
@@ -35,7 +46,15 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
         lock (_sync)
         {
             ThrowIfNotOpen();
-            if (ActiveTransaction is not null || _reserved || _operations.Count != 0)
+            if (OpenTransaction is { } open)
+            {
+                // BEGIN is refused while an aborted transaction waits for its rollback, as in
+                // PostgreSQL's failed transaction block.
+                throw open.IsUsable
+                    ? new DatabaseException("A transaction or stream is already active on this session.")
+                    : open.CreateRefusal();
+            }
+            if (_reserved || _operations.Count != 0)
             {
                 throw new DatabaseException("A transaction or stream is already active on this session.");
             }
@@ -88,8 +107,13 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
             {
                 throw new DatabaseException("Dispose the active blob stream before starting another operation on this session.");
             }
+            var transaction = OpenTransaction;
+            if (transaction is { IsUsable: false })
+            {
+                throw transaction.CreateRefusal();
+            }
             _reserved = true;
-            return ActiveTransaction;
+            return transaction;
         }
     }
     internal void ReleaseReservation()
@@ -123,6 +147,23 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
             throw new DatabaseException("The blob session is closed.");
         }
     }
+
+    /// <summary>
+    /// Aborts the session's explicit transaction for a failure that ends the session, unless an
+    /// operation already aborted it. The wire server calls it before it reports a terminal failure,
+    /// so a failure that came before an operation started (which leaves an in-process transaction
+    /// unchanged) has aborted a host-opened transaction before the client sees the error, and the
+    /// host's commit fails with <c>COHDBB001</c> naming it whichever of the commit and the
+    /// connection's teardown runs first.
+    /// </summary>
+    /// <param name="cause">The failure the client is told about.</param>
+    internal async ValueTask AbortTransactionAsync(Exception cause)
+    {
+        if (OpenTransaction is { IsUsable: true } transaction)
+        {
+            await transaction.AbortAsync(cause).ConfigureAwait(false);
+        }
+    }
     public async ValueTask DisposeAsync()
     {
         List<BlobOperation> operations;
@@ -136,22 +177,29 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
             operations = new List<BlobOperation>(_operations);
         }
         List<Exception>? errors = null;
-        foreach (var operation in operations)
+        if (operations.Count != 0)
         {
-            try
+            var closed = new DatabaseException("The blob session closed while the operation was running.");
+            foreach (var operation in operations)
             {
-                await operation.AbortAsync().ConfigureAwait(false);
-            }
-            catch (Exception error)
-            {
-                (errors ??= []).Add(error);
+                try
+                {
+                    await operation.AbortAsync(closed).ConfigureAwait(false);
+                }
+                catch (Exception error)
+                {
+                    (errors ??= []).Add(error);
+                }
             }
         }
         try
         {
-            if (ActiveTransaction is not null)
+            // The transaction object stays with its caller: a later rollback is a no-op, and a later
+            // commit fails with COHDBB001 naming the closure (or the operation failure before it).
+            // Over the wire this is the server session's teardown under a host-opened transaction.
+            if (OpenTransaction is { } transaction)
             {
-                await ActiveTransaction.DisposeAsync().ConfigureAwait(false);
+                await transaction.CloseAsync(new DatabaseException("The blob session closed before the transaction ended.")).ConfigureAwait(false);
             }
         }
         catch (Exception error)

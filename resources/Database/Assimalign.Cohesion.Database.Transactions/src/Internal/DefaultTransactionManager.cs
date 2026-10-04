@@ -118,6 +118,10 @@ internal sealed class DefaultTransactionManager : ITransactionManager
     {
         var owned = Validate(context);
 
+        // No statement applies once the end begins; one already applying finishes first,
+        // so the commit record follows every bracket stamped with the sequence.
+        await owned.BeginEndAsync().ConfigureAwait(false);
+
         try
         {
             // The write-ahead rule: the log returns only once the commit record is
@@ -138,8 +142,11 @@ internal sealed class DefaultTransactionManager : ITransactionManager
             _active.Remove(owned.Sequence.Value);
         }
 
-        _lockManager.ReleaseAll(owned.Sequence);
+        // The state changes before the locks release: a request granted after the
+        // release then sees an ended owner and must give the grant back (the engines'
+        // post-grant check), and one granted before it is released here.
         owned.State = TransactionState.Committed;
+        _lockManager.ReleaseAll(owned.Sequence);
     }
 
     /// <inheritdoc />
@@ -147,6 +154,11 @@ internal sealed class DefaultTransactionManager : ITransactionManager
     {
         var owned = Validate(context);
 
+        // The undo must see the writer's complete ledger: no statement applies once the
+        // end begins, and one already applying records its bracket before the purge runs.
+        // Without this, a bracket landing after the purge stays stamped with a sequence
+        // every snapshot then reads as committed.
+        await owned.BeginEndAsync().ConfigureAwait(false);
         await _versionStore.PurgeWriterAsync(owned.Sequence, cancellationToken).ConfigureAwait(false);
         await _log.AppendAbortAsync(owned.Sequence, cancellationToken).ConfigureAwait(false);
 
@@ -155,8 +167,38 @@ internal sealed class DefaultTransactionManager : ITransactionManager
             _active.Remove(owned.Sequence.Value);
         }
 
-        _lockManager.ReleaseAll(owned.Sequence);
         owned.State = TransactionState.RolledBack;
+        _lockManager.ReleaseAll(owned.Sequence);
+    }
+
+    /// <summary>
+    /// Admits one statement apply for the context's transaction, which must still be
+    /// in the active table and not ending. Every admitted apply is paired with
+    /// <see cref="DefaultTransactionContext.ExitApply"/>.
+    /// </summary>
+    /// <param name="context">The context the statement runs under, or a statement wrapper sharing its sequence.</param>
+    /// <returns>The manager's context for the transaction.</returns>
+    /// <exception cref="TransactionAbortedException">The transaction has ended or its end has begun.</exception>
+    internal DefaultTransactionContext EnterApply(ITransactionContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        DefaultTransactionContext? owned;
+
+        // By sequence, not by reference: engines hand statement wrappers (a
+        // read-committed statement's fixed snapshot) that share the sequence.
+        lock (_sync)
+        {
+            _active.TryGetValue(context.Sequence.Value, out owned);
+        }
+
+        if (owned is null || !owned.TryEnterApply())
+        {
+            throw new TransactionAbortedException(
+                $"Transaction {context.Sequence} ended while its statement was running; the statement was not applied.");
+        }
+
+        return owned;
     }
 
     /// <inheritdoc />
@@ -222,6 +264,7 @@ internal sealed class DefaultTransactionManager : ITransactionManager
 
     private async ValueTask AbortAsync(DefaultTransactionContext context)
     {
+        await context.BeginEndAsync().ConfigureAwait(false);
         await _versionStore.PurgeWriterAsync(context.Sequence).ConfigureAwait(false);
 
         try
@@ -239,8 +282,8 @@ internal sealed class DefaultTransactionManager : ITransactionManager
             _active.Remove(context.Sequence.Value);
         }
 
-        _lockManager.ReleaseAll(context.Sequence);
         context.State = TransactionState.Faulted;
+        _lockManager.ReleaseAll(context.Sequence);
     }
 
     private DefaultTransactionContext Validate(ITransactionContext context)

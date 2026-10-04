@@ -61,7 +61,10 @@ executing OQL or CRUD never interprets it as session authority over other databa
 
 Each statement uses one `ITransactionContext`. Automatic operations commit on
 success and roll back on failure. Explicit transaction operations leave commit
-to the caller; a failing operation rolls back the whole explicit transaction.
+to the caller; a failing operation aborts the whole explicit transaction, which
+then refuses every later statement until the caller rolls it back, as
+[Failed statements in explicit transactions](#failed-statements-in-explicit-transactions-1225)
+describes.
 Snapshot isolation fixes the read horizon at transaction start. ReadCommitted
 captures one statement snapshot and pins its retention horizon for the statement.
 Serializable is rejected rather than silently weakened.
@@ -72,6 +75,103 @@ latest state under that lock. An intervening change raises
 `DatabaseTransactionAbortedException`. Reads stay snapshot based. Catalog and
 index writes use the same logical context as content chunks; rollback and crash
 recovery cannot publish a partial document.
+
+### Failed statements in explicit transactions (#1225)
+
+A statement that fails inside an explicit transaction aborts the whole transaction. Document
+storage cannot undo one statement: a `PutAsync` writes its content chunks, tombstones the old
+chain and publishes catalog and index entries through separate physical brackets, and
+`Database.Transactions` undoes a writer only as a whole transaction, with no savepoints. Until
+#1225 the session then dropped the rolled-back transaction from view, so the next statement
+silently ran in autocommit and the caller's `RollbackAsync` threw. The session now follows the
+contract the Graph engine set in #1188 (Graph [DESIGN.md](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#failed-statements-in-explicit-transactions-1188)),
+with its own code, `COHDBD001`:
+
+1. The failure rolls the transaction's work back at once and releases its locks, so the aborted
+   transaction blocks no other writer while it waits for the caller.
+2. The transaction stays the session's `CurrentTransaction` and reports `TransactionState.Faulted`.
+   Every later statement on the session fails with `COHDBD001`: OQL text or requests, collection
+   `GetAsync`/`PutAsync`/`DeleteAsync`, and the session-bound `IDocumentDatabase` verbs
+   (`CreateCollectionAsync`, `GetCollectionAsync`, `DropCollectionAsync`,
+   `GetCollectionsAsync`). `BeginTransactionAsync` fails with `COHDBD001` too. The error names the
+   original failure in its message (`Cause: ...`) and carries it as `InnerException`. A refused
+   statement does not change the transaction, and an aborted transaction refuses text before
+   parsing it.
+3. `RollbackAsync` succeeds, leaves none of the transaction's writes, and returns the session to
+   autocommit. Disposing the transaction or the session ends it the same way. A rollback of any
+   transaction that did not commit may be repeated and raises nothing; a rollback of a committed
+   transaction is refused. This holds when the rollback, or the session's disposal, runs while a
+   statement of the transaction is still running on another thread: the kernel admits no
+   physical bracket of a transaction whose end has begun and waits for the one already applying
+   before it undoes the transaction (Transactions [DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#ending-a-transaction-under-a-running-statement)),
+   so the running statement fails with `DatabaseTransactionAbortedException` and writes nothing
+   that outlives the rollback. A statement still waiting for the writer lock fails at once.
+4. `CommitAsync` fails with `COHDBD001`, commits nothing, and ends the transaction (`RolledBack`).
+   It keeps that answer after the transaction has ended some other way (disposed, or rolled back
+   by the caller), so a commit never reports anything but `COHDBD001` for a transaction a
+   statement aborted. A commit after the session closed fails with `COHDBD001` too, naming the
+   closure when no statement failed first. A commit the kernel aborts throws
+   `DatabaseTransactionAbortedException` and leaves the transaction `Faulted` and ended.
+5. Every failure of a statement that started counts: parse diagnostics of text the session parses
+   or of a typed request, planning and execution errors (an unknown collection, a stale expected
+   version, a document whose indexed value outgrows the 1,024-byte index key, OQL `CREATE INDEX`
+   or `DROP INDEX` on a `COHESION_SCHEMA` collection, which the planner refuses), ownership
+   refusals, kernel aborts such as snapshot conflicts, and cancellation while the statement runs,
+   including a wait for the writer lock. Failures that come before a statement starts leave the
+   transaction unchanged: argument validation (a null, empty or whitespace id, collection name or
+   statement text), the typed `CreateCollectionAsync` and `DropCollectionAsync` refusal of a
+   `COHESION_SCHEMA` name, a session of another database, a request that carries no OQL
+   statement, and the refusal of a second concurrent operation on the session.
+6. Autocommit statements are unaffected: a failure ends only its own statement transaction.
+7. A rollback or commit observes its cancellation token only before it starts: a token canceled by
+   then throws `OperationCanceledException` and leaves the transaction as it was. One that has
+   started runs to completion (PostgreSQL holds interrupts through `AbortTransaction`,
+   `backend/access/transam/xact.c:2854-2861`). When a caller's rollback or commit still fails with
+   the transaction's context active (a journal or storage failure), the transaction stays
+   `CurrentTransaction` and reports `Faulted`, and the session refuses statements and BEGIN with
+   `COHDBD001` naming that failure, until a `RollbackAsync` completes. `CommitAsync` then completes
+   the rollback and fails with `COHDBD001`.
+
+Kernel failures cross the engine boundary translated (the area error policy): a deadlock as
+`DatabaseTransactionDeadlockException` and a kernel abort as `DatabaseTransactionAbortedException`,
+for statements and for the explicit transaction's commit and rollback alike. Storage failures
+still surface as the storage child root's exceptions.
+
+The explicit-transaction lifecycle, where Faulted is the new state:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Idle: autocommit statement succeeds or fails
+    Idle --> Active: BeginTransactionAsync
+    Active --> Active: statement succeeds, or fails before it starts
+    Active --> Faulted: statement fails and its transaction's work is rolled back
+    Active --> Faulted: RollbackAsync or CommitAsync fails with the context still active
+    Faulted --> Faulted: statement or BEGIN refused with COHDBD001, or a rollback that fails again
+    Active --> Idle: CommitAsync (committed, or aborted by the kernel), RollbackAsync, or DisposeAsync
+    Faulted --> Idle: RollbackAsync, DisposeAsync, or CommitAsync failing with COHDBD001
+```
+
+The reference engines agree on the outcome. PostgreSQL aborts the whole block on any error
+(`TBLOCK_ABORT`, "failed xact, awaiting ROLLBACK", `backend/access/transam/xact.c:171`) and rejects
+every later command but COMMIT and ROLLBACK before parse analysis with SQLSTATE 25P02
+(`backend/tcop/postgres.c:1150-1164`); Neo4j refuses work in a terminated transaction
+(`community/kernel/.../coreapi/TransactionImpl.java:529-535`), accepts repeated rollbacks
+(`community/kernel/.../KernelTransactionImplementation.java:1184-1194`) and fails a commit of a
+transaction it rolled back (`KernelTransactionImplementation.java:1206-1210`, `1291-1303`). COMMIT
+follows Neo4j, not PostgreSQL's silent ROLLBACK tag (`xact.c:4133-4139`): a caller awaiting
+`CommitAsync` must not see success when nothing committed. RavenDB, the document-model reference,
+has no interactive server transaction; its all-or-nothing unit is one client command or batch.
+Its transaction merger groups independent requests into one write transaction and, when that
+merged transaction fails, disposes it and reruns each request on its own
+(`src/Raven.Server/Documents/TransactionMerger/AbstractTransactionOperationsMerger.cs:368-375`,
+`391-394`); each rerun gets its own write transaction, disposed uncommitted when the command
+throws (`AbstractTransactionOperationsMerger.cs:906-916`). A failed request therefore commits
+nothing of its own, and the merge never makes one request's failure another's. Citations are to
+PostgreSQL `85f55534e80`, Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
+
+Documents has no wire server or client yet, so the contract is exercised in process only
+(`DocumentTransactionFailureTests`).
 
 Collections created by these APIs have `DatabaseObjectOwner.Adhoc`. A collection
 directly marked `Schema` refuses `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX`,

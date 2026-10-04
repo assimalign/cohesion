@@ -17,6 +17,12 @@ The coordinator's record ledger supports streamed model records: logical rollbac
 pruning, and recovery scrub use bounded physical mutation batches, while lifecycle
 analysis streams the shared journal instead of retaining page-image payloads.
 
+A transaction's end closes it to statements: once a commit, rollback or abort begins,
+the coordinator applies no further bracket of it, the end waits for the bracket already
+applying, and `ILockManager.ReleaseAll` fails the transaction's queued lock requests. A
+statement still running when its transaction ends on another thread therefore fails with
+`TransactionAbortedException` and leaves nothing stamped with the ended sequence.
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Database.Storage` (child-to-child: the journal/page substrate the implementations bind to)

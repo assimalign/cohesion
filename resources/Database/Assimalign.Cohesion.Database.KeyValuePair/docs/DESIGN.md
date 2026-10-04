@@ -122,12 +122,81 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
   default / `ReadCommitted` per-command refresh / `Serializable` rejected,
   rollback is logical through the ledger, recovery classifies + scrubs record
   space and primary index at open. Kernel aborts are wrapped in the root's
-  exceptions at the session boundary (the area error policy).
+  exceptions at the session boundary (the area error policy). A failed command
+  leaves an explicit transaction active; see
+  [Failed commands in explicit transactions](#failed-commands-in-explicit-transactions-1225).
 - **Result shapes.** `GET`/`SCAN` return result sets (`key`, `value`, `etag`);
   `PUT` a one-row outcome set (`applied`, `etag`); `EXISTS` a one-row boolean
   set; `DELETE` a plain result with its affected count. These shapes ride the
   wire's generic ResultHeader/Row/Complete framing untouched — a deliberate
   constraint so the model needs no protocol surface of its own.
+
+## Failed commands in explicit transactions (#1225)
+
+The #1225 audit asked whether this engine shares the Documents and Blob defect, where a failed
+statement rolled the explicit transaction back underneath its caller so that later statements
+silently autocommitted and `RollbackAsync` threw. For failed commands it does not, and it keeps
+a different contract from Graph, Documents and Blob, deliberately:
+
+- **A command is statement-atomic.** Its writes (the old version's tombstone, the new record,
+  both primary-index entries) share one physical bracket that the coordinator rolls back
+  physically when the command fails (`TransactionCoordinator.ApplyStatementAsync`), and the
+  ledger entries the failed bracket recorded are stamp-verified no-ops at undo and prune. Lock
+  waits, latest-version checks and conditional decisions run before the bracket. So a failed
+  command writes nothing, and the explicit transaction stays `Active` with every earlier command's
+  work intact: later commands run inside it, and `RollbackAsync` undoes all of them. This is the
+  SQL session's contract (a failed statement writes nothing and the transaction stays open),
+  which the Graph design names as the one it would keep if its storage could undo one statement.
+  It holds for every failure: a grammar violation, a first-updater-wins conflict, a unique-index
+  conflict found inside the bracket, a deadlock victim, a canceled lock wait. A conflict still
+  surfaces as the retryable `DatabaseTransactionAbortedException`; under Snapshot isolation a
+  retry inside the same transaction meets the same conflict, so the caller rolls back and retries
+  the transaction, as the MVCC tests do.
+- **The transaction's own end follows the #1188 contract**, with the code `COHDBK001`. A
+  transaction that did not commit accepts any number of rollbacks (a catch-block rollback after a
+  kernel-aborted commit raises nothing); a committed one refuses a rollback. A commit or rollback
+  observes its cancellation token only before it starts, and one that started runs to completion:
+  until #1225 a canceled commit token became a kernel abort ("the commit record could not be made
+  durable"), and a canceled or failed rollback left the context active, usable and queued for the
+  version-purge worker, which would undo work the session went on writing in it. When a caller's
+  commit or rollback fails with the context still active, the transaction stays
+  `CurrentTransaction` and reports `Faulted`, and the session refuses commands (typed and text,
+  the text before it is parsed) and BEGIN with `COHDBK001` naming the failure until a
+  `RollbackAsync` completes; a `CommitAsync` then completes the rollback and fails with
+  `COHDBK001`, committing nothing. `CurrentTransaction` returns the transaction until the caller
+  ends it, and null after a commit, rollback or disposal (it used to return the ended
+  transaction). Disposing the session rolls back an open transaction, and a commit of that
+  transaction afterwards fails with `COHDBK001` naming the closure.
+- **A rollback leaves no write behind, even under a running command.** The transaction can end on
+  another thread while one of its commands runs: the caller's rollback, the session closing, or a
+  host rolling back a wire session's transaction while a wire command waits for a key lock. Until
+  the #1225 review, a `PUT` or `DELETE` parked on the key lock was granted the lock later, after
+  its transaction had ended; it then applied its write under the ended sequence, which every
+  snapshot reads as committed, so a rolled-back write became visible, and the key lock stayed
+  granted to a transaction that would never release it, so every later writer of the key waited
+  until restart. Now three rules close it. The kernel admits no bracket of a transaction whose
+  end has begun ([Transactions DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#ending-a-transaction-under-a-running-statement)).
+  The end fails the transaction's queued lock requests, so the parked command fails at once with
+  `DatabaseTransactionAbortedException`. And a request queued just after the end is checked once
+  the grant arrives: the executor releases a grant made to an ended transaction and fails the
+  command, as the Graph, Documents and Blob engines do for their writer lock. A grant to a
+  transaction that is still active is kept when the command then fails, because releasing all of
+  the transaction's locks would expose the keys its earlier commands wrote.
+- **A commit waits for no command.** A commit that starts while a command of the transaction is
+  still running is refused with a plain `DatabaseException` and leaves the transaction active,
+  as Documents and Blob refuse a commit while an operation or stream is open: the command's
+  bracket would otherwise race the commit record. A rollback is never refused this way.
+- **Over the wire** the protocol has no transaction control, so a host opens the transaction on
+  `IDatabaseServerSession.DatabaseSession`. A failed wire command reports `ParseFailure` or
+  `ExecutionFailure`, keeps the session ready and keeps the transaction, exactly as in process
+  (`KeyValueTransactionFailureWireTests`, `KeyValueTransactionFailureClientTests`). A connection
+  that ends disposes its engine session and so rolls the transaction back; the host's rollback
+  afterwards, or racing the teardown, raises nothing, and its commit afterwards fails with
+  `COHDBK001`. A host rollback while a wire command waits for a key lock fails that command with
+  `ExecutionFailure`, and nothing of it is written.
+
+`KeyValueTransactionFailureTests` covers the in-process cases, and `KeyValueLifecycleTests` the
+transaction ending under a running command.
 
 ## The text seam (docs/COMMANDS.md — the grammar contract)
 

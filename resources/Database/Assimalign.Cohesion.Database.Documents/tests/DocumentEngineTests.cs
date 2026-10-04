@@ -102,6 +102,9 @@ public sealed class DocumentEngineTests
         await using var transaction = await old.BeginTransactionAsync();
         await collection.PutAsync(current, "one", "2"u8.ToArray());
         await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await collection.PutAsync(old, "one", "3"u8.ToArray()));
+        // The conflict aborts the explicit transaction, which waits for the caller's rollback (#1225).
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         Encoding.UTF8.GetString((await collection.GetAsync(current, "one")).ShouldNotBeNull().Content.Span).ShouldBe("2");
     }
@@ -158,6 +161,9 @@ public sealed class DocumentEngineTests
         {
             await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await collection.PutAsync(session, "one", "{\"a\":1}"u8.ToArray()));
         }
+        // The conflict aborts the explicit transaction, which waits for the caller's rollback (#1225).
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await database.GetCollectionAsync("items")).Name.ShouldBe("items");
     }

@@ -112,6 +112,9 @@ public sealed class BlobEngineTests
         var scoped = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
         await Write(container, "item", "after"u8.ToArray());
         await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await scoped.DeleteAsync("item"));
+        // The conflict aborts the explicit transaction, which waits for the caller's rollback (#1225).
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await Read(container, "item")).ShouldBe("after"u8.ToArray());
     }

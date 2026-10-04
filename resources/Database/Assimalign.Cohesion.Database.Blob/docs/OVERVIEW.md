@@ -43,6 +43,9 @@ await transaction.CommitAsync();
 
 Direct database/container operations use automatic transactions. Session operations use the
 active explicit transaction when present; otherwise they also use automatic transactions.
+An operation that fails inside an explicit transaction aborts the whole transaction: the session
+refuses further operations and BEGIN with `COHDBB001` until the caller rolls back, and a commit
+fails without committing.
 Close each stream before starting another operation on the same session or committing.
 Disposing a session aborts its pending work. Blob has no statement or query language:
 `ExecuteAsync` rejects commands, including database switching and server administration.

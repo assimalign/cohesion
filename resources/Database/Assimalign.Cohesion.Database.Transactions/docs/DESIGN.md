@@ -80,7 +80,11 @@ waiter wake-up on `ReleaseAll`, and wait-for-graph deadlock detection: a request
 would close a cycle aborts *itself* with `TransactionDeadlockException` — the
 newest-waiter-as-victim policy, chosen because it needs no cost model and the victim
 is retryable by construction. Waits are `TaskCompletionSource`-based and honor
-cancellation.
+cancellation. `ReleaseAll(owner)` ends the owner's participation in the table: it
+releases the owner's grants and fails the owner's own queued requests with
+`TransactionAbortedException`, because a grant arriving after the owner ended would hold
+the resource for a transaction that can never release it (see "Ending a transaction
+under a running statement").
 
 ## The WAL binding
 
@@ -168,6 +172,53 @@ the original `StorageException`/`ArgumentOutOfRangeException` handling and stamp
 rechecks. Committed tombstones enter the prunable set. Pruning requires
 `deleter < safeBound` and rechecks the current deleter before deleting. Index
 undo stays in recorded order, including its original accounting semantics.
+
+### Ending a transaction under a running statement
+
+A transaction can end on another thread while one of its statements still runs: a session
+closing, a caller's rollback racing its own statement, or a host rolling back a wire
+session's transaction while a wire command waits. Until the #1225 review the kernel let the
+statement go on: `ApplyStatementAsync` opened brackets for any context, and the rollback's
+`PurgeWriterAsync` took the writer's ledger before it waited for the apply gate. A bracket
+that applied after the undo, or while the undo waited for the gate, stayed stamped with the
+rolled-back sequence and in no undone ledger. Every snapshot reads a sequence that is
+neither active nor in progress as committed, so readers saw the rolled-back writes; and once
+a checkpoint truncated the abort record, recovery classified those stamps as committed and
+seeded their tombstones for pruning, so the purge reclaimed the content of records that were
+never deleted (a Documents or Blob delete running under a rollback lost committed data
+durably).
+
+The kernel now closes a context to statements when its end begins, with three rules:
+
+1. **Admission under the gate.** `ApplyStatementAsync` admits a bracket only after it holds
+   the apply gate, and only for a context the manager still holds active whose end has not
+   begun (by sequence, so statement wrappers sharing the sequence are covered). Otherwise it
+   throws `TransactionAbortedException` and applies nothing.
+2. **The end drains the context first.** `CommitAsync`, `RollbackAsync` and the manager's
+   internal abort mark the context ending, then wait for the one apply already admitted to
+   exit, before the commit record, the undo or the abort record. The wait is bounded: nothing
+   awaited inside the gate may actually wait. The undo therefore reads a ledger no bracket can
+   still add to, and the commit record follows every bracket stamped with the sequence.
+3. **The end fails the owner's queued lock requests.** The manager sets the ended state, then
+   calls `ReleaseAll`, which fails the owner's pending requests as well as releasing its grants,
+   so a statement parked on a lock fails at once. A request queued just after the release is
+   granted later; the engines check the context after every grant they wait for and release a
+   grant made to an ended transaction (Graph, Documents and Blob for the database writer lock,
+   KeyValuePair for key locks). Setting the state before the release is what makes that check
+   sufficient: a grant made after the release always observes the end.
+
+Neo4j terminates a transaction the same way: termination stops the transaction's lock client
+(`community/kernel/src/main/java/org/neo4j/kernel/impl/api/KernelTransactionImplementation.java:949-958`),
+which marks itself stopped, waits for the lock operations in flight to finish and then releases
+all its locks (`community/lock/src/main/java/org/neo4j/kernel/impl/locking/forseti/ForsetiClient.java:578-593`);
+a request waiting in the lock loop checks the stopped flag and throws (`ForsetiClient.java:230`,
+`1081-1085`), and every later operation of the transaction is refused by `assertOpen`
+(`KernelTransactionImplementation.java:1168-1174`). Citations are to Neo4j `54a7dcf7c25`.
+
+Operation-level atomicity stays the engines' job: the kernel guarantees that no bracket lands
+after an end begins, not that a multi-bracket operation commits whole. Documents and Blob
+refuse a commit while an operation or stream is open, and KeyValuePair refuses one while a
+command runs.
 
 ### Record stamp prefix: the 16-byte contract
 
