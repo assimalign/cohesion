@@ -420,6 +420,18 @@ object ids, so a table scan stops decoding the whole database.
   **commits**. Freeing eagerly would let the allocator hand a page to a new owner
   while the release could still roll back — the rollback's before-image would then
   resurrect old content over live data. Deferral makes that impossible.
+- **A page on the free list is never write-locked.** Commit releases the bracket's
+  page write locks and then returns its freed pages to the free-space map, in one hold
+  of the transaction lock that every page lock is taken under. Another transaction may
+  allocate a freed page the instant it is on the list; its first touch waits for that
+  lock and finds the page unlocked. The frees used to run first, under the owner lock
+  only, and an allocation that took a page between them failed with "Page N is
+  write-locked by transaction T" (the concurrency suite on CI runners). A page
+  one transaction releases twice (its last record deleted, then its chain released) is
+  freed once: a second free could return it to the list after another allocation took
+  it, and hand it to a second owner. PostgreSQL guards the same edge from the
+  allocating side, using a page the FSM reports only if its buffer lock is free
+  (`_bt_allocbuf`, `src/backend/access/nbtree/nbtpage.c`).
 - **Why release is O(pages), not O(1).** Full-page-image logging prices a
   transactional free at one page touch per page (before-image + after-image in the
   journal). A directory-level O(1) release needs a persisted allocation structure

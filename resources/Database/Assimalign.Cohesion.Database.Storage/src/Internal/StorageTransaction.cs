@@ -12,7 +12,7 @@ internal sealed class StorageTransaction : IStorageTransaction
 {
     private readonly Storage _owner;
     private readonly Dictionary<long, byte[]> _beforeImages = new();
-    private List<(long PageId, ulong OwnerId)>? _pendingFrees;
+    private Dictionary<long, ulong>? _pendingFrees;
     private bool _active = true;
 
     internal StorageTransaction(Storage owner, long sequence)
@@ -44,17 +44,21 @@ internal sealed class StorageTransaction : IStorageTransaction
     internal void RecordBeforeImage(long pageId, byte[] image) => _beforeImages.Add(pageId, image);
 
     /// <summary>
-    /// Gets the pages this transaction has released, with the owner chain each one
-    /// belonged to. The free-space map and owner directory are updated from this
-    /// list at commit — never before — so a rollback restores the chain untouched.
+    /// Gets the pages this transaction has released, keyed by page id, with the owner
+    /// chain each one belonged to. The free-space map and owner directory are updated
+    /// from this set at commit — never before — so a rollback restores the chain untouched.
     /// </summary>
-    internal IReadOnlyList<(long PageId, ulong OwnerId)>? PendingFrees => _pendingFrees;
+    internal IReadOnlyDictionary<long, ulong>? PendingFrees => _pendingFrees;
 
     /// <summary>
-    /// Registers a page release to apply when the transaction commits.
+    /// Registers a page release to apply when the transaction commits. A page released
+    /// again is registered once: deleting a page's last record and then releasing its
+    /// whole chain in the same transaction releases it twice, and a second free at commit
+    /// could put it back on the free list after another allocation took it, handing one
+    /// page to two owners.
     /// </summary>
     internal void RegisterPendingFree(long pageId, ulong ownerId)
-        => (_pendingFrees ??= new List<(long, ulong)>()).Add((pageId, ownerId));
+        => (_pendingFrees ??= new Dictionary<long, ulong>()).TryAdd(pageId, ownerId);
 
     /// <summary>
     /// Marks the transaction completed. The storage calls it in the step that releases the

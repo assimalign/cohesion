@@ -33,6 +33,17 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
         _nextPageId = 0;
     }
 
+    /// <summary>
+    /// Invoked with a page each time <see cref="Free"/> puts it on the free list, on the freeing
+    /// thread, once the map's lock is released: the instant another allocation can take the
+    /// page. This assembly's tests use it to allocate at that instant.
+    /// </summary>
+    /// <remarks>
+    /// The freeing caller may hold storage locks (a commit releases its pages under the storage's
+    /// transaction lock), so a handler must not wait on another thread that takes them.
+    /// </remarks>
+    internal Action<PageId>? Freed;
+
     /// <inheritdoc />
     public long TotalPageCount
     {
@@ -81,6 +92,7 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
     public void Free(PageId pageId)
     {
         long id = (long)pageId;
+        bool added;
 
         lock (_sync)
         {
@@ -89,10 +101,16 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
                 throw new StorageIOException($"Cannot free page {id}: the page was never allocated.");
             }
 
-            if (_freeSet.Add(id))
+            added = _freeSet.Add(id);
+            if (added)
             {
                 _freeQueue.Enqueue(id);
             }
+        }
+
+        if (added)
+        {
+            Freed?.Invoke(pageId);
         }
     }
 
