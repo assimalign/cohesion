@@ -145,6 +145,77 @@ public sealed class StorageCheckpointAnchorTests
         reopenedAgain.CheckpointActiveTransactions.ShouldBe(anchor);
     }
 
+    /// <summary>
+    /// A bracket committed with <c>awaitDurability: false</c> (a statement bracket, an undo batch,
+    /// a dropped table's release) returns its pages to the allocator as soon as its commit record
+    /// is appended, while that record may still sit in a journal tail that is not durable. An
+    /// anchor page is written outside the journal: reusing such a page and making it durable
+    /// first would overwrite the page's committed content while the bracket that freed it can
+    /// still vanish in a crash, and the content would be lost with nothing to restore it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint anchor: a chain page reuses a page only once the commit that freed it is durable")]
+    public void Checkpoint_ChainReusesAPageWhoseFreeIsNotDurable_ShouldMakeTheFreeDurableFirst()
+    {
+        // Arrange: one durable row alone on its page, then a bracket that frees the page and
+        // commits without waiting for durability; the journal is flush-gated.
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point, journalWriteThrough: false); // abandoned after its simulated power loss
+        var pages = storage.FillPages(1, owner: 9);
+        storage.Checkpoint();
+        long freer = storage.FreeOwner(9, awaitDurability: false);
+        long[] anchor = [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + 1).Select(i => (long)i)];
+
+        // Act: a checkpoint whose anchor needs a chain page loses power at the truncation.
+        point.CrashWhen = (stream, operation, _, _) => stream == "journal" && operation == "SetLength";
+        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(anchor));
+        var images = storage.CaptureDurable();
+        using var reopened = TornStorage.Open(images);
+        bool freeIsDurable = new StreamJournal(new MemoryStream(images.Journal)).ReadAll()
+            .Any(record => record.Type == JournalRecordType.CommitTransaction && record.TransactionSequence == freer);
+
+        // Assert: the row is gone only if the bracket that freed it survived, and it did — the
+        // free was durable before the chain reused the page.
+        reopened.AnchorChainPages.ShouldContain(pages[0]);
+        reopened.CountRecords(owner: 9).ShouldBe(freeIsDurable ? 0 : 1, "a committed row was lost to an unjournaled page write");
+        freeIsDurable.ShouldBeTrue();
+        reopened.CheckpointActiveTransactions.ShouldBe(anchor);
+    }
+
+    /// <summary>
+    /// The same rule for a header write that is not a checkpoint (<c>FlushChanges</c>), which
+    /// carries the last checkpoint's anchor into the other slot: power lost before its slot
+    /// write leaves the previous generation, and the free must still be in the durable journal.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint anchor: a non-checkpoint header write also reuses a freed page only once its free is durable")]
+    public void FlushHeader_ChainReusesAPageWhoseFreeIsNotDurable_ShouldMakeTheFreeDurableFirst()
+    {
+        // Arrange: a durable row alone on its page, whose journal images the checkpoint then
+        // truncates; slot 1 carries a chained anchor, and slot 0, which the next header write
+        // targets, has no chain yet, so that write allocates a page — the one the bracket frees.
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point, journalWriteThrough: false); // abandoned after its simulated power loss
+        var pages = storage.FillPages(1, owner: 9);
+        long[] anchor = [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + 1).Select(i => (long)i)];
+        storage.Checkpoint(anchor);
+        long freer = storage.FreeOwner(9, awaitDurability: false);
+
+        // Act: power is lost at the header slot write, after the chain page reached the media.
+        point.CrashWhen = (stream, operation, offset, _) => stream == "data" && operation == "Write" && offset == StorageHeaderPage.Slot0Offset;
+        Should.Throw<SimulatedPowerLossException>(() => storage.FlushHeader());
+        var images = storage.CaptureDurable();
+        using var reopened = TornStorage.Open(images);
+        bool freeIsDurable = new StreamJournal(new MemoryStream(images.Journal)).ReadAll()
+            .Any(record => record.Type == JournalRecordType.CommitTransaction && record.TransactionSequence == freer);
+        var chainPage = images.Data.AsSpan((int)(pages[0] * Units.Page.Size), Units.Page.Size);
+
+        // Assert: the freed page was overwritten as an anchor page; the row is gone only if the
+        // bracket that freed it survived, and it did.
+        ((PageType)chainPage[Units.Page.TypeFieldOffset]).ShouldBe(PageType.CheckpointAnchor);
+        reopened.CountRecords(owner: 9).ShouldBe(freeIsDurable ? 0 : 1, "a committed row was lost to an unjournaled page write");
+        freeIsDurable.ShouldBeTrue();
+        reopened.CheckpointActiveTransactions.ShouldBe(anchor);
+    }
+
     private static int CountAnchorPages(byte[] data)
     {
         int count = 0;

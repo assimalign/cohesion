@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
+using Assimalign.Cohesion.Database.Storage;
 
 using Internal;
 
@@ -227,7 +228,16 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
 
-            var storage = _strategy.OpenStorage(name);
+            KeyValueStorage storage;
+            try
+            {
+                storage = _strategy.OpenStorage(name);
+            }
+            catch (StorageFormatException exception)
+            {
+                throw RefuseStorageFormat(name, "data", name, exception);
+            }
+
             KeyValueStorage? catalogStorage = null;
 
             // See CreateDatabaseAsync: instance construction commits (recovery
@@ -236,9 +246,17 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
             try
             {
                 ConfigureStorage(storage, name);
-                catalogStorage = _strategy.StorageExists(name + CatalogSuffix)
-                    ? _strategy.OpenStorage(name + CatalogSuffix)
-                    : _strategy.CreateStorage(name + CatalogSuffix);
+                try
+                {
+                    catalogStorage = _strategy.StorageExists(name + CatalogSuffix)
+                        ? _strategy.OpenStorage(name + CatalogSuffix)
+                        : _strategy.CreateStorage(name + CatalogSuffix);
+                }
+                catch (StorageFormatException exception)
+                {
+                    throw RefuseStorageFormat(name, "catalog", name + CatalogSuffix, exception);
+                }
+
                 ConfigureStorage(catalogStorage, name + CatalogSuffix);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
                 var database = new KeyValueDatabaseInstance(name, this, storage, catalogStorage, recover: true);
@@ -263,6 +281,17 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
             }
         }
     }
+
+    /// <summary>
+    /// Names the database and the file set behind a storage format refusal; the refusal itself
+    /// names the formats found and supported, and the remedy.
+    /// </summary>
+    /// <param name="name">The database.</param>
+    /// <param name="role">Which of the database's file sets was refused: <c>data</c> or <c>catalog</c>.</param>
+    /// <param name="storageName">The file set's storage name.</param>
+    /// <param name="exception">The storage's refusal.</param>
+    private static DatabaseException RefuseStorageFormat(string name, string role, string storageName, StorageFormatException exception)
+        => new($"Database '{name}' cannot be opened: its {role} file set '{storageName}' was refused. {exception.Message}", exception);
 
     /// <inheritdoc />
     public ValueTask DropDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)

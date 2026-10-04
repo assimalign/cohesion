@@ -463,7 +463,14 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   format 5, but one of its index trees does not: COHDBI001: …", the index manager's
   `IndexFormatException` as its inner exception), and the files are left
   byte-identical. `SqlDataStorageFormatTests` pins both refusals with real format-1
-  index pages.
+  index pages. **Below the gate, each file set has its own storage format (#1251).**
+  The storage refuses a file set in another storage format with
+  `StorageFormatException` (`COHDBS001`) when it opens, before recovery reads its
+  journal. A database has two file sets, so `OpenDatabaseAsync` carries the refusal
+  in `SqlDataStorageFormatException` naming the database and the file set: "Database
+  'x' cannot be opened: its catalog file set 'x.catalog' was refused. COHDBS001: …"
+  (or its data file set 'x'). The server forwards it to the client like the gate's
+  own refusals, and the files stay byte-identical.
 - **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
   current rows under the exclusive object lock before publishing the complete
   replacement definition in one catalog transaction. Backfill is resolved at

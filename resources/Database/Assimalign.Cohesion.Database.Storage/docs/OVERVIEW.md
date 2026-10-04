@@ -19,9 +19,10 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
   pages and `IStorageUnitIterator` full scans.
 - **Journal** — `IStorageJournal` write-ahead logging with begin/commit/rollback
   markers, CRC-32C-protected frames, and recovery replay of committed operations.
-- **File header** — page 0: an identity block written once at creation and two
-  alternating, separately checksummed header slots (LSN and sequence floors, checkpoint
-  anchor), so a torn header write cannot make a file set unopenable. Storage format 2;
+- **File header** — page 0: an identity block written at creation and two alternating,
+  separately checksummed header slots (LSN and sequence floors, checkpoint anchor, and a
+  copy of the identity block), so a torn header write cannot make a file set unopenable.
+  Page 0 is never a data page: the page manager refuses to pin or free it. Storage format 2;
   any other format is refused with `StorageFormatException` (`COHDBS001`), with no upgrade
   path (#1152).
 - **File set** — each storage instance owns three streams: data (`.dat`), journal

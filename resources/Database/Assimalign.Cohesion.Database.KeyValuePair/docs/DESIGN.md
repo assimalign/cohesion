@@ -80,6 +80,12 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
   the storage layer's format-agnostic journal redo and undo, and keeps its
   journal for the engine that wrote it (`KeyValueEngineLifecycleTests` pins both
   refusals). There is no upgrade path (owner decision of 2026-10-02; #1152).
+  **Below both, each file set has its own storage format (#1251):** the storage refuses
+  a data or catalog file set in another storage format with `StorageFormatException`
+  (`COHDBS001`) before its journal is read, and the engine names the database and the
+  file set: `DatabaseException` "Database 'x' cannot be opened: its catalog file set
+  'x.catalog' was refused. COHDBS001: …" (or its data file set 'x'), the files left
+  byte-identical (`KeyValueEngineLifecycleTests`).
   With entries ordered by location, a PUT's tombstone of the key's previous
   version descends to it instead of walking the key's dead versions; the unique
   check still reads them until version pruning (#1195).

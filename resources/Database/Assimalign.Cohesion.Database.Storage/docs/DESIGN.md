@@ -57,15 +57,14 @@ Page 0 (8 KiB)
 ```
 
 - **The identity block** (magic, format version, page size, model, storage id, creation
-  time, name, and its own CRC-32C) is written once, when the file is created. Magic and
-  format version stay at page offsets 96 and 100 in every format, which is what lets the
-  format fence read them before anything is verified ("Storage format 2 and the format
-  fence").
+  time, name, and its own CRC-32C) is written when the file is created. Magic and format
+  version stay at page offsets 96 and 100 in every format, which is what lets the format
+  fence read them before anything is verified ("Storage format 2 and the format fence").
 - **Two header slots** carry everything that changes: the generation counter, the LSN floor,
   the transaction sequence floor, page counts, the modification time and the checkpoint
-  anchor, each slot under its own CRC-32C. Each slot is 3,584 bytes, seven 512-byte sectors
-  that share no sector with the other slot or the identity block, and each lies inside one
-  4 KiB block.
+  anchor, plus a copy of the identity block, each slot under its own CRC-32C. Each slot is
+  3,584 bytes, seven 512-byte sectors that share no sector with the other slot or the
+  identity block, and each lies inside one 4 KiB block.
 - **A header write goes to the slot that does not hold the newest generation**, as
   generation + 1, rewriting only that slot's bytes (a positional write, not the page). It is
   made durable before it counts: only once the data flush after it returns does the storage
@@ -73,14 +72,38 @@ Page 0 (8 KiB)
   point leaves at least one slot whole, and open picks the newest slot whose checksum
   verifies. A slot whose write tore fails its checksum — unless every sector that differed
   landed, in which case it is the complete new slot.
+- **The sector assumption, and why each slot copies the identity block.** The torn-write
+  model is old-or-new per 512-byte sector: that is what the slots' sector alignment rests on.
+  The identity block shares slot 0's 4 KiB block, though, and a drive with 4 KiB physical
+  sectors that emulates 512-byte ones (512e) turns a slot-0 write into a read-modify-write
+  of that whole physical sector; power lost during it can leave the sector unreadable or
+  garbage — page header, identity block, magic and format version included — while slot 1
+  is intact. So each slot carries a copy of the identity block, the way each of Voron's
+  header files is self-contained and restored from the other when it does not verify
+  (`HeaderAccessor.cs:71-86`). When page 0's identity block fails its magic or its checksum,
+  open takes the identity from the newest valid slot, and the next write to slot 0 rewrites
+  page 0's whole leading 4 KiB block (page header, identity block, slot 0) in one write. The
+  repair waits for a slot-0 write because writing the identity block beside a slot-1 write
+  would put the newest slot, slot 0, at risk of the very loss the copy guards against. A
+  page 0 with neither a verified identity block nor a valid slot is refused: as not a
+  storage file when its magic is wrong, as corruption otherwise.
 - **Page 0 never enters the buffer pool**, and its page-level checksum is zero ("never
   stamped"): a slot write changes only the slot, so a page checksum would be stale after
   every header write. The identity block and the slots carry their own checksums instead.
+  The page manager enforces it: it reserves page 0 in the free-space map and refuses to pin,
+  overwrite-pin or free it (`StorageIOException`), so a damaged page reference — a B-tree root
+  id, a graph record — cannot reach the file header through `GetPage` or
+  `IStorage.OpenPageForWrite`, and recovery never replays a journal image onto page 0. A
+  pooled copy would be stale after the next header write, and a write-back or replay of it
+  would roll both slots back.
 - **Tested by tearing.** The test crash simulation (`CrashSimulationStream` with a shared
   `CrashPoint`) loses power at a chosen write and keeps a durable prefix of k 512-byte
   sectors of it. `StorageFormatTests` tears a slot write after 0, 1, 3 and 6 of its seven
   sectors and opens from the previous generation each time (and from the new one when all
-  seven landed); with both slots damaged the open fails as corruption.
+  seven landed); with both slots damaged the open fails as corruption. It also destroys
+  page 0's leading 4 KiB block (zeros, then random bytes) and opens from slot 1, and checks
+  that the identity block is rewritten with slot 0 and never with slot 1.
+  `StorageHeaderPageAccessTests` covers each page-0 guard.
 
 Page 0 used to be one page rewritten in place at every checkpoint and checksum-verified at
 open, so a torn 8 KiB write (an 8 KiB page is sixteen 512-byte sectors, and power loss can
@@ -103,18 +126,26 @@ and no compatibility shim (owner decision, #1152): a file set of another format 
 never misread.
 
 - **The fence reads the raw bytes first.** Open reads magic (page offset 96) and format
-  version (100) from the raw page-0 bytes before it verifies any checksum. A wrong magic is
-  "not a storage file" (`StorageIOException`); any version but the current one is refused
-  with `StorageFormatException`, whose message leads with `COHDBS001`, names the version
-  found and the version supported, and points at #1152 (export with the engine that wrote
-  the file, or open it with the newer engine). Only then are the identity block's and the
-  slots' checksums verified. The order matters because the checksum algorithm is itself part
-  of the format: a format-1 file fails every CRC-32C, and checking that first would report a
-  version mismatch as corruption. PostgreSQL's `ReadControlFile` does the same — "complaining
-  about wrong version will probably be more enlightening than complaining about wrong CRC" —
-  checking `pg_control_version` before the CRC (`src/backend/access/transam/xlog.c:4507-4544`).
+  version (100) from the raw page-0 bytes before it verifies any checksum. With the magic in
+  place, any version but the current one is refused with `StorageFormatException`, whose
+  message leads with `COHDBS001`, names the version found and the version supported, and
+  points at #1152 (export with the engine that wrote the file, or open it with the newer
+  engine). Only then are the slots' and the identity block's checksums verified. A wrong
+  magic is "not a storage file" (`StorageIOException`) unless a header slot verifies, in
+  which case page 0's leading block was destroyed and the slot's copy of the identity block
+  stands in for it (its own format version fenced the same way; "Page 0" above). The order
+  matters because the checksum algorithm is itself part of the format: a format-1 file fails
+  every CRC-32C, and checking that first would report a version mismatch as corruption.
+  PostgreSQL's `ReadControlFile` does the same — "complaining about wrong version will
+  probably be more enlightening than complaining about wrong CRC" — checking
+  `pg_control_version` before the CRC (`src/backend/access/transam/xlog.c:4507-4544`).
   `StorageFileHeader.IsValid()` is exact (magic and exactly the current version) where it used
   to accept any positive version.
+- **Engines name the database.** Every model engine catches the refusal around its storage
+  open and rethrows it with the database's name, as it already does for an index-format
+  refusal: "Database 'x' cannot be opened. COHDBS001: …". The SQL and key-value engines open
+  two file sets per database and name the one refused ("its catalog file set 'x.catalog' was
+  refused"); SQL carries it in its format exception, which its server forwards to the client.
 - **Journal frames are fenced too.** A frame whose length, magic and CRC-32C verify but whose
   version byte is not 3 was written whole by another engine; the read refuses it with
   `StorageFormatException` (naming the frame's position) instead of stopping there as if it
@@ -138,8 +169,8 @@ a page touch's CPU cost (#1236); PostgreSQL uses CRC-32C for its WAL records
 (`src/include/port/pg_crc32c.h:44, 117`). A page checksum folds the page's own four checksum
 bytes as zeros (`Crc32C.AppendZeros`) rather than copying the page; `Crc32CTests` pins that
 path to the CRC of the page with its field zeroed, the RFC 3720 B.4 vectors and the
-`123456789` check value, and every length up to 9,000 bytes at every alignment against a
-bitwise reference.
+`123456789` check value, and every length from 0 to 9,000 bytes at all 8 alignments against
+a bitwise reference (run incrementally, one byte at a time, so every prefix costs one pass).
 
 ## File handles, positional I/O, and durability
 
@@ -366,8 +397,8 @@ object ids, so a table scan stops decoding the whole database.
 `IStorageJournal` is the durability mechanism — the *only* one. Frames are length-prefixed,
 magic-tagged, versioned (frame version 3) and CRC-32C-protected; a torn or corrupted tail
 terminates the read scan and is ignored — it belongs to work that was never acknowledged —
-while a verified frame of another version is a format error ("Storage format 2 and the
-format fence"). LSNs never restart: a reopened journal resumes above both its last record
+and the first append after a reopen cuts it off ("Failed appends" below), while a verified
+frame of another version is a format error ("Storage format 2 and the format fence"). LSNs never restart: a reopened journal resumes above both its last record
 and the LSN floor of the newest header generation ("Checkpoints"). Records are typed and
 binary (begin / commit / rollback / checkpoint / before-image / after-image / opaque
 logical operation); transaction identity at this level is a compact monotonic `long`
@@ -381,7 +412,9 @@ sequence — GUID identity belongs to the transaction layer above.
 2. **The write-ahead gate.** The buffer pool may steal (evict) a dirty page at any
    time, but its write-back first forces the journal durable up to the page's LSN —
    so any uncommitted content that reaches the data file is always undoable from a
-   durable before-image.
+   durable before-image. A page written outside the journal (a checkpoint anchor page)
+   carries the journal's last LSN at the time its page was allocated, so the gate holds
+   for it too ("Checkpoints").
 3. **Commit = after-images + commit record + fsync.** Commit appends the after-image
    of every touched page (stamping each page's LSN with its record), then the commit
    record, and acknowledges only after `EnsureDurable(commitLsn)`. Data pages are
@@ -417,6 +450,21 @@ outlives the failure:
   write (`ereport(PANIC, "could not write to log file ...")`,
   `src/backend/access/transam/xlog.c:2529-2531`, commit `85f55534e80`); this journal
   stops only its appends.
+- **Appends resume after the last verified frame (#1251 review).** A crash can leave a torn
+  frame at the end of the journal; the read scan stops there, and so recovery ignores it. The
+  next append, though, used to go to the physical end of the stream, behind those bytes, and
+  an engine's open appends before it truncates: its recovery scrub runs before the deferred
+  open-time checkpoint. A second crash in that window left the scrub's brackets unreadable,
+  their stolen page writes neither undoable nor redoable — and a journal holding only the
+  torn start of a checkpoint record was never truncated at all, so every later commit sat
+  behind it. `StreamJournal` therefore remembers where the last verified frame ended when a
+  read scan runs to the end of the verified frames (every journal's initialization does), and
+  its first append cuts the stream back to that offset. PostgreSQL resumes WAL insertion at
+  the end of the last valid record the same way (`EndOfLog`,
+  `src/backend/access/transam/xlog.c:6711-6718`). An open that appends nothing leaves the
+  journal byte-identical. Every later append goes to the offset the previous one ended at,
+  so the journal asks its file for the length once after a scan instead of once per append
+  ("Measurements").
 - **A page whose before image fails is not locked.** A first touch takes the page's
   write lock, then appends the before image. When that append fails the page is still
   unmodified and the transaction holds no before image of it, and commit and rollback
@@ -479,7 +527,10 @@ engine) added three storage-side rules that keep the logical layer sound:
   which is exactly the outer transaction's abort semantics. The write-ahead
   gate protects stolen pages regardless of the flag; the flag never weakens
   the rule that an *acknowledged* commit is durable, because acknowledgment
-  belongs to the outer commit.
+  belongs to the outer commit. Such a bracket's frees return its pages to the
+  allocator once its commit record is appended, before the record is durable, so a
+  page written outside the journal must not reuse one first: a header write makes the
+  journal durable through its last record before it writes an anchor page ("Checkpoints").
 
 Full page images (8 KiB per touch) were chosen over byte-range deltas deliberately:
 they make recovery a pure idempotent overwrite with no operation replay logic, which
@@ -508,11 +559,14 @@ flush.
 
 Recovery never replays onto the pages of the checkpoint anchor chain the newest header
 generation reads. Those pages are written outside the journal, while no transaction can touch
-them, so any image of one in the journal is from the page's earlier life — typically the
-committed free that returned it to the allocator before a header write reused it — and
-replaying it would overwrite the anchor open has just read (the next open would then refuse
-the file as corrupt). Open reads page 0 and the chain before recovery and passes the chain's
-pages to it.
+them, so any image of one in the journal is from the page's earlier life, which ended with the
+free that returned the page to the allocator. That free is durable before the chain page is
+written — the header write flushes the journal through it first, and the chain page's LSN
+makes the write-ahead gate enforce the same order ("Checkpoints") — so the free is committed in
+the journal recovery reads, and replaying an image of the page's earlier life would only
+overwrite the anchor open has just read (the next open would then refuse the file as
+corrupt). Open reads page 0 and the chain before recovery and passes the chain's pages to it.
+Recovery never replays onto page 0 either: nothing journals it, so an image of it is damage.
 
 ### Checkpoints
 
@@ -523,13 +577,15 @@ active transactions — truncating live before-images would orphan stolen writes
 checkpoints are a later feature (the record already carries the active-transaction
 set). Clean shutdown checkpoints, so a clean reopen recovers instantly.
 
-A checkpoint runs in PostgreSQL's order — data flush, then control file, then WAL recycling
-(`CreateCheckPoint` in `src/backend/access/transam/xlog.c`: `CheckPointGuts` at 8016, the
-control-file update at 8088-8140, `RemoveOldXlogFiles` at 8200) — with the header carrying
-what the journal is about to lose:
+A checkpoint runs in PostgreSQL's order — data flush, then WAL flush of the checkpoint
+record, then control file, then WAL recycling (`CreateCheckPoint` in
+`src/backend/access/transam/xlog.c`: `CheckPointGuts` at 8016, `XLogFlush` of the checkpoint
+record at 8055, the control-file update at 8088-8140, `RemoveOldXlogFiles` at 8200) — with the
+header carrying what the journal is about to lose:
 
-1. The anchor's overflow pages of the slot being written, then every dirty page, then a
-   durable data flush.
+1. The anchor's overflow pages of the slot being written (allocated, then written in the
+   pool, each carrying the journal's last LSN), then the journal made durable through that
+   LSN, then every dirty page, then a durable data flush.
 2. A new header generation into the other slot of page 0 — the sequence floor, the LSN floor,
    the anchor — then a durable data flush. Only now is that slot the newest.
 3. The journal truncation and its checkpoint record, flushed.
@@ -538,11 +594,48 @@ A crash before step 2 completes leaves the previous generation and the untruncat
 which together describe everything; a crash after it leaves the new generation, which names
 what the truncation destroys. `StorageFormatTests` cuts power at every write a checkpoint
 issues — anchor pages, data pages, the slot, the truncation, the checkpoint record — each torn
-at 0, 1, 7 and 15 sectors, with 478 logical writers in flight (an anchor that needs a chain
-page), and checks after each that the file opens, the writers are still named by the journal
-or the anchor, LSNs keep increasing and the committed data reads back. `Database.Transactions`'
-`TransactionCoordinatorCheckpointCrashTests` repeats it through the transaction coordinator and
-checks that every in-flight writer's version is scrubbed after each crash.
+at 0, 1, 7 and 15 sectors, with the inline capacity plus 40 logical writers in flight (an
+anchor that needs a chain page), and checks after each that the file opens, the writers are
+still named by the journal or the anchor, LSNs keep increasing and the committed data reads
+back. `Database.Transactions`' `TransactionCoordinatorCheckpointCrashTests` repeats it through
+the transaction coordinator and checks that every in-flight writer's version is scrubbed after
+each crash.
+
+**The write-ahead rule for anchor pages (#1251 review).** The anchor's overflow pages are the
+only pages written outside the journal, and allocation can hand them a page whose free is
+still in a journal tail that is not durable: a bracket committed with
+`Commit(awaitDurability: false)` — a statement bracket, an undo batch, `DROP TABLE`'s release —
+returns its pages to the allocator as soon as its commit record is appended. An anchor page
+written over such a page, and made durable, before that commit record is durable destroyed the
+page's committed content while the bracket that freed it could still vanish in a crash, with
+nothing left to restore either. So once the chain's pages are allocated, the header write reads
+the journal's last LSN — every free that returned one of those pages appended its commit
+record before it did — stamps each chain page with it, and makes the journal durable through
+it before the data flush. The stamp makes the buffer pool's write-ahead gate enforce the same
+order on any write-back of a chain page that comes first (an eviction by a concurrent reader,
+or the page writer), which the explicit flush alone would not cover. PostgreSQL applies the
+rule before every data write (`FlushBuffer` → `XLogFlush(recptr)`,
+`src/backend/storage/buffer/bufmgr.c:4567-4585`). `StorageCheckpointAnchorTests` reproduces
+the loss with a flush-gated journal — a checkpoint and a non-checkpoint header write each reuse
+the page a non-durable bracket freed, and power is lost before the truncation or the slot write
+— and fails on both without the rule. The flush costs an fsync only when the journal has a
+tail that is not yet durable; a checkpoint with any dirty data page flushed it through the
+gate before.
+
+**A header write that fails after its slot write was issued stops header writes.** A failed
+fsync after the slot write leaves that slot either the previous generation or, already on the
+media, the newest one pointing at this generation's chain. Retrying used to target the same
+slot at the same generation and rewrite that chain in place, and a crash during the retry left
+the newest valid slot pointing at pages that do not verify (an unopenable file) or at a chain
+mixing two generations. Every later header write — a checkpoint, `Flush`, the non-idle close —
+now throws `StorageIOException` until the storage is reopened, and the close flushes only the
+journal; the reopen finds a whole generation either way, and the untruncated journal describes
+everything since. A failure before the slot write is issued leaves the target slot older than
+the newest, so its chain may still be rewritten and the retry is allowed. PostgreSQL stops on a
+failed control-file write or fsync (`src/common/controldata_utils.c:245-265`; data-file fsync
+failures are PANIC unless `data_sync_retry`, `src/backend/storage/file/fd.c:3984-3987`);
+Voron never rewrites a header revision (`HeaderAccessor.cs:186-191`). `StorageFormatTests`
+covers both cases.
 
 **The LSN floor (#1242).** Every header generation persists the journal's last LSN, and open
 raises the journal to `max(last record, floor)` before anything appends. A checkpoint
@@ -570,9 +663,10 @@ the anchor, `Storage.CheckpointActiveTransactions` returns the list at the next 
   statement (including a rolled-back writer whose undo is deferred): only they can have
   stamped row versions. A reader that becomes a writer after a checkpoint is announced again
   with a begin record before its first statement bracket.
-- **No capacity limit.** A slot holds the first 438 sequences itself; the rest go on a chain
-  of `PageType.CheckpointAnchor` pages (1,008 sequences each: generation, slot, count, next
-  page and chain position, then the sequences, under the ordinary page checksum). Each slot
+- **No capacity limit.** A slot holds the first 406 sequences itself (after its fields and
+  its copy of the identity block); the rest go on a chain of `PageType.CheckpointAnchor` pages
+  (1,008 sequences each: generation, slot, count, next page and chain position, then the
+  sequences, under the ordinary page checksum, the page LSN set as above). Each slot
   owns its own chain, so writing one slot never touches the pages the other slot's generation
   reads; the chain grows from and shrinks back to the free-space map, and open frees any
   anchor page the newest generation does not chain. The anchor used to live in page 0 alone,
@@ -655,7 +749,8 @@ sequence floors and checkpoint anchor, which are not recomputable but need no jo
 checkpoint writes them into a new header generation and makes it durable before it
 truncates the journal ("Checkpoints"), and the alternating slots keep a torn write from
 destroying the previous generation. Page 0 and the anchor's overflow pages are flushed but
-never journaled. Page allocation is likewise
+never journaled; the overflow pages still follow the write-ahead rule, because they can reuse
+a page whose free is in the journal ("Checkpoints"). Page allocation is likewise
 not undone on rollback — a page allocated by an aborted transaction is restored to
 its empty initialized image and leaks safely until reused.
 
@@ -823,6 +918,28 @@ every access 63–67 s; format 2 with the walk only at structural changes 13 s. 
 move this test. The whole Debug suites, one run each: `Database.Sql` (1,048 tests) 3 min 41 s
 before, 4 min 6 s with format 2 and the walk on every access, 1 min 2 s after; `Database.Indexing`
 (74 tests, two runs each) 25–26 s with the walk on every access, 14 s after.
+
+**The review fixes (#1251 review).** Same machine and probe, base = format 2 as first written
+(`bbd42475`), review = with the write-ahead rule for anchor pages, the slot-fault latch, the
+identity copy in each slot, the page-0 guards and the torn-tail cut; builds alternating three
+times on four reserved cores, each cell the range of the three medians. The machine's load had
+changed since the table above, so compare the columns, not the table:
+
+| Workload | Base | Review |
+|---|---|---|
+| Page touch, 4,096-page pool: first touch / commit after-image, per page | 12.4–16.1 / 9.9–15.2 µs | 14.3–16.0 / 12.8–15.3 µs |
+| the same, 128-page pool | 8.3–11.2 / 11.5–12.4 µs | 9.2–10.6 / 12.7–13.5 µs |
+| #1236 benchmark, random references, 128 / 4,096-page pool | 93.1k–99.5k / 104.0k–150.0k inserts/s | 100.3k–106.2k / 130.5k–142.7k inserts/s |
+| Reopen after a crash with a 50.2 MB journal, in memory / physical files | 90–107 / 1,054–1,089 ms | 99–128 / 853–1,067 ms |
+| One-page committed bracket over physical files, durability `None` | 87–99 µs | 66–82 µs |
+| Durable journal flushes per checkpoint: idle / after lifecycle records only / after a non-durable free | 1 / 1 / 2 | 1 / 2 / 2 |
+
+Page touch, the index benchmark and recovery move within the noise. The physical-file commit
+is faster because the journal no longer asks the file for its length on every append: it
+appends at the offset its last append ended, and checks the length only once after a read scan
+(the torn-tail cut). The write-ahead rule adds a durable journal flush to a checkpoint only when
+the journal holds records past its durable point and no dirty data page's write-back flushed
+it first — lifecycle records alone, here; after any page change the gate already flushed it.
 
 ## Error model
 

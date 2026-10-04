@@ -23,6 +23,16 @@ public sealed class StreamJournal : StorageJournal
     // and cutting it back off failed too. Appends are refused until a truncation removes it.
     private bool _faulted;
 
+    // Where the next frame goes: the end of the last frame that verifies, once a read scan has
+    // run to the end of the verified frames or an append has landed; -1 until then. Bytes past
+    // it are a torn tail, which the next append cuts off first.
+    private long _appendOffset = -1;
+
+    // Whether bytes may follow _appendOffset: set by a completed read scan, cleared once an
+    // append has cut them off. While clear, the stream ends at _appendOffset (this journal is
+    // its only writer), so an append needs no length query.
+    private bool _tailUnchecked;
+
     /// <summary>
     /// Initializes a non-durable stream-backed journal. Use a handle or
     /// <see cref="StorageStream"/> to supply an explicit durability contract.
@@ -99,6 +109,15 @@ public sealed class StreamJournal : StorageJournal
     /// PostgreSQL stops on any failed WAL write for the same reason (<c>ereport(PANIC,
     /// "could not write to log file ...")</c>, <c>src/backend/access/transam/xlog.c:2529-2531</c>,
     /// commit <c>85f55534e80</c>); this journal stops only its appends.
+    /// <para>
+    /// For the same reason a frame never lands after a torn tail a crash left: the first
+    /// append after a reopen goes to the end of the last frame that verified when the journal
+    /// was read, cutting off whatever follows it, rather than to the end of the stream.
+    /// Otherwise every record appended before the next truncation — an engine's recovery scrub
+    /// runs before its open-time checkpoint — would sit behind bytes the next read scan stops
+    /// at, and a second crash would lose them. PostgreSQL likewise resumes WAL insertion at the
+    /// end of the last valid record (<c>EndOfLog</c>, <c>src/backend/access/transam/xlog.c:6711-6718</c>).
+    /// </para>
     /// </remarks>
     protected override void AppendFrame(ReadOnlySpan<byte> frame)
     {
@@ -109,10 +128,22 @@ public sealed class StreamJournal : StorageJournal
                 "A checkpoint or a reopen of the storage clears the condition.");
         }
 
-        long start = _stream.Seek(0, SeekOrigin.End);
+        long start = _appendOffset >= 0 ? _appendOffset : _stream.Seek(0, SeekOrigin.End);
 
         try
         {
+            if (_tailUnchecked)
+            {
+                if (_stream.Length > start)
+                {
+                    // A torn tail: no frame after it would ever be read.
+                    _stream.SetLength(start);
+                }
+
+                _tailUnchecked = false;
+            }
+
+            _stream.Seek(start, SeekOrigin.Begin);
             _stream.Write(frame);
         }
         catch
@@ -128,6 +159,8 @@ public sealed class StreamJournal : StorageJournal
 
             throw;
         }
+
+        _appendOffset = start + frame.Length;
     }
 
     /// <inheritdoc />
@@ -145,6 +178,7 @@ public sealed class StreamJournal : StorageJournal
         {
             _stream.Seek(0, SeekOrigin.Begin);
             var prefix = new byte[FramePrefixSize];
+            long verifiedEnd = 0;
 
             while (_stream.Position + FramePrefixSize <= _stream.Length)
             {
@@ -176,8 +210,14 @@ public sealed class StreamJournal : StorageJournal
                     break;
                 }
 
+                verifiedEnd = _stream.Position;
                 yield return body;
             }
+
+            // Reached only when the scan ran to the end of the verified frames, never when the
+            // caller stopped enumerating early: the next append goes here.
+            _appendOffset = verifiedEnd;
+            _tailUnchecked = true;
         }
         finally
         {
@@ -192,6 +232,8 @@ public sealed class StreamJournal : StorageJournal
 
         // Nothing is left of a partial frame a failed append could not remove.
         _faulted = false;
+        _appendOffset = 0;
+        _tailUnchecked = false;
     }
 
     /// <inheritdoc />

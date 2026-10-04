@@ -155,6 +155,7 @@ public interface IStorage : IAsyncDisposable, IDisposable
     /// <param name="pageId">The page to modify.</param>
     /// <returns>A handle to the pinned page; the caller marks it dirty after mutating.</returns>
     /// <exception cref="StorageTransactionException">The transaction is not active, or the page is owned by another transaction.</exception>
+    /// <exception cref="StorageIOException">The page is not allocated, or it is page 0, the file header, which is never a data page.</exception>
     IStoragePageHandle OpenPageForWrite(IStorageTransaction transaction, PageId pageId);
 
     /// <summary>

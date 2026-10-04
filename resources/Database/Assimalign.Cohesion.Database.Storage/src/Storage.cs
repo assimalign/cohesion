@@ -85,6 +85,16 @@ public abstract class Storage : IStorage
     private long _lsnFloor;
     private long _sequenceFloor;
 
+    // The identity block every header slot carries a copy of. When open had to take it from a
+    // slot (the identity block on page 0 failed its checksum or magic), the next write to slot 0
+    // rewrites page 0's whole leading block with it.
+    private byte[] _identity = new byte[StorageFileHeader.ByteSize];
+    private bool _identityNeedsRepair;
+
+    // Set when a header write failed after its slot write was issued: that slot may already be
+    // the newest generation on the media, so no further header write may run in this process.
+    private bool _headerFaulted;
+
     // The checkpoint anchor pages each slot's generation chains, in order. A slot owns its
     // chain alone, so rewriting one slot never touches the pages the other slot reads.
     private readonly List<long>[] _anchorChains = [new List<long>(), new List<long>()];
@@ -199,6 +209,36 @@ public abstract class Storage : IStorage
     }
 
     /// <summary>
+    /// Gets whether open took the identity from a header slot because page 0's identity block
+    /// did not verify, and the next write to slot 0 has yet to restore it (diagnostics and tests).
+    /// </summary>
+    internal bool IdentityRepairPending
+    {
+        get
+        {
+            lock (_headerLock)
+            {
+                return _identityNeedsRepair;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets whether a header write failed after its slot write was issued, so this instance
+    /// refuses every later header write until the storage is reopened (diagnostics and tests).
+    /// </summary>
+    internal bool HeaderFaulted
+    {
+        get
+        {
+            lock (_headerLock)
+            {
+                return _headerFaulted;
+            }
+        }
+    }
+
+    /// <summary>
     /// Gets or sets how commits reach stable storage. The default,
     /// <see cref="StorageCommitDurability.Synchronous"/>, flushes the journal durably
     /// inside every commit; <see cref="StorageCommitDurability.Grouped"/> batches
@@ -303,10 +343,11 @@ public abstract class Storage : IStorage
         _bufferPool.WriteAheadGate = FlushWriteAhead;
 
         // Page 0: the identity block and header slot 0 at generation 1 (slot 1 stays zero,
-        // which never verifies). Written directly — page 0 never enters the buffer pool.
-        _freeSpaceMap.MarkAllocated((PageId)0L);
+        // which never verifies). Written directly — page 0 never enters the buffer pool, and
+        // the page manager reserves it.
+        StorageHeaderPage.ComposeIdentity(_identity, _id, _name, Model, DateTime.UtcNow.Ticks);
         var headerPage = new byte[Page.Size];
-        StorageHeaderPage.Initialize(headerPage, _id, _name, Model, DateTime.UtcNow.Ticks);
+        StorageHeaderPage.ComposePageStart(headerPage, _identity);
         StorageHeaderPage.WriteSlot(
             headerPage.AsSpan(StorageHeaderPage.Slot0Offset, StorageHeaderPage.SlotSize),
             new StorageHeaderSlot(
@@ -320,6 +361,7 @@ public abstract class Storage : IStorage
                 AnchorInlineCount: 0,
                 AnchorChainHead: 0,
                 AnchorChainPageCount: 0),
+            _identity,
             ReadOnlySpan<long>.Empty);
         Data.WritePage((PageId)0L, headerPage);
         _headerSlot = 0;
@@ -1132,6 +1174,16 @@ public abstract class Storage : IStorage
             return;
         }
 
+        if (HeaderFaulted)
+        {
+            // No header write may run in this process (WriteHeader). The journal holds
+            // everything the next open's recovery needs, so it is flushed by the policy and the
+            // header is left as the media has it: either generation a reopen finds is
+            // consistent with an untruncated journal.
+            _journal.Flush(forceDurable: RequiresDurableFlush);
+            return;
+        }
+
         bool idle;
         lock (_transactionLock)
         {
@@ -1350,18 +1402,46 @@ public abstract class Storage : IStorage
 
     /// <summary>
     /// Writes a new header generation into the slot of page 0 that does not hold the newest
-    /// one: the anchor's overflow pages of that slot first, every dirty page and a durable
-    /// data flush, then the slot itself and another durable data flush. Only once the slot is
-    /// durable does it become the newest; a failure or a crash before that leaves the other
-    /// slot as the header open reads, and a torn slot write fails its checksum.
+    /// one: the anchor's overflow pages of that slot first, the journal through its last
+    /// record, every dirty page and a durable data flush, then the slot itself and another
+    /// durable data flush. Only once the slot is durable does it become the newest; a failure
+    /// or a crash before that leaves the other slot as the header open reads, and a torn slot
+    /// write fails its checksum.
     /// </summary>
     /// <param name="anchor">The checkpoint anchor the generation records.</param>
     /// <remarks>
+    /// <para>
+    /// <b>The write-ahead rule for unjournaled pages.</b> The anchor's overflow pages are
+    /// written outside the journal, and allocation can hand them a page whose free is still
+    /// in a journal tail that is not durable: a bracket committed with
+    /// <c>awaitDurability: false</c> returns its pages to the allocator as soon as its commit
+    /// record is appended. Overwriting such a page durably before that commit record is
+    /// durable would lose its content with nothing left to restore it. So the journal is made
+    /// durable through its last record once the chain's pages are allocated, and each chain
+    /// page carries that LSN, so the buffer pool's write-ahead gate enforces the same order on
+    /// any write-back of it (an eviction or the page writer) that comes first. PostgreSQL
+    /// flushes WAL up to a buffer's LSN before every data write (<c>FlushBuffer</c>,
+    /// <c>src/backend/storage/buffer/bufmgr.c:4567-4585</c>), and flushes the checkpoint
+    /// record before it updates the control file (<c>CreateCheckPoint</c>,
+    /// <c>src/backend/access/transam/xlog.c:8055</c> and <c>8140</c>).
+    /// </para>
+    /// <para>
+    /// <b>A failed slot write stops header writes.</b> Once the slot write is issued, a failure
+    /// (a failed fsync, say) leaves the slot either the previous generation or, on the media
+    /// already, the newest one pointing at this chain. A retry would rewrite that chain in place
+    /// at the same generation, and a crash during it would leave the newest slot pointing at
+    /// pages that do not verify. Every later header write therefore throws until the storage is
+    /// reopened, as PostgreSQL stops on a failed control-file write or fsync
+    /// (<c>src/common/controldata_utils.c:245-265</c>); shutdown then flushes only the journal.
+    /// </para>
+    /// <para>
     /// The LSN floor is the journal's last LSN: every LSN a data page carries came from a
     /// journal record, so the floor bounds them all even after the journal is truncated. The
     /// sequence floor is the highest sequence assigned so far; a checkpoint holds the
     /// transaction lock, under which sequences are assigned, so for a checkpoint it is exact.
+    /// </para>
     /// </remarks>
+    /// <exception cref="StorageIOException">An earlier header write of this instance failed after its slot write was issued.</exception>
     private void WriteHeader(ReadOnlySpan<long> anchor)
     {
         if (_pageManager is null || _journal is null || _disposed)
@@ -1371,55 +1451,95 @@ public abstract class Storage : IStorage
 
         lock (_headerLock)
         {
+            if (_headerFaulted)
+            {
+                throw new StorageIOException(
+                    "The storage refuses to write its file header: an earlier header write failed after its header slot write was " +
+                    "issued, so that slot may already be the newest generation on the media, and rewriting its checkpoint anchor chain " +
+                    "could leave the file unopenable. Reopen the storage; its journal holds everything recovery needs.");
+            }
+
             int target = 1 - _headerSlot;
             long generation = _headerGeneration + 1;
-            long lsnFloor = Math.Max(_lsnFloor, _journal.LastLsn);
             long sequenceFloor = Math.Max(_sequenceFloor, Interlocked.Read(ref _nextTransactionSequence));
 
             int inline = Math.Min(anchor.Length, StorageHeaderPage.InlineAnchorCapacity);
-            long chainHead = WriteAnchorChain(target, generation, anchor[inline..]);
+            var overflow = anchor[inline..];
+            ResizeAnchorChain(target, (overflow.Length + StorageHeaderPage.AnchorPageCapacity - 1) / StorageHeaderPage.AnchorPageCapacity);
 
-            // Everything the new generation points at is durable before the generation is.
+            // Read after the chain's allocations: every free that returned one of its pages to
+            // the allocator appended its commit record before it did.
+            long writeAheadLsn = _journal.LastLsn;
+            long chainHead = WriteAnchorChain(target, generation, overflow, writeAheadLsn);
+            long lsnFloor = Math.Max(_lsnFloor, writeAheadLsn);
+
+            // The journal first, then everything the new generation points at, durable before
+            // the generation is.
+            FlushWriteAhead(writeAheadLsn);
             _pageManager.FlushAll();
             Data.Flush(durable: RequiresDurableFlush);
 
-            var slot = new byte[StorageHeaderPage.SlotSize];
-            StorageHeaderPage.WriteSlot(
-                slot,
-                new StorageHeaderSlot(
-                    Generation: generation,
-                    LsnFloor: lsnFloor,
-                    SequenceFloor: sequenceFloor,
-                    TotalPageCount: _pageManager.PageCount,
-                    FreePageCount: _pageManager.FreePageCount,
-                    ModifiedAtUtcTicks: DateTime.UtcNow.Ticks,
-                    AnchorCount: anchor.Length,
-                    AnchorInlineCount: inline,
-                    AnchorChainHead: chainHead,
-                    AnchorChainPageCount: _anchorChains[target].Count),
-                anchor[..inline]);
+            var state = new StorageHeaderSlot(
+                Generation: generation,
+                LsnFloor: lsnFloor,
+                SequenceFloor: sequenceFloor,
+                TotalPageCount: _pageManager.PageCount,
+                FreePageCount: _pageManager.FreePageCount,
+                ModifiedAtUtcTicks: DateTime.UtcNow.Ticks,
+                AnchorCount: anchor.Length,
+                AnchorInlineCount: inline,
+                AnchorChainHead: chainHead,
+                AnchorChainPageCount: _anchorChains[target].Count);
 
-            Data.Write(slot, StorageHeaderPage.SlotOffset(target));
-            Data.Flush(durable: RequiresDurableFlush);
+            // A write to slot 0 restores page 0's identity block when open had to take the
+            // identity from a slot: the block shares slot 0's 4 KiB block, so the whole block
+            // is written at once, and slot 1 keeps a full copy until this write is durable.
+            // Writing the identity block beside slot 1 would put the newest slot (0) at risk.
+            bool repair = _identityNeedsRepair && target == 0;
+            byte[] bytes;
+            long offset;
+            if (repair)
+            {
+                bytes = new byte[StorageHeaderPage.LeadingBlockSize];
+                StorageHeaderPage.ComposePageStart(bytes, _identity);
+                StorageHeaderPage.WriteSlot(bytes.AsSpan(StorageHeaderPage.Slot0Offset), state, _identity, anchor[..inline]);
+                offset = 0;
+            }
+            else
+            {
+                bytes = new byte[StorageHeaderPage.SlotSize];
+                StorageHeaderPage.WriteSlot(bytes, state, _identity, anchor[..inline]);
+                offset = StorageHeaderPage.SlotOffset(target);
+            }
+
+            try
+            {
+                Data.Write(bytes, offset);
+                Data.Flush(durable: RequiresDurableFlush);
+            }
+            catch
+            {
+                // Whatever failed, the slot may already be on the media (see the remarks).
+                _headerFaulted = true;
+                throw;
+            }
 
             _headerSlot = target;
             _headerGeneration = generation;
             _lsnFloor = lsnFloor;
             _sequenceFloor = sequenceFloor;
+            _identityNeedsRepair &= !repair;
             Volatile.Write(ref _checkpointActives, anchor.ToArray());
         }
     }
 
     /// <summary>
-    /// Writes the anchor sequences a slot cannot hold onto that slot's chain of anchor pages,
-    /// growing the chain from the free-space map or freeing the pages it no longer needs. The
-    /// pages are written through the buffer pool, where the caller's flush makes them durable.
+    /// Sizes a slot's chain of anchor pages: frees the pages it no longer needs, then grows
+    /// it from the free-space map.
     /// </summary>
-    /// <returns>The first page of the chain, or zero when the slot holds the whole anchor.</returns>
-    private long WriteAnchorChain(int slot, long generation, ReadOnlySpan<long> overflow)
+    private void ResizeAnchorChain(int slot, int pagesNeeded)
     {
         var chain = _anchorChains[slot];
-        int pagesNeeded = (overflow.Length + StorageHeaderPage.AnchorPageCapacity - 1) / StorageHeaderPage.AnchorPageCapacity;
 
         while (chain.Count > pagesNeeded)
         {
@@ -1435,6 +1555,22 @@ public abstract class Storage : IStorage
             using var allocated = _pageManager!.AllocatePage(PageType.CheckpointAnchor);
             chain.Add((long)allocated.Id);
         }
+    }
+
+    /// <summary>
+    /// Writes the anchor sequences a slot cannot hold onto that slot's chain of anchor pages,
+    /// which <see cref="ResizeAnchorChain"/> sized. The pages are written through the buffer
+    /// pool, where the caller's flush makes them durable.
+    /// </summary>
+    /// <param name="slot">The header slot that owns the chain.</param>
+    /// <param name="generation">The generation being written.</param>
+    /// <param name="overflow">The anchor sequences the slot does not hold.</param>
+    /// <param name="lsn">The page LSN each chain page carries (see <see cref="WriteHeader"/>).</param>
+    /// <returns>The first page of the chain, or zero when the slot holds the whole anchor.</returns>
+    private long WriteAnchorChain(int slot, long generation, ReadOnlySpan<long> overflow, long lsn)
+    {
+        var chain = _anchorChains[slot];
+        int pagesNeeded = chain.Count;
 
         for (int index = 0; index < pagesNeeded; index++)
         {
@@ -1448,6 +1584,7 @@ public abstract class Storage : IStorage
                 StorageHeaderPage.WriteAnchorPage(
                     new Span<byte>(handle.Page.Pointer, Page.Size),
                     chain[index],
+                    lsn,
                     generation,
                     slot,
                     index,
@@ -1482,12 +1619,22 @@ public abstract class Storage : IStorage
 
     /// <summary>
     /// Reads page 0 of an existing file: the format fence first, from the raw bytes and
-    /// before any checksum, then the identity block, then the newest header slot that
-    /// verifies and its checkpoint anchor chain. Sets the identity and the header state.
+    /// before any checksum, then the newest header slot that verifies, the identity block
+    /// (or, when it does not verify, the newest slot's copy of it), and the slot's checkpoint
+    /// anchor chain. Sets the identity and the header state.
     /// </summary>
     /// <param name="anchor">The checkpoint anchor the newest generation records.</param>
     /// <param name="anchorChain">The anchor pages of that generation, in chain order.</param>
     /// <returns>The newest valid header slot.</returns>
+    /// <remarks>
+    /// The identity block shares slot 0's 4 KiB block. On a drive with 4 KiB physical sectors
+    /// that emulates 512-byte ones, power lost during a slot-0 write can leave that whole
+    /// physical sector unreadable or garbage — magic and format version included — while slot
+    /// 1 is intact. A page 0 whose magic or identity checksum fails is therefore opened from
+    /// the newest valid slot's copy of the identity block, and only a page 0 with neither a
+    /// verified identity block nor a valid slot is refused: as not a storage file when its
+    /// magic is wrong, as corruption otherwise.
+    /// </remarks>
     private StorageHeaderSlot ReadHeader(out long[] anchor, out List<long> anchorChain)
     {
         if (Data.Length < Page.Size)
@@ -1504,24 +1651,10 @@ public abstract class Storage : IStorage
         // so a file of another format would otherwise be reported as corrupt (PostgreSQL's
         // ReadControlFile checks pg_control_version before its CRC for the same reason).
         var (magic, formatVersion) = StorageHeaderPage.ReadFormat(page0);
-        if (magic != StorageFileHeader.ExpectedMagic)
-        {
-            throw new StorageIOException("Invalid storage file: header magic number mismatch.");
-        }
-
-        if (formatVersion != StorageFileHeader.CurrentFormatVersion)
+        if (magic == StorageFileHeader.ExpectedMagic && formatVersion != StorageFileHeader.CurrentFormatVersion)
         {
             throw StorageFormatException.ForDataFile(formatVersion);
         }
-
-        if (!StorageHeaderPage.VerifyIdentity(page0))
-        {
-            throw new StorageCorruptionException(
-                (PageId)0L,
-                "Invalid storage file: the identity block of page 0 failed checksum verification.");
-        }
-
-        (_id, _name) = StorageHeaderPage.ReadIdentity(page0);
 
         StorageHeaderSlot? newest = null;
         int newestSlot = -1;
@@ -1535,13 +1668,46 @@ public abstract class Storage : IStorage
             }
         }
 
-        if (newest is null)
+        var identity = StorageHeaderPage.IdentityBlock(page0);
+        if (magic != StorageFileHeader.ExpectedMagic || !StorageHeaderPage.VerifyIdentity(identity))
+        {
+            if (newest is null)
+            {
+                throw magic != StorageFileHeader.ExpectedMagic
+                    ? new StorageIOException("Invalid storage file: header magic number mismatch, and no header slot verifies.")
+                    : new StorageCorruptionException(
+                        (PageId)0L,
+                        "Invalid storage file: the identity block of page 0 failed checksum verification, and neither header slot " +
+                        "verifies to restore it from.");
+            }
+
+            identity = StorageHeaderPage.SlotIdentity(page0.AsSpan(StorageHeaderPage.SlotOffset(newestSlot), StorageHeaderPage.SlotSize));
+            var (copyMagic, copyVersion) = StorageHeaderPage.ReadIdentityFormat(identity);
+            if (copyMagic != StorageFileHeader.ExpectedMagic || !StorageHeaderPage.VerifyIdentity(identity))
+            {
+                throw new StorageCorruptionException(
+                    (PageId)0L,
+                    $"Invalid storage file: the identity block of page 0 does not verify, and neither does the copy header slot " +
+                    $"{newestSlot} (generation {newest.Generation}) carries.");
+            }
+
+            if (copyVersion != StorageFileHeader.CurrentFormatVersion)
+            {
+                throw StorageFormatException.ForDataFile(copyVersion);
+            }
+
+            _identityNeedsRepair = true;
+        }
+        else if (newest is null)
         {
             throw new StorageCorruptionException(
                 (PageId)0L,
                 "Invalid storage file: neither header slot of page 0 verifies. Each header write leaves the other slot intact, " +
                 "so both failing means page 0 was damaged outside a header write.");
         }
+
+        _identity = identity.ToArray();
+        (_id, _name) = StorageHeaderPage.ReadIdentity(_identity);
 
         anchor = new long[newest.AnchorCount];
         StorageHeaderPage.ReadInlineAnchor(

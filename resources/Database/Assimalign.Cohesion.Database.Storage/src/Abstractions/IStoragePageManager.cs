@@ -18,6 +18,9 @@ namespace Assimalign.Cohesion.Database.Storage;
 ///   <item>Retrieving pages by ID (from cache or disk)</item>
 ///   <item>Flushing dirty pages back to the storage stream</item>
 /// </list>
+/// Page 0 is the file header: the page manager never allocates, pins or frees it. The storage
+/// rewrites its header slots in place, outside the buffer pool, so a pooled copy of it would
+/// be stale after the next header write.
 /// </remarks>
 public interface IStoragePageManager : IAsyncDisposable, IDisposable
 {
@@ -42,6 +45,7 @@ public interface IStoragePageManager : IAsyncDisposable, IDisposable
     /// Returns a page to the free space map, making it available for reuse.
     /// </summary>
     /// <param name="pageId">The identifier of the page to free.</param>
+    /// <exception cref="StorageIOException">The page is page 0, the file header, which is never allocated or freed.</exception>
     void FreePage(PageId pageId);
 
     /// <summary>
@@ -50,6 +54,9 @@ public interface IStoragePageManager : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="pageId">The identifier of the page to retrieve.</param>
     /// <returns>A handle to the page, pinned in the buffer pool.</returns>
+    /// <exception cref="StorageIOException">
+    /// The page is not allocated, or it is page 0, the file header, which never enters the buffer pool.
+    /// </exception>
     IStoragePageHandle GetPage(PageId pageId);
 
     /// <summary>

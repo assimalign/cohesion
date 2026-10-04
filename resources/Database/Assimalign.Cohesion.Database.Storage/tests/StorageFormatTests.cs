@@ -55,28 +55,153 @@ public sealed class StorageFormatTests
     [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: the current format is 2, and a header names it exactly")]
     public void FileHeader_CurrentFormat_ShouldBeTwoAndExact()
     {
+        // Arrange
+        var current = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 2 };
+        var older = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 1 };
+        var newer = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 3 };
+
+        // Act
+        bool[] valid = [current.IsValid(), older.IsValid(), newer.IsValid()];
+
+        // Assert
         StorageFileHeader.CurrentFormatVersion.ShouldBe(2);
-        new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 2 }.IsValid().ShouldBeTrue();
-        new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 1 }.IsValid().ShouldBeFalse();
-        new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 3 }.IsValid().ShouldBeFalse();
+        valid.ShouldBe([true, false, false]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: a file without the magic number is not a storage file")]
-    public void Open_WrongMagic_ShouldBeRefused()
+    [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: a file without the magic number and without a valid header slot is not a storage file")]
+    public void Open_WrongMagicAndNoValidSlot_ShouldBeRefusedAsNotAStorageFile()
     {
+        // Arrange
         var images = CleanImages();
         images.Data[StorageHeaderPage.MagicOffset] ^= 0xFF;
+        images.Data[StorageHeaderPage.Slot0Offset + 20] ^= 0x01;
+        images.Data[StorageHeaderPage.Slot1Offset + 20] ^= 0x01;
 
-        Should.Throw<StorageIOException>(() => TornStorage.Open(images)).Message.ShouldContain("magic");
+        // Act
+        var refusal = Should.Throw<StorageIOException>(() => TornStorage.Open(images));
+
+        // Assert
+        refusal.Message.ShouldContain("magic");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: a damaged identity block is corruption")]
-    public void Open_DamagedIdentityBlock_ShouldBeCorruption()
+    /// <summary>
+    /// The identity block shares slot 0's 4 KiB block. On a drive with 4 KiB physical sectors that
+    /// emulates 512-byte ones, power lost during a slot-0 write can destroy the whole physical
+    /// sector — page header, identity block, magic and format version included — while slot 1,
+    /// the newest generation, is intact. Each slot carries a copy of the identity block, so open
+    /// takes it from slot 1, and the next write to slot 0 rewrites the whole block.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Header slots: page 0's destroyed leading 4 KiB block opens from slot 1 and is rewritten with slot 0")]
+    [InlineData(0x00)]
+    [InlineData(-1)]
+    public void Open_LeadingBlockDestroyed_ShouldOpenFromSlotOneAndRestoreTheBlock(int fill)
     {
+        // Arrange: a clean file whose newest generation is in slot 1; its first 4 KiB are lost.
         var images = CleanImages();
+        var original = images.Data.AsSpan(0, StorageHeaderPage.Slot0Offset).ToArray();
+        var block = images.Data.AsSpan(0, StorageHeaderPage.LeadingBlockSize);
+        if (fill < 0)
+        {
+            new Random(1251).NextBytes(block);
+        }
+        else
+        {
+            block.Fill((byte)fill);
+        }
+
+        // Act
+        long generation;
+        bool pendingAtOpen;
+        (byte[] Data, byte[] Journal) repaired;
+        using (var reopened = TornStorage.Open(images))
+        {
+            generation = reopened.HeaderState.Generation;
+            pendingAtOpen = reopened.IdentityRepairPending;
+            reopened.ScanText().ShouldBe(["row"]);
+            reopened.Checkpoint();
+            repaired = reopened.CaptureDurable();
+        }
+
+        using var again = TornStorage.Open(repaired);
+
+        // Assert: opened from slot 1; the checkpoint wrote slot 0 and, with it, the block.
+        generation.ShouldBe(2L);
+        pendingAtOpen.ShouldBeTrue();
+        repaired.Data.AsSpan(0, StorageHeaderPage.Slot0Offset).SequenceEqual(original).ShouldBeTrue();
+        again.IdentityRepairPending.ShouldBeFalse();
+        again.Name.ShouldBe((Name)"torn-harness");
+        again.ScanText().ShouldBe(["row"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a damaged identity block opens from the newest slot's copy")]
+    public void Open_DamagedIdentityBlock_ShouldOpenFromTheNewestSlotCopy()
+    {
+        // Arrange
+        var created = TornStorage.Create();
+        var id = created.Id;
+        created.Insert("row");
+        created.Dispose();
+        var images = created.CaptureDurable();
         images.Data[StorageHeaderPage.IdentityOffset + 50] ^= 0x01; // inside the name
 
-        Should.Throw<StorageCorruptionException>(() => TornStorage.Open(images)).Message.ShouldContain("identity block");
+        // Act
+        using var reopened = TornStorage.Open(images);
+
+        // Assert
+        reopened.Id.ShouldBe(id);
+        reopened.Name.ShouldBe((Name)"torn-harness");
+        reopened.IdentityRepairPending.ShouldBeTrue();
+        reopened.ScanText().ShouldBe(["row"]);
+    }
+
+    /// <summary>
+    /// The identity block is restored only by a write to slot 0, the slot whose 4 KiB block it
+    /// shares: writing it beside a slot-1 write would put the newest generation, in slot 0, at
+    /// risk of the very read-modify-write loss the copy guards against.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a damaged identity block is rewritten only with slot 0")]
+    public void Checkpoint_IdentityRepairPending_ShouldRewriteTheBlockOnlyWithSlotZero()
+    {
+        // Arrange: the newest generation is in slot 0 (three header writes: 1 in slot 0, 2 in 1, 3 in 0).
+        var created = TornStorage.Create();
+        created.Insert("row");
+        created.Checkpoint();
+        created.Dispose();
+        var images = created.CaptureDurable();
+        images.Data[StorageHeaderPage.IdentityOffset + 50] ^= 0x01;
+        var damaged = images.Data.AsSpan(StorageHeaderPage.IdentityOffset, StorageFileHeader.ByteSize).ToArray();
+
+        // Act
+        using var reopened = TornStorage.Open(images);
+        int slotAtOpen = reopened.HeaderState.Slot;
+        reopened.Checkpoint();
+        var afterSlotOne = reopened.CaptureDurable().Data.AsSpan(StorageHeaderPage.IdentityOffset, StorageFileHeader.ByteSize).ToArray();
+        bool pendingAfterSlotOne = reopened.IdentityRepairPending;
+        reopened.Checkpoint();
+        var afterSlotZero = reopened.CaptureDurable().Data;
+
+        // Assert
+        slotAtOpen.ShouldBe(0);
+        afterSlotOne.ShouldBe(damaged);
+        pendingAfterSlotOne.ShouldBeTrue();
+        reopened.IdentityRepairPending.ShouldBeFalse();
+        StorageHeaderPage.VerifyIdentity(StorageHeaderPage.IdentityBlock(afterSlotZero)).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a damaged identity block with neither slot valid is corruption")]
+    public void Open_DamagedIdentityBlockAndBothSlots_ShouldBeCorruption()
+    {
+        // Arrange
+        var images = CleanImages();
+        images.Data[StorageHeaderPage.IdentityOffset + 50] ^= 0x01;
+        images.Data[StorageHeaderPage.Slot0Offset + 20] ^= 0x01;
+        images.Data[StorageHeaderPage.Slot1Offset + 20] ^= 0x01;
+
+        // Act
+        var refusal = Should.Throw<StorageCorruptionException>(() => TornStorage.Open(images));
+
+        // Assert
+        refusal.Message.ShouldContain("identity block");
     }
 
     /// <summary>
@@ -132,7 +257,7 @@ public sealed class StorageFormatTests
     // ---------------------------------------------------------------- LSN floor
 
     [Fact(DisplayName = "Cohesion Test [Storage] - LSN floor: every checkpoint persists the last LSN in the header before it truncates")]
-    public void Checkpoint_ShouldPersistTheLastLsnAsTheFloor()
+    public void Checkpoint_WithCommittedWork_ShouldPersistTheLastLsnAsTheFloor()
     {
         // Arrange
         using var storage = TornStorage.Create();
@@ -207,7 +332,7 @@ public sealed class StorageFormatTests
     // ---------------------------------------------------------------- header slots
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: header writes alternate slots with increasing generations")]
-    public void HeaderWrites_ShouldAlternateSlots()
+    public void HeaderWrites_ConsecutiveCheckpoints_ShouldAlternateSlots()
     {
         // Arrange
         using var storage = TornStorage.Create();
@@ -274,11 +399,90 @@ public sealed class StorageFormatTests
     [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: page 0 with neither slot valid is corruption")]
     public void Open_BothSlotsDamaged_ShouldBeCorruption()
     {
+        // Arrange
         var images = CleanImages();
         images.Data[StorageHeaderPage.Slot0Offset + 20] ^= 0x01;
         images.Data[StorageHeaderPage.Slot1Offset + 20] ^= 0x01;
 
-        Should.Throw<StorageCorruptionException>(() => TornStorage.Open(images)).Message.ShouldContain("neither header slot");
+        // Act
+        var refusal = Should.Throw<StorageCorruptionException>(() => TornStorage.Open(images));
+
+        // Assert
+        refusal.Message.ShouldContain("neither header slot");
+    }
+
+    /// <summary>
+    /// A header write whose slot write was issued and then failed — an fsync that reports an
+    /// error, say — may have left that slot on the media as the newest generation. A retry would
+    /// rewrite the slot's anchor chain in place under it, so the storage refuses every later
+    /// header write until it is reopened, and its close flushes the journal without one; the
+    /// reopen finds a whole generation either way.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a failure after the slot write was issued stops header writes until a reopen")]
+    public void Checkpoint_SlotFlushFailsAfterTheWrite_ShouldRefuseLaterHeaderWritesUntilReopened()
+    {
+        // Arrange: both slots chain anchor pages (generation 2 in slot 1, 3 in slot 0).
+        long[] Anchor(int salt) => [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + 50).Select(i => (long)(i * 10) + salt)];
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point);
+        storage.Checkpoint(Anchor(1));
+        storage.Checkpoint(Anchor(2));
+        int target = 1 - storage.HeaderState.Slot;
+        storage.DataFaults.FailFlushAfterWriteAt = StorageHeaderPage.SlotOffset(target);
+
+        // Act
+        Should.Throw<IOException>(() => storage.Checkpoint(Anchor(3)));
+        int writesAfterTheFault = point.Writes;
+        var refusal = Should.Throw<StorageIOException>(() => storage.Checkpoint(Anchor(4)));
+        var flushRefusal = Should.Throw<StorageIOException>(() => storage.FlushHeader());
+        int writesAfterTheRefusals = point.Writes;
+        var (pageId, slot) = storage.Insert("after the fault");
+        int writesBeforeTheClose = point.Writes;
+        storage.Dispose();
+        var dataWritesAtClose = point.Log.Skip(writesBeforeTheClose).Count(entry => entry.StartsWith("data", StringComparison.Ordinal));
+        using var reopened = TornStorage.Open(storage.CaptureDurable());
+
+        // Assert: nothing was written for the refused header writes, the close wrote no header,
+        // and the reopen found the failed attempt's whole generation (the write landed).
+        storage.DataFaults.FailedFlushes.ShouldBe(1);
+        storage.HeaderFaulted.ShouldBeTrue();
+        refusal.Message.ShouldContain("Reopen the storage");
+        flushRefusal.Message.ShouldContain("Reopen the storage");
+        writesAfterTheRefusals.ShouldBe(writesAfterTheFault);
+        dataWritesAtClose.ShouldBe(0);
+        reopened.HeaderState.Generation.ShouldBe(4L);
+        reopened.CheckpointActiveTransactions.ShouldBe(Anchor(3));
+        reopened.Read(pageId, slot).ShouldBe("after the fault");
+        reopened.HeaderFaulted.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A failure before the slot write is issued leaves the slot it targets older than the
+    /// newest one on the media, so its chain may be rewritten: only a failure after the slot
+    /// write stops header writes.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a failure before the slot write leaves header writes allowed")]
+    public void Checkpoint_FlushFailsBeforeTheSlotWrite_ShouldAllowTheRetry()
+    {
+        // Arrange: slot 1's chain is the one the third checkpoint rewrites.
+        long[] Anchor(int salt) => [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + 50).Select(i => (long)(i * 10) + salt)];
+        using var storage = TornStorage.Create();
+        storage.Checkpoint(Anchor(1));
+        long chainPage = storage.AnchorChainPages[0];
+        storage.Checkpoint(Anchor(2));
+        storage.DataFaults.FailFlushAfterWriteAt = chainPage * Page.Size;
+
+        // Act
+        Should.Throw<IOException>(() => storage.Checkpoint(Anchor(3)));
+        bool faulted = storage.HeaderFaulted;
+        storage.Checkpoint(Anchor(4));
+        using var reopened = TornStorage.Open(storage.CaptureDurable());
+
+        // Assert
+        storage.DataFaults.FailedFlushes.ShouldBe(1);
+        faulted.ShouldBeFalse();
+        reopened.HeaderState.Generation.ShouldBe(4L);
+        reopened.CheckpointActiveTransactions.ShouldBe(Anchor(4));
     }
 
     // ---------------------------------------------------------------- torn data pages
@@ -319,6 +523,105 @@ public sealed class StorageFormatTests
         reopened.Read(pageId, slot).ShouldBe("committed and unflushed");
     }
 
+    // ---------------------------------------------------------------- torn journal tail
+
+    /// <summary>
+    /// A crash can leave a torn frame at the end of the journal. A reopen that defers its
+    /// checkpoint (every engine does, to analyze the journal first) appends before it truncates;
+    /// those frames must not land behind the torn one, which the next read scan stops at, or a
+    /// second crash loses them, acknowledged commits included.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Torn writes: an append after a torn journal tail lands where the next read finds it")]
+    public void Append_AfterATornJournalTail_ShouldSurviveTheNextCrash()
+    {
+        // Arrange: a committed row, then a bracket whose before-image frame tears after one sector.
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point); // abandoned after its simulated power loss
+        var (pageId, slot) = storage.Insert("v1");
+        point.DurableSectors = 1;
+        point.CrashWhen = (stream, operation, _, count) => stream == "journal" && operation == "Write" && count > Page.Size;
+        var torn = storage.BeginTransaction();
+        Should.Throw<SimulatedPowerLossException>(() => storage.Update(torn, pageId, slot, "v2"));
+        var images = storage.CaptureDurable();
+        int verifiedFrames = new StreamJournal(new MemoryStream(images.Journal)).ReadAll().Count;
+
+        // Act: reopen without the open-time checkpoint, commit, and lose power again.
+        (byte[] Data, byte[] Journal) second;
+        using (var reopened = TornStorage.Open(images))
+        {
+            reopened.Read(pageId, slot).ShouldBe("v1");
+            using (var transaction = reopened.BeginTransaction())
+            {
+                reopened.Update(transaction, pageId, slot, "v3");
+                transaction.Commit();
+            }
+
+            second = reopened.CaptureDurable();
+        }
+
+        using var recovered = TornStorage.Open(second);
+
+        // Assert: one sector of the torn frame followed the verified frames; the new bracket
+        // replaced it and reads back after the second crash.
+        images.Journal.Length.ShouldBe(FrameOffsets(images.Journal)[verifiedFrames] + CrashSimulationStream.SectorSize);
+        recovered.Read(pageId, slot).ShouldBe("v3");
+        recovered.Log.ReadAll().Count(record => record.Type == JournalRecordType.CommitTransaction).ShouldBe(2);
+        recovered.Log.ReadAll().Take(verifiedFrames).Select(record => record.Lsn)
+            .ShouldBe(new StreamJournal(new MemoryStream(images.Journal)).ReadAll().Select(record => record.Lsn));
+    }
+
+    /// <summary>
+    /// The journal a checkpoint truncated can hold nothing but the torn start of its checkpoint
+    /// record. No frame verifies, so the reopen has no records to checkpoint away; its first
+    /// append must still cut the torn bytes off.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Torn writes: a journal holding only a torn checkpoint record keeps later commits readable")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Append_AfterAJournalWithNoVerifiedFrame_ShouldSurviveTheNextCrash(bool checkpointOnOpen)
+    {
+        // Arrange: the checkpoint record (100 writers, more than a sector) tears after the truncation.
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point); // abandoned after its simulated power loss
+        var (pageId, slot) = storage.Insert("v1");
+        long[] writers = [.. Enumerable.Range(1, 100).Select(i => (long)i)];
+        bool truncated = false;
+        point.DurableSectors = 1;
+        point.CrashWhen = (stream, operation, _, _) =>
+        {
+            if (stream == "journal" && operation == "SetLength")
+            {
+                truncated = true;
+                return false;
+            }
+
+            return truncated && stream == "journal" && operation == "Write";
+        };
+        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(writers));
+        var images = storage.CaptureDurable();
+
+        // Act
+        (byte[] Data, byte[] Journal) second;
+        using (var reopened = TornStorage.Open(images, checkpointOnOpen: checkpointOnOpen))
+        {
+            using (var transaction = reopened.BeginTransaction())
+            {
+                reopened.Update(transaction, pageId, slot, "v2");
+                transaction.Commit();
+            }
+
+            second = reopened.CaptureDurable();
+        }
+
+        using var recovered = TornStorage.Open(second);
+
+        // Assert
+        images.Journal.Length.ShouldBe(CrashSimulationStream.SectorSize);
+        new StreamJournal(new MemoryStream(images.Journal)).ReadAll().ShouldBeEmpty();
+        recovered.Read(pageId, slot).ShouldBe("v2");
+        recovered.CheckpointActiveTransactions.ShouldBe(writers);
+    }
+
     // ---------------------------------------------------------------- crash at every step
 
     /// <summary>
@@ -331,9 +634,8 @@ public sealed class StorageFormatTests
     [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint: a crash at every write of a checkpoint keeps writers classified and LSNs increasing")]
     public void Checkpoint_CrashAtEveryWrite_ShouldKeepWritersClassifiedAndLsnsIncreasing()
     {
+        // Arrange: more writers than a slot holds, and a dry run that counts the checkpoint's writes.
         long[] writers = [.. Enumerable.Range(1_000, StorageHeaderPage.InlineAnchorCapacity + 40).Select(i => (long)i)];
-
-        // A dry run counts the checkpoint's writes.
         var dryPoint = new CrashPoint();
         var dry = Arrange(dryPoint, writers, out _);
         int before = dryPoint.Writes;
@@ -342,6 +644,7 @@ public sealed class StorageFormatTests
         dryPoint.Log.Skip(before).ShouldContain(entry => entry.StartsWith("journal SetLength", StringComparison.Ordinal));
         dry.Dispose();
 
+        // Act and assert: one crash per write and sector count, each checked after its reopen.
         int crashes = 0;
         for (int write = 1; write <= checkpointWrites; write++)
         {
@@ -378,6 +681,7 @@ public sealed class StorageFormatTests
         }
 
         crashes.ShouldBe(checkpointWrites * 4);
+        checkpointWrites.ShouldBeGreaterThan(4);
     }
 
     /// <summary>

@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// └──────────────┴──────────────────────┴──────────┴────────────┴──────────┴────────────┘
 /// </code>
 /// <para>
-/// The identity block is written once, when the file is created. Everything that changes —
+/// The identity block is written when the file is created. Everything that changes —
 /// page counts, the LSN and transaction-sequence floors, the checkpoint anchor — lives in two
 /// alternating header slots, each with its own generation counter and CRC-32C. A header
 /// write goes to the slot that does not hold the newest generation and is made durable
@@ -32,6 +32,15 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// <c>Modify</c>); PostgreSQL instead keeps <c>pg_control</c> within one 512-byte sector so
 /// that its single copy is written atomically (<c>PG_CONTROL_MAX_SAFE_SIZE</c>,
 /// <c>src/include/catalog/pg_control.h</c>).
+/// </para>
+/// <para>
+/// <b>The sector assumption.</b> A torn write is old-or-new per 512-byte sector: the slots
+/// share no 512-byte sector with each other or with the identity block. The identity block
+/// does share slot 0's 4 KiB block, and a drive with 4 KiB physical sectors that emulates
+/// 512-byte ones rewrites a slot-0 write as a read-modify-write of that whole physical sector,
+/// which power loss can leave unreadable. So each slot also carries a copy of the identity
+/// block: when the block on page 0 fails its magic or its checksum, open takes the identity
+/// from the newest valid slot, and the next write to slot 0 rewrites the whole leading block.
 /// </para>
 /// <para>
 /// Page 0 is never loaded through the buffer pool and its page-level checksum is zero

@@ -43,8 +43,19 @@ internal sealed record StorageHeaderSlot(
 /// A slot write rewrites only its own bytes. Its layout: magic (0), CRC-32C over the slot
 /// with the checksum field zero (4), generation (8), LSN floor (16), sequence floor (24),
 /// page count (32), free page count (40), modified time (48), anchor count (56), inline
-/// anchor count (60), anchor chain head (64), anchor chain page count (72), then the inline
-/// anchor sequences as little-endian 64-bit values from offset 80.
+/// anchor count (60), anchor chain head (64), anchor chain page count (72), a copy of the
+/// identity block (80, <see cref="StorageFileHeader.ByteSize"/> bytes), then the inline
+/// anchor sequences as little-endian 64-bit values from offset 336.
+/// </para>
+/// <para>
+/// <b>Why each slot copies the identity block.</b> Slot 0 shares its 4 KiB block with the
+/// identity block. The torn-write model is old-or-new per 512-byte sector, but a drive with
+/// 4 KiB physical sectors that emulates 512-byte ones (512e) rewrites a slot-0 write as a
+/// read-modify-write of the whole physical sector, and power lost during it can leave the
+/// identity block unreadable too. Each slot therefore carries everything open needs, as each of
+/// Voron's header files does (<c>src/Voron/Impl/FileHeaders/HeaderAccessor.cs:71-86</c>): when
+/// the identity block fails its checksum or its magic, open takes the identity from the newest
+/// valid slot, and the next write to slot 0 rewrites the whole block.
 /// </para>
 /// <para>
 /// <b>Anchor pages</b> (<see cref="PageType.CheckpointAnchor"/>) carry the anchor sequences
@@ -66,12 +77,15 @@ internal static class StorageHeaderPage
     /// <summary>The offset of <see cref="StorageFileHeader.FormatVersion"/> in page 0, the same in every storage format.</summary>
     internal const int FormatVersionOffset = IdentityOffset + sizeof(int);
 
-    private const int IdentityChecksumOffset = IdentityOffset + 168;
-    private const int IdentityModelOffset = IdentityOffset + 12;
-    private const int IdentityPageSizeOffset = IdentityOffset + 8;
-    private const int IdentityStorageIdOffset = IdentityOffset + 16;
-    private const int IdentityCreatedOffset = IdentityOffset + 32;
-    private const int IdentityNameOffset = IdentityOffset + 40;
+    // Offsets inside the identity block (StorageFileHeader's field offsets).
+    private const int BlockMagicOffset = 0;
+    private const int BlockFormatVersionOffset = 4;
+    private const int BlockPageSizeOffset = 8;
+    private const int BlockModelOffset = 12;
+    private const int BlockStorageIdOffset = 16;
+    private const int BlockCreatedOffset = 32;
+    private const int BlockNameOffset = 40;
+    private const int BlockChecksumOffset = 168;
     private const int NameCapacity = 128;
 
     /// <summary>The size of one header slot.</summary>
@@ -82,6 +96,12 @@ internal static class StorageHeaderPage
 
     /// <summary>The offset of header slot 1 in page 0.</summary>
     internal const int Slot1Offset = 4608;
+
+    /// <summary>
+    /// The size of page 0's leading 4 KiB block — the page header, the identity block and slot
+    /// 0 — which a write to slot 0 rewrites whole when the identity block needs restoring.
+    /// </summary>
+    internal const int LeadingBlockSize = Slot0Offset + SlotSize;
 
     private const int SlotMagicValue = 0x544F4C53; // "SLOT"
     private const int SlotMagicOffset = 0;
@@ -96,7 +116,8 @@ internal static class StorageHeaderPage
     private const int SlotAnchorInlineOffset = 60;
     private const int SlotAnchorChainHeadOffset = 64;
     private const int SlotAnchorChainPagesOffset = 72;
-    private const int SlotHeaderSize = 80;
+    private const int SlotIdentityOffset = 80;
+    private const int SlotHeaderSize = SlotIdentityOffset + StorageFileHeader.ByteSize;
 
     /// <summary>The most anchor sequences a slot holds itself.</summary>
     internal const int InlineAnchorCapacity = (SlotSize - SlotHeaderSize) / sizeof(long);
@@ -115,53 +136,78 @@ internal static class StorageHeaderPage
     internal static int SlotOffset(int slot) => slot == 0 ? Slot0Offset : Slot1Offset;
 
     /// <summary>
-    /// Writes a new page 0: the page header (never checksummed) and the identity block.
-    /// Both slots are left zero, which never verifies.
+    /// Composes a new identity block (<see cref="StorageFileHeader"/>) with its checksum.
     /// </summary>
-    internal static void Initialize(Span<byte> page0, StorageId id, Name name, StorageModel model, long createdAtUtcTicks)
+    /// <param name="block">The <see cref="StorageFileHeader.ByteSize"/> bytes to compose.</param>
+    internal static void ComposeIdentity(Span<byte> block, StorageId id, Name name, StorageModel model, long createdAtUtcTicks)
     {
-        page0[..Page.Size].Clear();
-        BinaryPrimitives.WriteInt64LittleEndian(page0, 0L); // page id
-        page0[Page.TypeFieldOffset] = (byte)PageType.FileHeader;
-
-        BinaryPrimitives.WriteInt32LittleEndian(page0[MagicOffset..], StorageFileHeader.ExpectedMagic);
-        BinaryPrimitives.WriteInt32LittleEndian(page0[FormatVersionOffset..], StorageFileHeader.CurrentFormatVersion);
-        BinaryPrimitives.WriteInt32LittleEndian(page0[IdentityPageSizeOffset..], Page.Size);
-        BinaryPrimitives.WriteInt32LittleEndian(page0[IdentityModelOffset..], (int)model);
-        ((Guid)id).TryWriteBytes(page0.Slice(IdentityStorageIdOffset, 16));
-        BinaryPrimitives.WriteInt64LittleEndian(page0[IdentityCreatedOffset..], createdAtUtcTicks);
+        block = block[..StorageFileHeader.ByteSize];
+        block.Clear();
+        BinaryPrimitives.WriteInt32LittleEndian(block[BlockMagicOffset..], StorageFileHeader.ExpectedMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(block[BlockFormatVersionOffset..], StorageFileHeader.CurrentFormatVersion);
+        BinaryPrimitives.WriteInt32LittleEndian(block[BlockPageSizeOffset..], Page.Size);
+        BinaryPrimitives.WriteInt32LittleEndian(block[BlockModelOffset..], (int)model);
+        ((Guid)id).TryWriteBytes(block.Slice(BlockStorageIdOffset, 16));
+        BinaryPrimitives.WriteInt64LittleEndian(block[BlockCreatedOffset..], createdAtUtcTicks);
 
         string? text = (string?)name;
         if (!string.IsNullOrEmpty(text))
         {
             byte[] encoded = Encoding.UTF8.GetBytes(text);
-            encoded.AsSpan(0, Math.Min(encoded.Length, NameCapacity)).CopyTo(page0[IdentityNameOffset..]);
+            encoded.AsSpan(0, Math.Min(encoded.Length, NameCapacity)).CopyTo(block[BlockNameOffset..]);
         }
 
-        BinaryPrimitives.WriteUInt32LittleEndian(page0[IdentityChecksumOffset..], ComputeIdentityChecksum(page0));
+        BinaryPrimitives.WriteUInt32LittleEndian(block[BlockChecksumOffset..], ComputeIdentityChecksum(block));
     }
+
+    /// <summary>
+    /// Composes the start of page 0 up to slot 0: the page header (never checksummed: page 0
+    /// never passes through the buffer pool), the identity block, and zeros up to slot 0.
+    /// </summary>
+    /// <param name="page0">At least <see cref="Slot0Offset"/> bytes of page 0.</param>
+    /// <param name="identity">The identity block.</param>
+    internal static void ComposePageStart(Span<byte> page0, ReadOnlySpan<byte> identity)
+    {
+        page0[..Slot0Offset].Clear();
+        BinaryPrimitives.WriteInt64LittleEndian(page0, 0L); // page id
+        page0[Page.TypeFieldOffset] = (byte)PageType.FileHeader;
+        identity[..StorageFileHeader.ByteSize].CopyTo(page0[IdentityOffset..]);
+    }
+
+    /// <summary>
+    /// Gets the identity block of page 0.
+    /// </summary>
+    internal static ReadOnlySpan<byte> IdentityBlock(ReadOnlySpan<byte> page0)
+        => page0.Slice(IdentityOffset, StorageFileHeader.ByteSize);
 
     /// <summary>
     /// Reads the magic number and format version from raw page-0 bytes, at the offsets every
     /// storage format shares, before anything is verified.
     /// </summary>
     internal static (int Magic, int FormatVersion) ReadFormat(ReadOnlySpan<byte> page0)
-        => (BinaryPrimitives.ReadInt32LittleEndian(page0[MagicOffset..]),
-            BinaryPrimitives.ReadInt32LittleEndian(page0[FormatVersionOffset..]));
+        => ReadIdentityFormat(IdentityBlock(page0));
 
     /// <summary>
-    /// Verifies the identity block's checksum.
+    /// Reads the magic number and format version of an identity block, before anything is
+    /// verified.
     /// </summary>
-    internal static bool VerifyIdentity(ReadOnlySpan<byte> page0)
-        => BinaryPrimitives.ReadUInt32LittleEndian(page0[IdentityChecksumOffset..]) == ComputeIdentityChecksum(page0);
+    internal static (int Magic, int FormatVersion) ReadIdentityFormat(ReadOnlySpan<byte> identity)
+        => (BinaryPrimitives.ReadInt32LittleEndian(identity[BlockMagicOffset..]),
+            BinaryPrimitives.ReadInt32LittleEndian(identity[BlockFormatVersionOffset..]));
+
+    /// <summary>
+    /// Verifies an identity block's checksum.
+    /// </summary>
+    internal static bool VerifyIdentity(ReadOnlySpan<byte> identity)
+        => BinaryPrimitives.ReadUInt32LittleEndian(identity[BlockChecksumOffset..]) == ComputeIdentityChecksum(identity);
 
     /// <summary>
     /// Reads the storage identifier and name from a verified identity block.
     /// </summary>
-    internal static (StorageId Id, Name Name) ReadIdentity(ReadOnlySpan<byte> page0)
+    internal static (StorageId Id, Name Name) ReadIdentity(ReadOnlySpan<byte> identity)
     {
-        var id = (StorageId)new Guid(page0.Slice(IdentityStorageIdOffset, 16));
-        var nameBytes = page0.Slice(IdentityNameOffset, NameCapacity);
+        var id = (StorageId)new Guid(identity.Slice(BlockStorageIdOffset, 16));
+        var nameBytes = identity.Slice(BlockNameOffset, NameCapacity);
         int length = nameBytes.IndexOf((byte)0);
         if (length < 0)
         {
@@ -173,14 +219,25 @@ internal static class StorageHeaderPage
     }
 
     /// <summary>
-    /// Composes a header slot: its fields, its inline anchor sequences, zeros after them,
-    /// and its checksum.
+    /// Gets the copy of the identity block a verified header slot carries.
     /// </summary>
-    internal static void WriteSlot(Span<byte> slot, StorageHeaderSlot state, ReadOnlySpan<long> inlineAnchor)
+    internal static ReadOnlySpan<byte> SlotIdentity(ReadOnlySpan<byte> slot)
+        => slot.Slice(SlotIdentityOffset, StorageFileHeader.ByteSize);
+
+    /// <summary>
+    /// Composes a header slot: its fields, a copy of the identity block, its inline anchor
+    /// sequences, zeros after them, and its checksum.
+    /// </summary>
+    internal static void WriteSlot(Span<byte> slot, StorageHeaderSlot state, ReadOnlySpan<byte> identity, ReadOnlySpan<long> inlineAnchor)
     {
         if (inlineAnchor.Length != state.AnchorInlineCount || inlineAnchor.Length > InlineAnchorCapacity)
         {
             throw new ArgumentException("The inline anchor does not match the slot state.", nameof(inlineAnchor));
+        }
+
+        if (identity.Length != StorageFileHeader.ByteSize)
+        {
+            throw new ArgumentException("The identity block has the wrong size.", nameof(identity));
         }
 
         slot = slot[..SlotSize];
@@ -196,6 +253,7 @@ internal static class StorageHeaderPage
         BinaryPrimitives.WriteInt32LittleEndian(slot[SlotAnchorInlineOffset..], state.AnchorInlineCount);
         BinaryPrimitives.WriteInt64LittleEndian(slot[SlotAnchorChainHeadOffset..], state.AnchorChainHead);
         BinaryPrimitives.WriteInt32LittleEndian(slot[SlotAnchorChainPagesOffset..], state.AnchorChainPageCount);
+        identity.CopyTo(slot[SlotIdentityOffset..]);
 
         for (int i = 0; i < inlineAnchor.Length; i++)
         {
@@ -268,7 +326,20 @@ internal static class StorageHeaderPage
     /// Composes an anchor page in a page buffer: the page header (the pool stamps the
     /// checksum when it writes the page back) and the chain fields and entries.
     /// </summary>
-    internal static void WriteAnchorPage(Span<byte> page, long pageId, long generation, int slot, int index, ReadOnlySpan<long> entries, long next)
+    /// <param name="page">The page buffer.</param>
+    /// <param name="pageId">The page's identifier.</param>
+    /// <param name="lsn">
+    /// The page LSN: the journal's last LSN once the chain's pages were allocated. The page
+    /// is written outside the journal, and may reuse a page whose free is still in a journal
+    /// tail that is not durable; the LSN makes the buffer pool's write-ahead gate flush that
+    /// tail before any write-back of the page.
+    /// </param>
+    /// <param name="generation">The header generation the chain belongs to.</param>
+    /// <param name="slot">The header slot that owns the chain.</param>
+    /// <param name="index">The page's position on the chain.</param>
+    /// <param name="entries">The anchor sequences the page holds.</param>
+    /// <param name="next">The next page of the chain, or zero.</param>
+    internal static void WriteAnchorPage(Span<byte> page, long pageId, long lsn, long generation, int slot, int index, ReadOnlySpan<long> entries, long next)
     {
         if (entries.Length is 0 or > AnchorPageCapacity)
         {
@@ -278,6 +349,7 @@ internal static class StorageHeaderPage
         page = page[..Page.Size];
         page.Clear();
         BinaryPrimitives.WriteInt64LittleEndian(page, pageId);
+        BinaryPrimitives.WriteInt64LittleEndian(page[Page.LsnFieldOffset..], lsn);
         page[Page.TypeFieldOffset] = (byte)PageType.CheckpointAnchor;
         BinaryPrimitives.WriteInt64LittleEndian(page[AnchorGenerationOffset..], generation);
         BinaryPrimitives.WriteInt32LittleEndian(page[AnchorSlotOffset..], slot);
@@ -349,14 +421,13 @@ internal static class StorageHeaderPage
         }
     }
 
-    private static uint ComputeIdentityChecksum(ReadOnlySpan<byte> page0)
+    private static uint ComputeIdentityChecksum(ReadOnlySpan<byte> identity)
     {
-        var block = page0.Slice(IdentityOffset, StorageFileHeader.ByteSize);
-        int checksumAt = IdentityChecksumOffset - IdentityOffset;
+        var block = identity[..StorageFileHeader.ByteSize];
         uint state = Crc32C.Begin();
-        state = Crc32C.Append(state, block[..checksumAt]);
+        state = Crc32C.Append(state, block[..BlockChecksumOffset]);
         state = Crc32C.AppendZeros(state, sizeof(uint));
-        state = Crc32C.Append(state, block[(checksumAt + sizeof(uint))..]);
+        state = Crc32C.Append(state, block[(BlockChecksumOffset + sizeof(uint))..]);
         return Crc32C.Finalize(state);
     }
 

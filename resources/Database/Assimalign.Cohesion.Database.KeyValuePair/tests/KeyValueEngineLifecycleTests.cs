@@ -10,6 +10,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
@@ -309,6 +311,46 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         failure.Message.ShouldContain("uses B-tree page format 1, but this engine supports only format 2", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<IndexFormatException>().FoundVersion.ShouldBe(1);
 
+        foreach (var (path, bytes) in before)
+        {
+            File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
+        }
+    }
+
+    /// <summary>
+    /// The storage refuses a file set in another storage format with <c>COHDBS001</c> (#1251).
+    /// A database has a data and a catalog file set, so the engine names the database and the
+    /// one that was refused.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: a file set in storage format 1 is refused at open with COHDBS001 naming the database and the file set, its files untouched (#1251)")]
+    [InlineData("data")]
+    [InlineData("catalog")]
+    public async Task Open_FileSetInStorageFormatOne_ShouldBeRefusedNamingTheDatabaseAndTheFileSet(string role)
+    {
+        // Arrange: a closed database whose page 0 in one file set names storage format 1.
+        await using (var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            await using var session = await database.CreateSessionAsync();
+            await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+        }
+
+        string storageName = role == "catalog" ? "kv" + KeyValueDatabaseEngine.CatalogSuffix : "kv";
+        StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, storageName, storageName + ".dat"), version: 1);
+        var before = Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+        // Act
+        await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
+
+        // Assert
+        failure.Message.ShouldStartWith(
+            $"Database 'kv' cannot be opened: its {role} file set '{storageName}' was refused. {StorageFormatException.ErrorCode}: ",
+            Case.Sensitive);
+        failure.Message.ShouldContain("uses storage format 1, but this engine supports only storage format 2", Case.Sensitive);
+        failure.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(1);
+        reopened.TryGetDatabase("kv", out _).ShouldBeFalse();
+        Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).Length.ShouldBe(before.Count);
         foreach (var (path, bytes) in before)
         {
             File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");

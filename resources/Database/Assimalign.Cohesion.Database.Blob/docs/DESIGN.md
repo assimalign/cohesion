@@ -56,6 +56,10 @@ Database names are single file-name components, compared ignoring case; invalid 
 are rejected. Database enumeration includes persisted databases and opens them through recovery.
 `TryGetDatabase` addresses the open instance set. Container and blob names are ordinal and
 case-sensitive; a slash in a blob name is ordinary name content, never a database selector.
+A file set in another storage format (#1251) is refused by the storage before its journal is
+read, and the engine names the database: "Database 'x' cannot be opened. COHDBS001: …", the
+storage's `StorageFormatException` as its inner exception, the files byte-identical
+(`BlobEngineTests`).
 
 ## Chunk chain and disk compatibility
 

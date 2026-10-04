@@ -6,10 +6,12 @@ using System.Text;
 namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 /// <summary>
-/// A storage over write-through crash-simulation streams that can share a
-/// <see cref="CrashPoint"/>: every write reaches the media as soon as it is issued (the worst
-/// case for both the steal path and a checkpoint), and a scheduled write can be torn. A
-/// storage that lost power is abandoned, not disposed: its shutdown would only throw again.
+/// A storage over crash-simulation streams that can share a <see cref="CrashPoint"/>: by default
+/// every write reaches the media as soon as it is issued (the worst case for both the steal path
+/// and a checkpoint), and a scheduled write can be torn. A journal can instead be flush-gated, so
+/// its appends survive a power loss only once flushed. The data handle can fail a flush after a
+/// chosen write (<see cref="DataFaults"/>). A storage that lost power is abandoned, not disposed:
+/// its shutdown would only throw again.
 /// </summary>
 internal sealed class TornStorage : Storage
 {
@@ -17,10 +19,16 @@ internal sealed class TornStorage : Storage
     private readonly CrashSimulationStream _journal;
 
     private TornStorage(CrashSimulationStream data, CrashSimulationStream journal, int poolCapacity)
-        : base(new StorageStream(data), new StorageStream(journal), new StorageStream(new MemoryStream()), poolCapacity)
+        : this(data, journal, new FlushFaultingHandle(data), poolCapacity)
+    {
+    }
+
+    private TornStorage(CrashSimulationStream data, CrashSimulationStream journal, FlushFaultingHandle dataFaults, int poolCapacity)
+        : base(new StorageStream(dataFaults), new StorageStream(journal), new StorageStream(new MemoryStream()), poolCapacity)
     {
         _data = data;
         _journal = journal;
+        DataFaults = dataFaults;
     }
 
     public override StorageModel Model => StorageModel.Custom;
@@ -31,11 +39,21 @@ internal sealed class TornStorage : Storage
     /// <summary>Gets the anchor pages the newest header generation chains.</summary>
     public IReadOnlyList<long> AnchorChainPages => HeaderState.AnchorChain;
 
-    public static TornStorage Create(CrashPoint? point = null, int poolCapacity = 8)
+    /// <summary>Gets the data handle, which can fail a flush after a chosen write.</summary>
+    public FlushFaultingHandle DataFaults { get; }
+
+    /// <summary>Creates a file set.</summary>
+    /// <param name="point">The scheduled power loss the data and journal streams share.</param>
+    /// <param name="poolCapacity">The buffer pool's capacity in pages.</param>
+    /// <param name="journalWriteThrough">
+    /// False to make the journal flush-gated: an append survives a power loss only once a flush
+    /// covered it, as an unsynced write in the operating system's cache.
+    /// </param>
+    public static TornStorage Create(CrashPoint? point = null, int poolCapacity = 8, bool journalWriteThrough = true)
     {
         var storage = new TornStorage(
             new CrashSimulationStream(writeThrough: true, point, "data"),
-            new CrashSimulationStream(writeThrough: true, point, "journal"),
+            new CrashSimulationStream(journalWriteThrough, point, "journal"),
             poolCapacity);
         storage.InitializeNew((Name)"torn-harness");
         return storage;
@@ -57,6 +75,9 @@ internal sealed class TornStorage : Storage
 
     /// <summary>Gets what a power loss right now would leave on the media.</summary>
     public (byte[] Data, byte[] Journal) CaptureDurable() => (_data.CaptureDurable(), _journal.CaptureDurable());
+
+    /// <summary>Writes a header generation without a checkpoint, as <c>FlushChanges</c> does.</summary>
+    public void FlushHeader() => Flush();
 
     /// <summary>Inserts one record per new page (each record nearly fills a page) in one committed bracket.</summary>
     public long[] FillPages(int count, ulong owner = 7)
@@ -84,6 +105,19 @@ internal sealed class TornStorage : Storage
         }
 
         transaction.Commit();
+    }
+
+    /// <summary>
+    /// Releases an owner's pages in one bracket committed with the given durability, as a
+    /// statement bracket under a logical transaction commits.
+    /// </summary>
+    /// <returns>The bracket's sequence.</returns>
+    public long FreeOwner(ulong owner, bool awaitDurability)
+    {
+        using var transaction = BeginTransaction();
+        FreeOwnerPages(transaction, owner);
+        transaction.Commit(awaitDurability);
+        return transaction.Sequence;
     }
 
     public (PageId PageId, int SlotIndex) Insert(string text)

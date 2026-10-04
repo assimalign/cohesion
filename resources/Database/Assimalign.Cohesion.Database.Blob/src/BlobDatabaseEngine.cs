@@ -141,6 +141,13 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
                 _databases.Add(name, database);
                 return new ValueTask<IDatabase>(database);
             }
+            catch (StorageFormatException exception)
+            {
+                // The storage refused the file set before recovery wrote anything; the refusal
+                // names the formats and the remedy, and this names the database.
+                storage?.Dispose();
+                throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+            }
             catch
             {
                 storage?.Dispose();

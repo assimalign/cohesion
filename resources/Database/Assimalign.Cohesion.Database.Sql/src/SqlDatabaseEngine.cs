@@ -12,6 +12,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
 using Internal;
@@ -286,7 +287,16 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             // close. Opening the catalog writes nothing beyond what opening any
             // storage does (crash recovery of the catalog file set itself), and
             // an untouched storage closes without writing.
-            var catalogStorage = _strategy.OpenStorage(name + CatalogSuffix);
+            SqlStorage catalogStorage;
+            try
+            {
+                catalogStorage = _strategy.OpenStorage(name + CatalogSuffix);
+            }
+            catch (StorageFormatException exception)
+            {
+                throw RefuseStorageFormat(name, "catalog", name + CatalogSuffix, exception);
+            }
+
             SqlStorage? storage = null;
 
             // See CreateDatabaseAsync: instance construction commits (recovery
@@ -299,7 +309,15 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 var catalog = SqlCatalog.Open(catalogStorage);
                 SqlDatabaseInstance.ThrowIfFormatIsNotCurrent(name, catalog);
 
-                storage = _strategy.OpenStorage(name);
+                try
+                {
+                    storage = _strategy.OpenStorage(name);
+                }
+                catch (StorageFormatException exception)
+                {
+                    throw RefuseStorageFormat(name, "data", name, exception);
+                }
+
                 ConfigureStorage(storage, name);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
                 var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, catalog, recover: true);
@@ -324,6 +342,19 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             }
         }
     }
+
+    /// <summary>
+    /// Names the database and the file set behind a storage format refusal. The refusal is
+    /// engine-authored and actionable (the formats found and supported, and the remedy), so it
+    /// travels as a <see cref="SqlDataStorageFormatException"/>, which the wire-protocol server
+    /// forwards to the client.
+    /// </summary>
+    /// <param name="name">The database.</param>
+    /// <param name="role">Which of the database's file sets was refused: <c>catalog</c> or <c>data</c>.</param>
+    /// <param name="storageName">The file set's storage name.</param>
+    /// <param name="exception">The storage's refusal.</param>
+    private static SqlDataStorageFormatException RefuseStorageFormat(string name, string role, string storageName, StorageFormatException exception)
+        => new($"Database '{name}' cannot be opened: its {role} file set '{storageName}' was refused. {exception.Message}", exception);
 
     /// <inheritdoc />
     public ValueTask DropDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)

@@ -38,12 +38,21 @@ public sealed class StorageFormatException : StorageException
     }
 
     /// <summary>
-    /// Gets the format version found on disk.
+    /// Gets the format version found on disk: a storage format version
+    /// (<see cref="StorageFileHeader.FormatVersion"/>) when page 0 of a data file was refused,
+    /// or a journal frame format version when a journal frame was refused (the message says
+    /// which).
     /// </summary>
+    /// <remarks>
+    /// The two version series are separate: storage format 2 writes journal frame format 3,
+    /// and storage format 1 wrote journal frame format 2.
+    /// </remarks>
     public int FoundVersion { get; }
 
     /// <summary>
-    /// Gets the only format version this engine reads.
+    /// Gets the only format version this engine reads, in the same series as
+    /// <see cref="FoundVersion"/>: <see cref="StorageFileHeader.CurrentFormatVersion"/> for a
+    /// refused data file, the current journal frame format (3) for a refused journal frame.
     /// </summary>
     public int SupportedVersion { get; }
 
