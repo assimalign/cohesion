@@ -333,6 +333,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
             try
             {
+                // From here on the transaction can stamp row versions, so every checkpoint
+                // until it ends must keep it classifiable (and the journal must name it now
+                // if the last checkpoint truncated its begin record while it was a reader).
+                _log.EnterWriter((long)context.Sequence.Value);
+
                 var bracket = _storage.BeginTransaction();
 
                 lock (_sync)
@@ -438,10 +443,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
     /// <summary>
     /// Checkpoints the data storage while logical transactions may be in flight:
-    /// the checkpoint record carries the sequences of every transaction whose
-    /// lifecycle records the truncation is about to destroy, captured atomically
-    /// with the truncation (no lifecycle record can land in between), so
-    /// recovery classification stays sound.
+    /// the checkpoint record and the storage's checkpoint anchor carry the sequences
+    /// of every in-flight <em>writer</em> — a transaction that applied a statement and
+    /// so can have stamped row versions, including a rolled-back writer whose undo is
+    /// deferred — captured atomically with the truncation (no lifecycle record can land
+    /// in between), so recovery classification stays sound. A reader stamps nothing and
+    /// is not listed; if it applies a statement after the checkpoint, its sequence is
+    /// first announced again with a begin record, so the journal names it before its
+    /// first stamp exists.
     /// </summary>
     /// <exception cref="StorageTransactionException">A storage-level bracket is still active.</exception>
     public void Checkpoint() => _log.CheckpointUnderGate(_storage);
@@ -656,16 +665,42 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// The manager's journal-bound transaction log, gated so lifecycle appends
     /// and checkpoint truncation are mutually exclusive: the checkpoint captures
-    /// the active-sequence list and truncates under the same gate no append can
+    /// the writer list and truncates under the same gate no append can
     /// interleave with, which is what makes recovery classification sound across
     /// truncation. Durability: commit appends the record under the gate and
     /// flushes outside it — if a checkpoint truncated past the record first, the
     /// checkpoint's own durable flush already covered the outcome.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only writers are anchored (#1242).</b> Recovery must classify every transaction
+    /// whose row versions can be in the data pages, and only a transaction that applied a
+    /// statement can have stamped one; a reader's begin record may go with the truncation.
+    /// So a checkpoint lists the active writers alone, which keeps the storage's checkpoint
+    /// anchor small under read-heavy load.
+    /// </para>
+    /// <para>
+    /// A transaction that was a reader at a checkpoint and applies a statement afterwards is
+    /// no longer named by the journal: its begin record was truncated and the checkpoint did
+    /// not list it. Before its first statement bracket begins, <see cref="EnterWriter"/>
+    /// therefore appends its begin record again, under the gate, so a crash before its commit
+    /// still finds it unproven and scrubs its versions. A transaction whose begin record is
+    /// in the current journal, or that the last checkpoint listed, needs no second one.
+    /// </para>
+    /// </remarks>
     private sealed class GatedJournalLog : ITransactionLog
     {
         private readonly TransactionCoordinator _coordinator;
         private readonly HashSet<long> _activeSequences = new();
+
+        // The active transactions that applied a statement: the only ones that can have
+        // stamped row versions, so the only ones a checkpoint must list. A rolled-back
+        // writer whose undo is deferred stays here until its abort record is appended.
+        private readonly HashSet<long> _writers = new();
+
+        // The active transactions the journal names since the last checkpoint: begun since
+        // then, announced again since then, or listed by that checkpoint (its writers).
+        private readonly HashSet<long> _journaled = new();
         private readonly object _gate = new();
 
         internal GatedJournalLog(TransactionCoordinator coordinator)
@@ -681,9 +716,36 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             {
                 _coordinator._journal.AppendBegin((long)sequence.Value);
                 _activeSequences.Add((long)sequence.Value);
+                _journaled.Add((long)sequence.Value);
             }
 
             return default;
+        }
+
+        /// <summary>
+        /// Records that a transaction is about to apply a statement and so may stamp row
+        /// versions: from now on every checkpoint lists it. When the journal no longer names
+        /// it — a checkpoint truncated its begin record while it was a reader — its begin
+        /// record is appended again first, so the journal names it before its first stamp.
+        /// </summary>
+        /// <param name="sequence">The transaction's sequence.</param>
+        internal void EnterWriter(long sequence)
+        {
+            lock (_gate)
+            {
+                if (_writers.Contains(sequence) || !_activeSequences.Contains(sequence))
+                {
+                    return;
+                }
+
+                if (!_journaled.Contains(sequence))
+                {
+                    _coordinator._journal.AppendBegin(sequence);
+                    _journaled.Add(sequence);
+                }
+
+                _writers.Add(sequence);
+            }
         }
 
         public ValueTask AppendCommitAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
@@ -694,7 +756,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             lock (_gate)
             {
                 lsn = _coordinator._journal.AppendCommit((long)sequence.Value);
-                _activeSequences.Remove((long)sequence.Value);
+                Forget((long)sequence.Value);
             }
 
             // Durability outside the gate: if a checkpoint truncated past the
@@ -735,7 +797,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                     // completed, so nothing of the writer is left for recovery to scrub
                     // and later checkpoints need not carry it — whether or not the
                     // advisory record itself was written (#1226).
-                    _activeSequences.Remove((long)sequence.Value);
+                    Forget((long)sequence.Value);
                 }
             }
 
@@ -743,26 +805,45 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
 
         /// <summary>
-        /// Checkpoints the storage with the active-sequence list captured under
-        /// the append gate, so no lifecycle record can land between the capture
-        /// and the truncation.
+        /// Checkpoints the storage with the writer list captured under the append gate,
+        /// so no lifecycle record can land between the capture and the truncation.
         /// </summary>
         internal void CheckpointUnderGate(IStorage storage)
         {
             lock (_gate)
             {
-                Span<long> actives = _activeSequences.Count <= 64
-                    ? stackalloc long[_activeSequences.Count]
-                    : new long[_activeSequences.Count];
+                Span<long> writers = _writers.Count <= 64
+                    ? stackalloc long[_writers.Count]
+                    : new long[_writers.Count];
 
                 int index = 0;
-                foreach (long sequence in _activeSequences)
+                foreach (long sequence in _writers)
                 {
-                    actives[index++] = sequence;
+                    writers[index++] = sequence;
                 }
 
-                storage.Checkpoint(actives);
+                writers.Sort();
+
+                try
+                {
+                    storage.Checkpoint(writers);
+                }
+                finally
+                {
+                    // Whether or not the truncation ran (it may have, even when the
+                    // checkpoint record then failed), only the writers it listed are still
+                    // named for certain; any reader that becomes a writer is announced again.
+                    _journaled.Clear();
+                    _journaled.UnionWith(_writers);
+                }
             }
+        }
+
+        private void Forget(long sequence)
+        {
+            _activeSequences.Remove(sequence);
+            _writers.Remove(sequence);
+            _journaled.Remove(sequence);
         }
     }
 }

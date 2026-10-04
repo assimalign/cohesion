@@ -33,21 +33,113 @@ the journal only — there are no side files.
   stream until the journal is durable up to its LSN) and for idempotent recovery replay
   (apply a record only if it is newer than the page). The storage layer stores the
   field; the journal build-out (#160) enforces the rule.
-- **Checksums on every read path.** CRC-32 over the full page with the checksum field
-  zeroed. Stamped centrally in the buffer pool's write-back (the only path to the data
-  stream), verified centrally in the buffer pool's load (the only path from it).
-  A stored checksum of zero means "never stamped" and skips verification — accepted
-  because the alternative (a validity bit elsewhere) buys nothing against the ~2⁻³²
-  false-negative rate this already carries.
+- **Checksums on every read path.** CRC-32C over the full page with the checksum field
+  zeroed (storage format 2, "Checksums" below). Stamped centrally in the buffer pool's
+  write-back (the only path to the data stream), verified centrally in the buffer pool's
+  load (the only path from it). A stored checksum of zero means "never stamped" and skips
+  verification — accepted because the alternative (a validity bit elsewhere) buys nothing
+  against the ~2⁻³² false-negative rate this already carries.
 
-### Why the file header lives in the page body
+### Page 0: the identity block and two alternating header slots
 
-`StorageFileHeader` (magic, format version, storage id/name, page counts, checkpoint
-LSN, sequence floor, checkpoint anchor count) sits in the **body** of page 0 — after the
-standard 96-byte page header — not at file offset 0. The rest of the body after its 256
-bytes holds the checkpoint anchor's sequences ("Checkpoints"). An earlier draft overlaid the file header on the page header, which made
-page 0 un-checksummable and un-typed. Making page 0 a normal `PageType.FileHeader` page
-means one integrity rule covers every page in the file, including the header.
+`StorageFileHeader` sits in the **body** of page 0, after the standard 96-byte page header,
+not at file offset 0. An earlier draft overlaid it on the page header, which made page 0
+un-checksummable and un-typed. Storage format 2 (#1251) splits what page 0 holds by how
+often it changes:
+
+```
+Page 0 (8 KiB)
+┌──────────────┬──────────────────────┬──────────┬────────────┬──────────┬────────────┐
+│ page header  │ StorageFileHeader    │ reserved │ header     │ reserved │ header     │
+│ 0..96        │ 96..352 (identity)   │ ..512    │ slot 0     │ ..4608   │ slot 1     │
+│              │                      │          │ 512..4096  │          │ 4608..8192 │
+└──────────────┴──────────────────────┴──────────┴────────────┴──────────┴────────────┘
+```
+
+- **The identity block** (magic, format version, page size, model, storage id, creation
+  time, name, and its own CRC-32C) is written once, when the file is created. Magic and
+  format version stay at page offsets 96 and 100 in every format, which is what lets the
+  format fence read them before anything is verified ("Storage format 2 and the format
+  fence").
+- **Two header slots** carry everything that changes: the generation counter, the LSN floor,
+  the transaction sequence floor, page counts, the modification time and the checkpoint
+  anchor, each slot under its own CRC-32C. Each slot is 3,584 bytes, seven 512-byte sectors
+  that share no sector with the other slot or the identity block, and each lies inside one
+  4 KiB block.
+- **A header write goes to the slot that does not hold the newest generation**, as
+  generation + 1, rewriting only that slot's bytes (a positional write, not the page). It is
+  made durable before it counts: only once the data flush after it returns does the storage
+  treat the slot as the newest, so the next write goes to the other one. A crash at any
+  point leaves at least one slot whole, and open picks the newest slot whose checksum
+  verifies. A slot whose write tore fails its checksum — unless every sector that differed
+  landed, in which case it is the complete new slot.
+- **Page 0 never enters the buffer pool**, and its page-level checksum is zero ("never
+  stamped"): a slot write changes only the slot, so a page checksum would be stale after
+  every header write. The identity block and the slots carry their own checksums instead.
+- **Tested by tearing.** The test crash simulation (`CrashSimulationStream` with a shared
+  `CrashPoint`) loses power at a chosen write and keeps a durable prefix of k 512-byte
+  sectors of it. `StorageFormatTests` tears a slot write after 0, 1, 3 and 6 of its seven
+  sectors and opens from the previous generation each time (and from the new one when all
+  seven landed); with both slots damaged the open fails as corruption.
+
+Page 0 used to be one page rewritten in place at every checkpoint and checksum-verified at
+open, so a torn 8 KiB write (an 8 KiB page is sixteen 512-byte sectors, and power loss can
+leave some written and others not) made the file set unopenable — and since #1226 page 0
+carries checkpoint state the journal cannot replace. RavenDB's Voron alternates its header
+files the same way: `Initialize` reads `headers.one` and `headers.two`, keeps the valid
+ones and takes the higher `HeaderRevision`, and `Modify` writes `HeaderFileNames[_revision & 1]`
+(`src/Voron/Impl/FileHeaders/HeaderAccessor.cs:44-99, 177-196`). PostgreSQL instead keeps its
+single `pg_control` copy within one 512-byte sector so that one write is atomic
+(`PG_CONTROL_MAX_SAFE_SIZE`, `src/include/catalog/pg_control.h:284-290`); the checkpoint
+anchor is far larger than a sector, so Cohesion double-buffers.
+
+## Storage format 2 and the format fence (#1251)
+
+`StorageFileHeader.CurrentFormatVersion` is 2, and it covers every on-disk change of #1251
+at once: CRC-32C page, slot and journal checksums, journal frame version 3, the identity
+block and alternating header slots of page 0, the persisted LSN floor, and the
+writers-only, chained checkpoint anchor. Nothing has shipped, so there is no upgrade path
+and no compatibility shim (owner decision, #1152): a file set of another format is refused,
+never misread.
+
+- **The fence reads the raw bytes first.** Open reads magic (page offset 96) and format
+  version (100) from the raw page-0 bytes before it verifies any checksum. A wrong magic is
+  "not a storage file" (`StorageIOException`); any version but the current one is refused
+  with `StorageFormatException`, whose message leads with `COHDBS001`, names the version
+  found and the version supported, and points at #1152 (export with the engine that wrote
+  the file, or open it with the newer engine). Only then are the identity block's and the
+  slots' checksums verified. The order matters because the checksum algorithm is itself part
+  of the format: a format-1 file fails every CRC-32C, and checking that first would report a
+  version mismatch as corruption. PostgreSQL's `ReadControlFile` does the same — "complaining
+  about wrong version will probably be more enlightening than complaining about wrong CRC" —
+  checking `pg_control_version` before the CRC (`src/backend/access/transam/xlog.c:4507-4544`).
+  `StorageFileHeader.IsValid()` is exact (magic and exactly the current version) where it used
+  to accept any positive version.
+- **Journal frames are fenced too.** A frame whose length, magic and CRC-32C verify but whose
+  version byte is not 3 was written whole by another engine; the read refuses it with
+  `StorageFormatException` (naming the frame's position) instead of stopping there as if it
+  were a torn tail, which would silently drop it and every record after it, commit records
+  included. A frame whose checksum fails is still a torn tail. Frames of format 1 (version 2,
+  IEEE CRC) fail their CRC-32C, so they read as a torn tail; the data file's fence refuses
+  such a file set before its journal is read, which makes the page-0 fence the one that
+  covers the polynomial change, and the frame version the one for later bumps that keep it.
+
+### Checksums
+
+Pages, journal frames, the identity block and the header slots use CRC-32C (Castagnoli,
+reflected polynomial `0x82F63B78`, initial value and final XOR `0xFFFFFFFF`) through
+`System.Numerics.BitOperations.Crc32C`, eight bytes per step: the CRC32C instruction on x64
+(SSE4.2) and ARM64 (the CRC32 extension), a software table elsewhere, all NativeAOT- and
+trimming-safe with no package. Each word is read little-endian, so a checksum is the same on
+every host. The byte-at-a-time IEEE table it replaced spent 27–30 µs on an 8 KiB page, most of
+a page touch's CPU cost (#1236); PostgreSQL uses CRC-32C for its WAL records
+(`xl_crc`, `src/include/access/xlogrecord.h:49`) and its control file
+(`src/include/catalog/pg_control.h:281`), with SSE4.2 and ARMv8 paths
+(`src/include/port/pg_crc32c.h:44, 117`). A page checksum folds the page's own four checksum
+bytes as zeros (`Crc32C.AppendZeros`) rather than copying the page; `Crc32CTests` pins that
+path to the CRC of the page with its field zeroed, the RFC 3720 B.4 vectors and the
+`123456789` check value, and every length up to 9,000 bytes at every alignment against a
+bitwise reference.
 
 ## File handles, positional I/O, and durability
 
@@ -172,13 +264,26 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   that every resident entry has a non-negative pin count, is not on the recycle stack,
   and owns exactly one node of the LRU list keyed by its page; that the LRU list holds
   nothing else; and that recycled entries are unpinned and detached. It is compiled
-  into every configuration. Debug builds also run it after every pool operation and add
-  per-operation checks: a handle never releases a pin on an entry that is no longer
+  into every configuration. Debug builds also run it wherever the pool's structure
+  changes — a pin miss (which may evict and recycle), an explicit eviction, a flush —
+  and, on a pin hit, a `TryGet` hit or an unpin, which change one entry's pin count and
+  LRU position, check just that frame: resident under its page, owning its node of the
+  access list, not recycled, with a non-negative pin count (#1240). They add
+  per-operation checks too: a handle never releases a pin on an entry that is no longer
   resident, a page is never unpinned more often than it was pinned, and a handle's page
   is never read after the handle was disposed. Release builds skip the per-operation
   checks and ignore an over-release. CI runs the suites in Release, so the explicit
   check, the injected-violation tests and the per-phase checks of the concurrency suites
-  run there too; the per-operation checks run in local Debug runs.
+  run there too; the per-operation checks run in local Debug runs. The walk used to run
+  after every pool operation: it is O(resident pages), and 99.7% of its calls in the
+  Debug 100,000-row cascade test came from hits and unpins, about 80% of that test's time
+  (63–70 s against 13 s, "Measurements").
+- **Allocation does not read the page it allocates.** `AllocatePage` clears every byte
+  of the page it hands out, so it pins through `PinForOverwrite`, which takes a resident
+  entry as it is and gives a non-resident page a zeroed buffer instead of reading and
+  verifying the free page's old bytes. Besides the wasted read, verification refused the
+  allocation of a free page whose last write a crash tore — recovery repairs torn pages
+  from journal images, and an unjournaled checkpoint anchor page has none.
 
 ## The record layer
 
@@ -259,8 +364,11 @@ object ids, so a table scan stops decoding the whole database.
 ## The journal (write-ahead log)
 
 `IStorageJournal` is the durability mechanism — the *only* one. Frames are length-prefixed,
-magic-tagged, and CRC-protected; a torn or corrupted tail terminates the read scan and
-is ignored — it belongs to work that was never acknowledged. Records are typed and
+magic-tagged, versioned (frame version 3) and CRC-32C-protected; a torn or corrupted tail
+terminates the read scan and is ignored — it belongs to work that was never acknowledged —
+while a verified frame of another version is a format error ("Storage format 2 and the
+format fence"). LSNs never restart: a reopened journal resumes above both its last record
+and the LSN floor of the newest header generation ("Checkpoints"). Records are typed and
 binary (begin / commit / rollback / checkpoint / before-image / after-image / opaque
 logical operation); transaction identity at this level is a compact monotonic `long`
 sequence — GUID identity belongs to the transaction layer above.
@@ -345,19 +453,19 @@ engine) added three storage-side rules that keep the logical layer sound:
   adopted bracket appends **no begin record** — the reserving caller's
   transaction log owns lifecycle records; the bracket contributes page images
   and its commit/rollback record.
-- **The sequence floor.** The file header persists the storage's high-water
-  transaction sequence (`LastTransactionSequence`, updated on every header
+- **The sequence floor.** Every header generation persists the storage's high-water
+  transaction sequence (the slot's sequence floor, written with every header
   write). On open, sequence assignment resumes above `max(journal-max, floor)`:
   a checkpoint truncates the journal — the only other sequence witness — while
   MVCC row stamps persist in data pages, so a recycled sequence would corrupt
-  snapshot visibility. Files written before the field read zero, a safe floor
-  (they predate row stamps).
-- **Checkpoints carry logical actives; the open-time checkpoint is deferrable.**
-  `Checkpoint(ReadOnlySpan<long>)` embeds in-flight *logical* sequences in the
-  truncating checkpoint record and, first, in the file header's checkpoint anchor
+  snapshot visibility.
+- **Checkpoints carry logical writers; the open-time checkpoint is deferrable.**
+  `Checkpoint(ReadOnlySpan<long>)` embeds the in-flight *logical* sequences it is given
+  in the truncating checkpoint record and, first, in the header's checkpoint anchor
   (their begin records are being destroyed; `TransactionRecovery.Analyze` reads them
   back so an unproven sequence still classifies as aborted, even when the record itself
-  was lost; see "Checkpoints"). Storage-level brackets must still be quiescent — the
+  was lost; see "Checkpoints"). The transaction layer passes only its writers: a reader
+  stamps nothing. Storage-level brackets must still be quiescent — the
   active-count interlock is unchanged, and logical actives are the caller's to
   supply because storage cannot see above its own layer. Symmetrically,
   `OpenExisting(checkpointOnOpen: false)` lets an engine analyze the recovered
@@ -390,6 +498,22 @@ captured bytes, and an image is skipped only when the on-disk page already verif
 data stream (bypassing the pool — a corrupt page must be overwritable), and finishes
 with a checkpoint.
 
+The exact-LSN skip is only sound because LSNs never repeat: if a new image could carry the
+LSN a stale page already holds, recovery would take it for applied. The LSN floor
+("Checkpoints") guarantees it. A torn data page — a write that a crash left with some of its
+sixteen sectors new and the rest old — fails its checksum, so it is never skipped and the
+winning image rewrites it; every page a checkpoint or the steal path writes was changed by a
+transaction whose images are still in the journal, which is truncated only after the data
+flush.
+
+Recovery never replays onto the pages of the checkpoint anchor chain the newest header
+generation reads. Those pages are written outside the journal, while no transaction can touch
+them, so any image of one in the journal is from the page's earlier life — typically the
+committed free that returned it to the allocator before a header write reused it — and
+replaying it would overwrite the anchor open has just read (the next open would then refuse
+the file as corrupt). Open reads page 0 and the chain before recovery and passes the chain's
+pages to it.
+
 ### Checkpoints
 
 `Checkpoint()` durably flushes all page state and **truncates** the journal, writing a
@@ -399,25 +523,65 @@ active transactions — truncating live before-images would orphan stolen writes
 checkpoints are a later feature (the record already carries the active-transaction
 set). Clean shutdown checkpoints, so a clean reopen recovers instantly.
 
-**The checkpoint anchor (#1226 integration review).** `Checkpoint(ReadOnlySpan<long>)` also
-writes the logical sequences it is given into page 0, after `StorageFileHeader` (count in
-`CheckpointActiveCount`, the sequences as little-endian 64-bit values in the rest of the
-page body, at most `StorageFileHeader.CheckpointAnchorCapacity`, 980 with 8 KiB pages), and
-it does so before the data flush, so the anchor is durable before the journal is truncated.
-The journal's checkpoint record carries the same list, but it is appended after the
-truncation: a failed append there leaves an empty journal (the failed frame is cut back off,
-"Failed appends" above), and so does a crash between the truncation and the record's flush.
-Without the anchor nothing would then name the logical transactions whose begin records the
-truncation destroyed while their row versions sit in durable data pages, and the
-transaction layer would read those versions as committed. With it, `Storage.CheckpointActiveTransactions`
-returns the list at the next open and `TransactionRecovery.Analyze` classifies it like a
-checkpoint record's list (`Database.Transactions` DESIGN.md, "Recovery and checkpoint
-interlock"). Every checkpoint replaces the anchor; the non-idle shutdown path, which does
-not truncate, leaves it as the last checkpoint wrote it, so it always matches the journal's
-truncation point. A checkpoint given more sequences than the anchor holds is refused with
-`StorageTransactionException` before it writes anything, which background checkpointers
-already treat as busy; PostgreSQL keeps the equivalent outside its WAL too (`pg_control`
-holds the checkpoint location that survives WAL recycling).
+A checkpoint runs in PostgreSQL's order — data flush, then control file, then WAL recycling
+(`CreateCheckPoint` in `src/backend/access/transam/xlog.c`: `CheckPointGuts` at 8016, the
+control-file update at 8088-8140, `RemoveOldXlogFiles` at 8200) — with the header carrying
+what the journal is about to lose:
+
+1. The anchor's overflow pages of the slot being written, then every dirty page, then a
+   durable data flush.
+2. A new header generation into the other slot of page 0 — the sequence floor, the LSN floor,
+   the anchor — then a durable data flush. Only now is that slot the newest.
+3. The journal truncation and its checkpoint record, flushed.
+
+A crash before step 2 completes leaves the previous generation and the untruncated journal,
+which together describe everything; a crash after it leaves the new generation, which names
+what the truncation destroys. `StorageFormatTests` cuts power at every write a checkpoint
+issues — anchor pages, data pages, the slot, the truncation, the checkpoint record — each torn
+at 0, 1, 7 and 15 sectors, with 478 logical writers in flight (an anchor that needs a chain
+page), and checks after each that the file opens, the writers are still named by the journal
+or the anchor, LSNs keep increasing and the committed data reads back. `Database.Transactions`'
+`TransactionCoordinatorCheckpointCrashTests` repeats it through the transaction coordinator and
+checks that every in-flight writer's version is scrubbed after each crash.
+
+**The LSN floor (#1242).** Every header generation persists the journal's last LSN, and open
+raises the journal to `max(last record, floor)` before anything appends. A checkpoint
+truncates the journal before it appends its own record, and when that record is lost — a
+failed append (the failed frame is cut back off, "Failed appends" above) or a crash between
+the truncation and the record's flush — the journal alone would restart LSNs at 1 while the
+data pages keep theirs. The next transaction's after-image of a page could then carry the LSN
+the stale page already holds, recovery's exact-LSN skip would take it for applied, and a
+committed update would be lost; `StorageFormatTests` reproduces exactly that loss with the
+floor disabled. The field (`LastCheckpointLsn`) existed in format 1 but nothing ever wrote it.
+Voron seeds its transaction counter the same way, from the journal's last transaction or,
+when the journal has none, from the file header (`src/Voron/StorageEnvironment.cs:324`).
+
+**The checkpoint anchor (#1226 integration review, #1242).** `Checkpoint(ReadOnlySpan<long>)`
+also writes the logical sequences it is given into the new header generation, before the
+journal is truncated. The journal's checkpoint record carries the same list, but it is
+appended after the truncation, so a lost record would leave nothing to name the logical
+transactions whose begin records the truncation destroyed while their row versions sit in
+durable data pages, and the transaction layer would read those versions as committed. With
+the anchor, `Storage.CheckpointActiveTransactions` returns the list at the next open and
+`TransactionRecovery.Analyze` classifies it like a checkpoint record's list
+(`Database.Transactions` DESIGN.md, "Recovery and checkpoint interlock").
+
+- **Writers only.** The transaction coordinator passes the transactions that applied a
+  statement (including a rolled-back writer whose undo is deferred): only they can have
+  stamped row versions. A reader that becomes a writer after a checkpoint is announced again
+  with a begin record before its first statement bracket.
+- **No capacity limit.** A slot holds the first 438 sequences itself; the rest go on a chain
+  of `PageType.CheckpointAnchor` pages (1,008 sequences each: generation, slot, count, next
+  page and chain position, then the sequences, under the ordinary page checksum). Each slot
+  owns its own chain, so writing one slot never touches the pages the other slot's generation
+  reads; the chain grows from and shrinks back to the free-space map, and open frees any
+  anchor page the newest generation does not chain. The anchor used to live in page 0 alone,
+  980 sequences readers included, and a checkpoint above that was refused as busy while the
+  journal kept growing.
+- Every checkpoint replaces the anchor; the non-idle shutdown path and `Flush`, which do not
+  truncate, write a new generation that carries the anchor the last checkpoint wrote, so it
+  always matches the journal's truncation point. PostgreSQL keeps the equivalent outside its
+  WAL too (`pg_control` holds the checkpoint location that survives WAL recycling).
 
 **Except when nothing was written since open.** An opened file set whose journal
 position and sequence counter are unchanged at shutdown (no transaction, no
@@ -486,10 +650,12 @@ here exactly as everywhere else.
 
 ### What is deliberately unlogged
 
-Page 0 (the file header) carries recomputable bookkeeping, rebuilt or revalidated on
-open, and the checkpoint anchor, which is not recomputable but needs no journal: every
-checkpoint writes it and makes it durable before it truncates the journal ("Checkpoints").
-Page 0 is flushed but never journaled. Page allocation is likewise
+Page 0 (the file header) carries its identity, recomputable bookkeeping, and the LSN and
+sequence floors and checkpoint anchor, which are not recomputable but need no journal: every
+checkpoint writes them into a new header generation and makes it durable before it
+truncates the journal ("Checkpoints"), and the alternating slots keep a torn write from
+destroying the previous generation. Page 0 and the anchor's overflow pages are flushed but
+never journaled. Page allocation is likewise
 not undone on rollback — a page allocated by an aborted transaction is restored to
 its empty initialized image and leaks safely until reused.
 
@@ -621,18 +787,59 @@ Overflow pages themselves remain unimplemented: until they are, `Page.AsSpan()` 
 the header only because the pool refuses an oversized one at load, and a `Page` built
 over caller memory carries no such check. Each follow-up needs its own work item.
 
+## Measurements (#1251, 2026-10-04)
+
+Release builds on one developer machine (win-arm64, 12 logical cores shared with other
+workloads at about 50% load, .NET 10.0.12). Before is the integration branch at `3f379cca`
+(storage format 1), after is storage format 2. A probe outside the repository ran each build
+in its own process on four reserved cores at high priority, alternating builds three times;
+each cell gives the three runs' medians. Storage harnesses use durable in-memory handles
+unless noted, so the figures are CPU cost, not I/O.
+
+| Workload | Before | After |
+|---|---|---|
+| Checksum of an 8 KiB page (table IEEE CRC-32 vs CRC-32C through `BitOperations.Crc32C`), reserved cores; unreserved best case | 19.1 µs; 26.8 µs | 3.8 µs; 1.0 µs |
+| Page touch, 500 random pages per bracket, 4,096-page pool: first touch / commit after-image, per page | 24–50 / 25–52 µs | 15–19 / 13–17 µs |
+| the same with a 128-page pool (the steal path reloads and writes back pages, each checksummed) | 54–110 / 60–110 µs | 11–12 / 14–20 µs |
+| #1236 benchmark: 100,000 index inserts over 10 INT keys, 1,000 per transaction, random references, 128-page pool | 11.6k–14.0k inserts/s | 77.7k–80.6k inserts/s |
+| the same, 4,096-page pool | 34.5k–38.4k inserts/s | 109.6k–114.8k inserts/s |
+| the same, references in insertion order / ascending in shuffled 200-reference blocks, 128-page pool | 105k–127k / 115k–128k | 135k–146k / 200k–261k |
+| the same, 4,096-page pool | 194k–239k / 113k–166k | 348k–408k / 380k–450k |
+| Reopen after a crash with a 50.2 MB journal (31 transactions of 100 page touches, 7.8 MB data file), in memory | 968–1,066 ms | 101–138 ms |
+| the same over physical files (operating-system cache warm) | 1,943–2,146 ms | 1,064–1,223 ms |
+
+The machine's load moved absolute numbers by up to 2× between alternations (the before page
+touch ran at 24 µs in one and 50 µs in another), which is why each build ran three times
+in alternation; the ratios held in every alternation. The random-reference row is still
+bound by the full 8 KiB before- and after-image each touched leaf costs per bracket (#1236
+steps 2 and 3, #1252 and #1253); at the 128-page pool it reaches 55–59% of the insertion-order
+rate, at 4,096 pages 27–32%.
+
+**Debug invariant cost (#1240).** The in-process 100,000-row cascade test
+(`Database.Sql`'s `SqlCascadeDeleteDepthTests`, Debug, whole test, three builds alternating
+twice): format 1 with the walk on every pool access 63–70 s; format 2 with the walk still on
+every access 63–67 s; format 2 with the walk only at structural changes 13 s. The walk was about
+80% of the test, as the #1240 measurement predicted (77%), and the checksum change alone does not
+move this test. The whole Debug suites, one run each: `Database.Sql` (1,048 tests) 3 min 41 s
+before, 4 min 6 s with format 2 and the walk on every access, 1 min 2 s after; `Database.Indexing`
+(74 tests, two runs each) 25–26 s with the walk on every access, 14 s after.
+
 ## Error model
 
 `StorageException` is the area root for this library. `StorageIOException` (stream and
 allocation failures), `SlottedPageException` (record layout violations),
 `StorageCorruptionException` (checksum/header integrity failures — carries the
-`PageId`), and `JournalException` (journal framing/state violations) all derive from
-it, so consumers can catch the family or the specific failure.
+`PageId`), `StorageFormatException` (a file set in another on-disk format, coded
+`COHDBS001`, carrying the found and supported versions), and `JournalException` (journal
+framing/state violations) all derive from it, so consumers can catch the family or the
+specific failure.
 
 ## AOT posture
 
 No reflection, no runtime codegen. Header structs are explicit-layout overlays read
-through pointers; encodings are hand-written span code. `AllowUnsafeBlocks` is enabled
+through pointers; encodings are hand-written span code. Checksums use the in-box
+`BitOperations.Crc32C` intrinsic, which NativeAOT compiles to the hardware instruction
+where the target has it. `AllowUnsafeBlocks` is enabled
 for the pointer overlays — the unsafe surface is confined to `Units/` and the buffer
 pool's pinned buffers. Pinned-object-heap allocation (`GC.AllocateArray(..., pinned:
 true)`) is supported by NativeAOT; the pool's per-operation invariant checks are

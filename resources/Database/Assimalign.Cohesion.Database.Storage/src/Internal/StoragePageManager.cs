@@ -34,9 +34,10 @@ internal sealed class StoragePageManager : IStoragePageManager
     {
         var pageId = _freeSpaceMap.Allocate();
 
-        // Pin the page in the buffer pool (will allocate a fresh buffer
-        // since the page doesn't exist in the stream yet)
-        var handle = _bufferPool.Pin(pageId, _stream);
+        // Pin the page without reading it: every byte is cleared below, so the free page's
+        // old content is never needed, and a free page whose last write a crash tore (an
+        // unjournaled checkpoint anchor page) must not fail its checksum here (#1251).
+        var handle = _bufferPool.PinForOverwrite(pageId, _stream);
 
         // Now extend the stream to accommodate the new page. Grow only, and under the pool
         // lock that every page read and write-back holds: a concurrent allocation of a
@@ -72,6 +73,22 @@ internal sealed class StoragePageManager : IStoragePageManager
 
         _bufferPool.Evict(pageId, _stream);
         _freeSpaceMap.Free(pageId);
+    }
+
+    /// <summary>
+    /// Pins an allocated page the caller rewrites completely, without reading its current
+    /// bytes from the stream (see <see cref="StorageBufferPool.PinForOverwrite"/>).
+    /// </summary>
+    /// <param name="pageId">The allocated page to pin.</param>
+    /// <returns>A handle on the pinned page; its content is undefined until the caller writes it.</returns>
+    internal IStoragePageHandle PinForOverwrite(PageId pageId)
+    {
+        if (!_freeSpaceMap.IsAllocated(pageId))
+        {
+            throw new StorageIOException($"Page {(long)pageId} is not allocated.");
+        }
+
+        return _bufferPool.PinForOverwrite(pageId, _stream);
     }
 
     /// <inheritdoc />

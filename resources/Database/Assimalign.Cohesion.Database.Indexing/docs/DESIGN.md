@@ -414,6 +414,15 @@ builds, and report the median over every round.
 | SQL hot row: `UPDATE t SET v = v + 1 WHERE id = 2` 20,000 times under the primary key's unique index, per update in updates 1–2,500 / 7,501–10,000 / 10,001–12,500 / 17,501–20,000 | 0.55 / 1.07 / 4.19 / 8.29 ms | 0.40 / 0.97 / 3.67 / 5.98 ms |
 | `SqlCascadeDeleteDepthTests`' 100,000-row self-referencing cascade (Debug, whole test, builds alternating) | 41 s, 41 s | 41 s, 42 s (unchanged) |
 
+**Since storage format 2 (#1251, 2026-10-04).** Most of the per-leaf before-image cost
+above was the storage layer's byte-at-a-time CRC over each 8 KiB image and page. With
+CRC-32C through `BitOperations.Crc32C` the duplicate-run rows, re-measured on reserved cores
+with both builds alternating (`Database.Storage` DESIGN.md, "Measurements"), read: random
+references 11.6k–14.0k → 77.7k–80.6k inserts/s at the 128-page pool and 34.5k–38.4k →
+109.6k–114.8k at 4,096 pages; insertion order 105k–127k → 135k–146k and 194k–239k →
+348k–408k; shuffled blocks 115k–128k → 200k–261k and 113k–166k → 380k–450k. The full
+before- and after-image per leaf per transaction remains (#1252, #1253).
+
 The issue's own measurements of the same baseline (#1194: 124 µs and 7.2 ms per
 delete; 76 ms, 442 ms and 4,526 ms per cascade) were taken on the same kind of
 build; the rows above vary with the machine's other load by up to 2×, which is why

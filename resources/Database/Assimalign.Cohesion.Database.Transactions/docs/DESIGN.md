@@ -193,12 +193,12 @@ the retry can touch the same pages.
 
 Each of those checkpoints truncates the journal, the writer's begin record with it, while
 the writer's versions stay in the data pages, so the writer's classification at the next
-open rests on the checkpoint's own list of active transactions. The journal's copy of that
+open rests on the checkpoint's own list of writers. The journal's copy of that
 list is appended after the truncation, and an append that fails there, or a crash between
 the truncation and the record's flush, would leave the journal empty and the writer
 unnamed: recovery would then read its versions as committed (#1226 integration review). The
-storage therefore also writes the list into its file header before the truncation, and the
-checkpoint's data flush makes it durable first (`Database.Storage` DESIGN.md, "Checkpoints").
+storage therefore also writes the list into its file header before the truncation, and makes
+that header generation durable first (`Database.Storage` DESIGN.md, "Checkpoints").
 `AnalyzeAndScrub` adds that anchor to the journal's classification, so the writer is aborted
 and scrubbed at the next open whether the checkpoint record survived or not. The same holds
 for any writer still in flight at a checkpoint, deferred or not.
@@ -464,7 +464,7 @@ The ordering is deliberately the same as in both original engines:
    physical WAL recovery without discarding logical transaction classification.
 2. Attach the engine's persisted indexes.
 3. `AnalyzeAndScrub` analyzes the recovered journal once, together with the storage's
-   checkpoint anchor (`Storage.CheckpointActiveTransactions`, the active list the last
+   checkpoint anchor (`Storage.CheckpointActiveTransactions`, the writer list the last
    checkpoint wrote into the file header before it truncated the journal), removes
    records created by unproven writers, clears their tombstones, and seeds surviving
    committed tombstones for pruning. It then reserves a storage sequence as the
@@ -475,13 +475,38 @@ The ordering is deliberately the same as in both original engines:
    earlier would erase the lifecycle records needed to classify index entries.
 
 During normal operation, begin/commit/abort appends and changes to the log's
-active-sequence set share one monitor with checkpoint capture and truncation.
-A begin cannot land between capturing the checkpoint's active list and truncating
-the journal. The storage writes that list twice: into its file header, flushed with the
-data pages before the truncation, and into the checkpoint record appended after it. The
-header copy is the one that survives a lost checkpoint record; a checkpoint with more
-active transactions than the header holds (`Storage.MaxCheckpointActiveTransactions`) is
-refused as busy before it writes anything. Commit appends and removes its active sequence under that monitor,
+active and writer sets share one monitor with checkpoint capture and truncation.
+A begin cannot land between capturing the checkpoint's list and truncating
+the journal. The storage writes that list twice: into a new generation of its file
+header, made durable before the truncation, and into the checkpoint record appended after
+it. The header copy is the one that survives a lost checkpoint record, and it holds any
+number of sequences (`Database.Storage` DESIGN.md, "Checkpoints").
+
+**Only writers are listed (#1242).** Recovery must classify every transaction whose row
+versions can be in the data pages, and only one that applied a statement can have stamped
+any. The log therefore tracks, besides the active set, the writers: a transaction joins
+when its first statement enters the apply gate (before its storage bracket begins), and
+leaves with its commit or abort record; a rolled-back writer whose undo is deferred stays
+until its abort record is appended. A checkpoint lists the writers alone, so readers cost
+the anchor nothing and a read-heavy load no longer pushes it past a capacity. A reader's
+begin record goes with the truncation; if it later applies a statement, the log first
+appends its begin record again — under the same monitor, so no checkpoint can intervene —
+and the journal names it before its first stamp exists. The log knows which active
+transactions the current journal names (begun or announced since the last checkpoint, or
+listed by it), and resets that knowledge to the listed writers at every checkpoint, whether
+or not the checkpoint completed, since a failed checkpoint may still have truncated.
+`TransactionCoordinatorRecoveryTests` covers both: a checkpoint with two readers and a writer
+lists the writer only, and a reader that writes after a checkpoint and then crashes is
+announced, classified aborted and scrubbed (with the announcement removed, its version reads
+as committed). `TransactionCoordinatorRollbackTests` anchors 1,000 writers — beyond the old
+980-entry cap — through a lost checkpoint record and scrubs every one, and
+`TransactionCoordinatorCheckpointCrashTests` cuts power at every write of a coordinator
+checkpoint (data pages, the header slot, the truncation, the checkpoint record; whole and torn)
+with 40 writers and a reader in flight: after each crash every writer is classified aborted and
+scrubbed, the committed version stays visible, and LSNs keep increasing. Listing an empty
+anchor instead fails it.
+
+Commit appends and removes its sequence under that monitor,
 then calls `EnsureDurable` outside it; a checkpoint that truncates first has
 already durably flushed the outcome. The manager keeps the transaction active
 until durability completes, or ends it as committed when the flush fails after the

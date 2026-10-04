@@ -96,9 +96,10 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
 
             if (_entries.TryGetValue(id, out var entry))
             {
+                // A hit changes one pin count and one LRU position: check that frame only.
                 entry.PinCount++;
                 Touch(entry);
-                AssertInvariantsLocked();
+                AssertFrameLocked(id, entry);
                 return new StoragePageHandle(pageId, entry, this);
             }
 
@@ -129,6 +130,55 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
                 Array.Clear(entry.Buffer);
             }
 
+            entry.PinCount = 1;
+            _entries[id] = entry;
+            entry.Node = _accessOrder.AddLast(id);
+
+            // A miss changes the pool's structure (an eviction, a recycled entry, a new
+            // resident page): walk all of it.
+            AssertInvariantsLocked();
+
+            return new StoragePageHandle(pageId, entry, this);
+        }
+    }
+
+    /// <summary>
+    /// Pins a page every byte of which the caller is about to overwrite: a resident page is
+    /// pinned as it is, and a page that is not resident is not read from the stream — it
+    /// gets a zeroed buffer instead.
+    /// </summary>
+    /// <remarks>
+    /// Allocation clears a page before anything reads it, so reading and verifying the free
+    /// page's old bytes first is wasted I/O, and worse, it refuses the allocation of a free
+    /// page whose last write a crash tore. Recovery repairs torn pages only from journal
+    /// images, and a page written outside the journal — a freed checkpoint anchor page —
+    /// has none. The caller marks the page dirty once it has written it.
+    /// </remarks>
+    /// <param name="pageId">The page to pin.</param>
+    /// <param name="stream">The stream to evict to when the pool is full.</param>
+    /// <returns>A handle on the pinned page.</returns>
+    internal IStoragePageHandle PinForOverwrite(PageId pageId, StorageStream stream)
+    {
+        lock (_syncRoot)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            long id = (long)pageId;
+
+            if (_entries.TryGetValue(id, out var entry))
+            {
+                entry.PinCount++;
+                Touch(entry);
+                AssertFrameLocked(id, entry);
+                return new StoragePageHandle(pageId, entry, this);
+            }
+
+            if (_entries.Count >= _capacity)
+            {
+                EvictOneLocked(stream);
+            }
+
+            entry = TakeEntryLocked();
+            Array.Clear(entry.Buffer);
             entry.PinCount = 1;
             _entries[id] = entry;
             entry.Node = _accessOrder.AddLast(id);
@@ -181,7 +231,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
             {
                 entry.PinCount++;
                 Touch(entry);
-                AssertInvariantsLocked();
+                AssertFrameLocked((long)pageId, entry);
                 handle = new StoragePageHandle(pageId, entry, this);
                 return true;
             }
@@ -245,9 +295,14 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     {
         lock (_syncRoot)
         {
-            if (_entries.TryGetValue((long)pageId, out var entry) && entry.IsDirty)
+            if (_entries.TryGetValue((long)pageId, out var entry))
             {
-                WriteBack(stream, pageId, entry);
+                if (entry.IsDirty)
+                {
+                    WriteBack(stream, pageId, entry);
+                }
+
+                AssertFrameLocked((long)pageId, entry);
             }
         }
     }
@@ -310,6 +365,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
                 }
             }
 
+            AssertInvariantsLocked();
             return written;
         }
     }
@@ -323,8 +379,10 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     /// </summary>
     /// <remarks>
     /// Compiled into every configuration, so tests can run it in the Release configuration
-    /// CI uses. Debug builds additionally run it after every pool operation; release builds
-    /// run it only when called.
+    /// CI uses. Debug builds additionally run it after every operation that changes the
+    /// pool's structure — a pin miss, an eviction, a removal, a flush — and check only the
+    /// frame involved after a pin hit or an unpin (#1240); release builds run it only when
+    /// called.
     /// </remarks>
     internal void CheckInvariants()
     {
@@ -373,7 +431,11 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
             FailOverReleaseLocked(entry);
         }
 
-        AssertInvariantsLocked();
+        // An unpin changes one pin count: check that frame only.
+        if (entry.Node is not null)
+        {
+            AssertFrameLocked(entry.Node.Value, entry);
+        }
     }
 
     /// <summary>
@@ -502,9 +564,43 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
 
     // The per-operation checks below are debug-only; the structural check they share
     // (CheckInvariantsLocked) is compiled into every configuration.
+    //
+    // The full walk is O(resident pages), so it runs only where the pool's structure
+    // changes: a pin miss (which may evict and recycle), an explicit eviction, a flush. A pin
+    // hit or an unpin changes one entry's pin count and LRU position, and checks just that
+    // frame. Running the walk on every access made Debug runs of the 100,000-row cascade
+    // test spend about 77% of their time in it (#1240), 99.7% of it on hits and unpins.
 
     [Conditional("DEBUG")]
     private void AssertInvariantsLocked() => CheckInvariantsLocked();
+
+    /// <summary>
+    /// Checks the one frame a pin hit or an unpin changed: resident under its page, owning
+    /// its node of the access list, not recycled, and with a non-negative pin count.
+    /// </summary>
+    [Conditional("DEBUG")]
+    private void AssertFrameLocked(long id, BufferEntry entry)
+    {
+        if (entry.PinCount < 0)
+        {
+            FailInvariantLocked($"page {id} has pin count {entry.PinCount}");
+        }
+
+        if (entry.IsRecycled)
+        {
+            FailInvariantLocked($"page {id} is resident but its entry is marked recycled");
+        }
+
+        if (!_entries.TryGetValue(id, out var resident) || !ReferenceEquals(resident, entry))
+        {
+            FailInvariantLocked($"page {id} is not resident under its entry");
+        }
+
+        if (entry.Node is null || !ReferenceEquals(entry.Node.List, _accessOrder) || entry.Node.Value != id)
+        {
+            FailInvariantLocked($"page {id} does not own a node of the access list keyed by its id");
+        }
+    }
 
     [Conditional("DEBUG")]
     private void AssertResidentLocked(BufferEntry entry)

@@ -1,0 +1,174 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Shouldly;
+using Xunit;
+
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
+namespace Assimalign.Cohesion.Database.Transactions.Tests;
+
+/// <summary>
+/// #1242's acceptance at the transaction layer: power is lost at every write a coordinator
+/// checkpoint issues — data pages, the header slot, the journal truncation, the checkpoint
+/// record — some writes torn, with logical writers and a reader in flight. After every crash the
+/// recovered coordinator classifies each writer as aborted and scrubs its version, the committed
+/// version stays visible, and LSNs keep increasing.
+/// </summary>
+public sealed class TransactionCoordinatorCheckpointCrashTests
+{
+    private const int WriterCount = 40;
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a crash at every write of a checkpoint keeps in-flight writers' versions invisible and LSNs increasing")]
+    public async Task Checkpoint_CrashAtEveryWrite_ShouldKeepUncommittedVersionsInvisible()
+    {
+        // A dry run counts the checkpoint's writes.
+        var dryPoint = new CrashPoint();
+        var dry = await ArrangeAsync(dryPoint);
+        int before = dryPoint.Writes;
+        dry.Coordinator.Checkpoint();
+        int checkpointWrites = dryPoint.Writes - before;
+        dryPoint.Log.Skip(before).ShouldContain(entry => entry.StartsWith("journal SetLength", StringComparison.Ordinal));
+
+        for (int write = 1; write <= checkpointWrites; write++)
+        {
+            foreach (int sectors in new[] { 0, 3 })
+            {
+                var point = new CrashPoint();
+                var scenario = await ArrangeAsync(point); // abandoned after its simulated power loss
+                point.CrashAtWrite = point.Writes + write;
+                point.DurableSectors = sectors;
+                Should.Throw<SimulatedPowerLossException>(() => scenario.Coordinator.Checkpoint());
+                string at = $"crash at checkpoint write {write} ({point.Log[point.CrashAtWrite - 1]}), {sectors} sectors";
+
+                using var reopened = CrashStorage.Open(scenario.Storage.CaptureDurable());
+                await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+                var plan = recovered.AnalyzeAndScrub();
+                recovered.CompleteRecovery();
+                var reader = await recovered.BeginAsync(IsolationLevel.Snapshot);
+
+                scenario.Writers.ShouldAllBe(writer => plan.Aborted.Contains(writer), at);
+                plan.Committed.ShouldNotContain(scenario.Writers[0], at);
+                RecordCount(reopened).ShouldBe(1, at);
+                (await recovered.VersionStore.GetVisibleVersionAsync(0, scenario.Committed, reader.Snapshot)).ShouldNotBeNull(at);
+                reopened.Log.LastLsn.ShouldBeGreaterThan(scenario.LastLsn, at);
+                await recovered.CommitAsync(reader);
+            }
+        }
+    }
+
+    /// <summary>
+    /// One committed version, <see cref="WriterCount"/> writers that each inserted a version and
+    /// are still in flight, and a reader, over write-through crash-simulation streams.
+    /// </summary>
+    private static async Task<Scenario> ArrangeAsync(CrashPoint point)
+    {
+        var storage = CrashStorage.Create(point);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+
+        var committed = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var location = await InsertAsync(coordinator, storage, committed);
+        await coordinator.CommitAsync(committed);
+
+        var writers = new List<TransactionSequence>();
+        for (int i = 0; i < WriterCount; i++)
+        {
+            var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+            await InsertAsync(coordinator, storage, writer);
+            writers.Add(writer.Sequence);
+        }
+
+        _ = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        return new Scenario(storage, coordinator, writers, location, storage.Log.LastLsn);
+    }
+
+    private static ValueTask<ulong> InsertAsync(TransactionCoordinator coordinator, CrashStorage storage, ITransactionContext context)
+        => coordinator.ApplyStatementAsync(context, bracket =>
+        {
+            byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];
+            RecordVersionStamp.WriteWriter(record, context.Sequence);
+            record[RecordVersionStamp.HeaderSize] = 42;
+            var (pageId, slotIndex) = storage.Insert(bracket, record);
+            coordinator.VersionStore.RecordCreated(context.Sequence, pageId, slotIndex);
+            return storage.PackLocation(pageId, slotIndex);
+        });
+
+    private static int RecordCount(IStorage storage)
+    {
+        using var iterator = storage.GetUnitIterator();
+        int count = 0;
+        while (iterator.MoveNext())
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private sealed record Scenario(
+        CrashStorage Storage,
+        TransactionCoordinator Coordinator,
+        List<TransactionSequence> Writers,
+        ulong Committed,
+        long LastLsn);
+
+    /// <summary>
+    /// A record space over write-through crash-simulation streams sharing one crash point.
+    /// </summary>
+    private sealed class CrashStorage : Storage.Storage, ITransactionRecordSpace
+    {
+        private readonly CrashSimulationStream _data;
+        private readonly CrashSimulationStream _journal;
+
+        private CrashStorage(CrashSimulationStream data, CrashSimulationStream journal, bool reopen)
+            : base(new StorageStream(data), new StorageStream(journal), new StorageStream(new MemoryStream()))
+        {
+            _data = data;
+            _journal = journal;
+            if (reopen)
+            {
+                OpenExisting(checkpointOnOpen: false);
+            }
+            else
+            {
+                InitializeNew((Name)"checkpoint-crash");
+            }
+        }
+
+        public override StorageModel Model => StorageModel.KeyValue;
+
+        internal IStorageJournal Log => WriteAheadLog;
+
+        internal static CrashStorage Create(CrashPoint point) => new(
+            new CrashSimulationStream(writeThrough: true, point, "data"),
+            new CrashSimulationStream(writeThrough: true, point, "journal"),
+            reopen: false);
+
+        internal static CrashStorage Open((byte[] Data, byte[] Journal) images) => new(
+            new CrashSimulationStream(images.Data, writeThrough: true),
+            new CrashSimulationStream(images.Journal, writeThrough: true),
+            reopen: true);
+
+        internal (byte[] Data, byte[] Journal) CaptureDurable() => (_data.CaptureDurable(), _journal.CaptureDurable());
+
+        internal (PageId PageId, int SlotIndex) Insert(IStorageTransaction bracket, ReadOnlySpan<byte> data)
+            => InsertRecord(bracket, data);
+
+        public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
+
+        public void Update(IStorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+            => UpdateRecord(bracket, pageId, slotIndex, record);
+
+        public void Delete(IStorageTransaction bracket, PageId pageId, int slotIndex)
+            => DeleteRecord(bracket, pageId, slotIndex);
+
+        public ulong PackLocation(PageId pageId, int slotIndex)
+            => ((ulong)(long)pageId << 16) | (ushort)slotIndex;
+
+        public (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
+            => ((PageId)(long)(location >> 16), (int)(location & 0xFFFF));
+    }
+}

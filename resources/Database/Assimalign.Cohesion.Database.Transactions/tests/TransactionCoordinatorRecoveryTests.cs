@@ -26,6 +26,10 @@ public class TransactionCoordinatorRecoveryTests
         using var storage = CoordinatorStorage.Create();
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
         var active = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // A writer: only a transaction that applied a statement is listed (#1242).
+        await coordinator.ApplyStatementAsync(active, bracket =>
+            storage.Insert(bracket, Stamped(active.Sequence, TransactionSequence.None)).SlotIndex);
         using var checkpointEntered = new ManualResetEventSlim();
         using var releaseCheckpoint = new ManualResetEventSlim();
         using var lifecycleStarted = new ManualResetEventSlim();
@@ -290,6 +294,75 @@ public class TransactionCoordinatorRecoveryTests
         (await coordinator.VersionStore.GetVisibleVersionAsync(0,
             storage.PackLocation(location.PageId, location.SlotIndex), reader.Snapshot)).ShouldNotBeNull();
         await coordinator.RollbackAsync(reader);
+    }
+
+    /// <summary>
+    /// Only a transaction that applied a statement can have stamped a row version, so only
+    /// writers are listed by a checkpoint and its anchor (#1242); readers, however many, cost
+    /// the anchor nothing.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: only writers are anchored, not readers")]
+    public async Task Checkpoint_ReadersAndWriters_ShouldAnchorOnlyTheWriters()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var secondReader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await coordinator.ApplyStatementAsync(writer, bracket =>
+            storage.Insert(bracket, Stamped(writer.Sequence, TransactionSequence.None)).SlotIndex);
+        long[] listed = [];
+        storage.BeforeCheckpoint = sequences => listed = sequences;
+
+        // Act
+        coordinator.Checkpoint();
+
+        // Assert
+        listed.ShouldBe([(long)writer.Sequence.Value]);
+        storage.CheckpointActiveTransactions.ShouldBe([(long)writer.Sequence.Value]);
+        var checkpointRecord = storage.Log.ReadAll().Single();
+        checkpointRecord.Payload.Length.ShouldBe(sizeof(long));
+        await coordinator.CommitAsync(writer);
+        await coordinator.CommitAsync(reader);
+        await coordinator.CommitAsync(secondReader);
+    }
+
+    /// <summary>
+    /// A reader's begin record goes with a checkpoint's truncation, and the checkpoint does not
+    /// list it. When it then applies a statement, the coordinator appends its begin record again
+    /// before the statement's bracket, so a crash before its commit still finds it unproven and
+    /// scrubs what it wrote. Without that, recovery would read its version as committed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a reader that writes after a checkpoint is announced again and scrubbed after a crash")]
+    public async Task Checkpoint_ReaderWritesAfterTheCheckpoint_ShouldBeAnnouncedAgainAndScrubbedAfterACrash()
+    {
+        // Arrange: a reader across a checkpoint, which truncates its begin record.
+        using var storage = CoordinatorStorage.Create();
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var late = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        coordinator.Checkpoint();
+        bool namedAfterTheCheckpoint = storage.Log.ReadAll().Any(record => record.TransactionSequence == (long)late.Sequence.Value);
+
+        // Act: it writes, then the process stops before it commits.
+        await coordinator.ApplyStatementAsync(late, bracket =>
+            storage.Insert(bracket, Stamped(late.Sequence, TransactionSequence.None)).SlotIndex);
+        var announced = storage.Log.ReadAll()
+            .Where(record => record.TransactionSequence == (long)late.Sequence.Value)
+            .Select(record => record.Type)
+            .ToArray();
+        var images = storage.CaptureImages();
+        using var reopened = CoordinatorStorage.Open(images.Data, images.Journal);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        var plan = recovered.AnalyzeAndScrub();
+        recovered.CompleteRecovery();
+
+        // Assert: the uncommitted version is gone — the loss of the re-announcement would leave it
+        // readable as committed — and the begin record is what named the transaction.
+        plan.Aborted.ShouldContain(late.Sequence);
+        RecordCount(reopened).ShouldBe(0);
+        namedAfterTheCheckpoint.ShouldBeFalse();
+        announced.ShouldBe([JournalRecordType.BeginTransaction]);
     }
 
     private static byte[] Stamped(TransactionSequence writer, TransactionSequence deleter)

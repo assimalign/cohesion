@@ -13,10 +13,28 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// provide the physical medium.
 /// </summary>
 /// <remarks>
-/// Frame layout: <c>[int frameLength][int magic][body][uint crc32(body)]</c> where the
+/// <para>
+/// Frame layout: <c>[int frameLength][int magic][body][uint crc32c(body)]</c> where the
 /// body is <c>[byte version][long lsn][long transactionSequence][byte type][long pageId]
 /// [payload]</c>. A record whose length prefix, magic, or checksum does not verify
 /// terminates the read scan — a torn tail belongs to work that was never acknowledged.
+/// </para>
+/// <para>
+/// A frame whose checksum verifies but whose version byte is not <see cref="CurrentVersion"/>
+/// is not a torn tail: it was written whole, in a format this engine does not read, and
+/// stopping the scan there would silently drop it and every record after it. The read
+/// refuses it with <see cref="StorageFormatException"/> instead (storage format 2, #1251).
+/// The checksum polynomial changed with frame version 3 (CRC-32C), so a frame written by
+/// an older engine fails its checksum and reads as a torn tail; the data file's own format
+/// fence (<see cref="StorageFileHeader.CurrentFormatVersion"/>) refuses such a file set
+/// before its journal is read.
+/// </para>
+/// <para>
+/// LSNs never restart: a reopened journal resumes after its last record, and the storage
+/// raises it further to the LSN floor its file header persisted at the last checkpoint
+/// (<see cref="RaiseLsnFloor"/>), because a checkpoint truncates the records that would
+/// otherwise witness the LSNs already stamped on data pages.
+/// </para>
 /// </remarks>
 public abstract class StorageJournal : IStorageJournal
 {
@@ -110,6 +128,28 @@ public abstract class StorageJournal : IStorageJournal
                 _durableLsn = _lastLsn;
             }
             return lsn;
+        }
+    }
+
+    /// <summary>
+    /// Raises the last assigned LSN to at least <paramref name="floor"/>, so the next
+    /// record continues above it. The storage calls this once at open, before anything
+    /// appends, with the LSN floor its file header persisted at the last checkpoint: a
+    /// checkpoint truncates the journal, and when its own record is then lost the journal
+    /// alone would restart LSNs below those already stamped on data pages.
+    /// </summary>
+    /// <param name="floor">The lowest LSN the next record may follow.</param>
+    internal void RaiseLsnFloor(long floor)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+
+        lock (_syncRoot)
+        {
+            if (floor > _lastLsn)
+            {
+                _lastLsn = floor;
+            }
         }
     }
 
@@ -229,7 +269,7 @@ public abstract class StorageJournal : IStorageJournal
         BinaryPrimitives.WriteInt64LittleEndian(body[18..], (long)pageId);
         payload.CopyTo(body[BodyHeaderSize..]);
 
-        uint checksum = Crc32.Compute(body);
+        uint checksum = Crc32C.Compute(body);
         BinaryPrimitives.WriteUInt32LittleEndian(span[(FramePrefixSize + bodyLength)..], checksum);
 
         AppendFrame(frame);
@@ -249,13 +289,23 @@ public abstract class StorageJournal : IStorageJournal
 
     private IEnumerable<JournalRecord> ReadRecordsCore()
     {
+        long frameNumber = 0;
+
         foreach (var frame in ReadFrames())
         {
             var body = frame.Span;
+            frameNumber++;
 
-            if (body.Length < BodyHeaderSize || body[0] != CurrentVersion)
+            if (body.Length < BodyHeaderSize)
             {
                 break;
+            }
+
+            // The frame verified, so it was written whole: another version is a format
+            // this engine does not read, never a torn tail to stop quietly at.
+            if (body[0] != CurrentVersion)
+            {
+                throw StorageFormatException.ForJournalFrame(frameNumber, body[0], CurrentVersion);
             }
 
             long lsn = BinaryPrimitives.ReadInt64LittleEndian(body[1..]);
@@ -282,12 +332,16 @@ public abstract class StorageJournal : IStorageJournal
                 return;
             }
 
-            _initialized = true;
-
+            // Marked only once the scan completes: a scan refused for its format leaves the
+            // journal uninitialized, so every later access refuses it the same way.
+            long lastLsn = 0;
             foreach (var record in ReadRecordsCore())
             {
-                _lastLsn = record.Lsn;
+                lastLsn = record.Lsn;
             }
+
+            _lastLsn = lastLsn;
+            _initialized = true;
             // Reading existing bytes does not prove a durable flush occurred:
             // a reopened memory store or live OS cache may contain the same bytes.
             // Only a completed explicit durable flush advances DurableLsn.
@@ -341,9 +395,11 @@ public abstract class StorageJournal : IStorageJournal
     protected const int BodyHeaderSize = 1 + sizeof(long) + sizeof(long) + 1 + sizeof(long);
 
     /// <summary>
-    /// Journal binary format version.
+    /// Journal frame format version: 3 since storage format 2 (#1251), whose frames are
+    /// checksummed with CRC-32C. A verified frame of any other version is refused with
+    /// <see cref="StorageFormatException"/>.
     /// </summary>
-    protected const byte CurrentVersion = 2;
+    protected const byte CurrentVersion = 3;
 
     /// <summary>
     /// Journal frame magic value ('WAL2').

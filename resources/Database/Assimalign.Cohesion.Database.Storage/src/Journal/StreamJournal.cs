@@ -171,7 +171,7 @@ public sealed class StreamJournal : StorageJournal
                 }
 
                 uint expected = BinaryPrimitives.ReadUInt32LittleEndian(checksumBuffer);
-                if (Crc32.Compute(body) != expected)
+                if (Crc32C.Compute(body) != expected)
                 {
                     break;
                 }
