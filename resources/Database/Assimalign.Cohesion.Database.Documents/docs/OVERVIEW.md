@@ -10,7 +10,9 @@ database to `IDocumentDatabase`, create a collection, and use a session with the
 existing `IDocumentCollection` methods. `session.Database` carries collection changes into the
 session transaction. Index definitions are changed with OQL on the session, using its active
 transaction or an automatic statement transaction; `IDocumentDatabase` has no index-management
-members.
+members. A statement that fails inside an explicit transaction aborts the whole transaction:
+the session refuses further statements and BEGIN with `COHDBD001` until the caller rolls back,
+and a commit fails without committing.
 
 ```csharp
 await using var engine = DocumentDatabaseEngine.Create(new());

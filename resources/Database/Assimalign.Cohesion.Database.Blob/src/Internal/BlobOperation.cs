@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Transactions;
@@ -10,6 +11,7 @@ internal sealed class BlobOperation
     private readonly BlobDatabaseSession? _session;
     private readonly BlobDatabaseTransaction? _transaction;
     private readonly ITransactionContext _context;
+    private readonly SemaphoreSlim _completionGate = new(1, 1);
     private ITransactionContext? _snapshotPin;
     private int _finished;
     internal BlobOperation(BlobDatabaseInstance database, BlobDatabaseSession? session, ITransactionContext context, BlobDatabaseTransaction? transaction)
@@ -47,46 +49,61 @@ internal sealed class BlobOperation
     }
     internal async ValueTask CompleteAsync()
     {
-        EnsureActive();
+        // A stream's disposal, its failure path and session disposal can all
+        // arrive at completion or abort; the gate lets exactly one of them end
+        // the operation, and the others observe the finished operation.
+        await _completionGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (_transaction is null)
-            {
-                await _database.Coordinator.CommitAsync(_context).ConfigureAwait(false);
-            }
-        }
-        finally
-        {
+            EnsureActive();
             try
             {
-                await ReleaseSnapshotPinAsync().ConfigureAwait(false);
+                if (_transaction is null)
+                {
+                    await _database.Coordinator.CommitAsync(_context).ConfigureAwait(false);
+                }
             }
             finally
             {
-                Finish();
+                await FinishAsync().ConfigureAwait(false);
             }
         }
+        finally { _completionGate.Release(); }
     }
-    internal async ValueTask AbortAsync()
+
+    /// <summary>Ends a failed or abandoned operation, rolling back the transaction it ran in.</summary>
+    /// <param name="cause">The failure the caller observed, or why the operation was abandoned.</param>
+    internal async ValueTask AbortAsync(Exception cause)
     {
+        await _completionGate.WaitAsync().ConfigureAwait(false);
         try
-        {
-            if (Context.State == TransactionState.Active)
-            {
-                await _database.Coordinator.RollbackAsync(_context).ConfigureAwait(false);
-            }
-        }
-        finally
         {
             try
             {
-                await ReleaseSnapshotPinAsync().ConfigureAwait(false);
+                if (_transaction is not null)
+                {
+                    // Blob storage cannot undo one operation of a transaction (an upload writes a
+                    // physical bracket per chunk), so a failed operation aborts its whole explicit
+                    // transaction, which records the cause and refuses later operations until the
+                    // caller rolls back (#1225).
+                    await _transaction.AbortAsync(cause).ConfigureAwait(false);
+                }
+                else if (Context.State == TransactionState.Active)
+                {
+                    await _database.Coordinator.RollbackAsync(_context).ConfigureAwait(false);
+                }
             }
             finally
             {
-                Finish();
+                await FinishAsync().ConfigureAwait(false);
             }
         }
+        finally { _completionGate.Release(); }
+    }
+    private async ValueTask FinishAsync()
+    {
+        try { await ReleaseSnapshotPinAsync().ConfigureAwait(false); }
+        finally { Finish(); }
     }
     private void Finish()
     {

@@ -37,7 +37,14 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
     public SessionState State => _state;
 
     /// <inheritdoc />
-    public IDatabaseTransaction? CurrentTransaction => _transaction;
+    /// <remarks>
+    /// The transaction stays current until the caller commits, rolls back or disposes it, including
+    /// one whose commit or rollback did not complete (<see cref="TransactionState.Faulted"/>), which
+    /// waits for the caller's rollback. A failed command never ends it.
+    /// </remarks>
+    public IDatabaseTransaction? CurrentTransaction => OpenTransaction;
+
+    private KeyValueDatabaseTransaction? OpenTransaction => _transaction is { IsOpen: true } transaction ? transaction : null;
 
     /// <inheritdoc />
     public ValueTask<IDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
@@ -66,9 +73,13 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
                 "Use IsolationLevel.Snapshot or IsolationLevel.ReadCommitted.");
         }
 
-        if (_transaction is not null && _transaction.State == TransactionState.Active)
+        if (OpenTransaction is { } open)
         {
-            throw new DatabaseException("A transaction is already active on this session.");
+            // BEGIN is refused while a transaction whose end did not complete waits for its
+            // rollback, as in PostgreSQL's failed transaction block.
+            throw open.IsUsable
+                ? new DatabaseException("A transaction is already active on this session.")
+                : open.CreateRefusal();
         }
 
         var context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
@@ -89,10 +100,19 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
                 $"The key-value session executes {nameof(KeyValueRequest)} commands; {request.GetType().Name} is not one.");
         }
 
-        // Inside an explicit transaction, the command rides its context.
-        if (_transaction is not null && _transaction.State == TransactionState.Active)
+        // Inside an explicit transaction, the command rides its context. A command is
+        // statement-atomic: its writes share one physical bracket that a failure rolls back, so a
+        // failed command writes nothing and the transaction stays active, as a failed SQL
+        // statement does. Only a transaction whose own end did not complete refuses commands, so
+        // a command never runs in a half-rolled-back transaction or silently autocommits (#1225).
+        if (OpenTransaction is { } transaction)
         {
-            var scope = new KeyValueStatementContext(_transaction.Context, _coordinator);
+            if (!transaction.IsUsable)
+            {
+                throw transaction.CreateRefusal();
+            }
+
+            var scope = new KeyValueStatementContext(transaction.Context, _coordinator);
 
             try
             {
@@ -164,6 +184,12 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
         ThrowIfNotOpen();
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
 
+        // A transaction that refuses commands refuses the text before it is parsed.
+        if (OpenTransaction is { IsUsable: false } refusing)
+        {
+            throw refusing.CreateRefusal();
+        }
+
         return ExecuteAsync(KeyValueCommandParser.Parse(statement, parameters), cancellationToken);
     }
 
@@ -175,14 +201,16 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
             return;
         }
 
-        // Auto-rollback any active transaction
-        if (_transaction is not null && _transaction.State == TransactionState.Active)
+        _state = SessionState.Closed;
+
+        // Roll back the transaction the caller left open, including one whose end did not
+        // complete. The transaction object stays with its caller, whose later rollback is a no-op.
+        if (OpenTransaction is { } transaction)
         {
-            await _transaction.DisposeAsync().ConfigureAwait(false);
+            await transaction.DisposeAsync().ConfigureAwait(false);
         }
 
         _transaction = null;
-        _state = SessionState.Closed;
     }
 
     private void ThrowIfNotOpen()

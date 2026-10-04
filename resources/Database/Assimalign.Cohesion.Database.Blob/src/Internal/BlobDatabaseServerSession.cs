@@ -392,7 +392,9 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         {
             // Roll back BEFORE successful disposal can finalize the storage stream. Explicit
             // transactions keep even successfully disposed destinations invisible until commit.
-            if (transaction.State == TransactionState.Active)
+            // A failed operation leaves the transaction Faulted until it is rolled back (#1225);
+            // only a committed transaction refuses the rollback.
+            if (transaction.State is TransactionState.Active or TransactionState.Faulted)
             {
                 await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             }

@@ -7,6 +7,12 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Internal;
 
+/// <summary>
+/// A blob session. Its explicit transaction stays the session's transaction until the caller
+/// commits, rolls back or disposes it; an operation that fails inside it aborts it, and the session
+/// then refuses every operation and BEGIN with <c>COHDBB001</c> until the caller rolls back. A
+/// failure never turns later operations into autocommit writes (#1225).
+/// </summary>
 internal sealed class BlobDatabaseSession : IDatabaseSession
 {
     private readonly BlobDatabaseInstance _database;
@@ -21,8 +27,13 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
     }
     public IDatabase Database { get; }
     public SessionState State { get; private set; } = SessionState.Open;
-    public IDatabaseTransaction? CurrentTransaction => _transaction;
-    internal BlobDatabaseTransaction? ActiveTransaction => _transaction?.State == TransactionState.Active ? _transaction : null;
+
+    /// <summary>
+    /// Gets the session's transaction until the caller ends it, including an aborted transaction
+    /// (<see cref="TransactionState.Faulted"/>) that still waits for the caller's rollback.
+    /// </summary>
+    public IDatabaseTransaction? CurrentTransaction => OpenTransaction;
+    private BlobDatabaseTransaction? OpenTransaction => _transaction is { IsOpen: true } transaction ? transaction : null;
     public ValueTask<IDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         => BeginTransactionAsync(IsolationLevel.Snapshot, cancellationToken);
     public async ValueTask<IDatabaseTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
@@ -35,7 +46,15 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
         lock (_sync)
         {
             ThrowIfNotOpen();
-            if (ActiveTransaction is not null || _reserved || _operations.Count != 0)
+            if (OpenTransaction is { } open)
+            {
+                // BEGIN is refused while an aborted transaction waits for its rollback, as in
+                // PostgreSQL's failed transaction block.
+                throw open.IsUsable
+                    ? new DatabaseException("A transaction or stream is already active on this session.")
+                    : open.CreateRefusal();
+            }
+            if (_reserved || _operations.Count != 0)
             {
                 throw new DatabaseException("A transaction or stream is already active on this session.");
             }
@@ -88,8 +107,13 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
             {
                 throw new DatabaseException("Dispose the active blob stream before starting another operation on this session.");
             }
+            var transaction = OpenTransaction;
+            if (transaction is { IsUsable: false })
+            {
+                throw transaction.CreateRefusal();
+            }
             _reserved = true;
-            return ActiveTransaction;
+            return transaction;
         }
     }
     internal void ReleaseReservation()
@@ -136,22 +160,26 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
             operations = new List<BlobOperation>(_operations);
         }
         List<Exception>? errors = null;
-        foreach (var operation in operations)
+        if (operations.Count != 0)
         {
-            try
+            var closed = new DatabaseException("The blob session closed while the operation was running.");
+            foreach (var operation in operations)
             {
-                await operation.AbortAsync().ConfigureAwait(false);
-            }
-            catch (Exception error)
-            {
-                (errors ??= []).Add(error);
+                try
+                {
+                    await operation.AbortAsync(closed).ConfigureAwait(false);
+                }
+                catch (Exception error)
+                {
+                    (errors ??= []).Add(error);
+                }
             }
         }
         try
         {
-            if (ActiveTransaction is not null)
+            if (OpenTransaction is { } transaction)
             {
-                await ActiveTransaction.DisposeAsync().ConfigureAwait(false);
+                await transaction.DisposeAsync().ConfigureAwait(false);
             }
         }
         catch (Exception error)

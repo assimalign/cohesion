@@ -166,11 +166,11 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
             session?.Track(operation);
             return operation;
         }
-        catch
+        catch (Exception error)
         {
             if (operation is not null)
             {
-                await operation.AbortAsync().ConfigureAwait(false);
+                await operation.AbortAsync(error).ConfigureAwait(false);
             }
             throw;
         }
@@ -189,12 +189,30 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
             await operation.CompleteAsync().ConfigureAwait(false);
             return result;
         }
-        catch
+        catch (Exception error)
         {
-            await operation.AbortAsync().ConfigureAwait(false);
-            throw;
+            // An explicit transaction records the error its caller sees as the cause of its abort.
+            var reported = TranslateKernelFailure(error);
+            await operation.AbortAsync(reported).ConfigureAwait(false);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
         }
     }
+
+    /// <summary>
+    /// Translates a failure of the transaction kernel into the area root's exception (the area
+    /// error policy: the layer that owns both vocabularies translates at its boundary); any other
+    /// failure is returned unchanged. Statements and the explicit transaction's commit and
+    /// rollback share it.
+    /// </summary>
+    /// <param name="error">The failure to translate.</param>
+    /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
+    internal static Exception TranslateKernelFailure(Exception error) => error switch
+    {
+        TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
+        TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
+        _ => error,
+    };
 
     // One database writer at a time is deliberately conservative. The shared
     // lock manager owns waits and releases; readers remain snapshot based.

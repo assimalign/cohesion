@@ -86,7 +86,14 @@ internal sealed class BlobContainer : IBlobContainer
             }, operation.AbortAsync, cancellationToken);
             return new BlobGuardedStream(stream, operation);
         }
-        catch { await operation.AbortAsync().ConfigureAwait(false); throw; }
+        catch (Exception error)
+        {
+            // An explicit transaction records the error its caller sees as the cause of its abort.
+            var reported = BlobDatabaseInstance.TranslateKernelFailure(error);
+            await operation.AbortAsync(reported).ConfigureAwait(false);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
     }
 
     public async ValueTask<Stream> OpenReadAsync(string name, CancellationToken cancellationToken = default)
@@ -100,7 +107,13 @@ internal sealed class BlobContainer : IBlobContainer
                 ?? throw new DatabaseException($"Blob '{name}' does not exist.");
             return new BlobGuardedStream(_database.DataStorage.OpenRead(BlobDatabaseInstance.Content(entry), operation.CompleteAsync), operation);
         }
-        catch { await operation.AbortAsync().ConfigureAwait(false); throw; }
+        catch (Exception error)
+        {
+            var reported = BlobDatabaseInstance.TranslateKernelFailure(error);
+            await operation.AbortAsync(reported).ConfigureAwait(false);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
     }
 
     public ValueTask<BlobProperties?> GetPropertiesAsync(string name, CancellationToken cancellationToken = default)
@@ -213,7 +226,7 @@ internal sealed class BlobGuardedStream : Stream
         {
             _disposed = true;
             try { _inner.Dispose(); }
-            catch { _operation.AbortAsync().AsTask().GetAwaiter().GetResult(); throw; }
+            catch (Exception error) { _operation.AbortAsync(error).AsTask().GetAwaiter().GetResult(); throw; }
         }
         base.Dispose(disposing);
     }
@@ -226,7 +239,7 @@ internal sealed class BlobGuardedStream : Stream
 
         _disposed = true;
         try { await _inner.DisposeAsync().ConfigureAwait(false); }
-        catch { await _operation.AbortAsync().ConfigureAwait(false); throw; }
+        catch (Exception error) { await _operation.AbortAsync(error).ConfigureAwait(false); throw; }
         GC.SuppressFinalize(this);
     }
 }

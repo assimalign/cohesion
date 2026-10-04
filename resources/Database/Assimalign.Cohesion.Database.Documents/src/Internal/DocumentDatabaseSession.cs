@@ -8,6 +8,12 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
+/// <summary>
+/// A document session. Its explicit transaction stays the session's transaction until the caller
+/// commits, rolls back or disposes it; a statement that fails inside it aborts it, and the session
+/// then refuses every statement and BEGIN with <c>COHDBD001</c> until the caller rolls back. A
+/// failure never turns later statements into autocommit writes (#1225).
+/// </summary>
 internal sealed class DocumentDatabaseSession : IDatabaseSession
 {
     private readonly DocumentDatabaseInstance _database;
@@ -23,8 +29,13 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
     public IDatabase Database { get; }
     internal DocumentDatabaseInstance Instance => _database;
     public SessionState State { get; private set; } = SessionState.Open;
-    public IDatabaseTransaction? CurrentTransaction => _transaction;
-    internal DocumentDatabaseTransaction? ActiveTransaction => _transaction?.State == TransactionState.Active ? _transaction : null;
+
+    /// <summary>
+    /// Gets the session's transaction until the caller ends it, including an aborted transaction
+    /// (<see cref="TransactionState.Faulted"/>) that still waits for the caller's rollback.
+    /// </summary>
+    public IDatabaseTransaction? CurrentTransaction => OpenTransaction;
+    private DocumentDatabaseTransaction? OpenTransaction => _transaction is { IsOpen: true } transaction ? transaction : null;
     public ValueTask<IDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         => BeginTransactionAsync(IsolationLevel.Snapshot, cancellationToken);
     public async ValueTask<IDatabaseTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
@@ -37,7 +48,15 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
         lock (_sync)
         {
             ThrowIfNotOpen();
-            if (ActiveTransaction is not null || _reserved || _operations.Count != 0)
+            if (OpenTransaction is { } open)
+            {
+                // BEGIN is refused while an aborted transaction waits for its rollback, as in
+                // PostgreSQL's failed transaction block.
+                throw open.IsUsable
+                    ? new DatabaseException("A transaction or operation is already active on this session.")
+                    : open.CreateRefusal();
+            }
+            if (_reserved || _operations.Count != 0)
             {
                 throw new DatabaseException("A transaction or operation is already active on this session.");
             }
@@ -83,7 +102,32 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
         ThrowIfNotOpen();
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
         cancellationToken.ThrowIfCancellationRequested();
-        return ExecuteAsync(DocumentQueryRequest.FromOql(statement, parameters), cancellationToken);
+        return ExecuteStatementAsync(() => DocumentQueryRequest.FromOql(statement, parameters), cancellationToken);
+    }
+
+    /// <summary>
+    /// Parses and executes one statement. An aborted transaction refuses the statement before it is
+    /// parsed; a parse failure aborts the explicit transaction exactly as an execution failure
+    /// does, so every failed statement has one outcome, as in PostgreSQL and Neo4j.
+    /// </summary>
+    /// <param name="parse">Parses the statement text into its request.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The statement's result.</returns>
+    private async ValueTask<QueryResult> ExecuteStatementAsync(Func<QueryRequest> parse, CancellationToken cancellationToken)
+    {
+        ThrowIfNotOpen();
+        ThrowIfTransactionAborted();
+        QueryRequest request;
+        try
+        {
+            request = parse();
+        }
+        catch (DatabaseException error)
+        {
+            await AbortTransactionAsync(error).ConfigureAwait(false);
+            throw;
+        }
+        return await ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
     }
     internal DocumentDatabaseTransaction? ReserveOperation()
     {
@@ -94,8 +138,13 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
             {
                 throw new DatabaseException("Dispose the active document operation before starting another operation on this session.");
             }
+            var transaction = OpenTransaction;
+            if (transaction is { IsUsable: false })
+            {
+                throw transaction.CreateRefusal();
+            }
             _reserved = true;
-            return ActiveTransaction;
+            return transaction;
         }
     }
     internal void ReleaseReservation()
@@ -129,6 +178,41 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
             throw new DatabaseException("The document session is closed.");
         }
     }
+    private void ThrowIfTransactionAborted()
+    {
+        if (OpenTransaction is { IsUsable: false } transaction)
+        {
+            throw transaction.CreateRefusal();
+        }
+    }
+
+    /// <summary>
+    /// Aborts the explicit transaction for a statement that failed before it reached an operation
+    /// (parsing). A statement running concurrently on the session (a caller contract violation)
+    /// owns the session; its own outcome decides the transaction's.
+    /// </summary>
+    /// <param name="cause">The failure the caller observes.</param>
+    private async ValueTask AbortTransactionAsync(Exception cause)
+    {
+        DocumentDatabaseTransaction? transaction;
+        lock (_sync)
+        {
+            transaction = OpenTransaction;
+            if (transaction is not { IsUsable: true } || _reserved || _operations.Count != 0)
+            {
+                return;
+            }
+            _reserved = true;
+        }
+        try
+        {
+            await transaction.AbortAsync(cause).ConfigureAwait(false);
+        }
+        finally
+        {
+            ReleaseReservation();
+        }
+    }
     public async ValueTask DisposeAsync()
     {
         List<DocumentOperation> operations;
@@ -142,22 +226,26 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
             operations = new List<DocumentOperation>(_operations);
         }
         List<Exception>? errors = null;
-        foreach (var operation in operations)
+        if (operations.Count != 0)
         {
-            try
+            var closed = new DatabaseException("The document session closed while the operation was running.");
+            foreach (var operation in operations)
             {
-                await operation.AbortAsync().ConfigureAwait(false);
-            }
-            catch (Exception error)
-            {
-                (errors ??= []).Add(error);
+                try
+                {
+                    await operation.AbortAsync(closed).ConfigureAwait(false);
+                }
+                catch (Exception error)
+                {
+                    (errors ??= []).Add(error);
+                }
             }
         }
         try
         {
-            if (ActiveTransaction is not null)
+            if (OpenTransaction is { } transaction)
             {
-                await ActiveTransaction.DisposeAsync().ConfigureAwait(false);
+                await transaction.DisposeAsync().ConfigureAwait(false);
             }
         }
         catch (Exception error)

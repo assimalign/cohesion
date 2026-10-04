@@ -20,6 +20,10 @@ keys order by unsigned lexicographic byte comparison.
   database (`<name>` + `<name>.catalog`).
 - `IKeyValueDatabase` — the typed model surface (get/put/delete/exists/scan with
   etag-conditional writes).
+- Explicit transactions: a failed command writes nothing and leaves the transaction
+  active, so later commands stay inside it until the caller commits or rolls back. A
+  rollback can be repeated, and a commit or rollback that does not complete leaves the
+  transaction faulted, refusing commands with `COHDBK001` until a rollback completes.
 - Sessions address exactly one database (A5). All five typed operations reject
   sessions from another database; text and typed requests execute only against
   the receiving session's database. Database/server administration stays on the

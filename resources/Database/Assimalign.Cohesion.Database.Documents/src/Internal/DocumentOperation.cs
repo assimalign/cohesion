@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Transactions;
@@ -66,7 +67,9 @@ internal sealed class DocumentOperation
         }
         finally { _completionGate.Release(); }
     }
-    internal async ValueTask AbortAsync()
+    /// <summary>Ends a failed or abandoned operation, rolling back the transaction it ran in.</summary>
+    /// <param name="cause">The failure the caller observed, or why the operation was abandoned.</param>
+    internal async ValueTask AbortAsync(Exception cause)
     {
         // Session disposal and the failing operation's catch path can both
         // arrive here. Only one path may perform logical rollback and release
@@ -76,7 +79,14 @@ internal sealed class DocumentOperation
         {
             try
             {
-                if (Context.State == TransactionState.Active)
+                if (_transaction is not null)
+                {
+                    // Document storage cannot undo one statement of a transaction, so a failed
+                    // statement aborts its whole explicit transaction, which records the cause
+                    // and refuses later statements until the caller rolls back (#1225).
+                    await _transaction.AbortAsync(cause).ConfigureAwait(false);
+                }
+                else if (Context.State == TransactionState.Active)
                 {
                     await _database.Coordinator.RollbackAsync(_context).ConfigureAwait(false);
                 }

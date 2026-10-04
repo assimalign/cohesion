@@ -88,8 +88,10 @@ That callback publishes the metadata head and commits an automatic transaction;
 an explicit session transaction retains publication until its own commit. The
 old chain remains untouched for readers. `Flush` alone never publishes metadata.
 The kernel's logical commit record makes all preceding physical brackets durable.
-A write/flush error or lifetime cancellation poisons the stream and invokes the
-abort callback once. Disposing a poisoned stream cannot publish it.
+A write/flush error, a publication failure or lifetime cancellation poisons the
+stream and invokes the abort callback once, with the exception the stream then
+throws to its caller, so an engine can record what aborted an explicit
+transaction (#1225). Disposing a poisoned stream cannot publish it.
 
 Read and write streams are sequential and do not support seeking or concurrent
 operations on one stream. Metadata publication, overwrite locking, and session
