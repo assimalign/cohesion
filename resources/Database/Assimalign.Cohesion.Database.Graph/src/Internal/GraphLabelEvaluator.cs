@@ -216,9 +216,16 @@ internal static class GraphLabelEvaluator
     /// </summary>
     /// <param name="expression">The expression to describe.</param>
     /// <returns>The text, ending in <c>...</c> when it was cut.</returns>
-    internal static string Describe(GqlLabelExpression expression)
+    internal static string Describe(GqlLabelExpression expression) => Shorten(expression.ToString());
+
+    /// <summary>
+    /// Text for a diagnostic, cut to the same readable length as <see cref="Describe"/>: a name
+    /// has no length limit. The cut never splits a surrogate pair.
+    /// </summary>
+    /// <param name="text">The text to quote, such as a label name.</param>
+    /// <returns>The text, ending in <c>...</c> when it was cut.</returns>
+    internal static string Shorten(string text)
     {
-        string text = expression.ToString();
         if (text.Length <= describedLength) { return text; }
         int cut = describedLength;
         if (char.IsHighSurrogate(text[cut - 1])) { cut--; }

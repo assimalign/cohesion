@@ -40,6 +40,9 @@ requests continue to use ordinary execution. Explicit transactions remain availa
 in-process session API; Graph wire transaction control is deliberately deferred. A statement that
 fails inside an explicit transaction aborts the whole transaction: the session refuses further
 statements with `COHDBG007` until the caller rolls back, and a commit fails without committing.
+A read that names a label or relationship type the database does not have is not a failure: as in
+Neo4j, the name matches nothing and the result carries a `COHDBG010` or `COHDBG011` warning, so a
+probe such as `MATCH (n:Missing) RETURN n` keeps the transaction.
 
 `GraphDatabaseEngine.CreateBuilder()` returns the same model builder for
 standalone composition or the concrete hosting builder's build-aware engine

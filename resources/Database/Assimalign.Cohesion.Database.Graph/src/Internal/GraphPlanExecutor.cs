@@ -39,7 +39,12 @@ internal static class GraphPlanExecutor
         var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression);
         if (plan.Query.Creates.Count > 0 || plan.Query.DeleteVariables.Count > 0)
         { await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false); }
-        var bindings = new List<Dictionary<string, object>> { new(StringComparer.Ordinal) };
+        // A pattern that requires a label or relationship type the database does not have matches
+        // no element, so the statement starts with no binding and reads nothing (#1228); a MATCH
+        // that matches nothing leaves its INSERT or DELETE nothing to act on.
+        var bindings = plan.MatchesNothing
+            ? new List<Dictionary<string, object>>()
+            : new List<Dictionary<string, object>> { new(StringComparer.Ordinal) };
         var budget = new ExpansionBudget();
         foreach (var path in plan.Matches)
         {
@@ -64,7 +69,7 @@ internal static class GraphPlanExecutor
                     _ => throw new DatabaseException("COHDBG001: Path execution requires a path or bound entity projection."),
                 });
             }
-            return new GraphPathsQueryResult(results.AsReadOnly());
+            return new GraphPathsQueryResult(results.AsReadOnly(), plan.Warnings);
         }
         long affected = 0;
         foreach (var binding in bindings)
@@ -93,12 +98,12 @@ internal static class GraphPlanExecutor
             if (database.Store.FindNode(id.Value, operation.Context.Snapshot) is not null) { affected++; }
             await database.Store.DeleteNodeAsync(id.Value, plan.Query.DetachDelete, operation.Context, token).ConfigureAwait(false);
         }
-        if (plan.Query.Projections.Count == 0) { return new GraphMutationResult(affected); }
+        if (plan.Query.Projections.Count == 0) { return new GraphMutationResult(affected, plan.Warnings); }
         var columns = plan.Query.Projections.Select((projection, i) => new QueryColumn
         { Name = projection.Alias ?? projection.Variable + (projection.Property is null ? "" : "." + projection.Property), Ordinal = i, Type = DatabaseType.Null }).ToArray();
         var rows = bindings.Select(binding => plan.Query.Projections.Select(projection => projection.Property is { } property
             ? GraphExpressionEvaluator.Property(binding[projection.Variable], property) : binding[projection.Variable]).ToArray()).ToArray();
-        return new GraphQueryResult(columns, rows);
+        return new GraphQueryResult(columns, rows, plan.Warnings);
     }
 
     private static async ValueTask MatchAsync(GraphDatabaseInstance database, GraphOperation operation, GraphPathPlan plan,
@@ -248,15 +253,18 @@ internal static class GraphPlanExecutor
 internal sealed class GraphMutationResult : QueryResult
 {
     private readonly long _count;
+    private readonly IReadOnlyList<Diagnostic> _warnings;
 
     /// <summary>Initializes a new instance of the <see cref="GraphMutationResult"/> class.</summary>
     /// <param name="count">The number of graph entities the mutation affected.</param>
-    public GraphMutationResult(long count)
+    /// <param name="warnings">The statement's warnings; a statement without a projection reports them here.</param>
+    public GraphMutationResult(long count, IReadOnlyList<Diagnostic> warnings)
     {
         _count = count;
+        _warnings = warnings;
     }
 
     public override QueryResultStatus Status => QueryResultStatus.Success;
     public override long AffectedCount => _count;
-    public override IReadOnlyList<Diagnostic>? Diagnostics => null;
+    public override IReadOnlyList<Diagnostic>? Diagnostics => _warnings.Count == 0 ? null : _warnings;
 }

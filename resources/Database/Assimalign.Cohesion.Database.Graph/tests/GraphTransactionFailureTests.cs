@@ -25,9 +25,9 @@ public sealed class GraphTransactionFailureTests
     /// <param name="code">The code the failing statement reports.</param>
     /// <param name="isolation">The isolation level the explicit transaction runs under.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a failed statement, a later write and ROLLBACK leave the graph unchanged")]
-    [InlineData("MATCH (n:Missing) RETURN n.name", "COHDBG002", IsolationLevel.Snapshot)]
+    [InlineData("MATCH (n) RETURN m.name", "COHDBG001", IsolationLevel.Snapshot)]
     [InlineData("MATCH (n:Keep {name: 'k'}) DELETE n", "COHDBG003", IsolationLevel.Snapshot)]
-    [InlineData("MATCH (n:Missing) RETURN n.name", "COHDBG002", IsolationLevel.ReadCommitted)]
+    [InlineData("MATCH (n) RETURN m.name", "COHDBG001", IsolationLevel.ReadCommitted)]
     [InlineData("MATCH (n:Keep {name: 'k'}) DELETE n", "COHDBG003", IsolationLevel.ReadCommitted)]
     public async Task ExecuteAsync_FailureThenWriteThenRollback_ShouldLeaveGraphUnchanged(string failing, string code, IsolationLevel isolation)
     {
@@ -71,7 +71,7 @@ public sealed class GraphTransactionFailureTests
         var seed = await database.CreateNodeAsync(session, ["Keep"]);
         var schema = GraphSchema.Open(database, session);
         var transaction = await session.BeginTransactionAsync();
-        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n:Missing) RETURN n.name"));
+        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN m.name"));
 
         // Act
         var refusals = new List<Exception>
@@ -116,14 +116,14 @@ public sealed class GraphTransactionFailureTests
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:Pending {name: 'p'})");
-        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n:Missing) RETURN n.name"));
+        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN m.name"));
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
 
         // Assert
         error.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
-        error.InnerException.ShouldNotBeNull().Message.ShouldStartWith("COHDBG002", Case.Sensitive);
+        error.InnerException.ShouldNotBeNull().Message.ShouldStartWith("COHDBG001", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
         // The client's rollback in a catch block after the failed commit is a no-op, not a second error.
@@ -143,7 +143,7 @@ public sealed class GraphTransactionFailureTests
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:Pending)");
-        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n:Missing) RETURN n.name"));
+        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN m.name"));
 
         // Act
         await transaction.DisposeAsync();
@@ -194,7 +194,7 @@ public sealed class GraphTransactionFailureTests
         await using var other = await database.CreateSessionAsync();
         await using var transaction = await failed.BeginTransactionAsync();
         await failed.ExecuteAsync("INSERT (:Pending)");
-        await Should.ThrowAsync<DatabaseException>(async () => await failed.ExecuteAsync("MATCH (n:Missing) RETURN n.name"));
+        await Should.ThrowAsync<DatabaseException>(async () => await failed.ExecuteAsync("MATCH (n) RETURN m.name"));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         // Act
@@ -217,7 +217,7 @@ public sealed class GraphTransactionFailureTests
         await session.ExecuteAsync("INSERT (:Keep)");
 
         // Act
-        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n:Missing) RETURN n.name"));
+        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN m.name"));
         await session.ExecuteAsync("INSERT (:After)");
 
         // Assert
@@ -236,7 +236,7 @@ public sealed class GraphTransactionFailureTests
         var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n:Missing) RETURN n.name"));
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN m.name"));
 
         // Act
         var first = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n:Other) RETURN n.name"));
@@ -314,7 +314,7 @@ public sealed class GraphTransactionFailureTests
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:Pending)");
-        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n:Missing) RETURN n.name"));
+        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN m.name"));
 
         // Act
         await session.DisposeAsync();

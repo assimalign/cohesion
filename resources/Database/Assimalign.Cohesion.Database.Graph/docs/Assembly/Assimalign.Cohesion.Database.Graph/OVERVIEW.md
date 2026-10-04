@@ -11,8 +11,13 @@
   yields distinct visited nodes, excluding the start.
 - `GraphQueryRequest.FromGql(text)` parses a request and throws `DatabaseParseException` for an
   error diagnostic. `IDatabaseSession.ExecuteAsync(string)` uses the same parser.
+- A read that names a label or relationship type the database does not have succeeds: the name
+  matches nothing, and the result's `Diagnostics` carries a `COHDBG010` (label) or `COHDBG011`
+  (relationship type) warning. The read does not abort an explicit transaction.
 - `GraphSchema.Open(database, session)` returns `IGraphSchema` for label/type discovery, definition
   and property changes, and node-property index creation. It rejects foreign sessions.
+  `GetIndexesAsync` returns `GraphSchemaResult<GraphIndexMetadata>`, a read-only list whose
+  `Diagnostics` holds the `COHDBG010` warning for a label the database does not have.
 - `AddGraph((context, engine) => ...)` is an extension member on the root
   `IDatabaseApplicationBuilder`; it captures construction and returns the application builder.
   Its Build-time callback receives `IGraphDatabaseEngineBuilder` with model options and

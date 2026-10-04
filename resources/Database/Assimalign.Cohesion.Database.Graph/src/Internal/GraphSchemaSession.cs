@@ -27,8 +27,18 @@ internal sealed class GraphSchemaSession : IGraphSchema
         => _database.RunAsync(_session, op => new ValueTask<IReadOnlyList<GraphRelationshipTypeMetadata>>(_database.Catalog.GetRelationshipTypes(op.Context.Snapshot)), cancellationToken);
     public ValueTask<IReadOnlyList<GraphPropertyKeyMetadata>> GetPropertyKeysAsync(Guid definitionId, CancellationToken cancellationToken = default)
         => _database.RunAsync(_session, op => new ValueTask<IReadOnlyList<GraphPropertyKeyMetadata>>(_database.Catalog.GetPropertyKeys(definitionId, op.Context.Snapshot)), cancellationToken);
-    public ValueTask<IReadOnlyList<GraphIndexMetadata>> GetIndexesAsync(string label, CancellationToken cancellationToken = default)
-        => _database.RunAsync(_session, op => new ValueTask<IReadOnlyList<GraphIndexMetadata>>(_database.Catalog.GetIndexes(Label(label, op).Id, op.Context.Snapshot)), cancellationToken);
+    public ValueTask<GraphSchemaResult<GraphIndexMetadata>> GetIndexesAsync(string label, CancellationToken cancellationToken = default)
+    {
+        // Argument validation runs before the read starts, so it never aborts an explicit transaction.
+        ArgumentNullException.ThrowIfNull(label);
+        // A read of a label the database does not have is empty with a warning, never a failure
+        // (#1228): Neo4j's schema API returns an empty list for a label token that does not exist
+        // (kernel/.../coreapi/schema/SchemaImpl.java:142-154).
+        return _database.RunAsync(_session, op => new ValueTask<GraphSchemaResult<GraphIndexMetadata>>(
+            _database.Catalog.FindLabel(label, op.Context.Snapshot) is { } metadata
+                ? new GraphSchemaResult<GraphIndexMetadata>(_database.Catalog.GetIndexes(metadata.Id, op.Context.Snapshot), [])
+                : new GraphSchemaResult<GraphIndexMetadata>([], [GraphTokenResolver.UnknownLabel(label, null)])), cancellationToken);
+    }
     public ValueTask SaveLabelAsync(GraphLabelMetadata definition, CancellationToken cancellationToken = default)
         => Write(op => _database.Catalog.SaveLabelAsync(definition, op.Context, cancellationToken), cancellationToken);
     public ValueTask SaveRelationshipTypeAsync(GraphRelationshipTypeMetadata definition, CancellationToken cancellationToken = default)

@@ -40,12 +40,14 @@ flowchart LR
     Client --> SharedClient["Database.Client"]
 ```
 
-No existing public interface changed. `IGraphDatabase` accepts an explicit `IDatabaseSession` for
-each data operation. Every entry point checks the concrete session's database identity; sharing an
-engine or database name is insufficient. `GraphSchema.Open(database, session)` returns the new
-`IGraphSchema` interface, also bound to that exact database and session. Its operations join the
-session transaction. Administrative database lifecycle remains on `IDatabaseEngine`; no GQL AST
-can select a server, another database, or another graph.
+The session-binding change altered no public interface that existed before it. `IGraphDatabase`
+accepts an explicit `IDatabaseSession` for each data operation. Every entry point checks the
+concrete session's database identity; sharing an engine or database name is insufficient.
+`GraphSchema.Open(database, session)` returns the new `IGraphSchema` interface, also bound to that
+exact database and session. Its operations join the session transaction. #1228 later changed
+`IGraphSchema.GetIndexesAsync` (a breaking change) to return `GraphSchemaResult<GraphIndexMetadata>`,
+a read-only list that also carries the read's warnings. Administrative database lifecycle remains
+on `IDatabaseEngine`; no GQL AST can select a server, another database, or another graph.
 
 ## Physical records and adjacency
 
@@ -217,13 +219,12 @@ A Bolt driver sends RESET after a failure; `RollbackAsync` plays that part here.
 from Neo4j in one case: Neo4j ignores a rollback of a committed transaction, and Graph refuses it,
 because a rollback that returns normally promises that none of the transaction's work persists.
 
-One known divergence is stricter than Neo4j. Reading an unknown label or relationship type is
-`COHDBG002`, a failed statement, so a read probe such as `MATCH (n:Missing) RETURN n` or
-`GraphSchema.GetIndexesAsync("Missing")` aborts the explicit transaction and discards its earlier
-writes. Neo4j answers the same read with an empty result and the `UnknownLabelWarning` or
-`UnknownRelationshipTypeWarning` notification (`common/.../kernel/api/exceptions/Status.java:346-355`,
-severity WARNING), and its transaction continues. Turning unknown-token reads into an empty result
-with a diagnostic is a follow-up.
+Reading a label or relationship type the database does not have is not a failed statement (#1228,
+following Neo4j). A read probe such as `MATCH (n:Missing) RETURN n` or
+`GraphSchema.GetIndexesAsync("Missing")` returns no rows and a `COHDBG010` or `COHDBG011` warning,
+and the explicit transaction stays active with its earlier writes, as
+[Unknown labels and relationship types in reads](#unknown-labels-and-relationship-types-in-reads-1228)
+describes.
 
 The graph protocol has no transaction control, so a wire session runs inside an explicit
 transaction only when its host opens one on the server session's engine session
@@ -256,14 +257,17 @@ never an equality, so `MATCH (n) WHERE n:A AND n.k = 1` also plans no index prop
 executor evaluates the expression on every candidate node, and a relationship pattern's expression
 on every incident edge's type. `GraphLabelEvaluator` validates each expression before execution:
 an unknown kind, a null operand, name or operand list, a conjunction or disjunction with fewer than
-two operands, or `Labels`/`Type` that disagree with the expression are `COHDBG001`, and every name,
-including those under `!` and `|`, must be a catalog label or relationship type (`COHDBG002`); a
-chain that repeats a name resolves it once. `Undirected` and `LeftOrRight`
+two operands, or `Labels`/`Type` that disagree with the expression are `COHDBG001`. Every name a
+match reads, including those under `!` and `|`, resolves against the catalog at the statement's
+snapshot, and a chain that repeats a name resolves it once; a name the database does not have
+matches nothing and is reported as a warning, not an error (see
+[Unknown labels and relationship types in reads](#unknown-labels-and-relationship-types-in-reads-1228)).
+`Undirected` and `LeftOrRight`
 constrain neither end of a stored edge; insertion takes only `Outgoing` and `Incoming`, one type,
 and a label conjunction. Storage cannot hold an empty or all-whitespace label, relationship type or
 property key, and a delimited name such as `(n:" ")` or `{" ": 1}` can spell one, so insertion
 rejects each with `COHDBG001` before anything is written; matching on such a name finds no catalog
-entry (`COHDBG002`) or no row.
+entry, so no element carries it and a read warns (`COHDBG010`/`COHDBG011`).
 
 Label expressions and `WHERE` predicates have no length or nesting limit (#1139 follow-up, owner
 decision 2026-10-02: do what Neo4j does; the evidence is in the
@@ -346,6 +350,89 @@ extension), DELETE, DETACH DELETE, SHOW (catalog extension) and LABEL EXPRESSION
 ordering, graph selection and language DDL are not advertised. Label/type/index management is the
 session-bound C# schema API. The ISO decision and conformance corpus are documented alongside the
 parser; this is a bounded ISO subset, not a full conformance claim.
+
+### Unknown labels and relationship types in reads (#1228)
+
+A read names a label or relationship type the database does not have when the catalog has no
+visible definition of that name at the statement's snapshot. Owner decision of 2026-10-03: follow
+Neo4j, where such a read returns no rows with a WARNING notification rather than an error. The
+statement does not fail, so it never aborts an explicit transaction
+([#1188](#failed-statements-in-explicit-transactions-1188)): a probe for a label that does not exist
+yet keeps the caller's transaction and its earlier writes.
+
+- **Matching.** An unknown name is a label no node carries, or the type of no relationship, and
+  every expression evaluates with it: `(n:Missing)`, `(n:A&Missing)` and `WHERE n:Missing` match no
+  node, `(n:A|Missing)` matches the `A` nodes, and `(n:!Missing)` and
+  `WHERE n IS NOT LABELED Missing` match every node. A label is not a relationship type, so
+  `WHERE r:A` on a relationship and `WHERE n:T` on a node name unknown tokens of the variable's kind.
+  Neo4j's token resolution likewise leaves an unresolved name out of its semantic table without an
+  error (`cypher-planner/.../compiler/planner/ResolveTokens.scala:80-105`).
+- **The warning.** A read-only statement reports each unknown name in its result's `Diagnostics`:
+  `COHDBG010` for a label (Neo4j `Neo.ClientNotification.Statement.UnknownLabelWarning`, GQLSTATUS
+  01N50) and `COHDBG011` for a relationship type (`UnknownRelationshipTypeWarning`, 01N51), each a
+  `Diagnostic` of `DiagnosticSeverity.Warning` whose message quotes the name, cut to 256 UTF-16 code
+  units (`common/.../kernel/api/exceptions/Status.java:346-355`,
+  `neo4j-notifications/.../NotificationCodeWithDescription.java:190-199`). Neo4j's
+  `CheckForUnresolvedTokens` reports every unresolved `LabelName` and `RelTypeName` in the statement,
+  under negation and disjunction included (`CheckForUnresolvedTokens.scala:61-88`), into a set keyed
+  by name and source position (`InternalNotificationLogger.scala:43-49`). Graph pattern names carry
+  no source position, so a name is reported once per kind, at its first mention: the patterns' names
+  path by path (each path's labels, then its relationship types), then the `WHERE` clause's. A
+  warning for a name first met in a labeled predicate carries that predicate's span
+  (`DiagnosticLocation.Absolute`); a pattern name's has none. `QueryResult.Diagnostics` stays null
+  for a statement with nothing to report. The warning travels on a row result (`QueryResultSet`), on
+  `GraphPathsQueryResult`, and on the result of a statement with no projection.
+- **Writes.** `INSERT` still defines new labels and relationship types. A write whose `MATCH` names
+  an unknown name matches nothing, so its `INSERT` or `DELETE` acts on nothing: the statement
+  succeeds having written nothing (an affected count of 0, or an empty row result for
+  `INSERT ... RETURN`) and reports no warning, because Neo4j checks unresolved tokens only when
+  `query.readOnly` (`CheckForUnresolvedTokens.scala:53`). Schema writes still
+  require the definition they change: `CreateIndexAsync`, `DropLabelAsync` and
+  `DropRelationshipTypeAsync` of an unknown name fail with `COHDBG002`, a failed statement.
+- **Snapshot.** Resolution uses the statement's snapshot, so a transaction sees the labels and types
+  its own earlier statements created, and another session sees them only after the commit.
+- **No wasted reads.** A pattern that requires an unknown name, a node conjunction (`:A`, `:A&B`,
+  `:A:B`) or a relationship's type, can match no element, so the plan records that it matches
+  nothing and the executor starts with no binding, never scanning the store. The `WHERE` form does
+  the same: a non-negated labeled predicate with a pure conjunction among the clause's top-level
+  `AND` operands (`WHERE n:Missing`, `WHERE n.k = 1 AND n IS LABELED A&Missing`, `WHERE r:Missing`)
+  is never true, so under three-valued `AND` the clause keeps no row and the plan reads nothing.
+  Without this, `MATCH (n) WHERE n:Missing` would scan every node and, past 1,000,000 candidates,
+  fail with `COHDBG004` and abort the explicit transaction it was meant to keep. Neo4j treats both
+  forms alike, planning a label scan from the selections' `HasLabels` predicates
+  (`cypher-planner/.../steps/leafplanner/labelScanLeafPlanner.scala:45`). A name under `!`, `|` or
+  `IS NOT LABELED` can be true for an element without it, so it leaves the plan as it is. The flag
+  empties the whole statement, which holds only because every `MATCH` in the subset is mandatory:
+  when `gql-optional-match` lands, an optional pattern that requires an unknown name binds nulls
+  instead and must not set it.
+- **Schema reads.** `IGraphSchema.GetIndexesAsync(label)` returns `GraphSchemaResult<GraphIndexMetadata>`,
+  a read-only list with a `Diagnostics` list: for an unknown label, no indexes and the same
+  `COHDBG010` warning. Neo4j's schema API returns an empty list for a label token that does not exist
+  (`kernel/.../coreapi/schema/SchemaImpl.java:142-154`); its core API has no notification channel.
+  A null label is an `ArgumentNullException` before the read starts.
+  `GraphSchemaResult<T>.Diagnostics` is empty, never null, when the read reports nothing: it is a
+  new collection property, and .NET's design guidelines rule out a null collection.
+  `QueryResult.Diagnostics` keeps its existing null-when-empty contract, so a caller tests `Count`
+  on the schema result and null on a statement result until the concrete-type redesign of the
+  Database models settles one convention. The other schema reads take no name (`GetLabelsAsync`,
+  `GetRelationshipTypesAsync`) or a definition identity (`GetPropertyKeysAsync`, empty for an
+  unknown identity, unchanged).
+- **Traversal.** `TraverseAsync` filters by `GraphTraversal.RelationshipType` without a catalog
+  lookup, so an unknown type visits nothing; its node stream has no diagnostics, so it reports no
+  warning.
+- **The wire.** Protocol 1.0 has no frame for a successful statement's diagnostics, and none is added
+  ad hoc. The server sends the read's rows as it sends any result's, so a read of a required unknown
+  name is an empty result: `Execute` sends `ResultHeader`, no `ResultRow` and `ResultComplete` (-1);
+  `ExecutePaths` sends `PathsComplete` with a count of 0. A 1.0 client therefore sees the rows without
+  the warning, and its session and explicit transaction continue (`GraphServerProtocolTests` pins the
+  frames, `GraphTransactionFailureWireTests` the client's view).
+  [#1105](https://github.com/assimalign/cohesion/issues/1105) (protocol 1.1
+  structured diagnostics) carries the warning: a core `Diagnostics` message in the reserved 14–63
+  range, sent only on a session that negotiated its capability, with Warning severity included and
+  Information never sent; Graph.Client then exposes it on its result objects. #1105's decision (2)
+  places the frame before `ResultComplete` on success, which covers `Execute`. It does not yet name
+  `ExecutePaths`; #1228 proposes the same placement there, before `PathsComplete`, for #1105 to
+  record.
 
 ## Catalog introspection (C2)
 
@@ -430,7 +517,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `GQL0008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
 | `GQL0009` | Parentheses nested deeper than the parsing thread's stack; `GraphQueryRequest.FromGql` and the engine report it as `COHDBG008` |
 | `COHDBG001` | Invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
-| `COHDBG002` | Unknown label or relationship type |
+| `COHDBG002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `COHDBG010` and `COHDBG011` |
 | `COHDBG003` | Schema/data mismatch, restricted deletion or invalid graph mutation |
 | `COHDBG004` | Path materialization or candidate-expansion limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
@@ -438,9 +525,13 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG007` | The session's explicit transaction is aborted, by a failed statement or by a rollback or commit that did not complete: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
 | `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; on the wire's `ExecutePaths` seam the client currently closes its connection |
 | `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
+| `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `QueryResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 1.0 |
+| `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 1.0 |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 
-Planner/data errors use stable code prefixes on `DatabaseException`. Kernel aborts cross the engine
+Planner/data errors use stable code prefixes on `DatabaseException`. Warnings are never exceptions
+or message prefixes: they are `Diagnostic` objects with a `Code` and `DiagnosticSeverity.Warning` on
+a successful result. Kernel aborts cross the engine
 boundary as `DatabaseTransactionAbortedException`; deadlocks retain their specialized subtype.
 Ownership uses the shared dedicated exception rather than an invented graph ownership code.
 
@@ -498,7 +589,12 @@ their ordered column contracts above remain supported by `GraphDatabaseServer`. 
 bound to `GraphProtocol.Family` once, before the handshake. Path messages transport the engine's
 real `GraphPathsQueryResult`, without changing the existing payload definitions. A path response
 contains zero or more Path frames and one PathsComplete; a shared Error terminates either exchange
-without a completion frame. Statement errors leave a completely consumed exchange reusable.
+without a completion frame. Statement errors leave a completely consumed exchange reusable. Version
+1.0 has no frame for a successful statement's warnings: a read that warns (`COHDBG010`,
+`COHDBG011`) reaches a 1.0 client as its rows alone, and protocol 1.1 (#1105) adds the negotiated
+core `Diagnostics` frame before `ResultComplete`, and, as #1228 proposes to #1105, before
+`PathsComplete`
+([Unknown labels and relationship types in reads](#unknown-labels-and-relationship-types-in-reads-1228)).
 Malformed or out-of-order frames are protocol violations. Server/client acceptance tests use the
 production `GraphDatabaseServer` and `Graph.Client` over `Connections.InMemory`.
 

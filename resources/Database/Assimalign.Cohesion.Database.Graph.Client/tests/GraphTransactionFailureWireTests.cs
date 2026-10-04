@@ -34,7 +34,7 @@ public sealed class GraphTransactionFailureWireTests
 
         // Act
         var failure = await Should.ThrowAsync<GraphClientException>(async () =>
-            await connection.QueryAsync("MATCH (n:Missing) RETURN n.name", cancellationToken: harness.Token));
+            await connection.QueryAsync("MATCH (n) RETURN m.name", cancellationToken: harness.Token));
         var refused = await Should.ThrowAsync<GraphClientException>(async () =>
             await connection.ExecuteAsync("MATCH (n) DETACH DELETE n", cancellationToken: harness.Token));
         var refusedRead = await Should.ThrowAsync<GraphClientException>(async () =>
@@ -44,7 +44,7 @@ public sealed class GraphTransactionFailureWireTests
 
         // Assert
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldContain("COHDBG002", Case.Sensitive);
+        failure.Message.ShouldContain("COHDBG001", Case.Sensitive);
         refused.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         refused.Message.ShouldContain("COHDBG007", Case.Sensitive);
         refusedRead.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
@@ -56,6 +56,47 @@ public sealed class GraphTransactionFailureWireTests
             .Select(row => (string?)row[0]).Order().ShouldBe(["j", "k"]);
         (await connection.QueryAsync("MATCH (a:Keep)-[r:LINK]->(b:Keep) RETURN a.name", cancellationToken: harness.Token)).ShouldHaveSingleItem();
         (await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).Select(row => (string?)row[2]).ShouldBe(["Keep"]);
+    }
+
+    /// <summary>
+    /// A read of an unknown label or relationship type is not a failed statement (#1228): over
+    /// protocol 1.0, which has no frame for its warning, the client sees an empty result, and the
+    /// explicit transaction stays active, so its earlier write commits. A write whose MATCH names
+    /// an unknown label matches nothing and fails nothing either.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - A read of an unknown label is empty and keeps the explicit transaction")]
+    public async Task QueryAsync_UnknownTokenReadInsideExplicitTransaction_ShouldReturnEmptyAndKeepTransaction()
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        (await connection.ExecuteAsync("CREATE (:Keep {name: 'k'})-[:LINK]->(:Keep {name: 'j'})", cancellationToken: harness.Token)).ShouldBe(3);
+        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(harness.Token);
+        (await connection.ExecuteAsync("CREATE (:Pending {name: 'p'})", cancellationToken: harness.Token)).ShouldBe(1);
+
+        // Act
+        var labelRead = await connection.QueryAsync("MATCH (n:Missing) RETURN n.name", cancellationToken: harness.Token);
+        var typeRead = await connection.QueryAsync("MATCH (a:Keep)-[r:Missing]->(b) RETURN r.name", cancellationToken: harness.Token);
+        var paths = new List<GraphPath>();
+        await foreach (var path in connection.QueryPathsAsync("MATCH (n:Missing) RETURN n", cancellationToken: harness.Token)) { paths.Add(path); }
+        long deleted = await connection.ExecuteAsync("MATCH (n:Missing) DETACH DELETE n", cancellationToken: harness.Token);
+        var state = transaction.State;
+        await transaction.CommitAsync(harness.Token);
+
+        // Assert
+        labelRead.ShouldBeEmpty();
+        labelRead.Columns.ShouldHaveSingleItem().Name.ShouldBe("n.name");
+        labelRead.AffectedCount.ShouldBe(-1);
+        typeRead.ShouldBeEmpty();
+        paths.ShouldBeEmpty();
+        deleted.ShouldBe(0);
+        state.ShouldBe(TransactionState.Active);
+        transaction.State.ShouldBe(TransactionState.Committed);
+        connection.IsOpen.ShouldBeTrue();
+        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
+        (await connection.QueryAsync("MATCH (n:Pending) RETURN n.name", cancellationToken: harness.Token))
+            .Select(row => (string?)row[0]).ShouldBe(["p"]);
     }
 
     /// <summary>A wire statement rejected while parsing or validating its request aborts the transaction as well.</summary>
@@ -142,7 +183,7 @@ public sealed class GraphTransactionFailureWireTests
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(harness.Token);
         await connection.ExecuteAsync("CREATE (:Pending {name: 'p'})", cancellationToken: harness.Token);
         await Should.ThrowAsync<GraphClientException>(async () =>
-            await connection.QueryAsync("MATCH (n:Missing) RETURN n.name", cancellationToken: harness.Token));
+            await connection.QueryAsync("MATCH (n) RETURN m.name", cancellationToken: harness.Token));
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(harness.Token));

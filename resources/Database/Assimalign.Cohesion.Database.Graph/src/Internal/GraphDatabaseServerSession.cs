@@ -332,6 +332,9 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             }
             // The engine session parses and validates the statement, so a statement that fails
             // here aborts an explicit transaction exactly as one that fails in process (#1188).
+            // A successful result's warnings (an unknown label or relationship type, #1228) have
+            // no frame in protocol 1.0, so the client receives the rows alone; protocol 1.1 (#1105)
+            // sends them in the core Diagnostics frame before ResultComplete or PathsComplete.
             var result = paths
                 ? await _databaseSession!.ExecuteStatementAsync(
                     () => GraphPathsQueryRequest.FromGql(message.Statement, parameters), cancellationToken).ConfigureAwait(false)

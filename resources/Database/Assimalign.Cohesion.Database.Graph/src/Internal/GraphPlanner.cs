@@ -2,13 +2,43 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal sealed record GraphAnchor(int NodeIndex, string? Label, string? Property, object? Value);
 internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor);
-internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphPathPlan> Matches);
+
+/// <summary>A validated statement with each MATCH pattern's anchor.</summary>
+/// <param name="Query">The validated statement.</param>
+/// <param name="Matches">Each MATCH pattern with the anchor it expands from, in source order.</param>
+internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphPathPlan> Matches)
+{
+    /// <summary>
+    /// Gets whether the statement requires a label or relationship type the database does not
+    /// have: a MATCH node pattern's conjunction (<c>:A</c>, <c>:A&amp;B</c>), a MATCH relationship
+    /// pattern's type, or a non-negated labeled predicate with a pure conjunction among the
+    /// <c>WHERE</c> clause's top-level <c>AND</c> operands (<c>WHERE n:A</c>,
+    /// <c>WHERE n.k = 1 AND n IS LABELED A</c>). No element can satisfy it, so the statement
+    /// matches no row and the executor reads nothing.
+    /// </summary>
+    /// <remarks>
+    /// The flag empties the whole statement, which is correct only because every MATCH in the
+    /// subset is mandatory. Only a mandatory MATCH, or a <c>WHERE</c> that filters the whole row,
+    /// may set it: when <c>gql-optional-match</c> lands, an optional pattern that requires an
+    /// unknown name binds nulls instead and must not set it (Graph.Language DESIGN, "when
+    /// gql-optional-match lands, a variable without a binding yields UNKNOWN").
+    /// </remarks>
+    internal bool MatchesNothing { get; init; }
+
+    /// <summary>
+    /// Gets the <c>COHDBG010</c>/<c>COHDBG011</c> warnings of a read-only statement that names a
+    /// label or relationship type the database does not have, in first-mention order; empty for a
+    /// statement that writes (#1228).
+    /// </summary>
+    internal IReadOnlyList<Diagnostic> Warnings { get; init; } = [];
+}
 
 internal sealed class GraphPlanner
 {
@@ -24,17 +54,30 @@ internal sealed class GraphPlanner
         _snapshot = snapshot;
     }
 
+    /// <summary>
+    /// Validates a statement and chooses each MATCH pattern's anchor. A label or relationship type
+    /// the database does not have is not an error (#1228): it matches nothing, and a read-only
+    /// statement reports it as a <c>COHDBG010</c>/<c>COHDBG011</c> warning. Only a read-only
+    /// statement warns, as Neo4j's <c>CheckForUnresolvedTokens</c> runs only when
+    /// <c>query.readOnly</c> (<c>cypher-planner/.../compiler/planner/CheckForUnresolvedTokens.scala:53</c>).
+    /// </summary>
+    /// <param name="query">The statement to plan.</param>
+    /// <returns>The plan.</returns>
+    /// <exception cref="DatabaseException">The statement is invalid (<c>COHDBG001</c>, <c>COHDBG003</c>).</exception>
     internal GraphPlan Plan(GqlQueryExpression query)
     {
         var variables = new Dictionary<string, BindingKind>(StringComparer.Ordinal);
         var paths = new List<GraphPathPlan>();
         var anchors = new AnchorSources(_database, _snapshot, query.Predicate);
+        var tokens = new GraphTokenResolver(_database.Catalog, _snapshot);
+        bool matchesNothing = false;
         foreach (var path in query.Matches)
         {
-            Validate(path, creating: false);
+            if (!Validate(path, creating: false)) { matchesNothing = true; }
             paths.Add(new GraphPathPlan(path, ChooseAnchor(path, anchors)));
         }
         ValidateExpression(query.Predicate);
+        matchesNothing |= RequiresUnknownName(query.Predicate);
         foreach (var path in query.Creates) { Validate(path, creating: true); }
         foreach (var variable in query.DeleteVariables) { RequireVariable(variable, entity: true); }
         foreach (var projection in query.Projections) { RequireVariable(projection.Variable, entity: projection.Property is not null); }
@@ -44,22 +87,29 @@ internal sealed class GraphPlanner
         { throw new DatabaseException("COHDBG001: Insertion and deletion cannot share a statement."); }
         if (query.DeleteVariables.Count != 0 && query.Projections.Count != 0)
         { throw new DatabaseException("COHDBG001: Deletion cannot be followed by projection in this subset."); }
-        return new GraphPlan(query, paths);
+        bool readOnly = query.Creates.Count == 0 && query.DeleteVariables.Count == 0;
+        return new GraphPlan(query, paths)
+        {
+            MatchesNothing = matchesNothing,
+            Warnings = readOnly ? tokens.Warnings : [],
+        };
 
-        void Validate(GqlPathPattern path, bool creating)
+        // Returns false when a MATCH pattern requires a name the database does not have.
+        bool Validate(GqlPathPattern path, bool creating)
         {
             if (path.Nodes.Count == 0 || path.Relationships.Count != path.Nodes.Count - 1 || path.Relationships.Count > 64)
             { throw new DatabaseException("COHDBG001: A finite path requires one more node than relationships and at most 64 hops."); }
+            bool satisfiable = true;
             foreach (var node in path.Nodes)
             {
                 Bind(node.Variable, BindingKind.Node);
-                ValidateNodeLabels(node, creating);
+                satisfiable &= ValidateNodeLabels(node, creating, tokens);
                 ValidateProperties(node.Properties, creating);
             }
             foreach (var relationship in path.Relationships)
             {
                 Bind(relationship.Variable, BindingKind.Relationship);
-                ValidateRelationship(relationship, creating);
+                satisfiable &= ValidateRelationship(relationship, creating, tokens);
                 ValidateProperties(relationship.Properties, creating);
             }
             if (path.Variable is { } variable)
@@ -67,6 +117,7 @@ internal sealed class GraphPlanner
                 if (creating || !variables.TryAdd(variable, BindingKind.Path))
                 { throw new DatabaseException($"COHDBG003: Path variable '{variable}' must be a new MATCH binding."); }
             }
+            return satisfiable;
         }
         void Bind(string? variable, BindingKind kind)
         {
@@ -123,7 +174,9 @@ internal sealed class GraphPlanner
             }
         }
         // A labeled predicate tests a node's labels or a relationship's type; a path has neither.
-        // Its names resolve against the catalog of the variable's kind, as a pattern's do.
+        // Its names resolve against the catalog of the variable's kind, as a pattern's do. It is a
+        // Boolean primary that IS NOT LABELED, !, | (and NOT or OR once WHERE has them) can invert,
+        // so an unknown name never empties the plan; it evaluates as a label no node carries.
         void ValidateLabeledPredicate(GqlLabeledPredicate labeled)
         {
             if (labeled.Variable is null) { throw new DatabaseException("COHDBG001: A labeled predicate requires a variable."); }
@@ -133,22 +186,68 @@ internal sealed class GraphPlanner
             if (labeled.LabelExpression is null) { throw new DatabaseException("COHDBG001: A labeled predicate requires a label expression."); }
             foreach (string name in GraphLabelEvaluator.Distinct(GraphLabelEvaluator.Names(labeled.LabelExpression)))
             {
-                if (kind == BindingKind.Node) { RequireLabel(name); }
-                else { RequireRelationshipType(name); }
+                if (kind == BindingKind.Node) { tokens.HasLabel(name, labeled.Location); }
+                else { tokens.HasRelationshipType(name, labeled.Location); }
             }
+        }
+        // Whether a top-level AND operand of a validated WHERE clause is a non-negated labeled
+        // predicate whose pure conjunction names a label or type the database does not have. Such
+        // an operand is false for every bound element (or unknown for an unbound one), so under
+        // ISO three-valued AND the clause is never true and the statement keeps no row: the plan
+        // can read nothing, as for the pattern form. Neo4j plans the WHERE form the same way, a
+        // label scan built from the selections' HasLabels predicates
+        // (cypher-planner/.../steps/leafplanner/labelScanLeafPlanner.scala:45), so an unresolved
+        // label reads nothing. Only AND nodes are descended, with an explicit stack; a negation,
+        // disjunction or wildcard can be true for an element without the name, so it never
+        // empties the plan.
+        bool RequiresUnknownName(GqlExpression? root)
+        {
+            if (root is null) { return false; }
+            var pending = new Stack<GqlExpression>();
+            pending.Push(root);
+            while (pending.TryPop(out var expression))
+            {
+                switch (expression)
+                {
+                    case GqlLogicalExpression { Operator: GqlLogicalOperator.And } logical:
+                        foreach (var operand in logical.Operands) { pending.Push(operand); }
+                        break;
+                    case GqlLabeledPredicate { IsNegated: false } labeled
+                        when GraphLabelEvaluator.Conjunction(labeled.LabelExpression) is { } conjunction:
+                        bool node = variables[labeled.Variable] == BindingKind.Node;
+                        foreach (string name in conjunction)
+                        {
+                            // Each name was resolved by validation; the resolver answers from its cache.
+                            if (node ? !tokens.HasLabel(name, labeled.Location) : !tokens.HasRelationshipType(name, labeled.Location))
+                            { return true; }
+                        }
+                        break;
+                }
+            }
+            return false;
         }
     }
 
     /// <summary>
     /// Validates a node pattern's label requirement. A label expression is the whole requirement,
-    /// so <c>Labels</c> must be empty or list its conjunction. Every name must be a catalog label
-    /// when matching, including names under <c>!</c> and <c>|</c>; insertion takes a pure
-    /// conjunction and may introduce new labels.
+    /// so <c>Labels</c> must be empty or list its conjunction. When matching, every name resolves
+    /// against the catalog, including names under <c>!</c> and <c>|</c>; a name the database does
+    /// not have is carried by no node, so it records a warning and evaluates as such (<c>:!A</c>
+    /// then matches every node). Insertion takes a pure conjunction and may introduce new labels.
     /// </summary>
-    private void ValidateNodeLabels(GqlNodePattern node, bool creating)
+    /// <param name="node">The node pattern.</param>
+    /// <param name="creating">Whether the pattern inserts rather than matches.</param>
+    /// <param name="tokens">Resolves the names a match reads.</param>
+    /// <returns>
+    /// <see langword="false"/> when a matched node's conjunction names a label the database does
+    /// not have, so no node satisfies the pattern.
+    /// </returns>
+    private static bool ValidateNodeLabels(GqlNodePattern node, bool creating, GraphTokenResolver tokens)
     {
         if (node.Labels is null) { throw new DatabaseException("COHDBG001: A node pattern requires a label list."); }
         IReadOnlyList<string> names = node.Labels;
+        // The labels every match carries: a pure conjunction's, or Labels for a pattern built without an expression.
+        IReadOnlyList<string> required = node.Labels;
         if (node.LabelExpression is { } expression)
         {
             names = GraphLabelEvaluator.Names(expression);
@@ -162,17 +261,25 @@ internal sealed class GraphPlanner
             {
                 throw new DatabaseException($"COHDBG001: An inserted node takes a label conjunction such as :A&B; '{GraphLabelEvaluator.Describe(expression)}' selects nodes and cannot label a new one.");
             }
+            required = conjunction ?? [];
         }
         // A chain may name a label many times; each is resolved once.
         foreach (string label in GraphLabelEvaluator.Distinct(names))
         {
             if (label is null) { throw new DatabaseException("COHDBG001: A label name cannot be null."); }
-            if (!creating) { RequireLabel(label); }
+            if (!creating) { tokens.HasLabel(label); }
             else if (string.IsNullOrWhiteSpace(label))
             {
                 throw new DatabaseException("COHDBG001: An inserted label cannot be empty or only whitespace.");
             }
         }
+        if (creating) { return true; }
+        // Each name was resolved above; the resolver answers again from its cache.
+        foreach (string label in required)
+        {
+            if (!tokens.HasLabel(label)) { return false; }
+        }
+        return true;
     }
 
     /// <summary>
@@ -195,16 +302,26 @@ internal sealed class GraphPlanner
 
     /// <summary>
     /// Validates a relationship pattern's direction and type requirement. A label expression is
-    /// the whole requirement, so <c>Type</c> must be null or its single name. Every name must be a
-    /// catalog type when matching. Insertion needs one type and one direction, so <c>-[]-</c>,
-    /// <c>&lt;-[]-&gt;</c> and their abbreviations cannot insert.
+    /// the whole requirement, so <c>Type</c> must be null or its single name. When matching, every
+    /// name resolves against the catalog; a type the database does not have records a warning and
+    /// is the type of no relationship. Insertion needs one type and one direction, so
+    /// <c>-[]-</c>, <c>&lt;-[]-&gt;</c> and their abbreviations cannot insert.
     /// </summary>
-    private void ValidateRelationship(GqlRelationshipPattern relationship, bool creating)
+    /// <param name="relationship">The relationship pattern.</param>
+    /// <param name="creating">Whether the pattern inserts rather than matches.</param>
+    /// <param name="tokens">Resolves the names a match reads.</param>
+    /// <returns>
+    /// <see langword="false"/> when a matched relationship's required type (its <c>Type</c>, or a
+    /// conjunction's names) is one the database does not have, so no relationship satisfies it.
+    /// </returns>
+    private static bool ValidateRelationship(GqlRelationshipPattern relationship, bool creating, GraphTokenResolver tokens)
     {
         if (!Enum.IsDefined(relationship.Direction))
         { throw new DatabaseException($"COHDBG001: Relationship direction {(int)relationship.Direction} is not defined."); }
         string? type = relationship.Type;
         IReadOnlyList<string> names = type is null ? [] : [type];
+        // The types a match must have: Type, or a conjunction's names (one name is a conjunction).
+        IReadOnlyList<string> required = names;
         if (relationship.LabelExpression is { } expression)
         {
             names = GraphLabelEvaluator.Names(expression);
@@ -214,6 +331,7 @@ internal sealed class GraphPlanner
                 throw new DatabaseException($"COHDBG001: A relationship pattern's type '{type}' must equal its label expression '{GraphLabelEvaluator.Describe(expression)}'.");
             }
             type = single;
+            required = GraphLabelEvaluator.Conjunction(expression) ?? [];
         }
         if (creating)
         {
@@ -221,21 +339,14 @@ internal sealed class GraphPlanner
             { throw new DatabaseException("COHDBG001: Inserted relationships require a type and a directed pattern."); }
             if (string.IsNullOrWhiteSpace(type))
             { throw new DatabaseException("COHDBG001: An inserted relationship type cannot be empty or only whitespace."); }
-            return;
+            return true;
         }
-        foreach (string name in GraphLabelEvaluator.Distinct(names)) { RequireRelationshipType(name); }
-    }
-
-    private void RequireLabel(string label)
-    {
-        if (_database.Catalog.FindLabel(label, _snapshot) is null)
-        { throw new DatabaseException($"COHDBG002: Unknown label '{label}'."); }
-    }
-
-    private void RequireRelationshipType(string type)
-    {
-        if (_database.Catalog.FindRelationshipType(type, _snapshot) is null)
-        { throw new DatabaseException($"COHDBG002: Unknown relationship type '{type}'."); }
+        foreach (string name in GraphLabelEvaluator.Distinct(names)) { tokens.HasRelationshipType(name); }
+        foreach (string name in required)
+        {
+            if (!tokens.HasRelationshipType(name)) { return false; }
+        }
+        return true;
     }
 
     private enum BindingKind { Node, Relationship, Path }

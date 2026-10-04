@@ -10,6 +10,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
@@ -250,31 +251,47 @@ public sealed class GqlLabelDirectionExecutionTests
         (await RowsAsync(session, "SHOW LABELS")).Count.ShouldBe(2);
     }
 
+    /// <summary>
+    /// An unknown name anywhere in MATCH, under <c>!</c> and <c>|</c> included, is a label no node
+    /// carries or a type no relationship has (#1228, as Neo4j): the expression evaluates with it, and
+    /// the read warns instead of failing. A label is not a relationship type and a type is not a
+    /// label, so <c>r:A</c> and <c>n:T</c> name unknown tokens of their variable's kind.
+    /// </summary>
     /// <param name="gql">A read naming a label or type the catalog does not define.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph] - Label expressions: an unknown name anywhere in MATCH is COHDBG002")]
-    [InlineData("MATCH (n:A|Missing) RETURN n")]
-    [InlineData("MATCH (n:!Missing) RETURN n")]
-    [InlineData("MATCH (n:A&!(B|Missing)) RETURN n")]
-    [InlineData("MATCH (n IS Missing|%) RETURN n")]
-    [InlineData("MATCH ()-[r:T|Missing]->() RETURN r")]
-    [InlineData("MATCH ()-[r:!Missing]->() RETURN r")]
-    [InlineData("MATCH (n) WHERE n:Missing RETURN n")]
-    [InlineData("MATCH (n) WHERE n IS NOT LABELED A|Missing RETURN n")]
-    [InlineData("MATCH ()-[r]->() WHERE r:Missing RETURN r")]
-    [InlineData("MATCH ()-[r]->() WHERE r:A RETURN r")]
-    [InlineData("MATCH (n) WHERE n:T RETURN n")]
-    public async Task Execute_UnknownLabelOrType_ShouldReportCohdbg002Async(string gql)
+    /// <param name="expected">The comma-separated names it returns in identity order, or empty.</param>
+    /// <param name="code">The warning's code: COHDBG010 for a label, COHDBG011 for a relationship type.</param>
+    /// <param name="name">The unknown name the warning quotes.</param>
+    [Theory(DisplayName = "Cohesion Test [Graph] - Label expressions: an unknown name anywhere in MATCH matches nothing and warns")]
+    [InlineData("MATCH (n:A|Missing) RETURN n.name", "a,ab", "COHDBG010", "Missing")]
+    [InlineData("MATCH (n:!Missing) RETURN n.name", "a,b,ab,c,u", "COHDBG010", "Missing")]
+    [InlineData("MATCH (n:A&!(B|Missing)) RETURN n.name", "a", "COHDBG010", "Missing")]
+    [InlineData("MATCH (n IS Missing|%) RETURN n.name", "a,b,ab,c", "COHDBG010", "Missing")]
+    [InlineData("MATCH (n:A&Missing) RETURN n.name", "", "COHDBG010", "Missing")]
+    [InlineData("MATCH ()-[r:T|Missing]->() RETURN r.name", "t", "COHDBG011", "Missing")]
+    [InlineData("MATCH ()-[r:!Missing]->() RETURN r.name", "t,u1", "COHDBG011", "Missing")]
+    [InlineData("MATCH ()-[r:Missing]->() RETURN r.name", "", "COHDBG011", "Missing")]
+    [InlineData("MATCH (n) WHERE n:Missing RETURN n.name", "", "COHDBG010", "Missing")]
+    [InlineData("MATCH (n) WHERE n IS NOT LABELED A|Missing RETURN n.name", "b,c,u", "COHDBG010", "Missing")]
+    [InlineData("MATCH ()-[r]->() WHERE r:Missing RETURN r.name", "", "COHDBG011", "Missing")]
+    [InlineData("MATCH ()-[r]->() WHERE r:A RETURN r.name", "", "COHDBG011", "A")]
+    [InlineData("MATCH (n) WHERE n:T RETURN n.name", "", "COHDBG010", "T")]
+    public async Task Execute_UnknownLabelOrType_ShouldMatchNothingAndWarnAsync(string gql, string expected, string code, string name)
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
         await using var session = await SeedAsync(engine, labelSeed);
 
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None));
+        await using var result = (QueryResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
+        var names = new List<string?>();
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { names.Add(row.GetString(0)); }
 
         // Assert
-        error.Message.ShouldStartWith("COHDBG002", Case.Sensitive);
+        names.ShouldBe(expected.Length == 0 ? [] : expected.Split(','));
+        var warning = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
+        warning.Code.ShouldBe(code);
+        warning.Severity.ShouldBe(DiagnosticSeverity.Warning);
+        warning.Message.ShouldNotBeNull().ShouldContain($"'{name}'", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Labeled predicate: IS LABELED, n: and the pattern form agree; IS NOT LABELED and r:T filter")]

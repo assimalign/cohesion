@@ -285,8 +285,11 @@ type, with a typed switch over the five records and no reflection or text matchi
 | `e & f` | it matches both | it matches both, so `T&U` selects none |
 | `e \| f` | it matches either | it matches either |
 
-Every name in a `MATCH` expression must be a catalog label or relationship type, including names
-under `!` and `|` (`COHDBG002`), because labels are persistent catalog definitions. An `INSERT`
+Every name in a `MATCH` expression resolves against the catalog, including names under `!` and `|`,
+because labels are persistent catalog definitions. A name the database does not have is a label no
+node carries, or the type of no relationship: the expression evaluates with it (`:!Missing` matches
+every node), and a read reports it as a `COHDBG010` or `COHDBG011` warning instead of failing, as
+Neo4j does (#1228; Graph engine design, "Unknown labels and relationship types in reads"). An `INSERT`
 node takes a pure conjunction (`:A`, `:A&B`, `:A:B`) and may introduce new labels; `|`, `!` and
 `%` select nodes and cannot label a new one, so they are `COHDBG001`. An inserted relationship
 needs one type. A labeled predicate (`n IS LABELED A|B`, `n IS NOT LABELED A`, `n:A|B`) resolves
