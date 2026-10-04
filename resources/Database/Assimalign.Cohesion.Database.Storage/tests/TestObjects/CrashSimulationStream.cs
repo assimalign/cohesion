@@ -298,4 +298,32 @@ public sealed class SimulatedPowerLossException : IOException
         : base("Simulated power loss.")
     {
     }
+
+    /// <summary>
+    /// Runs an action a simulated power loss interrupts, and returns the power loss: thrown as
+    /// itself, or as the cause of the <see cref="StorageOfflineException"/> a header slot write
+    /// that failed takes its storage offline with (#1268). Either way the process is gone; the
+    /// test reopens what the media holds.
+    /// </summary>
+    /// <param name="action">The action that loses power.</param>
+    /// <param name="context">What the test was doing, for the failure message.</param>
+    /// <returns>The power loss.</returns>
+    /// <exception cref="InvalidOperationException">The action completed; any other failure propagates.</exception>
+    public static SimulatedPowerLossException Expect(Action action, string? context = null)
+    {
+        try
+        {
+            action();
+        }
+        catch (SimulatedPowerLossException loss)
+        {
+            return loss;
+        }
+        catch (StorageOfflineException offline) when (offline.InnerException is SimulatedPowerLossException loss)
+        {
+            return loss;
+        }
+
+        throw new InvalidOperationException($"Expected a simulated power loss, but the action completed{(context is null ? "." : $": {context}.")}");
+    }
 }

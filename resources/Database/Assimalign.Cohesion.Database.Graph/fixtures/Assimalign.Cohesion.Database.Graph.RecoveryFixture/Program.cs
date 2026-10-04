@@ -22,8 +22,10 @@ if (args[0] == "seed")
     await session.ExecuteAsync("CREATE (a:Person {name:'partial'})-[r:PARTIAL]->(b:Person {name:'partial2'})");
     foreach (var worker in engine.Workers)
     {
-        if (worker.Kind == DatabaseEngineWorkerKind.PageWriteBack)
-        { ((DatabaseEngineWorker)worker).RunIteration(CancellationToken.None); }
+        // A pass records its failure instead of throwing it (#1268); the fixture fails fast.
+        if (worker.Kind == DatabaseEngineWorkerKind.PageWriteBack
+            && worker is DatabaseEngineWorker guided && !guided.RunIteration(CancellationToken.None))
+        { throw new InvalidOperationException("The page write-back pass failed.", guided.Fault); }
     }
     // End the process after page write-back without disposing the active transaction.
     Environment.Exit(0);

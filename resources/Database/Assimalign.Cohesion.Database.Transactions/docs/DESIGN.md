@@ -216,7 +216,10 @@ of it (in practice a few hundred milliseconds). A failure that persists is retri
 0.4 … seconds, then once per maintenance interval, so it cannot spin. The purge workers record a
 retry that fails again as a worker fault and keep running; before, the exception escaped the
 worker's pump loop and stopped the worker for good, leaving every deferred writer stuck until
-the database closed. The schedule reads a `TimeProvider` (the coordinator's internal
+the database closed. Since #1268 a failed retry is a failed worker pass like any other, so the
+worker's one-second failure backoff (`DatabaseEngineWorker.FailureBackoff`) floors the delay
+before the next retry: after a failed retry the schedule runs at 1 s, 1 s, 1 s, 1.6 s … rather
+than 0.2, 0.4, 0.8, 1.6 s. The first retry, which the deferral itself wakes, is unchanged. The schedule reads a `TimeProvider` (the coordinator's internal
 constructor), so `DeferredUndoBackoffTests` and the coordinator's tests drive it without
 waiting.
 
@@ -579,7 +582,10 @@ statement's length, and the worker moves on to the others at once. The deferred 
 fails the statement that runs it, whose outcome is already decided: a storage bracket still open
 outside the semaphore leaves the request for the next statement or the worker's next look, an
 offline storage drops it, and any other failure is kept and thrown by the next `TryCheckpoint`,
-so the worker records it. Short statements still cannot keep a checkpoint out, since every one
+so the worker records it (since #1268 the workers catch it per database, report it and retry;
+before, it escaped the worker's loop and ended the worker). A deferred request reported as
+`false` leaves an earlier failure of the worker recorded until a checkpoint of that database
+completes. Short statements still cannot keep a checkpoint out, since every one
 of them ends by running the deferred request. `TransactionCoordinatorRecoveryTests` covers the
 deferral and the failure hand-off, and the SQL engine's
 `CheckpointJournalSize_LongStatementInAnotherDatabase_ShouldKeepTheJournalBounded` holds one

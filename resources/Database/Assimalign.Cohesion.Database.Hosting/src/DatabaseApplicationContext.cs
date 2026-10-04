@@ -87,9 +87,11 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// </summary>
     /// <param name="cancellationToken">Signals that the health evaluation should be abandoned.</param>
     /// <returns>
-    /// A healthy result when every engine is running, a degraded result when an engine reports a
-    /// worker fault, or an unhealthy result when an engine is disposed or reports an unknown state,
-    /// or when an open database is offline after a failed durable flush (#1243).
+    /// A healthy result when every engine is running, a degraded result while an engine reports a
+    /// worker that keeps failing (the result names each failing worker and its last failure,
+    /// #1268), or an unhealthy result when an engine is disposed or reports an unknown state, or
+    /// when an open database is offline after a failed durable flush (#1243) or file header write
+    /// (#1268).
     /// </returns>
     public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
     {
@@ -118,6 +120,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
             ["engineCount"] = engines.Count,
         };
         var faultedEngines = new List<string>();
+        var failingWorkers = new List<string>();
         var unavailableEngines = new List<string>();
         var offlineDatabases = new List<string>();
         int workerCount = 0;
@@ -145,6 +148,18 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                 data[$"{prefix}.kind"] = worker.Kind.ToString();
                 data[$"{prefix}.intervalMilliseconds"] = worker.Interval.TotalMilliseconds;
                 workerCount++;
+
+                // A worker that keeps failing keeps running; its record says which and why.
+                if (worker is DatabaseEngineWorker guided)
+                {
+                    data[$"{prefix}.failureCount"] = guided.FailureCount;
+                    if (guided.Fault is { } fault)
+                    {
+                        data[$"{prefix}.consecutiveFailures"] = guided.ConsecutiveFailures;
+                        data[$"{prefix}.fault"] = $"{fault.GetType().Name}: {fault.Message}";
+                        failingWorkers.Add($"{worker.Name} ({guided.ConsecutiveFailures} failed pass(es); {fault.GetType().Name}: {fault.Message})");
+                    }
+                }
             }
 
             switch (state)
@@ -160,9 +175,9 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     break;
             }
 
-            // A database that went offline after a failed durable flush refuses every request
-            // until it is reopened (#1243); the engine itself keeps running, so its state does not
-            // show it. A disposed engine has no databases to report.
+            // A database that went offline after a failed durable flush or file header write
+            // refuses every request until it is reopened (#1243, #1268); the engine itself keeps
+            // running, so its state does not show it. A disposed engine has no databases to report.
             if (state != EngineState.Disposed)
             {
                 IReadOnlyList<DatabaseName> offline = engine.OfflineDatabases;
@@ -192,15 +207,17 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         else if (offlineDatabases.Count > 0)
         {
             contribution = HealthContribution.Unhealthy(
-                $"Offline databases: {string.Join(", ", offlineDatabases)}. A durable flush of their storage failed, so every " +
-                "operation on them is refused until each is reopened (OpenDatabaseAsync), or the process restarts and opens " +
-                "them again; either runs recovery.",
+                $"Offline databases: {string.Join(", ", offlineDatabases)}. A durable flush or a file header write of their " +
+                "storage failed, so every operation on them is refused until each is reopened (OpenDatabaseAsync), or the " +
+                "process restarts and opens them again; either runs recovery.",
                 data);
         }
         else if (faultedEngines.Count > 0)
         {
+            string workers = failingWorkers.Count > 0 ? $" Failing workers: {string.Join("; ", failingWorkers)}." : string.Empty;
             contribution = HealthContribution.Degraded(
-                $"Database engines with worker faults: {string.Join(", ", faultedEngines)}.",
+                $"Database engines with worker faults: {string.Join(", ", faultedEngines)}.{workers} The workers keep running " +
+                "and retry; the engine returns to Running once each completes a pass.",
                 data);
         }
         else

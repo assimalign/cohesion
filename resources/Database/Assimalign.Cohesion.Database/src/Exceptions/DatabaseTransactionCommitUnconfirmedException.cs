@@ -62,8 +62,8 @@ public class DatabaseTransactionCommitUnconfirmedException : DatabaseException
 
         string detail = cause.InnerException?.Message ?? cause.Message;
         return new DatabaseTransactionCommitUnconfirmedException(
-            $"{code}: Database '{database}' went offline while the operation was committing: a durable flush of its storage " +
-            $"failed ({detail}) after the operation's work reached the journal. The operation may or may not have been " +
+            $"{code}: Database '{database}' went offline while the operation was committing: {cause.FailedOperation} of its " +
+            $"storage failed ({detail}) after the operation's work reached the journal. The operation may or may not have been " +
             "applied; do not retry it. Reopen the database (OpenDatabaseAsync): its recovery keeps the work if its records " +
             "reached stable storage and discards it if not, and reading the data back then tells which.",
             cause);

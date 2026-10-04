@@ -997,7 +997,9 @@ a drop):
   default, was 30 seconds) passed since its last checkpoint and its journal received
   records since. Otherwise the worker wakes at most once a second to look. A busy
   storage (`StorageTransactionException`) is retried at the next look; an offline
-  database is skipped. The data file set checkpoints **through the database's
+  database is skipped; any other failure of one database's checkpoint is reported, the
+  pass goes on to the next database, and the worker retries after its failure backoff
+  (#1268, below). The data file set checkpoints **through the database's
   transaction coordinator**, which takes the statement apply gate, so a sustained
   statement load cannot keep the checkpoint out, and the truncating checkpoint record
   carries every in-flight logical transaction's sequence (recovery classification
@@ -1034,10 +1036,27 @@ flushes and closes every open database — an embedded consumer gets identical
 durability with no host and no composition at all (R10). A worker fault flips
 the engine's observational `State` to `Faulted` without stopping service — a
 faulted worker never compromises correctness (grouped commits self-help within
-the window; checkpoints simply stop truncating), but the owner can observe the
-engine runs degraded. (Previously the fault was thrown from `StopAsync`; with
-lifecycle members gone, `State` is the reporting surface — throwing from
-`DisposeAsync` would be hostile to `await using`.)
+the window; a checkpoint that cannot run leaves the journal untruncated), but the
+owner can observe the engine runs degraded. (Previously the fault was thrown from
+`StopAsync`; with lifecycle members gone, `State` is the reporting surface —
+throwing from `DisposeAsync` would be hostile to `await using`.)
+
+**A worker failure never ends a worker (#1268).** Every worker catches per database:
+a failure of one database's checkpoint, write-back or flush is reported
+(`DatabaseEngineWorker.ReportFailure`) and the pass goes on to the next database; a
+failed pass sets the worker's `Fault`, the loop sleeps `DatabaseEngineWorker.FailureBackoff`
+(one second, PostgreSQL's sleep after a background-worker error,
+`src/backend/postmaster/checkpointer.c:286-346`, `bgwriter.c:154-205`) and retries, and the
+first pass that completes its work clears the record, so `State` is `Faulted` exactly
+while a worker keeps failing. A failure that took a database offline (a failed durable
+flush, #1243, or a failed header slot write, #1268) is not the worker's: the workers skip
+that database and the engine lists it in `OfflineDatabases`. The engine's pump runs a
+worker again after the backoff if its loop ever ends early (only a worker that implements
+`IDatabaseEngineWorker` without the guided base can let that happen; the engine then reports
+`Faulted` until disposal). Before #1268 the pump caught outside the worker's loop, so one
+unexpected exception — a page write the checkpoint could not make, a deferred checkpoint's
+failure handed back by the coordinator — ended that worker for good, and the reproduction
+left the journal at 332,278 bytes ten seconds after the fault cleared.
 
 Cadence knobs live here, on `SqlDatabaseEngineOptions` — the engine owns the
 loop, so cadence is engine configuration; observers read it through
@@ -1104,6 +1123,24 @@ fails each fsync of `CREATE TABLE`, `CREATE INDEX`, `DROP TABLE` and `ALTER TABL
 turn, reopens, and checks the caller was told unconfirmed every time, including the cases whose
 effect survived.
 
+**A failed header slot write takes the database offline too (#1268).** A checkpoint whose
+header slot write fails leaves that slot possibly the newest generation on the media, so its
+storage writes no header again in this process, and with no header write no checkpoint can
+truncate the journal. The storage therefore goes offline exactly as a failed fsync takes it
+(`Database.Storage` DESIGN.md, "A header write that fails after its slot write was issued"), and
+the database with it: every later operation is refused with `COHSQLT004`, whose message names
+"a write of the file header" (`StorageOfflineException.FailedOperation`). Before #1268 the
+storage only refused later header writes while the database kept accepting commits; the
+reproduction committed 200 rows after the fault and grew the journal from 16,688 to 3,339,088
+bytes. `SqlWorkerResilienceTests` fails the checkpoint's header slot write on one database
+through device faults that fire on the worker's own thread and checks the coded refusals, that
+neither file set changes afterwards, that the slot write was tried once, that the other
+database keeps being checkpointed, and that the reopen brings back every row committed before
+the fault. The same suite fails a checkpoint's and a write-back's page writes (the worker
+reports, backs off, and recovers once the fault clears, while the other database's work goes
+on) and a group commit's fsync (only its database goes offline; the flush worker keeps serving
+the other database's grouped commits within the group-commit window).
+
 **Buffer pool and checkpoint options (#1254).**
 
 | Option | Default | Validation |
@@ -1136,7 +1173,10 @@ writer's locks until a retry completes it; the version-purge worker retries abou
 then at doubling delays up to `MaintenanceInterval` (`Database.Transactions` DESIGN.md). A
 transient failure releases a waiting writer in a few hundred milliseconds. A retry that fails
 makes the engine report `Faulted`; the first purge pass with no failure and no undo still
-deferred clears it, so a fault that passes leaves the engine `Running`.
+deferred clears it, so a fault that passes leaves the engine `Running`. Since #1268 a failed
+retry is a failed pass like any other, so the worker's one-second failure backoff floors the
+delay before the next retry; the first retry, which the deferral itself wakes, still runs about
+100 ms after it.
 
 ## The SQL server runtime (`SqlDatabaseServer`)
 

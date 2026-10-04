@@ -6,7 +6,8 @@ namespace Assimalign.Cohesion.Database;
 
 /// <summary>
 /// Thrown by every operation on a database that went offline: a durable flush of its journal
-/// or of one of its data files failed (#1243). Nothing more is written to the database, and
+/// or of one of its data files failed (#1243), or a write of a file header failed after its header
+/// slot write was issued (#1268). Nothing more is written to the database, and
 /// every later operation, in process and over every wire server, is refused with this
 /// exception until the database is reopened (<see cref="IDatabaseEngine.OpenDatabaseAsync"/>),
 /// whose recovery reads the journal and decides the outcome of every commit that was not
@@ -67,9 +68,9 @@ public class DatabaseOfflineException : DatabaseException
         string detail = cause.InnerException?.Message ?? cause.Message;
         return new DatabaseOfflineException(
             code,
-            $"{code}: Database '{database}' is offline: a durable flush of its storage failed ({detail}), so nothing more is " +
-            "written to it. Every operation is refused until the database is reopened (OpenDatabaseAsync); the reopen's " +
-            "recovery reads the journal and decides the outcome of every commit that was not confirmed.",
+            $"{code}: Database '{database}' is offline: {cause.FailedOperation} of its storage failed ({detail}), so nothing " +
+            "more is written to it. Every operation is refused until the database is reopened (OpenDatabaseAsync); the " +
+            "reopen's recovery reads the journal and decides the outcome of every commit that was not confirmed.",
             cause);
     }
 }

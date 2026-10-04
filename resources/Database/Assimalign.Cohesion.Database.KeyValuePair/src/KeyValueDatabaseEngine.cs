@@ -54,12 +54,14 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     private KeyValueStorage[] _storageSnapshot = [];
     private KeyValueDatabaseInstance[] _instanceSnapshot = [];
 
-    // A worker that died (its pump ended on an exception): kept for the engine's lifetime.
-    private Exception? _workerFault;
+    // The worker inventory as published to readers (Workers, State): replaced whole whenever a
+    // worker is attached, so a reader never enumerates a list being changed.
+    private IReadOnlyList<IDatabaseEngineWorker> _workerView = [];
 
-    // The last failure a running worker reported (the version-purge worker's failed retry of a
-    // deferred undo); cleared by that worker's next clean pass.
-    private Exception? _maintenanceFault;
+    // The last exception that escaped a worker's Run (only a worker that does not derive from
+    // DatabaseEngineWorker can let one escape); its pump restarted it, and the engine reports
+    // Faulted until it is disposed, because it cannot tell when such a worker is healthy again.
+    private Exception? _workerRunFault;
     private bool _disposed;
 
     /// <summary>
@@ -101,6 +103,7 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
             new KeyValueVersionPurgeWorker(this),
             new KeyValueIndexMaintenanceWorker(this),
         ];
+        PublishWorkers();
 
         // Spawn the worker pumps last, after every field they observe is
         // initialized: one dedicated background thread per worker, alive until
@@ -113,6 +116,12 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     public string Name { get; }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <see cref="EngineState.Faulted"/> while one of the engine's workers keeps failing: its
+    /// <see cref="DatabaseEngineWorker.Fault"/> is set from a failed pass until a pass completes its
+    /// work (#1268). An offline database is not a worker failure; <see cref="OfflineDatabases"/>
+    /// lists it.
+    /// </remarks>
     public EngineState State
     {
         get
@@ -122,9 +131,20 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
                 return EngineState.Disposed;
             }
 
-            return Volatile.Read(ref _workerFault) is null && Volatile.Read(ref _maintenanceFault) is null
-                ? EngineState.Running
-                : EngineState.Faulted;
+            if (Volatile.Read(ref _workerRunFault) is not null)
+            {
+                return EngineState.Faulted;
+            }
+
+            foreach (var worker in Volatile.Read(ref _workerView))
+            {
+                if (worker is DatabaseEngineWorker { Fault: not null })
+                {
+                    return EngineState.Faulted;
+                }
+            }
+
+            return EngineState.Running;
         }
     }
 
@@ -150,7 +170,7 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     public EngineModel Model => EngineModel.KeyValueStore;
 
     /// <inheritdoc />
-    public IReadOnlyList<IDatabaseEngineWorker> Workers => _workers.AsReadOnly();
+    public IReadOnlyList<IDatabaseEngineWorker> Workers => Volatile.Read(ref _workerView);
 
     /// <inheritdoc />
     public IReadOnlyList<IDatabaseServer> Servers => _servers.AsReadOnly();
@@ -189,20 +209,13 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     internal ManualResetEventSlim UndoDeferredSignal => _undoDeferredSignal;
 
     /// <summary>
-    /// Records a background worker's failure without stopping the worker: the engine reports
-    /// <see cref="EngineState.Faulted"/> and the worker's next pass runs as usual. The version-purge
-    /// worker reports a failed retry of a deferred undo here, and clears it
-    /// (<see cref="ClearWorkerFault"/>) once a pass runs clean.
+    /// Reports whether <paramref name="database"/> is still one of the engine's open databases:
+    /// false once it was dropped, closed for a reopen, or the engine closed it. A worker pass that
+    /// raced such a close tolerates the <see cref="ObjectDisposedException"/> it gets; one from a
+    /// database still open is a failure.
     /// </summary>
-    /// <param name="exception">The failure.</param>
-    internal void ReportWorkerFault(Exception exception) => Volatile.Write(ref _maintenanceFault, exception);
-
-    /// <summary>
-    /// Clears the failure <see cref="ReportWorkerFault"/> recorded, after the reporting worker's
-    /// next pass ran without one: a deferred undo that failed while its fault lasted and then
-    /// completed leaves nothing degraded (#1226 review). A worker that died stays recorded.
-    /// </summary>
-    internal void ClearWorkerFault() => Volatile.Write(ref _maintenanceFault, null);
+    /// <param name="database">The database a worker pass visited.</param>
+    internal bool IsOpen(KeyValueDatabaseInstance database) => Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
 
     /// <summary>
     /// Creates a new key-value database engine from options. The engine is
@@ -480,7 +493,14 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
             _workerThreads.Remove(thread);
             throw;
         }
+
+        PublishWorkers();
     }
+
+    /// <summary>
+    /// Publishes the worker inventory to readers as a fresh read-only copy.
+    /// </summary>
+    private void PublishWorkers() => Volatile.Write(ref _workerView, Array.AsReadOnly(_workers.ToArray()));
 
     internal void AttachServer(IDatabaseServer server)
     {
@@ -648,27 +668,41 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     }
 
     /// <summary>
-    /// The worker pump frame: runs the worker until the engine is disposed. A
-    /// cooperative cancellation exit is a clean stop; any other fault is recorded —
-    /// the engine reports <see cref="EngineState.Faulted"/> and keeps serving (a
-    /// faulted worker never compromises correctness: grouped commits self-help
-    /// within their window, checkpoints simply stop truncating), but the owner can
-    /// observe that the engine runs degraded. An escaped exception on a raw thread
-    /// would terminate the process.
+    /// The worker pump frame: runs the worker until the engine is disposed, and never lets it end
+    /// before that (#1268). A <see cref="DatabaseEngineWorker"/> catches every failure per pass,
+    /// records it and backs off, so its <see cref="IDatabaseEngineWorker.Run"/> returns only on
+    /// cancellation. A worker that implements the interface alone may let an exception escape, or
+    /// return early: the pump records that (the engine reports <see cref="EngineState.Faulted"/>
+    /// until disposal), sleeps <see cref="DatabaseEngineWorker.FailureBackoff"/>, and runs it again.
+    /// A faulted worker never compromises correctness: grouped commits self-help within their
+    /// window, and a checkpoint that cannot run leaves the journal untruncated. Only an
+    /// <see cref="OutOfMemoryException"/> escapes the thread, which ends the process.
     /// </summary>
     private void PumpWorker(IDatabaseEngineWorker worker, CancellationToken cancellationToken)
     {
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
-            worker.Run(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            // Clean stop.
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            Interlocked.CompareExchange(ref _workerFault, exception, null);
+            try
+            {
+                worker.Run(cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                Volatile.Write(ref _workerRunFault, new InvalidOperationException(
+                    $"Worker '{worker.Name}' returned from Run before its engine stopped it; the engine runs it again."));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                Volatile.Write(ref _workerRunFault, exception);
+            }
+
+            cancellationToken.WaitHandle.WaitOne(DatabaseEngineWorker.FailureBackoff);
         }
     }
 

@@ -126,7 +126,7 @@ public sealed class StorageCheckpointAnchorTests
         // Act: the checkpoint loses power at the journal truncation — after its header slot
         // is durable, before the journal loses the Free images of the reused pages.
         point.CrashWhen = (stream, operation, _, _) => stream == "journal" && operation == "SetLength";
-        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(anchor));
+        SimulatedPowerLossException.Expect(() => storage.Checkpoint(anchor));
         var images = storage.CaptureDurable();
         using var reopened = TornStorage.Open(images);
         long chainPage = reopened.AnchorChainPages[0];
@@ -167,7 +167,7 @@ public sealed class StorageCheckpointAnchorTests
 
         // Act: a checkpoint whose anchor needs a chain page loses power at the truncation.
         point.CrashWhen = (stream, operation, _, _) => stream == "journal" && operation == "SetLength";
-        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(anchor));
+        SimulatedPowerLossException.Expect(() => storage.Checkpoint(anchor));
         var images = storage.CaptureDurable();
         using var reopened = TornStorage.Open(images);
         bool freeIsDurable = new StreamJournal(new MemoryStream(images.Journal)).ReadAll()
@@ -201,7 +201,7 @@ public sealed class StorageCheckpointAnchorTests
 
         // Act: power is lost at the header slot write, after the chain page reached the media.
         point.CrashWhen = (stream, operation, offset, _) => stream == "data" && operation == "Write" && offset == StorageHeaderPage.Slot0Offset;
-        Should.Throw<SimulatedPowerLossException>(() => storage.FlushHeader());
+        SimulatedPowerLossException.Expect(() => storage.FlushHeader());
         var images = storage.CaptureDurable();
         using var reopened = TornStorage.Open(images);
         bool freeIsDurable = new StreamJournal(new MemoryStream(images.Journal)).ReadAll()

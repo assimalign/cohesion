@@ -27,7 +27,10 @@ the whole base surface — including child-owned vocabulary the contracts speak
   are **data machines**: operational from creation, no start/stop ceremony;
   disposal quiesces their background workers and durably flushes. `State` is
   observational (`Running`/`Faulted`/`Disposed`); `Workers` exposes the
-  engine-owned background loops for diagnostics (name, kind, cadence).
+  engine-owned background loops for diagnostics (name, kind, cadence). The
+  guided `DatabaseEngineWorker` base never lets a failure end its loop: it
+  records a failed pass (`Fault`), backs off (`FailureBackoff`) and retries, and
+  `Faulted` lasts exactly while a worker keeps failing (#1268).
 - **Server contracts** — `IDatabaseServer` (start/stop lifecycle — "running"
   lives on the server, never the engine) with its observational
   `IDatabaseServerContext` (the one engine it fronts + active sessions).

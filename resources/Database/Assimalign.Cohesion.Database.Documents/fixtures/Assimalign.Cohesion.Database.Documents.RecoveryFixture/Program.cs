@@ -29,9 +29,11 @@ if (args[0] == "seed")
     await collection.PutAsync(session, "partial", Encoding.UTF8.GetBytes(original));
     foreach (var worker in engine.Workers)
     {
-        if (worker.Kind == DatabaseEngineWorkerKind.PageWriteBack)
+        // A pass records its failure instead of throwing it (#1268); the fixture fails fast.
+        if (worker.Kind == DatabaseEngineWorkerKind.PageWriteBack
+            && worker is DatabaseEngineWorker guided && !guided.RunIteration(CancellationToken.None))
         {
-            ((DatabaseEngineWorker)worker).RunIteration(CancellationToken.None);
+            throw new InvalidOperationException("The page write-back pass failed.", guided.Fault);
         }
     }
     // Process termination skips disposal and rollback after physical write brackets.

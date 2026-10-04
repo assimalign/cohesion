@@ -18,6 +18,8 @@
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Indexing\tests\TestObjects\LegacyBTreePages.cs" Link="TestObjects\LegacyBTreePages.cs" />
 		<!-- Rewrites a data file's storage format version for the storage-format refusal tests (#1251). -->
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\StorageFormatFiles.cs" Link="TestObjects\StorageFormatFiles.cs" />
+		<!-- Device faults that fire on the engine's worker threads, for the worker resilience tests (#1268). -->
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DeviceFaults.cs" Link="TestObjects\DeviceFaults.cs" />
 	</ItemGroup>
 	<Target Name="CopyDocumentRecoveryFixture" AfterTargets="Build">
 		<ItemGroup>

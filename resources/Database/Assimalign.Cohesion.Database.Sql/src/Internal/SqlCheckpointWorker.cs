@@ -31,6 +31,15 @@ using Assimalign.Cohesion.Database.Storage;
 /// (<see cref="StorageTransactionException"/>) is retried at the next poll. An offline database
 /// (#1243) is skipped: nothing may be written to it until it is reopened.
 /// </para>
+/// <para>
+/// <b>A failed checkpoint is one database's failure (#1268).</b> Any other failure — a page write
+/// the checkpoint's flush could not make, a deferred checkpoint's failure the coordinator hands
+/// back — is reported and the pass goes on to the next database; the worker backs off
+/// (<see cref="DatabaseEngineWorker.FailureBackoff"/>) and retries, since the journal is still
+/// due. A failure that took the database offline (a failed durable flush, or a header slot write
+/// that failed) is not the worker's: the database is skipped from then on and the engine lists
+/// it offline. Before #1268 any such exception escaped the pass and ended the worker for good.
+/// </para>
 /// </remarks>
 internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
 {
@@ -75,11 +84,12 @@ internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
     }
 
     /// <inheritdoc />
-    public override void RunIteration(CancellationToken cancellationToken)
+    protected override bool RunIterationCore(CancellationToken cancellationToken)
     {
         // Reset before the pass: a journal that reaches the size mid-pass sets it again.
         _engine.CheckpointNeededSignal.Reset();
         var interval = Interval;
+        bool completed = true;
 
         foreach (SqlDatabaseInstance database in _engine.GetInstanceSnapshot())
         {
@@ -116,9 +126,10 @@ internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
                 // the worker never waits on one database's statement while the
                 // others' journals grow. The catalog storage has no logical
                 // transactions above it and checkpoints directly.
-                if (dataDue)
+                if (dataDue && !database.TryCheckpointDataStorage(cancellationToken))
                 {
-                    database.TryCheckpointDataStorage(cancellationToken);
+                    // Deferred to the statement holding the apply gate, which runs it as it ends.
+                    completed = false;
                 }
 
                 if (catalogDue || database.CatalogStorage.IsCheckpointDue(interval))
@@ -129,16 +140,28 @@ internal sealed class SqlCheckpointWorker : DatabaseEngineWorker
             catch (StorageTransactionException)
             {
                 // A transaction is active on this storage; retry on the next pass.
+                completed = false;
             }
-            catch (StorageOfflineException)
-            {
-                // A durable flush failed and took the database offline (#1243); the next pass
-                // skips it, and only a reopen brings it back.
-            }
-            catch (ObjectDisposedException)
+            catch (ObjectDisposedException) when (!_engine.IsOpen(database))
             {
                 // The snapshot can race a database drop; nothing left to checkpoint.
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // A failure that took the database offline (#1243, #1268) is reported through
+                // the engine's offline list, and the next pass skips the database; any other is
+                // this pass's failure, and the next pass retries the checkpoint.
+                if (!database.IsOffline)
+                {
+                    ReportFailure(exception);
+                }
+            }
         }
+
+        return completed;
     }
 }

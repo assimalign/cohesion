@@ -90,11 +90,38 @@ classDiagram
   grouped commits self-help, checkpoints just stop truncating — but the owner
   should learn it runs degraded), `Disposed`. The default control-plane health
   aggregate delivered by #973 reads this surface; nothing drives transitions
-  from outside. A fault a running worker reports (a failed retry of a deferred
-  undo) is cleared by that worker's next clean pass; a worker that died stays
-  recorded.
+  from outside. Since #1268 `Faulted` means a worker *keeps failing*: the guided
+  base records a failed pass (`DatabaseEngineWorker.Fault`, `ConsecutiveFailures`,
+  `FailureCount`) and the first pass that completes its work clears it, so a
+  transient fault does not leave the engine `Faulted` for good. Only a worker that
+  implements `IDatabaseEngineWorker` without the base and lets its loop end early is
+  recorded until disposal: the engine cannot tell when such a worker is healthy again.
+- **A worker failure never ends a worker (#1268).** `DatabaseEngineWorker.Run` is a
+  non-virtual loop that catches per pass: a pass whose work throws, or that reports a
+  failure it moved past (`ReportFailure`, used per database so one database's failed
+  checkpoint never stops another's), is recorded, and the loop sleeps
+  `DatabaseEngineWorker.FailureBackoff` (one second) before its next trigger wait;
+  `RunIteration` is the non-virtual pass (it records instead of throwing and returns
+  whether the pass ran clean) over the protected `RunIterationCore`, which returns
+  whether it completed its work, so a pass that only left work for later (a busy
+  storage, a deferred checkpoint or undo) neither fails nor clears the record. Only
+  cancellation and `OutOfMemoryException` leave the loop. The engines' pumps also run a
+  worker's `Run` again after the backoff if it ever throws or returns early. This is
+  PostgreSQL's recovery for its background writer, checkpointer and WAL writer, which
+  catch an error per cycle, report it, release what the cycle held and sleep a second
+  before the loop continues ("A write error is likely to be repeated",
+  `src/backend/postmaster/bgwriter.c:154-205`, `checkpointer.c:286-346`,
+  `walwriter.c:147-193`); Neo4j's checkpoint scheduler likewise counts consecutive
+  failures and clears them on the next success
+  (`community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:51-84`).
+  A failure the worker cannot recover from is not the worker's: a failed durable flush
+  (#1243) or header slot write (#1268) takes the database offline, the workers skip it,
+  and `OfflineDatabases` reports it. Before #1268 the engines' pumps caught outside
+  `Run`'s loop, so one unexpected exception (a page write the checkpoint could not
+  make) ended a checkpoint, write-back or flush worker for the life of the engine.
 - **An offline database is reported beside the state, not in it** (#1243 review).
-  A database whose fsync failed refuses every request while its engine keeps
+  A database whose fsync, or since #1268 whose header slot write, failed refuses every
+  request while its engine keeps
   serving the others, so `EngineState` does not change; `IDatabaseEngine.OfflineDatabases`
   lists the open databases that are offline, and the hosting health aggregate
   reports the application unhealthy while the list is not empty. Before this an

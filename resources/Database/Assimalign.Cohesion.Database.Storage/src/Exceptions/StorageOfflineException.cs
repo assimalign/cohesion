@@ -4,8 +4,9 @@ namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
 /// Raised when a storage, or its journal, is offline: a durable flush of its journal or of its
-/// data file failed, and nothing may be written to either file again until the storage is
-/// reopened, whose recovery reads the journal and decides what it holds (#1243).
+/// data file failed (#1243), or a write of its file header failed after the header slot write was
+/// issued (#1268), and nothing may be written to either file again until the storage is reopened,
+/// whose recovery reads the journal and decides what it holds.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,6 +24,13 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// flush, checkpoint, page write-back and header write of the same instance.
 /// </para>
 /// <para>
+/// A failed header slot write goes offline for a reason of its own: the slot may already be the
+/// newest generation on the media, so no header write may run again in this process, and without
+/// one no checkpoint can truncate the journal. A storage that kept accepting commits would grow
+/// its journal without bound; PostgreSQL stops on a failed control-file write
+/// (<c>src/common/controldata_utils.c:245-265</c>).
+/// </para>
+/// <para>
 /// The message leads with <see cref="ErrorCode"/>; <see cref="Exception.InnerException"/> is the
 /// failure that took the storage offline.
 /// </para>
@@ -35,14 +43,38 @@ public sealed class StorageOfflineException : StorageException
     public const string ErrorCode = "COHDBS002";
 
     /// <summary>
+    /// What failed when a durable flush of the journal took the storage offline.
+    /// </summary>
+    internal const string JournalFlushOperation = "a durable flush of the journal";
+
+    /// <summary>
+    /// What failed when a durable flush of the data file took the storage offline.
+    /// </summary>
+    internal const string DataFlushOperation = "a durable flush of the data file";
+
+    /// <summary>
+    /// What failed when a file header write took the storage offline.
+    /// </summary>
+    internal const string HeaderWriteOperation = "a write of the file header";
+
+    /// <summary>
     /// Initializes a new <see cref="StorageOfflineException"/>.
     /// </summary>
     /// <param name="message">The message, which leads with <see cref="ErrorCode"/>.</param>
-    /// <param name="cause">The durable flush failure that took the storage offline.</param>
-    internal StorageOfflineException(string message, Exception cause)
+    /// <param name="failedOperation">What failed, for <see cref="FailedOperation"/>.</param>
+    /// <param name="cause">The failure that took the storage offline.</param>
+    internal StorageOfflineException(string message, string failedOperation, Exception cause)
         : base(message, cause)
     {
+        FailedOperation = failedOperation;
     }
+
+    /// <summary>
+    /// Gets what failed and took the storage offline: <c>a durable flush of the journal</c>,
+    /// <c>a durable flush of the data file</c>, or <c>a write of the file header</c>. An engine's
+    /// offline refusal names it.
+    /// </summary>
+    public string FailedOperation { get; }
 
     /// <summary>
     /// Gets whether the storage commit record of the operation that threw this exception was
@@ -104,6 +136,23 @@ public sealed class StorageOfflineException : StorageException
             "durable flush may or may not have reached stable storage, and a retry could report success for writes the " +
             "operating system already dropped, so nothing more is written to the journal or the data file. Reopen the " +
             "storage: its recovery reads the journal and decides the outcome of every commit that was not confirmed.",
+            what,
+            cause);
+
+    /// <summary>
+    /// Creates the exception a failed file header write throws once its header slot write was
+    /// issued: the slot may already be the newest generation on the media, so the storage stops
+    /// writing altogether rather than keep accepting work no checkpoint could truncate (#1268).
+    /// </summary>
+    /// <param name="cause">The failure of the slot write or of the flush after it.</param>
+    internal static StorageOfflineException HeaderWriteFailed(Exception cause)
+        => new(
+            $"{ErrorCode}: The storage is offline: {HeaderWriteOperation} failed after its header slot write was issued " +
+            $"({cause.Message}). That slot may already be the newest generation on the media, so no header write may run " +
+            "again in this process, and without one no checkpoint can truncate the journal; nothing more is written to the " +
+            "journal or the data file. Reopen the storage: its recovery reads the journal and decides the outcome of every " +
+            "commit that was not confirmed.",
+            HeaderWriteOperation,
             cause);
 
     /// <summary>
@@ -111,7 +160,7 @@ public sealed class StorageOfflineException : StorageException
     /// </summary>
     /// <param name="offline">The exception the first failure threw.</param>
     internal static StorageOfflineException Refusal(StorageOfflineException offline)
-        => new(offline.Message, offline.InnerException!);
+        => new(offline.Message, offline.FailedOperation, offline.InnerException!);
 
     /// <summary>
     /// Creates the exception a storage commit throws when its commit record was appended and its
@@ -119,5 +168,5 @@ public sealed class StorageOfflineException : StorageException
     /// </summary>
     /// <param name="offline">The exception the flush threw.</param>
     internal static StorageOfflineException CommitUnconfirmed(StorageOfflineException offline)
-        => new(offline.Message, offline.InnerException!) { CommitRecordWritten = true };
+        => new(offline.Message, offline.FailedOperation, offline.InnerException!) { CommitRecordWritten = true };
 }

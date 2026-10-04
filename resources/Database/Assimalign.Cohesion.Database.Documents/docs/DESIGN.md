@@ -357,7 +357,24 @@ types by the explicit mixed-shape rules above.
 `DocumentDatabaseEngine.Create` starts four engine-owned workers: checkpoint,
 write-ahead-log flush, dirty-page write-back, and MVCC version purge. `Workers`
 exposes them through the existing engine contract. The observable state is Running,
-Faulted after an unexpected worker exception, and Disposed after close.
+Faulted while a worker keeps failing, and Disposed after close.
+
+A worker failure never ends a worker (#1268). Each worker catches per database: a failed
+checkpoint, page write-back or group flush of one database is reported
+(`DatabaseEngineWorker.ReportFailure`, the worker's `Fault`), the pass goes on to the next
+database, the loop sleeps `DatabaseEngineWorker.FailureBackoff` (one second, PostgreSQL's error
+sleep, `src/backend/postmaster/checkpointer.c:286-346`, `bgwriter.c:154-205`), and the first
+pass that completes its work clears the record, so the engine is Faulted exactly while a worker
+keeps failing. A failure that took a database offline (a failed durable flush, or a failed
+header slot write) is not the worker's: the workers skip the database and the engine lists it in
+`OfflineDatabases`. The engine's pump runs a worker again after the backoff if its loop ever ends
+early (only an `IDatabaseEngineWorker` without the guided base can; the engine then reports
+Faulted until disposal). Before #1268 the pump caught outside the worker's loop, so one
+unexpected exception ended that worker for good. `DocumentWorkerResilienceTests` fails a
+checkpoint's and a write-back's page writes (the worker reports, backs off and recovers while
+the other database's work goes on), a group flush's fsync on the flush worker's own thread (only
+its database goes offline), and a header slot write (the database goes offline with COHDBD002,
+naming "a write of the file header", and its files stop changing).
 Disposal is idempotent: stop/join workers, dispose coordinators (rolling back open
 transactions), then durably flush and close each storage file set. Close errors
 are aggregated after attempting every database.
@@ -396,7 +413,10 @@ The workers skip the database; closing its sessions and transactions writes noth
 bracket whose commit record was written before its flush failed is reported as unconfirmed,
 never refused (`StorageOfflineException.CommitRecordWritten`). The engine stays `Running`;
 `DocumentDatabaseEngine.OfflineDatabases` names the database, and `Database.Hosting` reports the
-application unhealthy while it is listed.
+application unhealthy while it is listed. A header slot write that fails takes the database
+offline the same way (#1268): no header write may run again in that process, so no checkpoint
+could truncate the journal, and a database that kept accepting commits would grow it without
+bound; the refusal's message names "a write of the file header".
 `DocumentDatabaseEngine.OpenDatabaseAsync(name)` disposes the offline instance without writing
 and reopens the file set, whose recovery keeps the unconfirmed commit if its record's bytes
 reached the media and aborts every transaction that was open. `DocumentStorageOperationsTests`
@@ -450,10 +470,12 @@ ended transaction. A caller cancellation token cancels a pending wait promptly;
 without cancellation, an ended operation fails when the earlier writer releases.
 Operation completion and abort are serialized to avoid duplicate logical rollback.
 
-The engine's durability setting configures the storage's physical commit gate.
-The current transaction coordinator flushes logical document commits synchronously
-in both settings; grouped logical commit batching is not claimed. The WAL flush
-worker remains the engine-owned implementation of the shared storage flush duty.
+The engine's durability setting configures the storage's physical commit gate, and
+the transaction coordinator's logical commit goes through it
+(`Storage.EnsureCommitDurable`): under `Grouped` a commit waits for the WAL flush
+worker's group flush, as `DocumentWorkerResilienceTests` shows (the failing fsync
+of a grouped commit runs on the flush worker's thread). The WAL flush worker is the
+engine-owned implementation of the shared storage flush duty.
 
 ## Document wire family
 

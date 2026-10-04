@@ -536,7 +536,11 @@ media then decides what survived.
 
 The storage does the same without stopping the process. When a durable flush of the journal
 (`EnsureDurable`, `FlushPendingCommits`, any `Flush(forceDurable: true)`) or of the data file
-(the checkpoint's and the header write's data flush) throws, the storage goes **offline**:
+(the checkpoint's and the header write's data flush) throws, or a header slot write fails once
+it was issued (#1268, "A header write that fails after its slot write was issued" below), the
+storage goes **offline**. `StorageOfflineException.FailedOperation` names which of the three
+failed (`a durable flush of the journal`, `a durable flush of the data file`, `a write of the
+file header`), and the engines' coded refusals repeat it:
 
 - **The failing call throws `StorageOfflineException`** (`COHDBS002`), carrying the I/O
   failure as its inner exception. The journal latches the error under its append lock, so no
@@ -731,26 +735,38 @@ the page a non-durable bracket freed, and power is lost before the truncation or
 tail that is not yet durable; a checkpoint with any dirty data page flushed it through the
 gate before.
 
-**A header write that fails after its slot write was issued stops header writes.** A failed
-fsync after the slot write leaves that slot either the previous generation or, already on the
-media, the newest one pointing at this generation's chain. Retrying used to target the same
-slot at the same generation and rewrite that chain in place, and a crash during the retry left
-the newest valid slot pointing at pages that do not verify (an unopenable file) or at a chain
-mixing two generations. Every later header write — a checkpoint, `Flush`, the non-idle close —
-now throws `StorageIOException` until the storage is reopened, and the close flushes only the
-journal; the reopen finds a whole generation either way, and the untruncated journal describes
-everything since. A failure before the slot write is issued leaves the target slot older than
-the newest, so its chain may still be rewritten and the retry is allowed. PostgreSQL stops on a
-failed control-file write or fsync (`src/common/controldata_utils.c:245-265`; data-file fsync
-failures are PANIC unless `data_sync_retry`, `src/backend/storage/file/fd.c:3984-3987`);
-Voron never rewrites a header revision (`HeaderAccessor.cs:186-191`). Since #1243 a failed
-*durable flush* of the data file — the one before the slot write, or the one after it — goes
-further and takes the whole storage offline ("A failed durable flush takes the storage
-offline"): the write-backs that flush covered may have been dropped while the pool recorded
-the pages clean, so even the retry that a failure before the slot write allows could truncate
-the journal over pages that never reached the media. A failed slot *write* (an I/O error, not
-an fsync) still only stops header writes. `StorageFormatTests` covers the four cases: a
-failed write before and after the slot write, and a failed data flush before and after it.
+**A header write that fails after its slot write was issued takes the storage offline
+(#1268).** A failed write or fsync after the slot write leaves that slot either the previous
+generation or, already on the media, the newest one pointing at this generation's chain.
+Retrying used to target the same slot at the same generation and rewrite that chain in place,
+and a crash during the retry left the newest valid slot pointing at pages that do not verify
+(an unopenable file) or at a chain mixing two generations. So no header write may run again in
+this process, and without one no checkpoint can truncate the journal. #1251 first answered this
+by refusing every later header write with `StorageIOException` while everything else went on,
+which left the database accepting commits into a journal nothing could truncate: the #1268
+reproduction committed 200 rows after the fault and grew the journal from 16,688 to 3,339,088
+bytes, and the engines' checkpoint workers died on the refusal. Now the failing header write
+takes the storage offline exactly as a failed durable flush does ("A failed durable flush takes
+the storage offline"): it throws `StorageOfflineException` (`FailedOperation` is `a write of the
+file header`, the slot write's failure the inner exception), raises `OnOffline`, and every
+later write is refused, the close included, until the storage is reopened; the reopen finds a
+whole generation either way, and the untruncated journal describes everything before the
+failure. `Storage.HeaderFaulted` (internal) still records that the offline state came from a
+failure after the slot write. A failure before the slot write is issued leaves the target slot
+older than the newest, so its chain may still be rewritten and the retry is allowed, unless it
+was a failed durable flush. PostgreSQL stops on a failed control-file write or fsync
+(`src/common/controldata_utils.c:245-265`; data-file fsync failures are PANIC unless
+`data_sync_retry`, `src/backend/storage/file/fd.c:3984-3987`); Voron never rewrites a header
+revision (`HeaderAccessor.cs:186-191`) and marks its environment catastrophically failed on a
+failed data-file flush or sync, refusing every later transaction
+(`src/Voron/GlobalFlushingBehavior.cs:174-181`, `246-254`; `StorageEnvironmentOptions.cs:302-343`).
+Since #1243 a failed *durable flush* of the data file — the one before the slot write, or the one
+after it — takes the storage offline too: the write-backs that flush covered may have been
+dropped while the pool recorded the pages clean, so even the retry that a failure before the slot
+write allows could truncate the journal over pages that never reached the media.
+`StorageFormatTests` covers the four cases: a failed write before and after the slot write, and a
+failed data flush before and after it; the crash tests take a power loss at the slot write either
+as itself or as the cause of the offline error (`SimulatedPowerLossException.Expect`).
 
 **The LSN floor (#1242).** Every header generation persists the journal's last LSN, and open
 raises the journal to `max(last record, floor)` before anything appends. A checkpoint

@@ -31,11 +31,13 @@ using Assimalign.Cohesion.Database.Storage;
 /// (<c>TransactionCoordinator.NextDeferredUndoRetry</c>).
 /// </para>
 /// <para>
-/// A failure is recorded — the engine's observational state flips to Faulted — and the worker
-/// keeps running: an undo that fails again is retried at its next delay, and unpurged versions
-/// cost space, never consistency. The first pass after it with no failure and no undo still
-/// deferred clears the record, so a transient fault does not leave the engine Faulted for good.
-/// An offline database (#1243) is skipped.
+/// A failure is reported (<see cref="DatabaseEngineWorker.ReportFailure"/>) — the engine's
+/// observational state flips to Faulted — and the worker keeps running: an undo that fails again
+/// is retried at its next delay, and unpurged versions cost space, never consistency. A pass that
+/// leaves an undo deferred, or finds a storage busy, has not completed its work, so it keeps the
+/// record; the first pass after it with no failure and nothing left over clears it, so a
+/// transient fault does not leave the engine Faulted for good. An offline database (#1243) is
+/// skipped.
 /// </para>
 /// </remarks>
 internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
@@ -94,7 +96,7 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
     }
 
     /// <inheritdoc />
-    public override void RunIteration(CancellationToken cancellationToken)
+    protected override bool RunIterationCore(CancellationToken cancellationToken)
     {
         _engine.UndoDeferredSignal.Reset();
         bool fullPass = Stopwatch.GetElapsedTime(Volatile.Read(ref _lastFullPass)) >= Interval;
@@ -103,9 +105,9 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
             Volatile.Write(ref _lastFullPass, Stopwatch.GetTimestamp());
         }
 
-        // Clean: no database failed this pass and none still has an undo deferred, so a fault
-        // reported by an earlier pass is over.
-        bool clean = true;
+        // Completed: no database still has an undo deferred or a busy storage, so with no
+        // failure reported a fault reported by an earlier pass is over.
+        bool completed = true;
 
         foreach (DocumentDatabaseInstance database in _engine.GetInstanceSnapshot())
         {
@@ -132,15 +134,15 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
 
                 if (database.Coordinator.NextDeferredUndoRetry is not null)
                 {
-                    clean = false;
+                    completed = false;
                 }
             }
             catch (StorageTransactionException)
             {
                 // A storage bracket is active on this database; retry next pass.
-                clean = false;
+                completed = false;
             }
-            catch (ObjectDisposedException)
+            catch (ObjectDisposedException) when (!_engine.IsOpen(database))
             {
                 // The snapshot can race a database drop; nothing left to purge.
             }
@@ -148,22 +150,18 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
             {
                 break;
             }
-            catch (Exception exception) when (exception is not OutOfMemoryException && !database.IsOffline)
-            {
-                // Recorded, not fatal: the writer whose undo failed again keeps its place in the
-                // retry schedule, and every other database keeps its maintenance.
-                _engine.ReportWorkerFault(exception);
-                clean = false;
-            }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                // The database went offline during the pass (#1243); the next pass skips it.
+                // Recorded, not fatal: the writer whose undo failed again keeps its place in the
+                // retry schedule, and every other database keeps its maintenance. A database that
+                // went offline during the pass (#1243) is skipped by the next pass instead.
+                if (!database.IsOffline)
+                {
+                    ReportFailure(exception);
+                }
             }
         }
 
-        if (clean && !cancellationToken.IsCancellationRequested)
-        {
-            _engine.ClearWorkerFault();
-        }
+        return completed && !cancellationToken.IsCancellationRequested;
     }
 }

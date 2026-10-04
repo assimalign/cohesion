@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -298,7 +299,7 @@ public sealed class StorageFormatTests
 
             return truncated && stream == "journal" && operation == "Write";
         };
-        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint());
+        SimulatedPowerLossException.Expect(() => storage.Checkpoint());
         var images = storage.CaptureDurable();
 
         // Act: reopen on the empty journal, commit an update of the same page, and crash before
@@ -384,7 +385,7 @@ public sealed class StorageFormatTests
             stream == "data" && operation == "Write" && offset == StorageHeaderPage.SlotOffset(target) && count == StorageHeaderPage.SlotSize;
 
         // Act
-        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(anchor));
+        SimulatedPowerLossException.Expect(() => storage.Checkpoint(anchor));
         var images = storage.CaptureDurable();
         using var reopened = TornStorage.Open(images);
 
@@ -414,47 +415,57 @@ public sealed class StorageFormatTests
     /// <summary>
     /// A header write whose slot write was issued and then failed — the write itself reported an
     /// error — may have left that slot on the media as the newest generation. A retry would
-    /// rewrite the slot's anchor chain in place under it, so the storage refuses every later
-    /// header write until it is reopened, and its close flushes the journal without one; the
-    /// reopen finds a whole generation either way.
+    /// rewrite the slot's anchor chain in place under it, so no header write may run again, and
+    /// without one no checkpoint can truncate the journal. The storage goes offline (#1268), as a
+    /// failed durable flush takes it: the failing checkpoint throws the coded offline error,
+    /// every later header write and record change is refused with it, OnOffline is raised once,
+    /// and the close writes nothing. The reopen finds a whole generation and the journal as it
+    /// was. Before #1268 the storage only refused later header writes and kept accepting record
+    /// changes, so an engine's database kept committing into a journal no checkpoint could truncate.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a failed slot write stops header writes until a reopen")]
-    public void Checkpoint_SlotWriteFails_ShouldRefuseLaterHeaderWritesUntilReopened()
+    [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a failed slot write takes the storage offline until a reopen")]
+    public void Checkpoint_SlotWriteFails_ShouldTakeTheStorageOfflineUntilReopened()
     {
         // Arrange: both slots chain anchor pages (generation 2 in slot 1, 3 in slot 0).
         long[] Anchor(int salt) => [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + 50).Select(i => (long)(i * 10) + salt)];
         var point = new CrashPoint();
         var storage = TornStorage.Create(point);
+        var (pageId, slot) = storage.Insert("before the fault");
         storage.Checkpoint(Anchor(1));
         storage.Checkpoint(Anchor(2));
         int target = 1 - storage.HeaderState.Slot;
         storage.DataFaults.FailWriteAt = StorageHeaderPage.SlotOffset(target);
+        var raised = new List<StorageOfflineException>();
+        storage.OnOffline = raised.Add;
 
         // Act
-        Should.Throw<IOException>(() => storage.Checkpoint(Anchor(3)));
+        var error = Should.Throw<StorageOfflineException>(() => storage.Checkpoint(Anchor(3)));
         int writesAfterTheFault = point.Writes;
-        var refusal = Should.Throw<StorageIOException>(() => storage.Checkpoint(Anchor(4)));
-        var flushRefusal = Should.Throw<StorageIOException>(() => storage.FlushHeader());
+        var refusal = Should.Throw<StorageOfflineException>(() => storage.Checkpoint(Anchor(4)));
+        var flushRefusal = Should.Throw<StorageOfflineException>(() => storage.FlushHeader());
+        var insertRefusal = Should.Throw<StorageOfflineException>(() => storage.Insert("after the fault"));
         int writesAfterTheRefusals = point.Writes;
-        var (pageId, slot) = storage.Insert("after the fault");
-        int writesBeforeTheClose = point.Writes;
         storage.Dispose();
-        var dataWritesAtClose = point.Log.Skip(writesBeforeTheClose).Count(entry => entry.StartsWith("data", StringComparison.Ordinal));
+        int writesAtClose = point.Writes - writesAfterTheRefusals;
         using var reopened = TornStorage.Open(storage.CaptureDurable());
 
-        // Assert: nothing was written for the refused header writes, the close wrote no header,
-        // and the reopen found the previous generation (this failed write wrote nothing) with the
-        // journal that describes everything since.
+        // Assert: the coded offline error naming the header write, raised once; nothing written
+        // after the failure, the close included; the reopen found the previous generation (this
+        // failed write wrote nothing) with the journal that describes everything before it.
+        error.Message.ShouldStartWith(StorageOfflineException.ErrorCode, Case.Sensitive);
+        error.FailedOperation.ShouldBe("a write of the file header");
+        error.InnerException.ShouldBeOfType<IOException>();
+        new[] { refusal, flushRefusal, insertRefusal }.ShouldAllBe(e => e.InnerException == error.InnerException && e.FailedOperation == error.FailedOperation);
+        raised.Count.ShouldBe(1);
         storage.HeaderFaulted.ShouldBeTrue();
-        storage.IsOffline.ShouldBeFalse();
-        refusal.Message.ShouldContain("Reopen the storage");
-        flushRefusal.Message.ShouldContain("Reopen the storage");
+        storage.IsOffline.ShouldBeTrue();
         writesAfterTheRefusals.ShouldBe(writesAfterTheFault);
-        dataWritesAtClose.ShouldBe(0);
+        writesAtClose.ShouldBe(0);
         reopened.HeaderState.Generation.ShouldBe(3L);
         reopened.CheckpointActiveTransactions.ShouldBe(Anchor(2));
-        reopened.Read(pageId, slot).ShouldBe("after the fault");
+        reopened.Read(pageId, slot).ShouldBe("before the fault");
         reopened.HeaderFaulted.ShouldBeFalse();
+        reopened.IsOffline.ShouldBeFalse();
     }
 
     /// <summary>
@@ -498,8 +509,9 @@ public sealed class StorageFormatTests
     /// <summary>
     /// A write that fails before the slot write is issued leaves the slot it targets older than
     /// the newest one on the media, so its chain may be rewritten: only a failure after the slot
-    /// write stops header writes. (A failed durable flush is different at any point: it takes the
-    /// storage offline, <see cref="StorageOfflineTests"/>.)
+    /// write takes the storage offline (#1268), and this one leaves the retry allowed. (A failed
+    /// durable flush is different at any point: it takes the storage offline,
+    /// <see cref="StorageOfflineTests"/>.)
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Storage] - Header slots: a write failure before the slot write leaves header writes allowed")]
     public void Checkpoint_WriteFailsBeforeTheSlotWrite_ShouldAllowTheRetry()
@@ -578,7 +590,7 @@ public sealed class StorageFormatTests
             stream == "data" && operation == "Write" && offset == (long)pageId * Page.Size && count == Page.Size;
 
         // Act
-        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint());
+        SimulatedPowerLossException.Expect(() => storage.Checkpoint());
         var images = storage.CaptureDurable();
         var tornPage = images.Data.AsSpan((int)((long)pageId * Page.Size), Page.Size).ToArray();
         using var reopened = TornStorage.Open(images);
@@ -667,7 +679,7 @@ public sealed class StorageFormatTests
 
             return truncated && stream == "journal" && operation == "Write";
         };
-        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(writers));
+        SimulatedPowerLossException.Expect(() => storage.Checkpoint(writers));
         var images = storage.CaptureDurable();
 
         // Act
@@ -724,7 +736,7 @@ public sealed class StorageFormatTests
                 var storage = Arrange(point, writers, out long lastLsn); // abandoned after its simulated power loss
                 point.CrashAtWrite = point.Writes + write;
                 point.DurableSectors = sectors;
-                Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(writers), $"write {write}, {sectors} sectors");
+                SimulatedPowerLossException.Expect(() => storage.Checkpoint(writers), $"write {write}, {sectors} sectors");
                 crashes++;
 
                 using var reopened = TornStorage.Open(storage.CaptureDurable());
