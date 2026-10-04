@@ -7,9 +7,11 @@ paths:
 
 # Database Area (`resources/Database/**`)
 
-Rules specific to the Database resource area. They apply to every project under
-`resources/Database/`, and to `Sdk.Database` and Database Studio, which bind the area's types.
-They layer on `resource-areas.md`, whose hosting-isolation rules (COHRES001–004, COHAM001) apply
+Rules specific to the Database resource area. The concrete-first deviation applies only to
+projects under `resources/Database/`. This file also loads for `Sdk.Database` and Database Studio
+because they bind the area's type names (the extractor's metadata-name strings, Studio's engine
+casts). Code in those projects keeps the general rules, interface-first included. The rules here
+layer on `resource-areas.md`, whose hosting-isolation rules (COHRES001–004, COHAM001) apply
 here unchanged. The plan that moves the existing code onto these rules, phase by phase, is
 `docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md` (epic #1255, phases #1256–#1264); the owner
 decision is O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md`.
@@ -17,7 +19,8 @@ decision is O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md`.
 ## The concrete-first rule (owner decision, 2026-10-04)
 
 > **Database public API is sealed concrete types. An abstract base exists only where a real
-> variant set exists, or where `Database.Hosting` must stay model-agnostic under COHRES002.
+> variant set exists, where `Database.Hosting` must stay model-agnostic under COHRES002, or where
+> a lower assembly drives a seam that a higher assembly or the application implements.
 > Interfaces survive only in the five places listed below.**
 
 This replaces two general rules for this area: "Public APIs use interfaces" and "Interface-first
@@ -42,7 +45,8 @@ phase lands, its existing interfaces stay, but nothing new is built on them.
 
 ## Where interfaces survive
 
-Exactly five. After phase 8, `rg "public interface" resources/Database/**/src` lists only these.
+Exactly five. After phase 8, `rg "public interface" resources/Database --glob '**/src/**'` lists
+only these.
 
 | Interface | Project | Why it stays |
 |---|---|---|
@@ -67,10 +71,18 @@ contracts in this sense and stay.
    `public static class X` + `public interface IX` + `internal DefaultX` triplet collapses into
    one `public sealed class X`. A factory may also sit on an abstract base and return its
    internal default leaf, the `Aes.Create()` shape (`ProtocolFrameReader.Create(...)`).
-2. **Abstract only for a real variant set, or for Hosting.** A base exists when two or more
-   implementations ship, or when `Database.Hosting` must treat every model alike under COHRES002.
-   That covers the root engine, database, session, transaction, server and server session. A
-   single implementation never gets an abstract base "for later".
+2. **Abstract only for a variant set, for Hosting, or for an inverted seam.** A base exists
+   when one of three things holds:
+   - **variant set:** two or more implementations ship (the root session, transaction and server
+     session; `TransactionRecordSpace`; the protocol frame reader and writer);
+   - **Hosting:** `Database.Hosting` must treat every model alike under COHRES002 (the root
+     engine, database, server and engine worker);
+   - **inverted seam:** a lower assembly drives the type and a higher assembly or the
+     application implements it (an exchange `Database.Client` runs, a record space the
+     coordinator drives, an authenticator the servers call, a client observer).
+
+   A single implementation that fits none of the three never gets an abstract base "for later".
+   The plan records which case each base meets.
 3. **Constructor visibility follows assembly topology.**
    - A base whose leaves live in other shipped assemblies gets a `protected` constructor. That
      applies to the root bases and to child-root seams implemented in model assemblies. It
@@ -83,11 +95,17 @@ contracts in this sense and stay.
      transaction log).
 4. **Public members are non-virtual (NVI).** Public members own argument validation, disposed and
    state checks, the cancellation fast path, the state machine and telemetry. Each calls a
-   `protected abstract …Core` or `…CoreAsync` member with no default body. `protected virtual`
-   is allowed in three cases only:
-   - an optional capability paired with a public `Supports*` flag (default `false`, a `Core`
-     that throws `NotSupportedException`). `DatabaseInstance.SupportsSchemaProvisioning` is the
-     only capability member allowed on `DatabaseInstance`.
+   `protected abstract …Core` or `…CoreAsync` member with no default body. One kind of public
+   member may be abstract: a getter for state the leaf computes or owns
+   (`DatabaseServer.Sessions`, `DatabaseServerSession.DatabaseSession`), which leaves override
+   covariantly (rule 7). A `Supports*` capability flag is not virtual: it is a non-virtual
+   getter over a value the protected constructor sets (rule 6). `protected virtual` is allowed in
+   three cases only:
+   - the `Core` of an optional capability paired with a public `Supports*` flag. The flag
+     defaults to `false`, the public member throws `NotSupportedException` while it is `false`,
+     and the `Core`'s default body throws `NotSupportedException` too.
+     `DatabaseInstance.SupportsSchemaProvisioning` is the only capability member allowed on
+     `DatabaseInstance`.
    - a lifecycle hook behind a non-virtual public member, such as `DisposeAsyncCore` behind
      `DisposeAsync`, or a worker's trigger wait behind `Run`.
    - an observer hook. Observer hooks are `protected internal virtual` with empty bodies, so the
@@ -100,18 +118,18 @@ contracts in this sense and stay.
    in a static extension member (`GetEngine<TEngine>`). A generic *type* with virtual members
    (`DatabaseProtocolExchange<TResult>`) is fine.
 6. **The base owns state as fields.** Values fixed at construction (name, model, id, isolation
-   level, protocol version, principal, the owning engine or database) are non-virtual,
-   field-backed getters. State changes go through protected, non-virtual methods on the base,
-   never through overridable setters. A base that owns products filled in by a model assembly,
-   such as an engine's workers and servers, accepts them through non-virtual `protected`
-   attach methods. Those methods throw `InvalidOperationException` once composition is frozen
-   after build.
+   level, protocol version, principal, the owning engine or database, a `Supports*` capability)
+   are non-virtual, field-backed getters. State changes go through protected, non-virtual
+   methods on the base, never through overridable setters. A base that owns products filled in
+   by a model assembly, such as an engine's workers and servers, accepts them through
+   non-virtual `protected` attach methods. Those methods throw `InvalidOperationException` once
+   composition is frozen after build.
 7. **Typed surface without casts.**
    - A reference fixed at construction stays a base field. The leaf re-exposes it typed with
      `new`, backed by its own typed field: `public new SqlDatabaseEngine Engine => _engine;`.
      Neither path makes a virtual call.
-   - A covariant override (`public override SqlCatalogSnapshot …`) is for members that are
-     abstract for their own reasons, such as computed or leaf-specific state.
+   - A covariant override (`public override SqlDatabaseSession? DatabaseSession`) is for the
+     public abstract getters rule 4 allows: computed or leaf-specific state.
    - An async factory cannot be covariant, because `ValueTask<SqlDatabase>` does not convert to
      `ValueTask<DatabaseInstance>`. The leaf declares
      `public new ValueTask<SqlDatabaseSession> CreateSessionAsync(...)`, which awaits the
@@ -122,16 +140,19 @@ contracts in this sense and stay.
    own copy: the explicit-transaction state machine (#1188/#1225), the "transaction already
    active" check, attach and dispose ordering. Each model now supplies only its vocabulary
    (error codes, exception translation) through a protected abstract member.
-9. **Collections are never null.** A collection-valued member returns an empty collection, not
-   `null`, when it has nothing to report. That includes `Diagnostics` on every result type.
-   `QueryResult.Diagnostics` is the one standing exception, and it is removed in phase 8 (#1264).
+9. **Diagnostics and other result collections are never null.** They return an empty
+   collection when there is nothing to report. `QueryResult.Diagnostics` changes in phase 8
+   (#1264). A member where `null` means "absent" (an optional syntax-tree list such as
+   `SqlInsertExpression.Columns`, an options property such as
+   `BTreeIndexManagerOptions.ExistingIndexes`, `QueryRequest.Parameters`) is outside this rule.
 10. **Names.** The replacement for `IDatabase` is `DatabaseInstance`, never `Database`. A type
     named `Database` breaks user code in a namespace such as `Acme.Database` with CS0118.
     `Storage.Storage` is the precedent for the pain. Leaves are `SqlDatabase`, `GraphDatabase`,
     and so on.
-11. **Folders.** Abstract bases sit in the `src/` root or a feature folder, never in
-    `Abstractions/`. A model project loses its `Abstractions/` folder with its last interface. A
-    type promoted from `Internal/` moves out of it and declares the `RootNamespace`.
+11. **Folders.** Public abstract bases sit in the `src/` root or a feature folder, never in
+    `Abstractions/`. Internal abstract bases go to `Internal/` (`general-rules.md`). A model
+    project loses its `Abstractions/` folder with its last interface. A type promoted from
+    `Internal/` moves out of it and declares the `RootNamespace`.
 
 ## Test doubles
 
@@ -141,6 +162,11 @@ contracts in this sense and stay.
   test-only `InternalsVisibleTo`.
 - A double that was both a `Storage` and a record space is split: a `Storage` subclass plus a
   separate `TransactionRecordSpace`.
+- A double that intercepted a non-virtual member by re-implementing an interface (the
+  coordinator doubles' `IStorage.Checkpoint`) or by decorating one (`IStorageJournal`) loses
+  that seam with the interface. The hook moves to the type that makes the call, as an internal
+  member its own test assembly reaches, not to protected surface on the public base. Each
+  rewritten test asserts that its hook fired.
 - Model behavior tests use real in-memory engines, as RavenDB does (`RunInMemory`), not fakes.
 - Application developers lose interface mocking of clients. The substitute is an in-process
   engine, or `EmbeddedDatabase` behind a loopback server, which is also how Npgsql's sealed
@@ -148,15 +174,19 @@ contracts in this sense and stay.
 
 ## Marking the deviation
 
-Every public abstract base the program adds or keeps, every model engine and every model engine
-builder carries this marker at its declaration. The plan lists them:
+Every public abstract base the program adds, or strips of its interface (`Storage` and
+`StorageJournal` included), carries this marker at its declaration. So does each model engine and
+each model engine builder, as the model's entry point (`deviations.md`, step 4). The plan lists
+them:
 
 ```csharp
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 ```
 
-Sealed leaves need no marker of their own, because this file covers them. Every PR in the series
-carries the line `Deviates from interface-first (database-area.md)` in its change summary.
+Every other sealed leaf needs no marker of its own, because this file covers it. An existing
+public abstract type that keeps no interface twin and is only tightened (`QueryRow`,
+`CompiledSchema`) carries none. Every PR in the series carries the line
+`Deviates from interface-first (database-area.md)` in its change summary.
 
 ## How this relates to the other rules
 

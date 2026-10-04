@@ -438,7 +438,7 @@ internal sealed class TcpConnectionListener : ConnectionListener { /* ... */ }
 
 The interface remains the canonical public surface; concrete types derive from the base and stay `internal` where possible. Use the explicit-implementation forwarding only where the base can offer a richer, concrete-typed member; members without a richer counterpart are declared `public`/`protected abstract` directly.
 
-**Exception: Database engines are the reverse.** In `resources/Database/**` the abstract base is the canonical public surface, no interface ships beside it, and leaves are sealed. A base exists only where real variants exist or where Hosting must stay model-agnostic. See `database-area.md` (owner decision 2026-10-04). Every other area keeps this rule.
+**Exception: Database engines are the reverse.** In `resources/Database/**` the abstract base is the canonical public surface, no interface ships beside it, and leaves are sealed. A base exists only where real variants exist, where Hosting must stay model-agnostic, or where a lower assembly drives a seam that a higher assembly or the application implements. See `database-area.md` (owner decision 2026-10-04). Every other area keeps this rule.
 
 ## Service composition
 

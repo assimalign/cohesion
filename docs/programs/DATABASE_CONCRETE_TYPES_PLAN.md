@@ -37,7 +37,7 @@ this tree on 2026-10-04 or in a cited reference source. **[Likely]** means a str
   - One copy of each shared contract. The explicit-transaction state machine exists four times
     and the "transaction already active" check five times, with three different messages (§6.4).
   - Sealed hot types: `StorageTransaction`, `StoragePageHandle`, `BTreeIndex`, `TransactionContext`.
-  - [Likely] 55 to 60 fewer public types (§10).
+  - [Likely] 53 to 58 fewer public types (§10).
 - **It is a source break.** [Certain] Tag `v10.0.0-preview.1` (`c0dbbd42`) contains all 106
   `Abstractions/I*.cs` files. Owner decision 2026-10-04 (#1152): no `[Obsolete]` shims, no
   compatibility layer, no upgrade path. The release notes carry one line.
@@ -60,7 +60,7 @@ The owner approved every recommendation on 2026-10-04, after giving the directio
 | D9 | All five storage strategies become `internal abstract` (critique correction, §4). | P4 |
 | D10 | #1236 lands before phase 2. | Gate on P2 |
 | D11 | Breaking the preview.1 surface is accepted, with a release-notes line. | Release |
-| D12 | Collections are never null. `QueryResult.Diagnostics` returns an empty list instead of `null`, which matches #1228's `GraphSchemaResult<T>.Diagnostics` (§6.8). | P8 |
+| D12 | Diagnostics and other result collections are never null. `QueryResult.Diagnostics` returns an empty list instead of `null`, which matches #1228's `GraphSchemaResult<T>.Diagnostics` (§6.8). A member where `null` means "absent" keeps it. | P8 |
 
 **Not decided:** whether an analyzer (`COHDB0xx` under `analyzers/`) should reject deriving from
 the root bases outside `resources/Database`. The review made no recommendation, so the approval
@@ -71,7 +71,8 @@ finds misuse (§11).
 
 The binding text is `database-area.md`. This section records the evidence behind it.
 
-- **Sealed by default. Abstract only for a real variant set, or for Hosting.** PostgreSQL keeps
+- **Sealed by default. Abstract only for a variant set, for Hosting, or for an inverted seam**
+  (§8 records which case each base meets). PostgreSQL keeps
   its variant sets behind routine tables (`TableAmRoutine`, `src/include/access/tableam.h:322`;
   `IndexAmRoutine`, `src/include/access/amapi.h:233`), and its core managers stay single concrete
   implementations. RavenDB's `DocumentDatabase` is a concrete class
@@ -79,9 +80,10 @@ The binding text is `database-area.md`. This section records the evidence behind
 - **NVI, the ADO.NET shape.** A public non-virtual member calls a protected abstract core
   (`DbConnection.BeginTransaction`, `System.Data.Common/.../DbConnection.cs:56`, over
   `BeginDbTransaction`, `:51`). A capability is a flag plus a throwing virtual
-  (`DbTransaction.SupportsSavepoints`, `DbTransaction.cs:83`). A virtual member that falls back to
-  another member is banned: the default `DbConnection.OpenAsync` runs the synchronous `Open`
-  (`DbConnection.cs:324-341`).
+  (`DbTransaction.SupportsSavepoints`, `DbTransaction.cs:83`). ADO.NET makes the flag itself
+  virtual; here it is a constructor-set field (rule 6), so reading it makes no virtual call. A
+  virtual member that falls back to another member is banned: the default
+  `DbConnection.OpenAsync` runs the synchronous `Open` (`DbConnection.cs:324-341`).
 - **Constructor visibility follows assembly topology.** The root bases' leaves live in model
   assemblies, and shipped-to-shipped `InternalsVisibleTo` is banned, so those constructors are
   `protected`. Npgsql closes `NpgsqlDataSource` with an internal constructor (`NpgsqlDataSource.cs:96`),
@@ -124,7 +126,7 @@ items. Each item is resolved below. Line references were re-measured on 2026-10-
 | C6 | Option A gives `Dispose` two meanings on one sealed Blob or Documents type. | Option B (§6.6). | P4 |
 | C7 | The Sql.Schema declaration records are positional and cannot be closed. | The declaration model stays internal behind an opaque `public sealed SqlSchema`, and `SqlSchemaCompiler` becomes internal (§6.7). Correction to the critique: Sql.Schema has **no** `InternalsVisibleTo` today. Phase 4 adds Sql.Schema → Sql.Schema.Tests. | P4 |
 | C8 | The existing public abstract hot types were not audited. | Each is audited in the phase that touches it (§5.3). | P2, P3, P8 |
-| C9 | Test doubles that are both a `Storage` and a record space break under single inheritance. | They are split. Verification found three: `CoordinatorStorage` (`TransactionCoordinatorRecoveryTests.cs:318`), `RollbackStorage` (`TransactionCoordinatorRollbackTests.cs:926`) and `RecordStorage` (`RecordSpaceVersionStoreTests.cs:246`). | P2 |
+| C9 | Test doubles that are both a `Storage` and a record space break under single inheritance. | They are split. Verification found three: `CoordinatorStorage` (`TransactionCoordinatorRecoveryTests.cs:318`), `RollbackStorage` (`TransactionCoordinatorRollbackTests.cs:926`) and `RecordStorage` (`RecordSpaceVersionStoreTests.cs:246`). The first two also name `IStorage` in their base lists and re-implement its members, which breaks in P1, not P2: P1 removes those and moves the hooks to the coordinator (§6.9). Only the record-space split waits for P2. | P1, P2 |
 | C10 | The shared `DatabaseEngineBuilderState.cs` is typed against the root interfaces. The bridge must still satisfy `IDatabaseServer.Context`. | Step P4.0 makes the state generic before the first model PR. The context classes are deleted in P6. | P4.0, P6 |
 | C11 | The performance numbers were tagged `[Certain, measured]`, but they do not reproduce. | They are retagged `[Likely]`, given as ranges with ±60% variance, and the "whatever the type shape" claim is dropped (§9). | P0 |
 | C12 | Rule conflicts the original rule changes missed: access-modifier rule 1, "internal types are internal", the `Internal/` namespace, one public type per file. | `database-area.md` ("How this relates to the other rules") explains why rule 1 and the checklist line still hold. The moves out of `Internal/`, with their namespace changes and test `using` lines, are counted in P2, P4 and P5 (§10). | P0 |
@@ -149,6 +151,22 @@ Two defects of the design were found while verifying it for this plan:
   `TransactionCoordinator.cs:132`) derives from it, and a public class cannot have an internal
   base (CS0060). It is public, with a `private protected` constructor (row 45).
 
+The phase-0 review (2026-10-04) found more. Each is folded in where it lands:
+
+- **Storage sub-components are reachable.** Rows 31, 34, 37 and 38 were marked internal-only on
+  a name search. Public `Storage` members return them, and nine shipped assemblies call through
+  those members, so the rows become sealed public types in P2 (§5.1).
+- **P1 removes the coordinator tests' hooks.** Deleting `IStorage` and `IStorageJournal` removes
+  the interception six #1226-era coordinator tests rely on. The hooks move to the coordinator in
+  P1 (§6.9).
+- **P3 cannot gate on model behavior.** No model derives from the root bases until P4, so P3
+  tests the bases through root-level doubles, and each model's P4 PR carries its own #1188,
+  #1225 and #1226 gate (§6.4).
+- **The base criteria were incomplete.** Four approved bases have one shipped implementation or
+  none. They are inverted seams, a third case the rule now names (§8).
+- **The schema-provisioning bridge.** Hosting's type test needs `IDatabaseSchemaProvisioner`
+  until P6, so `SqlDatabase` keeps it in its base list until then (row 8).
+
 ## 5. Inventory
 
 ### 5.1 The 106 public interfaces
@@ -157,6 +175,24 @@ Two defects of the design were found while verifying it for this plan:
 declarations on 2026-10-04. All are public and all are in `Abstractions/`. None are internal or
 nested, and no `shared/` folder declares one. The set matches the design inventory row for row.
 Paths in the Project column are under `resources/Database/Assimalign.Cohesion.<Project>/src/`.
+
+**How "delete" was checked.** [Certain] A name search cannot see a consumer that reaches a type
+through `var` or member access, so every delete row was checked a second way: each public member
+whose type is the deleted interface was found (`rg "public .*\bI<Name>\b" --glob '**/src/**'`), and
+its member-access consumers were searched outside the owning project, for the storage rows with
+`rg "\.(PageManager|FreeSpaceMap|BufferPool)\b|GetUnitIterator\(" resources/Database`. That moved
+rows 31, 34, 37 and 38 from delete to sealed: `Storage.PageManager`, `Storage.FreeSpaceMap` and
+`Storage.GetUnitIterator` are public (`Storage.cs:113`, `:121`, `:837`, `:843`), and Indexing,
+Graph.Catalog, Graph.Storage, Transactions, Sql, Sql.Catalog, KeyValuePair.Catalog,
+Documents.Catalog and Blob.Catalog call through them. Making the types internal would need a
+shipped-to-shipped `InternalsVisibleTo`. The other delete rows hold:
+
+- row 30's carrier, `Storage.BufferPool` (`Storage.cs:117`), is read only by Storage.Tests
+  (`StorageConcurrencyTests.cs:211`, `:338`), so the property becomes internal;
+- row 42's carriers are the `TransactionLog` factories (§5.2);
+- row 23's carrier is `BTreeIndexManagerOptions.TransactionSource` (§6.3);
+- rows 93 to 101 are reached only through `ISqlSchema`, which becomes the opaque `SqlSchema` (§6.7);
+- the remaining delete rows have no public carrier.
 
 **Proposal** is one of four values:
 
@@ -171,21 +207,21 @@ interface is deleted in P6.
 
 | # | Interface | Project | Layer | Proposal | Target | Phase |
 |---|---|---|---|---|---|---|
-| 1 | `IDatabase` | Database `Abstractions/IDatabase.cs:16` | area root | abstract | `public abstract class DatabaseInstance`, with a protected constructor taking the name and owning engine. `Name` and `Engine` are non-virtual and field-backed, and leaves re-expose `Engine` with `new`. NVI `CreateSessionAsync` calls `CreateSessionCoreAsync`. It absorbs schema provisioning (row 8). | P3/P6 |
+| 1 | `IDatabase` | Database `Abstractions/IDatabase.cs:16` | area root | abstract | `public abstract class DatabaseInstance`, with a protected constructor taking the name, the owning engine and the schema-provisioning capability. `Name` and `Engine` are non-virtual and field-backed, and leaves re-expose `Engine` with `new`. NVI `CreateSessionAsync` calls `CreateSessionCoreAsync`. It absorbs schema provisioning (row 8). | P3/P6 |
 | 2 | `IDatabaseApplication` | Database `:19` | area root | keep | Unchanged; `Context` is retyped transitively. The O34 seam. | — |
 | 3 | `IDatabaseApplicationBuilder` | Database `:7` | area root | keep | Retyped: `AddEngine(DatabaseEngine)` and `AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine>)`. | P6 |
 | 4 | `IDatabaseApplicationContext` | Database `:6` | area root | keep | `Engines` becomes `IReadOnlyList<DatabaseEngine>`, `Servers` becomes `IReadOnlyList<DatabaseServer>`, and `GetEngine` returns `DatabaseEngine`. Adds a static extension `GetEngine<TEngine>(name) where TEngine : DatabaseEngine`. | P6 |
 | 5 | `IDatabaseEngine` | Database `:29` | area root | abstract | `public abstract class DatabaseEngine : IAsyncDisposable, IDisposable`, with a protected constructor taking the name and model. `Name`, `Model`, `State`, `Workers` and `Servers` are non-virtual and field-backed. `protected` non-virtual `AttachWorker` and `AttachServer` are refused after `CompleteComposition()` (§6.5). NVI create, open, drop, list and try-get members call `*Core` members. A non-virtual `DisposeAsync` keeps the order servers, then workers, then `DisposeAsyncCore`. Leaves add `public new ValueTask<SqlDatabase> OpenDatabaseAsync(...)` over the base NVI member. | P3/P6 |
 | 6 | `IDatabaseEngineBuilder` | Database `:7` | area root | delete | Five `public sealed <Model>DatabaseEngineBuilder` types with internal constructors, typed `AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker>)` and `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)`, and a `Build()` that returns the model engine. Shared logic moves to `DatabaseEngineBuilderState<TEngine>` (P4.0). | P4.0/P4/P6 |
 | 7 | `IDatabaseEngineWorker` | Database `:19` | area root | delete | The existing `DatabaseEngineWorker` (`DatabaseEngineWorker.cs:24`) moves to NVI. `Name`, `Kind` and `Interval` are set by the constructor and non-virtual (abstract today, `:32-38`). `Run` (`:47`) and `RunIteration` (`:68`) become non-virtual, and `RunIteration` calls `protected abstract RunIterationCore`. The trigger wait (`:76`) stays a `protected virtual` lifecycle hook; the five write-ahead flush workers override it (`*WriteAheadFlushWorker.cs:46`). | P3 (NVI)/P6 |
-| 8 | `IDatabaseSchemaProvisioner` | Database `:7` | area root | delete | Folded into `DatabaseInstance`: `public virtual bool SupportsSchemaProvisioning => false`, and an NVI `ApplySchemaAsync` over a `protected virtual ApplySchemaCoreAsync` that throws `NotSupportedException`. It is the only capability member on `DatabaseInstance`. Hosting's type test (`Hosting/src/Internal/DefaultDatabaseProvisioner.cs:49`) becomes a flag check. | P3/P6 |
+| 8 | `IDatabaseSchemaProvisioner` | Database `:7` | area root | delete | Folded into `DatabaseInstance`: a non-virtual `public bool SupportsSchemaProvisioning`, set by `protected DatabaseInstance(Name name, DatabaseEngine engine, bool supportsSchemaProvisioning = false)` (rule 6), and an NVI `ApplySchemaAsync` that throws `NotSupportedException` while the flag is `false` and otherwise calls a `protected virtual ApplySchemaCoreAsync` whose default throws `NotSupportedException`. It is the only capability member on `DatabaseInstance`. **Bridge:** Hosting's type test (`Hosting/src/Internal/DefaultDatabaseProvisioner.cs:49`) still needs the interface until P6, and the Sql PR of P4 deletes `ISqlDatabase` (`Sql/src/Abstractions/ISqlDatabase.cs:6`), which is how `SqlDatabase` carries it today. So `SqlDatabase` keeps `IDatabaseSchemaProvisioner` in its base list until P6, implemented by the inherited NVI member. Only Sql claims the interface, as today, and the SampleHost provisioning test stays green. P6 deletes it and turns the type test into a flag check. | P3/P6 |
 | 9 | `IDatabaseServer` | Database `:26` | area root | abstract | `public abstract class DatabaseServer : IAsyncDisposable`, with a protected constructor taking the engine. `Engine` is non-virtual and field-backed (replacing `Context.Engine`), and leaves re-expose it typed with `new`. NVI `StartAsync` and `StopAsync`, with a state guard, call `StartCoreAsync` and `StopCoreAsync`. `public abstract IReadOnlyCollection<DatabaseServerSession> Sessions`. During the bridge, `Context` stays a temporary abstract member (row 10). | P3/P6 |
 | 10 | `IDatabaseServerContext` | Database `:16` | area root | delete | `Engine` and `Sessions` fold into `DatabaseServer`. The four context classes (`Blob`, `Graph`, `KeyValuePair`, `Sql` `Internal/*DatabaseServerContext.cs:9`) and five test-double contexts are deleted **in P6**, because Hosting reads `server.Context.Engine` until P6 retypes it. | P6 |
 | 11 | `IDatabaseServerSession` | Database `:11` | area root | abstract | `public abstract class DatabaseServerSession`, with a protected constructor taking `(Guid, ProtocolVersion, string? principal)` that backs non-virtual getters. `public abstract DatabaseSession? DatabaseSession`. Leaves stay internal sealed. | P3/P6 |
 | 12 | `IDatabaseSession` | Database `:19` | area root | abstract | `public abstract class DatabaseSession : IAsyncDisposable`. The base owns `State`, `CurrentTransaction` and the one "already active" check, with one message (§6.4). `Database` is non-virtual and field-backed, and leaves re-expose it typed with `new`. NVI `BeginTransactionAsync` and `ExecuteAsync` call `BeginTransactionCoreAsync(IsolationLevel)` and `ExecuteCoreAsync`. | P3/P6 |
 | 13 | `IDatabaseTransaction` | Database `:18` | area root | abstract | `public abstract class DatabaseTransaction : IAsyncDisposable`, with a protected constructor taking `(TransactionId, IsolationLevel)`. It owns the explicit-transaction state machine (§6.4). NVI `CommitAsync` and `RollbackAsync` call `CommitCoreAsync` and `RollbackCoreAsync`. A non-virtual `DisposeAsync` rolls back if the transaction is active, then calls `DisposeAsyncCore`. | P3/P6 |
 | 14 | `IQueryExecutor` | Execution `:13` | child root | delete | `SqlQueryExecutor` stays internal sealed. | P1 |
-| 15 | `IQueryPipeline` | Execution `:18` | child root | delete | Deleted together with `QueryPipelineBuilder`, `QueryExecutionContext`, `Internal/BuiltQueryPipeline`, `QueryPipelineDelegate`, `QueryTransactionStatus` and `tests/QueryPipelineTests.cs`. This is the Web-style tap-in pipeline the owner ruled out, and no engine consumes it. | P1 |
+| 15 | `IQueryPipeline` | Execution `:18` | child root | delete | Deleted together with `QueryPipelineBuilder`, `QueryExecutionContext`, `Internal/BuiltQueryPipeline`, `QueryPipelineDelegate`, `QueryTransactionStatus`, `QueryStatementResult` and `tests/QueryPipelineTests.cs`. `QueryStatementResult` (`QueryStatementResult.cs:12`) came with the pipeline, and its only constructions are in `QueryPipelineTests.cs:93` and `:272`. This is the Web-style tap-in pipeline the owner ruled out, and no engine consumes it. | P1 |
 | 16 | `IQueryPipelineStage` | Execution `:11` | child root | delete | Deleted with the pipeline. | P1 |
 | 17 | `IQueryTransactionScope` | Execution `:15` | child root | delete | Deleted with the pipeline. | P1 |
 | 18 | `IResourceGovernor` | Governance `:9` | child root | delete | The interface and the `Database.Governance` project are deleted (D6). | P1 |
@@ -194,21 +230,21 @@ interface is deleted in P6.
 | 21 | `IIndexManager` | Indexing `:14` | child root | sealed | One `public sealed class BTreeIndexManager` for the manager and the registry. It absorbs `public static class BTreeIndexManager` (`BTreeIndexManager.cs:13`, `Create` at `:38`). | P2 |
 | 22 | `IIndexRegistry` | Indexing `:17` | child root | sealed | Merged into `BTreeIndexManager` (row 21). | P2 |
 | 23 | `IStorageTransactionSource` | Indexing `:16` | child root | delete | `BTreeIndexManagerOptions` takes a per-engine delegate, `Func<TransactionContext, StorageTransaction>` (§6.3). | P2 |
-| 24 | `IProtocolFrameReader` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameReader`, with a protected constructor, because its leaves live in Protocol, Database.Client and Blob.Client. NVI `ReadFrameAsync` calls `ReadFrameCoreAsync`. `public static ProtocolFrameReader Create(Stream, bool leaveOpen = false)` replaces `ProtocolFraming.CreateReader`. | P2 |
+| 24 | `IProtocolFrameReader` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameReader : IAsyncDisposable`, with a protected constructor, because its leaves live in Protocol, Database.Client and Blob.Client. NVI `ReadFrameAsync` calls `ReadFrameCoreAsync`, and a non-virtual `DisposeAsync` calls `DisposeAsyncCore` (the interface extends `IAsyncDisposable` today, `IProtocolFrameReader.cs:10`). `public static ProtocolFrameReader Create(Stream, bool leaveOpen = false)` replaces `ProtocolFraming.CreateReader`. | P2 |
 | 25 | `IProtocolFrameWriter` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameWriter : IAsyncDisposable`. NVI `WriteFrameAsync` calls `WriteFrameCoreAsync`, and `DisposeAsync` calls `DisposeAsyncCore`. `Create(Stream, bool)` replaces `ProtocolFraming.CreateWriter`. | P2 |
 | 26 | `IAuthorizationService` | Security `:9` | child root | delete | It has no implementer anywhere. | P1 |
 | 27 | `IDatabaseAuthenticator` | Security `:18` | child root | abstract | `public abstract class DatabaseAuthenticator`, with a protected constructor. NVI `AuthenticateAsync` calls `AuthenticateCoreAsync`. It absorbs `public static class DatabaseAuthenticator` (`DatabaseAuthenticator.cs:8`) as `public static DatabaseAuthenticator AllowAll`. | P2 |
-| 28 | `IStorage` | Storage `:16` | child root | delete | Consumers retype to the existing abstract `Storage`. The default member `EnsureCommitDurable` (`IStorage.cs:218`) already exists as `Storage.EnsureCommitDurable` (`Storage.cs:219`), and the explicit implementation (`Storage.cs:241`) goes. | P1 |
+| 28 | `IStorage` | Storage `:16` | child root | delete | Consumers retype to the existing abstract `Storage`. The default member `EnsureCommitDurable` (`IStorage.cs:218`) already exists as `Storage.EnsureCommitDurable` (`Storage.cs:219`), and the explicit implementation (`Storage.cs:241`) goes. Two Transactions.Tests doubles re-implement `IStorage.Checkpoint` and `ReserveTransactionSequence`, which are non-virtual on `Storage` (`:549`, `:467`); their hooks move to the coordinator in P1 (§6.9). | P1 |
 | 29 | `IStorageBackupManager` | Storage `:9` | child root | delete | It has no implementer and no reference. | P1 |
-| 30 | `IStorageBufferPool` | Storage `:15` | child root | delete | `StorageBufferPool` stays internal sealed. | P1 |
-| 31 | `IStorageFreeSpaceMap` | Storage `:15` | child root | delete | The implementation stays internal sealed. | P1 |
-| 32 | `IStorageJournal` | Storage `:31` | child root | delete | Consumers retype to the existing abstract `StorageJournal`. | P1 |
+| 30 | `IStorageBufferPool` | Storage `:15` | child root | delete | `StorageBufferPool` stays internal sealed, and the public `Storage.BufferPool` (`Storage.cs:117`) becomes internal. Only Storage.Tests reads it (`StorageConcurrencyTests.cs:211`, `:338`), through Storage's existing grant. | P1 |
+| 31 | `IStorageFreeSpaceMap` | Storage `:15` | child root | sealed | `public sealed class StorageFreeSpaceMap`, with an internal constructor. The public `Storage.FreeSpaceMap` (`Storage.cs:121`) returns it, and Graph.Catalog and Graph.Storage call `IsAllocated` through it (`Internal/DefaultGraphCatalog.cs:298`, `Internal/DefaultGraphStore.cs:234`). | P2 |
+| 32 | `IStorageJournal` | Storage `:31` | child root | delete | Consumers retype to the existing abstract `StorageJournal`. `FaultInjectingJournal` (`TransactionCoordinatorRollbackTests.cs:844`) decorates the interface to reject rollback records; `StorageJournal.AppendRollback` is non-virtual (`StorageJournal.cs:78`), so the double is deleted and its fault moves to the coordinator in P1 (§6.9). `StorageJournal` itself is audited in P2 (§5.3). | P1 |
 | 33 | `IStoragePageHandle` | Storage `:26` | child root | sealed | `public sealed class StoragePageHandle`, with an internal constructor. It is on the per-page hot path. | P2 |
-| 34 | `IStoragePageManager` | Storage `:22` | child root | delete | The implementation stays internal sealed. | P1 |
+| 34 | `IStoragePageManager` | Storage `:22` | child root | sealed | `public sealed class StoragePageManager`, with an internal constructor. The public `Storage.PageManager` (`Storage.cs:113`) returns it. Indexing's `BTreeIndex` calls `PageManager.GetPage` on the per-page hot path (`Internal/BTreeIndex.cs:104` and seven more sites), as do Graph.Catalog and Graph.Storage, so every call becomes non-virtual. | P2 |
 | 35 | `IStorageRecoveryManager` | Storage `:9` | child root | delete | It has no implementer and no reference. | P1 |
 | 36 | `IStorageTransaction` | Storage `:30` | child root | sealed | `public sealed class StorageTransaction`, with an internal constructor. | P2 |
-| 37 | `IStorageUnit` | Storage `:19` | child root | delete | The internal struct is used directly. | P1 |
-| 38 | `IStorageUnitIterator` | Storage `:10` | child root | delete | The iterator stays internal sealed and enumerates `StorageUnit`. | P1 |
+| 37 | `IStorageUnit` | Storage `:19` | child root | sealed | `public readonly struct StorageUnit` (internal today, `Internal/StorageUnit.cs:8`), with an internal constructor. The iterator returns it unboxed. | P2 |
+| 38 | `IStorageUnitIterator` | Storage `:10` | child root | sealed | `public sealed class StorageUnitIterator : IEnumerator<StorageUnit>`, with an internal constructor. The public `Storage.GetUnitIterator` (`Storage.cs:837`, `:843`) returns it to Transactions, Sql, the five model catalogs and Graph.Storage. | P2 |
 | 39 | `ILockManager` | Transactions `:16` | child root | sealed | `public sealed class LockManager`, with an internal constructor. It absorbs `public static class LockManager` (`LockManager.cs:8`) as `public static LockManager Create()`. The coordinator's view becomes an internal release filter (§6.2). | P2 |
 | 40 | `IRecordVersionIndex` | Transactions `:13` | child root | abstract | `public abstract class RecordVersionIndex` in Transactions, with a protected constructor, because its leaves live in Indexing, Documents.Catalog and Graph.Storage. NVI erase and clear-deleter members call `protected abstract` cores. Indexing's sealed type (`Indexing/src/RecordVersionIndex.cs:17`) is renamed `BTreeRecordVersionIndex`. | P2 |
 | 41 | `ITransactionContext` | Transactions `:14` | child root | sealed | `public sealed class TransactionContext`, with an internal constructor, plus `public TransactionContext PinStatementSnapshot()` (§6.1). It is the most-consumed kernel contract (47 `src` files), and every call becomes non-virtual. | P2 |
@@ -251,10 +287,10 @@ interface is deleted in P6.
 | 78 | `IKeyValueClient` | KeyValuePair.Client `:20` | client | sealed | `public sealed class KeyValueClient`. It absorbs the static class (`KeyValueClient.cs:11`). | P5 |
 | 79 | `IKeyValueClientObserver` | KeyValuePair.Client `:18` | client | abstract | `public abstract class KeyValueClientObserver`, with a protected constructor. Its hooks are `protected internal virtual` with empty bodies. | P5 |
 | 80 | `IKeyValueConnection` | KeyValuePair.Client `:24` | client | sealed | `public sealed class KeyValueConnection`, with an internal constructor. | P5 |
-| 81 | `ISqlAggregateExpression` | Sql `:9` | model | sealed | `public sealed record class SqlAggregateExpression`, with an internal constructor. `Sql.Sum` (`Sql.cs:23`) returns it. | P4 |
-| 82 | `ISqlDatabase` | Sql `:6` | model | sealed | `public sealed class SqlDatabase : DatabaseInstance`, which overrides `SupportsSchemaProvisioning => true`. | P4 |
+| 81 | `ISqlAggregateExpression` | Sql `:9` | model | sealed | `public sealed class SqlAggregateExpression`, with get-only `SourceType`, `Selector` and `Predicate` and an internal constructor. Not a record: the current type is a positional record (`Internal/SqlAggregateExpression.cs:9`), and a public one would expose a public `with` that clones around validation (C7). `Sql.Sum` (`Sql.cs:23`) returns it. | P4 |
+| 82 | `ISqlDatabase` | Sql `:6` | model | sealed | `public sealed class SqlDatabase : DatabaseInstance`, which passes `supportsSchemaProvisioning: true` to the base constructor and overrides `ApplySchemaCoreAsync`. Until P6 it also lists `IDatabaseSchemaProvisioner` (row 8). | P4 |
 | 83 | `ISqlDatabaseEngineBuilder` | Sql `:10` | model | sealed | `public sealed class SqlDatabaseEngineBuilder`, with an internal constructor and a typed `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)` (D5). `ExternalEngineBuilder` (`tests/SqlExpressionDepthExecutionTests.cs:1230`) is deleted, and its `ExpressionNestingLimit` cases (32 to 4096, checked in `Build()`) are retested against the sealed builder. | P4 |
-| 84 | `ISqlStorageStrategy` | Sql `:13` | model | abstract *(internal)* | `internal abstract class SqlStorageStrategy`, with an internal option property. The crash doubles (`CrashCaptureSqlStorageStrategy`) derive through the existing grant. | P4 |
+| 84 | `ISqlStorageStrategy` | Sql `:13` | model | abstract *(internal)* | `internal abstract class SqlStorageStrategy`, with an internal option property. The crash doubles derive through the existing grant. `CrashCaptureSqlStorageStrategy` is `public sealed` today (`tests/TestObjects/CrashCaptureSqlStorageStrategy.cs:20`) and becomes `internal sealed`, because a public class cannot derive from an internal one (CS0060); only Sql.Tests uses it. | P4 |
 | 85 | `ISqlCatalog` | Sql.Catalog `:23` | model child | sealed | `public sealed class SqlCatalog`. It absorbs the static class (`SqlCatalog.cs:25`, `Open` at `:33` and `:53`), and `CaptureSnapshot` (`:72`) becomes an instance method. | P4 |
 | 86 | `ISqlCatalogSnapshot` | Sql.Catalog `:14` | model child | sealed | `public sealed class SqlCatalogSnapshot`, with an internal constructor. | P4 |
 | 87 | `ISqlSchemaBuilder` | Sql.Schema `:9` | model child | sealed | `public sealed class SqlSchemaBuilder`, with an internal constructor. `Table<T>` is a non-virtual generic method. The SDK constant (`CSharpSchemaExtractor.cs:20`) changes in the same commit. | P4 |
@@ -278,15 +314,19 @@ interface is deleted in P6.
 | 105 | `IDatabaseResourceDescriptor` | ApplicationModel `:6` | applicationmodel | keep | Unchanged. It extends the library-owned `IResourceCommandDescriptor`, following the 17-area pattern. | — |
 | 106 | `IDatabaseApplicationTestFactory` | Testing `:20` | other | keep | Unchanged. It matches Web.Testing's `IWebApplicationTestFactory`. | — |
 
-**Tally after corrections: delete 32, sealed 48, abstract 21 (16 public, 5 internal), keep 5.**
-#1255 recorded the design's tally of 24, 56, 21 and 5. Two critique corrections move nine rows
-net. `ITransactionManager` moves from delete to sealed (C1). The nine Sql.Schema declaration
-interfaces move from sealed to delete, because their records stay internal (C7).
+**Tally after corrections: delete 28, sealed 52, abstract 21 (16 public, 5 internal), keep 5.**
+#1255 recorded the design's tally of 24, 56, 21 and 5. Three corrections move rows.
+`ITransactionManager` moves from delete to sealed (C1). The nine Sql.Schema declaration
+interfaces move from sealed to delete, because their records stay internal (C7). The four
+storage sub-component interfaces (rows 31, 34, 37 and 38) move from delete to sealed, because
+public `Storage` members return them (the member-access check above).
 
 ### 5.2 Public static factories and other public signatures
 
 [Certain] These public members name a deleted interface, or collide with a type name the program
-introduces. rg found them in `resources/Database/**/src`. Each has an explicit decision.
+introduces. `rg` over `resources/Database --glob '**/src/**'` found them, and the phase-0 review
+added the composition verbs, extension containers and factory below. Each has an explicit
+decision.
 
 | Type or member | Today | Decision | Phase |
 |---|---|---|---|
@@ -299,6 +339,11 @@ introduces. rg found them in `resources/Database/**/src`. Each has an explicit d
 | `TransactionRecovery` (`TransactionRecovery.cs:18`, `Analyze` at `:25` and `:40`) | `public static class` taking `IStorageJournal` | Kept as a public static class: it is a stateless analysis with no interface twin. The parameter is retyped to `StorageJournal`. | P1 |
 | `Sql.Sum<TSource>` (`Sql/src/Sql.cs:23`) | returns `ISqlAggregateExpression` | Returns `SqlAggregateExpression` (row 81). | P4 |
 | `<Model>DatabaseEngine.CreateBuilder()` (`SqlDatabaseEngine.cs:181`, `KeyValueDatabaseEngine.cs:152`, Graph, Documents and Blob at `:67`) | return builder interfaces | Return the sealed builders. | P4 |
+| The five composition verbs `AddSql`, `AddKeyValue`, `AddGraph`, `AddDocuments` and `AddBlob` (`Extensions/SqlDatabaseApplicationExtensions.cs:16`, `KeyValueDatabaseApplicationExtensions.cs:16`, `GraphDatabaseApplicationExtensions.cs:17`, `DocumentDatabaseApplicationExtensions.cs:17`, `BlobDatabaseApplicationExtensions.cs:17`) | take `Action<IDatabaseApplicationContext, I<Model>DatabaseEngineBuilder>` | Retyped to the sealed builder in each model's PR. They stay `extension(IDatabaseApplicationBuilder)` members on the kept seam. The templates call them with untyped lambdas (`cohesion-database/Program.cs:11`), so they compile unchanged. | P4 |
+| `SqlDatabaseEngineFactory` (`Sql/src/SqlDatabaseEngineFactory.cs:8`) | `public static class` that forwards to `SqlDatabaseEngine.Create(options)` (`SqlDatabaseEngine.cs:163`) | Deleted in the Sql PR: rule 1 puts the factory on the type itself, which already has it. No code calls it. Its `(rootPath, engineName)` overload is not carried over, and the two doc mentions (`Database.Sql/docs/DESIGN.md:634`, `docs/programs/DATABASE_HOSTING_DESIGN.md:61`) change with it. | P4 |
+| `BlobContainerExtensions.GetOwnershipAsync` (`Blob/src/Extensions/BlobContainerExtensions.cs:13`) | `extension(IBlobContainer)` that casts to the internal implementation and throws for anything else | Folded into the sealed `BlobContainer` as an instance method, and the extension container is deleted. It existed only to avoid widening the interface, and a type in the same assembly needs no extension of itself. | P4 |
+| `DatabaseClientStreamingExtensions.ExecuteStreamingAsync` (`Client/src/Extensions/DatabaseClientStreamingExtensions.cs:13`, parameter at `:30`) | `extension(IDatabaseClient)`, taking `IDatabaseStreamingExchange` | Folded into the sealed `DatabaseClient` as an instance method taking `DatabaseStreamingExchange`, for the same reason. The extension container is deleted. | P5 |
+| `SqlProtocolConnectionExtensions.ExecuteAsync` (`Sql.Client/src/Extensions/SqlProtocolConnectionExtensions.cs:24`) | old-style `this IDatabaseConnection` extension | Stays an extension, because `DatabaseConnection` lives in Database.Client. It is retyped to `DatabaseConnection` and moves into an `extension(DatabaseConnection connection)` block (`general-rules.md`, extension containers). | P5 |
 | `SqlCatalog.CaptureSnapshot` (`:72`), `KeyValueCatalog.CaptureSnapshot` (`:41`) | static, taking the catalog interface | Instance methods on the sealed catalogs. | P4 |
 | `BTreeIndexManager.EnsureFormat` (`Indexing/src/BTreeIndexManager.cs:55`) | takes `IStorage` | Takes `Storage`. | P1 |
 | `EmbeddedDatabase.Engines`, `TryGetEngine(string, …)` and `TryGetEngine(EngineModel, …)` (`Embedded/src/EmbeddedDatabase.cs:32`, `:75`, `:95`; the field at `:21-24`) | typed `IDatabaseEngine` | Typed `DatabaseEngine`. | P6 |
@@ -309,12 +354,13 @@ introduces. rg found them in `resources/Database/**/src`. Each has an explicit d
 | Type | Finding | Phase |
 |---|---|---|
 | `Storage.Model` (`Storage/src/Storage.cs:101`) | `public abstract StorageModel Model`. The value is fixed per storage, so it becomes a base field set by the protected constructor (rule 6). | P2 |
+| `StorageJournal` (`Storage/src/Journal/StorageJournal.cs:21`) | After P1 it is the type the coordinator and recovery name. It has one shipped leaf, the sealed `StreamJournal` in the same assembly (`StreamJournal.cs:16`), so as it stands it meets none of rule 2's cases, and its constructor is `protected` (`:32`). P2's Storage commit, after #1236 settles the journal format, either collapses `StreamJournal` into one public sealed `StorageJournal`, keeping the file factories (`StreamJournal.cs:75`, `:86`), or records the second variant that justifies the base and narrows the constructor to `private protected` (rule 3). | P2 |
 | `CompiledSchema` (`Database/src/Provisioning/CompiledSchema.cs:12`) | A public abstract class whose leaf (`SqlCompiledSchema`) lives in Sql.Schema. It keeps a protected constructor. Audit its members for NVI when `DatabaseInstance.ApplySchemaAsync` starts taking it. | P3 |
 | `DatabaseEngineWorker` (`Database/src/DatabaseEngineWorker.cs:24`) | Public abstract `Name`, `Kind` and `Interval`, a virtual `Run`, a public abstract `RunIteration`, and a virtual `WaitForTrigger`. Converted to NVI (row 7). #1264's body lists it, but P3 is where the root bases are written, so it moves there. | P3 |
 | `QueryRow` (`Execution/src/QueryRow.cs:8`) | Nine public abstract getters (`:13-69`). `GetValue` returns `object?` and boxes. It has four leaves in four assemblies (`SqlMaterializedRow`, `KeyValueMaterializedRow`, `GraphQueryRow`, `DocumentQueryRow`), so it is megamorphic in a multi-model host. It gets NVI with the ordinal checks in the base, and typed accessors on the hot path. | P8 |
 | `QueryResultSet` (`QueryResultSet.cs:15`) | `GetRowsAsync` returns `IAsyncEnumerable<QueryRow>` (`:27`), which costs one interface dispatch per row. [Guessing] Replace it with a non-virtual pull shape only if a per-row benchmark shows the dispatch matters. | P8 |
 | `QueryResult` (`QueryResult.cs:10`) | `Diagnostics` is `IReadOnlyList<Diagnostic>?` (`:33`). It becomes non-null (§6.8). | P8 |
-| `QueryRequest` (`QueryRequest.cs:10`, `:36`) | Audit for NVI and constructor visibility. | P8 |
+| `QueryRequest` (`QueryRequest.cs:10`, `:36`) | Audit for NVI and constructor visibility. `Parameters` (`:29`, overridden in four model requests) stays nullable: `null` means the request carries none, which rule 9 leaves alone. | P8 |
 | `QueryParser` and `QueryAnalyzer` (`Language/src/QueryParser.cs:12`, `QueryAnalyzer.cs:12`) | Audit for NVI. `QueryAnalyzer` is declared in a block-scoped namespace (`QueryAnalyzer.cs:7`, a forbidden pattern) with empty `<summary>` docs. `QueryParserOptions.Analyzers` exposes a mutable `List<QueryAnalyzer>` (`QueryParserOptions.cs:12`). | P8 |
 
 ## 6. Design notes for the corrected rows
@@ -404,9 +450,22 @@ Two contracts stay per model:
 | "A transaction or stream is already active on this session." | Blob (`BlobDatabaseSession.cs:54-59`) |
 
 `DatabaseSession` keeps one check with one message: "A transaction or operation is already active
-on this session." Tests that assert the old text change in P3.
+on this session."
 
-**Gate:** the #1188, #1225 and #1226 suites, in process and over the wire, for every model.
+**When it takes effect.** No model session or transaction derives from the root bases until its
+model PR in P4, so the consolidation lands in two steps:
+
+- **P3** writes the bases with the consolidated state machine and the one check, and adds a
+  Database.Tests suite that drives them through root-level test doubles (the bases' constructors
+  are `protected`): the end gate, the Faulted state, a repeatable rollback, cancellation only
+  before an end starts, `Abort`, and the one "already active" message. Model tests do not change
+  in P3, because no model runs the base code yet.
+- **Each model PR in P4** deletes that model's own copy (`GraphDatabaseTransaction.cs:19` and its
+  siblings above), derives from the bases, adds the typed `new` fields, and updates that model's
+  "already active" assertions.
+
+**Gate:** P3 runs the new Database.Tests suite. Each model PR in P4 runs that model's #1188, #1225
+and #1226 suites, in process and over the wire.
 
 ### 6.5 Root-base state, attach semantics and typed accessors (rows 1, 5, 9, 12)
 
@@ -463,15 +522,21 @@ the session operations in the same model PR.
 
 ### 6.8 One Diagnostics convention: never null (D12)
 
-`QueryResult.Diagnostics` is nullable (`Execution/src/QueryResult.cs:33`), and its nine overrides
+`QueryResult.Diagnostics` is nullable (`Execution/src/QueryResult.cs:33`), and its ten overrides
 return `null` when they have nothing to report. #1228 made `GraphSchemaResult<T>.Diagnostics`
 non-null and empty instead (`Graph/src/GraphSchemaResult.cs:28`; commit `9eee083d` cites the .NET
 design guideline against null collection properties). The area adopts the #1228 form:
 
-- every collection-valued member returns an empty collection, never `null` (rule 9 in
-  `database-area.md`);
-- P8 changes `QueryResult.Diagnostics` to `IReadOnlyList<Diagnostic>` and updates the nine
-  overrides, plus the seven test files that assert `null` (Graph `GqlUnknownTokenWarningTests`,
+- Diagnostics and other result collections return an empty collection, never `null` (rule 9 in
+  `database-area.md`). A member where `null` means "absent" is outside the rule and keeps its
+  meaning: `QueryRequest.Parameters` and its four overrides, `SqlInsertExpression.Columns`
+  (`Sql.Language/src/Expressions/SqlInsertExpression.cs:44`, "the column list, if specified"),
+  `SqlInExpression.Values` (`SqlInExpression.cs:38`) and
+  `BTreeIndexManagerOptions.ExistingIndexes` (`Indexing/src/BTreeIndexManagerOptions.cs:36`);
+- P1 deletes one override, `QueryStatementResult` (`Execution/src/QueryStatementResult.cs:36`),
+  with the pipeline (row 15);
+- P8 changes `QueryResult.Diagnostics` to `IReadOnlyList<Diagnostic>` and updates the remaining
+  nine overrides, plus the seven test files that assert `null` (Graph `GqlUnknownTokenWarningTests`,
   `GqlLabelDirectionExecutionTests`, `GraphPathsQueryTests`; Sql `SqlExpressionDepthExecutionTests`,
   `SqlTransactionControlTests`, `SqlStatementCompletenessExecutionTests`,
   `SqlSubqueryBindingDiagnosticTests`).
@@ -485,7 +550,7 @@ statement (#1228).
 
 | Grant | Phase | Needed by |
 |---|---|---|
-| Transactions → `Assimalign.Cohesion.Database.Transactions.Tests` (new `src/Properties/AssemblyInfo.cs`) | P1 | `FailingCommitLog` (`TransactionManagerTests.cs:251`); `ControlledLog` (`TransactionManagerRollbackTests.cs:529`); `ControlledVersionStore` (`:467`, from P2); tests that call the now-internal log factories |
+| Transactions → `Assimalign.Cohesion.Database.Transactions.Tests` (new `src/Properties/AssemblyInfo.cs`) | P1 | `FailingCommitLog` (`TransactionManagerTests.cs:251`); `ControlledLog` (`TransactionManagerRollbackTests.cs:529`); `ControlledVersionStore` (`:467`, from P2); tests that call the now-internal log factories; the coordinator's three internal test hooks (below) |
 | Sql.Schema → `Assimalign.Cohesion.Database.Sql.Schema.Tests` (new `src/Properties/AssemblyInfo.cs`) | P4 (Sql) | `SqlSchemaTests.cs` and `CompiledSchemaTests.cs`, which read the internal declaration model |
 
 Every other derivation goes through a protected constructor, or through a grant that already
@@ -502,10 +567,63 @@ Documents.Language, Blob and Hosting.
   - `BTreePageFormatTests.cs:53` supplies the delegate too (P2).
 - **Sql.Tests** `SqlMvccBindingTests.cs:63`, `:71` read `database.Coordinator.Manager.OldestActive`.
   They compile unchanged, because `OldestActive` stays public on the sealed type; P1 verifies it.
-- **Transactions.Tests**:
-  - the three Storage-and-record-space doubles are split (C9, P2);
+- **Transactions.Tests, P1: the coordinator hooks (rows 28 and 32).** P1 retypes
+  `TransactionCoordinator` (`TransactionCoordinator.cs:77`) to `Storage` and `StorageJournal`.
+  The members three doubles intercept are public and non-virtual there
+  (`Storage.ReserveTransactionSequence`, `Storage.cs:467`; `Storage.Checkpoint`, `:549`;
+  `StorageJournal.AppendRollback`, `StorageJournal.cs:78`), and `StreamJournal` is sealed. The
+  doubles also stop compiling in P1, because `IStorage` is in their base lists:
+  - `CoordinatorStorage` (`TransactionCoordinatorRecoveryTests.cs:318`) re-implements
+    `IStorage.Checkpoint` (`:374`) and `IStorage.ReserveTransactionSequence` (`:380`) to fire
+    `BeforeCheckpoint` and `SequenceReserved`;
+  - `RollbackStorage` (`TransactionCoordinatorRollbackTests.cs:926`) re-implements
+    `IStorage.Checkpoint` (`:987`) to fire `BeforeCheckpoint`;
+  - `FaultInjectingJournal` (`:844`) decorates the storage's journal and throws from
+    `AppendRollback`.
+
+  **Seam decision.** `TransactionCoordinator` owns three internal hooks, reached through the P1
+  grant. Each sits at the call the double intercepted, inside the same gate, so the tests keep
+  their interleavings:
+  - one invoked under the append gate just before `storage.Checkpoint(actives)` (`:764`), with
+    the captured active list;
+  - one invoked after the allocator's `ReserveTransactionSequence` (`:99`);
+  - one invoked inside the `try` of the rollback append (`:730`), which may throw to reject the
+    record, so the `finally` still drops the sequence from the active set.
+
+  `FaultInjectingJournal` is deleted. `CoordinatorStorage` and `RollbackStorage` drop `IStorage`
+  and their explicit re-implementations in P1; only the record-space split (C9) waits for P2. The
+  `RecordCount(IStorage)` and `CountRecords(IStorage)` helpers
+  (`TransactionCoordinatorRecoveryTests.cs:304`, `TransactionCoordinatorRollbackTests.cs:769`,
+  `RecordSpaceVersionStoreTests.cs:204`) and the doubles' `Log` properties retype to `Storage`
+  and `StorageJournal`.
+
+  **Rejected seams.** `protected virtual` observer hooks on `Storage` would add protected surface
+  to a public base purely for tests (`general-rules.md`, "Adding a public API to the producer
+  purely to serve one consumer"). A `StorageJournal`-derived decorator cannot forward to another
+  instance's protected frame cores (CS1540), and a test cannot hand `Storage` its own journal:
+  `Storage` builds its `StreamJournal` itself (`Storage.cs:270`, `:367`). A stream-level trigger on
+  the rollback frame would tie the tests to the frame layout that #1236 is rewriting.
+
+  **The six tests this carries**, from #1226 (`2b97a498`) and the coordinator's checkpoint
+  classification:
+  - `Checkpoint_ConcurrentLifecycleAppend_ShouldPreserveClassification` (`TransactionCoordinatorRecoveryTests.cs:24`, both cases);
+  - `RollbackAsync_JournalRejectsAbortRecord_ShouldReleaseWriterForTheNextOne` (`TransactionCoordinatorRollbackTests.cs:47`);
+  - `RollbackAsync_UndoFails_ShouldHoldLocksAndVisibilityUntilThePurgePassCompletesIt` (`:147`);
+  - `Recovery_WriterWithoutAbortRecord_ShouldBeClassifiedAbortedAndScrubbed` (`:201`);
+  - `RollbackAsync_UndoBracketJournalWriteFails_ShouldDeferTheUndoAndLeaveCheckpointsRunning` (`:279`);
+  - `DisposeAsync_UndoStillFailsAndStorageClosesCleanly_ShouldLeaveTheWriterForRecoveryToScrub` (`:315`).
+
+  Each asserts that its hook fired, so a hook that is silently never called cannot pass. The
+  `Checkpoint(coordinator, storage)` helper (`TransactionCoordinatorRollbackTests.cs:730`) starts
+  its capture as `null` and asserts it was set; today an empty capture would pass
+  `ShouldNotContain` (`:191`).
+- **Transactions.Tests, P2**:
+  - the three Storage-and-record-space doubles are split (C9);
   - `BlockingIndex` (`TransactionCoordinatorRollbackTests.cs:782`) and the two `FailingIndex`
-    doubles (`:819`, `RecordSpaceVersionStoreTests.cs:216`) derive from `RecordVersionIndex` (P2).
+    doubles (`:819`, `RecordSpaceVersionStoreTests.cs:216`) derive from `RecordVersionIndex`.
+- **Storage sub-components (rows 31, 34, 37, 38), P2.** No test names their interfaces. Their
+  consumers reach them through `var` and member access, and compile unchanged against the sealed
+  types.
 - **Authenticator doubles** derive from `DatabaseAuthenticator` (P2). They are in KeyValuePair
   (`TestObjects/RejectingAuthenticator.cs:12`), Sql (`TestObjects/RejectingAuthenticator.cs:12`),
   Blob (`BlobDatabaseServerTests.cs:381`) and KeyValuePair.Client (`KeyValueClientTests.cs:202`).
@@ -588,8 +706,8 @@ Each phase adds its own gate below.
 per-project DESIGN changes. *Gate:* docs only. The dependency graph check passes, and the Database
 root builds with 0 warnings, as before.
 
-**P1, #1257: delete dead and internal-only seams.** Rows 14 to 18, 26, 28 to 32, 34, 35, 37, 38,
-42, 43, 46 and 47 (row 43 per C1).
+**P1, #1257: delete dead and internal-only seams.** Rows 14 to 18, 26, 28 to 30, 32, 35, 42, 43,
+46 and 47 (row 43 per C1). Rows 31, 34, 37 and 38 moved to P2 (§5.1).
 
 - **Projects deleted (D6).** `Database.Governance`, `Database.Replication` and
   `Database.Sql.Replication`, plus the four empty model shells `Blob.Replication`,
@@ -600,16 +718,31 @@ root builds with 0 warnings, as before.
   - `Database.Runtime/Directory.Build.props:38`, and the exclusion comment at `:98-113`;
   - the root `Assimalign.Cohesion.Database.csproj:16`;
   - `resource-database.yml:31-34` and `:50`, and `sdk-smoke.yml:27`, `:76`, `:322` and `:392`;
-  - the three `.slnx` files;
-  - the Governance child-root lists in `.claude/rules/resource-areas.md:92` and `:289`,
-    `resources/Database/README.md:11` and `:144`, and `docs/resources/Database/DESIGN.md:90`,
-    `:96` and `:130`.
-- **Transactions.** `TransactionManager`, `TransactionLog` and `TransactionRecovery` per §5.2, and
-  the Transactions → Transactions.Tests grant.
+  - the four `.slnx` files: the root `Assimalign.Cohesion.slnx`,
+    `resources/Assimalign.Cohesion.Resources.slnx`, the area's
+    `resources/Database/Assimalign.Cohesion.Database.slnx`, and
+    `resources/Database/Assimalign.Cohesion.Database/Assimalign.Cohesion.Database.slnx:23`;
+  - the Governance child-root lists in `.claude/rules/resource-areas.md:92` and `:289`;
+  - `resources/Database/README.md:11`, `:100`, `:111` and `:143-144`;
+  - `docs/resources/Database/DESIGN.md:43`, `:72`, `:83`, `:90`, `:94`, `:96`, `:120`, `:122`,
+    `:130` and `:495` (the decision-log row at `:469` is history and stays);
+  - `Database/docs/OVERVIEW.md:19` and `:69`, `Database/docs/DESIGN.md:14`, and
+    `Database.Storage/docs/DESIGN.md:646`;
+  - `docs/programs/DATABASE_PROGRAM_PLAN.md` (five mentions);
+  - re-run `rg -n "Governance|Replication" --glob '*.md' --glob '*.slnx'` before the commit,
+    because these lines move.
+- **Execution.** `QueryStatementResult` goes with the pipeline (row 15), and
+  `Database.Execution/docs/OVERVIEW.md:13` with it.
+- **Storage.** `Storage.BufferPool` becomes internal (row 30). The `Storage` and `StorageJournal`
+  deviation markers are written (§8).
+- **Transactions.** `TransactionManager`, `TransactionLog` and `TransactionRecovery` per §5.2, the
+  Transactions → Transactions.Tests grant, and the coordinator hooks that replace the `IStorage`
+  and `IStorageJournal` interception (§6.9).
 
 *Gate:*
 
 - every Database suite, Indexing.Tests and Sql.Tests by name;
+- the six coordinator tests of §6.9 by name, each asserting that its hook fired;
 - `Assert-CohesionReleaseInventory`;
 - `dotnet pack resources/Database/Assimalign.Cohesion.Database.Runtime/src/Assimalign.Cohesion.Database.Runtime.csproj`,
   because the framework loses Governance;
@@ -620,7 +753,8 @@ P1 and #1236 both touch `Storage.cs`, at different lines; whichever lands second
 **P2, #1258: kernel child roots.** It waits for #1236. There is one commit per child root, in
 dependency order, and each updates its consumers mechanically:
 
-1. **Storage:** rows 33 and 36, and `Storage.Model`.
+1. **Storage:** rows 31, 33, 34, 36, 37 and 38, `Storage.Model`, and the `StorageJournal` audit
+   (§5.3).
 2. **Transactions:** rows 39 to 41, 44 and 45; §6.1, §6.2 and C9; `TransactionManager.Create`
    retyped.
 3. **Indexing:** rows 19 to 23, and §6.3.
@@ -634,16 +768,20 @@ microbenchmark of the insert path runs before and after.
 **P3, #1259: root bridge bases.** Rows 1, 5, 9, 11, 12 and 13 add `DatabaseEngine`,
 `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer` and
 `DatabaseServerSession`. Each still **explicitly implements** its old root interface, so
-Hosting and Embedded keep compiling. That is today's guided-abstract-base rule. P3 also:
+Hosting and Embedded keep compiling. That is today's guided-abstract-base rule. No model leaf
+derives from them yet; that happens per model in P4. P3 also:
 
-- consolidates the state machine and the "already active" check (§6.4);
-- adds the attach semantics and typed fields (§6.5);
-- folds in schema provisioning (row 8) and audits `CompiledSchema`;
-- converts `DatabaseEngineWorker` to NVI (row 7), with its 22 worker leaves.
+- writes the consolidated state machine and the one "already active" check into the bases
+  (§6.4), and the Database.Tests suite that drives them through root-level doubles;
+- writes the attach semantics and the base fields that typed `new` properties sit on (§6.5);
+- folds schema provisioning into `DatabaseInstance` (row 8) and audits `CompiledSchema`;
+- converts `DatabaseEngineWorker` to NVI (row 7). Its 22 worker leaves already derive from it, so
+  they change in P3.
 
 `DatabaseServer` keeps `IDatabaseServer.Context` as a temporary abstract member until P6.
-*Gate:* the #1188, #1225 and #1226 suites in process and over the wire. The changed
-"already active" message is updated in tests.
+*Gate:* the new Database.Tests base suite (end gate, Faulted state, repeatable rollback,
+cancellation before an end, `Abort`, the one message, attach after freeze refused); every
+existing Database suite unchanged and green; the engine-worker suites of every model.
 
 **P4, #1260: one PR per model.**
 
@@ -654,6 +792,10 @@ Hosting and Embedded keep compiling. That is today's guided-abstract-base rule. 
   `DatabaseEngine`.
 - **Then KeyValuePair, Graph, Documents, Blob and Sql, one PR each, serialized.**
   - The leaves derive from the bridge bases and become public sealed.
+  - The model deletes its own copy of the explicit-transaction state machine and the "already
+    active" check, adopts the base's, adds its typed `new` fields, and updates its message
+    assertions (§6.4). Sql's transaction gains the end gate.
+  - The `Add<Model>` composition verb is retyped to the sealed builder (§5.2).
   - The model children collapse into sealed types, and the builder becomes sealed with typed
     `AddServer` and `AddWorker`.
   - The strategies become internal abstract (D9), and the model's `Abstractions/` folder goes.
@@ -661,21 +803,28 @@ Hosting and Embedded keep compiling. That is today's guided-abstract-base rule. 
   - The model's tests, fixtures (including the Documents recovery fixture's casts) and Studio
     workspace are updated. Studio, which is MAUI with `IsPackable=false`, is built in every model
     PR.
-- **Blob and Documents** use option B (§6.6).
+- **Blob and Documents** use option B (§6.6). The Blob PR folds `GetOwnershipAsync` into
+  `BlobContainer` (§5.2).
 - **The Sql PR** carries:
   - §6.7, with the SDK strings in lockstep;
   - the `ExternalEngineBuilder` deletion and the builder-validation retests (row 83);
+  - `IDatabaseSchemaProvisioner` kept in `SqlDatabase`'s base list until P6 (row 8);
+  - the `SqlDatabaseEngineFactory` deletion and `CrashCaptureSqlStorageStrategy` made internal
+    (§5.2, row 84);
   - the reversal of Sql DESIGN's 2026-10-02 ruling (`Database.Sql/docs/DESIGN.md:627-631`) and its
     "interface-first entry" paragraph (`:1554`);
   - the note that #1232 is superseded.
 
 The template, fixture and example casts `(SqlDatabaseEngine)engine` become identity casts and
-still compile. *Gate:* each model's suites and Studio's build. The Sql PR also runs the
-`Sdk.Database` tests against refreshed canonical packs.
+still compile. *Gate:* each model's suites, including its #1188, #1225 and #1226 suites in
+process and over the wire (§6.4), and Studio's build. The Sql PR also runs the `Sdk.Database`
+tests against refreshed canonical packs, and the SampleHost provisioning test.
 
 **P5, #1261: clients.** Rows 48 to 52, 58, 59, 71, 72, 78 to 80 and 102 to 104.
 
 - **The Database.Client core first.** Then the Sql, KeyValuePair, Graph and Blob clients.
+- **Extension containers.** `ExecuteStreamingAsync` folds into `DatabaseClient`, and
+  `SqlProtocolConnectionExtensions` moves to an `extension(DatabaseConnection)` block (§5.2).
 - **Retypes.** The Studio client workspaces, and
   `sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/tests/TestProjects/EnabledWeb/Program.cs:20`
   (`ISqlClient` becomes `SqlClient`).
@@ -686,8 +835,9 @@ still compile. *Gate:* each model's suites and Studio's build. The Sql PR also r
 
 - **Retypes.** Rows 3 and 4. In Hosting: `DatabaseApplicationContext`, `DatabaseApplicationBuilder`
   (`server.Context.Engine` becomes `server.Engine`), `DefaultDatabaseProvisioner.cs:49` (which
-  becomes a flag check), `DatabaseResourceCommandHandler` and the admin endpoint. Also Embedded
-  (§5.2) and Testing.
+  becomes a flag check; `SqlDatabase` and Hosting's `ProvisioningDatabase` double,
+  `ProvisioningEngine.cs:101`, drop `IDatabaseSchemaProvisioner`), `DatabaseResourceCommandHandler`
+  and the admin endpoint. Also Embedded (§5.2) and Testing.
 - **Doubles and deletions.** The Hosting and Embedded doubles move to the bases (§6.9). Then delete
   the 10 root interfaces (rows 1 and 5 to 13, which include `IDatabaseServerContext`), the four
   context classes, the five double contexts, and the bridge's explicit implementations.
@@ -731,20 +881,43 @@ kept interfaces.
 
 ## 8. Deviation markers
 
-There are 27 markers, each with the exact text in `database-area.md`:
+There are 29 markers, each with the exact text in `database-area.md`:
 
-- **17 public abstract bases**, the 16 of §5.1 plus the existing `DatabaseEngineWorker`:
-  `DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`,
-  `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`, `DatabaseEngineWorker`,
-  `TransactionRecordSpace`, `RecordVersionIndex`, `VersionStore`, `ProtocolFrameReader`,
-  `ProtocolFrameWriter`, `DatabaseAuthenticator`, `DatabaseProtocolExchange<TResult>`,
-  `DatabaseStreamingExchange`, `SqlClientObserver` and `KeyValueClientObserver`.
-- **5 model engines.**
-- **5 model engine builders.**
+- **19 public abstract bases**: the 16 of §5.1, the existing `DatabaseEngineWorker`, and the
+  existing `Storage` and `StorageJournal`, which P1 strips of their interfaces;
+- **5 model engines**;
+- **5 model engine builders**.
+
+Each base meets one of rule 2's cases: **V**, a variant set (two or more shipped
+implementations); **H**, `Database.Hosting` must stay model-agnostic under COHRES002; **S**, an
+inverted seam (a lower assembly drives it, and a higher assembly or the application implements
+it). [Certain] The implementers were counted with rg on 2026-10-04.
+
+| Base | Case | Implementations | Constructor | Marker in |
+|---|---|---|---|---|
+| `DatabaseEngine` | H, V | the five model engines | `protected` | P3 |
+| `DatabaseInstance` | H, V | the five model databases | `protected` | P3 |
+| `DatabaseSession` | V | the five model sessions | `protected` | P3 |
+| `DatabaseTransaction` | V | the five model transactions | `protected` | P3 |
+| `DatabaseServer` | H, V | the Sql, KeyValuePair, Graph and Blob wire servers | `protected` | P3 |
+| `DatabaseServerSession` | V | one per model server | `protected` | P3 |
+| `DatabaseEngineWorker` | H, V | 22 workers in the model assemblies | `protected` | P3 |
+| `Storage` | V | `SqlStorage`, `KeyValueStorage`, `GraphStorage`, `DocumentStorage`, `BlobStorage` | `protected` (existing) | P1 |
+| `StorageJournal` | none yet | `StreamJournal` only; audited in P2, and the marker goes if the type collapses (§5.3) | `protected` until the audit | P1 |
+| `TransactionRecordSpace` | V, S | five model record spaces; the coordinator drives them | `protected` | P2 |
+| `RecordVersionIndex` | V, S | Indexing's `BTreeRecordVersionIndex` and the Documents.Catalog and Graph.Storage undo indexes | `protected` | P2 |
+| `VersionStore` | V | `RecordSpaceVersionStore` and `InMemoryVersionStore`, both in Transactions | `private protected` | P2 |
+| `ProtocolFrameReader` | V | four, in Protocol, Database.Client and Blob.Client | `protected` | P2 |
+| `ProtocolFrameWriter` | V | four, in the same three assemblies | `protected` | P2 |
+| `DatabaseAuthenticator` | S | one shipped (`AllowAll`); the model servers call it and the application supplies its own | `protected` | P2 |
+| `DatabaseProtocolExchange<TResult>` | V, S | the Sql, KeyValuePair, Graph and Blob exchanges and Database.Client's streaming exchange; `Database.Client` runs them | `protected` | P5 |
+| `DatabaseStreamingExchange` | S | one shipped (Blob.Client's download exchange); `Database.Client` runs it | `protected` | P5 |
+| `SqlClientObserver` | S | none shipped; the application sets one through `SqlClientOptions` (`SqlClientOptions.cs:29`) | `protected` | P5 |
+| `KeyValueClientObserver` | S | none shipped; set through `KeyValueClientOptions` (`KeyValueClientOptions.cs:29`) | `protected` | P5 |
 
 Internal abstract bases (the strategies and `TransactionLog`) are not public API and carry no
-marker. Sealed leaves are covered by `database-area.md`. Each marker lands in the phase that writes
-its type.
+marker. Other sealed leaves are covered by `database-area.md`. Each marker lands in the phase that
+writes its type, or, for `Storage` and `StorageJournal`, strips its interface.
 
 ## 9. Performance evidence
 
@@ -797,32 +970,34 @@ That is roughly 570 files in this repository and 119 in the two companions.
 **Public types.**
 
 - [Certain] 101 interfaces leave.
-- [Likely] About 31 internal implementations become public sealed types under new public names,
-  and about 15 static factory classes become sealed types under their existing names.
+- [Likely] About 35 internal implementations become public sealed types under new public names:
+  the design's 31, plus the four storage sub-components the review moved to sealed (rows 31, 34,
+  37 and 38). About 15 static factory classes become sealed types under their existing names.
 - There are 16 public abstract bases. Three reuse an existing public name (`VersionStore`,
   `DatabaseAuthenticator`, `RecordVersionIndex`).
 - The corrections remove further public types: the nine Sql.Schema declaration records stay
-  internal, two strategies become internal, and `SqlSchemaCompiler`, `ProtocolFraming` and the
-  public `TransactionLog` factory go.
-- [Likely] Net: about 55 to 60 fewer public types.
+  internal, two strategies become internal, and `SqlSchemaCompiler`, `ProtocolFraming`, the
+  public `TransactionLog` factory, `QueryStatementResult` and `SqlDatabaseEngineFactory` go.
+- [Likely] Net: about 53 to 58 fewer public types.
 
-**Effort.** [Guessing] About 13 PRs: P0, P1, P2 (five commits), P3, P4.0, five model PRs, P5,
-P6, P7 and P8. Roughly 15,000 to 25,000 changed lines, most of them mechanical renames in tests.
-The real design work is in P3 (NVI bases and the consolidated state machine), §6.6 and §6.7. The
-moves out of `Internal/` (C12) are counted in P2, P4 and P5: [Likely] about 31 files, each
-changing namespace, plus the `using …Internal` lines in their tests.
+**Effort.** [Guessing] 14 PRs in this repository: P0, P1, P2 (five commits), P3, P4.0, five model
+PRs, P5, P6, P7 and P8. P7 adds one cohesion-examples PR in the same window. Roughly 15,000 to
+25,000 changed lines, most of them mechanical renames in tests. The real design work is in P3
+(NVI bases and the consolidated state machine), §6.6 and §6.7. The moves out of `Internal/` (C12)
+are counted in P2, P4 and P5: [Likely] about 35 files, including the four storage
+sub-components, each changing namespace, plus the `using …Internal` lines in their tests.
 
 ## 11. Risks
 
 | # | Risk | Mitigation |
 |---|---|---|
-| R1 | [Certain] The owner expects throughput. The measured dispatch gain is about 1.5 ns per megamorphic call. | §1 and §9 state it. #1236 is the throughput work and runs first. |
+| R1 | [Likely] The owner expects throughput. The measured dispatch gain is about 1.5 ns per megamorphic call, within ±60% run-to-run variance (§9). | §1 and §9 state it. #1236 is the throughput work and runs first. |
 | R2 | [Certain] The SDK breaks silently. The extractor matches by string, so a rename compiles and then rejects every schema at build time. | The SDK strings change in the same commit (§6.7), and the SDK tests run against refreshed canonical packs. |
 | R3 | [Likely] A `new` typed async member calls the `Core` directly and skips the state machine. | `database-area.md` rule 7. Reviewers check every `new` member. An analyzer remains an open option. |
-| R4 | [Certain] Centralizing the messages changes behavior: tests that assert the old "already active" text fail. | Those tests are updated in P3 (§6.4). |
+| R4 | [Certain] Centralizing the messages changes behavior: tests that assert the old "already active" text fail. | Each model's P4 PR updates its own assertions when its session adopts the base (§6.4). |
 | R5 | [Likely] The changes conflict on the integration branch. They touch about 570 files. | #1236 lands first, model PRs are serialized, and each phase merges back before the next starts. |
 | R6 | [Certain] The protected root constructors leave the hierarchy open: anyone can derive from `DatabaseEngine` and call the protected attach methods before freezing. | NVI, sealed leaves and frozen attach keep it tight. The analyzer decision is open. |
-| R7 | [Certain] The #1188, #1225 and #1226 transaction contracts regress when the state machine moves into the base. | Those suites gate P3, in process and over the wire. |
+| R7 | [Certain] The #1188, #1225 and #1226 transaction contracts regress when the state machine moves into the base. | P3 tests the base through root-level doubles in Database.Tests. Each model's P4 PR, where that model adopts the base, runs its #1188, #1225 and #1226 suites in process and over the wire (§6.4). |
 | R8 | [Likely] The `LockManager` filter changes the lock retention of deferred writers (#1226). | §6.2. The #1226 rollback tests gate P2. |
 | R9 | [Certain] Crash-harness coverage depends on the strategies staying derivable. | The strategies become `internal abstract`, never sealed, and the crash doubles derive through the existing grants. |
 | R10 | [Certain] Option B changes more Blob and Documents API than option A would: Studio's workspaces and the wire servers move to session operations. | It is done in the same model PR, with Studio built in each. |
@@ -831,12 +1006,18 @@ changing namespace, plus the `using …Internal` lines in their tests.
 | R13 | [Certain] Studio is MAUI and Windows-only, outside most CI legs, so it can rot between phases. | It is built in P4, P5 and P7. |
 | R14 | [Certain] cohesion-examples drifts. | The identity cast keeps it compiling until P7. P7 updates it in the same window. |
 | R15 | [Certain] A source break for preview.1 consumers. | One release-notes line (D11). |
+| R16 | [Certain] The coordinator carries three internal test hooks in production code (§6.9). | They are internal, `null` unless a test sets them, and called once per checkpoint, sequence reservation or rollback, never per row. Only Transactions.Tests reaches them, and each test asserts its hook fired. |
 
 ## 12. Follow-ups this plan does not do
 
 - The analyzer decision (§2) is open until P8.
 - #1264's body lists `DatabaseEngineWorker`, but this plan moves it to P3 (§5.3). The issue body
   needs the same edit.
+- The phase-0 review changed other issue bodies' scope, and they need the same edits: #1255's
+  tally becomes 28 delete, 52 sealed, 21 abstract and 5 keep (§5.1); #1257 (P1) loses rows 31,
+  34, 37 and 38 to #1258 (P2) and gains the coordinator hooks and the six named tests (§6.9);
+  #1259 (P3) gates on a Database.Tests base suite, and each model PR under #1260 (P4) carries
+  its own #1188, #1225 and #1226 gate (§6.4).
 - #1232 is closed as superseded when the Sql PR of P4 lands.
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
