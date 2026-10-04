@@ -491,7 +491,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
 - **DROP COLUMN rewrites every version in place; no version moves (#1237).**
   Records are positional, so dropping a column removes its component from every
   stored version, live, tombstoned or visible only to an older snapshot
-  (`SqlPlanExecutor.SpliceColumnOut`). The rewrite is a byte splice
+  (`SqlPlanExecutor.CollectColumnSplices`). The rewrite is a byte splice
   (`SqlRowCodec.WithoutColumn`, bounded by `DatabaseKeyReader.BytesConsumed`):
   stamps, object id and every surviving component are copied verbatim, so the
   rewritten version is shorter than its slot by at least one byte and
@@ -501,9 +501,11 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   version by location needs maintenance: index entries are (key, entry
   reference, writer) and keys cannot change (an indexed column cannot be
   dropped), the version store's prunable tombstones and undo ledger hold
-  locations, and row locks are taken on locations. A rewritten version that
-  would not shrink is an internal invariant failure (`InvalidOperationException`,
-  the statement bracket rolls back), never a relocation.
+  locations, and row locks are taken on locations. A spliced version that
+  would not shrink is an internal invariant failure (`InvalidOperationException`),
+  never a relocation; it is raised while the splices are collected, before the
+  catalog commits, so the statement fails with the table unchanged (*Ordering*,
+  below).
   - *Why it was wrong before.* The rewrite decoded each version, materialized
     its missing tail from the column defaults and re-encoded it. A version
     written before `ADD COLUMN ... DEFAULT '<long text>'` therefore grew by the
@@ -512,8 +514,9 @@ declared dialect and retain their existing unsupported-clause diagnostics.
     freed location, so seeks missed the row, and once a page emptied that way was
     reused by later inserts the stale location could answer for another row; its
     ledger location went stale too. `SqlDropColumnRewriteTests`
-    reproduced it on full pages: every version moved, and 571 seeks across the
-    primary key, two secondary indexes and a UNIQUE index disagreed with the scan.
+    reproduced it on full pages: every version written before the ADD COLUMN
+    (360 of 452) moved, and 571 seeks across the primary key, two secondary
+    indexes and a UNIQUE index disagreed with the scan.
   - *Why not rewrite and rebuild the indexes.* PostgreSQL's rewriting ALTER
     TABLE forms write a new heap and rebuild every index
     (`src/backend/commands/tablecmds.c:6041-6066`, `ATRewriteTables` calling
@@ -531,16 +534,46 @@ declared dialect and retain their existing unsupported-clause diagnostics.
     update fails rather than resize a tuple
     (`src/backend/access/heap/heapam.c:6727-6731`, "wrong tuple length"). The
     splice keeps that property without a dropped-attribute catalog format.
-  - *Ordering.* The catalog drop self-commits first; the rewrite then runs in one
-    bracket under the apply gate and is not cancellable, because a cancelled
-    rewrite would leave versions the published definition decodes on the wrong
-    positions. The bracket commits durably, as CREATE INDEX's does: the
-    statement's transaction neither records nor undoes it. The scan runs inside
-    the bracket, so the purge worker, which prunes under the same gate, cannot
-    reclaim a version (or free its page) between the read and the write. Known
-    limit: the catalog and the data are separate file sets, so a crash after the
-    catalog commit and before the rewrite's durable commit leaves versions on
-    the old layout under the new definition.
+  - *Ordering.* Every drop the catalog would refuse (an unknown, primary-key,
+    constrained or indexed column, or the last column) is refused before the
+    bracket opens, so a refused drop never scans the table inside the apply
+    gate; the catalog stays authoritative and checks again under its own lock.
+    The statement then runs one bracket under the gate, committed durably as
+    CREATE INDEX's is (the statement's transaction neither records nor undoes
+    it), in three steps: the splices are collected and checked with
+    nothing written and cancellation honoured; the catalog drop self-commits and
+    the new definition is published; the collected splices are written, with
+    cancellation no longer observed, because a rewrite left half done would leave
+    versions the published definition decodes on the wrong positions. Every
+    failure the statement can detect (a malformed version, a splice that would
+    not shrink, cancellation, running out of memory while collecting) therefore
+    lands before the catalog commits and leaves the table and its catalog entry
+    unchanged. The scan and the writes share one gate hold, so the purge worker,
+    which prunes under the same gate, cannot reclaim a version (or free its
+    page) between the read and the write. The catalog call keeps the gate's
+    no-wait rule: the catalog is synchronous, behind its own monitor, on its own
+    file set, and takes neither the gate nor a lock-manager lock.
+  - *Known limits (both predate #1237).* The catalog and the data are separate
+    file sets. A crash after the catalog commit and before the rewrite's durable
+    commit, or a storage failure in that window (a splice write or the durable
+    commit itself), leaves versions on the old layout under the new
+    definition: reads then silently shift values into the wrong columns, and
+    seeks on a shifted column miss. And a single-table SELECT takes no table
+    lock (see "SELECT statements take no locks" under the execution model), so
+    one that overlaps a DROP COLUMN can decode versions written in the other
+    layout and return values from the wrong columns. Joins are not affected:
+    they take IntentShared, which waits for DROP COLUMN's Exclusive lock, and a
+    join bound to the old definition then fails with "changed while the
+    statement was waiting" rather than read. PostgreSQL closes both gaps. Its
+    DROP COLUMN takes AccessExclusiveLock as a change "visible to concurrent
+    SELECTs" (`src/backend/commands/tablecmds.c:4714-4724`), which conflicts
+    with the AccessShareLock every SELECT takes
+    (`src/backend/parser/parse_relation.c:1533`). It also rewrites no tuple: it
+    marks the attribute dropped in one catalog change
+    (`src/backend/catalog/heap.c:1702`, `RemoveAttributeById`, the flag set at
+    `:1731-1732`). A dropped-attribute catalog design here (a catalog format
+    bump through the existing gate) would close both gaps and remove the
+    O(table) rewrite.
 - **Expression evaluation** is interpretive with SQL null propagation (nulls
   reject predicates, comparisons with null are null, `AND`/`OR` are three-valued
   and skip the right operand once `FALSE AND` or `TRUE OR` decides the result),

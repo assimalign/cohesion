@@ -15,6 +15,7 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// DROP COLUMN's row rewrite (#1237): every stored version — live, tombstoned, or
@@ -210,7 +211,108 @@ public sealed class SqlDropColumnRewriteTests : IDisposable
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - DROP COLUMN: a version the splice cannot decode fails the statement before the catalog drop commits, leaving the column and every version unchanged")]
+    public async Task DropColumn_MalformedVersion_ShouldFailBeforeTheCatalogCommits()
+    {
+        // Arrange: the dropped column comes first, so its component directly follows the
+        // object id; one version gets a component tag no type uses.
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "drop-column-malformed" });
+        var database = await engine.CreateDatabaseAsync("malformed-db");
+        await using var session = await database.CreateSessionAsync();
+
+        await ExecuteAsync(session, "CREATE TABLE t (note VARCHAR(40), id INT NOT NULL PRIMARY KEY, code VARCHAR(20) NOT NULL)");
+        await ExecuteAsync(session, "CREATE INDEX ix_code ON t (code)");
+        await ExecuteAsync(session, "INSERT INTO t (note, id, code) VALUES ('n1', 1, 'c1'), ('n2', 2, 'c2'), ('n3', 3, 'c3')");
+
+        var instance = (SqlDatabaseInstance)database;
+        ulong objectId = ObjectIdOf(database);
+        var (location, intact) = StoredVersions(instance, objectId).OrderBy(pair => pair.Key).Last();
+        byte[] malformed = intact.Bytes.ToArray();
+        var reader = new DatabaseKeyReader(malformed.AsSpan(SqlRowCodec.StampHeaderSize));
+        reader.ReadInt64();
+        int noteTag = SqlRowCodec.StampHeaderSize + reader.BytesConsumed;
+        ((DatabaseType)malformed[noteTag]).ShouldBe(DatabaseType.String);
+        malformed[noteTag] = 0xEE;
+        instance.DataStorage.UpdateRow(location.PageId, location.SlotIndex, malformed);
+        var before = StoredVersions(instance, objectId);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("ALTER TABLE t DROP COLUMN note"));
+
+        // Assert: the column is still in the catalog and no version was written.
+        failure.Message.ShouldContain("Malformed row");
+        instance.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+        table.Columns.Select(column => column.Name).ShouldBe(["note", "id", "code"]);
+        AssertUnchanged(before, StoredVersions(instance, objectId));
+
+        // Act: with the version repaired, the same drop completes.
+        instance.DataStorage.UpdateRow(location.PageId, location.SlotIndex, intact.Bytes);
+        await ExecuteAsync(session, "ALTER TABLE t DROP COLUMN note");
+
+        // Assert: every version lost the column where it lay, and the index still seeks it.
+        var after = StoredVersions(instance, objectId);
+        after.Keys.Order().ShouldBe(before.Keys.Order());
+        foreach (var (stored, version) in after)
+        {
+            version.Length.ShouldBeLessThan(before[stored].Length, $"the version at {stored} still stores the dropped column");
+        }
+
+        var rows = await Rows(session, "SELECT * FROM t ORDER BY id");
+        rows.Select(row => (Convert.ToInt64(row[0], CultureInfo.InvariantCulture), (string)row[1]!)).ShouldBe(
+            [(1L, "c1"), (2L, "c2"), (3L, "c3")]);
+        foreach (var code in new[] { "c1", "c2", "c3" })
+        {
+            (await Rows(session, $"SELECT id FROM t WHERE code = '{code}'")).Count.ShouldBe(1, code);
+            AccessPathOf(session).ShouldBe("seek:ix_code");
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - DROP COLUMN: a drop the catalog refuses fails with the catalog's message and changes nothing")]
+    [InlineData("t", "missing", "Table 'dbo.t' has no column named 'missing'.")]
+    [InlineData("t", "id", "Column 'id' is part of the primary key of 'dbo.t' and cannot be dropped.")]
+    [InlineData("t", "code", "Column 'code' is referenced by index 'ix_code' on 'dbo.t'. Drop the index first.")]
+    [InlineData("solo", "sole", "Cannot drop the last column of 'dbo.solo'.")]
+    public async Task DropColumn_RefusedByTheCatalog_ShouldFailWithItsMessageAndChangeNothing(string tableName, string column, string message)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "drop-column-refused" });
+        var database = await engine.CreateDatabaseAsync("refused-db");
+        await using var session = await database.CreateSessionAsync();
+
+        await ExecuteAsync(session, "CREATE TABLE t (id INT NOT NULL PRIMARY KEY, note VARCHAR(40), code VARCHAR(20) NOT NULL)");
+        await ExecuteAsync(session, "CREATE INDEX ix_code ON t (code)");
+        await ExecuteAsync(session, "INSERT INTO t (id, note, code) VALUES (1, 'n1', 'c1'), (2, 'n2', 'c2')");
+        await ExecuteAsync(session, "CREATE TABLE solo (sole INT)");
+        await ExecuteAsync(session, "INSERT INTO solo (sole) VALUES (1)");
+
+        var instance = (SqlDatabaseInstance)database;
+        instance.Catalog.TryGetTable("dbo", tableName, out var target).ShouldBeTrue();
+        var columns = target.Columns.Select(c => c.Name).ToList();
+        var before = StoredVersions(instance, target.ObjectId);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"ALTER TABLE {tableName} DROP COLUMN {column}"));
+
+        // Assert
+        failure.Message.ShouldBe(message);
+        instance.Catalog.TryGetTable("dbo", tableName, out var table).ShouldBeTrue();
+        table.Columns.Select(c => c.Name).ShouldBe(columns);
+        AssertUnchanged(before, StoredVersions(instance, target.ObjectId));
+    }
+
     // ── Consistency checks ─────────────────────────────────────────────
+
+    /// <summary>Every version is where it was, byte for byte.</summary>
+    private static void AssertUnchanged(
+        Dictionary<(PageId PageId, int SlotIndex), StoredVersion> before,
+        Dictionary<(PageId PageId, int SlotIndex), StoredVersion> after)
+    {
+        after.Keys.Order().ShouldBe(before.Keys.Order());
+        foreach (var (location, version) in after)
+        {
+            version.Bytes.ShouldBe(before[location].Bytes, $"the version at {location}");
+        }
+    }
 
     /// <summary>
     /// The scan is checked against the model, then every index is sought for every key any
