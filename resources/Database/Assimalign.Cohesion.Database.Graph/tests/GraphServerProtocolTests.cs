@@ -129,15 +129,15 @@ public sealed class GraphServerProtocolTests
             transaction.State.ShouldBe(TransactionState.Active);
 
             await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
-                GraphProtocolExecuteMessage.Create("MATCH (n:Missing) RETURN n.name").Encode(), token);
-            (await ReadErrorAsync(channel, token)).Message.ShouldStartWith("COHDBG002", Case.Sensitive);
+                GraphProtocolExecuteMessage.Create("MATCH (n) RETURN m.name").Encode(), token);
+            (await ReadErrorAsync(channel, token)).Message.ShouldStartWith("COHDBG001", Case.Sensitive);
             foreach (var type in new[] { GraphProtocolMessageType.Execute, GraphProtocolMessageType.ExecutePaths })
             {
                 await WriteAsync(channel, (ProtocolMessageType)type, GraphProtocolExecuteMessage.Create("MATCH (n) RETURN n").Encode(), token);
                 var refused = await ReadErrorAsync(channel, token);
                 refused.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
                 refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
-                refused.Message.ShouldContain("COHDBG002", Case.Sensitive);
+                refused.Message.ShouldContain("COHDBG001", Case.Sensitive);
             }
             await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
             (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);
@@ -149,6 +149,56 @@ public sealed class GraphServerProtocolTests
             var complete = await ReadAsync(channel, token);
             complete.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.PathsComplete);
             GraphProtocolPathsCompleteMessage.Decode(complete.Payload.Span).PathCount.ShouldBe(0);
+        });
+    }
+
+    /// <summary>
+    /// A read of an unknown label or relationship type succeeds on the wire (#1228). Protocol 1.0
+    /// has no frame for a successful statement's warning, so the exchange is byte-for-byte an empty
+    /// result: Execute answers ResultHeader then ResultComplete, ExecutePaths answers PathsComplete
+    /// with a zero count, and the next Ping gets Pong, so no other frame was sent. The explicit
+    /// transaction stays active and commits the earlier write.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Server: a read of an unknown label is an empty result and keeps the transaction")]
+    public async Task Execute_UnknownTokenRead_ShouldReturnEmptyResultAndKeepTransaction()
+    {
+        await WithServerAsync(async (server, channel, token) =>
+        {
+            var databaseSession = server.Context.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull();
+            var transaction = await databaseSession.BeginTransactionAsync(token);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                GraphProtocolExecuteMessage.Create("INSERT (:Pending {name: 'p'})").Encode(), token);
+            (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
+
+            foreach (string statement in new[] { "MATCH (n:Missing) RETURN n.name", "MATCH (a)-[r:Missing]->(b) RETURN r.name" })
+            {
+                await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                    GraphProtocolExecuteMessage.Create(statement).Encode(), token);
+                var header = await ReadAsync(channel, token);
+                header.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultHeader);
+                GraphProtocolResultHeaderMessage.Decode(header.Payload.Span).Columns.ShouldHaveSingleItem();
+                var complete = await ReadAsync(channel, token);
+                complete.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
+                GraphProtocolResultCompleteMessage.Decode(complete.Payload.Span).AffectedCount.ShouldBe(-1);
+            }
+            foreach (string statement in new[] { "MATCH (n:Missing) RETURN n", "MATCH p = (a)-[r:Missing]->(b) RETURN p" })
+            {
+                await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths,
+                    GraphProtocolExecuteMessage.Create(statement).Encode(), token);
+                var complete = await ReadAsync(channel, token);
+                complete.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.PathsComplete);
+                GraphProtocolPathsCompleteMessage.Decode(complete.Payload.Span).PathCount.ShouldBe(0);
+            }
+            await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
+            (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);
+
+            transaction.State.ShouldBe(TransactionState.Active);
+            await transaction.CommitAsync(token);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                GraphProtocolExecuteMessage.Create("MATCH (n:Pending) RETURN n.name").Encode(), token);
+            (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultHeader);
+            (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultRow);
+            (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
         });
     }
 

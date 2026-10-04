@@ -207,8 +207,6 @@ public sealed class GraphQueryTests
     }
 
     [Theory]
-    [InlineData("MATCH (a:Missing) RETURN a", "COHDBG002")]
-    [InlineData("MATCH (a)-[r:Missing]->(b) RETURN r", "COHDBG002")]
     [InlineData("MATCH (a)-[a]->(b) RETURN a", "COHDBG003")]
     [InlineData("MATCH (a) RETURN unbound", "COHDBG001")]
     [InlineData("INSERT (a)-[r]-(b)", "COHDBG001")]

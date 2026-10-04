@@ -206,7 +206,7 @@ public sealed class GraphClientWireTests
     /// <param name="code">The expected stable error code.</param>
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Statement failures preserve pooled authenticated sessions")]
     [InlineData("MATCH (a) RETURN *", ProtocolErrorCode.ParseFailure)]
-    [InlineData("MATCH (a:Missing) RETURN a.name", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData("MATCH (a) RETURN b.name", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("MATCH (a) RETURN a", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("BEGIN", ProtocolErrorCode.ParseFailure)]
     [InlineData("COMMIT", ProtocolErrorCode.ParseFailure)]

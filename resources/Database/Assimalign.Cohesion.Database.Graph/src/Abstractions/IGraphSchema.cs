@@ -64,6 +64,11 @@ public interface IGraphSchema
     /// <summary>Lists a label's property indexes.</summary>
     /// <param name="label">The label name.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The visible indexes.</returns>
-    ValueTask<IReadOnlyList<GraphIndexMetadata>> GetIndexesAsync(string label, CancellationToken cancellationToken = default);
+    /// <returns>
+    /// The visible indexes. For a label the database does not have, no indexes and a
+    /// <c>COHDBG010</c> warning in <see cref="GraphSchemaResult{T}.Diagnostics"/>: the read does
+    /// not fail, so it leaves an explicit transaction active.
+    /// </returns>
+    /// <exception cref="System.ArgumentNullException"><paramref name="label"/> is null; checked before the read starts.</exception>
+    ValueTask<GraphSchemaResult<GraphIndexMetadata>> GetIndexesAsync(string label, CancellationToken cancellationToken = default);
 }

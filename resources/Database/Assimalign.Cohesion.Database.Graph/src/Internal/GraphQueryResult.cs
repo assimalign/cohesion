@@ -15,19 +15,22 @@ internal sealed class GraphQueryResult : QueryResultSet
 {
     private readonly IReadOnlyList<QueryColumn> _columns;
     private readonly IReadOnlyList<object?[]> _rows;
+    private readonly IReadOnlyList<Diagnostic> _warnings;
 
     /// <summary>Initializes a new instance of the <see cref="GraphQueryResult"/> class.</summary>
     /// <param name="columns">The projected result columns.</param>
     /// <param name="rows">The materialized result rows, one value array per row.</param>
-    public GraphQueryResult(IReadOnlyList<QueryColumn> columns, IReadOnlyList<object?[]> rows)
+    /// <param name="warnings">The statement's warnings, such as an unknown label it read (#1228).</param>
+    public GraphQueryResult(IReadOnlyList<QueryColumn> columns, IReadOnlyList<object?[]> rows, IReadOnlyList<Diagnostic>? warnings = null)
     {
         _columns = columns;
         _rows = rows;
+        _warnings = warnings ?? [];
     }
 
     public override QueryResultStatus Status => QueryResultStatus.Success;
     public override long AffectedCount => -1;
-    public override IReadOnlyList<Diagnostic>? Diagnostics => null;
+    public override IReadOnlyList<Diagnostic>? Diagnostics => _warnings.Count == 0 ? null : _warnings;
     public override IReadOnlyList<QueryColumn> Columns => _columns;
     public override async IAsyncEnumerable<QueryRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
