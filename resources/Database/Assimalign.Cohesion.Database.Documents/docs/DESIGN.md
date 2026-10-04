@@ -371,7 +371,11 @@ indexes an engine before #1194 wrote is refused with "Database 'x' cannot be
 opened. COHDBI001: …". A cleanly closed database is left byte-identical. A
 crashed one has already had the storage layer's format-agnostic journal redo and
 undo when the check runs, but keeps its journal (the open-time checkpoint is
-deferred), so the engine that wrote it still recovers it. Both synchronous and grouped durability
+deferred), so the engine that wrote it still recovers it. A file set in another storage
+format (#1251) is refused by the storage before its journal is read, and the engine names
+the database: "Database 'x' cannot be opened. COHDBS001: …", the storage's
+`StorageFormatException` as its inner exception, the files byte-identical
+(`DocumentEngineTests`). Both synchronous and grouped durability
 acknowledge commits only after the journal is durable. Memory-backed databases
 use the identical storage/transaction implementation over in-memory streams.
 

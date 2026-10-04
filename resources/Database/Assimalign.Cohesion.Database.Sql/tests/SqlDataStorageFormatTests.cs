@@ -19,6 +19,8 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 /// <summary>
 /// The data-storage format gate (#1099, owner decisions of 2026-10-01 and
@@ -175,6 +177,39 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         AssertUnchanged(before);
         (await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync(TestDatabase)))
             .Message.ShouldBe(refusal.Message);
+    }
+
+    /// <summary>
+    /// Below the data-storage format sits the storage format of each file set (#1251): the
+    /// storage refuses a file set in another storage format with <c>COHDBS001</c> before
+    /// anything is read through it. A database has two file sets, so the engine names the
+    /// database and the one that was refused, and forwards the refusal like its own format
+    /// errors.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Storage format: a file set in storage format 1 is refused with COHDBS001 naming the database and the file set, its files untouched (#1251)")]
+    [InlineData("catalog")]
+    [InlineData("data")]
+    public async Task Open_FileSetInStorageFormatOne_ShouldBeRefusedNamingTheDatabaseAndTheFileSet(string role)
+    {
+        // Arrange: a closed database whose page 0 in one file set names storage format 1.
+        await CreateDatabaseAsync(formatVersion: null);
+        string storageName = role == "catalog" ? TestDatabase + ".catalog" : TestDatabase;
+        StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, storageName, storageName + ".dat"), version: 1);
+        var before = Snapshot();
+
+        // Act
+        await using var engine = CreateEngine();
+        var refusal = await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync(TestDatabase));
+
+        // Assert
+        refusal.ShouldBeOfType<SqlDataStorageFormatException>();
+        refusal.Message.ShouldStartWith(
+            $"Database '{TestDatabase}' cannot be opened: its {role} file set '{storageName}' was refused. {StorageFormatException.ErrorCode}: ",
+            Case.Sensitive);
+        refusal.Message.ShouldContain("uses storage format 1, but this engine supports only storage format 2", Case.Sensitive);
+        refusal.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(1);
+        engine.TryGetDatabase(TestDatabase, out _).ShouldBeFalse();
+        AssertUnchanged(before);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a database without a catalog storage is refused without creating one (#1099)")]

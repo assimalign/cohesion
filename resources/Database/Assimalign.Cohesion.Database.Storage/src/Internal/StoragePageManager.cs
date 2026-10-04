@@ -10,6 +10,14 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// Coordinates page-level operations by managing the buffer pool, free space map,
 /// and storage stream together.
 /// </summary>
+/// <remarks>
+/// Page 0 is the file header (storage format 2). The storage rewrites its header slots in place
+/// with positional writes that bypass the buffer pool, so a pooled copy of page 0 would be stale
+/// after the next header write, and its page checksum is zero, so a stale or damaged copy would
+/// never be caught. A write-back of one, or a journaled image of it that recovery replays, would
+/// roll both header slots back. The manager therefore reserves page 0 in the free-space map and
+/// refuses to pin or free it, whatever page id a caller (a damaged B-tree reference, say) hands it.
+/// </remarks>
 internal sealed class StoragePageManager : IStoragePageManager
 {
     private readonly StorageStream _stream;
@@ -21,6 +29,9 @@ internal sealed class StoragePageManager : IStoragePageManager
         _stream = stream;
         _bufferPool = bufferPool;
         _freeSpaceMap = freeSpaceMap;
+
+        // Never allocated: the file header is not a data page.
+        _freeSpaceMap.MarkAllocated((PageId)0L);
     }
 
     /// <inheritdoc />
@@ -34,9 +45,10 @@ internal sealed class StoragePageManager : IStoragePageManager
     {
         var pageId = _freeSpaceMap.Allocate();
 
-        // Pin the page in the buffer pool (will allocate a fresh buffer
-        // since the page doesn't exist in the stream yet)
-        var handle = _bufferPool.Pin(pageId, _stream);
+        // Pin the page without reading it: every byte is cleared below, so the free page's
+        // old content is never needed, and a free page whose last write a crash tore (an
+        // unjournaled checkpoint anchor page) must not fail its checksum here (#1251).
+        var handle = _bufferPool.PinForOverwrite(pageId, _stream);
 
         // Now extend the stream to accommodate the new page. Grow only, and under the pool
         // lock that every page read and write-back holds: a concurrent allocation of a
@@ -59,6 +71,8 @@ internal sealed class StoragePageManager : IStoragePageManager
     /// <inheritdoc />
     public unsafe void FreePage(PageId pageId)
     {
+        ThrowIfHeaderPage(pageId);
+
         // Stamp the page as free on disk so the free-space map can be rebuilt from
         // page headers when the file is reopened, then return it to the map.
         using (var handle = _bufferPool.Pin(pageId, _stream))
@@ -74,15 +88,44 @@ internal sealed class StoragePageManager : IStoragePageManager
         _freeSpaceMap.Free(pageId);
     }
 
+    /// <summary>
+    /// Pins an allocated page the caller rewrites completely, without reading its current
+    /// bytes from the stream (see <see cref="StorageBufferPool.PinForOverwrite"/>).
+    /// </summary>
+    /// <param name="pageId">The allocated page to pin.</param>
+    /// <returns>A handle on the pinned page; its content is undefined until the caller writes it.</returns>
+    internal IStoragePageHandle PinForOverwrite(PageId pageId)
+    {
+        ThrowIfHeaderPage(pageId);
+
+        if (!_freeSpaceMap.IsAllocated(pageId))
+        {
+            throw new StorageIOException($"Page {(long)pageId} is not allocated.");
+        }
+
+        return _bufferPool.PinForOverwrite(pageId, _stream);
+    }
+
     /// <inheritdoc />
     public IStoragePageHandle GetPage(PageId pageId)
     {
+        ThrowIfHeaderPage(pageId);
+
         if (!_freeSpaceMap.IsAllocated(pageId))
         {
             throw new StorageIOException($"Page {(long)pageId} is not allocated.");
         }
 
         return _bufferPool.Pin(pageId, _stream);
+    }
+
+    private static void ThrowIfHeaderPage(PageId pageId)
+    {
+        if ((long)pageId == 0L)
+        {
+            throw new StorageIOException(
+                "Page 0 is the file header and is not accessible as a data page: the storage writes its header slots outside the buffer pool.");
+        }
     }
 
     /// <inheritdoc />

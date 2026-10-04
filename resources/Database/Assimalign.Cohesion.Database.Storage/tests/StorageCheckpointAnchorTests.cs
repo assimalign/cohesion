@@ -5,6 +5,9 @@ using System.Linq;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Internal;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
@@ -54,30 +57,177 @@ public sealed class StorageCheckpointAnchorTests
         reopened.CountRecords().ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint anchor: more active transactions than the anchor holds defer the checkpoint")]
-    public void Checkpoint_MoreActiveTransactionsThanTheAnchorHolds_ShouldBeRefusedBeforeWritingAnything()
+    [Theory(DisplayName = "Cohesion Test [Storage] - Checkpoint anchor: an anchor larger than a header slot chains anchor pages instead of refusing the checkpoint")]
+    [InlineData(StorageHeaderPage.InlineAnchorCapacity)]
+    [InlineData(StorageHeaderPage.InlineAnchorCapacity + 1)]
+    [InlineData(981)]
+    [InlineData(StorageHeaderPage.InlineAnchorCapacity + (3 * StorageHeaderPage.AnchorPageCapacity))]
+    [InlineData(25_000)]
+    public void Checkpoint_MoreSequencesThanASlotHolds_ShouldChainAnchorPagesAndRoundTrip(int count)
     {
-        // Arrange
+        // Arrange: the anchor used to refuse anything above 980 sequences as busy (#1242).
         using var storage = AnchorStorage.Create();
-        storage.Checkpoint([3]);
-        long lastLsn = storage.Log.LastLsn;
-        long[] full = [.. Enumerable.Range(1, Storage.MaxCheckpointActiveTransactions).Select(i => (long)i)];
-        long[] tooMany = [.. Enumerable.Range(1, Storage.MaxCheckpointActiveTransactions + 1).Select(i => (long)i)];
+        storage.Insert("kept");
+        long[] anchor = [.. Enumerable.Range(1, count).Select(i => (long)i * 7)];
+        int expectedPages = (Math.Max(0, count - StorageHeaderPage.InlineAnchorCapacity) + StorageHeaderPage.AnchorPageCapacity - 1)
+            / StorageHeaderPage.AnchorPageCapacity;
 
-        // Act
-        var refused = Should.Throw<StorageTransactionException>(() => storage.Checkpoint(tooMany));
-        long lastLsnAfterRefusal = storage.Log.LastLsn;
-        var anchorAfterRefusal = storage.CheckpointActiveTransactions;
-        storage.Checkpoint(full);
+        // Act: twice, so both header slots carry a chain.
+        storage.Checkpoint(anchor);
+        storage.Checkpoint(anchor);
         var images = storage.CaptureImages();
         using var reopened = AnchorStorage.Open(images.Data, images.Journal);
 
-        // Assert: the refusal changed nothing, and a full anchor round-trips.
-        refused.Message.ShouldContain("Checkpoint deferred");
-        lastLsnAfterRefusal.ShouldBe(lastLsn);
-        anchorAfterRefusal.ShouldBe([3L]);
-        StorageFileHeader.CheckpointAnchorCapacity.ShouldBe(980);
-        reopened.CheckpointActiveTransactions.ShouldBe(full);
+        // Assert
+        storage.CheckpointActiveTransactions.ShouldBe(anchor);
+        reopened.CheckpointActiveTransactions.ShouldBe(anchor);
+        CountAnchorPages(images.Data).ShouldBe(2 * expectedPages);
+        reopened.CountRecords().ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint anchor: a shrinking anchor returns its chain's pages to the allocator")]
+    public void Checkpoint_AnchorShrinks_ShouldFreeTheChainPages()
+    {
+        // Arrange: both slots chain three pages.
+        using var storage = AnchorStorage.Create();
+        long[] large = [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + (2 * StorageHeaderPage.AnchorPageCapacity) + 1).Select(i => (long)i)];
+        storage.Checkpoint(large);
+        storage.Checkpoint(large);
+        long pagesWithChains = storage.PageManager.PageCount;
+        long freeWithChains = storage.PageManager.FreePageCount;
+
+        // Act: two small checkpoints release both chains; inserts then reuse the pages.
+        storage.Checkpoint([4, 2]);
+        storage.Checkpoint([4]);
+        long freeAfterShrink = storage.PageManager.FreePageCount;
+        var images = storage.CaptureImages();
+        using var reopened = AnchorStorage.Open(images.Data, images.Journal);
+
+        // Assert: every chain page is free again, on disk too, and the file did not grow.
+        freeAfterShrink.ShouldBe(freeWithChains + 6);
+        storage.PageManager.PageCount.ShouldBe(pagesWithChains);
+        CountAnchorPages(images.Data).ShouldBe(0);
+        reopened.CheckpointActiveTransactions.ShouldBe([4L]);
+        reopened.PageManager.FreePageCount.ShouldBe(freeAfterShrink);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint anchor: recovery never replays a stale image onto a page the live anchor chain reuses")]
+    public void Checkpoint_ChainReusesPagesFreedSinceTheLastCheckpoint_ShouldSurviveRecoveryBeforeTheTruncation()
+    {
+        // Arrange: pages freed by a committed transaction keep their images (Free pages) in
+        // the journal until the next truncation; the next header write reuses them for its chain.
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point); // abandoned after its simulated power loss
+        var pages = storage.FillPages(4);
+        storage.Checkpoint();
+        storage.FreeAll(pages);
+        long[] anchor = [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + StorageHeaderPage.AnchorPageCapacity + 5).Select(i => (long)i)];
+
+        // Act: the checkpoint loses power at the journal truncation — after its header slot
+        // is durable, before the journal loses the Free images of the reused pages.
+        point.CrashWhen = (stream, operation, _, _) => stream == "journal" && operation == "SetLength";
+        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(anchor));
+        var images = storage.CaptureDurable();
+        using var reopened = TornStorage.Open(images);
+        long chainPage = reopened.AnchorChainPages[0];
+        var afterRecovery = reopened.CaptureDurable();
+        using var reopenedAgain = TornStorage.Open(afterRecovery);
+
+        // Assert: the freed page's Free image was still in the journal recovery replayed, yet the
+        // chain page holding the new anchor survived it — on disk and in the allocator.
+        pages.ShouldContain(chainPage);
+        new StreamJournal(new MemoryStream(images.Journal)).ReadAll()
+            .Count(record => record.Type == JournalRecordType.AfterPageImage && (long)record.PageId == chainPage)
+            .ShouldBeGreaterThan(0);
+        reopened.CheckpointActiveTransactions.ShouldBe(anchor);
+        reopened.FreeSpaceMap.IsAllocated((PageId)chainPage).ShouldBeTrue();
+        ((PageType)afterRecovery.Data[(chainPage * Units.Page.Size) + Units.Page.TypeFieldOffset]).ShouldBe(PageType.CheckpointAnchor);
+        reopenedAgain.CheckpointActiveTransactions.ShouldBe(anchor);
+    }
+
+    /// <summary>
+    /// A bracket committed with <c>awaitDurability: false</c> (a statement bracket, an undo batch,
+    /// a dropped table's release) returns its pages to the allocator as soon as its commit record
+    /// is appended, while that record may still sit in a journal tail that is not durable. An
+    /// anchor page is written outside the journal: reusing such a page and making it durable
+    /// first would overwrite the page's committed content while the bracket that freed it can
+    /// still vanish in a crash, and the content would be lost with nothing to restore it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint anchor: a chain page reuses a page only once the commit that freed it is durable")]
+    public void Checkpoint_ChainReusesAPageWhoseFreeIsNotDurable_ShouldMakeTheFreeDurableFirst()
+    {
+        // Arrange: one durable row alone on its page, then a bracket that frees the page and
+        // commits without waiting for durability; the journal is flush-gated.
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point, journalWriteThrough: false); // abandoned after its simulated power loss
+        var pages = storage.FillPages(1, owner: 9);
+        storage.Checkpoint();
+        long freer = storage.FreeOwner(9, awaitDurability: false);
+        long[] anchor = [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + 1).Select(i => (long)i)];
+
+        // Act: a checkpoint whose anchor needs a chain page loses power at the truncation.
+        point.CrashWhen = (stream, operation, _, _) => stream == "journal" && operation == "SetLength";
+        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(anchor));
+        var images = storage.CaptureDurable();
+        using var reopened = TornStorage.Open(images);
+        bool freeIsDurable = new StreamJournal(new MemoryStream(images.Journal)).ReadAll()
+            .Any(record => record.Type == JournalRecordType.CommitTransaction && record.TransactionSequence == freer);
+
+        // Assert: the row is gone only if the bracket that freed it survived, and it did — the
+        // free was durable before the chain reused the page.
+        reopened.AnchorChainPages.ShouldContain(pages[0]);
+        reopened.CountRecords(owner: 9).ShouldBe(freeIsDurable ? 0 : 1, "a committed row was lost to an unjournaled page write");
+        freeIsDurable.ShouldBeTrue();
+        reopened.CheckpointActiveTransactions.ShouldBe(anchor);
+    }
+
+    /// <summary>
+    /// The same rule for a header write that is not a checkpoint (<c>FlushChanges</c>), which
+    /// carries the last checkpoint's anchor into the other slot: power lost before its slot
+    /// write leaves the previous generation, and the free must still be in the durable journal.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint anchor: a non-checkpoint header write also reuses a freed page only once its free is durable")]
+    public void FlushHeader_ChainReusesAPageWhoseFreeIsNotDurable_ShouldMakeTheFreeDurableFirst()
+    {
+        // Arrange: a durable row alone on its page, whose journal images the checkpoint then
+        // truncates; slot 1 carries a chained anchor, and slot 0, which the next header write
+        // targets, has no chain yet, so that write allocates a page — the one the bracket frees.
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point, journalWriteThrough: false); // abandoned after its simulated power loss
+        var pages = storage.FillPages(1, owner: 9);
+        long[] anchor = [.. Enumerable.Range(1, StorageHeaderPage.InlineAnchorCapacity + 1).Select(i => (long)i)];
+        storage.Checkpoint(anchor);
+        long freer = storage.FreeOwner(9, awaitDurability: false);
+
+        // Act: power is lost at the header slot write, after the chain page reached the media.
+        point.CrashWhen = (stream, operation, offset, _) => stream == "data" && operation == "Write" && offset == StorageHeaderPage.Slot0Offset;
+        Should.Throw<SimulatedPowerLossException>(() => storage.FlushHeader());
+        var images = storage.CaptureDurable();
+        using var reopened = TornStorage.Open(images);
+        bool freeIsDurable = new StreamJournal(new MemoryStream(images.Journal)).ReadAll()
+            .Any(record => record.Type == JournalRecordType.CommitTransaction && record.TransactionSequence == freer);
+        var chainPage = images.Data.AsSpan((int)(pages[0] * Units.Page.Size), Units.Page.Size);
+
+        // Assert: the freed page was overwritten as an anchor page; the row is gone only if the
+        // bracket that freed it survived, and it did.
+        ((PageType)chainPage[Units.Page.TypeFieldOffset]).ShouldBe(PageType.CheckpointAnchor);
+        reopened.CountRecords(owner: 9).ShouldBe(freeIsDurable ? 0 : 1, "a committed row was lost to an unjournaled page write");
+        freeIsDurable.ShouldBeTrue();
+        reopened.CheckpointActiveTransactions.ShouldBe(anchor);
+    }
+
+    private static int CountAnchorPages(byte[] data)
+    {
+        int count = 0;
+        for (int offset = Units.Page.Size; offset + Units.Page.Size <= data.Length; offset += Units.Page.Size)
+        {
+            if ((PageType)data[offset + Units.Page.TypeFieldOffset] == PageType.CheckpointAnchor)
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint anchor: every checkpoint replaces it, and a close that does not truncate keeps it")]

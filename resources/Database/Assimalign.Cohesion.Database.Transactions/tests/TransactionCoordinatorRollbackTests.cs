@@ -67,8 +67,9 @@ public class TransactionCoordinatorRollbackTests
         RecordCount(storage).ShouldBe(0);
         await waiting.WaitAsync(Timeout);
 
-        // The undo completed, so later checkpoints stop carrying the writer.
-        Checkpoint(coordinator, storage).ShouldBe([(long)next.Sequence.Value]);
+        // The undo completed, so later checkpoints stop carrying the writer; the next
+        // transaction has applied nothing yet, and a reader is never listed (#1242).
+        Checkpoint(coordinator, storage).ShouldBeEmpty();
 
         // The next writer proceeds to a commit.
         journal.FailRollbackRecords = false;
@@ -297,7 +298,10 @@ public class TransactionCoordinatorRollbackTests
         writer.State.ShouldBe(TransactionState.RolledBack);
         RecordCount(storage).ShouldBe(1);
         coordinator.LockManager.TryAcquire(next.Sequence, Row, LockMode.Exclusive).ShouldBeFalse();
-        Checkpoint(coordinator, storage).ShouldBe([(long)writer.Sequence.Value, (long)next.Sequence.Value], ignoreOrder: true);
+
+        // The deferred writer still owes its undo, so checkpoints keep listing it; the next
+        // transaction has applied nothing, and a reader is never listed (#1242).
+        Checkpoint(coordinator, storage).ShouldBe([(long)writer.Sequence.Value]);
 
         // Act: the purge pass retries the undo.
         coordinator.RunVersionPurgePass(CancellationToken.None);
@@ -305,7 +309,7 @@ public class TransactionCoordinatorRollbackTests
         // Assert
         await waiting.WaitAsync(Timeout);
         RecordCount(storage).ShouldBe(0);
-        Checkpoint(coordinator, storage).ShouldBe([(long)next.Sequence.Value]);
+        Checkpoint(coordinator, storage).ShouldBeEmpty();
         await coordinator.CommitAsync(next);
     }
 
@@ -534,6 +538,44 @@ public class TransactionCoordinatorRollbackTests
             await Should.ThrowAsync<IOException>(async () => await coordinator.DisposeAsync());
             storage.Dispose();
         }
+    }
+
+    /// <summary>
+    /// The anchor used to hold 980 sequences, readers included, and above that the checkpoint was
+    /// refused as busy while the journal kept growing (#1242). Now it lists writers only and a
+    /// header slot chains anchor pages for what it cannot hold: 1,000 writers in flight are all
+    /// classified after a checkpoint whose own record was lost, and all of their versions scrubbed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: more writers than a header slot holds are anchored on a chain and scrubbed after a lost checkpoint record")]
+    public async Task Checkpoint_ThousandWritersAndLostRecord_ShouldClassifyEveryWriterThroughTheChainedAnchor()
+    {
+        // Arrange
+        const int writers = 1_000;
+        var storage = RollbackStorage.Create();
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var contexts = new ITransactionContext[writers];
+        for (int i = 0; i < writers; i++)
+        {
+            contexts[i] = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+            await InsertAsync(coordinator, storage, contexts[i]);
+        }
+
+        // Act: the checkpoint truncates the journal, then cannot append its record; the process stops.
+        storage.JournalStream.FailWrites = 1;
+        Should.Throw<IOException>(() => coordinator.Checkpoint());
+        var images = storage.CaptureImages();
+        using var reopened = RollbackStorage.Open(images.Data, images.Journal);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        var anchored = reopened.CheckpointActiveTransactions;
+        var plan = recovered.AnalyzeAndScrub();
+        recovered.CompleteRecovery();
+
+        // Assert
+        reopened.Log.ReadAll().ShouldAllBe(record => record.Type == JournalRecordType.Checkpoint);
+        anchored.Count.ShouldBe(writers);
+        anchored.ShouldBe(contexts.Select(context => (long)context.Sequence.Value).Order(), ignoreOrder: false);
+        contexts.ShouldAllBe(context => plan.Aborted.Contains(context.Sequence));
+        RecordCount(reopened).ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a lost checkpoint record does not commit a writer still in flight at a crash")]

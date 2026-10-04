@@ -18,6 +18,8 @@
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\SimulatedDurableFileHandle.cs" Link="TestObjects\SimulatedDurableFileHandle.cs" />
 		<!-- Rewrites index pages into the layouts the old-format refusal tests need (#1194). -->
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Indexing\tests\TestObjects\LegacyBTreePages.cs" Link="TestObjects\LegacyBTreePages.cs" />
+		<!-- Rewrites a data file's storage format version for the storage-format refusal tests (#1251). -->
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\StorageFormatFiles.cs" Link="TestObjects\StorageFormatFiles.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />

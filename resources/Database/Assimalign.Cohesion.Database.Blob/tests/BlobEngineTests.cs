@@ -7,6 +7,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Blob.Catalog;
 using Assimalign.Cohesion.Database.Blob.Internal;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
 using Xunit;
@@ -254,6 +256,43 @@ public sealed class BlobEngineTests
             await Should.ThrowAsync<ArgumentException>(async () => await reopened.CreateDatabaseAsync("../escape"));
         }
         finally { if (Directory.Exists(path)) { Directory.Delete(path, recursive: true); } }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Format: a database in storage format 1 is refused at open with COHDBS001 naming it, its files untouched (#1251)")]
+    public async Task Open_StorageFormatOne_ShouldBeRefusedNamingTheDatabase()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-blob-storage-format-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // Arrange: a closed database whose page 0 names storage format 1.
+            await using (var engine = BlobDatabaseEngine.Create(new() { RootPath = root }))
+            {
+                var database = (IBlobDatabase)await engine.CreateDatabaseAsync("legacy");
+                var container = await database.CreateContainerAsync("files");
+                await Write(container, "item", "durable"u8.ToArray());
+            }
+
+            StorageFormatFiles.WriteVersion(Path.Combine(root, "legacy", "blob.dat"), version: 1);
+            var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+            // Act
+            await using var reopened = BlobDatabaseEngine.Create(new() { RootPath = root });
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("legacy"));
+
+            // Assert: the storage's coded refusal, named for the database; nothing written.
+            failure.Message.ShouldStartWith("Database 'legacy' cannot be opened. " + StorageFormatException.ErrorCode + ": ", Case.Sensitive);
+            failure.Message.ShouldContain("uses storage format 1, but this engine supports only storage format 2", Case.Sensitive);
+            failure.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(1);
+            reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
+            await reopened.DisposeAsync();
+
+            Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length.ShouldBe(before.Count);
+            foreach (var (path, bytes) in before)
+            {
+                File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes).ShouldBeTrue($"{path} was modified by the refused open");
+            }
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
     }
 
     internal static async Task Write(IBlobContainer container, string name, byte[] bytes)

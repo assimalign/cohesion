@@ -320,7 +320,7 @@ the real-process E2E obtains the sample apphost through `ReferenceOutputAssembly
 - **Atomicity** — all writes stage through the transaction's WAL records; commit is a single durable WAL commit record; rollback replays undo.
 - **Consistency** — per-model catalogs enforce constraints (SQL: PK/unique/FK/check; Documents: optional schema + unique indexes; Graph: relationship endpoint integrity; KV/Blob: key/etag uniqueness) inside the transaction boundary.
 - **Isolation** — MVCC snapshots (`ReadCommitted`, `Snapshot` default) with a lock manager for write-write conflicts and `Serializable` upgrade later. Readers never block writers.
-- **Durability** — WAL flushed per durability policy before commit acknowledges; group commit batches fsyncs; recovery replays the journal to the last committed LSN on open; torn pages detected via per-page CRC.
+- **Durability** — WAL flushed per durability policy before commit acknowledges; group commit batches fsyncs; recovery replays the journal to the last committed LSN on open; torn data pages detected via a per-page CRC-32C and rewritten from journal images; the file header (page 0) keeps two alternating, checksummed header slots, so a torn header write leaves the previous generation to open from (storage format 2, `Database.Storage` DESIGN.md).
 
 Crash/recovery test suites (kill the process mid-commit, replay, verify) are the acceptance bar for R1 — per-model correctness tests build on a shared crash-harness in the kernel.
 

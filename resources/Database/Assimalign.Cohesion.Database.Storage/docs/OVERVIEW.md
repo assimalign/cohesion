@@ -8,7 +8,7 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
 
 ## Scope
 
-- **Pages** — 8 KiB `Page` unit with a 96-byte header (id, LSN, CRC-32 checksum, type,
+- **Pages** — 8 KiB `Page` unit with a 96-byte header (id, LSN, CRC-32C checksum, type,
   flags, slot bookkeeping), `SlottedPage` variable-length record layout, `PageSlot`
   directory entries.
 - **Buffer pool** — `IStorageBufferPool` pin/unpin caching over a `StorageStream`;
@@ -18,7 +18,13 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
   pages and `IStorageUnitIterator` full scans.
 - **Journal** — `IStorageJournal` write-ahead logging with begin/commit/rollback
-  markers, CRC-protected frames, and recovery replay of committed operations.
+  markers, CRC-32C-protected frames, and recovery replay of committed operations.
+- **File header** — page 0: an identity block written at creation and two alternating,
+  separately checksummed header slots (LSN and sequence floors, checkpoint anchor, and a
+  copy of the identity block), so a torn header write cannot make a file set unopenable.
+  Page 0 is never a data page: the page manager refuses to pin or free it. Storage format 2;
+  any other format is refused with `StorageFormatException` (`COHDBS001`), with no upgrade
+  path (#1152).
 - **File set** — each storage instance owns three streams: data (`.dat`), journal
   (`.log`), and backup (`.bak`), wrapped by `StorageStream`.
 

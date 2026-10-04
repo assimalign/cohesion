@@ -41,6 +41,16 @@ public readonly unsafe struct Page
     public const int ChecksumFieldOffset = 16;
 
     /// <summary>
+    /// The byte offset of the page LSN within the header.
+    /// </summary>
+    internal const int LsnFieldOffset = 8;
+
+    /// <summary>
+    /// The byte offset of the page type within the header.
+    /// </summary>
+    internal const int TypeFieldOffset = 21;
+
+    /// <summary>
     /// A pointer to the start of the page buffer.
     /// </summary>
     public readonly byte* Pointer;
