@@ -12,6 +12,11 @@ physical index registrations exported by `Database.Indexing`.
   literals, and primary-key constraints.
 - **Transactional DDL** — create/drop table, add/drop column; each operation is a
   self-committing storage transaction (durable when the call returns).
+- **Physical column layout** — each table records which physical ordinals its
+  dropped columns kept (`DroppedColumnOrdinals`, `PhysicalColumnCount`,
+  `GetPhysicalOrdinal`): drop marks a column's ordinal dropped and never renumbers
+  the others, and add appends a new ordinal, so stored rows are never rewritten
+  (#1241).
 - **Index registration persistence** — `SaveIndexRegistrationsAsync` /
   `GetIndexRegistrations` store the `BTreeIndexRegistration` set so indexes
   re-attach when the database reopens.

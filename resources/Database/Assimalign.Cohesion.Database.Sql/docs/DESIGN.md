@@ -373,11 +373,12 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   proof surface — the planner suite asserts an indexed equality seek examines
   O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
-  chains (since record-space format version 3; the current format is 5).**
+  chains (since record-space format version 3; the current format is 6).**
   Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
   B+Tree leaf-entry design adopted for the record space — followed by the
   shared tuple codec payload (#854): the owning table's object id, then one
-  self-describing component per column. Why a fixed binary prefix and not
+  self-describing component per *physical* column, live or dropped, in
+  physical-ordinal order (see "DROP COLUMN marks the column dropped" below). Why a fixed binary prefix and not
   tuple components (the rejected alternative): (a) stamps in front never
   disturb ADD COLUMN's missing-tail decode, which depends on absent
   components being *trailing*; (b) fixed width makes tombstoning a same-length
@@ -399,25 +400,32 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   construction, versions are WAL-covered like all record writes (restart keeps
   them correct for free), and aborted stamps revert physically with the page
   images. Deletes tombstone (older snapshots keep the row until the purge
-  worker reclaims below every live horizon). The one DDL row rewrite (DROP
-  COLUMN) walks *every* stored version, visible or not, and rewrites each where
-  it lies, stamps preserved: **no statement ever moves a version**, so a
-  location (page, slot) is a version's identity for its whole life — what index
-  entries, row locks and the version store's ledger all key on.
+  worker reclaims below every live horizon). No DDL rewrites a row (ADD and
+  DROP COLUMN change only the catalog, #1023 and #1241): **no statement ever
+  moves a version**, so a location (page, slot) is a version's identity for its
+  whole life — what index entries, row locks and the version store's ledger all
+  key on.
 - **Format rule (data-storage format version, catalog-persisted): exactly one
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 5 only: stamped rows in per-object page chains whose index keys use the
+  format 6 only: stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
-  `Database.Indexing` DESIGN). The earlier versions are history —
+  `Database.Indexing` DESIGN), decoded through each table's physical column
+  layout, which the catalog's table record carries (extension version 3: the
+  dropped columns' physical ordinals, #1241). The earlier versions are history —
   1 = the pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream,
   3 = per-object chains with the `DateTimeKind` and offset inside temporal keys
   (written through 10.0.0-preview.1), 4 = format 5's rows over index trees of
   B-tree page format 1, ordered by key alone (owner decision of 2026-10-02: the
-  page format change takes no upgrade path either). `CreateDatabaseAsync` writes
-  the format-5 marker as soon as the catalog opens, and first checks that the catalog is new
+  page format change takes no upgrade path either), 5 = format 6's rows and
+  trees with no physical layout in the catalog, whose DROP COLUMN spliced the
+  column out of every stored version (#1237; the catalog format change takes no
+  upgrade path either, #1152). A format-5 table record (extension version 2)
+  still loads, so that the gate below, not a decode error, refuses the database.
+  `CreateDatabaseAsync` writes
+  the format-6 marker as soon as the catalog opens, and first checks that the catalog is new
   (no marker, no tables): `ISqlStorageStrategy.CreateStorage` must refuse
   existing storage, and a strategy that reopened it instead would otherwise get
   an older catalog declared current. `OpenDatabaseAsync` refuses a database on
@@ -454,13 +462,14 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   format-4 marker is a record kind their catalogs refuse to load; they fail the
   open instead of writing format-3 keys into a format-4 database. Format-4
   engines compare the marker for equality, so they refuse a format-5 database as
-  written by a newer engine. **Behind the gate, the index manager checks the trees
+  written by a newer engine, and format-5 engines refuse a format-6 one the same
+  way (they would refuse its extension-3 table records first). **Behind the gate, the index manager checks the trees
   themselves (#1194).** `Database.Indexing` owns the B-tree page format and checks
   every tree's root page when `SqlDatabaseInstance` attaches the catalog's
   registrations, before recovery's scrub or checkpoint writes anything. A marker
   that does not describe its trees — a damaged root, or pages another engine build
   wrote — fails the open with `SqlDataStorageFormatException` ("uses data-storage
-  format 5, but one of its index trees does not: COHDBI001: …", the index manager's
+  format 6, but one of its index trees does not: COHDBI001: …", the index manager's
   `IndexFormatException` as its inner exception), and the files are left
   byte-identical. `SqlDataStorageFormatTests` pins both refusals with real format-1
   index pages.
@@ -482,98 +491,123 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   new definition even with an older row snapshot. NOT NULL without a default
   fails if any current row exists; historical deleted versions can still read
   NULL under an older snapshot after an addition to a currently empty table.
-  `DROP COLUMN` splices the column out of every stored version in place (#1237),
-  described in the next item. DDL is self-committing and refused in explicit
+  `DROP COLUMN` marks the column dropped in the catalog and rewrites no row
+  (#1241), described in the next item. DDL is self-committing and refused in explicit
   transactions. Schema-owned tables retain their existing live-session DDL guard.
   The persisted default is the canonical SQL text of its literal (`'it''s'`, `5`,
   `TRUE`), and the value every read and INSERT coerces comes from the table
   version's bound form, parsed once (see [Persisted definitions](#persisted-definitions-canonical-text-parsed-once)).
-- **DROP COLUMN rewrites every version in place; no version moves (#1237).**
-  Records are positional, so dropping a column removes its component from every
-  stored version, live, tombstoned or visible only to an older snapshot
-  (`SqlPlanExecutor.CollectColumnSplices`). The rewrite is a byte splice
-  (`SqlRowCodec.WithoutColumn`, bounded by `DatabaseKeyReader.BytesConsumed`):
-  stamps, object id and every surviving component are copied verbatim, so the
-  rewritten version is shorter than its slot by at least one byte and
-  `SlottedPage.UpdateSlot` writes it in place, at the same page and slot. A
-  version that never stored the column (written before an ADD COLUMN) keeps it
-  in its missing tail and is left byte-identical. Nothing that references a
-  version by location needs maintenance: index entries are (key, entry
-  reference, writer) and keys cannot change (an indexed column cannot be
-  dropped), the version store's prunable tombstones and undo ledger hold
-  locations, and row locks are taken on locations. A spliced version that
-  would not shrink is an internal invariant failure (`InvalidOperationException`),
-  never a relocation; it is raised while the splices are collected, before the
-  catalog commits, so the statement fails with the table unchanged (*Ordering*,
-  below).
-  - *Why it was wrong before.* The rewrite decoded each version, materialized
-    its missing tail from the column defaults and re-encoded it. A version
-    written before `ADD COLUMN ... DEFAULT '<long text>'` therefore grew by the
-    default, and one that no longer fit its page was deleted and re-inserted
-    elsewhere (the `SlottedPageException` fallback). Its index entries kept the
-    freed location, so seeks missed the row, and once a page emptied that way was
-    reused by later inserts the stale location could answer for another row; its
-    ledger location went stale too. `SqlDropColumnRewriteTests`
-    reproduced it on full pages: every version written before the ADD COLUMN
-    (360 of 452) moved, and 571 seeks across the primary key, two secondary
-    indexes and a UNIQUE index disagreed with the scan.
-  - *Why not rewrite and rebuild the indexes.* PostgreSQL's rewriting ALTER
-    TABLE forms write a new heap and rebuild every index
-    (`src/backend/commands/tablecmds.c:6041-6066`, `ATRewriteTables` calling
-    `ATRewriteTable` and `finish_heap_swap(..., true /* reindex */, ...)`;
-    `src/backend/commands/repack.c:2084`, `reindex_relation`). That copies only
-    the tuples the latest snapshot sees (`tablecmds.c:6415`), which is why
-    PostgreSQL documents those forms as not MVCC-safe: an older snapshot sees the
-    rewritten table empty (`doc/src/sgml/ref/alter_table.sgml:1563-1566`). Here
-    dead versions must survive the DDL for older snapshots, and the version store
-    keys them by location,
-    so a moving rewrite would have to rebuild the indexes *and* repoint the
-    ledger. PostgreSQL's own DROP COLUMN moves nothing: it marks the attribute
-    dropped and leaves the tuples alone (`src/backend/catalog/heap.c:1696-1732`,
-    `RemoveAttributeById`; `alter_table.sgml:1546-1552`), and its in-place
-    update fails rather than resize a tuple
-    (`src/backend/access/heap/heapam.c:6727-6731`, "wrong tuple length"). The
-    splice keeps that property without a dropped-attribute catalog format.
-  - *Ordering.* Every drop the catalog would refuse (an unknown, primary-key,
-    constrained or indexed column, or the last column) is refused before the
-    bracket opens, so a refused drop never scans the table inside the apply
-    gate; the catalog stays authoritative and checks again under its own lock.
-    The statement then runs one bracket under the gate, committed durably as
-    CREATE INDEX's is (the statement's transaction neither records nor undoes
-    it), in three steps: the splices are collected and checked with
-    nothing written and cancellation honoured; the catalog drop self-commits and
-    the new definition is published; the collected splices are written, with
-    cancellation no longer observed, because a rewrite left half done would leave
-    versions the published definition decodes on the wrong positions. Every
-    failure the statement can detect (a malformed version, a splice that would
-    not shrink, cancellation, running out of memory while collecting) therefore
-    lands before the catalog commits and leaves the table and its catalog entry
-    unchanged. The scan and the writes share one gate hold, so the purge worker,
-    which prunes under the same gate, cannot reclaim a version (or free its
-    page) between the read and the write. The catalog call keeps the gate's
-    no-wait rule: the catalog is synchronous, behind its own monitor, on its own
-    file set, and takes neither the gate nor a lock-manager lock.
-  - *Known limits (both predate #1237).* The catalog and the data are separate
-    file sets. A crash after the catalog commit and before the rewrite's durable
-    commit, or a storage failure in that window (a splice write or the durable
-    commit itself), leaves versions on the old layout under the new
-    definition: reads then silently shift values into the wrong columns, and
-    seeks on a shifted column miss. And a single-table SELECT takes no table
-    lock (see "SELECT statements take no locks" under the execution model), so
-    one that overlaps a DROP COLUMN can decode versions written in the other
-    layout and return values from the wrong columns. Joins are not affected:
-    they take IntentShared, which waits for DROP COLUMN's Exclusive lock, and a
-    join bound to the old definition then fails with "changed while the
-    statement was waiting" rather than read. PostgreSQL closes both gaps. Its
-    DROP COLUMN takes AccessExclusiveLock as a change "visible to concurrent
-    SELECTs" (`src/backend/commands/tablecmds.c:4714-4724`), which conflicts
-    with the AccessShareLock every SELECT takes
-    (`src/backend/parser/parse_relation.c:1533`). It also rewrites no tuple: it
-    marks the attribute dropped in one catalog change
-    (`src/backend/catalog/heap.c:1702`, `RemoveAttributeById`, the flag set at
-    `:1731-1732`). A dropped-attribute catalog design here (a catalog format
-    bump through the existing gate) would close both gaps and remove the
-    O(table) rewrite.
+- **DROP COLUMN marks the column dropped; no version is rewritten (#1241).**
+  The catalog keeps each table's physical column layout (`SqlCatalogTable`): the
+  live columns, in order (`Columns`), and the physical ordinals of the dropped
+  ones (`DroppedColumnOrdinals`). A row version stores one component per
+  physical ordinal (`PhysicalColumnCount`), and a live column's component sits
+  at `GetPhysicalOrdinal(i)`. DROP COLUMN removes the column from the live list
+  and adds its physical ordinal to the dropped list, in one self-committed
+  catalog record (`DefaultSqlCatalog.DropColumnAsync`). The executor takes the
+  table's Exclusive lock, runs the constraint checks and calls the catalog
+  (`SqlPlanExecutor.ExecuteDropColumnAsync`): no scan, no apply-gate hold and no
+  data write, so the statement is O(1) in the table's size and no writer of any
+  table waits on it. This is PostgreSQL's dropped-attribute design:
+  `pg_attribute.attisdropped` (`src/include/catalog/pg_attribute.h:139-140`) is
+  set by `RemoveAttributeById`, "the guts of ALTER TABLE DROP COLUMN", which
+  rewrites no tuple (`src/backend/catalog/heap.c:1692-1732`, reached from
+  `ATExecDropColumn`, `src/backend/commands/tablecmds.c:9355`; documented at
+  `doc/src/sgml/ref/alter_table.sgml:1546-1552`).
+  - *Every decode path skips dropped ordinals.* `SqlRowCodec.TryDecode` walks the
+    physical components up to the bound definition's `PhysicalColumnCount` and
+    skips each dropped one with `DatabaseKeyReader.Skip`, which materializes no
+    value, as `heap_deform_tuple` walks a dropped attribute by its stored length
+    (`src/backend/access/common/heaptuple.c:1254`). A record that ends early was
+    written before the columns it lacks were added; that missing tail resolves
+    from the bound defaults as before (PostgreSQL: `getmissingattr`,
+    `heaptuple.c:1360-1365`), and since physical ordinals ascend with the live
+    columns the stored columns are always a prefix. Scans, index seeks, the
+    latest-state constraint reads, constraint backfills (ADD CONSTRAINT, ADD
+    COLUMN), cascade walks and index builds all decode through `DecodeRow`.
+    Everything above the codec already works on `Columns`, which holds live
+    columns only: `SELECT *` and the planner's name resolution, INSERT without a
+    column list, the wire result header, CHECK and DEFAULT binding
+    (`SqlBoundTableCache` binds by name against the live columns),
+    INFORMATION_SCHEMA and COHESION_SCHEMA, and the persisted definitions, whose
+    CHECK text and index and constraint column lists name columns, never
+    ordinals. PostgreSQL filters dropped attributes at the same layers:
+    `expandTupleDesc` for `*` (`src/backend/parser/parse_relation.c:3181`) and
+    `NOT a.attisdropped` in `information_schema.columns`
+    (`src/backend/catalog/information_schema.sql:782`).
+    `INFORMATION_SCHEMA.COLUMNS.ORDINAL_POSITION` numbers the live columns 1..n,
+    as the SQL standard's drop renumbers them; PostgreSQL reports `attnum`, gaps
+    included (`information_schema.sql:672`), and that is the one place this
+    engine does not follow it.
+  - *Writes store NULL at a dropped ordinal.* `SqlRowCodec.Encode` writes a
+    one-byte NULL component for every dropped ordinal, as PostgreSQL's INSERT and
+    UPDATE target lists carry a NULL for a dropped attribute
+    (`src/backend/optimizer/prep/preptlist.c:446-455`). A dropped value's space
+    comes back as its rows are updated and the versions that hold it are purged,
+    the behaviour `alter_table.sgml:1546-1552` documents.
+  - *ADD COLUMN appends a physical ordinal.* A new column takes
+    `PhysicalColumnCount`, after every live and dropped ordinal (PostgreSQL:
+    `relnatts + 1`, `tablecmds.c:7445-7446`). A column re-added under a dropped
+    column's name is a different column: versions written before it read it from
+    their missing tail (its default, or NULL), never the dropped values, which
+    stay behind the dropped ordinal.
+  - *Dropped ordinals are never reclaimed.* A physical ordinal names one column
+    for the life of the table. Reusing it would decode the dropped value into
+    the new column, from every version that still stores it: live, tombstoned,
+    or pinned by an older snapshot. PostgreSQL keeps a dropped `pg_attribute`
+    row and its `attnum` for good and counts it against the column limit
+    (`doc/src/sgml/limits.sgml:133-134`). Here the bound is the catalog record:
+    each dropped ordinal costs the table record one integer component, and a
+    definition that outgrows one record is refused (`EnsureStorable`).
+    Compacting the layout would need a rewrite that moves every version to the
+    new layout and rebuilds every index and version-store location, which is
+    what PostgreSQL's rewriting forms do (`tablecmds.c:6041-6066`, and why they
+    are not MVCC-safe, `alter_table.sgml:1563-1566`). No such rewrite exists; one
+    added later must replace the layout in the same recoverable unit as the
+    versions.
+  - *Replacements keep the layout.* Every catalog alteration (ADD/DROP COLUMN,
+    ADD/DROP CONSTRAINT) carries the dropped ordinals forward, and
+    `SqlCatalog.PublishTableAsync` refuses a replacement that does not keep the
+    current layout as its prefix (same dropped ordinals, every live column in
+    place; it may only append), and a new table published with dropped columns.
+  - *Crash safety.* The catalog commit is the drop's only durable step. A crash
+    before it reopens on the old definition, one after it on the new one, and
+    every stored version decodes correctly under either, because no row changed
+    and no ordinal moved. `SqlDropColumnTests` records a crash point after every
+    durable write the statement makes (`CrashCaptureSqlStorageStrategy.RecordCrashPoints`)
+    and reopens each. Run against the former in-place rewrite (#1237), the point
+    between the catalog commit and the rewrite's durable commit reopened on the
+    new definition with every row's values shifted into the wrong columns: 770
+    wrong values and failed seeks at that one of its five crash points (base
+    3f379cca). The drop now writes only the catalog's commit (four crash points
+    in the same run, the first before it and the rest after it), and every crash
+    point reads back exactly the model.
+  - *Concurrent readers.* A single-table SELECT still takes no table lock (see
+    "SELECT statements take no locks" under the execution model), so it can
+    overlap a DROP COLUMN, bound to either definition, and both decode every
+    version onto the right columns: one bound after the drop skips the dropped
+    component of a version written before it, and one bound before the drop
+    reads NULL for the dropped column in a version written after it. No value of
+    another column ever appears in a column. PostgreSQL takes
+    AccessExclusiveLock for DROP COLUMN as a change "visible to concurrent
+    SELECTs" (`tablecmds.c:4714-4724`), which waits for the AccessShareLock every
+    SELECT holds (`parse_relation.c:1533`). The layout makes that wait
+    unnecessary for correctness here, so DROP COLUMN does not block readers.
+    Run against the former rewrite, `SqlDropColumnTests`' concurrent readers
+    read 24,230 rows with values in the wrong columns in 203 SELECTs over four
+    drops, and 4 more SELECTs failed on a misplaced value (base 3f379cca, with
+    the readers' window around each drop fixed at 20 ms before and 40 ms after;
+    the issue's reviewers measured 12,495 wrong rows in 11 SELECTs). Writers and
+    joins take intent locks, which wait for DROP COLUMN's Exclusive lock; one
+    bound to the old definition then fails with "changed while the statement was
+    waiting".
+  - *What it replaced.* #1237 made DROP COLUMN splice the column out of every
+    stored version in place, inside the database-wide apply gate, after the
+    catalog drop self-committed on its own file set. That left the two gaps the
+    last two items close (#1241), and its O(table) scan held the gate every
+    writer of every table waits on. The splice (`SqlRowCodec.WithoutColumn`,
+    `SqlPlanExecutor.CollectColumnSplices`) and `DatabaseKeyReader.BytesConsumed`,
+    which existed only for it, are gone.
 - **Expression evaluation** is interpretive with SQL null propagation (nulls
   reject predicates, comparisons with null are null, `AND`/`OR` are three-valued
   and skip the right operand once `FALSE AND` or `TRUE OR` decides the result),

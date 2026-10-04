@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Transactions;
@@ -11,44 +10,78 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Encodes table rows as MVCC-stamped typed records: a fixed 16-byte version
 /// header — the writer and deleter <see cref="TransactionSequence"/> stamps, the
 /// B+Tree leaf-entry design adopted for the record space — followed by the
-/// owning table's object id and one self-describing component per column, in
-/// catalog column order. The object-id prefix is what lets multiple tables share
+/// owning table's object id and one self-describing component per physical
+/// column (<see cref="SqlCatalogTable.PhysicalColumnCount"/>), live or dropped, in
+/// physical-ordinal order. The object-id prefix is what lets multiple tables share
 /// one record space (scans filter by it); the fixed-width stamp header is what
 /// makes tombstoning an in-place, same-length update (a deleter stamp never
 /// relocates a record) and keeps ADD COLUMN's missing-tail decode intact
 /// (stamps sit in front of the tuple, never after the columns).
 /// </summary>
+/// <remarks>
+/// A dropped column keeps its physical ordinal (#1241): a version written before the
+/// drop still stores its value there, and one written after stores NULL, as
+/// PostgreSQL's INSERT and UPDATE store a null for a dropped attribute
+/// (<c>src/backend/optimizer/prep/preptlist.c:446-455</c>, <c>expand_targetlist</c>).
+/// Decoding walks every physical component and skips the dropped ones without
+/// materializing them, as <c>heap_deform_tuple</c> walks a dropped attribute by its
+/// stored length (<c>src/backend/access/common/heaptuple.c:1254</c>). Because a physical
+/// ordinal is never reused, a version decodes onto the right columns under every
+/// definition of its table: one written before or after a drop or an addition, read
+/// through a definition bound before or after it.
+/// </remarks>
 internal static class SqlRowCodec
 {
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 5 = stamped records in per-object page chains whose index
-    /// keys encode the temporal identity (<see cref="ToKeyIdentity"/>), in index
-    /// trees of B-tree page format 2, which order entries by key, entry reference
-    /// and writer (#1194). Earlier versions — 4 (the same rows, with index trees
-    /// of B-tree page format 1, ordered by key alone), 3 (the kind and offset
-    /// inside temporal keys), 2 (records in the shared page stream) and 1
-    /// (pre-MVCC unstamped records) — are history: a database is created on this
-    /// version, and an existing one on any other version is refused at open.
+    /// the catalog: 6 = format 5's stamped records and index trees, with each
+    /// table's physical column layout in its catalog record (table-record extension
+    /// version 3): a dropped column keeps its physical ordinal, rows are decoded
+    /// through that layout, and DROP COLUMN rewrites no row (#1241). Earlier
+    /// versions — 5 (DROP COLUMN spliced the column out of every stored version, so
+    /// the catalog recorded no dropped columns; index keys encode the temporal
+    /// identity, <see cref="ToKeyIdentity"/>, in index trees of B-tree page format 2,
+    /// which order entries by key, entry reference and writer, #1194), 4 (the same
+    /// rows, with index trees of B-tree page format 1, ordered by key alone), 3 (the
+    /// kind and offset inside temporal keys), 2 (records in the shared page stream)
+    /// and 1 (pre-MVCC unstamped records) — are history: a database is created on
+    /// this version, and an existing one on any other version is refused at open.
     /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
     /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 5;
+    internal const int RecordSpaceFormatVersion = 6;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.
     /// </summary>
     internal const int StampHeaderSize = RecordVersionStamp.HeaderSize;
 
-    internal static byte[] Encode(ulong objectId, IReadOnlyList<SqlCatalogColumn> columns, object?[] values, TransactionSequence writer)
+    /// <summary>
+    /// Encodes a row version under a table definition: one component per physical column,
+    /// the value of each live column and NULL at each dropped ordinal.
+    /// </summary>
+    /// <param name="table">The definition the version is written under.</param>
+    /// <param name="values">The live columns' values, by position in <see cref="SqlCatalogTable.Columns"/>.</param>
+    /// <param name="writer">The writing transaction's stamp.</param>
+    /// <returns>The stamped record.</returns>
+    internal static byte[] Encode(SqlCatalogTable table, object?[] values, TransactionSequence writer)
     {
         var writerCodec = new DatabaseKeyWriter();
-        writerCodec.AppendInt64((long)objectId);
+        writerCodec.AppendInt64((long)table.ObjectId);
 
-        for (int i = 0; i < columns.Count; i++)
+        var dropped = table.DroppedColumnOrdinals;
+        for (int physical = 0, column = 0, next = 0; physical < table.PhysicalColumnCount; physical++)
         {
-            AppendValue(writerCodec, columns[i].Type.Type, values[i]);
+            if (next < dropped.Count && dropped[next] == physical)
+            {
+                next++;
+                writerCodec.AppendNull();
+                continue;
+            }
+
+            AppendValue(writerCodec, table.Columns[column].Type.Type, values[column]);
+            column++;
         }
 
         byte[] payload = writerCodec.ToArray();
@@ -81,17 +114,27 @@ internal static class SqlRowCodec
         => RecordVersionStamp.WithoutDeleter(record);
 
     /// <summary>
-    /// Decodes a stamped record when it belongs to the expected table; returns
-    /// null when the record belongs to a different object or is too short to
-    /// carry a stamp header. Returns the stored column count so the caller can
-    /// resolve absent trailing fields from its bound catalog definition without
-    /// confusing them with explicitly stored NULLs. Visibility is the caller's
-    /// decision, made against its snapshot and the returned version stamps.
+    /// Decodes a stamped record through a table definition when it belongs to that
+    /// table; returns null when the record belongs to a different object or is too short
+    /// to carry a stamp header. Every physical component up to the definition's
+    /// <see cref="SqlCatalogTable.PhysicalColumnCount"/> is walked; a component at a
+    /// dropped ordinal is skipped without being materialized, and components past the
+    /// definition's physical columns (written under a later definition) are ignored.
+    /// Returns how many live columns the record stores, so the caller can resolve absent
+    /// trailing fields from its bound catalog definition without confusing them with
+    /// explicitly stored NULLs: physical ordinals ascend with the live columns, so the
+    /// stored columns are always a prefix. Visibility is the caller's decision, made
+    /// against its snapshot and the returned version stamps.
     /// </summary>
+    /// <param name="record">The stored record.</param>
+    /// <param name="table">The definition to decode through.</param>
+    /// <param name="writer">The record's writer stamp.</param>
+    /// <param name="deleter">The record's deleter stamp.</param>
+    /// <param name="storedColumnCount">How many of the definition's live columns the record stores.</param>
+    /// <returns>The live columns' values, by position in <see cref="SqlCatalogTable.Columns"/>, or null.</returns>
     internal static object?[]? TryDecode(
         ReadOnlySpan<byte> record,
-        ulong objectId,
-        int columnCount,
+        SqlCatalogTable table,
         out TransactionSequence writer,
         out TransactionSequence deleter,
         out int storedColumnCount)
@@ -109,88 +152,28 @@ internal static class SqlRowCodec
 
         var reader = new DatabaseKeyReader(record.Slice(StampHeaderSize));
 
-        if ((ulong)reader.ReadInt64() != objectId)
+        if ((ulong)reader.ReadInt64() != table.ObjectId)
         {
             return null;
         }
 
-        var values = new object?[columnCount];
+        var values = new object?[table.Columns.Count];
+        var dropped = table.DroppedColumnOrdinals;
 
-        for (int i = 0; i < columnCount; i++)
+        for (int physical = 0, next = 0; physical < table.PhysicalColumnCount && !reader.IsAtEnd; physical++)
         {
-            if (reader.IsAtEnd)
+            // A record that ends early was written before the columns it lacks were added.
+            if (next < dropped.Count && dropped[next] == physical)
             {
-                break; // column added after this row version was written
+                next++;
+                reader.Skip();
+                continue;
             }
 
-            values[i] = ReadValue(ref reader);
-            storedColumnCount++;
+            values[storedColumnCount++] = ReadValue(ref reader);
         }
 
         return values;
-    }
-
-    /// <summary>
-    /// Returns a copy of a stamped record with the component of one stored column
-    /// removed: DROP COLUMN's row rewrite (#1237). Every other byte is copied
-    /// verbatim (the version stamps, the object id and each surviving component keep
-    /// their exact encoding), so the copy is shorter than <paramref name="record"/> by
-    /// exactly the removed component, at least one byte. A slotted page writes a
-    /// record no longer than its slot in place, at the same page and slot, so the
-    /// rewrite never moves a version and every reference to it stays valid: index
-    /// entries (key, entry reference, writer) and the version store's locations.
-    /// </summary>
-    /// <param name="record">The stored record.</param>
-    /// <param name="objectId">The table the record must belong to.</param>
-    /// <param name="ordinal">The ordinal, in the layout the record was written under, of the column to remove.</param>
-    /// <returns>
-    /// The record without the column's component, or null when the record needs no
-    /// rewrite: it is too short to carry a stamp header, belongs to another object, or
-    /// stores no component at <paramref name="ordinal"/>. The last case is a version
-    /// written before the column was added: the column is part of its missing tail,
-    /// which decodes from the column metadata, and the components it does store keep
-    /// their positions.
-    /// </returns>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="ordinal"/> is negative.</exception>
-    internal static byte[]? WithoutColumn(ReadOnlySpan<byte> record, ulong objectId, int ordinal)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(ordinal);
-
-        if (record.Length < StampHeaderSize)
-        {
-            return null;
-        }
-
-        var reader = new DatabaseKeyReader(record.Slice(StampHeaderSize));
-
-        if ((ulong)reader.ReadInt64() != objectId)
-        {
-            return null;
-        }
-
-        for (int i = 0; i < ordinal; i++)
-        {
-            if (reader.IsAtEnd)
-            {
-                return null;
-            }
-
-            ReadValue(ref reader);
-        }
-
-        if (reader.IsAtEnd)
-        {
-            return null;
-        }
-
-        int start = StampHeaderSize + reader.BytesConsumed;
-        ReadValue(ref reader);
-        int end = StampHeaderSize + reader.BytesConsumed;
-
-        var spliced = new byte[record.Length - (end - start)];
-        record[..start].CopyTo(spliced);
-        record[end..].CopyTo(spliced.AsSpan(start));
-        return spliced;
     }
 
     /// <summary>

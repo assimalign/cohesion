@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-/// <summary>Proves read-time defaults remain correct across positional row rewrites and retained MVCC versions.</summary>
+/// <summary>Proves read-time defaults remain correct across dropped columns and retained MVCC versions.</summary>
 public sealed class SqlAddColumnLayoutTests
 {
     /// <summary>Dropping an earlier column preserves an added default and a stored explicit null.</summary>
@@ -30,12 +30,13 @@ public sealed class SqlAddColumnLayoutTests
         before[1].ShouldBe(new object?[] { 2, "remove-two", "two", 7 });
         await ExecuteAsync(session, "INSERT INTO t VALUES (3, 'remove-three', 'three', NULL);");
 
-        // Act: DROP splices obsolete out of the positional records; the old rows keep extra
-        // in their missing tail (#1237), and the UPDATE writes a version that stores it.
+        // Act: DROP marks obsolete's physical ordinal dropped and rewrites no record; the old
+        // rows keep extra in their missing tail (#1241), and the UPDATE writes a version that
+        // stores NULL at the dropped ordinal and stores extra.
         await ExecuteAsync(session, "ALTER TABLE t DROP COLUMN obsolete;");
         await ExecuteAsync(session, "UPDATE t SET payload = 'one-updated' WHERE id = 1;");
 
-        // Assert: the shifted layout still resolves the default and keeps the explicit null.
+        // Assert: the layout with a dropped ordinal still resolves the default and keeps the explicit null.
         var rows = await RowsAsync(session, "SELECT id, payload, extra FROM t ORDER BY id;");
         rows.Count.ShouldBe(3);
         rows[0].ShouldBe(new object?[] { 1, "one-updated", 7 });

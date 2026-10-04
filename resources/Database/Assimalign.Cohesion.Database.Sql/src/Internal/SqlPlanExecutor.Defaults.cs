@@ -11,8 +11,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     /// <summary>
-    /// Resolves only physically absent trailing fields from the statement's bound
-    /// column metadata. Stored NULLs and the original MVCC stamps are preserved.
+    /// Decodes a stored version through the statement's bound table version: dropped
+    /// columns' components are skipped, and only physically absent trailing fields are
+    /// resolved from the bound column metadata. Stored NULLs and the original MVCC
+    /// stamps are preserved.
     /// </summary>
     /// <param name="record">The stored record.</param>
     /// <param name="table">The table version the statement is bound to.</param>
@@ -22,8 +24,7 @@ internal sealed partial class SqlPlanExecutor
     private static object?[]? DecodeRow(ReadOnlySpan<byte> record, SqlCatalogTable table, IReadOnlyList<string?> defaultValues,
         out TransactionSequence writer, out TransactionSequence deleter)
     {
-        var values = SqlRowCodec.TryDecode(record, table.ObjectId, table.Columns.Count,
-            out writer, out deleter, out int storedColumnCount);
+        var values = SqlRowCodec.TryDecode(record, table, out writer, out deleter, out int storedColumnCount);
         if (values is not null)
         {
             for (int ordinal = storedColumnCount; ordinal < values.Length; ordinal++)

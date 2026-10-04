@@ -39,6 +39,10 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
 
     private const int schemaStateChunkSize = 3 * 1024;
 
+    // The version of a table record's trailing extension this catalog writes; it reads
+    // every version up to it. Version 3 adds the dropped columns' physical ordinals (#1241).
+    private const int tableExtensionVersion = 3;
+
     private static readonly Encoding _strictUtf8 = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
@@ -305,9 +309,12 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                 throw new SqlCatalogException($"Table '{schema}.{name}' already has a column named '{column.Name}'.");
             }
 
+            // The new column takes the next physical ordinal, after every live and dropped
+            // one (PostgreSQL: relnatts + 1, src/backend/commands/tablecmds.c:7445-7446), so
+            // a column re-added under a dropped column's name never reads that column's values.
             var columns = slot.Table.Columns.Append(column).ToList();
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns,
-                slot.Table.Owner, slot.Table.OwningSchema, slot.Table.Constraints);
+                slot.Table.Owner, slot.Table.OwningSchema, slot.Table.Constraints, slot.Table.DroppedColumnOrdinals);
             ReplaceTable(slot, updated);
             return new ValueTask<SqlCatalogTable>(updated);
         }
@@ -321,8 +328,17 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         lock (_sync)
         {
             var slot = GetSlot(schema, name);
+            int ordinal = -1;
+            for (int index = 0; index < slot.Table.Columns.Count; index++)
+            {
+                if (string.Equals(slot.Table.Columns[index].Name, columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    ordinal = index;
+                    break;
+                }
+            }
 
-            if (slot.Table.FindColumn(columnName) is null)
+            if (ordinal < 0)
             {
                 throw new SqlCatalogException($"Table '{schema}.{name}' has no column named '{columnName}'.");
             }
@@ -349,8 +365,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                 }
             }
 
-            // An indexed column cannot be dropped: index entries key on the column's
-            // values (and row rewrites must never invalidate live entry references).
+            // An indexed column cannot be dropped: index entries key on the column's values.
             foreach (var indexSlot in _indexes.Values)
             {
                 if (indexSlot.Index.TableObjectId == slot.Table.ObjectId &&
@@ -366,11 +381,16 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                 throw new SqlCatalogException($"Cannot drop the last column of '{schema}.{name}'.");
             }
 
-            var columns = slot.Table.Columns
-                .Where(c => !string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            // The whole of DROP COLUMN: the column leaves the live list and its physical
+            // ordinal is marked dropped, in one catalog record. No row is rewritten — every
+            // stored version keeps the dropped component, which every read skips, and later
+            // writes store NULL there. PostgreSQL's RemoveAttributeById, "the guts of ALTER
+            // TABLE DROP COLUMN", likewise only marks the attribute (attisdropped,
+            // src/backend/catalog/heap.c:1692-1732) and leaves the tuples alone.
+            var columns = slot.Table.Columns.Where((_, index) => index != ordinal).ToList();
+            int[] dropped = [.. slot.Table.DroppedColumnOrdinals, slot.Table.GetPhysicalOrdinal(ordinal)];
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns,
-                slot.Table.Owner, slot.Table.OwningSchema, slot.Table.Constraints);
+                slot.Table.Owner, slot.Table.OwningSchema, slot.Table.Constraints, dropped);
             ReplaceTable(slot, updated);
             return new ValueTask<SqlCatalogTable>(updated);
         }
@@ -834,8 +854,10 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         }
 
         AppendOwnership(ref writer, table.Owner, table.OwningSchema);
-        // Versioned trailing extension; old records end after keys or ownership.
-        writer.AppendInt32(2).AppendInt32(table.Constraints.Count);
+        // Versioned trailing extension; old records end after keys or ownership. Version 1
+        // carries the constraints, 2 adds the column collations and 3 (data-storage format 6,
+        // #1241) the dropped columns' physical ordinals.
+        writer.AppendInt32(tableExtensionVersion).AppendInt32(table.Constraints.Count);
         foreach (SqlCatalogConstraint constraint in table.Constraints)
         {
             writer.AppendString(constraint.Name, Collation.Binary)
@@ -858,6 +880,11 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         foreach (var column in table.Columns)
         {
             writer.AppendInt32(column.Collation?.Id ?? -1);
+        }
+        writer.AppendInt32(table.DroppedColumnOrdinals.Count);
+        foreach (int ordinal in table.DroppedColumnOrdinals)
+        {
+            writer.AppendInt32(ordinal);
         }
         return writer.ToArray();
     }
@@ -909,10 +936,14 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
 
         var (owner, owningSchema) = ReadOwnership(ref reader, allowTrailing: true);
         var constraints = new List<SqlCatalogConstraint>();
+        var dropped = new List<int>();
         if (!reader.IsAtEnd)
         {
+            // Versions 1 and 2 still load, so that the data-storage format gate, which
+            // reads the loaded catalog, refuses an older database with its own message
+            // (format 5 and earlier wrote version 2; they had no dropped columns).
             int version = reader.ReadInt32();
-            if (version is not (1 or 2))
+            if (version is < 1 or > tableExtensionVersion)
             {
                 throw new SqlCatalogException($"Unsupported table-constraint metadata version {version}.");
             }
@@ -955,12 +986,32 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                         column.DefaultLiteral, id < 0 ? null : Collation.FromId((byte)id));
                 }
             }
+            if (version >= 3)
+            {
+                int droppedCount = reader.ReadInt32();
+                if (droppedCount < 0)
+                {
+                    throw new SqlCatalogException($"The persisted dropped-column count {droppedCount} of '{schema}.{name}' is invalid.");
+                }
+                for (int index = 0; index < droppedCount; index++)
+                {
+                    dropped.Add(reader.ReadInt32());
+                }
+            }
         }
         if (!reader.IsAtEnd)
         {
             throw new SqlCatalogException("The persisted table constraint metadata contains trailing values.");
         }
-        var table = new SqlCatalogTable(objectId, schema, name, columns, primaryKey, owner, owningSchema, constraints);
+        SqlCatalogTable table;
+        try
+        {
+            table = new SqlCatalogTable(objectId, schema, name, columns, primaryKey, owner, owningSchema, constraints, dropped);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new SqlCatalogException($"The persisted definition of '{schema}.{name}' is invalid: {exception.Message}");
+        }
         ValidateConstraints(table);
         return table;
     }
@@ -1127,6 +1178,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             {
                 throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' has an unexpected catalog identity.");
             }
+            EnsurePhysicalLayoutKept(existing?.Table, table);
             ValidateColumns(table.Schema, table.Name, table.Columns, table.PrimaryKeyColumns);
             ValidateConstraints(table);
             var names = new HashSet<string>(table.Constraints.Select(constraint => constraint.Name), StringComparer.OrdinalIgnoreCase);
@@ -1164,6 +1216,45 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         }
     }
 
+    /// <summary>
+    /// Refuses a published definition that would move a stored component to another
+    /// column. A new table starts with no dropped column. A replacement keeps the
+    /// definition it replaces as its prefix: the same dropped ordinals and the same live
+    /// columns, by name, at the same positions, so every column keeps its physical
+    /// ordinal; it may only append columns. Every stored version is decoded through these
+    /// ordinals, so a replacement that renumbered them would read each value from
+    /// another column's component.
+    /// </summary>
+    /// <param name="existing">The definition being replaced, or null for a new table.</param>
+    /// <param name="table">The definition being published.</param>
+    /// <exception cref="SqlCatalogException">The published definition renumbers a physical column.</exception>
+    private static void EnsurePhysicalLayoutKept(SqlCatalogTable? existing, SqlCatalogTable table)
+    {
+        if (existing is null)
+        {
+            if (table.DroppedColumnOrdinals.Count > 0)
+            {
+                throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' cannot be created with dropped columns.");
+            }
+
+            return;
+        }
+
+        bool kept = existing.DroppedColumnOrdinals.SequenceEqual(table.DroppedColumnOrdinals) &&
+            table.Columns.Count >= existing.Columns.Count;
+        for (int ordinal = 0; kept && ordinal < existing.Columns.Count; ordinal++)
+        {
+            kept = string.Equals(existing.Columns[ordinal].Name, table.Columns[ordinal].Name, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!kept)
+        {
+            throw new SqlCatalogException(
+                $"The replacement definition of '{table.Schema}.{table.Name}' does not keep the physical column layout of the current one: " +
+                "it may only append columns.");
+        }
+    }
+
     internal ValueTask<SqlCatalogTable> AddConstraintAsync(
         string schema, string name, SqlCatalogConstraint constraint, CancellationToken cancellationToken)
     {
@@ -1178,7 +1269,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             }
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, slot.Table.Columns,
                 slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema,
-                slot.Table.Constraints.Append(constraint).ToArray());
+                slot.Table.Constraints.Append(constraint).ToArray(), slot.Table.DroppedColumnOrdinals);
             ValidateConstraints(updated);
             ReplaceTable(slot, updated);
             return new ValueTask<SqlCatalogTable>(updated);
@@ -1204,7 +1295,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                 throw new SqlCatalogException($"Constraint '{constraintName}' does not exist on '{schema}.{name}'.");
             }
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, slot.Table.Columns,
-                slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema, constraints);
+                slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema, constraints, slot.Table.DroppedColumnOrdinals);
             ReplaceTable(slot, updated);
             return new ValueTask<SqlCatalogTable>(updated);
         }

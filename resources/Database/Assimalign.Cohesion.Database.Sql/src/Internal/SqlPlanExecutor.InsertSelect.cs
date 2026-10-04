@@ -79,7 +79,7 @@ internal sealed partial class SqlPlanExecutor
                     values[ordinal] = ResolveDefault(table.Columns[ordinal], defaults[ordinal]);
                 }
             }
-            rows.Add((SqlRowCodec.Encode(table.ObjectId, table.Columns, values, statement.Transaction.Sequence), values));
+            rows.Add((SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values));
         }
 
         // As with literal INSERT, acquire reference locks and unique-key locks

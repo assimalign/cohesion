@@ -172,7 +172,8 @@ internal sealed partial class SqlPlanExecutor
         var columns = plan.Table.Columns.Select(column => primary.Contains(column.Name, StringComparer.OrdinalIgnoreCase)
             ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation) : column).ToArray();
         var replacement = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
-            primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray());
+            primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray(),
+            plan.Table.DroppedColumnOrdinals);
         var rows = Scan(plan.Table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
         foreach (var row in rows)
         {
@@ -214,12 +215,16 @@ internal sealed partial class SqlPlanExecutor
         }
 
         var primary = primaryDefinition?.Columns ?? table.PrimaryKeyColumns;
-        var provisional = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema, table.Constraints);
+        // The added column takes the next physical ordinal: the replacement keeps the
+        // table's dropped ordinals, so every existing column keeps its own (the catalog
+        // refuses a replacement that does not).
+        var provisional = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema,
+            table.Constraints, table.DroppedColumnOrdinals);
         var constraints = BindConstraints(provisional, plan.Constraints);
         await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
         constraints = BindConstraints(provisional, plan.Constraints);
         var replacement = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema,
-            table.Constraints.Concat(constraints).ToArray());
+            table.Constraints.Concat(constraints).ToArray(), table.DroppedColumnOrdinals);
         // Backfill is logical: missing trailing fields resolve from the immutable
         // replacement metadata. Existing row bytes and MVCC stamps never change;
         // one durable catalog publication makes the complete addition visible.

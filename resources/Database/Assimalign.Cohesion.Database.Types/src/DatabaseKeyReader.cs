@@ -32,13 +32,79 @@ public ref struct DatabaseKeyReader
     public readonly bool IsAtEnd => _position >= _source.Length;
 
     /// <summary>
-    /// Gets the number of bytes the reader has consumed: the offset in the encoded key
-    /// at which the next component starts. Components are self-delimiting, so two
-    /// readings taken around a read bracket exactly the bytes of the components read
-    /// in between, which lets a caller copy or remove a component without decoding
-    /// and re-encoding its value.
+    /// Consumes the next component without materializing its value. Components are
+    /// self-delimiting, so a caller that does not need a component (the SQL engine's
+    /// rows skip the component a dropped column left behind) walks past it without
+    /// allocating its string or byte payload or parsing its digits. The component is
+    /// checked as strictly as the typed read would check it: its type tag, its collation
+    /// for a string, its escape sequences and terminator, and its length.
     /// </summary>
-    public readonly int BytesConsumed => _position;
+    /// <exception cref="DatabaseTypeException">
+    /// The reader is at the end of the key, or the component is malformed or truncated.
+    /// </exception>
+    public void Skip()
+    {
+        var type = PeekType();
+        _position++;
+
+        switch (type)
+        {
+            case DatabaseType.Null:
+                break;
+            case DatabaseType.Boolean:
+            case DatabaseType.Int8:
+                TakeSpan(1);
+                break;
+            case DatabaseType.Int16:
+                TakeSpan(sizeof(short));
+                break;
+            case DatabaseType.Int32:
+            case DatabaseType.Float32:
+            case DatabaseType.Date:
+                TakeSpan(sizeof(int));
+                break;
+            case DatabaseType.Int64:
+            case DatabaseType.Float64:
+            case DatabaseType.Time:
+            case DatabaseType.TimeSpan:
+                TakeSpan(sizeof(long));
+                break;
+            case DatabaseType.DateTime:
+                TakeSpan(sizeof(long) + 1);
+                break;
+            case DatabaseType.DateTimeOffset:
+                TakeSpan(sizeof(long) + sizeof(short));
+                break;
+            case DatabaseType.Guid:
+                TakeSpan(16);
+                break;
+            case DatabaseType.Decimal:
+                KeyComponentEncoding.SkipDecimal(_source, ref _position);
+                break;
+            case DatabaseType.String:
+                var collation = Collation.FromId(Take());
+                KeyComponentEncoding.SkipEscaped(_source, ref _position);
+                if (!collation.IsIndexBacked)
+                {
+                    // A legacy invariant key: the original bytes follow the sort key,
+                    // length-prefixed (see ReadString).
+                    int length = BinaryPrimitives.ReadInt32BigEndian(TakeSpan(sizeof(int)));
+                    if (length < 0 || _position + length > _source.Length)
+                    {
+                        throw new DatabaseTypeException("Malformed key: invalid string payload length.");
+                    }
+
+                    _position += length;
+                }
+
+                break;
+            case DatabaseType.Binary:
+                KeyComponentEncoding.SkipEscaped(_source, ref _position);
+                break;
+            default:
+                throw new DatabaseTypeException($"Malformed key: unexpected component type {type}.");
+        }
+    }
 
     /// <summary>
     /// Returns the type of the next component without consuming it.

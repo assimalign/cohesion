@@ -136,7 +136,10 @@ Structural fixes that must land before engine work, because every engine inherit
 > addition without a default is allowed when no current rows exist; historical
 > versions visible only to an older snapshot then retain NULL in the missing field.
 > Schema-owned tables remain protected and DDL in explicit transactions remains
-> refused (#1023). ORDER BY accepts source expressions, output aliases (bare or nested), and select-list
+> refused (#1023). DROP COLUMN changes only the catalog, as PostgreSQL's does: the
+> column's physical position is marked dropped and no row is rewritten, so a crash
+> at any point and SELECTs running beside it see every value in its own column, and
+> a column re-added under the same name never reads the dropped values (#1241). ORDER BY accepts source expressions, output aliases (bare or nested), and select-list
 > ordinals across supported stored/system/join/grouped sources, including DISTINCT and LIMIT/OFFSET (#1024).
 > Unqualified aliases take precedence over same-named source columns; qualified names select the source.
 > Referencing a duplicated output alias is ambiguous. Aggregate arguments retain their source scope.

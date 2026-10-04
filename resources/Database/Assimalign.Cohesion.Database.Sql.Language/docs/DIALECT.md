@@ -44,7 +44,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `UPDATE` | Supported | multi-column `SET`, `WHERE`; no aggregate in either (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
 | `DELETE` | Supported | optional `WHERE`, without an aggregate |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
-| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). |
+| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `DROP TABLE` | Supported | `IF EXISTS` |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
@@ -433,6 +433,42 @@ DDL remains self-committing and is rejected inside an explicit transaction with
 `COHSQLT003`; it cannot be undone by a later ROLLBACK. ALTER against a code-owned
 table (`DatabaseObjectOwner.Schema`) remains refused unless performed by its
 owning schema deployment.
+
+## DROP COLUMN (#1241)
+
+`ALTER TABLE t DROP COLUMN c` removes `c` from the table's definition: `SELECT *`,
+INSERT without a column list, name resolution, the wire result header and the
+system views no longer see it. It is refused, with nothing changed, for an unknown
+column, a primary-key column, a column an index covers (drop the index first), a
+column a foreign key, UNIQUE or CHECK constraint uses or references (drop the
+constraint first; a table-level CHECK that reads the column is found by binding it
+without the column, and the refusal names the column it misses), and a table's
+last column.
+
+The drop is **a catalog-only change**, as in PostgreSQL: the column's physical
+position is marked dropped and no stored row is read or rewritten, so the statement
+takes the same time on an empty table and a large one and holds up no other
+table's writes. The dropped values stay in the rows that hold them, unreadable;
+rows written afterwards store NULL there, and the space returns as rows are
+updated and their old versions purged. A crash at any point leaves either the
+table as it was or the column dropped, with every value in its own column either
+way. DDL stays self-committing (above).
+
+Statements running beside the drop: a write or a join waits for it, and one planned
+on the old definition then fails with "changed while the statement was waiting" and
+can be retried. A single-table SELECT does not wait. Whichever definition it was
+planned on, every value it returns is in its own column; one planned before the
+drop reads NULL for the dropped column in rows written after the drop. Snapshots
+older than the drop keep reading their rows, without the dropped column once a
+statement is planned on the new definition.
+
+`ADD COLUMN` after a drop adds a new column, even under the dropped column's name:
+existing rows read the new column's default (or NULL), never the dropped values.
+`INFORMATION_SCHEMA.COLUMNS.ORDINAL_POSITION` numbers the live columns 1..n, so a
+column behind a dropped one moves up by one, as the SQL standard specifies;
+PostgreSQL instead reports its internal attribute number, with gaps. A table's
+dropped positions are never reused; each one keeps a few bytes in the table's
+catalog definition, which is limited to one catalog record.
 
 ## Collation (#1025)
 
@@ -1045,7 +1081,7 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | Relation | Columns, in order | Rows |
 |---|---|---|
 | `INFORMATION_SCHEMA.TABLES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `TABLE_TYPE` | Stored tables in the current database; `TABLE_TYPE = 'BASE TABLE'` |
-| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION` | One row per table column; ordinals start at one |
+| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION` | One row per live table column; ordinals start at one and have no gap where a column was dropped |
 | `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`, `IS_DEFERRABLE`, `INITIALLY_DEFERRED` | Primary keys, unique indexes/constraints, foreign keys, and explicit checks; both deferral fields are `NO` |
 | `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |
 | `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, delete rule `RESTRICT` or `CASCADE` |

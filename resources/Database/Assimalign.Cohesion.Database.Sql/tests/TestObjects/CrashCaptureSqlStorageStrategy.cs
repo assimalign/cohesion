@@ -22,6 +22,7 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
     private readonly Dictionary<string, (GatedStream Data, GatedStream Journal, GatedStream Backup)> _live = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)> _images = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
+    private CrashPointRecorder? _recorder;
 
     /// <summary>
     /// Initializes an empty strategy (databases are created through the engine).
@@ -45,15 +46,120 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
     {
         lock (_sync)
         {
-            var images = new Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)>(_images, StringComparer.OrdinalIgnoreCase);
+            return new CrashCaptureSqlStorageStrategy(CaptureImagesLocked());
+        }
+    }
 
-            foreach (var (name, streams) in _live)
+    /// <summary>
+    /// Starts recording a crash point after every change to the durable image of any
+    /// storage this strategy holds: each write to a write-through stream, each flush,
+    /// and each length change. A crash point is the set of durable images a process
+    /// crash at that instant would leave behind, so reopening every recorded point
+    /// crashes the work in between at every place it touches a file. The recording
+    /// starts with the images as they are when it is armed and stops when the returned
+    /// recorder is disposed.
+    /// </summary>
+    /// <returns>The recorder whose <see cref="CrashPointRecorder.Points"/> collect the crash points.</returns>
+    /// <exception cref="InvalidOperationException">A recording is already running.</exception>
+    public CrashPointRecorder RecordCrashPoints()
+    {
+        lock (_sync)
+        {
+            if (_recorder is not null)
             {
-                images[name] = (streams.Data.CaptureDurable(), streams.Journal.CaptureDurable(), streams.Backup.CaptureDurable());
+                throw new InvalidOperationException("Crash points are already being recorded.");
             }
 
-            return new CrashCaptureSqlStorageStrategy(images);
+            _recorder = new CrashPointRecorder(this);
+            _recorder.Add(CaptureImagesLocked());
+            return _recorder;
         }
+    }
+
+    private Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)> CaptureImagesLocked()
+    {
+        var images = new Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)>(_images, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (name, streams) in _live)
+        {
+            images[name] = (streams.Data.CaptureDurable(), streams.Journal.CaptureDurable(), streams.Backup.CaptureDurable());
+        }
+
+        return images;
+    }
+
+    private void OnDurableChange()
+    {
+        lock (_sync)
+        {
+            _recorder?.Add(CaptureImagesLocked());
+        }
+    }
+
+    private void StopRecording(CrashPointRecorder recorder)
+    {
+        lock (_sync)
+        {
+            if (ReferenceEquals(_recorder, recorder))
+            {
+                _recorder.Add(CaptureImagesLocked());
+                _recorder = null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The crash points <see cref="RecordCrashPoints"/> collected: the durable images
+    /// before the first recorded change, after every change, and when the recording
+    /// stopped. Consecutive identical points are kept, so the count measures how many
+    /// durable changes the recorded work made.
+    /// </summary>
+    public sealed class CrashPointRecorder : IDisposable
+    {
+        private readonly CrashCaptureSqlStorageStrategy _owner;
+        private readonly List<Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)>> _points = [];
+
+        internal CrashPointRecorder(CrashCaptureSqlStorageStrategy owner)
+        {
+            _owner = owner;
+        }
+
+        /// <summary>Gets the number of recorded crash points.</summary>
+        public int Count
+        {
+            get
+            {
+                lock (_owner._sync)
+                {
+                    return _points.Count;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns a strategy that opens databases from the images of one crash point, as a
+        /// restarted process would find its files.
+        /// </summary>
+        /// <param name="index">The crash point, from 0 to <see cref="Count"/> - 1.</param>
+        /// <returns>A strategy over that crash point's images.</returns>
+        public CrashCaptureSqlStorageStrategy Open(int index)
+        {
+            lock (_owner._sync)
+            {
+                var images = new Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (name, image) in _points[index])
+                {
+                    images[name] = ((byte[])image.Data.Clone(), (byte[])image.Journal.Clone(), (byte[])image.Backup.Clone());
+                }
+
+                return new CrashCaptureSqlStorageStrategy(images);
+            }
+        }
+
+        /// <inheritdoc />
+        public void Dispose() => _owner.StopRecording(this);
+
+        internal void Add(Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)> point) => _points.Add(point);
     }
 
     /// <summary>
@@ -92,7 +198,8 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
 
             // Data write-through: the worst case for steal (every page write is
             // immediately "on disk"); the journal honors flush-gated durability.
-            var streams = (Data: new GatedStream(writeThrough: true), Journal: new GatedStream(writeThrough: false), Backup: new GatedStream(writeThrough: true));
+            var streams = (Data: new GatedStream(writeThrough: true, OnDurableChange), Journal: new GatedStream(writeThrough: false, OnDurableChange),
+                Backup: new GatedStream(writeThrough: true, OnDurableChange));
             _live[databaseName] = streams;
             return SqlStorage.Create(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
                 new StorageStream(new SimulatedDurableFileHandle(streams.Journal)),
@@ -110,7 +217,9 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
                 throw new DatabaseException($"Crash-capture storage for '{databaseName}' does not exist.");
             }
 
-            var streams = (Data: new GatedStream(image.Data, writeThrough: true), Journal: new GatedStream(image.Journal, writeThrough: false), Backup: new GatedStream(image.Backup, writeThrough: true));
+            var streams = (Data: new GatedStream(image.Data, writeThrough: true, OnDurableChange),
+                Journal: new GatedStream(image.Journal, writeThrough: false, OnDurableChange),
+                Backup: new GatedStream(image.Backup, writeThrough: true, OnDurableChange));
             _live[databaseName] = streams;
 
             // Deferred checkpoint per the strategy contract: the engine analyzes
@@ -150,16 +259,18 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
     {
         private readonly MemoryStream _liveBuffer;
         private readonly bool _writeThrough;
+        private readonly Action _onDurableChange;
         private byte[] _durable;
 
-        internal GatedStream(bool writeThrough)
+        internal GatedStream(bool writeThrough, Action onDurableChange)
         {
             _liveBuffer = new MemoryStream();
             _durable = Array.Empty<byte>();
             _writeThrough = writeThrough;
+            _onDurableChange = onDurableChange;
         }
 
-        internal GatedStream(byte[] content, bool writeThrough)
+        internal GatedStream(byte[] content, bool writeThrough, Action onDurableChange)
         {
             // Copy into an expandable stream: MemoryStream(byte[]) cannot grow.
             _liveBuffer = new MemoryStream();
@@ -167,6 +278,7 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
             _liveBuffer.Position = 0;
             _durable = (byte[])content.Clone();
             _writeThrough = writeThrough;
+            _onDurableChange = onDurableChange;
         }
 
         internal byte[] CaptureDurable() => (byte[])_durable.Clone();
@@ -185,6 +297,7 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
         public override void Flush()
         {
             _durable = _liveBuffer.ToArray();
+            _onDurableChange();
         }
 
         public override int Read(byte[] buffer, int offset, int count) => _liveBuffer.Read(buffer, offset, count);
@@ -198,6 +311,7 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
             if (_writeThrough)
             {
                 _durable = _liveBuffer.ToArray();
+                _onDurableChange();
             }
         }
 
@@ -208,6 +322,7 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
             if (_writeThrough)
             {
                 _durable = _liveBuffer.ToArray();
+                _onDurableChange();
             }
         }
     }

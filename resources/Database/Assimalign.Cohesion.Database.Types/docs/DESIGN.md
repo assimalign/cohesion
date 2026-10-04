@@ -94,13 +94,17 @@ references makes cross-model ordering a compile-time fact rather than a conventi
   #1152) — not in the writer, because rows and the wire protocol need the
   round-trip bytes.
   Documents, Graph and KeyValuePair key no temporal values today.
-- **The reader reports its position (`BytesConsumed`).** Components are
-  self-delimiting, so the bytes between two readings taken around a read are
-  exactly that component's encoding. A caller can remove or copy a component
-  without re-encoding its value, which keeps the edit byte-exact instead of
-  relying on every decode/encode pair round-tripping to the same bytes. The SQL
-  engine's DROP COLUMN splices a dropped column out of stored rows this way, so a
-  rewritten row is always shorter and never leaves its slot (#1237).
+- **The reader skips a component without materializing it (`Skip`).** Components
+  are self-delimiting, so a caller that does not need one walks past it by its
+  tag and its own delimiting: a fixed width, the escaped payload's terminator, or
+  the decimal digits' terminator. No string, byte array or digit text is built,
+  and the component is checked as strictly as its typed read would check it. The
+  SQL engine's rows use it for the component a dropped column left behind: DROP
+  COLUMN marks the column dropped and rewrites no row (#1241), so every later read
+  of a version written before the drop walks past that component, and a skip that
+  allocated the old value would make every scan of the table pay for a column it
+  no longer has. (It replaces `BytesConsumed`, which existed only for the row
+  splice DROP COLUMN no longer does.)
 - `Guid` orders by RFC 4122 big-endian bytes (not SQL Server's segment order).
 - **JSON kinds are not key components.** `DatabaseType.Json`/`JsonBinary` exist as
   identities for storage/coercion, but ordering JSON is a model-level semantic; the

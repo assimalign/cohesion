@@ -20,8 +20,8 @@ this project so ordering is consistent across every database model.
 - **Key encodings** — `DatabaseKeyWriter` builds self-describing composite keys whose
   unsigned byte-wise comparison equals component-by-component value comparison;
   `DatabaseKeyReader` decodes them back (folding collations return canonical text;
-  original spelling stays in value storage) and reports how many bytes it has
-  consumed, so a caller can bracket one component's bytes exactly. `Database.Indexing`'s `IndexKey`
+  original spelling stays in value storage) and can skip a component without
+  materializing its value. `Database.Indexing`'s `IndexKey`
   and every model's key convention consume these.
 - **Boxed-value bridge** — `DatabaseValueCodec` maps boxed runtime values onto the
   same component encoding (dispatch by runtime type, read back boxed). The wire
