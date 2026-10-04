@@ -355,8 +355,9 @@ public sealed class SqlStorageOperationsTests
             }
         }
 
-        // The busy database is due by size the whole time, and one statement holds its gate.
-        busy.DataStorage.CheckpointJournalSize = 1;
+        // One statement holds the busy database's gate, and only then does the database become due
+        // by size, so the checkpoint worker cannot checkpoint it before the gate is held (a race
+        // that left the journal near-empty on a fast Linux runner).
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var context = await busy.Coordinator.BeginAsync(IsolationLevel.Snapshot);
@@ -367,7 +368,9 @@ public sealed class SqlStorageOperationsTests
             return true;
         }, durable: false).AsTask();
         await entered.Task.WaitAsync(Timeout);
+        busy.DataStorage.CheckpointJournalSize = 1;
         long busyJournalWhileHeld = busy.DataStorage.JournalLength;
+        busyJournalWhileHeld.ShouldBeGreaterThan(1024, "the busy database's journal must hold its inserts before the deferred checkpoint");
 
         using var stop = new CancellationTokenSource();
         var writers = Enumerable.Range(0, 2).Select(writer => Task.Run(async () =>
