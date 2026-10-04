@@ -77,9 +77,19 @@ internal sealed class DefaultLockManager : ILockManager
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The owner's own pending requests fail with <see cref="TransactionAbortedException"/>
+    /// instead of staying queued: a grant that arrived after the owner ended would hold
+    /// the resource for a transaction that can never release it again. Neo4j's lock
+    /// client does the same when its transaction is terminated: the wait loop checks the
+    /// stopped flag and throws (<c>community/lock/.../forseti/ForsetiClient.java:1081-1085</c>,
+    /// checked at <c>:230</c>). A request queued after this call is not seen here, so a
+    /// caller that can race an end checks its transaction after the grant and releases it.
+    /// </remarks>
     public void ReleaseAll(TransactionSequence owner)
     {
         List<Waiter> granted = new();
+        List<(LockResource Resource, Waiter Waiter)>? ended = null;
 
         lock (_sync)
         {
@@ -90,6 +100,15 @@ internal sealed class DefaultLockManager : ILockManager
             foreach (var (resource, entry) in _table)
             {
                 entry.Granted.Remove(owner.Value);
+
+                for (int i = entry.Waiters.Count - 1; i >= 0; i--)
+                {
+                    if (entry.Waiters[i].Owner == owner.Value)
+                    {
+                        (ended ??= new()).Add((resource, entry.Waiters[i]));
+                        entry.Waiters.RemoveAt(i);
+                    }
+                }
 
                 // Wake compatible waiters in FIFO order.
                 for (int i = 0; i < entry.Waiters.Count;)
@@ -126,6 +145,15 @@ internal sealed class DefaultLockManager : ILockManager
         foreach (var waiter in granted)
         {
             waiter.Completion.TrySetResult();
+        }
+
+        if (ended is not null)
+        {
+            foreach (var (resource, waiter) in ended)
+            {
+                waiter.Completion.TrySetException(new TransactionAbortedException(
+                    $"Transaction {owner} ended while it waited for {waiter.Mode} on {resource}; the request was not granted."));
+            }
         }
     }
 

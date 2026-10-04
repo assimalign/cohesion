@@ -8,7 +8,8 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 /// <summary>
 /// Tests for the lock manager: the compatibility matrix, blocking waits with FIFO
-/// wake-up, upgrades, cancellation, and deadlock victim resolution (#850).
+/// wake-up, upgrades, cancellation, deadlock victim resolution (#850), and an ended
+/// owner's queued requests (#1225 review).
 /// </summary>
 public class LockManagerTests
 {
@@ -130,6 +131,30 @@ public class LockManagerTests
 
         // The abandoned wait must not receive the lock on release.
         locks.ReleaseAll(_t1);
+        locks.TryAcquire(_t3, resource, LockMode.Exclusive).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Releasing an owner fails the owner's own queued requests: a grant that arrived after the
+    /// owner ended would hold the resource for a transaction that can never release it again.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: ReleaseAll fails the owner's queued requests")]
+    public async Task ReleaseAll_OwnerWithQueuedRequest_ShouldFailTheRequestAndNeverGrantIt()
+    {
+        // Arrange: T1 holds the resource; T2 waits for it.
+        var locks = LockManager.Create();
+        var resource = LockResource.Entry(5, 5);
+        await locks.AcquireAsync(_t1, resource, LockMode.Exclusive);
+        var waiting = locks.AcquireAsync(_t2, resource, LockMode.Exclusive).AsTask();
+        waiting.IsCompleted.ShouldBeFalse();
+
+        // Act: T2 ends while it waits, then T1 releases.
+        locks.ReleaseAll(_t2);
+        var error = await Should.ThrowAsync<TransactionAbortedException>(async () => await waiting.WaitAsync(TimeSpan.FromSeconds(5)));
+        locks.ReleaseAll(_t1);
+
+        // Assert: the ended request was never granted, so a third owner gets the resource at once.
+        error.Message.ShouldStartWith($"Transaction {_t2} ended while it waited", Case.Sensitive);
         locks.TryAcquire(_t3, resource, LockMode.Exclusive).ShouldBeTrue();
     }
 }

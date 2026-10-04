@@ -196,10 +196,11 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
         try
         {
             // A session may close or its transaction may roll back while this
-            // request waits. ReleaseAll at rollback removes grants, not pending
-            // requests, so a subsequently granted inactive owner must release
-            // its new grant before the operation leaves the wait; otherwise the
-            // database writer lock stays granted to an ended transaction.
+            // request waits. ReleaseAll at the end fails the requests it finds
+            // queued, but one queued just after it is granted later to the ended
+            // owner, which must release that grant before the operation leaves
+            // the wait; otherwise the database writer lock stays granted to an
+            // ended transaction. The kernel sets the state before it releases.
             token.ThrowIfCancellationRequested();
             ThrowIfDisposed();
             if (context.State != TransactionState.Active)

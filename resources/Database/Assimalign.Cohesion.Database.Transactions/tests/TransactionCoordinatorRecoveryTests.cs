@@ -179,6 +179,119 @@ public class TransactionCoordinatorRecoveryTests
         RecordCount(storage).ShouldBe(0);
     }
 
+    /// <summary>
+    /// A rollback that runs while a statement of the transaction is inside the apply gate waits for
+    /// that statement, undoes its bracket, and refuses every later one, so no record keeps the
+    /// rolled-back sequence. Before the #1225 review the rollback took the empty ledger at once,
+    /// the bracket landed afterwards, and once a checkpoint truncated the abort record, recovery
+    /// read the tombstone as committed and the purge reclaimed a record that was never deleted.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator: a rollback under a running statement undoes it and refuses later brackets")]
+    public async Task RollbackAsync_WhileStatementApplies_ShouldUndoItAndSurviveCheckpointAndReopen()
+    {
+        // Arrange: a committed record, and a statement of the writer held inside the apply gate
+        // before it tombstones the record.
+        using var storage = CoordinatorStorage.Create();
+        (PageId PageId, int SlotIndex) location;
+        using (var setup = storage.BeginTransaction())
+        {
+            location = storage.Insert(setup, Stamped(TransactionSequence.None, TransactionSequence.None));
+            setup.Commit();
+        }
+
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var running = Task.Factory.StartNew(() => coordinator.ApplyStatementAsync(writer, bracket =>
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+            storage.Update(bracket, location.PageId, location.SlotIndex, Stamped(TransactionSequence.None, writer.Sequence));
+            coordinator.VersionStore.RecordTombstoned(writer.Sequence, location.PageId, location.SlotIndex);
+            return 0;
+        }).AsTask().GetAwaiter().GetResult(), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        entered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+        bool laterApplied = false;
+
+        // Act
+        var rollingBack = coordinator.RollbackAsync(writer).AsTask();
+        bool waitedForStatement = !rollingBack.IsCompleted;
+        release.Set();
+        await running.WaitAsync(TimeSpan.FromSeconds(10));
+        await rollingBack.WaitAsync(TimeSpan.FromSeconds(10));
+        var refused = await Should.ThrowAsync<TransactionAbortedException>(async () =>
+            await coordinator.ApplyStatementAsync(writer, bracket =>
+            {
+                laterApplied = true;
+                return 0;
+            }));
+        int pairedAfterEnd = coordinator.PairedTransactionCount;
+        coordinator.Checkpoint();
+        var images = storage.CaptureImages();
+        await coordinator.DisposeAsync();
+        using var reopened = CoordinatorStorage.Open(images.Data, images.Journal);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        recovered.AnalyzeAndScrub();
+        recovered.CompleteRecovery();
+        long pruned = recovered.RunVersionPurgePass(CancellationToken.None);
+
+        // Assert
+        waitedForStatement.ShouldBeTrue();
+        writer.State.ShouldBe(TransactionState.RolledBack);
+        refused.Message.ShouldContain("was not applied", Case.Sensitive);
+        laterApplied.ShouldBeFalse();
+        pairedAfterEnd.ShouldBe(0);
+        RecordVersionStamp.ReadStamps(storage.Read(location.PageId, location.SlotIndex).Span).Deleter.ShouldBe(TransactionSequence.None);
+        pruned.ShouldBe(0);
+        RecordCount(reopened).ShouldBe(1);
+        RecordVersionStamp.ReadStamps(reopened.Read(location.PageId, location.SlotIndex).Span).Deleter.ShouldBe(TransactionSequence.None);
+    }
+
+    /// <summary>
+    /// A commit that starts while a statement of the transaction is inside the apply gate waits for
+    /// it, so the commit record follows every bracket stamped with the sequence, and a statement
+    /// after the commit is refused.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator: a commit waits for a running statement and refuses later brackets")]
+    public async Task CommitAsync_WhileStatementApplies_ShouldWaitForItAndRefuseLaterBrackets()
+    {
+        // Arrange
+        using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        (PageId PageId, int SlotIndex) location = default;
+        var running = Task.Factory.StartNew(() => coordinator.ApplyStatementAsync(writer, bracket =>
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+            location = storage.Insert(bracket, Stamped(writer.Sequence, TransactionSequence.None));
+            coordinator.VersionStore.RecordCreated(writer.Sequence, location.PageId, location.SlotIndex);
+            return 0;
+        }).AsTask().GetAwaiter().GetResult(), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        entered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+
+        // Act
+        var committing = coordinator.CommitAsync(writer).AsTask();
+        bool waitedForStatement = !committing.IsCompleted;
+        release.Set();
+        await running.WaitAsync(TimeSpan.FromSeconds(10));
+        await committing.WaitAsync(TimeSpan.FromSeconds(10));
+        await Should.ThrowAsync<TransactionAbortedException>(async () =>
+            await coordinator.ApplyStatementAsync(writer, bracket => 0));
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // Assert
+        waitedForStatement.ShouldBeTrue();
+        writer.State.ShouldBe(TransactionState.Committed);
+        TransactionRecovery.Analyze(storage.Log).Committed.ShouldContain(writer.Sequence);
+        (await coordinator.VersionStore.GetVisibleVersionAsync(0,
+            storage.PackLocation(location.PageId, location.SlotIndex), reader.Snapshot)).ShouldNotBeNull();
+        await coordinator.RollbackAsync(reader);
+    }
+
     private static byte[] Stamped(TransactionSequence writer, TransactionSequence deleter)
     {
         var bytes = new byte[17];

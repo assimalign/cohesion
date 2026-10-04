@@ -24,6 +24,7 @@ public interface ILockManager
     /// <param name="mode">The requested lock mode.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <exception cref="TransactionDeadlockException">Thrown when the request was chosen as a deadlock victim.</exception>
+    /// <exception cref="TransactionAbortedException">Thrown when <see cref="ReleaseAll"/> ended the owner while the request waited.</exception>
     ValueTask AcquireAsync(TransactionSequence owner, LockResource resource, LockMode mode, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -36,7 +37,9 @@ public interface ILockManager
     bool TryAcquire(TransactionSequence owner, LockResource resource, LockMode mode);
 
     /// <summary>
-    /// Releases every lock held by the specified transaction.
+    /// Releases every lock held by the specified transaction, and fails its pending
+    /// requests with <see cref="TransactionAbortedException"/>: the call ends the
+    /// owner's participation in the lock table.
     /// </summary>
     /// <param name="owner">The transaction whose locks are released.</param>
     void ReleaseAll(TransactionSequence owner);

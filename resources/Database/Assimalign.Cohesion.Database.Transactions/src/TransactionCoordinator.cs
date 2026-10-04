@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions.Internal;
 
 /// <summary>
 /// The per-database MVCC composition (area DESIGN §3.8): one
@@ -51,7 +52,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 {
     private readonly IStorage _storage;
     private readonly IStorageJournal _journal;
-    private readonly ITransactionManager _manager;
+    private readonly DefaultTransactionManager _manager;
     private readonly ILockManager _lockManager;
     private readonly RecordSpaceVersionStore _versionStore;
     private readonly GatedJournalLog _log;
@@ -85,7 +86,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         _lockManager = Transactions.LockManager.Create();
         _versionStore = new RecordSpaceVersionStore(storage, records, _applyGate);
         _log = new GatedJournalLog(this);
-        _manager = TransactionManager.Create(
+
+        // The concrete manager, not the factory's interface: the statement apply
+        // admits a bracket only for a context the manager still holds open.
+        _manager = new DefaultTransactionManager(
             _log,
             _lockManager,
             _versionStore,
@@ -261,44 +265,67 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// </param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The apply result.</returns>
+    /// <exception cref="TransactionAbortedException">
+    /// The transaction has ended, or its commit, rollback or abort has begun: the
+    /// statement was not applied. A transaction can end on another thread while one
+    /// of its statements runs (a session closing, a host rolling back a wire
+    /// session's transaction); its brackets stop at the end, because a bracket
+    /// applied after the rollback's undo would carry a sequence every snapshot then
+    /// reads as committed, and nothing would ever undo it.
+    /// </exception>
     public async ValueTask<T> ApplyStatementAsync<T>(
         ITransactionContext context,
         Func<IStorageTransaction, ValueTask<T>> apply,
         bool durable = false,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(apply);
+
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
-            var bracket = _storage.BeginTransaction();
-
-            lock (_sync)
-            {
-                _statementBrackets[context.Sequence.Value] = bracket;
-            }
+            // Admission under the gate: a statement queued on the gate when its
+            // transaction's end began is refused, and an end waits for the one
+            // admitted apply of its context to exit before it undoes or commits.
+            var owner = _manager.EnterApply(context);
 
             try
             {
-                var result = await apply(bracket).ConfigureAwait(false);
-                bracket.Commit(awaitDurability: durable);
-                return result;
-            }
-            catch
-            {
-                if (bracket.IsActive)
+                var bracket = _storage.BeginTransaction();
+
+                lock (_sync)
                 {
-                    bracket.Rollback();
+                    _statementBrackets[context.Sequence.Value] = bracket;
                 }
 
-                throw;
+                try
+                {
+                    var result = await apply(bracket).ConfigureAwait(false);
+                    bracket.Commit(awaitDurability: durable);
+                    return result;
+                }
+                catch
+                {
+                    if (bracket.IsActive)
+                    {
+                        bracket.Rollback();
+                    }
+
+                    throw;
+                }
+                finally
+                {
+                    lock (_sync)
+                    {
+                        _statementBrackets.Remove(context.Sequence.Value);
+                    }
+                }
             }
             finally
             {
-                lock (_sync)
-                {
-                    _statementBrackets.Remove(context.Sequence.Value);
-                }
+                owner.ExitApply();
             }
         }
         finally
