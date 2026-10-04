@@ -243,9 +243,11 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
         }
         try
         {
+            // The transaction object stays with its caller: a later rollback is a no-op, and a later
+            // commit fails with COHDBD001 naming the closure (or the statement failure before it).
             if (OpenTransaction is { } transaction)
             {
-                await transaction.DisposeAsync().ConfigureAwait(false);
+                await transaction.CloseAsync(new DatabaseException("The document session closed before the transaction ended.")).ConfigureAwait(false);
             }
         }
         catch (Exception error)

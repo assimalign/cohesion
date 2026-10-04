@@ -185,11 +185,16 @@ internal sealed class BlobContainer : IBlobContainer
 
 // Keeps a read snapshot pinned until disposal and refuses access after session
 // rollback/disposal, including bytes already buffered by the underlying stream.
+// A read that fails once the operation started (a canceled ReadAsync, a checksum
+// mismatch, a storage error) fails the operation, so inside an explicit transaction
+// it aborts the transaction like any other failed operation (#1225). An upload's
+// failures reach the operation through the storage stream's own abort callback.
 internal sealed class BlobGuardedStream : Stream
 {
     private readonly Stream _inner;
     private readonly BlobOperation _operation;
     private bool _disposed;
+    private bool _readFailed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BlobGuardedStream"/> class.
@@ -209,10 +214,47 @@ internal sealed class BlobGuardedStream : Stream
     public override long Position { get { Check(); return _inner.Position; } set => throw new NotSupportedException(); }
     public override void Flush() { Check(); _inner.Flush(); }
     public override Task FlushAsync(CancellationToken cancellationToken) { Check(); return _inner.FlushAsync(cancellationToken); }
-    public override int Read(byte[] buffer, int offset, int count) { Check(); return _inner.Read(buffer, offset, count); }
-    public override int Read(Span<byte> buffer) { Check(); return _inner.Read(buffer); }
-    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-    { Check(); return _inner.ReadAsync(buffer, cancellationToken); }
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        return Read(buffer.AsSpan(offset, count));
+    }
+
+    public override int Read(Span<byte> buffer)
+    {
+        CheckReadable();
+        try
+        {
+            return _inner.Read(buffer);
+        }
+        catch (Exception error)
+        {
+            _readFailed = true;
+            _operation.AbortAsync(error).AsTask().GetAwaiter().GetResult();
+            throw;
+        }
+    }
+
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        CheckReadable();
+        try
+        {
+            return await _inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error)
+        {
+            _readFailed = true;
+            await _operation.AbortAsync(error).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+    }
     public override void Write(byte[] buffer, int offset, int count) { Check(); _inner.Write(buffer, offset, count); }
     public override void Write(ReadOnlySpan<byte> buffer) { Check(); _inner.Write(buffer); }
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
@@ -220,13 +262,30 @@ internal sealed class BlobGuardedStream : Stream
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
     private void Check() { ObjectDisposedException.ThrowIf(_disposed, this); _operation.EnsureActive(); }
+
+    // A refused read (an ended operation, an upload stream) is not a failure of the
+    // operation and leaves it as it is.
+    private void CheckReadable()
+    {
+        Check();
+        if (!_inner.CanRead)
+        {
+            throw new NotSupportedException("The blob stream does not support reading.");
+        }
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing && !_disposed)
         {
             _disposed = true;
             try { _inner.Dispose(); }
-            catch (Exception error) { _operation.AbortAsync(error).AsTask().GetAwaiter().GetResult(); throw; }
+            catch (Exception error) when (!_readFailed) { _operation.AbortAsync(error).AsTask().GetAwaiter().GetResult(); throw; }
+            catch (Exception) when (_readFailed)
+            {
+                // The failed read already ended the operation and threw to the caller; the
+                // stream's completion callback can only report that the operation ended.
+            }
         }
         base.Dispose(disposing);
     }
@@ -239,7 +298,11 @@ internal sealed class BlobGuardedStream : Stream
 
         _disposed = true;
         try { await _inner.DisposeAsync().ConfigureAwait(false); }
-        catch (Exception error) { await _operation.AbortAsync(error).ConfigureAwait(false); throw; }
+        catch (Exception error) when (!_readFailed) { await _operation.AbortAsync(error).ConfigureAwait(false); throw; }
+        catch (Exception) when (_readFailed)
+        {
+            // See Dispose: the failed read already ended the operation and threw to the caller.
+        }
         GC.SuppressFinalize(this);
     }
 }

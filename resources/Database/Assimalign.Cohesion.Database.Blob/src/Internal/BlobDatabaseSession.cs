@@ -147,6 +147,23 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
             throw new DatabaseException("The blob session is closed.");
         }
     }
+
+    /// <summary>
+    /// Aborts the session's explicit transaction for a failure that ends the session, unless an
+    /// operation already aborted it. The wire server calls it before it reports a terminal failure,
+    /// so a failure that came before an operation started (which leaves an in-process transaction
+    /// unchanged) has aborted a host-opened transaction before the client sees the error, and the
+    /// host's commit fails with <c>COHDBB001</c> naming it whichever of the commit and the
+    /// connection's teardown runs first.
+    /// </summary>
+    /// <param name="cause">The failure the client is told about.</param>
+    internal async ValueTask AbortTransactionAsync(Exception cause)
+    {
+        if (OpenTransaction is { IsUsable: true } transaction)
+        {
+            await transaction.AbortAsync(cause).ConfigureAwait(false);
+        }
+    }
     public async ValueTask DisposeAsync()
     {
         List<BlobOperation> operations;
@@ -177,9 +194,12 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
         }
         try
         {
+            // The transaction object stays with its caller: a later rollback is a no-op, and a later
+            // commit fails with COHDBB001 naming the closure (or the operation failure before it).
+            // Over the wire this is the server session's teardown under a host-opened transaction.
             if (OpenTransaction is { } transaction)
             {
-                await transaction.DisposeAsync().ConfigureAwait(false);
+                await transaction.CloseAsync(new DatabaseException("The blob session closed before the transaction ended.")).ConfigureAwait(false);
             }
         }
         catch (Exception error)

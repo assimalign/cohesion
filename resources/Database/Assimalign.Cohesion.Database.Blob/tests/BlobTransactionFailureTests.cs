@@ -57,6 +57,7 @@ public sealed class BlobTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
+        ShouldBeExpectedFailure(error, failure);
         refused.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
         if (error is OperationCanceledException)
         {
@@ -327,6 +328,104 @@ public sealed class BlobTransactionFailureTests
         (await Names(container)).ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// A read that fails once its stream is open is a failed operation: inside an explicit
+    /// transaction it aborts the transaction, so the next operation is refused with COHDBB001, and
+    /// disposing the failed stream raises nothing more.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a failed read aborts the explicit transaction")]
+    public async Task ReadAsync_FailsInsideTransaction_ShouldAbortTransaction()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var container = await database.CreateContainerAsync("files");
+        await Write(container, "keep", new string('k', 100_000));
+        await using var session = await database.CreateSessionAsync();
+        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var transaction = await session.BeginTransactionAsync();
+        await Write(files, "pending", "pending");
+        var stream = await files.OpenReadAsync("keep");
+        var buffer = new byte[1_000];
+        (await stream.ReadAsync(buffer)).ShouldBe(buffer.Length);
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act
+        await Should.ThrowAsync<OperationCanceledException>(async () => await stream.ReadExactlyAsync(buffer, canceled.Token));
+        var faultedState = transaction.State;
+        var refusedRead = await Should.ThrowAsync<DatabaseException>(async () => await stream.ReadExactlyAsync(buffer));
+        await stream.DisposeAsync();
+        var refused = await Should.ThrowAsync<DatabaseException>(async () => await Write(files, "late", "late"));
+        await transaction.RollbackAsync();
+
+        // Assert
+        faultedState.ShouldBe(TransactionState.Faulted);
+        refusedRead.Message.ShouldNotStartWith("COHDBB001", Case.Sensitive);
+        refused.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        // A canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
+        refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await Names(container)).ShouldBe(["keep"]);
+    }
+
+    /// <summary>An autocommit read that fails ends only its own read, and the session stays usable.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a failed autocommit read leaves the session usable")]
+    public async Task ReadAsync_FailsInAutocommit_ShouldLeaveSessionUsable()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var container = await database.CreateContainerAsync("files");
+        await Write(container, "keep", "original");
+        await using var session = await database.CreateSessionAsync();
+        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var stream = await files.OpenReadAsync("keep");
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act
+        await Should.ThrowAsync<OperationCanceledException>(async () => await stream.ReadExactlyAsync(new byte[4], canceled.Token));
+        await stream.DisposeAsync();
+        await Write(files, "after", "after");
+
+        // Assert
+        session.CurrentTransaction.ShouldBeNull();
+        (await Read(files, "keep")).ShouldBe("original");
+        (await Names(container)).ShouldBe(["after", "keep"]);
+    }
+
+    /// <summary>
+    /// A commit after the session closed under an open transaction fails with COHDBB001 naming the
+    /// closure, whichever is asked first, and commits nothing; a rollback afterwards is a no-op.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: COMMIT after the session closed fails with COHDBB001")]
+    public async Task CommitAsync_AfterSessionClosed_ShouldFailWithCodeNamingTheClosure()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var container = await database.CreateContainerAsync("files");
+        var session = await database.CreateSessionAsync();
+        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var transaction = await session.BeginTransactionAsync();
+        await Write(files, "pending", "pending");
+
+        // Act
+        await session.DisposeAsync();
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        await transaction.RollbackAsync();
+
+        // Assert
+        error.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        error.Message.ShouldContain("nothing was committed", Case.Sensitive);
+        error.Message.ShouldContain("The blob session closed before the transaction ended.", Case.Sensitive);
+        repeated.Message.ShouldBe(error.Message);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await Names(container)).ShouldBeEmpty();
+    }
+
     /// <summary>Failures that come before an operation starts leave the transaction active.</summary>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: argument and request validation leave the transaction active")]
     public async Task Validation_BeforeOperationStarts_ShouldLeaveTransactionActive()
@@ -550,6 +649,27 @@ public sealed class BlobTransactionFailureTests
             case "conflict":
                 // The blob changed after this snapshot began: first-updater-wins refuses the delete.
                 await files.DeleteAsync("keep");
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(failure));
+        }
+    }
+
+    // The failure each case must raise, so a wrong failure cannot pass as the one under test. A
+    // canceled task may surface a derived cancellation exception.
+    private static void ShouldBeExpectedFailure(Exception error, string failure)
+    {
+        switch (failure)
+        {
+            case "container":
+            case "exists":
+                error.ShouldBeOfType<DatabaseException>();
+                break;
+            case "upload":
+                error.ShouldBeAssignableTo<OperationCanceledException>();
+                break;
+            case "conflict":
+                error.ShouldBeOfType<DatabaseTransactionAbortedException>();
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(failure));

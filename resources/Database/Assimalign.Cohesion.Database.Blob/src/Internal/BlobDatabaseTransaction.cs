@@ -206,6 +206,35 @@ internal sealed class BlobDatabaseTransaction : IDatabaseTransaction
     }
 
     /// <summary>
+    /// Ends the transaction because its session closed: rolls it back like a disposal, and records
+    /// the closure as the cause when no operation failed first, so a caller that still holds the
+    /// transaction (a host that opened it on a wire session) gets <c>COHDBB001</c> naming why nothing
+    /// committed from a later commit, whichever of its commit and the teardown runs first. A
+    /// transaction its caller already ended keeps its own outcome.
+    /// </summary>
+    /// <param name="cause">Why the session closed.</param>
+    internal async ValueTask CloseAsync(Exception cause)
+    {
+        await _endGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            lock (_sync)
+            {
+                if (!_ended)
+                {
+                    _failure ??= cause;
+                }
+                _ended = true;
+            }
+            await RollbackContextAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _endGate.Release();
+        }
+    }
+
+    /// <summary>
     /// Aborts the transaction because an operation failed in it: records the first failure, then
     /// rolls the transaction's work back so it holds no writer lock while it waits for the
     /// caller's rollback. The failure is recorded first, so the session refuses later operations

@@ -356,7 +356,21 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         catch (Exception exception) when (exception is not (ProtocolException or OperationCanceledException or OutOfMemoryException))
         {
             // A transfer may already be in progress. An error is terminal: no uncertain frame
-            // boundary or partially consumed content is returned to the connection pool.
+            // boundary or partially consumed content is returned to the connection pool. The
+            // teardown ends the session's transaction; a host-opened one is aborted first, so the
+            // host's commit names this failure whenever it runs (#1225).
+            if (_databaseSession is BlobDatabaseSession session)
+            {
+                try
+                {
+                    await session.AbortTransactionAsync(exception).ConfigureAwait(false);
+                }
+                catch (Exception abortError) when (abortError is not OutOfMemoryException)
+                {
+                    // The transaction stays Faulted with the rollback failure recorded, and the
+                    // teardown retries the rollback; the client still gets the original failure.
+                }
+            }
             await TryWriteErrorAsync(ProtocolErrorCode.ExecutionFailure, exception.Message).ConfigureAwait(false);
             return false;
         }

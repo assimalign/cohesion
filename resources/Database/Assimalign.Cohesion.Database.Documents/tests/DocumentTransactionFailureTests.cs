@@ -26,6 +26,7 @@ public sealed class DocumentTransactionFailureTests
     [InlineData("version", IsolationLevel.Snapshot)]
     [InlineData("query", IsolationLevel.Snapshot)]
     [InlineData("parse", IsolationLevel.Snapshot)]
+    [InlineData("system", IsolationLevel.Snapshot)]
     [InlineData("version", IsolationLevel.ReadCommitted)]
     [InlineData("query", IsolationLevel.ReadCommitted)]
     [InlineData("parse", IsolationLevel.ReadCommitted)]
@@ -317,6 +318,37 @@ public sealed class DocumentTransactionFailureTests
         (await Ids(observer)).ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// A commit after the session closed under an open transaction fails with COHDBD001 naming the
+    /// closure, whichever is asked first, and commits nothing; a rollback afterwards is a no-op.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT after the session closed fails with COHDBD001")]
+    public async Task CommitAsync_AfterSessionClosed_ShouldFailWithCodeNamingTheClosure()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await collection.PutAsync(session, "pending", Doc("pending"));
+
+        // Act
+        await session.DisposeAsync();
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        await transaction.RollbackAsync();
+
+        // Assert
+        error.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
+        error.Message.ShouldContain("nothing was committed", Case.Sensitive);
+        error.Message.ShouldContain("The document session closed before the transaction ended.", Case.Sensitive);
+        repeated.Message.ShouldBe(error.Message);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        await using var observer = await database.CreateSessionAsync();
+        (await Ids(observer)).ShouldBeEmpty();
+    }
+
     /// <summary>Failures that come before a statement starts leave the transaction active.</summary>
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: argument and request validation leave the transaction active")]
     public async Task Validation_BeforeStatementStarts_ShouldLeaveTransactionActive()
@@ -520,6 +552,10 @@ public sealed class DocumentTransactionFailureTests
             case "parse":
                 // Text the session parses is part of its statement, as in PostgreSQL and Neo4j.
                 await session.ExecuteAsync("SELECT FROM");
+                break;
+            case "system":
+                // OQL index DDL on a system collection is refused by the planner, inside the statement.
+                await session.ExecuteAsync("CREATE INDEX injected ON cohesion_schema.indexes (x)");
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(failure));

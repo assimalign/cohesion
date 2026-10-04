@@ -47,7 +47,7 @@ public sealed class BlobTransactionFailureWireTests
         // Assert
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.Message.ShouldContain("Container 'missing' does not exist.", Case.Sensitive);
-        refusedWrite.ShouldNotBeNull();
+        refusedWrite.ObjectName.ShouldNotBeNullOrEmpty();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await Read(harness.Container, "keep", timeout.Token)).ShouldBe("original");
         await using var next = await harness.Client.ConnectAsync(timeout.Token);
@@ -79,6 +79,46 @@ public sealed class BlobTransactionFailureWireTests
         repeated.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await Read(harness.Container, "keep", timeout.Token)).ShouldBe("original");
+    }
+
+    /// <summary>
+    /// A wire request refused before its operation starts still ends a host-opened transaction,
+    /// because a Blob wire failure is terminal: the server aborts the transaction before it reports
+    /// the failure, then closes the connection. The host's COMMIT fails with COHDBB001 naming the
+    /// refusal before and after the teardown, its earlier wire write is undone, and a fresh
+    /// connection works.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Blob.Client] - Transaction: a refused wire request ends the host transaction and COMMIT fails with COHDBB001")]
+    public async Task UploadAsync_RefusedBeforeItStarts_ShouldEndHostTransactionAndFailCommitWithCode()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
+        await Write(harness.Container, "keep", "original", timeout.Token);
+        var connection = await harness.Client.ConnectAsync(timeout.Token);
+        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(timeout.Token);
+        (await connection.DeleteAsync("files", "keep", timeout.Token)).ShouldBeTrue();
+
+        // Act: an upload begins its own transaction, so BEGIN refuses it on a session that has one.
+        var failure = await Should.ThrowAsync<BlobClientException>(async () =>
+            await connection.UploadAsync("files", "other", new MemoryStream(new byte[10]), cancellationToken: timeout.Token));
+        var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
+        await WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0, timeout.Token);
+        var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
+        await transaction.RollbackAsync(timeout.Token);
+        await connection.DisposeAsync();
+
+        // Assert
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        commit.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        commit.Message.ShouldContain("nothing was committed", Case.Sensitive);
+        commit.Message.ShouldContain(failure.Message, Case.Sensitive);
+        repeated.Message.ShouldBe(commit.Message);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await Read(harness.Container, "keep", timeout.Token)).ShouldBe("original");
+        await using var next = await harness.Client.ConnectAsync(timeout.Token);
+        (await next.GetPropertiesAsync("files", "other", timeout.Token)).ShouldBeNull();
     }
 
     private static async Task Write(IBlobContainer container, string name, string content, CancellationToken cancellationToken)

@@ -100,21 +100,28 @@ with its own code, `COHDBD001`:
 3. `RollbackAsync` succeeds, leaves none of the transaction's writes, and returns the session to
    autocommit. Disposing the transaction or the session ends it the same way. A rollback of any
    transaction that did not commit may be repeated and raises nothing; a rollback of a committed
-   transaction is refused.
+   transaction is refused. This holds when the rollback, or the session's disposal, runs while a
+   statement of the transaction is still running on another thread: the kernel admits no
+   physical bracket of a transaction whose end has begun and waits for the one already applying
+   before it undoes the transaction (Transactions [DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#ending-a-transaction-under-a-running-statement)),
+   so the running statement fails with `DatabaseTransactionAbortedException` and writes nothing
+   that outlives the rollback. A statement still waiting for the writer lock fails at once.
 4. `CommitAsync` fails with `COHDBD001`, commits nothing, and ends the transaction (`RolledBack`).
    It keeps that answer after the transaction has ended some other way (disposed, or rolled back
    by the caller), so a commit never reports anything but `COHDBD001` for a transaction a
-   statement aborted. A commit the kernel aborts throws `DatabaseTransactionAbortedException` and
-   leaves the transaction `Faulted` and ended.
+   statement aborted. A commit after the session closed fails with `COHDBD001` too, naming the
+   closure when no statement failed first. A commit the kernel aborts throws
+   `DatabaseTransactionAbortedException` and leaves the transaction `Faulted` and ended.
 5. Every failure of a statement that started counts: parse diagnostics of text the session parses
    or of a typed request, planning and execution errors (an unknown collection, a stale expected
-   version, a document whose indexed value outgrows the 1,024-byte index key), ownership
+   version, a document whose indexed value outgrows the 1,024-byte index key, OQL `CREATE INDEX`
+   or `DROP INDEX` on a `COHESION_SCHEMA` collection, which the planner refuses), ownership
    refusals, kernel aborts such as snapshot conflicts, and cancellation while the statement runs,
    including a wait for the writer lock. Failures that come before a statement starts leave the
    transaction unchanged: argument validation (a null, empty or whitespace id, collection name or
-   statement text), the read-only `COHESION_SCHEMA` names, a session of another database, a
-   request that carries no OQL statement, and the refusal of a second concurrent operation on the
-   session.
+   statement text), the typed `CreateCollectionAsync` and `DropCollectionAsync` refusal of a
+   `COHESION_SCHEMA` name, a session of another database, a request that carries no OQL
+   statement, and the refusal of a second concurrent operation on the session.
 6. Autocommit statements are unaffected: a failure ends only its own statement transaction.
 7. A rollback or commit observes its cancellation token only before it starts: a token canceled by
    then throws `OperationCanceledException` and leaves the transaction as it was. One that has
@@ -154,11 +161,14 @@ every later command but COMMIT and ROLLBACK before parse analysis with SQLSTATE 
 transaction it rolled back (`KernelTransactionImplementation.java:1206-1210`, `1291-1303`). COMMIT
 follows Neo4j, not PostgreSQL's silent ROLLBACK tag (`xact.c:4133-4139`): a caller awaiting
 `CommitAsync` must not see success when nothing committed. RavenDB, the document-model reference,
-has no interactive server transaction; its unit of work is a batch, and an exception in any
-command of the batch disposes the merged write transaction uncommitted
-(`src/Raven.Server/Documents/TransactionMerger/AbstractTransactionOperationsMerger.cs:368-375`),
-the same all-or-nothing outcome. Citations are to PostgreSQL `85f55534e80`, Neo4j `54a7dcf7c25`
-and RavenDB `83399cb8bc8`.
+has no interactive server transaction; its all-or-nothing unit is one client command or batch.
+Its transaction merger groups independent requests into one write transaction and, when that
+merged transaction fails, disposes it and reruns each request on its own
+(`src/Raven.Server/Documents/TransactionMerger/AbstractTransactionOperationsMerger.cs:368-375`,
+`391-394`); each rerun gets its own write transaction, disposed uncommitted when the command
+throws (`AbstractTransactionOperationsMerger.cs:906-916`). A failed request therefore commits
+nothing of its own, and the merge never makes one request's failure another's. Citations are to
+PostgreSQL `85f55534e80`, Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
 
 Documents has no wire server or client yet, so the contract is exercised in process only
 (`DocumentTransactionFailureTests`).

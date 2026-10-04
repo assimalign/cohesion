@@ -129,11 +129,14 @@ This conservative first version serializes writers for the upload lifetime; snap
 continue concurrently. Under that lock, the engine compares snapshot-visible metadata with
 the latest state and rejects stale writes. A session admits only one active operation/stream.
 This avoids overlapping uploads in the same transaction replacing the same original version.
-The lock manager removes grants, not pending requests, when a transaction ends, so an operation
-whose session closes or whose transaction rolls back while it waits for the writer lock checks
-its context once the grant arrives and releases the grant if the transaction has ended
-(`BlobLifecycleTests`); without that check the database writer lock stayed granted to an ended
-transaction and every later writer waited forever. The Documents engine has the same check.
+When a transaction ends, the lock manager releases its grants and fails the requests it still has
+queued, so an operation whose session closes or whose transaction rolls back while it waits for
+the writer lock fails at once. A request queued just after that release is granted later, so
+the operation also checks its context once the grant arrives and releases the grant if the
+transaction has ended (`BlobLifecycleTests`); without that check the database writer lock stayed
+granted to an ended transaction and every later writer waited forever. The kernel sets an ended
+transaction's state before it releases its locks, which is what makes the check sufficient. The
+Documents and Graph engines have the same check, and KeyValuePair has it for key locks.
 
 ### Failed operations in explicit transactions (#1225)
 
@@ -159,20 +162,32 @@ records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines 
 3. `RollbackAsync` succeeds, leaves none of the transaction's writes, and returns the session to
    autocommit. Disposing the transaction or the session ends it the same way. A rollback of any
    transaction that did not commit may be repeated and raises nothing; a rollback of a committed
-   transaction is refused.
+   transaction is refused. This holds when the rollback, or the session's disposal, runs while an
+   operation of the transaction is still running on another thread (a large delete tombstoning
+   its chain chunk by chunk, an upload between chunks): the kernel admits no physical bracket of a
+   transaction whose end has begun and waits for the one already applying before it undoes the
+   transaction (Transactions [DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#ending-a-transaction-under-a-running-statement)),
+   so the running operation fails with `DatabaseTransactionAbortedException` and writes nothing
+   that outlives the rollback. Before that rule, the operation went on stamping chunks with the
+   rolled-back sequence after the undo; once a checkpoint truncated the abort record, recovery
+   read those tombstones as committed and the purge reclaimed the content of a blob that was never
+   deleted. An operation still waiting for the writer lock fails at once.
 4. `CommitAsync` fails with `COHDBB001`, commits nothing, and ends the transaction (`RolledBack`).
    It keeps that answer after the transaction has ended some other way, so a host's commit gets
    `COHDBB001` whether it runs before or after the server session's teardown disposed the
-   transaction. A commit the kernel aborts throws `DatabaseTransactionAbortedException` and leaves
-   the transaction `Faulted` and ended. A commit while a stream is still open is refused before it
+   transaction. A commit after the session closed fails with `COHDBB001` too, naming the closure
+   when no operation failed first. A
+   commit the kernel aborts throws `DatabaseTransactionAbortedException` and leaves the
+   transaction `Faulted` and ended. A commit while a stream is still open is refused before it
    starts and leaves the transaction active.
 5. Every failure of an operation that started counts: an unknown container, an upload refused
    because the blob exists and `Overwrite` is false, a snapshot conflict, an upload stream whose
    chunk write, publication or cancellation fails after it persisted chunks, a canceled wait for
-   the writer lock, and a stream whose disposal fails. Failures that come before an operation
-   starts leave the transaction unchanged: argument validation (a null, empty or whitespace name),
-   `ExecuteAsync` (Blob has no statement language), and the refusal of a second concurrent
-   operation on the session.
+   the writer lock, a read stream whose read fails (a canceled `ReadAsync`, a checksum mismatch, a
+   storage error), and a stream whose disposal fails. Failures that come before an operation
+   starts leave the transaction unchanged: argument validation (a null, empty or whitespace name,
+   an invalid read buffer), a read on an operation that already ended, `ExecuteAsync` (Blob has no
+   statement language), and the refusal of a second concurrent operation on the session.
 6. Autocommit operations are unaffected: a failure ends only its own operation transaction.
 7. A rollback or commit observes its cancellation token only before it starts, and one that has
    started runs to completion. When a caller's rollback or commit still fails with the
@@ -186,13 +201,19 @@ rollback. The lifecycle is the Documents state diagram with operations in place 
 
 Over the wire a failure is terminal (see "Server lifecycle and failure semantics"): the server
 writes `ExecutionFailure` and closes the connection, and the session's teardown disposes the
-engine session and so ends the aborted transaction. No later request can reach that transaction
+engine session and so ends the transaction. That includes a failure that came before an
+operation started, which leaves an in-process transaction unchanged: over the wire every failure,
+pre-start refusals included, ends a host-opened transaction, because the connection ends with it.
+So that the outcome never depends on timing, the server aborts a still-usable host transaction
+with the failure before it writes `ExecutionFailure`. No later request can reach that transaction
 over the same connection, and a request on a new connection runs in a new session. A host that
 opened the transaction on `IDatabaseServerSession.DatabaseSession` sees the contract's ROLLBACK
-and COMMIT answers whichever of its call and the teardown runs first
-(`BlobTransactionFailureWireTests` in `Blob.Client`). An upload always begins its own transaction
-on the server session, so an upload on a connection whose engine session already has a host
-transaction is refused at BEGIN.
+and COMMIT answers whichever of its call and the teardown runs first: ROLLBACK raises nothing,
+and COMMIT fails with `COHDBB001` naming the failure. A teardown without a failure (the client
+disconnects, a protocol violation, a server stop) ends the transaction too, and a later COMMIT
+fails with `COHDBB001` naming the session's closure (`BlobTransactionFailureWireTests` in
+`Blob.Client`). An upload always begins its own transaction on the server session, so an upload on
+a connection whose engine session already has a host transaction is refused at BEGIN.
 
 Containers carry stable identities distinct from their names, so a dropped and recreated
 container cannot be addressed through an obsolete handle. Runtime creation marks them Adhoc.
