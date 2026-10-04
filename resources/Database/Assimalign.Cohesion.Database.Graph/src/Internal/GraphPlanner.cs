@@ -16,11 +16,20 @@ internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor)
 internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphPathPlan> Matches)
 {
     /// <summary>
-    /// Gets whether a MATCH pattern requires a label or relationship type the database does not
-    /// have: a node pattern's conjunction (<c>:A</c>, <c>:A&amp;B</c>) or a relationship pattern's
-    /// type. No element can satisfy that pattern, so the statement matches no row and the executor
-    /// reads nothing.
+    /// Gets whether the statement requires a label or relationship type the database does not
+    /// have: a MATCH node pattern's conjunction (<c>:A</c>, <c>:A&amp;B</c>), a MATCH relationship
+    /// pattern's type, or a non-negated labeled predicate with a pure conjunction among the
+    /// <c>WHERE</c> clause's top-level <c>AND</c> operands (<c>WHERE n:A</c>,
+    /// <c>WHERE n.k = 1 AND n IS LABELED A</c>). No element can satisfy it, so the statement
+    /// matches no row and the executor reads nothing.
     /// </summary>
+    /// <remarks>
+    /// The flag empties the whole statement, which is correct only because every MATCH in the
+    /// subset is mandatory. Only a mandatory MATCH, or a <c>WHERE</c> that filters the whole row,
+    /// may set it: when <c>gql-optional-match</c> lands, an optional pattern that requires an
+    /// unknown name binds nulls instead and must not set it (Graph.Language DESIGN, "when
+    /// gql-optional-match lands, a variable without a binding yields UNKNOWN").
+    /// </remarks>
     internal bool MatchesNothing { get; init; }
 
     /// <summary>
@@ -68,6 +77,7 @@ internal sealed class GraphPlanner
             paths.Add(new GraphPathPlan(path, ChooseAnchor(path, anchors)));
         }
         ValidateExpression(query.Predicate);
+        matchesNothing |= RequiresUnknownName(query.Predicate);
         foreach (var path in query.Creates) { Validate(path, creating: true); }
         foreach (var variable in query.DeleteVariables) { RequireVariable(variable, entity: true); }
         foreach (var projection in query.Projections) { RequireVariable(projection.Variable, entity: projection.Property is not null); }
@@ -179,6 +189,42 @@ internal sealed class GraphPlanner
                 if (kind == BindingKind.Node) { tokens.HasLabel(name, labeled.Location); }
                 else { tokens.HasRelationshipType(name, labeled.Location); }
             }
+        }
+        // Whether a top-level AND operand of a validated WHERE clause is a non-negated labeled
+        // predicate whose pure conjunction names a label or type the database does not have. Such
+        // an operand is false for every bound element (or unknown for an unbound one), so under
+        // ISO three-valued AND the clause is never true and the statement keeps no row: the plan
+        // can read nothing, as for the pattern form. Neo4j plans the WHERE form the same way, a
+        // label scan built from the selections' HasLabels predicates
+        // (cypher-planner/.../steps/leafplanner/labelScanLeafPlanner.scala:45), so an unresolved
+        // label reads nothing. Only AND nodes are descended, with an explicit stack; a negation,
+        // disjunction or wildcard can be true for an element without the name, so it never
+        // empties the plan.
+        bool RequiresUnknownName(GqlExpression? root)
+        {
+            if (root is null) { return false; }
+            var pending = new Stack<GqlExpression>();
+            pending.Push(root);
+            while (pending.TryPop(out var expression))
+            {
+                switch (expression)
+                {
+                    case GqlLogicalExpression { Operator: GqlLogicalOperator.And } logical:
+                        foreach (var operand in logical.Operands) { pending.Push(operand); }
+                        break;
+                    case GqlLabeledPredicate { IsNegated: false } labeled
+                        when GraphLabelEvaluator.Conjunction(labeled.LabelExpression) is { } conjunction:
+                        bool node = variables[labeled.Variable] == BindingKind.Node;
+                        foreach (string name in conjunction)
+                        {
+                            // Each name was resolved by validation; the resolver answers from its cache.
+                            if (node ? !tokens.HasLabel(name, labeled.Location) : !tokens.HasRelationshipType(name, labeled.Location))
+                            { return true; }
+                        }
+                        break;
+                }
+            }
+            return false;
         }
     }
 

@@ -9,6 +9,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -34,6 +35,8 @@ public sealed class GqlUnknownTokenWarningTests
     [InlineData("MATCH (n:Missing) RETURN n.name", GraphTokenResolver.UnknownLabelCode, IsolationLevel.ReadCommitted)]
     [InlineData("MATCH (a)-[r:Missing]->(b) RETURN r.name", GraphTokenResolver.UnknownRelationshipTypeCode, IsolationLevel.Snapshot)]
     [InlineData("MATCH (a)-[r:Missing]->(b) RETURN r.name", GraphTokenResolver.UnknownRelationshipTypeCode, IsolationLevel.ReadCommitted)]
+    [InlineData("MATCH (n) WHERE n.name = 'k' AND n:Missing RETURN n.name", GraphTokenResolver.UnknownLabelCode, IsolationLevel.Snapshot)]
+    [InlineData("MATCH (a)-[r]->(b) WHERE r IS LABELED Missing RETURN r.name", GraphTokenResolver.UnknownRelationshipTypeCode, IsolationLevel.ReadCommitted)]
     public async Task Execute_UnknownTokenInsideTransaction_ShouldWarnAndKeepTransactionAsync(string gql, string code, IsolationLevel isolation)
     {
         // Arrange
@@ -154,7 +157,8 @@ public sealed class GqlUnknownTokenWarningTests
     /// <summary>
     /// Writes still define new labels and types. A write whose MATCH names an unknown label matches
     /// nothing, so it writes nothing, and reports no warning: Neo4j checks unresolved tokens only for
-    /// a read-only query.
+    /// a read-only query. A write without a projection reports an affected count of 0; an
+    /// <c>INSERT ... RETURN</c> reports its empty rows.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Graph] - Unknown tokens: a write's MATCH matches nothing without failing; writes define new names")]
     public async Task Execute_WriteNamingUnknownToken_ShouldMatchNothingWithoutFailingAsync()
@@ -167,7 +171,9 @@ public sealed class GqlUnknownTokenWarningTests
 
         // Act
         var deleted = await session.ExecuteAsync("MATCH (n:Missing) DETACH DELETE n", cancellationToken: CancellationToken.None);
+        var deletedByWhere = await session.ExecuteAsync("MATCH (n) WHERE n:Missing DETACH DELETE n", cancellationToken: CancellationToken.None);
         var unmatched = await session.ExecuteAsync("MATCH (a:Keep)-[:Gone]->(b) INSERT (a)-[:NEVER]->(:Never)", cancellationToken: CancellationToken.None);
+        var (returnedRows, returnedDiagnostics) = await ReadAsync(session, "MATCH (n:Missing) INSERT (n)-[:R]->(m:New {name: 'x'}) RETURN m.name");
         var inserted = await session.ExecuteAsync("MATCH (a:Keep {name: 'k'}) INSERT (a)-[:FRESH]->(:Fresh {name: 'f'})", cancellationToken: CancellationToken.None);
         var state = transaction.State;
         await transaction.CommitAsync(CancellationToken.None);
@@ -175,14 +181,50 @@ public sealed class GqlUnknownTokenWarningTests
         // Assert
         deleted.AffectedCount.ShouldBe(0);
         deleted.Diagnostics.ShouldBeNull();
+        deletedByWhere.AffectedCount.ShouldBe(0);
+        deletedByWhere.Diagnostics.ShouldBeNull();
         unmatched.AffectedCount.ShouldBe(0);
         unmatched.Diagnostics.ShouldBeNull();
+        returnedRows.ShouldBeEmpty();
+        returnedDiagnostics.ShouldBeNull();
         inserted.AffectedCount.ShouldBe(2);
         state.ShouldBe(TransactionState.Active);
         await using var observer = await database.CreateSessionAsync(CancellationToken.None);
         (await ColumnAsync(observer, "SHOW LABELS", ordinal: 2)).ShouldBe(["Fresh", "Keep"]);
         (await ColumnAsync(observer, "SHOW RELATIONSHIP TYPES", ordinal: 2)).ShouldBe(["FRESH", "LINK"]);
         (await ColumnAsync(observer, "MATCH (n:Keep) RETURN n.name")).Order().ShouldBe(["j", "k"]);
+    }
+
+    /// <summary>
+    /// A read-only statement with no projection reports its warning on the mutation-shaped result.
+    /// The parser rejects MATCH without RETURN (GQL0002), but the public
+    /// <see cref="GraphQueryRequest(GqlQueryStatement, IReadOnlyDictionary{string, object?})"/>
+    /// constructor runs a hand-built statement of that shape.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Graph] - Unknown tokens: a read with no projection reports the warning and keeps the transaction")]
+    public async Task Execute_ReadWithoutProjectionNamingUnknownLabel_ShouldWarnAndKeepTransactionAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var session = await SeedAsync(engine);
+        var node = new GqlNodePattern("n", ["Missing"], new Dictionary<string, object?>());
+        var statement = new GqlQueryStatement(
+            new GqlQueryExpression([new GqlPathPattern([node], [])], null, [], [], false, []));
+        var transaction = await session.BeginTransactionAsync(CancellationToken.None);
+
+        // Act
+        var result = await session.ExecuteAsync(new GraphQueryRequest(statement), CancellationToken.None);
+        var state = transaction.State;
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert
+        result.ShouldBeOfType<GraphMutationResult>();
+        result.AffectedCount.ShouldBe(0);
+        var warning = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
+        warning.Code.ShouldBe(GraphTokenResolver.UnknownLabelCode);
+        warning.Severity.ShouldBe(DiagnosticSeverity.Warning);
+        state.ShouldBe(TransactionState.Active);
+        transaction.State.ShouldBe(TransactionState.Committed);
     }
 
     /// <summary>A path request reports the warning on its result and keeps the transaction.</summary>
@@ -250,7 +292,9 @@ public sealed class GqlUnknownTokenWarningTests
 
     /// <summary>
     /// A pattern that requires an unknown name (a node conjunction, a relationship type) plans to
-    /// read nothing; one that names it only under <c>!</c>, <c>|</c> or in WHERE still reads.
+    /// read nothing, and so does a top-level <c>AND</c> operand of WHERE that requires one, as Neo4j
+    /// plans a label scan from either form; a name only under <c>!</c>, <c>|</c> or
+    /// <c>IS NOT LABELED</c> still reads.
     /// </summary>
     /// <param name="gql">The statement to plan.</param>
     /// <param name="matchesNothing">Whether its plan reads nothing.</param>
@@ -264,7 +308,17 @@ public sealed class GqlUnknownTokenWarningTests
     [InlineData("MATCH (n:Keep|Missing) RETURN n.name", false)]
     [InlineData("MATCH (a)-[r:LINK|Missing]->(b) RETURN a.name", false)]
     [InlineData("MATCH (a)-[r:!Missing]->(b) RETURN a.name", false)]
-    [InlineData("MATCH (n) WHERE n:Missing RETURN n.name", false)]
+    [InlineData("MATCH (n) WHERE n:Missing RETURN n.name", true)]
+    [InlineData("MATCH (n) WHERE n IS LABELED Missing RETURN n.name", true)]
+    [InlineData("MATCH (n) WHERE n.name = 'k' AND n:Missing RETURN n.name", true)]
+    [InlineData("MATCH (n) WHERE n.name = 'k' AND (n.name = 'k' AND n:Keep&Missing) RETURN n.name", true)]
+    [InlineData("MATCH (a)-[r]->(b) WHERE r:Missing RETURN a.name", true)]
+    [InlineData("MATCH (a)-[r]->(b) WHERE r:Keep RETURN a.name", true)]
+    [InlineData("MATCH (n) WHERE n IS NOT LABELED Missing RETURN n.name", false)]
+    [InlineData("MATCH (n) WHERE n:!Missing RETURN n.name", false)]
+    [InlineData("MATCH (n) WHERE n:Keep|Missing RETURN n.name", false)]
+    [InlineData("MATCH (n) WHERE n:Keep RETURN n.name", false)]
+    [InlineData("MATCH (a)-[r]->(b) WHERE r:LINK RETURN a.name", false)]
     [InlineData("MATCH (n:Keep) RETURN n.name", false)]
     public async Task Plan_RequiredUnknownName_ShouldMatchNothingAsync(string gql, bool matchesNothing)
     {
@@ -331,7 +385,10 @@ public sealed class GqlUnknownTokenWarningTests
     private static ValueTask<GraphPlan> PlanAsync(IGraphDatabase database, IDatabaseSession session, string gql)
     {
         var instance = (GraphDatabaseInstance)database;
+        var statement = GraphQueryRequest.FromGql(gql).Statement;
+        // The planner never sees a statement the parser rejected, so neither does this helper.
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
         return instance.RunAsync((GraphDatabaseSession)session, operation => new ValueTask<GraphPlan>(
-            new GraphPlanner(instance, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql(gql).Statement.GqlExpression)), CancellationToken.None);
+            new GraphPlanner(instance, operation.Context.Snapshot).Plan(statement.GqlExpression)), CancellationToken.None);
     }
 }
