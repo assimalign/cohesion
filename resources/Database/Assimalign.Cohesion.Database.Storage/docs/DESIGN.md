@@ -466,7 +466,10 @@ Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
   over the body in place, assigns the LSN, and issues no system call. Nothing is allocated per
   frame: a test appends 200 frames after warm-up and allocates under 1 KiB in all (each append
   used to allocate its frame, 8 KiB for a page image). A checkpoint record's active list is
-  encoded straight into its frame too.
+  encoded straight into its frame too, and a commit encodes each after image straight from its
+  pooled page, which the bracket holds write-locked while the journal copies it (#1252 review:
+  the commit used to copy every page into a fresh 8 KiB array first). The before image a first
+  touch copies is the one page copy left on the write path, because rollback restores from it.
 - **Three positions.** `LastLsn` is the last LSN assigned, `WrittenLsn` the last one that left
   the buffer (the file holds it, or a checkpoint truncated it), and `DurableLsn` the last one a
   durable flush confirmed — PostgreSQL's insert, write and flush positions.
@@ -483,7 +486,7 @@ Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
 - **The drain rule.** The buffer drains to the operating system before:
   - **every commit is acknowledged, in every durability mode.** `Synchronous` and `Grouped` drain
     in the durable flush they already made (`EnsureDurable`); `None`, which used to return at once,
-    now drains through the commit record (`StreamJournal.EnsureWritten`, internal, through
+    now drains through the commit record (`StorageJournal.EnsureWritten`, internal, through
     `Storage.EnsureCommitDurable`), without a durable flush. So a process crash loses no
     acknowledged commit that survived it when every append was a write; a power loss under `None`
     may lose it, as before. PostgreSQL's `synchronous_commit = off` acknowledges a commit while its
@@ -500,7 +503,10 @@ Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
   - **a checkpoint truncates**: the buffer is written before the truncation, so nothing appended is
     discarded unwritten and a drain failure stops the checkpoint before it truncates anything; the
     checkpoint record itself is then drained with the checkpoint's flush.
-  - **`Flush` and disposal.** A clean close drains; an offline one writes nothing.
+  - **`Flush` and disposal.** A clean close drains; an offline one writes nothing. Disposal marks
+    the journal disposed under the append lock, and every append, flush, read and checkpoint
+    checks that flag again under the same lock, so a call that raced the close cannot buffer a
+    record after the final drain and return an LSN that is never written (#1252 review).
 - **`LastLsn` consumers** read an assignment counter, not a file position, and none of them reads
   the file on its strength: the header write's LSN floor is `LastLsn`, and the header write drains
   and flushes through it before it writes the slot; `IsCheckpointDue` and the close's "nothing
@@ -853,8 +859,9 @@ failed write before and after the slot write, and a failed data flush before and
 **The LSN floor (#1242).** Every header generation persists the journal's last LSN, and open
 raises the journal to `max(last record, floor)` before anything appends. A checkpoint
 truncates the journal before it appends its own record, and when that record is lost — a
-failed append (the failed frame is cut back off, "Failed appends" above) or a crash between
-the truncation and the record's flush — the journal alone would restart LSNs at 1 while the
+failed write of it, which takes the storage offline and leaves the torn frame to the reopen's
+scan ("Failed appends" above), or a crash between the truncation and the record's flush — the
+journal alone would restart LSNs at 1 while the
 data pages keep theirs. The next transaction's after-image of a page could then carry the LSN
 the stale page already holds, recovery's exact-LSN skip would take it for applied, and a
 committed update would be lost; `StorageFormatTests` reproduces exactly that loss with the
@@ -923,7 +930,8 @@ PostgreSQL uses:
 
 - **Size.** `Storage.CheckpointJournalSize` (zero, the storage-level default, disables it)
   is compared with `JournalLength`, the bytes the journal holds since its last truncation
-  (counted as frames are appended, and from the verified frames when a journal is opened). The
+  (counted as frames are appended, records still in the append buffer included since #1252,
+  and from the verified frames when a journal is opened). The
   first append that reaches the size invokes `OnCheckpointNeeded`, outside every storage lock
   and once per checkpoint cycle; an engine sets the signal its checkpoint worker waits on. This
   is PostgreSQL's `XLogWrite` requesting a checkpoint once the WAL written since the last one

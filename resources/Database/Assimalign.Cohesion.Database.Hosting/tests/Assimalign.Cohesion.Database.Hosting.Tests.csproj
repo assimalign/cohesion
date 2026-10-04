@@ -27,6 +27,6 @@
 		<!-- The SQL engine's fault-injecting storage strategy: health must report a database a
 		     failed journal fsync took offline (#1243). -->
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Sql\tests\TestObjects\FaultInjectingJournalSqlStorageStrategy.cs" Link="TestObjects\FaultInjectingJournalSqlStorageStrategy.cs" />
-		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalBufferHooks.cs" Link="TestObjects\JournalBufferHooks.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalFrames.cs" Link="TestObjects\JournalFrames.cs" />
 	</ItemGroup>
 </Project>

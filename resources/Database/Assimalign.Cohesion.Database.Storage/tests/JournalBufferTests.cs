@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.FileSystem;
 
@@ -321,6 +322,123 @@ public sealed class JournalBufferTests
         // Assert
         stolen.ShouldBeGreaterThan(0);
         violations.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The engines' fault-injecting media fail the write that carries a given record by reading
+    /// the frames off the wire (<see cref="JournalFrames"/>), so every record type a drain carries
+    /// must read back from the bytes of that one write, and a write that does not start with a
+    /// whole frame carries none.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal buffer: the records a drain carries read off the bytes of its one write")]
+    public void Drain_RecordsOfEveryType_ShouldReadOffTheWire()
+    {
+        // Arrange
+        var medium = new RecordingHandle();
+        var writes = new List<byte[]>();
+        medium.OnWrite = (_, bytes) => writes.Add(bytes.ToArray());
+        using var journal = new StreamJournal(new StorageStream(medium));
+        journal.AppendBegin(1);
+        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.BeforePageImage, Image);
+        journal.AppendOperation(1, [1, 2, 3]);
+        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.AfterPageImage, Image);
+        journal.AppendCommit(1);
+        journal.AppendRollback(2);
+
+        // Act
+        journal.Flush();
+        journal.Checkpoint([]);
+
+        // Assert: one write per drain; the first carries every record appended before it, the
+        // checkpoint's own write only its record.
+        writes.Count.ShouldBe(2);
+        JournalRecordType[] appended =
+        [
+            JournalRecordType.BeginTransaction, JournalRecordType.BeforePageImage, JournalRecordType.Operation,
+            JournalRecordType.AfterPageImage, JournalRecordType.CommitTransaction, JournalRecordType.RollbackTransaction,
+        ];
+        appended.ShouldAllBe(type => JournalFrames.Carries(writes[0], type));
+        JournalFrames.Carries(writes[0], JournalRecordType.Checkpoint).ShouldBeFalse();
+        JournalFrames.Carries(writes[1], JournalRecordType.Checkpoint).ShouldBeTrue();
+        appended.ShouldAllBe(type => !JournalFrames.Carries(writes[1], type));
+        JournalFrames.Carries(writes[0].AsSpan(1), JournalRecordType.BeginTransaction).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Appends racing the journal's close (#1252 review): every LSN an append returned is on the
+    /// medium once the close returns, and every other append is refused as disposed. An append
+    /// that passed the disposed check before the close took the append lock used to buffer its
+    /// record after the close's final drain and return an LSN that was never written.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal buffer: an append racing the close is written or refused, never lost")]
+    public void Dispose_RacingAppends_ShouldWriteEveryReturnedLsnOrRefuseTheAppend()
+    {
+        const int rounds = 50;
+        const int appenders = 4;
+        byte[] payload = [1, 2, 3, 4];
+        int lost = 0;
+        int refused = 0;
+        long returned = 0;
+        var unexpected = new List<Exception>();
+
+        for (int round = 0; round < rounds; round++)
+        {
+            // Arrange: appenders hammering the journal before the close starts.
+            var medium = new RecordingHandle();
+            var journal = new StreamJournal(new StorageStream(medium), leaveOpen: true);
+            var lsns = new List<long>[appenders];
+            int started = 0;
+            var threads = new Thread[appenders];
+            for (int i = 0; i < appenders; i++)
+            {
+                var own = lsns[i] = new List<long>();
+                threads[i] = new Thread(() =>
+                {
+                    Interlocked.Increment(ref started);
+                    try
+                    {
+                        while (true)
+                        {
+                            own.Add(journal.AppendOperation(1, payload));
+                        }
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        Interlocked.Increment(ref refused);
+                    }
+                    catch (Exception exception)
+                    {
+                        lock (unexpected)
+                        {
+                            unexpected.Add(exception);
+                        }
+                    }
+                })
+                { IsBackground = true };
+                threads[i].Start();
+            }
+
+            SpinWait.SpinUntil(() => Volatile.Read(ref started) == appenders && journal.LastLsn > 2_000, TimeSpan.FromSeconds(10));
+
+            // Act
+            journal.Dispose();
+            foreach (var thread in threads)
+            {
+                thread.Join(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+            }
+
+            // Assert: the medium holds every LSN an append returned.
+            var written = Reopen(medium).Select(record => record.Lsn).ToHashSet();
+            foreach (var own in lsns)
+            {
+                returned += own.Count;
+                lost += own.Count(lsn => !written.Contains(lsn));
+            }
+        }
+
+        unexpected.ShouldBeEmpty();
+        refused.ShouldBe(rounds * appenders);
+        lost.ShouldBe(0, $"{lost} of {returned} returned LSNs were never written in {rounds} rounds");
     }
 
     private static IReadOnlyList<JournalRecord> Reopen(RecordingHandle medium)

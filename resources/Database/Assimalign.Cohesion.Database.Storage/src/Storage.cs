@@ -232,8 +232,9 @@ public abstract class Storage : IStorage
     }
 
     /// <summary>
-    /// Gets the number of bytes the journal holds since its last truncation: what a recovery
-    /// would read, and what the next checkpoint discards. Zero before the storage is initialized.
+    /// Gets the number of bytes the journal holds since its last truncation, the records still in
+    /// its append buffer included (#1252): what the next checkpoint discards, and what a recovery
+    /// reads once the buffer has drained. Zero before the storage is initialized.
     /// </summary>
     public long JournalLength => _journal?.Length ?? 0;
 
@@ -1364,11 +1365,13 @@ public abstract class Storage : IStorage
         {
             using var handle = _pageManager!.GetPage((PageId)pageId);
 
-            var image = new byte[Page.Size];
-            new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size).CopyTo(image);
-
+            // The after image is encoded straight from the pooled page (#1252 review): the
+            // bracket holds the page's write lock, and the journal copies the span into its
+            // frame under its own lock before this returns, so no copy of the page is needed.
+            // The before image (RecordBeforeImage) keeps its copy: rollback restores from it.
             long lsn = _journal!.AppendPageImage(
-                transaction.Sequence, (PageId)pageId, JournalRecordType.AfterPageImage, image);
+                transaction.Sequence, (PageId)pageId, JournalRecordType.AfterPageImage,
+                new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size));
 
             var page = handle.Page;
             page.Lsn = lsn;

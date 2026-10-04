@@ -47,13 +47,14 @@ public sealed class StorageOfflineException : StorageException
 
     /// <summary>
     /// Gets whether the storage commit record of the operation that threw this exception was
-    /// appended before the durable flush failed. Such a commit ended committed in memory and is
-    /// decided by the reopen's recovery: it survives exactly when the record reached stable
-    /// storage. An engine reports it as unconfirmed, never as refused, because a caller told
-    /// "refused" would not look for effects that can survive (#1243).
+    /// appended before the drain or durable flush that was to confirm it failed (#1243, #1252).
+    /// Such a commit ended committed in memory and is decided by the reopen's recovery: it
+    /// survives exactly when the record reached the journal file (stable storage, for a durable
+    /// flush). An engine reports it as unconfirmed, never as refused, because a caller told
+    /// "refused" would not look for effects that can survive.
     /// </summary>
     /// <remarks>
-    /// Only a storage bracket that commits durably by itself raises it (a catalog write, or a
+    /// Only a storage bracket that awaits its own commit raises it (a catalog write, or a
     /// self-committing statement's bracket); a refusal of a later operation is never flagged.
     /// </remarks>
     public bool CommitRecordWritten { get; private init; }
@@ -115,8 +116,9 @@ public sealed class StorageOfflineException : StorageException
         => new(offline.Message, offline.InnerException!);
 
     /// <summary>
-    /// Creates the exception a storage commit throws when its commit record was appended and its
-    /// durable flush then failed or was refused: <see cref="CommitRecordWritten"/> is set.
+    /// Creates the exception a storage commit throws when its commit record was appended and the
+    /// drain or durable flush that was to confirm it then failed or was refused:
+    /// <see cref="CommitRecordWritten"/> is set.
     /// </summary>
     /// <param name="offline">The exception the flush threw.</param>
     internal static StorageOfflineException CommitUnconfirmed(StorageOfflineException offline)

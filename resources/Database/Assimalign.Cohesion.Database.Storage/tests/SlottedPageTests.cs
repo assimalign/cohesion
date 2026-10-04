@@ -109,14 +109,16 @@ public sealed unsafe class SlottedPageTests
     [Fact(DisplayName = "Cohesion Test [Storage] - SlottedPage: reading a slot that runs past the page fails as corruption instead of reading past it")]
     public void ReadSlot_SlotPastPageEnd_ShouldThrowCorruption()
     {
-        // Arrange
-        NewGuardedPage(out byte* page);
+        // Arrange: the guarded page stays referenced to the end; only the pointer into it is used,
+        // and a collection of the pinned array would leave the pointer reading freed memory.
+        var memory = NewGuardedPage(out byte* page);
         var slotted = new SlottedPage(page);
         slotted.InsertSlot(new byte[200]);
         SetSlot(page, 0, offset: Page.Size - 50, length: 200);
 
         // Act / Assert
         Should.Throw<StorageCorruptionException>(() => slotted.ReadSlot(0, new byte[200]));
+        AssertGuardsIntact(memory);
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - SlottedPage: a slot count no page can hold fails as corruption")]

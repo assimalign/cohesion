@@ -29,6 +29,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
 {
     private static readonly AsyncLocal<Budget?> s_failures = new();
     private static readonly AsyncLocal<Budget?> s_flushFailures = new();
+    private static readonly AsyncLocal<Budget?> s_recordFailures = new();
     private readonly Dictionary<string, Files> _databases = new(StringComparer.Ordinal);
     private readonly object _sync = new();
     private readonly bool _durable;
@@ -46,23 +47,6 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
     internal bool LoseUnconfirmedJournalOnReopen { get; set; }
 
     /// <summary>
-    /// Gets or sets whether every journal this strategy opens keeps an append buffer of one small
-    /// frame (#1252): each append then drains the frame buffered ahead of it, and a page image is
-    /// written directly, so a test can fail the write an append of its own causes. A failed journal
-    /// write takes the storage offline.
-    /// </summary>
-    internal bool SmallJournalBuffer { get; set; }
-
-    // Applies SmallJournalBuffer to a storage this strategy created or opened.
-    private void ConfigureJournal(IStorageJournal journal)
-    {
-        if (SmallJournalBuffer)
-        {
-            JournalBufferHooks.SetMaximumBufferBytes(journal, JournalBufferHooks.SmallestBuffer);
-        }
-    }
-
-    /// <summary>
     /// Fails <paramref name="writes"/> journal writes made on the calling flow, after letting the
     /// next <paramref name="skip"/> writes through, until the returned scope is disposed.
     /// </summary>
@@ -71,8 +55,8 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
     /// <remarks>
     /// Since #1252 an append writes nothing: the journal's append buffer drains at a commit, a
     /// reader, the write-ahead gate, a checkpoint, a full buffer and a close, and each drain is one
-    /// write. A failed one takes the storage offline. With <see cref="SmallJournalBuffer"/> each
-    /// append drains the frame ahead of it, which is how a test fails an append's own write.
+    /// write. A failed one takes the storage offline. To lose a given record, fail the drain that
+    /// carries it with <see cref="FailJournalWritesContaining"/>.
     /// </remarks>
     /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
     internal static FailureScope FailJournalWrites(int writes, int skip = 0)
@@ -81,6 +65,28 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
         var budget = new Budget { Skip = skip, Fail = writes };
         s_failures.Value = budget;
         return new FailureScope(s_failures, previous, budget);
+    }
+
+    /// <summary>
+    /// Fails the next <paramref name="writes"/> journal writes made on the calling flow that carry a
+    /// record of <paramref name="type"/>, until the returned scope is disposed; every other write
+    /// goes through.
+    /// </summary>
+    /// <param name="type">The record type a failing write carries.</param>
+    /// <param name="writes">The number of such writes to fail.</param>
+    /// <remarks>
+    /// Since #1252 a record reaches the journal file with the drain of the append buffer that
+    /// carries it, wherever that drain happens, so a test loses one record by failing that drain.
+    /// The record is read off the frames on the wire (<see cref="JournalFrames"/>); the failed
+    /// write takes the storage offline.
+    /// </remarks>
+    /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
+    internal static FailureScope FailJournalWritesContaining(JournalRecordType type, int writes = 1)
+    {
+        var previous = s_recordFailures.Value;
+        var budget = new Budget { Fail = writes, RecordType = type };
+        s_recordFailures.Value = budget;
+        return new FailureScope(s_recordFailures, previous, budget);
     }
 
     /// <summary>
@@ -120,10 +126,8 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
             _databases[databaseName.ToString()] = files;
         }
 
-        var created = GraphStorage.Create(DataStream(files), JournalStream(files),
+        return GraphStorage.Create(DataStream(files), JournalStream(files),
             new StorageStream(files.Backup), databaseName.ToString(), durability);
-        ConfigureJournal(created.WriteAheadJournal);
-        return created;
     }
 
     /// <summary>
@@ -151,10 +155,8 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
             _databases[databaseName.ToString()] = files;
         }
 
-        var created = GraphStorage.Open(DataStream(files), JournalStream(files),
+        return GraphStorage.Open(DataStream(files), JournalStream(files),
             new StorageStream(files.Backup), checkpointOnOpen: false, durability);
-        ConfigureJournal(created.WriteAheadJournal);
-        return created;
     }
 
     public void DropStorage(DatabaseName databaseName)
@@ -223,6 +225,18 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
         return false;
     }
 
+    // Spends the calling flow's record budget when the write carries a record of its type.
+    private static bool SpendCarrying(ReadOnlySpan<byte> written)
+    {
+        if (s_recordFailures.Value is not { RecordType: { } type, Fail: > 0 } budget || !JournalFrames.Carries(written, type))
+        {
+            return false;
+        }
+
+        budget.Fail--;
+        return true;
+    }
+
     /// <summary>The armed failure budget of one calling flow.</summary>
     internal sealed class FailureScope : IDisposable
     {
@@ -255,6 +269,9 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
 
         /// <summary>Gets or sets the number still to fail.</summary>
         public int Fail { get; set; }
+
+        /// <summary>Gets or sets the record type a failing write carries, or null for any write.</summary>
+        public JournalRecordType? RecordType { get; set; }
     }
 
     /// <summary>The data, journal and backup streams of one database.</summary>
@@ -269,7 +286,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            if (Spend(s_failures))
+            if (Spend(s_failures) || SpendCarrying(buffer.AsSpan(offset, count)))
             {
                 throw new IOException("Injected journal write failure.");
             }

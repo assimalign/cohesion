@@ -153,10 +153,14 @@ failed part way. PostgreSQL treats any failed WAL write as fatal (`ereport(PANIC
 because bytes a failed write left behind would end recovery's read of the log before
 every later record. This journal gives the same guarantee without stopping the
 process. Since #1252 an append writes nothing: records wait in the journal's append buffer
-until it drains, and the abort record's append can fail only when it has to drain a full
-buffer and that write fails, which takes the storage offline, so nothing is written behind
-the bytes the failed write left (`Database.Storage` DESIGN.md, "The append buffer"). The
-rollback still ends; the reopen's recovery reads the writer as aborted. Ignoring a failed
+until it drains. The abort record's append itself fails only when the journal is already
+offline, or when it has to drain a full buffer and that write fails; otherwise the record is
+lost, if at all, with the later drain that carries it (the next commit's, a checkpoint's),
+after the rollback returned. Either way the failed write takes the storage offline, so nothing
+is written behind the bytes it left (`Database.Storage` DESIGN.md, "The append buffer"). The
+rollback still ends; the reopen's recovery reads the writer as aborted. The engines' rollback
+tests lose the record that second way, failing the drain that carries it
+(`FailJournalWritesContaining`). Ignoring a failed
 abort record therefore never hides a later commit record from recovery. (Until #1252 a
 failed append cut its partial frame back off and the storage stayed online.)
 
@@ -220,9 +224,12 @@ holds while the rollback runs (the shared test object `PageWriteLockHolder`); un
 failed undo journal write, which now takes the storage offline instead, so a journal fault is no
 longer one a retry can outlive. A failure that persists is retried at 0.1, 0.2,
 0.4 … seconds, then once per maintenance interval, so it cannot spin. The purge workers record a
-retry that fails again as a worker fault and keep running; before, the exception escaped the
-worker's pump loop and stopped the worker for good, leaving every deferred writer stuck until
-the database closed. The schedule reads a `TimeProvider` (the coordinator's internal
+retry that fails again with anything other than a busy page or bracket as a worker fault and
+keep running; a busy page or bracket (`StorageTransactionException`, which the page write lock
+above raises) they retry on the next pass without reporting it, so an undo that a held page
+keeps failing is retried on the schedule but never surfaces as a fault. Before, the exception
+escaped the worker's pump loop and stopped the worker for good, leaving every deferred writer
+stuck until the database closed. The schedule reads a `TimeProvider` (the coordinator's internal
 constructor), so `DeferredUndoBackoffTests` and the coordinator's tests drive it without
 waiting.
 

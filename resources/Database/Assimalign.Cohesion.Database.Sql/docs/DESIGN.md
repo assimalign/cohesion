@@ -1307,8 +1307,9 @@ transaction before releasing the session. The C# transaction API and SQL control
 commands operate on the same scope. A rollback observes the caller's token only
 before it starts; a started rollback always ends the transaction, even when the
 journal rejects its abort record (#1226, `Database.Transactions` DESIGN.md,
-"Ending a transaction"); since #1252 that rejection is a failed write of the journal's
-append buffer, which also takes the database offline (`Database.Storage` DESIGN.md,
+"Ending a transaction"); since #1252 the record is lost with the failed drain of the
+journal's append buffer that carries it, at the rollback or at a later drain such as the
+next commit's, which also takes the database offline (`Database.Storage` DESIGN.md,
 "The append buffer").
 
 The session owns `Stack<SqlTransactionScope>`, with zero entries outside a

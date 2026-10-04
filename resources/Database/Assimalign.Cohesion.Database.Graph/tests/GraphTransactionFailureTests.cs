@@ -418,18 +418,20 @@ public sealed class GraphTransactionFailureTests
     }
 
     /// <summary>
-    /// A rollback whose abort record cannot be written still ends the transaction (#1226). Since
-    /// #1252 the record's append writes only when it drains the journal's append buffer (one small
-    /// frame here), and a failed journal write takes the database offline (#1243's rule): the
-    /// session is free, the next statement is refused as offline, and the reopen keeps what
-    /// committed and nothing of the transaction.
+    /// A rollback whose abort record cannot be written still ends the transaction and releases the
+    /// database writer lock (#1226). Since #1252 the rollback appends the record to the journal's
+    /// append buffer, and it reaches the file with the next drain: here the commit of another
+    /// session's statement, which proceeds because the writer lock is free. That drain fails,
+    /// which takes the database offline (#1243's rule): the statement is reported unconfirmed, the
+    /// next one is refused as offline, and the reopen keeps what committed before and nothing of
+    /// either transaction.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a rollback whose abort record cannot be written still ends the transaction, and the database goes offline")]
     public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndGoOffline()
     {
         // Arrange
-        var strategy = new FaultInjectingJournalStorageStrategy { SmallJournalBuffer = true };
-        var engine = GraphDatabaseEngine.Create(new() { StorageStrategy = strategy });
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
         var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var other = await database.CreateSessionAsync();
@@ -440,49 +442,62 @@ public sealed class GraphTransactionFailureTests
         // the abort record is the rollback's only journal append.
         await session.ExecuteAsync("MATCH (n:Keep) WHERE n.name = 'missing' DELETE n");
 
-        // Act
+        // Act: the rollback buffers the abort record; the other session's statement needs the
+        // writer lock, and its commit drains the record, which fails.
+        int unspentAfterTheRollback;
         int unspent;
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        DatabaseTransactionCommitUnconfirmedException lost;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWritesContaining(JournalRecordType.RollbackTransaction))
         {
             await transaction.RollbackAsync();
+            unspentAfterTheRollback = failures.Remaining;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            lost = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(
+                async () => await other.ExecuteAsync("INSERT (:Other)", cancellationToken: timeout.Token));
             unspent = failures.Remaining;
         }
 
-        await Should.ThrowAsync<DatabaseOfflineException>(async () => await other.ExecuteAsync("INSERT (:Other)"));
+        var refused = await Should.ThrowAsync<DatabaseOfflineException>(async () => await other.ExecuteAsync("INSERT (:After)"));
         await other.DisposeAsync();
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = GraphDatabaseEngine.Create(new() { StorageStrategy = strategy });
+        await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
         var recovered = (IGraphDatabase)await reopened.OpenDatabaseAsync("graph");
         await using var observer = await recovered.CreateSessionAsync();
 
-        // Assert: the record's write failed, and the rollback ended the transaction anyway.
+        // Assert: the rollback wrote nothing and ended the transaction; the drain that carried its
+        // record failed.
+        unspentAfterTheRollback.ShouldBe(1);
         unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
+        StorageOfflineException.Find(lost).ShouldNotBeNull();
+        refused.InnerException.ShouldNotBeNull();
         (await Rows(observer, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Keep"]);
     }
 
     /// <summary>
     /// After a rollback whose abort record was lost, the transaction is rolled back like any other
-    /// and COMMIT commits nothing. The lost record's write took the database offline (#1252), so
-    /// the COMMIT and a repeated rollback are refused as offline before they start.
+    /// and COMMIT commits nothing. The record is lost with the drain that carries it (#1252), here
+    /// the commit of the session's next statement, which takes the database offline: the COMMIT
+    /// and a repeated rollback are then refused as offline before they start.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: COMMIT after a rollback whose abort record was lost is refused")]
     public async Task CommitAsync_AfterRollbackWithLostAbortRecord_ShouldBeRefused()
     {
         // Arrange
-        var strategy = new FaultInjectingJournalStorageStrategy { SmallJournalBuffer = true };
-        var engine = GraphDatabaseEngine.Create(new() { StorageStrategy = strategy });
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
         var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("MATCH (n:Keep) WHERE n.name = 'missing' DELETE n");
         int unspent;
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWritesContaining(JournalRecordType.RollbackTransaction))
         {
             await transaction.RollbackAsync();
+            await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await session.ExecuteAsync("INSERT (:Next)"));
             unspent = failures.Remaining;
         }
 
@@ -491,7 +506,7 @@ public sealed class GraphTransactionFailureTests
         await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = GraphDatabaseEngine.Create(new() { StorageStrategy = strategy });
+        await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
         var recovered = (IGraphDatabase)await reopened.OpenDatabaseAsync("graph");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -503,40 +518,44 @@ public sealed class GraphTransactionFailureTests
     }
 
     /// <summary>
-    /// A commit whose record cannot be appended is aborted by the kernel and ends Faulted. Since
-    /// #1252 the append fails only when it drains the journal's append buffer (one small frame
-    /// here) and that write fails, which takes the database offline: the commit crosses the
-    /// boundary as the offline refusal, not as committed or unconfirmed, a later rollback is
-    /// refused as offline too, and the reopen holds nothing of the transaction.
+    /// A commit whose record cannot be written is never acknowledged (#1252): the commit drains the
+    /// journal's append buffer through its record before it returns, in every durability mode, and
+    /// when that drain fails the database goes offline (#1243's rule) and the commit crosses the
+    /// boundary as committed-unconfirmed, its outcome left to the reopen's recovery. The record
+    /// never reached the file here, so the reopen holds nothing of the transaction, and a later
+    /// rollback is refused as offline.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a commit whose record cannot be appended aborts, and the database goes offline")]
-    public async Task CommitAsync_CommitRecordCannotBeAppended_ShouldAbortAndGoOffline()
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a commit whose record cannot be written is unconfirmed, and the database goes offline")]
+    public async Task CommitAsync_CommitRecordCannotBeWritten_ShouldBeUnconfirmedAndGoOffline()
     {
         // Arrange
-        var strategy = new FaultInjectingJournalStorageStrategy { SmallJournalBuffer = true };
-        var engine = GraphDatabaseEngine.Create(new() { StorageStrategy = strategy });
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
         var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:Pending)");
 
-        // Act: the commit record's append drains the record ahead of it, and that write fails.
-        DatabaseOfflineException error;
-        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        // Act: the commit's drain carries its commit record, and that write fails.
+        DatabaseTransactionCommitUnconfirmedException error;
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWritesContaining(JournalRecordType.CommitTransaction))
         {
-            error = await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.CommitAsync());
+            error = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await transaction.CommitAsync());
+            unspent = failures.Remaining;
         }
         var stateAfterCommit = transaction.State;
         await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
         await session.DisposeAsync();
         engine.Dispose();
-        await using var reopened = GraphDatabaseEngine.Create(new() { StorageStrategy = strategy });
+        await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
         var recovered = (IGraphDatabase)await reopened.OpenDatabaseAsync("graph");
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
-        error.ShouldNotBeOfType<DatabaseTransactionCommitUnconfirmedException>();
-        stateAfterCommit.ShouldBe(TransactionState.Faulted);
+        unspent.ShouldBe(0);
+        StorageOfflineException.Find(error).ShouldNotBeNull();
+        stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
         (await Rows(observer, "SHOW LABELS")).ShouldBeEmpty();
     }

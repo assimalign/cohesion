@@ -13,6 +13,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -51,50 +52,70 @@ public sealed class SqlTransactionRollbackTests
 
     /// <summary>
     /// A started rollback ends the transaction and releases its locks even when the journal
-    /// rejects its abort record (#1226). Since #1252 the record's append writes only when it drains
-    /// the journal's append buffer (one small frame here), and a failed journal write takes the
-    /// database offline (#1243's rule): the next statement is refused as offline, and the reopen
-    /// keeps what committed and nothing of the transaction.
+    /// rejects its abort record (#1226). Since #1252 the rollback appends the record to the
+    /// journal's append buffer, and it reaches the file with the next drain: here the commit of
+    /// another session's insert. That drain fails, which takes the database offline (#1243's
+    /// rule): the insert is reported unconfirmed, the next statement is refused as offline, and the
+    /// reopen keeps what committed before and nothing of either transaction.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Rollback: a journal that rejects the abort record still ends the transaction and releases its locks, and the database goes offline")]
     public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndGoOffline()
     {
         // Arrange
-        var strategy = new FaultInjectingJournalSqlStorageStrategy { SmallJournalBuffer = true };
-        var options = new SqlDatabaseEngineOptions { EngineName = "rollback-journal", StorageStrategy = strategy };
-        var engine = SqlDatabaseEngine.Create(options);
+        var strategy = new FaultInjectingJournalSqlStorageStrategy();
+        var engine = SqlDatabaseEngine.Create(QuietOptions("rollback-journal", strategy));
         var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("journal-db");
         var session = await database.CreateSessionAsync();
         var other = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
         await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (1, 10)");
+        database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
         var transaction = await session.BeginTransactionAsync();
 
         // An update that matches no row takes the table's intent-exclusive lock and writes no
         // version, so the abort record is the rollback's only journal append.
         await session.ExecuteAsync("UPDATE t SET val = 11 WHERE id = 999");
 
-        // Act
+        // Act: the rollback buffers the abort record; the other session's insert commits, and its
+        // drain carries the record, which fails.
+        int unspentAfterTheRollback;
         int unspent;
-        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalWrites(1))
+        bool tableLockFree;
+        bool openContextsAfterTheRollback;
+        DatabaseTransactionCommitUnconfirmedException lost;
+        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalWritesContaining(JournalRecordType.RollbackTransaction))
         {
             await transaction.RollbackAsync();
+            unspentAfterTheRollback = failures.Remaining;
+            openContextsAfterTheRollback = database.Coordinator.GetOpenContexts().Count > 0;
+
+            // The table's exclusive lock, which the writer's intent-exclusive lock would block, is
+            // granted at once to an owner no transaction uses, and given back.
+            var probe = new TransactionSequence(ulong.MaxValue);
+            tableLockFree = database.Coordinator.LockManager.TryAcquire(probe, LockResource.Object(table.ObjectId), LockMode.Exclusive);
+            database.Coordinator.LockManager.ReleaseAll(probe);
+
+            lost = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
+                await other.ExecuteAsync("INSERT INTO t (id, val) VALUES (2, 20)"));
             unspent = failures.Remaining;
         }
 
-        bool openContextsAfterTheRollback = database.Coordinator.GetOpenContexts().Count > 0;
-        await Should.ThrowAsync<DatabaseOfflineException>(async () => await other.ExecuteAsync("DROP TABLE t"));
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await other.ExecuteAsync("INSERT INTO t (id, val) VALUES (3, 30)"));
         await other.DisposeAsync();
         await session.DisposeAsync();
         await engine.DisposeAsync();
-        await using var reopened = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "rollback-journal", StorageStrategy = strategy });
+        await using var reopened = SqlDatabaseEngine.Create(QuietOptions("rollback-journal", strategy));
         var recovered = await reopened.OpenDatabaseAsync("journal-db");
         await using var observer = await recovered.CreateSessionAsync();
 
-        // Assert: the record's write failed, and the rollback ended the transaction anyway.
+        // Assert: the rollback wrote nothing, ended the transaction and released its locks; the
+        // drain that carried its record failed.
+        unspentAfterTheRollback.ShouldBe(1);
         unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         openContextsAfterTheRollback.ShouldBeFalse();
+        tableLockFree.ShouldBeTrue();
+        StorageOfflineException.Find(lost).ShouldNotBeNull();
         (await Rows(observer, "SELECT id, val FROM t")).Select(row => (Convert.ToInt64(row[0]), Convert.ToInt64(row[1])))
             .ShouldBe([(1L, 10L)]);
     }

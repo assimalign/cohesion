@@ -24,16 +24,6 @@ public class TransactionCoordinatorRollbackTests
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
     private static readonly LockResource Row = LockResource.Entry(7, 7);
 
-    /// <summary>The journal writes of the undo's storage bracket a test fails.</summary>
-    public enum UndoJournalWrite
-    {
-        /// <summary>The bracket's begin record.</summary>
-        BracketBegin,
-
-        /// <summary>The before image of the first page the undo changes.</summary>
-        PageImage,
-    }
-
     /// <summary>The awaits inside the record-space undo a caller's token used to reach.</summary>
     public enum UndoAwait
     {
@@ -276,44 +266,44 @@ public class TransactionCoordinatorRollbackTests
     }
 
     /// <summary>
-    /// The undo's storage bracket cannot write its begin record, or the before image of the page
-    /// it undoes. Since #1252 a journal write is a drain of the journal's append buffer, and a
-    /// failed one takes the storage offline (#1243's rule): the rollback still ends the
-    /// transaction with its undo deferred, nothing more is written, a retry is refused, and the
-    /// reopen's recovery scrubs the writer, whose journal names it without a commit record. Until
-    /// #1252 a failed append was recoverable and the retried undo completed in place. The journal's
-    /// buffer is shrunk to one small frame here, so the undo's appends each reach the medium.
+    /// The undo runs on a storage that another transaction's failed drain took offline (#1252,
+    /// #1243's rule), so its storage bracket cannot begin: the rollback still ends the transaction
+    /// with its undo deferred, nothing more is written, a retry is refused, and the reopen's
+    /// recovery scrubs the writer, whose journal names it without a commit record. Until #1252
+    /// every append was a write of its own, a failed one was recoverable, and the retried undo
+    /// completed in place.
     /// </summary>
-    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator rollback: a journal that rejects the undo's own writes takes the storage offline, and the reopen scrubs the writer")]
-    [InlineData(UndoJournalWrite.BracketBegin)]
-    [InlineData(UndoJournalWrite.PageImage)]
-    public async Task RollbackAsync_UndoBracketJournalWriteFails_ShouldGoOfflineAndLeaveTheWriterToRecovery(UndoJournalWrite failing)
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator rollback: an undo on a storage a failed drain took offline is deferred, and the reopen scrubs the writer")]
+    public async Task RollbackAsync_StorageWentOfflineBeforeTheUndo_ShouldDeferTheUndoAndLeaveTheWriterToRecovery()
     {
-        // Arrange
+        // Arrange: a writer the journal file names, and another transaction whose commit's drain
+        // fails, which takes the storage offline.
         var storage = RollbackStorage.Create();
         var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
         var writer = await BeginWriterAsync(coordinator, storage);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         storage.Log.Flush();
-        JournalBufferHooks.SetMaximumBufferBytes(storage.Log, JournalBufferHooks.SmallestBuffer);
-
-        // Act: the undo's storage bracket cannot write its begin record (its first write), or the
-        // before image of the page it undoes (its second).
-        storage.JournalStream.SkipWrites = failing == UndoJournalWrite.PageImage ? 1 : 0;
+        var other = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await InsertAsync(coordinator, storage, other);
         storage.JournalStream.FailWrites = 1;
+        await Should.ThrowAsync<TransactionCommitUnconfirmedException>(async () => await coordinator.CommitAsync(other));
+
+        // Act
         await coordinator.RollbackAsync(writer);
         var atTheFailure = storage.CaptureClosedImages();
 
         // Assert: the transaction ended, its version and its lock wait for an undo the offline
-        // storage refuses, and nothing more reaches the files.
+        // storage refuses, and nothing more reaches the files. The other transaction ended
+        // committed in memory, its outcome left to recovery.
         storage.JournalStream.FailWrites.ShouldBe(0);
         writer.State.ShouldBe(TransactionState.RolledBack);
         coordinator.IsStorageOffline.ShouldBeTrue();
-        RecordCount(storage).ShouldBe(1);
+        coordinator.VersionStore.PendingAbortedPurges.ShouldBe([writer.Sequence.Value]);
+        RecordCount(storage).ShouldBe(2);
         coordinator.LockManager.TryAcquire(next.Sequence, Row, LockMode.Exclusive).ShouldBeFalse();
         Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint());
         Should.Throw<StorageOfflineException>(() => coordinator.RunVersionPurgePass(CancellationToken.None));
-        RecordCount(storage).ShouldBe(1);
+        RecordCount(storage).ShouldBe(2);
 
         // Act: close, as an engine does, and reopen.
         await coordinator.DisposeAsync();
@@ -324,7 +314,64 @@ public class TransactionCoordinatorRollbackTests
         var plan = recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
 
-        // Assert: the close wrote nothing, and recovery classified the writer aborted and scrubbed it.
+        // Assert: the close wrote nothing; recovery classified the writer aborted and scrubbed it,
+        // and the other transaction's commit never reached the file.
+        images.Journal.ShouldBe(atTheFailure.Journal);
+        images.Data.ShouldBe(atTheFailure.Data);
+        plan.Aborted.ShouldContain(writer.Sequence);
+        plan.Committed.ShouldNotContain(other.Sequence);
+        RecordCount(reopened).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The undo completes, and its journal records are lost: since #1252 the undo's storage
+    /// brackets commit without a drain, so their records wait in the append buffer, and the drain
+    /// that carries them (a checkpoint's here) fails, which takes the storage offline (#1243's
+    /// rule). The rollback has already released the writer, and the reopen's recovery, which reads
+    /// no record of the undo, scrubs the writer from the records the journal file does hold.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator rollback: an undo whose records are lost at the next drain takes the storage offline, and the reopen scrubs the writer")]
+    public async Task RollbackAsync_UndoRecordsLostAtTheNextDrain_ShouldGoOfflineAndLeaveTheWriterToRecovery()
+    {
+        // Arrange: a writer the journal file names, and a transaction waiting for its row.
+        var storage = RollbackStorage.Create();
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var journal = (StorageJournal)storage.Log;
+        var writer = await BeginWriterAsync(coordinator, storage);
+        var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        storage.Log.Flush();
+        long written = journal.WrittenLsn;
+
+        // Act: the rollback undoes the writer in memory and buffers the undo's records; the
+        // checkpoint's drain carries them and fails.
+        await coordinator.RollbackAsync(writer);
+        bool undoBuffered = journal.LastLsn > written && journal.WrittenLsn == written;
+        storage.JournalStream.FailWrites = 1;
+        var offline = Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint());
+        var atTheFailure = storage.CaptureClosedImages();
+
+        // Assert: the rollback released the writer, and the failed drain took the storage offline.
+        undoBuffered.ShouldBeTrue();
+        storage.JournalStream.FailWrites.ShouldBe(0);
+        offline.InnerException.ShouldBeOfType<IOException>();
+        writer.State.ShouldBe(TransactionState.RolledBack);
+        coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        RecordCount(storage).ShouldBe(0);
+        await waiting.WaitAsync(Timeout);
+        coordinator.IsStorageOffline.ShouldBeTrue();
+
+        // Act: close, as an engine does, and reopen.
+        await coordinator.DisposeAsync();
+        storage.Dispose();
+        var images = storage.CaptureClosedImages();
+        using var reopened = RollbackStorage.Open(images.Data, images.Journal);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        var plan = recovered.AnalyzeAndScrub();
+        recovered.CompleteRecovery();
+
+        // Assert: the close wrote nothing, and recovery, reading the writer's records without a
+        // commit, abort or undo record, classified it aborted and scrubbed it.
         images.Journal.ShouldBe(atTheFailure.Journal);
         images.Data.ShouldBe(atTheFailure.Data);
         plan.Aborted.ShouldContain(writer.Sequence);
@@ -707,6 +754,51 @@ public class TransactionCoordinatorRollbackTests
     }
 
     /// <summary>
+    /// A commit the coordinator acknowledged survives a process crash in every durability mode,
+    /// <see cref="StorageCommitDurability.None"/> included (#1252): the logical commit drains the
+    /// journal's append buffer through its record before <c>CommitAsync</c> returns
+    /// (<c>Storage.EnsureCommitDurable</c>), so the files as the operating system holds them at
+    /// that moment, with nothing of the process, carry the commit record and every record of the
+    /// statement brackets ahead of it.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator commit: an acknowledged commit survives a process crash in every durability mode")]
+    [InlineData(StorageCommitDurability.None)]
+    [InlineData(StorageCommitDurability.Synchronous)]
+    [InlineData(StorageCommitDurability.Grouped)]
+    public async Task CommitAsync_ProcessCrashAfterAcknowledgment_ShouldKeepTheCommit(StorageCommitDurability durability)
+    {
+        // Arrange: a writer whose statement bracket committed without awaiting durability, so its
+        // records wait in the append buffer for the transaction's commit.
+        using var storage = RollbackStorage.Create();
+        storage.CommitDurability = durability;
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await InsertAsync(coordinator, storage, writer);
+        var location = storage.PackLocation(storage.LastInserted.PageId, storage.LastInserted.SlotIndex);
+        var beforeTheCommit = storage.CaptureClosedImages();
+
+        // Act: the commit is acknowledged, and the process stops at once: the files keep what the
+        // operating system was handed, without a flush or a close.
+        await coordinator.CommitAsync(writer);
+        var images = storage.CaptureClosedImages();
+        using var reopened = RollbackStorage.Open(images.Data, images.Journal);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        var plan = recovered.AnalyzeAndScrub();
+        recovered.CompleteRecovery();
+        var reader = await recovered.BeginAsync(IsolationLevel.Snapshot);
+
+        // Assert: the statement's records were still buffered before the commit; after it the
+        // reopen's recovery reads the writer as committed, and a new snapshot sees its version.
+        new StreamJournal(new MemoryStream(beforeTheCommit.Journal)).ReadAll()
+            .ShouldNotContain(record => record.TransactionSequence == (long)writer.Sequence.Value);
+        plan.Committed.ShouldContain(writer.Sequence);
+        plan.Aborted.ShouldNotContain(writer.Sequence);
+        RecordCount(reopened).ShouldBe(1);
+        (await recovered.VersionStore.GetVisibleVersionAsync(0, location, reader.Snapshot)).ShouldNotBeNull();
+        await recovered.CommitAsync(reader);
+    }
+
+    /// <summary>
     /// A transient undo failure is retried on its own backoff (#1226 owner decision of
     /// 2026-10-04): the first retry is due 100 ms after the deferral, not a maintenance interval
     /// later, and the retry that succeeds releases the writer's locks to the transaction waiting
@@ -890,10 +982,10 @@ public class TransactionCoordinatorRollbackTests
     /// <summary>
     /// A statement bracket ends even when its advisory rollback record cannot be appended, and the
     /// statement's own failure is the error its caller sees: the engines name it as the cause of an
-    /// aborted transaction, so a journal error must not replace it. Since #1252 the rollback
-    /// record's append fails only when it has to drain the journal's append buffer and that write
-    /// fails, which takes the storage offline: another record is buffered ahead of it here, and the
-    /// buffer holds one small frame.
+    /// aborted transaction, so a journal error must not replace it. Since #1252 an append writes
+    /// nothing, so the rollback record's append fails only when the journal is offline or a drain
+    /// of a full buffer fails: here a drain made while the statement runs fails, which takes the
+    /// storage offline (#1243's rule), and the bracket's rollback record is refused.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator apply: a failed statement keeps its own error when the bracket's rollback record is lost")]
     public async Task ApplyStatementAsync_StatementFailsAndRollbackRecordIsLost_ShouldSurfaceTheStatementsError()
@@ -902,25 +994,28 @@ public class TransactionCoordinatorRollbackTests
         using var storage = RollbackStorage.Create();
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        JournalBufferHooks.SetMaximumBufferBytes(storage.Log, JournalBufferHooks.SmallestBuffer);
+        long lastBeforeTheRollback = 0;
 
-        // Act: the statement writes a record, then fails while the journal rejects the next write,
-        // which drains another session's record ahead of its bracket's rollback record.
+        // Act: the statement writes a record, a drain of the records it buffered fails, and the
+        // statement fails.
         Func<IStorageTransaction, int> failingStatement = bracket =>
         {
             byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];
             RecordVersionStamp.WriteWriter(record, writer.Sequence);
             storage.Insert(bracket, record);
-            storage.Log.AppendOperation(0, [1]);
             storage.JournalStream.FailWrites = 1;
+            Should.Throw<StorageOfflineException>(() => storage.Log.Flush());
+            lastBeforeTheRollback = storage.Log.LastLsn;
             throw new InvalidOperationException("The statement's own failure.");
         };
         var error = await Should.ThrowAsync<InvalidOperationException>(async () => await coordinator.ApplyStatementAsync(writer, failingStatement));
 
-        // Assert: the rollback record's drain was the write that failed, the bracket still ended,
-        // and the statement wrote nothing; the failed write took the storage offline.
+        // Assert: the bracket's rollback record was refused (no LSN was assigned after the failed
+        // drain), the bracket still ended, and the statement wrote nothing; the failed drain took
+        // the storage offline.
         error.Message.ShouldBe("The statement's own failure.");
         storage.JournalStream.FailWrites.ShouldBe(0);
+        storage.Log.LastLsn.ShouldBe(lastBeforeTheRollback);
         coordinator.PairedTransactionCount.ShouldBe(0);
         RecordCount(storage).ShouldBe(0);
         coordinator.IsStorageOffline.ShouldBeTrue();

@@ -76,9 +76,10 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// (PostgreSQL's "fsyncgate"). The failing call throws <see cref="StorageOfflineException"/>,
 /// and every later append, flush and checkpoint of this instance throws it too, so nothing is
 /// written after the failure; only reads (of what the medium holds) and the confirmation of an
-/// LSN that was already durable, or already written, still succeed. Records still in the append
-/// buffer are never written. Reopening the storage runs recovery, which decides what the
-/// journal holds. PostgreSQL raises <c>PANIC</c> on a failed WAL fsync for the same reason
+/// LSN that was already durable, or already written and flushed to the operating system, still
+/// succeed. Records still in the append buffer are never written. Reopening the storage runs
+/// recovery, which decides what the journal holds. PostgreSQL raises <c>PANIC</c> on a failed WAL
+/// fsync for the same reason
 /// (<c>issue_xlog_fsync</c>, <c>src/backend/access/transam/xlog.c:9877-9937</c>).
 /// </para>
 /// </remarks>
@@ -162,9 +163,10 @@ public abstract class StorageJournal : IStorageJournal
     }
 
     /// <summary>
-    /// Gets the LSN up to which every record has left the append buffer: the medium holds it
-    /// (the operating system has it, durably or not), or a checkpoint truncated it. Records above
-    /// it, up to <see cref="LastLsn"/>, are lost if the process stops before the next drain.
+    /// Gets the LSN up to which every record has left the append buffer: the medium was handed it
+    /// (a medium that buffers in user space, such as a <see cref="System.IO.FileStream"/>, may hold
+    /// it until its next flush), or a checkpoint truncated it. Records above it, up to
+    /// <see cref="LastLsn"/>, are lost if the process stops before the next drain.
     /// </summary>
     public long WrittenLsn
     {
@@ -386,6 +388,7 @@ public abstract class StorageJournal : IStorageJournal
         {
             lock (_syncRoot)
             {
+                ThrowIfDisposed();
                 ThrowIfOfflineLocked();
                 if (_buffered > 0)
                 {
@@ -425,6 +428,7 @@ public abstract class StorageJournal : IStorageJournal
 
         lock (_syncRoot)
         {
+            ThrowIfDisposed();
             if (floor > _lastLsn)
             {
                 // Called before anything is appended, so the buffer is empty and the medium holds
@@ -455,6 +459,7 @@ public abstract class StorageJournal : IStorageJournal
         {
             lock (_syncRoot)
             {
+                ThrowIfDisposed();
                 if (_durableLsn >= lsn)
                 {
                     return;
@@ -480,9 +485,12 @@ public abstract class StorageJournal : IStorageJournal
     /// </summary>
     /// <param name="lsn">The LSN that must have left the buffer.</param>
     /// <remarks>
-    /// An LSN that was already written is confirmed even after the journal went offline. Any
-    /// other request on an offline journal throws <see cref="StorageOfflineException"/>, and a
-    /// drain that fails takes the journal offline.
+    /// An LSN that was already written and flushed to the operating system (no write-out since
+    /// the last flush of the medium) is confirmed even after the journal went offline; one written
+    /// by a write-out whose flush has not run yet (a full buffer, a reader, a truncation) is
+    /// refused, because a medium that buffers in user space may still hold it. Any other request
+    /// on an offline journal throws <see cref="StorageOfflineException"/>, and a drain that fails
+    /// takes the journal offline.
     /// </remarks>
     internal void EnsureWritten(long lsn)
     {
@@ -493,6 +501,7 @@ public abstract class StorageJournal : IStorageJournal
         {
             lock (_syncRoot)
             {
+                ThrowIfDisposed();
                 if (_writtenLsn >= lsn && !_unflushed)
                 {
                     return;
@@ -523,6 +532,7 @@ public abstract class StorageJournal : IStorageJournal
         {
             lock (_syncRoot)
             {
+                ThrowIfDisposed();
                 ThrowIfOfflineLocked();
                 DrainLocked(forceDurable);
 
@@ -554,6 +564,7 @@ public abstract class StorageJournal : IStorageJournal
         {
             lock (_syncRoot)
             {
+                ThrowIfDisposed();
                 DrainForReadLocked();
                 return ReadAllCore();
             }
@@ -582,6 +593,7 @@ public abstract class StorageJournal : IStorageJournal
         {
             lock (_syncRoot)
             {
+                ThrowIfDisposed();
                 DrainForReadLocked();
                 foreach (var record in ReadRecordsCore())
                 {
@@ -600,6 +612,9 @@ public abstract class StorageJournal : IStorageJournal
     /// The append buffer drains before the medium is released, as a clean close must not lose
     /// appended records. An offline journal writes nothing. A drain that fails takes the journal
     /// offline; the medium is released, and the <see cref="StorageOfflineException"/> is thrown.
+    /// The journal is marked disposed under its append lock, which every append, flush, read and
+    /// checkpoint re-checks under the same lock, so none of them runs after the final drain; a
+    /// second or concurrent call returns without releasing the medium again.
     /// </remarks>
     public void Dispose()
     {
@@ -609,11 +624,18 @@ public abstract class StorageJournal : IStorageJournal
         }
 
         StorageOfflineException? failure = null;
+        bool disposing = false;
         try
         {
             lock (_syncRoot)
             {
+                if (_disposed)
+                {
+                    return;
+                }
+
                 _disposed = true;
+                disposing = true;
                 if (_initialized && _offline is null && _buffered > 0)
                 {
                     try
@@ -632,8 +654,17 @@ public abstract class StorageJournal : IStorageJournal
         }
         finally
         {
-            RaiseOffline();
-            DisposeCore();
+            if (disposing)
+            {
+                try
+                {
+                    RaiseOffline();
+                }
+                finally
+                {
+                    DisposeCore();
+                }
+            }
         }
 
         if (failure is not null)
@@ -665,6 +696,10 @@ public abstract class StorageJournal : IStorageJournal
         {
             lock (_syncRoot)
             {
+                // Checked again under the lock: Dispose sets the flag and drains under it, so an
+                // append that passed the check above while Dispose ran cannot buffer a record
+                // after the final drain and return an LSN that is never written.
+                ThrowIfDisposed();
                 ThrowIfOfflineLocked();
                 lsn = AppendLocked(transactionSequence, type, pageId, payload, ReadOnlySpan<long>.Empty);
 
