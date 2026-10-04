@@ -40,6 +40,29 @@ public class TransactionRecoveryTests
         plan.Committed.ShouldContain(transaction.Sequence);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Recovery: analysis reads the records still in the journal's append buffer (#1252)")]
+    public void Analyze_WithBufferedRecords_ShouldDrainAndClassifyThem()
+    {
+        // Arrange: lifecycle records the journal has not written yet.
+        using var stream = new SimulatedDurableFileHandle();
+        using var journal = new StreamJournal(stream, leaveOpen: true);
+        journal.AppendBegin(1);
+        journal.AppendCommit(1);
+        journal.AppendBegin(2);
+        long bufferedThrough = journal.LastLsn;
+        long writtenBefore = journal.WrittenLsn;
+
+        // Act
+        var plan = TransactionRecovery.Analyze(journal);
+
+        // Assert: the analysis drained the buffer, then read every record.
+        writtenBefore.ShouldBe(0);
+        journal.WrittenLsn.ShouldBe(bufferedThrough);
+        plan.Committed.ShouldContain(new TransactionSequence(1));
+        plan.Aborted.ShouldContain(new TransactionSequence(2));
+        stream.Length.ShouldBeGreaterThan(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Recovery: crash mid-commit leaves no partial effects")]
     public async Task Recovery_CrashBeforeCommitRecord_ShouldPurgeUncommittedVersions()
     {

@@ -298,7 +298,7 @@ public sealed class StorageFormatTests
 
             return truncated && stream == "journal" && operation == "Write";
         };
-        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint());
+        SimulatedPowerLossException.ShouldBeThrownBy(() => storage.Checkpoint());
         var images = storage.CaptureDurable();
 
         // Act: reopen on the empty journal, commit an update of the same page, and crash before
@@ -384,7 +384,7 @@ public sealed class StorageFormatTests
             stream == "data" && operation == "Write" && offset == StorageHeaderPage.SlotOffset(target) && count == StorageHeaderPage.SlotSize;
 
         // Act
-        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(anchor));
+        SimulatedPowerLossException.ShouldBeThrownBy(() => storage.Checkpoint(anchor));
         var images = storage.CaptureDurable();
         using var reopened = TornStorage.Open(images);
 
@@ -578,7 +578,7 @@ public sealed class StorageFormatTests
             stream == "data" && operation == "Write" && offset == (long)pageId * Page.Size && count == Page.Size;
 
         // Act
-        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint());
+        SimulatedPowerLossException.ShouldBeThrownBy(() => storage.Checkpoint());
         var images = storage.CaptureDurable();
         var tornPage = images.Data.AsSpan((int)((long)pageId * Page.Size), Page.Size).ToArray();
         using var reopened = TornStorage.Open(images);
@@ -604,14 +604,18 @@ public sealed class StorageFormatTests
     [Fact(DisplayName = "Cohesion Test [Storage] - Torn writes: an append after a torn journal tail lands where the next read finds it")]
     public void Append_AfterATornJournalTail_ShouldSurviveTheNextCrash()
     {
-        // Arrange: a committed row, then a bracket whose before-image frame tears after one sector.
+        // Arrange: a committed row, then a bracket whose begin record and before image are still in
+        // the journal's append buffer; the drain that writes them tears after one sector, inside
+        // the before image (#1252: an append is no longer a write of its own).
         var point = new CrashPoint();
         var storage = TornStorage.Create(point); // abandoned after its simulated power loss
         var (pageId, slot) = storage.Insert("v1");
+        var torn = storage.BeginTransaction();
+        storage.Update(torn, pageId, slot, "v2");
+        long drainStart = storage.CaptureDurable().Journal.Length;
         point.DurableSectors = 1;
         point.CrashWhen = (stream, operation, _, count) => stream == "journal" && operation == "Write" && count > Page.Size;
-        var torn = storage.BeginTransaction();
-        Should.Throw<SimulatedPowerLossException>(() => storage.Update(torn, pageId, slot, "v2"));
+        SimulatedPowerLossException.ShouldBeThrownBy(() => storage.Log.Flush());
         var images = storage.CaptureDurable();
         int verifiedFrames = new StreamJournal(new MemoryStream(images.Journal)).ReadAll().Count;
 
@@ -631,9 +635,11 @@ public sealed class StorageFormatTests
 
         using var recovered = TornStorage.Open(second);
 
-        // Assert: one sector of the torn frame followed the verified frames; the new bracket
-        // replaced it and reads back after the second crash.
-        images.Journal.Length.ShouldBe(FrameOffsets(images.Journal)[verifiedFrames] + CrashSimulationStream.SectorSize);
+        // Assert: one sector of the torn drain reached the media — the begin record whole, then
+        // the start of the before image after the verified frames; the new bracket replaced the
+        // torn bytes and reads back after the second crash.
+        ((long)images.Journal.Length).ShouldBe(drainStart + CrashSimulationStream.SectorSize);
+        FrameOffsets(images.Journal)[verifiedFrames].ShouldBeLessThan(images.Journal.Length);
         recovered.Read(pageId, slot).ShouldBe("v3");
         recovered.Log.ReadAll().Count(record => record.Type == JournalRecordType.CommitTransaction).ShouldBe(2);
         recovered.Log.ReadAll().Take(verifiedFrames).Select(record => record.Lsn)
@@ -667,7 +673,7 @@ public sealed class StorageFormatTests
 
             return truncated && stream == "journal" && operation == "Write";
         };
-        Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(writers));
+        SimulatedPowerLossException.ShouldBeThrownBy(() => storage.Checkpoint(writers));
         var images = storage.CaptureDurable();
 
         // Act
@@ -724,7 +730,7 @@ public sealed class StorageFormatTests
                 var storage = Arrange(point, writers, out long lastLsn); // abandoned after its simulated power loss
                 point.CrashAtWrite = point.Writes + write;
                 point.DurableSectors = sectors;
-                Should.Throw<SimulatedPowerLossException>(() => storage.Checkpoint(writers), $"write {write}, {sectors} sectors");
+                SimulatedPowerLossException.ShouldBeThrownBy(() => storage.Checkpoint(writers), $"write {write}, {sectors} sectors");
                 crashes++;
 
                 using var reopened = TornStorage.Open(storage.CaptureDurable());
@@ -777,6 +783,12 @@ public sealed class StorageFormatTests
         {
             storage.Log.AppendBegin(writer);
         }
+
+        // A writer's begin record is durable before anything it stamps can reach the data file:
+        // the write-ahead gate flushes the journal through a page's LSN before writing the page.
+        // Appends are buffered (#1252), so a checkpoint would otherwise lead with the write that
+        // drains these records, and a crash in it would lose writers that never stamped a page.
+        storage.Log.Flush(forceDurable: true);
 
         lastLsn = storage.Log.LastLsn;
         return storage;

@@ -170,23 +170,24 @@ public sealed class KeyValueTransactionFailureTests
 
     /// <summary>
     /// A rollback whose abort record cannot be written still ends the transaction and releases its
-    /// key locks, so another session's writer of the same key proceeds and the session runs
-    /// commands and BEGIN again (#1226). Until #1226 such a rollback failed and left the
-    /// transaction Faulted, refusing work with COHDBK001, until a later rollback completed.
+    /// key locks (#1226). Since #1252 the record's append writes only when it drains the journal's
+    /// append buffer (one small frame here), and a failed journal write takes the database offline
+    /// (#1243's rule): the session is free, the next command is refused as offline, and the reopen
+    /// keeps what committed and nothing of the transaction.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: a rollback whose abort record cannot be written still ends the transaction")]
-    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndReleaseKeyLocks()
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: a rollback whose abort record cannot be written still ends the transaction, and the database goes offline")]
+    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndGoOffline()
     {
         // Arrange
-        var (engine, database) = await CreateAsync(options => options.StorageStrategy = new FaultInjectingJournalStorageStrategy());
-        await using var _ = engine;
-        await using var session = await database.CreateSessionAsync();
-        await using var other = await database.CreateSessionAsync();
+        var strategy = new FaultInjectingJournalStorageStrategy { SmallJournalBuffer = true };
+        var (engine, database) = await CreateAsync(options => options.StorageStrategy = strategy);
+        var session = await database.CreateSessionAsync();
+        var other = await database.CreateSessionAsync();
         await database.PutAsync(session, Bytes("keep"), Bytes("v"), cancellationToken: TestTimeout.Token());
         var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
 
         // A delete of a missing key takes the key's lock and writes no version, so the abort
-        // record is the rollback's only journal write.
+        // record is the rollback's only journal append.
         (await database.TryDeleteAsync(session, Bytes("missing"), cancellationToken: TestTimeout.Token())).ShouldBeFalse();
 
         // Act
@@ -197,77 +198,96 @@ public sealed class KeyValueTransactionFailureTests
             unspent = failures.Remaining;
         }
 
-        // Assert: the record write failed, and the rollback ended the transaction anyway.
+        await Should.ThrowAsync<DatabaseOfflineException>(async () =>
+            await database.PutAsync(other, Bytes("missing"), Bytes("other"), cancellationToken: TestTimeout.Token(5)));
+        await other.DisposeAsync();
+        await session.DisposeAsync();
+        await engine.DisposeAsync();
+        await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-tests", StorageStrategy = strategy });
+        var recovered = (IKeyValueDatabase)await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
+        await using var observer = await recovered.CreateSessionAsync();
+
+        // Assert: the record's write failed, and the rollback ended the transaction anyway.
         unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        (await database.PutAsync(other, Bytes("missing"), Bytes("other"), cancellationToken: TestTimeout.Token(5))).Applied.ShouldBeTrue();
-        await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token());
-        await using (var next = await session.BeginTransactionAsync(TestTimeout.Token()))
-        {
-            await database.PutAsync(session, Bytes("after"), Bytes("v"), cancellationToken: TestTimeout.Token());
-            await next.CommitAsync(TestTimeout.Token());
-        }
-        (await Keys(database, session)).ShouldBe(["after", "keep", "missing"]);
+        (await Keys(recovered, observer)).ShouldBe(["keep"]);
     }
 
     /// <summary>
-    /// After a rollback whose abort record was lost, the transaction is rolled back like any other:
-    /// COMMIT is refused and commits nothing, and a repeated rollback raises nothing.
+    /// After a rollback whose abort record was lost, the transaction is rolled back like any other
+    /// and COMMIT commits nothing. The lost record's write took the database offline (#1252), so
+    /// the COMMIT and a repeated rollback are refused as offline before they start.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: COMMIT after a rollback whose abort record was lost is refused")]
     public async Task CommitAsync_AfterRollbackWithLostAbortRecord_ShouldBeRefused()
     {
         // Arrange
-        var (engine, database) = await CreateAsync(options => options.StorageStrategy = new FaultInjectingJournalStorageStrategy());
-        await using var _ = engine;
-        await using var session = await database.CreateSessionAsync();
+        var strategy = new FaultInjectingJournalStorageStrategy { SmallJournalBuffer = true };
+        var (engine, database) = await CreateAsync(options => options.StorageStrategy = strategy);
+        var session = await database.CreateSessionAsync();
         await database.PutAsync(session, Bytes("keep"), Bytes("v"), cancellationToken: TestTimeout.Token());
         var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
         (await database.TryDeleteAsync(session, Bytes("missing"), cancellationToken: TestTimeout.Token())).ShouldBeFalse();
-        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
         {
             await transaction.RollbackAsync(TestTimeout.Token());
+            unspent = failures.Remaining;
         }
 
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(TestTimeout.Token()));
-        await transaction.RollbackAsync(TestTimeout.Token());
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.CommitAsync(TestTimeout.Token()));
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync(TestTimeout.Token()));
+        await session.DisposeAsync();
+        await engine.DisposeAsync();
+        await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-tests", StorageStrategy = strategy });
+        var recovered = (IKeyValueDatabase)await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
+        await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
-        error.Message.ShouldBe("Cannot commit transaction in state 'RolledBack'.");
+        unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        (await Keys(database, session)).ShouldBe(["keep"]);
+        (await Keys(recovered, observer)).ShouldBe(["keep"]);
     }
 
-    /// <summary>A commit the kernel aborts crosses the boundary translated, and a catch-block rollback afterwards raises nothing.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: a kernel-aborted commit is translated and a later rollback is a no-op")]
-    public async Task CommitAsync_KernelAbortsCommit_ShouldTranslateAndAcceptRollback()
+    /// <summary>
+    /// A commit whose record cannot be appended is aborted by the kernel and ends Faulted. Since
+    /// #1252 the append fails only when it drains the journal's append buffer (one small frame
+    /// here) and that write fails, which takes the database offline: the commit crosses the
+    /// boundary as the offline refusal, not as committed or unconfirmed, a later rollback is
+    /// refused as offline too, and the reopen holds nothing of the transaction.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: a commit whose record cannot be appended aborts, and the database goes offline")]
+    public async Task CommitAsync_CommitRecordCannotBeAppended_ShouldAbortAndGoOffline()
     {
         // Arrange
-        var (engine, database) = await CreateAsync(options => options.StorageStrategy = new FaultInjectingJournalStorageStrategy());
-        await using var _ = engine;
-        await using var session = await database.CreateSessionAsync();
+        var strategy = new FaultInjectingJournalStorageStrategy { SmallJournalBuffer = true };
+        var (engine, database) = await CreateAsync(options => options.StorageStrategy = strategy);
+        var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
         await database.PutAsync(session, Bytes("pending"), Bytes("v"), cancellationToken: TestTimeout.Token());
 
-        // Act: the commit record is the commit's first journal write; the kernel then aborts the transaction.
-        DatabaseTransactionAbortedException error;
+        // Act: the commit record's append drains the record ahead of it, and that write fails.
+        DatabaseOfflineException error;
         using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
         {
-            error = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await transaction.CommitAsync(TestTimeout.Token()));
+            error = await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.CommitAsync(TestTimeout.Token()));
         }
         var stateAfterCommit = transaction.State;
-        await transaction.RollbackAsync(TestTimeout.Token());
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync(TestTimeout.Token()));
+        await session.DisposeAsync();
+        await engine.DisposeAsync();
+        await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-tests", StorageStrategy = strategy });
+        var recovered = (IKeyValueDatabase)await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
+        await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
-        error.InnerException.ShouldBeOfType<TransactionAbortedException>();
+        error.ShouldNotBeOfType<DatabaseTransactionCommitUnconfirmedException>();
         stateAfterCommit.ShouldBe(TransactionState.Faulted);
-        transaction.State.ShouldBe(TransactionState.Faulted);
         session.CurrentTransaction.ShouldBeNull();
-        await database.PutAsync(session, Bytes("after"), Bytes("v"), cancellationToken: TestTimeout.Token());
-        (await Keys(database, session)).ShouldBe(["after"]);
+        (await Keys(recovered, observer)).ShouldBeEmpty();
     }
 
     /// <summary>

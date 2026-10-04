@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
@@ -121,13 +122,15 @@ public sealed class KeyValueLifecycleTests
         var pending = database.PutAsync(waitingSession, Bytes("hot"), Bytes("waiter"), cancellationToken: TestTimeout.Token(30)).AsTask();
         bool parked = !pending.IsCompleted;
 
-        // Act: the undo's first journal write (its storage bracket's begin) fails, so the kernel
-        // ends the transaction and defers the undo.
-        int unspent;
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        // Act: another storage bracket holds every page while the rollback runs, so the undo's
+        // bracket cannot touch the first page it undoes: the kernel ends the transaction and
+        // defers the undo. (Until #1252 a failed journal write was the fault; a journal write
+        // failure now takes the database offline.)
+        int locked;
+        using (var holder = PageWriteLockHolder.LockEveryPage(instance.DataStorage))
         {
             await waiting.RollbackAsync(TestTimeout.Token());
-            unspent = failures.Remaining;
+            locked = holder.Pages;
         }
         var error = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending.WaitAsync(TestTimeout.Token()));
         var blockerStateWhenTheCommandFailed = blocker.State;
@@ -141,7 +144,7 @@ public sealed class KeyValueLifecycleTests
 
         // Assert
         parked.ShouldBeTrue();
-        unspent.ShouldBe(0);
+        locked.ShouldBeGreaterThan(0);
         deferred.ShouldBe(1);
         waiting.State.ShouldBe(TransactionState.RolledBack);
         error.InnerException.ShouldBeOfType<TransactionAbortedException>();

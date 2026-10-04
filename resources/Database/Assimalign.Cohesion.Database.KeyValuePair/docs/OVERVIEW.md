@@ -23,9 +23,10 @@ keys order by unsigned lexicographic byte comparison.
 - Explicit transactions: a failed command writes nothing and leaves the transaction
   active, so later commands stay inside it until the caller commits or rolls back. A
   rollback can be repeated, and a started rollback always ends the transaction, even when
-  the journal rejects its abort record or its undo (the kernel then keeps the written keys
-  locked until a retry completes the undo: about 100 ms later, then at doubling delays up to
-  the maintenance interval, #1226). A transaction the kernel ended under its
+  its abort record or its undo fails (an undo that fails keeps the written keys locked until
+  a retry completes it: about 100 ms later, then at doubling delays up to the maintenance
+  interval, #1226; a failed journal write takes the database offline instead, #1252). A
+  transaction the kernel ended under its
   caller refuses commands and COMMIT with `COHDBK001`. A rollback or a closed session ends
   the transaction even under a running command, which then fails and writes nothing; a
   commit while a command runs is refused.

@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
 using Xunit;
@@ -225,14 +226,14 @@ public sealed class DocumentStorageOperationsTests
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "rolled", Doc("rolled"));
 
-        // Act: the rollback's first journal write is its undo bracket's begin record, which fails
-        // once, so the undo is deferred with the database writer lock held.
-        int unspent;
+        // Act: another storage bracket holds every page while the rollback runs, so the undo's
+        // bracket cannot touch the first page it undoes and the undo is deferred with the database
+        // writer lock held; the pages are released at once. (Until #1252 a failed journal write was
+        // the transient fault; a journal write failure now takes the database offline.)
         var watch = Stopwatch.StartNew();
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        using (PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
-            unspent = failures.Remaining;
         }
 
         // The engine handed the coordinator its first retry delay: the retry is due within it.
@@ -242,7 +243,6 @@ public sealed class DocumentStorageOperationsTests
         watch.Stop();
 
         // Assert
-        unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
         (await collection.GetAsync(other, "rolled")).ShouldBeNull();

@@ -4,8 +4,9 @@ namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
 /// Raised when a storage, or its journal, is offline: a durable flush of its journal or of its
-/// data file failed, and nothing may be written to either file again until the storage is
-/// reopened, whose recovery reads the journal and decides what it holds (#1243).
+/// data file failed (#1243), or a write of the journal's append buffer did (#1252), and nothing
+/// may be written to either file again until the storage is reopened, whose recovery reads the
+/// journal and decides what it holds.
 /// </summary>
 /// <remarks>
 /// <para>

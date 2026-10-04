@@ -13,6 +13,7 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -415,10 +416,12 @@ public sealed class SqlStorageOperationsTests
     }
 
     /// <summary>
-    /// Every journal write fails for a while, so the rollback's undo is deferred and the
-    /// version-purge worker's retries fail too: the engine reports Faulted. Once writes work again
-    /// the next retry completes the undo, the waiting writer proceeds, and the engine reports
-    /// Running again instead of staying Faulted for good (#1226 review, probe P8).
+    /// The rollback's undo cannot run for a while, so it is deferred and the version-purge worker's
+    /// retries fail too: the engine reports Faulted. Once the fault clears the next retry completes
+    /// the undo, the waiting writer proceeds, and the engine reports Running again instead of
+    /// staying Faulted for good (#1226 review, probe P8). The fault is a data file that refuses
+    /// reads while the buffer pool holds none of its pages; until #1252 it was a device refusing
+    /// journal writes, which now takes the database offline instead.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Deferred undo: a fault that clears leaves the engine Running once the retry completes")]
     public async Task RollbackAsync_UndoFailsUntilTheFaultClears_ShouldReturnTheEngineToRunning()
@@ -439,15 +442,25 @@ public sealed class SqlStorageOperationsTests
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (2, 20)");
 
-        // Act: the device refuses journal writes until the worker's retry has failed.
-        strategy.FailEveryJournalWrite = true;
+        // Act: the pool keeps one page, the shared space's first, not the table's; the data file
+        // refuses reads until the worker's retry has failed.
+        int capacity = database.DataStorage.BufferPoolCapacity;
+        database.DataStorage.BufferPoolCapacity = 1;
+        using (database.DataStorage.PageManager.GetPage((Assimalign.Cohesion.Database.Storage.PageId)1L))
+        {
+        }
+
+        strategy.FailEveryDataRead = true;
         await transaction.RollbackAsync();
+        bool deferred = database.Coordinator.NextDeferredUndoRetry is not null;
         bool faulted = await Eventually(() => engine.State == EngineState.Faulted);
-        strategy.FailEveryJournalWrite = false;
+        strategy.FailEveryDataRead = false;
+        database.DataStorage.BufferPoolCapacity = capacity;
         await other.ExecuteAsync("DROP TABLE t").AsTask().WaitAsync(Timeout);
         bool recovered = await Eventually(() => engine.State == EngineState.Running);
 
         // Assert
+        deferred.ShouldBeTrue();
         faulted.ShouldBeTrue();
         recovered.ShouldBeTrue();
         database.Coordinator.NextDeferredUndoRetry.ShouldBeNull();
@@ -614,14 +627,14 @@ public sealed class SqlStorageOperationsTests
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (2, 20)");
 
-        // Act: the rollback's first journal write is its undo bracket's begin record, which fails
-        // once, so the undo is deferred with the writer's locks held.
-        int unspent;
+        // Act: another storage bracket holds every page while the rollback runs, so the undo's
+        // bracket cannot touch the first page it undoes and the undo is deferred with
+        // the writer's locks held; the pages are released at once. (Until #1252 a failed journal
+        // write was the transient fault; a journal write failure now takes the database offline.)
         var watch = Stopwatch.StartNew();
-        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalWrites(1))
+        using (PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
-            unspent = failures.Remaining;
         }
 
         // The engine handed the coordinator its first retry delay: the retry is due within it.
@@ -632,7 +645,6 @@ public sealed class SqlStorageOperationsTests
         watch.Stop();
 
         // Assert
-        unspent.ShouldBe(0);
         options.DeferredUndoRetryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
         firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(options.DeferredUndoRetryDelay);
         transaction.State.ShouldBe(TransactionState.RolledBack);

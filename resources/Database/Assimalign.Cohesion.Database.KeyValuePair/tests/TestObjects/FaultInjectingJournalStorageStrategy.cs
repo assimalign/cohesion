@@ -8,6 +8,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.FileSystem;
 
 /// <summary>
@@ -45,11 +46,34 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
     internal bool LoseUnconfirmedJournalOnReopen { get; set; }
 
     /// <summary>
+    /// Gets or sets whether every journal this strategy opens keeps an append buffer of one small
+    /// frame (#1252): each append then drains the frame buffered ahead of it, and a page image is
+    /// written directly, so a test can fail the write an append of its own causes. A failed journal
+    /// write takes the storage offline.
+    /// </summary>
+    internal bool SmallJournalBuffer { get; set; }
+
+    // Applies SmallJournalBuffer to a storage this strategy created or opened.
+    private void ConfigureJournal(IStorageJournal journal)
+    {
+        if (SmallJournalBuffer)
+        {
+            JournalBufferHooks.SetMaximumBufferBytes(journal, JournalBufferHooks.SmallestBuffer);
+        }
+    }
+
+    /// <summary>
     /// Fails <paramref name="writes"/> journal writes made on the calling flow, after letting the
     /// next <paramref name="skip"/> writes through, until the returned scope is disposed.
     /// </summary>
     /// <param name="writes">The number of writes to fail.</param>
     /// <param name="skip">The number of writes to let through before the first failure.</param>
+    /// <remarks>
+    /// Since #1252 an append writes nothing: the journal's append buffer drains at a commit, a
+    /// reader, the write-ahead gate, a checkpoint, a full buffer and a close, and each drain is one
+    /// write. A failed one takes the storage offline. With <see cref="SmallJournalBuffer"/> each
+    /// append drains the frame ahead of it, which is how a test fails an append's own write.
+    /// </remarks>
     /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
     internal static FailureScope FailJournalWrites(int writes, int skip = 0)
     {
@@ -104,7 +128,9 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
             }
         }
 
-        return KeyValueStorage.Create(DataStream(files), JournalStream(files, databaseName), new StorageStream(files.Backup), databaseName);
+        var created = KeyValueStorage.Create(DataStream(files), JournalStream(files, databaseName), new StorageStream(files.Backup), databaseName);
+        ConfigureJournal(created.WriteAheadJournal);
+        return created;
     }
 
     /// <summary>
@@ -133,7 +159,9 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
             _storages[databaseName] = files;
         }
 
-        return KeyValueStorage.Open(DataStream(files), JournalStream(files, databaseName), new StorageStream(files.Backup), checkpointOnOpen: false);
+        var created = KeyValueStorage.Open(DataStream(files), JournalStream(files, databaseName), new StorageStream(files.Backup), checkpointOnOpen: false);
+        ConfigureJournal(created.WriteAheadJournal);
+        return created;
     }
 
     /// <inheritdoc />

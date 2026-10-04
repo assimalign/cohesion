@@ -33,6 +33,11 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// journal: committed work is redone, uncommitted work is undone.
 /// </para>
 /// <para>
+/// Journal records are appended to a user-space buffer (#1252,
+/// <see cref="StorageJournal"/>), which drains to the operating system before every commit is
+/// acknowledged, in every durability mode, and before the write-ahead gate lets a page through.
+/// </para>
+/// <para>
 /// The file-header page (page 0) is deliberately unlogged (storage format 2, see
 /// <see cref="StorageFileHeader"/>): an identity block written once at creation, and two
 /// alternating header slots carrying recomputable bookkeeping, the LSN and transaction
@@ -274,9 +279,9 @@ public abstract class Storage : IStorage
 
     /// <summary>
     /// Gets the error that took this storage offline, or null while it is online: a durable
-    /// flush of its journal or its data file failed (#1243). Once set it stays set for the life
-    /// of this instance; only reopening the storage, which runs recovery, brings the file set
-    /// back.
+    /// flush of its journal or its data file failed (#1243), or a write of the journal's append
+    /// buffer did (#1252). Once set it stays set for the life of this instance; only reopening
+    /// the storage, which runs recovery, brings the file set back.
     /// </summary>
     /// <remarks>
     /// While offline the storage writes nothing: every journal append, flush and checkpoint,
@@ -288,7 +293,7 @@ public abstract class Storage : IStorage
     public StorageOfflineException? OfflineError => Volatile.Read(ref _offline) ?? _journal?.OfflineError;
 
     /// <summary>
-    /// Gets whether a failed durable flush took this storage offline (see <see cref="OfflineError"/>).
+    /// Gets whether a failed durable flush or journal write took this storage offline (see <see cref="OfflineError"/>).
     /// </summary>
     public bool IsOffline => OfflineError is not null;
 
@@ -317,8 +322,8 @@ public abstract class Storage : IStorage
 
     /// <summary>
     /// Gets or sets the hook invoked once, with the error, when this storage goes offline: a
-    /// durable flush of its journal or its data file failed, or <see cref="TakeOffline"/> was
-    /// called (#1243). An engine whose database spans several storages takes the others offline
+    /// durable flush of its journal or its data file failed, a write of the journal failed
+    /// (#1252), or <see cref="TakeOffline"/> was called (#1243). An engine whose database spans several storages takes the others offline
     /// from it, so none of them is written after the failure.
     /// </summary>
     /// <remarks>
@@ -463,6 +468,33 @@ public abstract class Storage : IStorage
     }
 
     /// <summary>
+    /// Gets the number of storage-level transactions begun and not yet completed (diagnostics and
+    /// tests): a checkpoint runs only while it is zero.
+    /// </summary>
+    internal int ActiveTransactions
+    {
+        get
+        {
+            lock (_transactionLock)
+            {
+                return _activeTransactionCount;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets whether an active transaction holds the page's write lock (diagnostics and tests).
+    /// </summary>
+    /// <param name="pageId">The page.</param>
+    internal bool IsPageWriteLocked(PageId pageId)
+    {
+        lock (_transactionLock)
+        {
+            return _pageWriteLocks.ContainsKey((long)pageId);
+        }
+    }
+
+    /// <summary>
     /// Gets whether a header write failed after its slot write was issued, so this instance
     /// refuses every later header write until the storage is reopened (diagnostics and tests).
     /// </summary>
@@ -524,9 +556,15 @@ public abstract class Storage : IStorage
 
     /// <summary>
     /// Applies this storage's durability policy to an already appended commit
-    /// record. Non-durable mode makes no durable request or promise.
+    /// record. Non-durable mode makes no durable request or promise, but it still drains the
+    /// journal's append buffer through the record, so a process crash never loses a commit
+    /// that was acknowledged (#1252).
     /// </summary>
     /// <param name="lsn">The appended commit record's log sequence number.</param>
+    /// <exception cref="StorageOfflineException">
+    /// The storage is offline, or the drain or durable flush this call made failed and took it
+    /// offline.
+    /// </exception>
     public void EnsureCommitDurable(long lsn)
     {
         if (_journal is null)
@@ -537,6 +575,9 @@ public abstract class Storage : IStorage
         switch (CommitDurability)
         {
             case StorageCommitDurability.None:
+                // The record leaves the process before the commit is acknowledged, as it did when
+                // every append was its own write: only a power loss can take it now.
+                _journal.EnsureWritten(lsn);
                 return;
             case StorageCommitDurability.Grouped:
                 _groupCommitGate.AwaitDurable(lsn, GroupCommitWindow, _journal);
@@ -1614,6 +1655,12 @@ public abstract class Storage : IStorage
         }
     }
 
+    /// <summary>
+    /// The write-ahead gate: before a page whose LSN is <paramref name="lsn"/> reaches the data
+    /// file, the journal holds every record up to it — durably when the policy flushes durably,
+    /// and at least out of the append buffer otherwise (#1252), so a stolen page's before image
+    /// is never still in the process when the page is on the file.
+    /// </summary>
     private void FlushWriteAhead(long lsn)
     {
         if (RequiresDurableFlush)
@@ -1624,7 +1671,7 @@ public abstract class Storage : IStorage
         {
             // Preserve journal-before-page write ordering without claiming that
             // an ordinary flush makes either memory or buffered bytes durable.
-            _journal!.Flush(forceDurable: false);
+            _journal!.EnsureWritten(lsn);
         }
     }
 

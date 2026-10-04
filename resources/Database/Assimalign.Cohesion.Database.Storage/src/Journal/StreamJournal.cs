@@ -19,18 +19,14 @@ public sealed class StreamJournal : StorageJournal
     private readonly IFileSystemFileHandle _handle;
     private readonly bool _leaveOpen;
 
-    // Set when a failed append may have left part of its frame at the end of the stream
-    // and cutting it back off failed too. Appends are refused until a truncation removes it.
-    private bool _faulted;
-
-    // Where the next frame goes: the end of the last frame that verifies, once a read scan has
-    // run to the end of the verified frames or an append has landed; -1 until then. Bytes past
-    // it are a torn tail, which the next append cuts off first.
+    // Where the next frames go: the end of the last frame that verifies, once a read scan has
+    // run to the end of the verified frames or a write has landed; -1 until then. Bytes past
+    // it are a torn tail, which the next write cuts off first.
     private long _appendOffset = -1;
 
-    // Whether bytes may follow _appendOffset: set by a completed read scan, cleared once an
-    // append has cut them off. While clear, the stream ends at _appendOffset (this journal is
-    // its only writer), so an append needs no length query.
+    // Whether bytes may follow _appendOffset: set by a completed read scan, cleared once a
+    // write has cut them off. While clear, the stream ends at _appendOffset (this journal is
+    // its only writer), so a write needs no length query.
     private bool _tailUnchecked;
 
     /// <summary>
@@ -98,69 +94,46 @@ public sealed class StreamJournal : StorageJournal
 
     /// <inheritdoc />
     /// <remarks>
-    /// A write that fails part way can leave the start of the frame at the end of the
-    /// stream. Recovery's read scan stops at the first frame that does not verify, so a
-    /// later frame appended after those bytes would be unreadable, and with it every commit
-    /// record acknowledged after the failure. The failed append therefore cuts the stream
-    /// back to where its frame began before the failure propagates. When that cut fails
-    /// too, the journal refuses every later append with <see cref="JournalException"/>
-    /// until a checkpoint's truncation removes the partial frame or the storage is
-    /// reopened: a write that cannot reach recovery must fail rather than be acknowledged.
-    /// PostgreSQL stops on any failed WAL write for the same reason (<c>ereport(PANIC,
-    /// "could not write to log file ...")</c>, <c>src/backend/access/transam/xlog.c:2529-2531</c>,
-    /// commit <c>85f55534e80</c>); this journal stops only its appends.
     /// <para>
-    /// For the same reason a frame never lands after a torn tail a crash left: the first
-    /// append after a reopen goes to the end of the last frame that verified when the journal
-    /// was read, cutting off whatever follows it, rather than to the end of the stream.
-    /// Otherwise every record appended before the next truncation — an engine's recovery scrub
-    /// runs before its open-time checkpoint — would sit behind bytes the next read scan stops
-    /// at, and a second crash would lose them. PostgreSQL likewise resumes WAL insertion at the
-    /// end of the last valid record (<c>EndOfLog</c>, <c>src/backend/access/transam/xlog.c:6711-6718</c>).
+    /// The frames go to the stream in one positional write at the end of the last frame
+    /// written, so a drain costs one system call however many records it carries (#1252).
+    /// </para>
+    /// <para>
+    /// A frame never lands after a torn tail a crash left: the first write after a reopen goes
+    /// to the end of the last frame that verified when the journal was read, cutting off
+    /// whatever follows it, rather than to the end of the stream. Otherwise every record
+    /// appended before the next truncation — an engine's recovery scrub runs before its
+    /// open-time checkpoint — would sit behind bytes the next read scan stops at, and a second
+    /// crash would lose them. PostgreSQL likewise resumes WAL insertion at the end of the last
+    /// valid record (<c>EndOfLog</c>, <c>src/backend/access/transam/xlog.c:6711-6718</c>).
+    /// </para>
+    /// <para>
+    /// A write that fails part way can leave the start of a frame at the end of the stream.
+    /// The failure takes the journal offline, so nothing is written behind those bytes; the
+    /// reopen's read scan stops at them and its first write cuts them off. PostgreSQL stops on
+    /// any failed WAL write for the same reason (<c>ereport(PANIC, "could not write to log file
+    /// ...")</c>, <c>src/backend/access/transam/xlog.c:2529-2532</c>). Until #1252 the journal cut
+    /// a partial frame back off and kept appending, which a buffered journal cannot do safely:
+    /// the frames a failed drain carried are already described by pages in the buffer pool.
     /// </para>
     /// </remarks>
-    protected override void AppendFrame(ReadOnlySpan<byte> frame)
+    protected override void WriteFramesCore(ReadOnlySpan<byte> frames)
     {
-        if (_faulted)
-        {
-            throw new JournalException(
-                "The journal refuses appends: an earlier append failed part way and its partial frame could not be removed. " +
-                "A checkpoint or a reopen of the storage clears the condition.");
-        }
+        long start = _appendOffset >= 0 ? _appendOffset : _handle.Length;
 
-        long start = _appendOffset >= 0 ? _appendOffset : _stream.Seek(0, SeekOrigin.End);
-
-        try
+        if (_tailUnchecked)
         {
-            if (_tailUnchecked)
+            if (_handle.Length > start)
             {
-                if (_stream.Length > start)
-                {
-                    // A torn tail: no frame after it would ever be read.
-                    _stream.SetLength(start);
-                }
-
-                _tailUnchecked = false;
+                // A torn tail: no frame after it would ever be read.
+                _handle.SetLength(start);
             }
 
-            _stream.Seek(start, SeekOrigin.Begin);
-            _stream.Write(frame);
-        }
-        catch
-        {
-            try
-            {
-                _stream.SetLength(start);
-            }
-            catch
-            {
-                _faulted = true;
-            }
-
-            throw;
+            _tailUnchecked = false;
         }
 
-        _appendOffset = start + frame.Length;
+        _handle.Write(frames, start);
+        _appendOffset = start + frames.Length;
     }
 
     /// <inheritdoc />
@@ -229,9 +202,6 @@ public sealed class StreamJournal : StorageJournal
     protected override void TruncateCore()
     {
         _stream.SetLength(0);
-
-        // Nothing is left of a partial frame a failed append could not remove.
-        _faulted = false;
         _appendOffset = 0;
         _tailUnchecked = false;
     }

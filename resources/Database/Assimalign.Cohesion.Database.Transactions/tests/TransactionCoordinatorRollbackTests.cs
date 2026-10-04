@@ -9,6 +9,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
@@ -274,43 +275,60 @@ public class TransactionCoordinatorRollbackTests
         await coordinator.CommitAsync(probe);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator rollback: a journal that rejects the undo's own writes defers the undo and leaves checkpoints running")]
+    /// <summary>
+    /// The undo's storage bracket cannot write its begin record, or the before image of the page
+    /// it undoes. Since #1252 a journal write is a drain of the journal's append buffer, and a
+    /// failed one takes the storage offline (#1243's rule): the rollback still ends the
+    /// transaction with its undo deferred, nothing more is written, a retry is refused, and the
+    /// reopen's recovery scrubs the writer, whose journal names it without a commit record. Until
+    /// #1252 a failed append was recoverable and the retried undo completed in place. The journal's
+    /// buffer is shrunk to one small frame here, so the undo's appends each reach the medium.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator rollback: a journal that rejects the undo's own writes takes the storage offline, and the reopen scrubs the writer")]
     [InlineData(UndoJournalWrite.BracketBegin)]
     [InlineData(UndoJournalWrite.PageImage)]
-    public async Task RollbackAsync_UndoBracketJournalWriteFails_ShouldDeferTheUndoAndLeaveCheckpointsRunning(UndoJournalWrite failing)
+    public async Task RollbackAsync_UndoBracketJournalWriteFails_ShouldGoOfflineAndLeaveTheWriterToRecovery(UndoJournalWrite failing)
     {
         // Arrange
-        using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var storage = RollbackStorage.Create();
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
         var writer = await BeginWriterAsync(coordinator, storage);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        storage.Log.Flush();
+        JournalBufferHooks.SetMaximumBufferBytes(storage.Log, JournalBufferHooks.SmallestBuffer);
 
         // Act: the undo's storage bracket cannot write its begin record (its first write), or the
         // before image of the page it undoes (its second).
         storage.JournalStream.SkipWrites = failing == UndoJournalWrite.PageImage ? 1 : 0;
         storage.JournalStream.FailWrites = 1;
         await coordinator.RollbackAsync(writer);
+        var atTheFailure = storage.CaptureClosedImages();
 
-        // Assert: the transaction ended, its version and its lock wait for the undo, and the
-        // failed bracket left nothing active in the storage, so checkpoints still run.
+        // Assert: the transaction ended, its version and its lock wait for an undo the offline
+        // storage refuses, and nothing more reaches the files.
         storage.JournalStream.FailWrites.ShouldBe(0);
         writer.State.ShouldBe(TransactionState.RolledBack);
+        coordinator.IsStorageOffline.ShouldBeTrue();
         RecordCount(storage).ShouldBe(1);
         coordinator.LockManager.TryAcquire(next.Sequence, Row, LockMode.Exclusive).ShouldBeFalse();
+        Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint());
+        Should.Throw<StorageOfflineException>(() => coordinator.RunVersionPurgePass(CancellationToken.None));
+        RecordCount(storage).ShouldBe(1);
 
-        // The deferred writer still owes its undo, so checkpoints keep listing it; the next
-        // transaction has applied nothing, and a reader is never listed (#1242).
-        Checkpoint(coordinator, storage).ShouldBe([(long)writer.Sequence.Value]);
+        // Act: close, as an engine does, and reopen.
+        await coordinator.DisposeAsync();
+        storage.Dispose();
+        var images = storage.CaptureClosedImages();
+        using var reopened = RollbackStorage.Open(images.Data, images.Journal);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        var plan = recovered.AnalyzeAndScrub();
+        recovered.CompleteRecovery();
 
-        // Act: the purge pass retries the undo.
-        coordinator.RunVersionPurgePass(CancellationToken.None);
-
-        // Assert
-        await waiting.WaitAsync(Timeout);
-        RecordCount(storage).ShouldBe(0);
-        Checkpoint(coordinator, storage).ShouldBeEmpty();
-        await coordinator.CommitAsync(next);
+        // Assert: the close wrote nothing, and recovery classified the writer aborted and scrubbed it.
+        images.Journal.ShouldBe(atTheFailure.Journal);
+        images.Data.ShouldBe(atTheFailure.Data);
+        plan.Aborted.ShouldContain(writer.Sequence);
+        RecordCount(reopened).ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator dispose: a writer whose undo still fails survives a clean close for recovery to scrub")]
@@ -500,20 +518,25 @@ public class TransactionCoordinatorRollbackTests
         writer.State.ShouldBe(TransactionState.RolledBack);
 
         // Act: the checkpoint truncates the journal, then cannot append its record.
+        // The journal holds every record first, so the checkpoint's first journal write is its own
+        // record (#1252: appends are buffered); the failed write takes the storage offline.
+        storage.Log.Flush();
         storage.JournalStream.FailWrites = 1;
-        Should.Throw<IOException>(() => coordinator.Checkpoint());
+        var offline = Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint());
+        offline.InnerException.ShouldBeOfType<IOException>();
         storage.JournalStream.FailWrites.ShouldBe(0);
         bool journalNamesTheWriter = storage.Log.ReadAll().Any(record => record.TransactionSequence == (long)writer.Sequence.Value);
         (byte[] Data, byte[] Journal) images;
         if (cleanClose)
         {
-            await Should.ThrowAsync<IOException>(async () => await coordinator.DisposeAsync());
+            // The storage is offline: the coordinator cannot run the undo, and the close writes nothing.
+            await coordinator.DisposeAsync();
             storage.Dispose();
             images = storage.CaptureClosedImages();
         }
         else
         {
-            images = storage.CaptureImages();
+            images = storage.CaptureClosedImages();
         }
 
         using var reopened = RollbackStorage.Open(images.Data, images.Journal);
@@ -535,7 +558,7 @@ public class TransactionCoordinatorRollbackTests
         await recovered.CommitAsync(reader);
         if (!cleanClose)
         {
-            await Should.ThrowAsync<IOException>(async () => await coordinator.DisposeAsync());
+            await coordinator.DisposeAsync();
             storage.Dispose();
         }
     }
@@ -560,10 +583,11 @@ public class TransactionCoordinatorRollbackTests
             await InsertAsync(coordinator, storage, contexts[i]);
         }
 
-        // Act: the checkpoint truncates the journal, then cannot append its record; the process stops.
+        // Act: the checkpoint truncates the journal, then cannot write its record; the process stops.
+        storage.Log.Flush();
         storage.JournalStream.FailWrites = 1;
-        Should.Throw<IOException>(() => coordinator.Checkpoint());
-        var images = storage.CaptureImages();
+        Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint()).InnerException.ShouldBeOfType<IOException>();
+        var images = storage.CaptureClosedImages();
         using var reopened = RollbackStorage.Open(images.Data, images.Journal);
         await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
         var anchored = reopened.CheckpointActiveTransactions;
@@ -588,10 +612,11 @@ public class TransactionCoordinatorRollbackTests
         var location = storage.PackLocation(storage.LastInserted.PageId, storage.LastInserted.SlotIndex);
 
         // Act: the checkpoint loses its record, then the process stops.
+        storage.Log.Flush();
         storage.JournalStream.FailWrites = 1;
-        Should.Throw<IOException>(() => coordinator.Checkpoint());
+        Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint()).InnerException.ShouldBeOfType<IOException>();
         storage.CheckpointActiveTransactions.ShouldBe([(long)writer.Sequence.Value]);
-        var images = storage.CaptureImages();
+        var images = storage.CaptureClosedImages();
         using var reopened = RollbackStorage.Open(images.Data, images.Journal);
         await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
         var plan = recovered.AnalyzeAndScrub();
@@ -865,7 +890,10 @@ public class TransactionCoordinatorRollbackTests
     /// <summary>
     /// A statement bracket ends even when its advisory rollback record cannot be appended, and the
     /// statement's own failure is the error its caller sees: the engines name it as the cause of an
-    /// aborted transaction, so a journal error must not replace it.
+    /// aborted transaction, so a journal error must not replace it. Since #1252 the rollback
+    /// record's append fails only when it has to drain the journal's append buffer and that write
+    /// fails, which takes the storage offline: another record is buffered ahead of it here, and the
+    /// buffer holds one small frame.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator apply: a failed statement keeps its own error when the bracket's rollback record is lost")]
     public async Task ApplyStatementAsync_StatementFailsAndRollbackRecordIsLost_ShouldSurfaceTheStatementsError()
@@ -874,29 +902,29 @@ public class TransactionCoordinatorRollbackTests
         using var storage = RollbackStorage.Create();
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        JournalBufferHooks.SetMaximumBufferBytes(storage.Log, JournalBufferHooks.SmallestBuffer);
 
         // Act: the statement writes a record, then fails while the journal rejects the next write,
-        // which is its bracket's rollback record.
+        // which drains another session's record ahead of its bracket's rollback record.
         Func<IStorageTransaction, int> failingStatement = bracket =>
         {
             byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];
             RecordVersionStamp.WriteWriter(record, writer.Sequence);
             storage.Insert(bracket, record);
+            storage.Log.AppendOperation(0, [1]);
             storage.JournalStream.FailWrites = 1;
             throw new InvalidOperationException("The statement's own failure.");
         };
         var error = await Should.ThrowAsync<InvalidOperationException>(async () => await coordinator.ApplyStatementAsync(writer, failingStatement));
 
-        // Assert: the rollback record was the write that failed, the bracket still ended, and the
-        // statement wrote nothing; the transaction goes on.
+        // Assert: the rollback record's drain was the write that failed, the bracket still ended,
+        // and the statement wrote nothing; the failed write took the storage offline.
         error.Message.ShouldBe("The statement's own failure.");
         storage.JournalStream.FailWrites.ShouldBe(0);
         coordinator.PairedTransactionCount.ShouldBe(0);
         RecordCount(storage).ShouldBe(0);
-        coordinator.Checkpoint();
-        await InsertAsync(coordinator, storage, writer);
-        await coordinator.CommitAsync(writer);
-        RecordCount(storage).ShouldBe(1);
+        coordinator.IsStorageOffline.ShouldBeTrue();
+        Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint());
     }
 
     private static Task StartHeldInsert(

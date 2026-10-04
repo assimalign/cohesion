@@ -19,10 +19,14 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
   pages and `IStorageUnitIterator` full scans.
 - **Journal** — `IStorageJournal` write-ahead logging with begin/commit/rollback
-  markers, CRC-32C-protected frames, and recovery replay of committed operations.
-- **Offline on a failed fsync** — a durable flush of the journal or the data file that
-  fails takes the storage offline (`StorageOfflineException`, `COHDBS002`): nothing more is
-  written to either file, closing included, until the file set is reopened and its recovery
+  markers, CRC-32C-protected frames, and recovery replay of committed operations. Appends go
+  to a user-space buffer, frames built in place, which drains to the operating system in one
+  write before every commit is acknowledged (every durability mode), every reader, the
+  write-ahead gate and a checkpoint's truncation (#1252, PostgreSQL's WAL buffers).
+- **Offline on a failed fsync** — a durable flush of the journal or the data file, or a write
+  of the journal's buffer, that fails takes the storage offline (`StorageOfflineException`,
+  `COHDBS002`): nothing more is written to either file, closing included, until the file set
+  is reopened and its recovery
   decides every unconfirmed commit (#1243, PostgreSQL's PANIC on a failed WAL fsync).
   `OnOffline` is raised once when it happens, so an engine takes a database's other file sets
   offline in the same moment, and `CommitRecordWritten` marks a commit that may survive.

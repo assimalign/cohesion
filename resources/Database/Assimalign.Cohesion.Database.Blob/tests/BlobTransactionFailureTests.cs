@@ -4,6 +4,8 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
 using Xunit;
@@ -526,22 +528,30 @@ public sealed class BlobTransactionFailureTests
     /// database writer lock, so another session's writer proceeds (#1226). Until #1226 such a
     /// rollback failed and left the transaction Faulted until a later rollback completed.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a rollback whose abort record cannot be written still ends the transaction")]
-    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndReleaseWriterLock()
+    /// <summary>
+    /// A rollback whose abort record cannot be written still ends the transaction (#1226). Since
+    /// #1252 the record's append writes only when it drains the journal's append buffer (one small
+    /// frame here), and a failed journal write takes the database offline (#1243's rule): the
+    /// session is free, the next operation is refused as offline, and the reopen keeps what
+    /// committed and nothing of the transaction.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a rollback whose abort record cannot be written still ends the transaction, and the database goes offline")]
+    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndGoOffline()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
+        var strategy = new FaultInjectingJournalStorageStrategy { SmallJournalBuffer = true };
+        var engine = BlobDatabaseEngine.Create(new() { StorageStrategy = strategy });
         var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         await Write(container, "keep", "original");
-        await using var session = await database.CreateSessionAsync();
-        await using var other = await database.CreateSessionAsync();
+        var session = await database.CreateSessionAsync();
+        var other = await database.CreateSessionAsync();
         var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
         var otherFiles = await ((IBlobDatabase)other.Database).GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
 
         // A delete that matches nothing takes the database writer lock and writes no version, so
-        // the abort record is the rollback's only journal write.
+        // the abort record is the rollback's only journal append.
         (await files.DeleteAsync("missing")).ShouldBeFalse();
 
         // Act
@@ -552,50 +562,59 @@ public sealed class BlobTransactionFailureTests
             unspent = failures.Remaining;
         }
 
-        // Assert: the record write failed, and the rollback ended the transaction anyway.
+        var refused = await Should.ThrowAsync<DatabaseOfflineException>(async () => await Write(otherFiles, "other", "other"));
+        await other.DisposeAsync();
+        await session.DisposeAsync();
+        engine.Dispose();
+        await using var reopened = BlobDatabaseEngine.Create(new() { StorageStrategy = strategy });
+        var recovered = (IBlobDatabase)await reopened.OpenDatabaseAsync("test");
+
+        // Assert: the record's write failed, and the rollback ended the transaction anyway.
         unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await Write(otherFiles, "other", "other", timeout.Token);
-        await using (var next = await session.BeginTransactionAsync())
-        {
-            await Write(files, "after", "after");
-            await next.CommitAsync();
-        }
-        (await Names(container)).ShouldBe(["after", "keep", "other"]);
+        refused.InnerException.ShouldNotBeNull();
+        (await Names(await recovered.GetContainerAsync("files"))).ShouldBe(["keep"]);
     }
 
     /// <summary>
-    /// After a rollback whose abort record was lost, the transaction is rolled back like any other:
-    /// COMMIT is refused and commits nothing, and a repeated rollback raises nothing.
+    /// After a rollback whose abort record was lost, the transaction is rolled back like any other
+    /// and COMMIT commits nothing. The lost record's write took the database offline (#1252), so
+    /// the COMMIT and a repeated rollback are refused as offline before they start.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: COMMIT after a rollback whose abort record was lost is refused")]
     public async Task CommitAsync_AfterRollbackWithLostAbortRecord_ShouldBeRefused()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
+        var strategy = new FaultInjectingJournalStorageStrategy { SmallJournalBuffer = true };
+        var engine = BlobDatabaseEngine.Create(new() { StorageStrategy = strategy });
         var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         await Write(container, "keep", "original");
-        await using var session = await database.CreateSessionAsync();
+        var session = await database.CreateSessionAsync();
         var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
         (await files.DeleteAsync("missing")).ShouldBeFalse();
-        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
         {
             await transaction.RollbackAsync();
+            unspent = failures.Remaining;
         }
 
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
-        await transaction.RollbackAsync();
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.CommitAsync());
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
+        await session.DisposeAsync();
+        engine.Dispose();
+        await using var reopened = BlobDatabaseEngine.Create(new() { StorageStrategy = strategy });
+        var recovered = (IBlobDatabase)await reopened.OpenDatabaseAsync("test");
 
         // Assert
-        error.Message.ShouldBe("The transaction is RolledBack.");
+        unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        (await Names(container)).ShouldBe(["keep"]);
+        (await Names(await recovered.GetContainerAsync("files"))).ShouldBe(["keep"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Rollback: an undo that still fails at close is scrubbed at the next open")]
@@ -604,7 +623,7 @@ public sealed class BlobTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = BlobDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = (Internal.BlobDatabaseInstance)await engine.CreateDatabaseAsync("test");
         await database.CreateContainerAsync("files");
         await using (var session = await database.CreateSessionAsync())
         {
@@ -614,31 +633,24 @@ public sealed class BlobTransactionFailureTests
             await BlobEngineTests.Write(scoped, "rolled", "rolled"u8.ToArray());
             await BlobEngineTests.Write(scoped, "kept", "overwritten"u8.ToArray());
 
-            // The undo's storage bracket begins (the first write) and fails at its first page
-            // image (the second), so the bracket rolls itself back and the undo is deferred.
-            using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
-            {
-                await transaction.RollbackAsync();
-                failures.Remaining.ShouldBe(0);
-            }
-
+            // Another storage bracket holds every page, through the close: the undo's bracket
+            // cannot touch the first page it undoes, so it rolls itself back and the undo is
+            // deferred. (Until #1252 a failed journal write was the fault; a journal write
+            // failure now takes the database offline.)
+            _ = PageWriteLockHolder.LockEveryPage(database.DataStorage); // abandoned with the storage
+            await transaction.RollbackAsync();
             transaction.State.ShouldBe(TransactionState.RolledBack);
         }
 
         // Act: the close retries the undo, which fails the same way.
-        AggregateException closeFailure;
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1, skip: 1))
-        {
-            closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
-            failures.Remaining.ShouldBe(0);
-        }
+        var closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
 
         await using var reopened = BlobDatabaseEngine.Create(QuietOptions(strategy));
         var recovered = (IBlobDatabase)await reopened.OpenDatabaseAsync("test");
         var files = await recovered.GetContainerAsync("files");
 
         // Assert: the new blob is gone and the overwrite is undone.
-        closeFailure.InnerExceptions.ShouldContain(error => error is IOException);
+        closeFailure.Flatten().InnerExceptions.ShouldContain(error => error is StorageTransactionException);
         (await files.GetPropertiesAsync("rolled")).ShouldBeNull();
         (await BlobEngineTests.Read(files, "kept")).ShouldBe("kept"u8.ToArray());
     }
@@ -665,12 +677,13 @@ public sealed class BlobTransactionFailureTests
         await Write(files, "rolled", "rolled");
         await Write(files, "keep", "overwritten");
 
-        // Act: the undo's first journal write (its storage bracket's begin) fails.
-        int unspent;
-        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        // Act: another storage bracket holds every page while the rollback runs, so the undo's
+        // bracket cannot touch the first page it undoes and the undo is deferred.
+        int locked;
+        using (var holder = PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
-            unspent = failures.Remaining;
+            locked = holder.Pages;
         }
         int deferred = database.Coordinator.VersionStore.PendingAbortedPurges.Count;
         var waiting = Write(otherFiles, "other", "other");
@@ -680,7 +693,7 @@ public sealed class BlobTransactionFailureTests
         await waiting.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Assert
-        unspent.ShouldBe(0);
+        locked.ShouldBeGreaterThan(0);
         deferred.ShouldBe(1);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
@@ -718,35 +731,44 @@ public sealed class BlobTransactionFailureTests
         DeferredUndoRetryDelay = TimeSpan.FromHours(1),
     };
 
-    /// <summary>A commit the kernel aborts crosses the boundary translated, and a catch-block rollback afterwards raises nothing.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a kernel-aborted commit is translated and a later rollback is a no-op")]
-    public async Task CommitAsync_KernelAbortsCommit_ShouldTranslateAndAcceptRollback()
+    /// <summary>
+    /// A commit whose record cannot be appended is aborted by the kernel and ends Faulted. Since
+    /// #1252 the append fails only when it drains the journal's append buffer (one small frame
+    /// here) and that write fails, which takes the database offline: the commit crosses the
+    /// boundary as the offline refusal, not as committed or unconfirmed, a later rollback is
+    /// refused as offline too, and the reopen holds nothing of the transaction.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a commit whose record cannot be appended aborts, and the database goes offline")]
+    public async Task CommitAsync_CommitRecordCannotBeAppended_ShouldAbortAndGoOffline()
     {
         // Arrange
-        await using var engine = BlobDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
+        var strategy = new FaultInjectingJournalStorageStrategy { SmallJournalBuffer = true };
+        var engine = BlobDatabaseEngine.Create(new() { StorageStrategy = strategy });
         var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
-        var container = await database.CreateContainerAsync("files");
-        await using var session = await database.CreateSessionAsync();
+        await database.CreateContainerAsync("files");
+        var session = await database.CreateSessionAsync();
         var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
         await Write(files, "pending", "pending");
 
-        // Act: the commit record is the commit's first journal write; the kernel then aborts the transaction.
-        DatabaseTransactionAbortedException error;
+        // Act: the commit record's append drains the record ahead of it, and that write fails.
+        DatabaseOfflineException error;
         using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
         {
-            error = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await transaction.CommitAsync());
+            error = await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.CommitAsync());
         }
         var stateAfterCommit = transaction.State;
-        await transaction.RollbackAsync();
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
+        await session.DisposeAsync();
+        engine.Dispose();
+        await using var reopened = BlobDatabaseEngine.Create(new() { StorageStrategy = strategy });
+        var recovered = (IBlobDatabase)await reopened.OpenDatabaseAsync("test");
 
         // Assert
-        error.InnerException.ShouldBeOfType<TransactionAbortedException>();
+        error.ShouldNotBeOfType<DatabaseTransactionCommitUnconfirmedException>();
         stateAfterCommit.ShouldBe(TransactionState.Faulted);
-        transaction.State.ShouldBe(TransactionState.Faulted);
         session.CurrentTransaction.ShouldBeNull();
-        await Write(files, "after", "after");
-        (await Names(container)).ShouldBe(["after"]);
+        (await Names(await recovered.GetContainerAsync("files"))).ShouldBeEmpty();
     }
 
     private static async Task FailAsync(string failure, IBlobDatabase scoped, IBlobContainer files)

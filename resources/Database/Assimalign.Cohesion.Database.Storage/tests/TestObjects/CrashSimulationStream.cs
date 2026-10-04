@@ -298,4 +298,27 @@ public sealed class SimulatedPowerLossException : IOException
         : base("Simulated power loss.")
     {
     }
+
+    /// <summary>
+    /// Asserts that <paramref name="action"/> ends in the simulated power loss: the exception
+    /// itself, or the <see cref="StorageOfflineException"/> a failed journal drain or durable
+    /// flush raises with it as the inner exception (#1243, #1252).
+    /// </summary>
+    /// <param name="action">The operation that loses power.</param>
+    /// <param name="context">A description for the assertion message.</param>
+    /// <returns>The exception the operation threw.</returns>
+    public static Exception ShouldBeThrownBy(Action action, string? context = null)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception exception) when (exception is SimulatedPowerLossException
+            || exception is StorageOfflineException { InnerException: SimulatedPowerLossException })
+        {
+            return exception;
+        }
+
+        throw new Shouldly.ShouldAssertException($"Expected a simulated power loss{(context is null ? "" : $" ({context})")}, but the operation completed.");
+    }
 }

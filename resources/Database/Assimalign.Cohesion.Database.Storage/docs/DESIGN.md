@@ -339,7 +339,8 @@ third of the 4,096-page rate ("Measurements").
   (entry, dictionary slot, LRU node: 0.6 MiB at 4,096 pages). The SQL and key-value engines open
   a second, catalog file set per database whose pool stays at 128 pages (1 MiB): the catalog is
   small and hot. So an open database costs up to about 33 MiB (34 MiB for SQL and key-value) of
-  pool memory; an in-memory database also holds its data and its journal in memory. The journal
+  pool memory, plus each file set's journal append buffer, 64 KiB to 1 MiB (#1252, "The append
+  buffer"); an in-memory database also holds its data and its journal in memory. The journal
   is bounded by the checkpoint size ("Checkpoint triggers"), but its buffer is a `MemoryStream`'s,
   which doubles as it grows: when the journal passes 256 MiB the buffer becomes 512 MiB until the
   checkpoint truncates it. Truncating an in-memory stream to zero releases its buffer
@@ -432,12 +433,102 @@ object ids, so a table scan stops decoding the whole database.
 `IStorageJournal` is the durability mechanism — the *only* one. Frames are length-prefixed,
 magic-tagged, versioned (frame version 3) and CRC-32C-protected; a torn or corrupted tail
 terminates the read scan and is ignored — it belongs to work that was never acknowledged —
-and the first append after a reopen cuts it off ("Failed appends" below), while a verified
+and the first write after a reopen cuts it off ("Failed appends" below), while a verified
 frame of another version is a format error ("Storage format 2 and the format fence"). LSNs never restart: a reopened journal resumes above both its last record
 and the LSN floor of the newest header generation ("Checkpoints"). Records are typed and
 binary (begin / commit / rollback / checkpoint / before-image / after-image / opaque
 logical operation); transaction identity at this level is a compact monotonic `long`
-sequence — GUID identity belongs to the transaction layer above.
+sequence — GUID identity belongs to the transaction layer above. Appends go to a user-space
+buffer and reach the file when it drains ("The append buffer" below).
+
+### The append buffer (#1252)
+
+Until #1252 every append was a positional write of its own frame into a freshly allocated
+array: a one-row statement paid a system call for its begin record, each before image, each
+after image and its commit record, about 5 µs for a 38-byte record and 14 µs for an 8 KiB image on
+the overlapped handle ("Measurements (#1252)"), and that cost would dominate once #1253 makes
+the records small. The journal now works like PostgreSQL's WAL buffers: `XLogInsertRecord`
+copies a record into shared buffers (`CopyXLogRecordToWAL`, `src/backend/access/transam/xlog.c:1323`),
+`AdvanceXLInsertBuffer` writes the oldest buffer out when an insert needs its space
+(`xlog.c:2083-2157`), and `XLogWrite`/`XLogFlush` write the buffers in as few `pg_pwrite` calls
+as their layout allows and then fsync (`xlog.c:2382`, `2480-2532`, `2861`), keeping the written
+and flushed positions apart (`XLogwrtResult`, `xlog.c:332-336`). Neo4j buffers its transaction
+log the same way (`PhysicalFlushableChannel`, `community/io/src/main/java/org/neo4j/io/fs/PhysicalFlushableChannel.java:76-95`,
+`218-224`; `TransactionLogFile.force` drains under the lock and forces outside it,
+`community/kernel/src/main/java/org/neo4j/wal/files/TransactionLogFile.java:1194-1214`), and
+Voron writes each transaction's pages to its journal in one call (`WriteAheadJournal.WriteToJournal`,
+`src/Voron/Impl/Journal/WriteAheadJournal.cs:1700-1760`, `JournalWriter.Write`,
+`src/Voron/Impl/Journal/JournalWriter.cs:51-57`). Citations are to PostgreSQL `85f55534e80`,
+Neo4j `54a7dcf7c25` and RavenDB `83399cb8bc8`.
+
+- **Frames are built in place.** An append reserves its frame at the end of the buffer under the
+  append lock, writes the prefix, the body header and the payload there, computes the CRC-32C
+  over the body in place, assigns the LSN, and issues no system call. Nothing is allocated per
+  frame: a test appends 200 frames after warm-up and allocates under 1 KiB in all (each append
+  used to allocate its frame, 8 KiB for a page image). A checkpoint record's active list is
+  encoded straight into its frame too.
+- **Three positions.** `LastLsn` is the last LSN assigned, `WrittenLsn` the last one that left
+  the buffer (the file holds it, or a checkpoint truncated it), and `DurableLsn` the last one a
+  durable flush confirmed — PostgreSQL's insert, write and flush positions.
+- **Size.** The buffer starts at 64 KiB, allocated by the first append (PostgreSQL's smallest
+  `wal_buffers`, eight 8 KiB pages, `XLOGChooseNumBuffers`, `xlog.c:5244-5255`), which holds a
+  statement's page images; when the records between two drains do not fit, it doubles up to
+  1 MiB, the 1/32 of the default 32 MiB pool that PostgreSQL gives its WAL buffers
+  (`NBuffers / 32`, `xlog.c:5248`; Neo4j's `db.tx_log.buffer.size` is 512 KiB to 4 MiB,
+  `community/configuration/src/main/java/org/neo4j/configuration/GraphDatabaseSettings.java:679-684`).
+  It never shrinks: at most 1 MiB per open journal, two for the SQL and key-value engines' data
+  and catalog file sets. A full buffer is written out in
+  one call before the next frame is encoded. A frame larger than 1 MiB (an operation record of
+  that size; no page image is) is written directly after the buffered frames, from a pooled array.
+- **The drain rule.** The buffer drains to the operating system before:
+  - **every commit is acknowledged, in every durability mode.** `Synchronous` and `Grouped` drain
+    in the durable flush they already made (`EnsureDurable`); `None`, which used to return at once,
+    now drains through the commit record (`StreamJournal.EnsureWritten`, internal, through
+    `Storage.EnsureCommitDurable`), without a durable flush. So a process crash loses no
+    acknowledged commit that survived it when every append was a write; a power loss under `None`
+    may lose it, as before. PostgreSQL's `synchronous_commit = off` acknowledges a commit while its
+    record is still in the WAL buffers (`RecordTransactionCommit`, `src/backend/access/transam/xact.c:1553-1565`);
+    this journal does not. A storage bracket committed with `awaitDurability: false` (a statement
+    bracket, an undo batch) is not acknowledged and stays buffered until the outer commit drains it,
+    which is exactly the window in which it was always unproven.
+  - **every reader.** `ReadAll` and `ReadSequential` drain under the lock they read under, so
+    `StorageRecovery`, `TransactionRecovery.Analyze` and every test reading the journal see every
+    appended record. An offline journal is read as the file holds it.
+  - **the write-ahead gate** lets a page reach the data file: `EnsureDurable(pageLsn)` when the
+    storage flushes durably, `EnsureWritten(pageLsn)` under `None`, so a stolen page's before image
+    is never still in the process when the page is on the file.
+  - **a checkpoint truncates**: the buffer is written before the truncation, so nothing appended is
+    discarded unwritten and a drain failure stops the checkpoint before it truncates anything; the
+    checkpoint record itself is then drained with the checkpoint's flush.
+  - **`Flush` and disposal.** A clean close drains; an offline one writes nothing.
+- **`LastLsn` consumers** read an assignment counter, not a file position, and none of them reads
+  the file on its strength: the header write's LSN floor is `LastLsn`, and the header write drains
+  and flushes through it before it writes the slot; `IsCheckpointDue` and the close's "nothing
+  written since open" test compare counters. Code that reads the file reads it through the
+  journal's readers, which drain.
+- **A failed drain takes the storage offline (#1243's rule).** A drain carries records that pages
+  in the buffer pool already describe, before images included, so it can neither be dropped nor
+  retried safely; the failing call throws `StorageOfflineException`, nothing more is written, and
+  the reopen's recovery reads what the file holds, as after a failed fsync. PostgreSQL raises
+  `PANIC` on any failed WAL write (`xlog.c:2514-2532`). An append can therefore fail with
+  `StorageOfflineException` when it has to drain a full buffer.
+- **Concurrency is unchanged.** Appends, drains and flushes are serialized by the journal's lock,
+  which a durable flush still holds across its fsync. Releasing it during the fsync, as Neo4j's
+  `force` does, would let appenders fill the buffer meanwhile; that is a separate change.
+
+**The handle keeps `FileOptions.Asynchronous | FileOptions.RandomAccess`.** The physical file
+system opens every handle overlapped with the random-access hint (`PhysicalFileSystemFile.OpenHandle`),
+and a synchronous `RandomAccess.Write` on an overlapped Windows handle waits on an event: measured
+here at +4–6 µs for a 64-byte or 8 KiB extending write (7.4–9.3 µs against 2.3–4.4 µs for 64 bytes,
+13.5–14.1 against 7.2–8.2 µs for 8 KiB), and within the noise from 64 KiB up and under any fsync
+(~300 µs on this machine). The buffer turns that per-record cost into a per-drain one: one write
+per acknowledged statement instead of four or more. The end-to-end A/B below ("Measurements
+(#1252)") puts what is left at up to 5 µs per `None`-mode commit (a one-page bracket at 26–28 µs
+against 22–27 µs on a synchronous handle) and at nothing measurable under an fsync. Dropping the
+flag would need a per-handle option on the shared `IFileSystemFile.OpenHandle` contract and would
+apply equally to the data file, whose 8 KiB page reads and writes pay the same overhead, so it is
+recorded as a follow-up for the FileSystem library rather than a journal-only special case.
+`RandomAccess` disables read-ahead, which only the open-time recovery scan of the journal would use.
 
 ### Write ordering rules (steal / no-force, full page images)
 
@@ -447,13 +538,17 @@ sequence — GUID identity belongs to the transaction layer above.
 2. **The write-ahead gate.** The buffer pool may steal (evict) a dirty page at any
    time, but its write-back first forces the journal durable up to the page's LSN —
    so any uncommitted content that reaches the data file is always undoable from a
-   durable before-image. A page written outside the journal (a checkpoint anchor page)
+   durable before-image. The force drains the append buffer through that LSN first
+   (#1252); under `CommitDurability.None` the gate drains without a durable flush
+   (`EnsureWritten`). A page written outside the journal (a checkpoint anchor page)
    carries the journal's last LSN at the time its page was allocated, so the gate holds
    for it too ("Checkpoints").
-3. **Commit = after-images + commit record + fsync.** Commit appends the after-image
+3. **Commit = after-images + commit record + drain + fsync.** Commit appends the after-image
    of every touched page (stamping each page's LSN with its record), then the commit
-   record, and acknowledges only after `EnsureDurable(commitLsn)`. Data pages are
-   *not* forced — recovery redoes them (no-force).
+   record, and acknowledges only after `EnsureDurable(commitLsn)`, which drains the append
+   buffer and flushes durably; under `CommitDurability.None` the commit is acknowledged once
+   the drain wrote the record (#1252). Data pages are *not* forced — recovery redoes them
+   (no-force).
 4. **Rollback restores in memory.** Before-images are kept per transaction and copied
    back into the pooled pages, so rollback is complete without I/O; a rollback record
    marks the outcome.
@@ -471,20 +566,22 @@ sequence — GUID identity belongs to the transaction layer above.
 ### Failed appends (#1226)
 
 A journal append that fails must not leave the journal or the storage in a state that
-outlives the failure:
+outlives the failure. Since #1252 an append writes nothing, so it fails only when it has to
+drain a full buffer (or write a frame larger than the buffer) and that write fails, which takes
+the storage offline ("The append buffer" above; "A failed durable flush takes the storage
+offline" below). The bookkeeping below still holds for every failed append, offline or not:
 
-- **A partial frame is cut back off.** A write that fails part way can leave the start
-  of its frame at the end of the stream, and the read scan stops at the first frame that
-  does not verify, so every frame appended after it, commit records included, would be
-  invisible to recovery. `StreamJournal` therefore truncates the stream back to where
-  the failed frame began before the failure propagates. When that truncation fails too,
-  the journal refuses every later append with `JournalException` until a checkpoint's
-  truncation removes the partial frame or the storage is reopened: a record that could
-  not reach recovery is never acknowledged. Flushing stays allowed, because everything
-  before the partial frame still reads. PostgreSQL stops the server on any failed WAL
-  write (`ereport(PANIC, "could not write to log file ...")`,
-  `src/backend/access/transam/xlog.c:2529-2531`, commit `85f55534e80`); this journal
-  stops only its appends.
+- **A partial frame is left to recovery.** A write that fails part way can leave the start
+  of a frame at the end of the file, and the read scan stops at the first frame that does
+  not verify, so a frame written after it would be invisible to recovery. The failed write
+  takes the storage offline, so nothing is written behind those bytes; the reopen's read scan
+  stops at them and its first write cuts them off (next item). PostgreSQL stops the server on
+  any failed WAL write (`ereport(PANIC, "could not write to log file ...")`,
+  `src/backend/access/transam/xlog.c:2529-2532`). Until #1252 every append was its own write:
+  a failed one cut its partial frame back off and the journal kept appending, refusing appends
+  with `JournalException` only when the cut failed too. A buffered journal cannot do that
+  safely — the frames a failed drain carried are already described by pages in the buffer pool,
+  before images included — so the cut and the refusal are gone.
 - **Appends resume after the last verified frame (#1251 review).** A crash can leave a torn
   frame at the end of the journal; the read scan stops there, and so recovery ignores it. The
   next append, though, used to go to the physical end of the stream, behind those bytes, and
@@ -494,11 +591,11 @@ outlives the failure:
   torn start of a checkpoint record was never truncated at all, so every later commit sat
   behind it. `StreamJournal` therefore remembers where the last verified frame ended when a
   read scan runs to the end of the verified frames (every journal's initialization does), and
-  its first append cuts the stream back to that offset. PostgreSQL resumes WAL insertion at
+  its first write cuts the stream back to that offset. PostgreSQL resumes WAL insertion at
   the end of the last valid record the same way (`EndOfLog`,
   `src/backend/access/transam/xlog.c:6711-6718`). An open that appends nothing leaves the
-  journal byte-identical. Every later append goes to the offset the previous one ended at,
-  so the journal asks its file for the length once after a scan instead of once per append
+  journal byte-identical. Every later write goes to the offset the previous one ended at,
+  so the journal asks its file for the length once after a scan instead of once per write
   ("Measurements").
 - **A page whose before image fails is not locked.** A first touch takes the page's
   write lock, then appends the before image. When that append fails the page is still
@@ -522,9 +619,9 @@ outlives the failure:
 
 ### A failed durable flush takes the storage offline (#1243)
 
-A failed append is recoverable because the journal knows exactly what it holds afterwards. A
-failed fsync is not: the operating system may have kept the bytes it was asked to make durable,
-or dropped them and marked its cache pages clean, and a second fsync can then report success
+A failed fsync leaves the storage unable to know what the media holds: the operating system
+may have kept the bytes it was asked to make durable, or dropped them and marked its cache
+pages clean, and a second fsync can then report success
 for writes that never reached the device. That is PostgreSQL's 2018 "fsyncgate", and PostgreSQL
 answers it by never retrying: a WAL fsync failure is `PANIC` (`issue_xlog_fsync`,
 `src/backend/access/transam/xlog.c:9877-9937`), a failure inside the commit critical section is
@@ -535,8 +632,9 @@ with `data_sync_retry` off, its default, a data-file fsync failure is `PANIC` to
 media then decides what survived.
 
 The storage does the same without stopping the process. When a durable flush of the journal
-(`EnsureDurable`, `FlushPendingCommits`, any `Flush(forceDurable: true)`) or of the data file
-(the checkpoint's and the header write's data flush) throws, the storage goes **offline**:
+(`EnsureDurable`, `FlushPendingCommits`, any `Flush(forceDurable: true)`), a write of the
+journal's append buffer (a drain, #1252: "The append buffer"), or a durable flush of the data
+file (the checkpoint's and the header write's data flush) throws, the storage goes **offline**:
 
 - **The failing call throws `StorageOfflineException`** (`COHDBS002`), carrying the I/O
   failure as its inner exception. The journal latches the error under its append lock, so no
@@ -914,9 +1012,15 @@ reference is PostgreSQL's `max_wal_size` of 1 GB (`max_wal_size_mb = 1024`,
   durable in either mode.
 - **`None`:** commits do not flush to durable storage because the backing store
   cannot provide it. The same before images, after images, and commit records are
-  appended. Page write-back keeps ordinary journal-before-page flush ordering;
+  appended, and a commit is acknowledged only once the journal's append buffer drained
+  through its record to the operating system (`EnsureWritten`, #1252), so a process crash
+  loses no acknowledged commit; a power loss can. Page write-back keeps ordinary
+  journal-before-page ordering through the same drain;
   recovery, checkpoints, explicit flushes, and shutdown perform ordinary flushes
   without advancing the durable LSN or publishing durable group-commit progress.
+
+In `Synchronous` and `Grouped` the durable flush drains the append buffer first, so a group
+flush writes every buffered record of every waiting committer in one write and one fsync.
 
 `Synchronous = 0` and `Grouped = 1` retain their shipped enum values; `None = 2` is
 additive. The low-level `Storage` property retains its synchronous default for
@@ -965,7 +1069,9 @@ page that was freed during a scan.
 of an enumeration and yields one validated frame at a time. Callers consume it on
 one thread without awaiting or mutating the journal; early disposal restores the
 underlying stream position and releases the lock. `ReadAll` preserves its existing
-materialized API. Journal initialization also uses streaming enumeration.
+materialized API. Journal initialization also uses streaming enumeration. Both readers
+drain the append buffer under the same lock before they read (#1252), so they return every
+appended record; an offline journal is read as the file holds it.
 
 Physical recovery uses three streaming passes: classify committed sequences,
 retain the winning relevant LSN per page, then replay only those images. The winner
@@ -1188,6 +1294,36 @@ checkpointed by its statement as the statement ends. The single-database bound a
 are unchanged, and the per-statement cost of the reentrancy mark and the deferral check is within
 the noise of the statement rate.
 
+## Measurements (#1252, 2026-10-04)
+
+Release builds on the same machine (win-arm64, 12 logical cores, .NET 10.0.12), physical files on
+the local volume. Before is the integration branch at `cf3b17b1`, after is this change; a probe
+outside the repository ran each configuration in its own process on four reserved cores at high
+priority, alternating the builds in three rounds. Each cell is the range of the three rounds'
+medians. "Synchronous handle" replaces the journal's handle with one opened without
+`FileOptions.Asynchronous`, for the decision in "The append buffer".
+
+| Workload | Before | After |
+|---|---|---|
+| Journal throughput, 38-byte commit records appended then one flush, physical handle | 206k–215k records/s (7.5–7.8 MiB/s) | 8.9M–9.4M records/s (322–340 MiB/s) |
+| the same, synchronous handle | 540k–590k records/s | 7.8M–9.8M records/s |
+| Journal throughput, 8 KiB page images, physical handle | 66k–73k records/s (517–569 MiB/s) | 143k–154k records/s (1,124–1,210 MiB/s) |
+| the same, synchronous handle | 105k–109k records/s | 127k–156k records/s |
+| One-page committed bracket, durability `None` (begin, before image, after image, commit) | 46.3–47.9 µs | 26.3–27.8 µs |
+| the same, synchronous handle | 31.3–42.2 µs | 22.2–26.5 µs |
+| One-page committed bracket, durability `Synchronous` | 352–447 µs | 381–425 µs |
+| SQL single-row `INSERT` per statement (auto-commit, `INT PRIMARY KEY`, 3,000 rows), durability `None` | 137–143 µs | 79–106 µs |
+| the same, durability `Synchronous` (1,000 rows) | 465–557 µs | 476–521 µs |
+| the same, in memory, durability `None` | 64–78 µs | 58–82 µs |
+
+Every acknowledged commit now costs one write instead of one per record: a `None`-mode statement
+on physical files is 27–45% cheaper, and raw append throughput rises 43-fold for small records,
+the shape #1253's delta records will have. Under `Synchronous` the fsync (about 300 µs here)
+dominates both builds and the difference is within the noise; an in-memory journal neither gains
+nor loses, because a write to a `MemoryStream` was already a copy. The synchronous-handle rows
+measure the `FileOptions.Asynchronous` cost that remains: up to 5 µs per `None`-mode commit, nothing
+under an fsync.
+
 ## Error model
 
 `StorageException` is the area root for this library. `StorageIOException` (stream and
@@ -1195,11 +1331,13 @@ allocation failures), `SlottedPageException` (record layout violations),
 `StorageCorruptionException` (checksum/header integrity failures — carries the
 `PageId`), `StorageFormatException` (a file set in another on-disk format, coded
 `COHDBS001`, carrying the found and supported versions), `StorageOfflineException` (a
-durable flush of the journal or the data file failed and the storage writes nothing more
-until it is reopened, coded `COHDBS002`, carrying the I/O failure; `Find` locates one in an
-inner-exception or aggregate chain, and `CommitRecordWritten` says the throwing bracket's commit
-record was appended before the flush failed), and `JournalException` (journal framing/state
-violations) all derive from it, so consumers can catch the family or the specific failure.
+durable flush of the journal or the data file, or a write of the journal's append buffer,
+failed and the storage writes nothing more until it is reopened, coded `COHDBS002`, carrying
+the I/O failure; `Find` locates one in an inner-exception or aggregate chain, and
+`CommitRecordWritten` says the throwing bracket's commit record was appended before the flush
+failed), and `JournalException` (journal framing violations: a record whose frame would exceed
+2 GiB; since #1252 a failed append no longer raises it) all derive from it, so consumers can
+catch the family or the specific failure.
 Engines translate `StorageOfflineException` into the area root's `DatabaseOfflineException`
 with their own code, or into `DatabaseTransactionCommitUnconfirmedException` when
 `CommitRecordWritten` is set.

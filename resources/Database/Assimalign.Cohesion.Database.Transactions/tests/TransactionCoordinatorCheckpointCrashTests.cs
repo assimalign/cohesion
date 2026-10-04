@@ -41,7 +41,7 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
                 var scenario = await ArrangeAsync(point); // abandoned after its simulated power loss
                 point.CrashAtWrite = point.Writes + write;
                 point.DurableSectors = sectors;
-                Should.Throw<SimulatedPowerLossException>(() => scenario.Coordinator.Checkpoint());
+                SimulatedPowerLossException.ShouldBeThrownBy(() => scenario.Coordinator.Checkpoint());
                 string at = $"crash at checkpoint write {write} ({point.Log[point.CrashAtWrite - 1]}), {sectors} sectors";
 
                 using var reopened = CrashStorage.Open(scenario.Storage.CaptureDurable());
@@ -61,10 +61,51 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
     }
 
     /// <summary>
-    /// One committed version, <see cref="WriterCount"/> writers that each inserted a version and
-    /// are still in flight, and a reader, over write-through crash-simulation streams.
+    /// Since #1252 the writers' records wait in the journal's append buffer until the checkpoint
+    /// drains them in the write that leads it. A crash in that write loses records nothing on the
+    /// data file depends on: no page the writers changed was written yet (the write-ahead gate
+    /// drains the journal through a page's LSN before the page), so recovery finds the committed
+    /// version and no trace of the writers, which classify as never begun.
     /// </summary>
-    private static async Task<Scenario> ArrangeAsync(CrashPoint point)
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a crash in the drain that leads a checkpoint loses only records no data page depends on")]
+    public async Task Checkpoint_CrashInTheLeadingDrain_ShouldLoseNothingTheDataFileDependsOn()
+    {
+        foreach (int sectors in new[] { 0, 3 })
+        {
+            // Arrange: the writers' records are still buffered.
+            var point = new CrashPoint();
+            var scenario = await ArrangeAsync(point, drain: false);
+            int before = point.Writes;
+            point.CrashAtWrite = before + 1;
+            point.DurableSectors = sectors;
+
+            // Act
+            SimulatedPowerLossException.ShouldBeThrownBy(() => scenario.Coordinator.Checkpoint());
+            string at = $"crash at {point.Log[point.CrashAtWrite - 1]}, {sectors} sectors";
+            using var reopened = CrashStorage.Open(scenario.Storage.CaptureDurable());
+            await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+            var plan = recovered.AnalyzeAndScrub();
+            recovered.CompleteRecovery();
+            var reader = await recovered.BeginAsync(IsolationLevel.Snapshot);
+
+            // Assert: the crash hit the journal's drain, before any data page; no writer committed,
+            // and only the committed version is there.
+            point.Log[point.CrashAtWrite - 1].ShouldStartWith("journal Write", Case.Sensitive, at);
+            scenario.Writers.ShouldAllBe(writer => !plan.Committed.Contains(writer), at);
+            RecordCount(reopened).ShouldBe(1, at);
+            (await recovered.VersionStore.GetVisibleVersionAsync(0, scenario.Committed, reader.Snapshot)).ShouldNotBeNull(at);
+            await recovered.CommitAsync(reader);
+        }
+    }
+
+    /// <summary>
+    /// One committed version, <see cref="WriterCount"/> writers that each inserted a version and
+    /// are still in flight, and a reader, over write-through crash-simulation streams. Unless
+    /// <paramref name="drain"/> is false the journal's append buffer is drained last, so the
+    /// writers' records are on the media before the checkpoint, as any commit or stolen page leaves
+    /// them, and every crash point is one of the checkpoint's own writes.
+    /// </summary>
+    private static async Task<Scenario> ArrangeAsync(CrashPoint point, bool drain = true)
     {
         var storage = CrashStorage.Create(point);
         var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
@@ -82,6 +123,11 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
         }
 
         _ = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        if (drain)
+        {
+            storage.Log.Flush();
+        }
+
         return new Scenario(storage, coordinator, writers, location, storage.Log.LastLsn);
     }
 
