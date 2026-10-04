@@ -58,7 +58,7 @@ public sealed class KeyValueTransactionFailureTests
         }
 
         // Act
-        await Should.ThrowAsync<Exception>(async () => await FailAsync(failure, database, session));
+        var error = await Should.ThrowAsync<Exception>(async () => await FailAsync(failure, database, session));
         var stateAfterFailure = transaction.State;
         var currentAfterFailure = session.CurrentTransaction;
         await database.PutAsync(session, Bytes("later"), Bytes("later"), cancellationToken: TestTimeout.Token());
@@ -70,6 +70,7 @@ public sealed class KeyValueTransactionFailureTests
         }
 
         // Assert: the failure aborted nothing and autocommitted nothing.
+        ShouldBeExpectedFailure(error, failure);
         stateAfterFailure.ShouldBe(TransactionState.Active);
         currentAfterFailure.ShouldBeSameAs(transaction);
         outside.ShouldBeNull();
@@ -264,8 +265,11 @@ public sealed class KeyValueTransactionFailureTests
         (await Keys(database, session)).ShouldBe(["after"]);
     }
 
-    /// <summary>Closing a session ends its transaction, and the caller's rollback afterwards raises nothing.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: closing the session ends the transaction and a later rollback is a no-op")]
+    /// <summary>
+    /// Closing a session ends its transaction: the caller's rollback afterwards raises nothing, and
+    /// its commit fails with COHDBK001 naming the closure and commits nothing.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: closing the session ends the transaction; a later rollback is a no-op and a commit fails with COHDBK001")]
     public async Task DisposeAsync_SessionWithTransaction_ShouldEndTransactionAndAcceptRollback()
     {
         // Arrange
@@ -282,7 +286,9 @@ public sealed class KeyValueTransactionFailureTests
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        commit.Message.ShouldContain("RolledBack", Case.Sensitive);
+        commit.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
+        commit.Message.ShouldContain("nothing was committed", Case.Sensitive);
+        commit.Message.ShouldContain("The key-value session closed before the transaction ended.", Case.Sensitive);
         session.CurrentTransaction.ShouldBeNull();
         await using var observer = await database.CreateSessionAsync();
         (await Keys(database, observer)).ShouldBeEmpty();
@@ -308,6 +314,26 @@ public sealed class KeyValueTransactionFailureTests
                 await pending;
                 break;
             }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(failure));
+        }
+    }
+
+    // The failure each case must raise, so a wrong failure cannot pass as the one under test. A
+    // canceled task may surface a derived cancellation exception.
+    private static void ShouldBeExpectedFailure(Exception error, string failure)
+    {
+        switch (failure)
+        {
+            case "conflict":
+                error.ShouldBeOfType<DatabaseTransactionAbortedException>();
+                break;
+            case "parse":
+                error.ShouldBeOfType<DatabaseParseException>();
+                break;
+            case "canceled":
+                error.ShouldBeAssignableTo<OperationCanceledException>();
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(failure));
         }

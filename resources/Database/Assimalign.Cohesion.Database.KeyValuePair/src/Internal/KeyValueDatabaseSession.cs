@@ -107,7 +107,10 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
         // a command never runs in a half-rolled-back transaction or silently autocommits (#1225).
         if (OpenTransaction is { } transaction)
         {
-            if (!transaction.IsUsable)
+            // The admission also keeps a commit from starting while the command runs. A rollback
+            // may still end the transaction underneath it (a host's rollback of a wire session's
+            // transaction): the command then fails, and the kernel applies nothing for it.
+            if (!transaction.TryBeginCommand())
             {
                 throw transaction.CreateRefusal();
             }
@@ -127,6 +130,10 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
             catch (TransactionAbortedException exception)
             {
                 throw new DatabaseTransactionAbortedException(exception.Message, exception);
+            }
+            finally
+            {
+                transaction.EndCommand();
             }
         }
 
@@ -204,10 +211,11 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
         _state = SessionState.Closed;
 
         // Roll back the transaction the caller left open, including one whose end did not
-        // complete. The transaction object stays with its caller, whose later rollback is a no-op.
+        // complete. The transaction object stays with its caller, whose later rollback is a no-op
+        // and whose later commit fails with COHDBK001 naming the closure.
         if (OpenTransaction is { } transaction)
         {
-            await transaction.DisposeAsync().ConfigureAwait(false);
+            await transaction.CloseAsync(new DatabaseException("The key-value session closed before the transaction ended.")).ConfigureAwait(false);
         }
 
         _transaction = null;

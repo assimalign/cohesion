@@ -21,6 +21,10 @@ public sealed class KeyValueTransactionFailureClientTests
 
     private static string Text(ReadOnlyMemory<byte> bytes) => Encoding.UTF8.GetString(bytes.Span);
 
+    /// <summary>
+    /// A conflict inside the host's transaction fails one client command and leaves the transaction
+    /// active; the client's later write stays inside it, and the host's ROLLBACK undoes every write.
+    /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Transaction: a failed command, a later write and ROLLBACK leave the key space unchanged")]
     public async Task PutAsync_ConflictInsideHostTransaction_ShouldKeepTransactionAndRollBackEveryWrite()
     {

@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
@@ -76,6 +77,48 @@ public sealed class KeyValueTransactionFailureWireTests
         var database = (IKeyValueDatabase)opened;
         await using var observer = await database.CreateSessionAsync();
         (await database.GetAsync(observer, Bytes("pending"), TestTimeout.Token())).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A host rollback while a wire command of its transaction waits for a key lock fails that
+    /// command with ExecutionFailure: nothing of it is written, the session stays ready, and the
+    /// key's next writer is not blocked (#1225 review).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Wire transaction: a host rollback fails a wire command parked on a key lock and writes nothing")]
+    public async Task Execute_HostRollsBackWhileCommandWaitsForKeyLock_ShouldFailCommandAndWriteNothing()
+    {
+        // Arrange: another transaction holds the lock of a fresh key the wire command will write.
+        await using var harness = await KeyValueServerHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        harness.Engine.TryGetDatabase(KeyValueServerHarness.DatabaseName, out var opened).ShouldBeTrue();
+        var database = (IKeyValueDatabase)opened;
+        await using var blockingSession = await database.CreateSessionAsync();
+        await using var observer = await database.CreateSessionAsync();
+        var blocker = await blockingSession.BeginTransactionAsync(TestTimeout.Token());
+        await database.PutAsync(blockingSession, Bytes("fresh"), Bytes("blocker"), cancellationToken: TestTimeout.Token());
+        var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(TestTimeout.Token());
+        await client.SendAsync(ProtocolMessageType.Execute, Command("PUT @k @v", ("k", Bytes("fresh")), ("v", Bytes("wire"))).Encode());
+
+        // Once the command is admitted into the transaction, it can only run inside it.
+        await KeyValueServerHarness.WaitUntilAsync(() => ((KeyValueDatabaseTransaction)transaction).RunningCommands == 1);
+
+        // Act: the host ends its transaction under the command, then the blocker rolls back, which
+        // would grant the key to a command that had queued just after the host's rollback.
+        await transaction.RollbackAsync(TestTimeout.Token());
+        await blocker.RollbackAsync(TestTimeout.Token());
+        var failure = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+        var fresh = await database.GetAsync(observer, Bytes("fresh"), TestTimeout.Token());
+        var later = await database.PutAsync(observer, Bytes("fresh"), Bytes("later"), cancellationToken: TestTimeout.Token(5));
+
+        // Assert
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        fresh.ShouldBeNull();
+        later.Applied.ShouldBeTrue();
+        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
+        await PutAsync(client, "after");
     }
 
     private static async Task PutAsync(KeyValueProtocolClient client, string key)

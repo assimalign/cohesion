@@ -165,15 +165,38 @@ a different contract from Graph, Documents and Blob, deliberately:
   `RollbackAsync` completes; a `CommitAsync` then completes the rollback and fails with
   `COHDBK001`, committing nothing. `CurrentTransaction` returns the transaction until the caller
   ends it, and null after a commit, rollback or disposal (it used to return the ended
-  transaction). Disposing the session rolls back an open transaction.
+  transaction). Disposing the session rolls back an open transaction, and a commit of that
+  transaction afterwards fails with `COHDBK001` naming the closure.
+- **A rollback leaves no write behind, even under a running command.** The transaction can end on
+  another thread while one of its commands runs: the caller's rollback, the session closing, or a
+  host rolling back a wire session's transaction while a wire command waits for a key lock. Until
+  the #1225 review, a `PUT` or `DELETE` parked on the key lock was granted the lock later, after
+  its transaction had ended; it then applied its write under the ended sequence, which every
+  snapshot reads as committed, so a rolled-back write became visible, and the key lock stayed
+  granted to a transaction that would never release it, so every later writer of the key waited
+  until restart. Now three rules close it. The kernel admits no bracket of a transaction whose
+  end has begun ([Transactions DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#ending-a-transaction-under-a-running-statement)).
+  The end fails the transaction's queued lock requests, so the parked command fails at once with
+  `DatabaseTransactionAbortedException`. And a request queued just after the end is checked once
+  the grant arrives: the executor releases a grant made to an ended transaction and fails the
+  command, as the Graph, Documents and Blob engines do for their writer lock. A grant to a
+  transaction that is still active is kept when the command then fails, because releasing all of
+  the transaction's locks would expose the keys its earlier commands wrote.
+- **A commit waits for no command.** A commit that starts while a command of the transaction is
+  still running is refused with a plain `DatabaseException` and leaves the transaction active,
+  as Documents and Blob refuse a commit while an operation or stream is open: the command's
+  bracket would otherwise race the commit record. A rollback is never refused this way.
 - **Over the wire** the protocol has no transaction control, so a host opens the transaction on
   `IDatabaseServerSession.DatabaseSession`. A failed wire command reports `ParseFailure` or
   `ExecutionFailure`, keeps the session ready and keeps the transaction, exactly as in process
   (`KeyValueTransactionFailureWireTests`, `KeyValueTransactionFailureClientTests`). A connection
   that ends disposes its engine session and so rolls the transaction back; the host's rollback
-  afterwards, or racing the teardown, raises nothing.
+  afterwards, or racing the teardown, raises nothing, and its commit afterwards fails with
+  `COHDBK001`. A host rollback while a wire command waits for a key lock fails that command with
+  `ExecutionFailure`, and nothing of it is written.
 
-`KeyValueTransactionFailureTests` covers the in-process cases.
+`KeyValueTransactionFailureTests` covers the in-process cases, and `KeyValueLifecycleTests` the
+transaction ending under a running command.
 
 ## The text seam (docs/COMMANDS.md — the grammar contract)
 
