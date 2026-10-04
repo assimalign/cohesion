@@ -388,7 +388,22 @@ public abstract class Storage : IStorage
             _activeTransactionCount++;
         }
 
-        _journal.AppendBegin(sequence);
+        try
+        {
+            _journal.AppendBegin(sequence);
+        }
+        catch
+        {
+            // No transaction exists for the caller to complete, so nothing else would
+            // return the count, and every later checkpoint would refuse to run.
+            lock (_transactionLock)
+            {
+                _activeTransactionCount--;
+            }
+
+            throw;
+        }
+
         return new StorageTransaction(this, sequence);
     }
 
@@ -912,6 +927,14 @@ public abstract class Storage : IStorage
     /// Rolls a storage transaction back: restores every touched page to its before
     /// image in the buffer pool and appends a rollback record.
     /// </summary>
+    /// <remarks>
+    /// The rollback record is advisory: recovery undoes every transaction without a
+    /// commit record. Once the pages are restored the transaction therefore ends even
+    /// when the record cannot be appended: its page write locks and its place in the
+    /// active count are released before the append failure propagates, so a journal
+    /// failure cannot leave the storage refusing every later checkpoint. A failure while
+    /// restoring the pages leaves the transaction active, so the caller can retry.
+    /// </remarks>
     internal unsafe void RollbackTransaction(StorageTransaction transaction)
     {
         foreach (var (pageId, image) in transaction.BeforeImages)
@@ -921,9 +944,14 @@ public abstract class Storage : IStorage
             handle.MarkDirty();
         }
 
-        _journal!.AppendRollback(transaction.Sequence);
-
-        ReleasePageWriteLocks(transaction);
+        try
+        {
+            _journal!.AppendRollback(transaction.Sequence);
+        }
+        finally
+        {
+            ReleasePageWriteLocks(transaction);
+        }
     }
 
     /// <inheritdoc />
@@ -1141,6 +1169,7 @@ public abstract class Storage : IStorage
     private unsafe void RegisterTouch(StorageTransaction transaction, IStoragePageHandle handle)
     {
         long pageId = (long)handle.Id;
+        bool locked = false;
 
         lock (_transactionLock)
         {
@@ -1155,6 +1184,7 @@ public abstract class Storage : IStorage
             else
             {
                 _pageWriteLocks[pageId] = transaction.Sequence;
+                locked = true;
             }
         }
 
@@ -1166,8 +1196,27 @@ public abstract class Storage : IStorage
         var image = new byte[Page.Size];
         new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size).CopyTo(image);
 
-        long lsn = _journal!.AppendPageImage(
-            transaction.Sequence, handle.Id, JournalRecordType.BeforePageImage, image);
+        long lsn;
+        try
+        {
+            lsn = _journal!.AppendPageImage(
+                transaction.Sequence, handle.Id, JournalRecordType.BeforePageImage, image);
+        }
+        catch
+        {
+            // The page is unmodified and has no before image in this transaction, so neither
+            // its commit nor its rollback (both release by before image) would release the lock
+            // taken above, and every later transaction touching the page would be refused.
+            if (locked)
+            {
+                lock (_transactionLock)
+                {
+                    _pageWriteLocks.Remove(pageId);
+                }
+            }
+
+            throw;
+        }
 
         transaction.RecordBeforeImage(pageId, image);
 
@@ -1199,8 +1248,10 @@ public abstract class Storage : IStorage
 
             // Commit and rollback each end exactly one begun transaction (the scope
             // guards double completion), so the active count pairs with
-            // BeginTransaction's increment.
+            // BeginTransaction's increment. The scope completes in the same step, so a
+            // completion that throws after this point is never repeated by Dispose.
             _activeTransactionCount--;
+            transaction.MarkCompleted();
         }
     }
 

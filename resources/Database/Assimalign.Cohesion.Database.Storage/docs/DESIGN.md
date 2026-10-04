@@ -291,6 +291,43 @@ sequence — GUID identity belongs to the transaction layer above.
    conflict surface without ever weakening the invariant that makes page-image
    logging correct.
 
+### Failed appends (#1226)
+
+A journal append that fails must not leave the journal or the storage in a state that
+outlives the failure:
+
+- **A partial frame is cut back off.** A write that fails part way can leave the start
+  of its frame at the end of the stream, and the read scan stops at the first frame that
+  does not verify, so every frame appended after it, commit records included, would be
+  invisible to recovery. `StreamJournal` therefore truncates the stream back to where
+  the failed frame began before the failure propagates. When that truncation fails too,
+  the journal refuses every later append with `JournalException` until a checkpoint's
+  truncation removes the partial frame or the storage is reopened: a record that could
+  not reach recovery is never acknowledged. Flushing stays allowed, because everything
+  before the partial frame still reads. PostgreSQL stops the server on any failed WAL
+  write (`ereport(PANIC, "could not write to log file ...")`,
+  `src/backend/access/transam/xlog.c:2529-2531`, commit `85f55534e80`); this journal
+  stops only its appends.
+- **A page whose before image fails is not locked.** A first touch takes the page's
+  write lock, then appends the before image. When that append fails the page is still
+  unmodified and the transaction holds no before image of it, and commit and rollback
+  release page locks by before image, so the touch releases the lock itself before the
+  failure propagates. Otherwise the page would stay locked to a finished transaction,
+  and every later transaction touching it, the retry of a failed undo included, would be
+  refused until a restart.
+- **A bracket whose begin record fails is not counted.** `BeginTransaction` counts the
+  bracket as active before it appends the begin record (under the lock checkpoints
+  take), and returns the count when the append fails, since no scope exists for the
+  caller to complete. Otherwise every later checkpoint would refuse to run until a
+  restart.
+- **A rollback ends its bracket even when its rollback record fails.** The record is
+  advisory: recovery undoes every bracket without a commit record. Once the pages are
+  restored from their before images, the bracket's page write locks and its place in
+  the active count are released, and the scope is completed in the same step, before
+  the append failure propagates; disposing the scope afterwards does not roll it back
+  a second time. A failure while restoring the pages leaves the bracket active, so the
+  caller can retry it.
+
 ### The physical/logical bracket interplay (MVCC layering rules)
 
 The MVCC session binding (area DESIGN.md §3.8, first delivered by the SQL
