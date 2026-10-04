@@ -737,12 +737,36 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>
     /// Drops a column and rewrites the table's rows to the new positional layout —
     /// row records are positional, so removing a middle column requires splicing
-    /// every stored row (ADD COLUMN, by contrast, is O(1): missing trailing
-    /// components decode as null). Runs under the table's Exclusive lock: the
-    /// intent-lock matrix makes the rewrite wait for in-flight row writers (and
-    /// them for it), so no writer's uncommitted version can be rewritten from
-    /// under it.
+    /// it out of every stored version (ADD COLUMN, by contrast, is O(1): missing
+    /// trailing components decode from the column metadata). Runs under the
+    /// table's Exclusive lock: the intent-lock matrix makes the rewrite wait for
+    /// in-flight row writers (and them for it), so no writer's uncommitted version
+    /// can be rewritten from under it. The rewrite itself never moves a version
+    /// (<see cref="CollectColumnSplices"/>), so the table's indexes need no maintenance.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One gated bracket orders the statement so that every failure it can detect
+    /// lands before the catalog commits: the splices are collected and checked first
+    /// (cancellable, nothing written), then the catalog drop self-commits and the new
+    /// definition is published, then the collected splices are written. A malformed
+    /// version, a splice that would not shrink, cancellation or running out of memory
+    /// while collecting therefore leave the table and its catalog entry exactly as they
+    /// were. What can still fail after the catalog commit is the storage itself (a
+    /// write or the bracket's durable commit), or a crash; either leaves versions on
+    /// the old layout under the new definition (DESIGN.md, "DROP COLUMN rewrites every
+    /// version in place", Ordering).
+    /// </para>
+    /// <para>
+    /// Once the catalog has committed nothing observes cancellation: a rewrite left
+    /// half done would leave versions the published definition decodes on the wrong
+    /// positions. The bracket commits durably (the self-committing DDL posture of
+    /// CREATE INDEX): the statement's transaction neither records nor undoes it. The
+    /// catalog call honours the gate's no-wait invariant: the catalog is synchronous,
+    /// behind its own monitor and on its own file set, and never takes the apply gate
+    /// or a lock-manager lock.
+    /// </para>
+    /// </remarks>
     private async Task<QueryResult> ExecuteDropColumnAsync(SqlDropColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (!_catalog.TryGetTable(plan.Schema, plan.Name, out var before))
@@ -758,65 +782,152 @@ internal sealed partial class SqlPlanExecutor
         EnsureSameIdentity(before, current);
         before = current;
         EnsureCanDropColumn(before, plan.ColumnName);
+        int droppedOrdinal = FindDroppableColumnOrdinal(before, plan.Schema, plan.Name, plan.ColumnName);
 
-        int droppedOrdinal = -1;
-        for (int i = 0; i < before.Columns.Count; i++)
+        return await statement.Coordinator.ApplyStatementAsync<QueryResult>(statement.Transaction, async bracket =>
         {
-            if (string.Equals(before.Columns[i].Name, plan.ColumnName, StringComparison.OrdinalIgnoreCase))
+            var splices = CollectColumnSplices(before, droppedOrdinal, cancellationToken);
+
+            // The authoritative, self-committed step: the catalog re-checks the drop
+            // under its own lock. Nothing after it observes cancellation.
+            var updated = await _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken).ConfigureAwait(false);
+            _definitions.Get(updated);
+
+            foreach (var (pageId, slotIndex, record) in splices)
             {
-                droppedOrdinal = i;
+                _storage.UpdateRow(bracket, pageId, slotIndex, record);
+            }
+
+            return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+        }, durable: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Returns the ordinal of the column a DROP COLUMN removes, after refusing every
+    /// drop the catalog itself refuses (an unknown, primary-key or indexed column, or
+    /// the table's last column) with the catalog's own messages; constraint
+    /// participation is <see cref="EnsureCanDropColumn"/>'s. The catalog stays
+    /// authoritative and checks again under its lock. Checking here first keeps a
+    /// refused drop from scanning the whole table inside the apply gate, which every
+    /// writer of every table waits on.
+    /// </summary>
+    /// <param name="table">The table's current definition, read under its Exclusive lock.</param>
+    /// <param name="schema">The schema as the statement named it.</param>
+    /// <param name="name">The table as the statement named it.</param>
+    /// <param name="columnName">The column to drop.</param>
+    /// <returns>The column's ordinal in <paramref name="table"/>.</returns>
+    /// <exception cref="SqlCatalogException">The catalog would refuse the drop.</exception>
+    private int FindDroppableColumnOrdinal(SqlCatalogTable table, string schema, string name, string columnName)
+    {
+        int ordinal = -1;
+        for (int i = 0; i < table.Columns.Count; i++)
+        {
+            if (string.Equals(table.Columns[i].Name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                ordinal = i;
                 break;
             }
         }
 
-        // The rewrite walks EVERY stored version — visible or not — because the
-        // whole record space must stay decodable on the new positional layout;
-        // stamps are preserved so visibility is unchanged by the DDL.
-        var targets = new List<(PageId PageId, int SlotIndex, object?[] Values, TransactionSequence Writer, TransactionSequence Deleter)>();
-        if (droppedOrdinal >= 0)
+        if (ordinal < 0)
         {
-            foreach (var (location, values, writer, deleter) in ScanVersions(before, cancellationToken))
+            throw new SqlCatalogException($"Table '{schema}.{name}' has no column named '{columnName}'.");
+        }
+
+        if (table.PrimaryKeyColumns.Any(column => string.Equals(column, columnName, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new SqlCatalogException($"Column '{columnName}' is part of the primary key of '{schema}.{name}' and cannot be dropped.");
+        }
+
+        foreach (var index in _catalog.GetIndexes(table.ObjectId))
+        {
+            if (index.ColumnNames.Any(column => string.Equals(column, columnName, StringComparison.OrdinalIgnoreCase)))
             {
-                targets.Add((location.PageId, location.SlotIndex, values, writer, deleter));
+                throw new SqlCatalogException(
+                    $"Column '{columnName}' is referenced by index '{index.Name}' on '{schema}.{name}'. Drop the index first.");
             }
         }
 
-        var updated = await _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken).ConfigureAwait(false);
-        _definitions.Get(updated);
-
-        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
+        if (table.Columns.Count == 1)
         {
-            foreach (var (pageId, slotIndex, values, writer, deleter) in targets)
+            throw new SqlCatalogException($"Cannot drop the last column of '{schema}.{name}'.");
+        }
+
+        return ordinal;
+    }
+
+    /// <summary>
+    /// DROP COLUMN's row rewrite, collected without writing: the dropped column's
+    /// component spliced out of every stored version of the table, visible or not.
+    /// Runs inside the statement's bracket before the catalog drop commits, so every
+    /// failure it can raise (a malformed version, a splice that would not shrink,
+    /// cancellation) leaves the table unchanged.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rewrite only ever removes bytes (<see cref="SqlRowCodec.WithoutColumn"/>):
+    /// stamps, object id and surviving components are copied verbatim, so every
+    /// rewritten version is shorter than its slot and <c>SlottedPage.UpdateSlot</c>
+    /// writes it in place, at the same page and slot. No version moves, which is what
+    /// keeps every index entry (key, entry reference, writer) and every version-store
+    /// location (prunable tombstones, the undo ledger) pointing at its version, and
+    /// keys are unchanged because the catalog refuses to drop an indexed column. A
+    /// version that does not store the column (written before the column was added)
+    /// is left byte-identical.
+    /// </para>
+    /// <para>
+    /// The rewrite used to decode each version, materialize its missing tail and
+    /// re-encode it, which grows a version written before an <c>ADD COLUMN ...
+    /// DEFAULT</c>; one that no longer fit its page was deleted and re-inserted
+    /// elsewhere, and every index entry and ledger location for it went stale (#1237).
+    /// A version that does not shrink is now an internal invariant failure, never a
+    /// relocation: PostgreSQL's in-place update refuses a tuple whose length changed
+    /// (<c>heap_inplace_update_and_unlock</c>, "wrong tuple length"), and its DROP
+    /// COLUMN moves no tuple at all (it marks the attribute dropped). A rewrite that
+    /// must move versions would need what PostgreSQL's <c>ATRewriteTable</c> does: a
+    /// new heap and every index rebuilt (<c>finish_heap_swap</c>), plus, here, the
+    /// version store's locations.
+    /// </para>
+    /// <para>
+    /// The scan runs inside the bracket, under the apply gate, and the bracket writes
+    /// the splices before it releases the gate, so the version-purge worker (which
+    /// prunes under the same gate) cannot reclaim a version, or free its page, between
+    /// the read and the write. The splices are collected before any is written because
+    /// the unit iterator holds a pin on the page it is reading.
+    /// </para>
+    /// </remarks>
+    /// <param name="table">The table definition the stored versions were written under.</param>
+    /// <param name="droppedOrdinal">The dropped column's ordinal in <paramref name="table"/>.</param>
+    /// <param name="cancellationToken">Cancellation token for the scan.</param>
+    /// <returns>Each version that stores the column, by location, with its spliced record.</returns>
+    /// <exception cref="InvalidOperationException">A spliced version would not be shorter than its slot.</exception>
+    private List<(PageId PageId, int SlotIndex, byte[] Record)> CollectColumnSplices(
+        SqlCatalogTable table, int droppedOrdinal, CancellationToken cancellationToken)
+    {
+        var splices = new List<(PageId PageId, int SlotIndex, byte[] Record)>();
+        using var iterator = _storage.GetUnitIterator(table.ObjectId);
+        while (iterator.MoveNext())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var unit = iterator.Current;
+
+            if (SqlRowCodec.WithoutColumn(unit.Data.Span, table.ObjectId, droppedOrdinal) is not { } record)
             {
-                var spliced = new object?[values.Length - 1];
-                for (int i = 0, j = 0; i < values.Length; i++)
-                {
-                    if (i != droppedOrdinal)
-                    {
-                        spliced[j++] = values[i];
-                    }
-                }
-
-                byte[] record = SqlRowCodec.Encode(updated.ObjectId, updated.Columns, spliced, writer);
-
-                if (deleter != TransactionSequence.None)
-                {
-                    record = SqlRowCodec.WithDeleter(record, deleter);
-                }
-
-                try
-                {
-                    _storage.UpdateRow(bracket, pageId, slotIndex, record);
-                }
-                catch (SlottedPageException)
-                {
-                    _storage.DeleteRow(bracket, pageId, slotIndex);
-                    _storage.InsertRow(bracket, updated.ObjectId, record);
-                }
+                continue;
             }
 
-            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
-        }, cancellationToken).ConfigureAwait(false);
+            if (record.Length >= unit.Data.Length)
+            {
+                throw new InvalidOperationException(
+                    $"DROP COLUMN rewrite invariant violated on '{table.Schema}.{table.Name}': the version at page {unit.PageId}, slot {unit.SlotIndex} " +
+                    $"is {record.Length} bytes after the splice, not shorter than its {unit.Data.Length}-byte slot, so writing it could move " +
+                    "the version away from its index entries.");
+            }
+
+            splices.Add((unit.PageId, unit.SlotIndex, record));
+        }
+
+        return splices;
     }
 
     private async Task<QueryResult> ExecuteDropTableAsync(SqlDropTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)

@@ -30,11 +30,12 @@ public sealed class SqlAddColumnLayoutTests
         before[1].ShouldBe(new object?[] { 2, "remove-two", "two", 7 });
         await ExecuteAsync(session, "INSERT INTO t VALUES (3, 'remove-three', 'three', NULL);");
 
-        // Act: DROP rewrites positional records, including the formerly missing tail.
+        // Act: DROP splices obsolete out of the positional records; the old rows keep extra
+        // in their missing tail (#1237), and the UPDATE writes a version that stores it.
         await ExecuteAsync(session, "ALTER TABLE t DROP COLUMN obsolete;");
         await ExecuteAsync(session, "UPDATE t SET payload = 'one-updated' WHERE id = 1;");
 
-        // Assert: materializing the rewrite preserves defaults and explicit nulls separately.
+        // Assert: the shifted layout still resolves the default and keeps the explicit null.
         var rows = await RowsAsync(session, "SELECT id, payload, extra FROM t ORDER BY id;");
         rows.Count.ShouldBe(3);
         rows[0].ShouldBe(new object?[] { 1, "one-updated", 7 });
