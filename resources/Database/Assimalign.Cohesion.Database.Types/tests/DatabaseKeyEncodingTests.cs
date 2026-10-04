@@ -295,6 +295,57 @@ public class DatabaseKeyEncodingTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Types] - Reader: BytesConsumed brackets exactly the bytes of each component read")]
+    public void Reader_BytesConsumed_ShouldBracketEachComponent()
+    {
+        // Arrange: each component also encoded on its own, so its exact bytes are known.
+        var components = new List<Action<DatabaseKeyWriter>>
+        {
+            w => w.AppendInt64(42),
+            w => w.AppendNull(),
+            w => w.AppendString("embedded\0zero and ünïcode", Collation.Binary),
+            w => w.AppendDecimal(-1234.5678m),
+            w => w.AppendBinary(new byte[] { 0x00, 0xFF, 0x00, 0x01 }),
+            w => w.AppendDateTimeOffset(new DateTimeOffset(2026, 10, 3, 8, 0, 0, TimeSpan.FromHours(2))),
+            w => w.AppendBoolean(false),
+        };
+        var writer = new DatabaseKeyWriter();
+        var expected = new List<byte[]>();
+        foreach (var append in components)
+        {
+            append(writer);
+            expected.Add(Encode(append));
+        }
+
+        byte[] key = writer.ToArray();
+        var reader = new DatabaseKeyReader(key);
+        reader.BytesConsumed.ShouldBe(0);
+
+        // Act / Assert: the bytes between two readings are the component, byte for byte.
+        int index = 0;
+        while (!reader.IsAtEnd)
+        {
+            int start = reader.BytesConsumed;
+            switch (reader.PeekType())
+            {
+                case DatabaseType.Null: reader.ReadNull(); break;
+                case DatabaseType.Int64: reader.ReadInt64(); break;
+                case DatabaseType.String: reader.ReadString(out _); break;
+                case DatabaseType.Decimal: reader.ReadDecimal(); break;
+                case DatabaseType.Binary: reader.ReadBinary(); break;
+                case DatabaseType.DateTimeOffset: reader.ReadDateTimeOffset(); break;
+                case DatabaseType.Boolean: reader.ReadBoolean(); break;
+                default: throw new InvalidOperationException("Unexpected component.");
+            }
+
+            key.AsSpan(start, reader.BytesConsumed - start).ToArray().ShouldBe(expected[index], $"component {index}");
+            index++;
+        }
+
+        index.ShouldBe(components.Count);
+        reader.BytesConsumed.ShouldBe(key.Length);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Types] - Reader: type mismatches and truncation fail loudly")]
     public void Reader_TypeMismatchOrTruncation_ShouldThrow()
     {

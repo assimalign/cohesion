@@ -131,6 +131,69 @@ internal static class SqlRowCodec
     }
 
     /// <summary>
+    /// Returns a copy of a stamped record with the component of one stored column
+    /// removed: DROP COLUMN's row rewrite (#1237). Every other byte is copied
+    /// verbatim (the version stamps, the object id and each surviving component keep
+    /// their exact encoding), so the copy is shorter than <paramref name="record"/> by
+    /// exactly the removed component, at least one byte. A slotted page writes a
+    /// record no longer than its slot in place, at the same page and slot, so the
+    /// rewrite never moves a version and every reference to it stays valid: index
+    /// entries (key, entry reference, writer) and the version store's locations.
+    /// </summary>
+    /// <param name="record">The stored record.</param>
+    /// <param name="objectId">The table the record must belong to.</param>
+    /// <param name="ordinal">The ordinal, in the layout the record was written under, of the column to remove.</param>
+    /// <returns>
+    /// The record without the column's component, or null when the record needs no
+    /// rewrite: it is too short to carry a stamp header, belongs to another object, or
+    /// stores no component at <paramref name="ordinal"/>. The last case is a version
+    /// written before the column was added: the column is part of its missing tail,
+    /// which decodes from the column metadata, and the components it does store keep
+    /// their positions.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="ordinal"/> is negative.</exception>
+    internal static byte[]? WithoutColumn(ReadOnlySpan<byte> record, ulong objectId, int ordinal)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(ordinal);
+
+        if (record.Length < StampHeaderSize)
+        {
+            return null;
+        }
+
+        var reader = new DatabaseKeyReader(record.Slice(StampHeaderSize));
+
+        if ((ulong)reader.ReadInt64() != objectId)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < ordinal; i++)
+        {
+            if (reader.IsAtEnd)
+            {
+                return null;
+            }
+
+            ReadValue(ref reader);
+        }
+
+        if (reader.IsAtEnd)
+        {
+            return null;
+        }
+
+        int start = StampHeaderSize + reader.BytesConsumed;
+        ReadValue(ref reader);
+        int end = StampHeaderSize + reader.BytesConsumed;
+
+        var spliced = new byte[record.Length - (end - start)];
+        record[..start].CopyTo(spliced);
+        record[end..].CopyTo(spliced.AsSpan(start));
+        return spliced;
+    }
+
+    /// <summary>
     /// Appends one typed value as an index-key component: the identity encoding
     /// every key path shares (maintenance, seek bounds, unique-key locks and build
     /// duplicate detection). Strings encode under the column's effective

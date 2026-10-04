@@ -399,8 +399,11 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   construction, versions are WAL-covered like all record writes (restart keeps
   them correct for free), and aborted stamps revert physically with the page
   images. Deletes tombstone (older snapshots keep the row until the purge
-  worker reclaims below every live horizon). DDL row rewrites (DROP COLUMN)
-  walk *every* stored version, visible or not, preserving stamps.
+  worker reclaims below every live horizon). The one DDL row rewrite (DROP
+  COLUMN) walks *every* stored version, visible or not, and rewrites each where
+  it lies, stamps preserved: **no statement ever moves a version**, so a
+  location (page, slot) is a version's identity for its whole life — what index
+  entries, row locks and the version store's ledger all key on.
 - **Format rule (data-storage format version, catalog-persisted): exactly one
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
@@ -479,12 +482,65 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   new definition even with an older row snapshot. NOT NULL without a default
   fails if any current row exists; historical deleted versions can still read
   NULL under an older snapshot after an addition to a currently empty table.
-  `DROP COLUMN` rewrites positional records, materializing surviving defaults
-  while preserving version stamps. DDL is self-committing and refused in explicit
+  `DROP COLUMN` splices the column out of every stored version in place (#1237),
+  described in the next item. DDL is self-committing and refused in explicit
   transactions. Schema-owned tables retain their existing live-session DDL guard.
   The persisted default is the canonical SQL text of its literal (`'it''s'`, `5`,
   `TRUE`), and the value every read and INSERT coerces comes from the table
   version's bound form, parsed once (see [Persisted definitions](#persisted-definitions-canonical-text-parsed-once)).
+- **DROP COLUMN rewrites every version in place; no version moves (#1237).**
+  Records are positional, so dropping a column removes its component from every
+  stored version, live, tombstoned or visible only to an older snapshot
+  (`SqlPlanExecutor.SpliceColumnOut`). The rewrite is a byte splice
+  (`SqlRowCodec.WithoutColumn`, bounded by `DatabaseKeyReader.BytesConsumed`):
+  stamps, object id and every surviving component are copied verbatim, so the
+  rewritten version is shorter than its slot by at least one byte and
+  `SlottedPage.UpdateSlot` writes it in place, at the same page and slot. A
+  version that never stored the column (written before an ADD COLUMN) keeps it
+  in its missing tail and is left byte-identical. Nothing that references a
+  version by location needs maintenance: index entries are (key, entry
+  reference, writer) and keys cannot change (an indexed column cannot be
+  dropped), the version store's prunable tombstones and undo ledger hold
+  locations, and row locks are taken on locations. A rewritten version that
+  would not shrink is an internal invariant failure (`InvalidOperationException`,
+  the statement bracket rolls back), never a relocation.
+  - *Why it was wrong before.* The rewrite decoded each version, materialized
+    its missing tail from the column defaults and re-encoded it. A version
+    written before `ADD COLUMN ... DEFAULT '<long text>'` therefore grew by the
+    default, and one that no longer fit its page was deleted and re-inserted
+    elsewhere (the `SlottedPageException` fallback). Its index entries kept the
+    freed location, so seeks missed the row, and once a page emptied that way was
+    reused by later inserts the stale location could answer for another row; its
+    ledger location went stale too. `SqlDropColumnRewriteTests`
+    reproduced it on full pages: every version moved, and 571 seeks across the
+    primary key, two secondary indexes and a UNIQUE index disagreed with the scan.
+  - *Why not rewrite and rebuild the indexes.* PostgreSQL's rewriting ALTER
+    TABLE forms write a new heap and rebuild every index
+    (`src/backend/commands/tablecmds.c:6041-6066`, `ATRewriteTables` calling
+    `ATRewriteTable` and `finish_heap_swap(..., true /* reindex */, ...)`;
+    `src/backend/commands/repack.c:2084`, `reindex_relation`). That copies only
+    the tuples the latest snapshot sees (`tablecmds.c:6415`), which is why
+    PostgreSQL documents those forms as not MVCC-safe: an older snapshot sees the
+    rewritten table empty (`doc/src/sgml/ref/alter_table.sgml:1563-1566`). Here
+    dead versions must survive the DDL for older snapshots, and the version store
+    keys them by location,
+    so a moving rewrite would have to rebuild the indexes *and* repoint the
+    ledger. PostgreSQL's own DROP COLUMN moves nothing: it marks the attribute
+    dropped and leaves the tuples alone (`src/backend/catalog/heap.c:1696-1732`,
+    `RemoveAttributeById`; `alter_table.sgml:1546-1552`), and its in-place
+    update fails rather than resize a tuple
+    (`src/backend/access/heap/heapam.c:6727-6731`, "wrong tuple length"). The
+    splice keeps that property without a dropped-attribute catalog format.
+  - *Ordering.* The catalog drop self-commits first; the rewrite then runs in one
+    bracket under the apply gate and is not cancellable, because a cancelled
+    rewrite would leave versions the published definition decodes on the wrong
+    positions. The bracket commits durably, as CREATE INDEX's does: the
+    statement's transaction neither records nor undoes it. The scan runs inside
+    the bracket, so the purge worker, which prunes under the same gate, cannot
+    reclaim a version (or free its page) between the read and the write. Known
+    limit: the catalog and the data are separate file sets, so a crash after the
+    catalog commit and before the rewrite's durable commit leaves versions on
+    the old layout under the new definition.
 - **Expression evaluation** is interpretive with SQL null propagation (nulls
   reject predicates, comparisons with null are null, `AND`/`OR` are three-valued
   and skip the right operand once `FALSE AND` or `TRUE OR` decides the result),

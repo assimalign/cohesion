@@ -32,6 +32,15 @@ public ref struct DatabaseKeyReader
     public readonly bool IsAtEnd => _position >= _source.Length;
 
     /// <summary>
+    /// Gets the number of bytes the reader has consumed: the offset in the encoded key
+    /// at which the next component starts. Components are self-delimiting, so two
+    /// readings taken around a read bracket exactly the bytes of the components read
+    /// in between, which lets a caller copy or remove a component without decoding
+    /// and re-encoding its value.
+    /// </summary>
+    public readonly int BytesConsumed => _position;
+
+    /// <summary>
     /// Returns the type of the next component without consuming it.
     /// </summary>
     /// <returns>The next component's type.</returns>

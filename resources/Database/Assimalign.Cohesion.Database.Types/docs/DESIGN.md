@@ -94,6 +94,13 @@ references makes cross-model ordering a compile-time fact rather than a conventi
   #1152) — not in the writer, because rows and the wire protocol need the
   round-trip bytes.
   Documents, Graph and KeyValuePair key no temporal values today.
+- **The reader reports its position (`BytesConsumed`).** Components are
+  self-delimiting, so the bytes between two readings taken around a read are
+  exactly that component's encoding. A caller can remove or copy a component
+  without re-encoding its value, which keeps the edit byte-exact instead of
+  relying on every decode/encode pair round-tripping to the same bytes. The SQL
+  engine's DROP COLUMN splices a dropped column out of stored rows this way, so a
+  rewritten row is always shorter and never leaves its slot (#1237).
 - `Guid` orders by RFC 4122 big-endian bytes (not SQL Server's segment order).
 - **JSON kinds are not key components.** `DatabaseType.Json`/`JsonBinary` exist as
   identities for storage/coercion, but ordering JSON is a model-level semantic; the

@@ -737,11 +737,12 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>
     /// Drops a column and rewrites the table's rows to the new positional layout —
     /// row records are positional, so removing a middle column requires splicing
-    /// every stored row (ADD COLUMN, by contrast, is O(1): missing trailing
-    /// components decode as null). Runs under the table's Exclusive lock: the
-    /// intent-lock matrix makes the rewrite wait for in-flight row writers (and
-    /// them for it), so no writer's uncommitted version can be rewritten from
-    /// under it.
+    /// it out of every stored version (ADD COLUMN, by contrast, is O(1): missing
+    /// trailing components decode from the column metadata). Runs under the
+    /// table's Exclusive lock: the intent-lock matrix makes the rewrite wait for
+    /// in-flight row writers (and them for it), so no writer's uncommitted version
+    /// can be rewritten from under it. The rewrite itself never moves a version
+    /// (<see cref="SpliceColumnOut"/>), so the table's indexes need no maintenance.
     /// </summary>
     private async Task<QueryResult> ExecuteDropColumnAsync(SqlDropColumnPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
@@ -769,54 +770,93 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        // The rewrite walks EVERY stored version — visible or not — because the
-        // whole record space must stay decodable on the new positional layout;
-        // stamps are preserved so visibility is unchanged by the DDL.
-        var targets = new List<(PageId PageId, int SlotIndex, object?[] Values, TransactionSequence Writer, TransactionSequence Deleter)>();
-        if (droppedOrdinal >= 0)
-        {
-            foreach (var (location, values, writer, deleter) in ScanVersions(before, cancellationToken))
-            {
-                targets.Add((location.PageId, location.SlotIndex, values, writer, deleter));
-            }
-        }
-
+        // The catalog drop is the self-committed, authoritative step; the catalog
+        // refuses an unknown, primary-key, constrained or indexed column, so a
+        // drop that returns found the column at droppedOrdinal.
         var updated = await _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken).ConfigureAwait(false);
         _definitions.Get(updated);
 
-        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
+        // From here every version must reach the new layout, so the rewrite is not
+        // cancellable: a cancelled rewrite would leave versions the published
+        // definition decodes on the wrong positions. Its bracket commits durably
+        // (the self-committing DDL posture of CREATE INDEX): it completes a catalog
+        // change that is already durable, and the statement's transaction neither
+        // records nor undoes it.
+        return await statement.Coordinator.ApplyStatementAsync<QueryResult>(statement.Transaction, bracket =>
         {
-            foreach (var (pageId, slotIndex, values, writer, deleter) in targets)
+            SpliceColumnOut(bracket, before, droppedOrdinal);
+            return new ValueTask<QueryResult>(new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0));
+        }, durable: true, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// DROP COLUMN's row rewrite: removes the dropped column's component from every
+    /// stored version of the table, visible or not, inside the statement's bracket.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rewrite only ever removes bytes (<see cref="SqlRowCodec.WithoutColumn"/>):
+    /// stamps, object id and surviving components are copied verbatim, so every
+    /// rewritten version is shorter than its slot and <c>SlottedPage.UpdateSlot</c>
+    /// writes it in place, at the same page and slot. No version moves, which is what
+    /// keeps every index entry (key, entry reference, writer) and every version-store
+    /// location (prunable tombstones, the undo ledger) pointing at its version, and
+    /// keys are unchanged because the catalog refuses to drop an indexed column. A
+    /// version that does not store the column (written before the column was added)
+    /// is left byte-identical.
+    /// </para>
+    /// <para>
+    /// The rewrite used to decode each version, materialize its missing tail and
+    /// re-encode it, which grows a version written before an <c>ADD COLUMN ...
+    /// DEFAULT</c>; one that no longer fit its page was deleted and re-inserted
+    /// elsewhere, and every index entry and ledger location for it went stale (#1237).
+    /// A version that does not shrink is now an internal invariant failure, never a
+    /// relocation: PostgreSQL's in-place update refuses a tuple whose length changed
+    /// (<c>heap_inplace_update_and_unlock</c>, "wrong tuple length"), and its DROP
+    /// COLUMN moves no tuple at all (it marks the attribute dropped). A rewrite that
+    /// must move versions would need what PostgreSQL's <c>ATRewriteTable</c> does: a
+    /// new heap and every index rebuilt (<c>finish_heap_swap</c>), plus, here, the
+    /// version store's locations.
+    /// </para>
+    /// <para>
+    /// The scan runs inside the bracket, under the apply gate, so the version-purge
+    /// worker (which prunes under the same gate) cannot reclaim a version, or free its
+    /// page, between the read and the write.
+    /// </para>
+    /// </remarks>
+    /// <param name="bracket">The statement's storage bracket.</param>
+    /// <param name="table">The table definition the stored versions were written under.</param>
+    /// <param name="droppedOrdinal">The dropped column's ordinal in <paramref name="table"/>.</param>
+    /// <exception cref="InvalidOperationException">A rewritten version would not be shorter than its slot.</exception>
+    private void SpliceColumnOut(IStorageTransaction bracket, SqlCatalogTable table, int droppedOrdinal)
+    {
+        // Collect first: the unit iterator holds a pin on the page it is reading.
+        var rewrites = new List<(PageId PageId, int SlotIndex, int SlotLength, byte[] Record)>();
+        using (var iterator = _storage.GetUnitIterator(table.ObjectId))
+        {
+            while (iterator.MoveNext())
             {
-                var spliced = new object?[values.Length - 1];
-                for (int i = 0, j = 0; i < values.Length; i++)
-                {
-                    if (i != droppedOrdinal)
-                    {
-                        spliced[j++] = values[i];
-                    }
-                }
+                var unit = iterator.Current;
 
-                byte[] record = SqlRowCodec.Encode(updated.ObjectId, updated.Columns, spliced, writer);
-
-                if (deleter != TransactionSequence.None)
+                if (SqlRowCodec.WithoutColumn(unit.Data.Span, table.ObjectId, droppedOrdinal) is { } record)
                 {
-                    record = SqlRowCodec.WithDeleter(record, deleter);
-                }
-
-                try
-                {
-                    _storage.UpdateRow(bracket, pageId, slotIndex, record);
-                }
-                catch (SlottedPageException)
-                {
-                    _storage.DeleteRow(bracket, pageId, slotIndex);
-                    _storage.InsertRow(bracket, updated.ObjectId, record);
+                    rewrites.Add((unit.PageId, unit.SlotIndex, unit.Data.Length, record));
                 }
             }
+        }
 
-            return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
-        }, cancellationToken).ConfigureAwait(false);
+        foreach (var (pageId, slotIndex, slotLength, record) in rewrites)
+        {
+            if (record.Length >= slotLength)
+            {
+                throw new InvalidOperationException(
+                    $"DROP COLUMN rewrite invariant violated on '{table.Schema}.{table.Name}': the version at page {pageId}, slot {slotIndex} " +
+                    $"is {record.Length} bytes after the splice, not shorter than its {slotLength}-byte slot, so writing it could move " +
+                    "the version away from its index entries.");
+            }
+
+            _storage.UpdateRow(bracket, pageId, slotIndex, record);
+        }
     }
 
     private async Task<QueryResult> ExecuteDropTableAsync(SqlDropTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
