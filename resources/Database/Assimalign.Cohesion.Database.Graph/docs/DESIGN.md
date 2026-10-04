@@ -145,7 +145,9 @@ transaction, with no savepoints. The SQL session's contract, where the failed st
 nothing and the transaction stays active, is therefore unavailable, and the session follows Neo4j:
 
 1. The failure rolls the transaction's work back at once and releases its locks, so the aborted
-   transaction blocks no other writer while it waits for the caller.
+   transaction blocks no other writer while it waits for the caller. (When the undo itself fails,
+   the kernel keeps the writer lock until its version-purge pass completes the undo; see
+   `Database.Transactions` DESIGN.md, "Ending a transaction".)
 2. The transaction stays the session's `CurrentTransaction` and reports `TransactionState.Faulted`.
    Every later statement on the session fails with `COHDBG007`: GQL text or requests, typed
    `IGraphDatabase` operations, traversals and `GraphSchema` calls. `BeginTransactionAsync` fails
@@ -180,10 +182,17 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    PostgreSQL likewise holds interrupts through `AbortTransaction`
    (`backend/access/transam/xact.c:2854-2861`), and Neo4j's `commit` and `rollback` take no
    cancellation.
-   When a caller's rollback or commit still fails with the transaction's context active (a journal
-   or storage failure), the transaction stays `CurrentTransaction` and reports `Faulted`, and the
-   session refuses statements and BEGIN with `COHDBG007` naming that failure, until a
-   `RollbackAsync` completes. `CommitAsync` then completes the rollback and fails with `COHDBG007`.
+   A rollback or commit that started always ends the transaction. Until #1226 a journal or
+   storage failure could leave the context active behind a failed rollback, and the session then
+   kept the transaction `Faulted` until a later rollback completed. The transaction kernel now
+   completes a started rollback whatever fails (a lost abort record is ignored, and a failed undo
+   is retried by the kernel with the writer's locks held), and it aborts a commit it cannot
+   complete, so that branch could no longer run and was removed rather than kept as defense in
+   depth: no fault the kernel can raise reaches it, so no test could exercise it. One guard
+   stays, because it costs no state: should a kernel rollback ever throw with the context active,
+   the session still refuses statements in the ended transaction ("being committed or rolled
+   back"), accepts another `RollbackAsync`, and a `CommitAsync` completes the rollback and fails
+   with `COHDBG007`, so nothing the caller rolled back can commit.
 
 The session's explicit-transaction lifecycle, where Faulted is the new state:
 
@@ -194,8 +203,7 @@ stateDiagram-v2
     Idle --> Active: BeginTransactionAsync
     Active --> Active: statement succeeds, or fails before it starts
     Active --> Faulted: statement fails and its transaction's work is rolled back
-    Active --> Faulted: RollbackAsync or CommitAsync fails with the context still active
-    Faulted --> Faulted: statement or BEGIN refused with COHDBG007, or a rollback that fails again
+    Faulted --> Faulted: statement or BEGIN refused with COHDBG007
     Active --> Idle: CommitAsync (committed, or aborted by the kernel), RollbackAsync, or DisposeAsync
     Faulted --> Idle: RollbackAsync, DisposeAsync, or CommitAsync failing with COHDBG007
 ```
@@ -435,7 +443,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG004` | Path materialization or candidate-expansion limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
 | `COHDBG006` | Storage failure translated at the engine boundary |
-| `COHDBG007` | The session's explicit transaction is aborted, by a failed statement or by a rollback or commit that did not complete: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
+| `COHDBG007` | The session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
 | `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; on the wire's `ExecutePaths` seam the client currently closes its connection |
 | `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |

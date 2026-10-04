@@ -4,20 +4,22 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
-using Assimalign.Cohesion.Database.Graph.Storage;
+namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
+
+using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
-namespace Assimalign.Cohesion.Database.Graph.Tests;
-
 /// <summary>
-/// An in-memory graph storage strategy whose journal fails writes on demand. Writes fail only on
+/// An in-memory SQL storage strategy whose journals fail writes on demand. Writes fail only on
 /// the asynchronous flow that armed the failure, so a test can fail one journal append of its own
 /// call while the engine's background workers keep writing normally.
 /// </summary>
-internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrategy
+internal sealed class FaultInjectingJournalSqlStorageStrategy : ISqlStorageStrategy
 {
     private static readonly AsyncLocal<StrongBox<int>?> s_failures = new();
-    private readonly HashSet<string> _databases = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _storages = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _sync = new();
 
     /// <summary>
     /// Fails the next <paramref name="writes"/> journal writes made on the calling flow, until the
@@ -33,25 +35,40 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
         return new FailureScope(previous, budget);
     }
 
-    public GraphStorage CreateStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    /// <inheritdoc />
+    public SqlStorage CreateStorage(string databaseName)
     {
-        _databases.Add(databaseName.ToString());
-        return GraphStorage.Create(StorageStream.FromInMemory(), new StorageStream(new FaultInjectingStream()),
-            StorageStream.FromInMemory(), databaseName, durability);
+        lock (_sync)
+        {
+            if (!_storages.Add(databaseName))
+            {
+                throw new DatabaseException($"Fault-injecting storage for '{databaseName}' already exists.");
+            }
+        }
+
+        return SqlStorage.Create(StorageStream.FromInMemory(), new StorageStream(new FaultInjectingStream()),
+            StorageStream.FromInMemory(), databaseName);
     }
 
-    public GraphStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    /// <inheritdoc />
+    public SqlStorage OpenStorage(string databaseName)
         => throw new NotSupportedException("In-memory fault-injecting storage cannot be reopened.");
 
-    public void DropStorage(DatabaseName databaseName) => _databases.Remove(databaseName.ToString());
-
-    public bool StorageExists(DatabaseName databaseName) => _databases.Contains(databaseName.ToString());
-
-    public IEnumerable<DatabaseName> GetDatabaseNames()
+    /// <inheritdoc />
+    public void DropStorage(string databaseName)
     {
-        foreach (string name in _databases)
+        lock (_sync)
         {
-            yield return new DatabaseName(name);
+            _storages.Remove(databaseName);
+        }
+    }
+
+    /// <inheritdoc />
+    public bool StorageExists(string databaseName)
+    {
+        lock (_sync)
+        {
+            return _storages.Contains(databaseName);
         }
     }
 

@@ -414,68 +414,70 @@ public sealed class GraphTransactionFailureTests
         (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["First", "Second"]);
     }
 
-    /// <summary>A rollback that does not complete leaves the transaction faulted and refusing work until a rollback completes.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a rollback that does not complete leaves the transaction faulted")]
-    public async Task RollbackAsync_ThatDoesNotComplete_ShouldLeaveTransactionFaultedUntilRetried()
+    /// <summary>
+    /// A rollback whose abort record cannot be written still ends the transaction and releases the
+    /// database writer lock, so another session's writer proceeds (#1226).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a rollback whose abort record cannot be written still ends the transaction")]
+    public async Task RollbackAsync_AbortRecordCannotBeWritten_ShouldEndTransactionAndReleaseWriterLock()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
         var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
-        await session.ExecuteAsync("INSERT (:Keep)");
+        await using var other = await database.CreateSessionAsync();
+        await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
         var transaction = await session.BeginTransactionAsync();
-        (await Rows(session, "SHOW LABELS")).ShouldHaveSingleItem();
 
-        // Act: the abort record is the rollback's only journal write, so failing it fails the rollback.
-        IOException rollbackFailure;
-        using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        // A delete that matches nothing takes the database writer lock and writes no version, so
+        // the abort record is the rollback's only journal write.
+        await session.ExecuteAsync("MATCH (n:Keep) WHERE n.name = 'missing' DELETE n");
+
+        // Act
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
         {
-            rollbackFailure = await Should.ThrowAsync<IOException>(async () => await transaction.RollbackAsync());
+            await transaction.RollbackAsync();
+            unspent = failures.Remaining;
         }
-        var faultedState = transaction.State;
-        var currentWhileFaulted = session.CurrentTransaction;
-        var refused = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT (:Late)"));
-        var beginRefused = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
-        await transaction.RollbackAsync();
 
-        // Assert
-        faultedState.ShouldBe(TransactionState.Faulted);
-        currentWhileFaulted.ShouldBeSameAs(transaction);
-        refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
-        refused.Message.ShouldContain("did not complete", Case.Sensitive);
-        refused.InnerException.ShouldBeSameAs(rollbackFailure);
-        beginRefused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        // Assert: the record write failed, and the rollback ended the transaction anyway.
+        unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
+        await other.ExecuteAsync("INSERT (:Other)").AsTask().WaitAsync(TimeSpan.FromSeconds(10));
         await session.ExecuteAsync("INSERT (:After)");
-        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["After", "Keep"]);
+        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["After", "Keep", "Other"]);
     }
 
-    /// <summary>COMMIT after a rollback that did not complete fails with COHDBG007, commits nothing, and ends the transaction.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: COMMIT after an incomplete rollback fails and ends the transaction")]
-    public async Task CommitAsync_AfterRollbackThatDidNotComplete_ShouldFailAndEndTransaction()
+    /// <summary>
+    /// After a rollback whose abort record was lost, the transaction is rolled back like any other:
+    /// COMMIT is refused, and a repeated rollback raises nothing.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: COMMIT after a rollback whose abort record was lost is refused")]
+    public async Task CommitAsync_AfterRollbackWithLostAbortRecord_ShouldBeRefused()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new() { StorageStrategy = new FaultInjectingJournalStorageStrategy() });
         var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
         var transaction = await session.BeginTransactionAsync();
-        (await Rows(session, "SHOW LABELS")).ShouldBeEmpty();
+        await session.ExecuteAsync("MATCH (n:Keep) WHERE n.name = 'missing' DELETE n");
         using (FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
         {
-            await Should.ThrowAsync<IOException>(async () => await transaction.RollbackAsync());
+            await transaction.RollbackAsync();
         }
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        await transaction.RollbackAsync();
 
         // Assert
-        error.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
-        error.Message.ShouldContain("nothing was committed", Case.Sensitive);
-        error.InnerException.ShouldBeOfType<IOException>();
+        error.Message.ShouldBe("The transaction is RolledBack.");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        await transaction.RollbackAsync();
+        (await Rows(session, "MATCH (n:Keep) RETURN n.name")).ShouldHaveSingleItem();
     }
 
     /// <summary>A commit the kernel aborts crosses the boundary translated, and a catch-block rollback afterwards raises nothing.</summary>

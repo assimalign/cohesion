@@ -91,6 +91,27 @@ public sealed class DocumentEngineTests
     }
 
     [Fact]
+    public async Task Rollback_canceled_before_it_starts_leaves_the_transaction_and_its_writes_intact()
+    {
+        // #1226: the token is observed only before the rollback starts, so nothing of it ran and
+        // no purge pass may undo the still-active writer.
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await collection.PutAsync(session, "kept", "1"u8.ToArray());
+        using var canceled = new System.Threading.CancellationTokenSource();
+        canceled.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await transaction.RollbackAsync(canceled.Token));
+        transaction.State.ShouldBe(TransactionState.Active);
+        database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        database.Coordinator.RunVersionPurgePass(default);
+        await transaction.CommitAsync();
+        (await collection.GetAsync(session, "kept")).ShouldNotBeNull();
+    }
+
+    [Fact]
     public async Task Snapshot_write_conflicts_abort_and_do_not_overwrite_newer_content()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());

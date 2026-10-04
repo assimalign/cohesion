@@ -83,6 +83,28 @@ public sealed class BlobEngineTests
         (await Read(container, "item")).ShouldBe("committed"u8.ToArray());
     }
 
+    [Fact]
+    public async Task Rollback_canceled_before_it_starts_leaves_the_transaction_and_its_writes_intact()
+    {
+        // #1226: the token is observed only before the rollback starts, so nothing of it ran and
+        // no purge pass may undo the still-active writer.
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        await database.CreateContainerAsync("files");
+        await using var session = await database.CreateSessionAsync();
+        var scoped = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var transaction = await session.BeginTransactionAsync();
+        await Write(scoped, "item", "kept"u8.ToArray());
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await transaction.RollbackAsync(canceled.Token));
+        transaction.State.ShouldBe(TransactionState.Active);
+        database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        database.Coordinator.RunVersionPurgePass(CancellationToken.None);
+        await transaction.CommitAsync();
+        (await Read(await database.GetContainerAsync("files"), "item")).ShouldBe("kept"u8.ToArray());
+    }
+
     [Theory]
     [InlineData(IsolationLevel.Snapshot, "before")]
     [InlineData(IsolationLevel.ReadCommitted, "after")]

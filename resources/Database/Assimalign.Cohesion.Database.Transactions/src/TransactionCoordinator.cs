@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions.Internal;
 
 /// <summary>
 /// The per-database MVCC composition (area DESIGN §3.8): one
@@ -51,7 +52,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 {
     private readonly IStorage _storage;
     private readonly IStorageJournal _journal;
-    private readonly ITransactionManager _manager;
+    private readonly DefaultTransactionManager _manager;
     private readonly ILockManager _lockManager;
     private readonly RecordSpaceVersionStore _versionStore;
     private readonly GatedJournalLog _log;
@@ -85,7 +86,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         _lockManager = Transactions.LockManager.Create();
         _versionStore = new RecordSpaceVersionStore(storage, records, _applyGate);
         _log = new GatedJournalLog(this);
-        _manager = TransactionManager.Create(
+
+        // The concrete manager: the version-purge pass drives its deferred-undo retry.
+        _manager = new DefaultTransactionManager(
             _log,
             _lockManager,
             _versionStore,
@@ -195,7 +198,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
         finally
         {
-            Untrack(context.Sequence.Value);
+            UntrackEnded(context);
         }
     }
 
@@ -205,7 +208,18 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// tombstones cleared), the abort record is appended, and locks release.
     /// </summary>
     /// <param name="context">The transaction to roll back.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <param name="cancellationToken">
+    /// Observed only before the rollback starts. A token canceled by then throws
+    /// <see cref="OperationCanceledException"/> and leaves the transaction active;
+    /// a started rollback runs to completion.
+    /// </param>
+    /// <remarks>
+    /// A started rollback always ends the transaction (#1226), even when the abort
+    /// record cannot be written. When the undo itself fails, the transaction still
+    /// ends, but the writer keeps its locks and stays in flight for every snapshot
+    /// until <see cref="RunVersionPurgePass"/> completes the undo; the project
+    /// DESIGN.md, "Ending a transaction", records the rule.
+    /// </remarks>
     public async ValueTask RollbackAsync(ITransactionContext context, CancellationToken cancellationToken = default)
     {
         try
@@ -214,7 +228,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
         finally
         {
-            Untrack(context.Sequence.Value);
+            UntrackEnded(context);
         }
     }
 
@@ -362,15 +376,31 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// (a long-running snapshot pins its view), or the manager's oldest-active
     /// bound when idle.
     /// </summary>
-    /// <param name="cancellationToken">Cancels the pass.</param>
+    /// <param name="cancellationToken">
+    /// Cancels the pass between writers and prune batches; a rolled-back writer's
+    /// undo, once started, runs to completion.
+    /// </param>
     /// <returns>The number of versions physically reclaimed or undone.</returns>
+    /// <remarks>
+    /// A rollback whose undo failed ended its transaction but left the writer in
+    /// flight, holding its locks. The pass retries that undo through the manager,
+    /// which releases the writer — abort record, active table, locks — as soon as
+    /// the undo completes. A retry that fails again is rethrown after every deferred
+    /// writer was attempted, and the writer waits for the next pass.
+    /// </remarks>
     public long RunVersionPurgePass(CancellationToken cancellationToken)
     {
-        long total = 0;
+        long total = _manager.RetryDeferredUndoAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
 
+        // Writers queued by a direct PurgeWriterAsync caller; the manager owns the rest.
         foreach (ulong writer in _versionStore.PendingAbortedPurges)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (_manager.IsUndoDeferred(writer))
+            {
+                continue;
+            }
+
             total += _versionStore.PurgeWriterAsync(new TransactionSequence(writer), cancellationToken)
                 .AsTask().GetAwaiter().GetResult();
         }
@@ -423,23 +453,41 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// transaction (purging its stamps through the version store's ledger)
     /// before the storage closes.
     /// </summary>
+    /// <remarks>
+    /// A rolled-back writer whose undo still fails at disposal is rethrown after every
+    /// other transaction was aborted: its versions are still in the record space, and
+    /// only the next open's recovery scrub removes them.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        await _manager.DisposeAsync().ConfigureAwait(false);
-
-        lock (_sync)
+        try
         {
-            _statementBrackets.Clear();
-            _openContexts.Clear();
+            await _manager.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                _statementBrackets.Clear();
+                _openContexts.Clear();
+            }
         }
     }
 
-    private void Untrack(ulong sequence)
+    // A commit or rollback refused before it started (a canceled token, or another end
+    // already running) leaves the context active: it stays tracked, so its snapshot
+    // keeps bounding the prune and its statement bracket stays resolvable.
+    private void UntrackEnded(ITransactionContext context)
     {
+        if (context.State == TransactionState.Active)
+        {
+            return;
+        }
+
         lock (_sync)
         {
-            _statementBrackets.Remove(sequence);
-            _openContexts.Remove(sequence);
+            _statementBrackets.Remove(context.Sequence.Value);
+            _openContexts.Remove(context.Sequence.Value);
         }
     }
 
@@ -502,8 +550,18 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
             lock (_gate)
             {
-                _coordinator._journal.AppendRollback((long)sequence.Value);
-                _activeSequences.Remove((long)sequence.Value);
+                try
+                {
+                    _coordinator._journal.AppendRollback((long)sequence.Value);
+                }
+                finally
+                {
+                    // The manager appends the abort record only once the writer's undo
+                    // completed, so nothing of the writer is left for recovery to scrub
+                    // and later checkpoints need not carry it — whether or not the
+                    // advisory record itself was written (#1226).
+                    _activeSequences.Remove((long)sequence.Value);
+                }
             }
 
             return default;

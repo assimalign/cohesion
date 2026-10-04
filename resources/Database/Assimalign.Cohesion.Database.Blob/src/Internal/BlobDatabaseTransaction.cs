@@ -35,8 +35,18 @@ internal sealed class BlobDatabaseTransaction : IDatabaseTransaction
 
         return _coordinator.CommitAsync(_context, cancellationToken);
     }
+    /// <summary>
+    /// Rolls the transaction back. The token is observed only before the rollback
+    /// starts; a started rollback runs to completion and always ends the
+    /// transaction (#1226).
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the rollback before it starts.</param>
     public ValueTask RollbackAsync(CancellationToken cancellationToken = default)
-    { EnsureActive(); return _coordinator.RollbackAsync(_context, cancellationToken); }
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureActive();
+        return _coordinator.RollbackAsync(_context, CancellationToken.None);
+    }
     public ValueTask DisposeAsync() => State == TransactionState.Active ? _coordinator.RollbackAsync(_context) : default;
     private void EnsureActive()
     { if (State != TransactionState.Active)

@@ -182,7 +182,9 @@ public sealed class RecordSpaceVersionStore : IVersionStore
         bool visible = snapshot.IsVisible(writer)
             && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter));
 
-        return new ValueTask<ReadOnlyMemory<byte>?>(visible ? record : null);
+        // Typed null: a bare null here converts through ReadOnlyMemory's implicit
+        // operator from a null array, which reads as an empty visible version.
+        return new ValueTask<ReadOnlyMemory<byte>?>(visible ? record : (ReadOnlyMemory<byte>?)null);
     }
 
     /// <inheritdoc />

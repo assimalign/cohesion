@@ -50,10 +50,74 @@ returns the default manager. Lifecycle ordering encodes the write-ahead rule: co
 appends the commit record and awaits durability *while the transaction is still in
 the active table* — no snapshot can observe it as committed before its record is on
 stable storage; only then does it leave the table and release its locks as a set. A
-commit whose record cannot be made durable aborts (versions purged, locks released,
-state `Faulted`) and surfaces `TransactionAbortedException`. `OldestActive` is the
+commit whose record cannot be made durable aborts, ending the transaction the way a
+rollback does (state `Faulted`; see "Ending a transaction" below), and surfaces
+`TransactionAbortedException`. `OldestActive` is the
 pruning bound: `min(active)` or `lastAssigned + 1` when idle. A manager rejects a
 context begun on a different manager instance (identity check, not just type check).
+
+## Ending a transaction: a started rollback always completes (#1226)
+
+A rollback, once it starts, ends its transaction whatever fails or is canceled. The
+start is a claim: `CommitAsync`, `RollbackAsync` and the abort that disposal forces
+each claim the context's end first, so exactly one of them runs. A second attempt
+while one runs fails with `TransactionAbortedException` ("already ending"), and a
+commit can never race a rollback of the same writer. `RollbackAsync` observes the
+caller's token only before the claim: a token canceled by then throws
+`OperationCanceledException` and leaves the transaction active and untouched. After
+the claim no token reaches the rollback, and it throws nothing:
+
+1. **Undo.** `IVersionStore.PurgeWriterAsync(writer)` removes the writer's versions.
+2. **Abort record.** `ITransactionLog.AppendAbortAsync(writer)`. A failure is ignored.
+3. **Release.** The writer leaves the active table and its locks are released. The
+   state is `RolledBack`, or `Faulted` for an abort a failed commit or disposal forced.
+
+**The abort record is advisory.** Recovery classifies by commit records alone:
+`TransactionRecovery.Analyze` puts every sequence it meets (in a begin, page image or
+rollback record, or in a checkpoint's active list) into `Aborted` unless the journal
+holds its commit record (`TransactionRecovery.cs:87-88`). A writer whose abort record
+was lost therefore reads as aborted after a crash, exactly like one whose record was
+written, and the open-time scrub of an already-undone writer changes nothing because
+it is stamp-checked. PostgreSQL relies on the same presumption: `RecordTransactionAbort`
+does not flush its abort record "since the default assumption after a crash would be
+that we aborted, anyway" (`src/backend/access/transam/xact.c:1825-1827`), loss of an
+abort record "is noncritical; the presumption would be that it aborted, anyway"
+(`xact.c:1456-1458`), and marking the transaction aborted in clog is "not absolutely
+necessary" because "in event of a crash we'd be assumed to have aborted anyway"
+(`xact.c:1885-1890`; PostgreSQL commit `85f55534e80`). The coordinator's journal-bound
+log drops the writer from the checkpoint's active list even when the append fails:
+the manager appends the record only after the undo completed, so nothing of the
+writer is left for recovery to scrub.
+
+**The token stops at the start.** A rollback stopped half way would keep the locks of
+a writer whose work it only partly undid, the zombie this rule removes. PostgreSQL
+holds interrupts through the whole of `AbortTransaction` ("Prevent cancel/die
+interrupt while cleaning up", `xact.c:2860`). Graph's transaction already followed the
+rule (#1188); the SQL, KeyValuePair, Documents and Blob transactions now observe the
+caller's token before the start and pass none to the coordinator.
+
+**When the undo itself fails.** This is the one failure a rollback cannot absorb by
+ignoring it. The writer's versions are still in the record space, and the snapshot has
+no commit-log lookup ("Snapshot semantics", above), so the writer must keep reading
+as in flight. The transaction still ends: the caller's rollback returns and the state
+is `RolledBack`. But the writer stays in the active table, keeps its locks, and gets no
+abort record, so checkpoints keep carrying it in their active list. The manager owns
+this deferred undo. The coordinator's `RunVersionPurgePass` retries it, and when the
+undo completes the manager appends the abort record, removes the writer from the
+active table and releases its locks. Disposal retries it once more and rethrows an
+undo that still fails, after every other transaction was aborted, because the
+writer's versions then survive the close and only the next open's recovery scrub
+removes them. Holding the locks until the undo completes follows PostgreSQL, which
+holds regular locks "till we finish aborting" (`xact.c:2873`). Neo4j releases them
+in a `finally` whether or not its rollback threw
+(`community/kernel/.../KernelTransactionImplementation.java:1216-1229`, `1614-1623`;
+commit `54a7dcf7c25`), but its rollback only discards in-memory transaction state and
+leaves nothing on disk to undo; this kernel's undo is physical. Releasing them first
+would let the next lock holder build on versions about to be undone, and the Graph,
+Documents and Blob engines' latest-state checks, which build a snapshot from the open
+contexts under the database writer lock, rely on no lock holder leaving effects
+unresolved. A manager composed directly through `TransactionManager.Create` has no
+version-purge pass, so its deferred undo is retried only at disposal.
 
 **The sequence allocator (why an external hook and not a seed).** An engine that
 pairs manager transactions with storage brackets passes the storage's own
@@ -88,7 +152,7 @@ Storage owns the physical journal (`Database.Storage`); `ITransactionLog` is the
 
 ## Error model
 
-`TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). Caller-initiated rollback is not an error and throws nothing.
+`TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). Caller-initiated rollback is not an error: once started it throws nothing (#1226); before the start it throws only for a canceled token or a context it cannot end.
 
 ## The engine binding (first adopter: the SQL engine)
 
@@ -128,8 +192,9 @@ work items under #862). The integration kept this package exactly as shaped:
   B+Tree uniqueness precedent generalized), and deadlock victims cross the
   model boundary as the root's `DatabaseTransactionDeadlockException`.
 - The engine's version-purge worker drives the reclamation duties on its own
-  timer (#910): `PurgeWriterAsync` retries for aborted writers whose inline
-  undo failed, and `PruneAsync` below the safe snapshot bound — the minimum
+  timer (#910): it retries the undo of rolled-back writers whose inline undo
+  failed, releasing each writer once its undo completes (#1226, "Ending a
+  transaction" above), and `PruneAsync` below the safe snapshot bound — the minimum
   snapshot floor across open transactions, not `OldestActive` alone, which
   can trail a live snapshot's view (see the Sql DESIGN.md for the recorded
   bound decision). With that, all four §3.8 steps are implemented.

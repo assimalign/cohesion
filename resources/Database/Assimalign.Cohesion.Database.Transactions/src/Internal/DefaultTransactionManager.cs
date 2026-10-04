@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,6 +13,27 @@ namespace Assimalign.Cohesion.Database.Transactions.Internal;
 /// transaction log. Locks release as a set at completion; aborted writers are purged
 /// from the version store so snapshots never consult them.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>A started rollback always ends its transaction (#1226).</b> Rollback observes
+/// the caller's token only before it claims the context's end. From the claim on,
+/// nothing the caller does and nothing that fails can leave the context active: the
+/// undo and the abort record run with no token, a lost abort record is ignored, and
+/// the context ends as <see cref="TransactionState.RolledBack"/> (an abort that a
+/// failed commit forces ends it as <see cref="TransactionState.Faulted"/>).
+/// </para>
+/// <para>
+/// What the end releases depends on the undo. When the writer's versions are undone,
+/// the abort record is appended, the writer leaves the active table and its locks are
+/// released, in that order. When the undo itself fails, the writer's versions are
+/// still in the record space, so the writer stays in the active table (every snapshot
+/// keeps treating it as in flight, which hides those versions) and keeps its locks,
+/// and the abort record is not written (the journal keeps classifying the writer as
+/// unproven). That deferred undo belongs to the manager, not to the caller:
+/// <see cref="RetryDeferredUndoAsync"/> (the coordinator's version-purge pass) and
+/// <see cref="DisposeAsync"/> retry it and release the writer once it completes.
+/// </para>
+/// </remarks>
 internal sealed class DefaultTransactionManager : ITransactionManager
 {
     private readonly ITransactionLog _log;
@@ -19,6 +41,13 @@ internal sealed class DefaultTransactionManager : ITransactionManager
     private readonly IVersionStore _versionStore;
     private readonly Func<TransactionSequence>? _sequenceAllocator;
     private readonly Dictionary<ulong, DefaultTransactionContext> _active = new();
+
+    // Writers whose transaction ended but whose undo did not complete. Each one is still
+    // in _active and still holds its locks.
+    private readonly HashSet<ulong> _deferredUndo = new();
+
+    // Serializes the retries of deferred undo, so two retries never undo one writer at once.
+    private readonly SemaphoreSlim _undoRetryGate = new(1, 1);
     private readonly object _sync = new();
     private ulong _lastSequence;
     private bool _disposed;
@@ -116,7 +145,7 @@ internal sealed class DefaultTransactionManager : ITransactionManager
     /// <inheritdoc />
     public async ValueTask CommitAsync(ITransactionContext context, CancellationToken cancellationToken = default)
     {
-        var owned = Validate(context);
+        var owned = ClaimEnd(context);
 
         try
         {
@@ -128,7 +157,7 @@ internal sealed class DefaultTransactionManager : ITransactionManager
         }
         catch (Exception exception)
         {
-            await AbortAsync(owned).ConfigureAwait(false);
+            await EndAbortedAsync(owned, TransactionState.Faulted).ConfigureAwait(false);
             throw new TransactionAbortedException(
                 $"Transaction {owned.Sequence} aborted: the commit record could not be made durable.", exception);
         }
@@ -143,23 +172,29 @@ internal sealed class DefaultTransactionManager : ITransactionManager
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The token is observed only before the rollback starts: a token canceled by
+    /// then throws <see cref="OperationCanceledException"/> and leaves the
+    /// transaction active and untouched. Once started, the rollback runs to
+    /// completion and throws nothing — a canceled token, a failed abort record and a
+    /// failed undo all still end the transaction (see the class remarks).
+    /// </remarks>
     public async ValueTask RollbackAsync(ITransactionContext context, CancellationToken cancellationToken = default)
     {
-        var owned = Validate(context);
+        cancellationToken.ThrowIfCancellationRequested();
+        var owned = ClaimEnd(context);
 
-        await _versionStore.PurgeWriterAsync(owned.Sequence, cancellationToken).ConfigureAwait(false);
-        await _log.AppendAbortAsync(owned.Sequence, cancellationToken).ConfigureAwait(false);
-
-        lock (_sync)
-        {
-            _active.Remove(owned.Sequence.Value);
-        }
-
-        _lockManager.ReleaseAll(owned.Sequence);
-        owned.State = TransactionState.RolledBack;
+        await EndAbortedAsync(owned, TransactionState.RolledBack).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Aborts every transaction still active, then retries every deferred undo once.
+    /// An undo that still fails is rethrown after everything else is done: its writer's
+    /// versions remain in the record space without a commit record, which only the
+    /// next open's recovery scrub can remove, so the owner must not treat the close as
+    /// clean.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -177,10 +212,62 @@ internal sealed class DefaultTransactionManager : ITransactionManager
 
         foreach (var context in remaining)
         {
-            if (context.State == TransactionState.Active)
+            // A context whose commit or rollback is running is ended by that call.
+            if (context.State == TransactionState.Active && context.TryClaimEnd())
             {
-                await AbortAsync(context).ConfigureAwait(false);
+                await EndAbortedAsync(context, TransactionState.Faulted).ConfigureAwait(false);
             }
+        }
+
+        await _undoRetryGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await RetryDeferredUndoCoreAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            _undoRetryGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Retries the undo of every writer whose transaction ended while its undo failed.
+    /// Each writer whose undo now completes gets its abort record, leaves the active
+    /// table and releases its locks; a writer whose undo fails again stays deferred.
+    /// </summary>
+    /// <param name="cancellationToken">
+    /// Observed between writers only: a writer's undo, once started, runs to completion.
+    /// </param>
+    /// <returns>The number of versions and index entries the completed undos changed.</returns>
+    /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
+    /// <remarks>
+    /// Every deferred writer is attempted. When any of them fails again, the first
+    /// failure is rethrown after the pass; the others stay queued for the next pass.
+    /// </remarks>
+    internal async ValueTask<long> RetryDeferredUndoAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        await _undoRetryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await RetryDeferredUndoCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _undoRetryGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Gets whether the specified writer's transaction ended with its undo deferred.
+    /// </summary>
+    /// <param name="writer">The writer's sequence.</param>
+    /// <returns>True while the manager owns the writer's undo.</returns>
+    internal bool IsUndoDeferred(ulong writer)
+    {
+        lock (_sync)
+        {
+            return _deferredUndo.Contains(writer);
         }
     }
 
@@ -220,30 +307,115 @@ internal sealed class DefaultTransactionManager : ITransactionManager
         return new TransactionSnapshot(owner, new TransactionSequence(minimum), new TransactionSequence(next), active);
     }
 
-    private async ValueTask AbortAsync(DefaultTransactionContext context)
+    /// <summary>
+    /// Ends a claimed context as aborted. Throws nothing and observes no token: this is
+    /// the part of a rollback that, once started, always completes.
+    /// </summary>
+    private async ValueTask EndAbortedAsync(DefaultTransactionContext context, TransactionState outcome)
     {
-        await _versionStore.PurgeWriterAsync(context.Sequence).ConfigureAwait(false);
+        var sequence = context.Sequence;
 
         try
         {
-            await _log.AppendAbortAsync(context.Sequence).ConfigureAwait(false);
+            await _versionStore.PurgeWriterAsync(sequence, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception)
         {
-            // The abort record is advisory: recovery treats any sequence without a
-            // durable commit record as aborted, so a failed append changes nothing.
+            // The versions are still in the record space. Releasing the writer now would
+            // let every new snapshot read them as committed and let the next lock holder
+            // build on them, so the writer stays in the active table with its locks, and
+            // the manager owns the retry, which reports the failure if it recurs.
+            // PostgreSQL likewise holds regular locks "till we finish aborting"
+            // (xact.c:2873).
+            lock (_sync)
+            {
+                _deferredUndo.Add(sequence.Value);
+            }
+
+            context.State = outcome;
+            return;
+        }
+
+        context.State = outcome;
+        await ReleaseUndoneAsync(sequence).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Releases a writer whose undo completed: appends its abort record, removes it
+    /// from the active table and releases its locks.
+    /// </summary>
+    private async ValueTask ReleaseUndoneAsync(TransactionSequence sequence)
+    {
+        try
+        {
+            await _log.AppendAbortAsync(sequence, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // The abort record is advisory: recovery classifies every sequence without a
+            // durable commit record as aborted (TransactionRecovery.Analyze), so a lost
+            // abort record changes nothing. PostgreSQL does not even flush its abort
+            // record, "since the default assumption after a crash would be that we
+            // aborted, anyway" (xact.c:1825-1827).
         }
 
         lock (_sync)
         {
-            _active.Remove(context.Sequence.Value);
+            _active.Remove(sequence.Value);
         }
 
-        _lockManager.ReleaseAll(context.Sequence);
-        context.State = TransactionState.Faulted;
+        _lockManager.ReleaseAll(sequence);
     }
 
-    private DefaultTransactionContext Validate(ITransactionContext context)
+    private async ValueTask<long> RetryDeferredUndoCoreAsync(CancellationToken cancellationToken)
+    {
+        ulong[] writers;
+        lock (_sync)
+        {
+            writers = [.. _deferredUndo];
+        }
+
+        long total = 0;
+        Exception? failure = null;
+
+        foreach (ulong writer in writers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var sequence = new TransactionSequence(writer);
+            long undone;
+
+            try
+            {
+                undone = await _versionStore.PurgeWriterAsync(sequence, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                // Still deferred: the writer keeps its place in the active table and its locks.
+                failure ??= exception;
+                continue;
+            }
+
+            lock (_sync)
+            {
+                _deferredUndo.Remove(writer);
+            }
+
+            await ReleaseUndoneAsync(sequence).ConfigureAwait(false);
+            total += undone;
+        }
+
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+
+        return total;
+    }
+
+    /// <summary>
+    /// Validates a context and claims its end for the caller.
+    /// </summary>
+    private DefaultTransactionContext ClaimEnd(ITransactionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -257,6 +429,12 @@ internal sealed class DefaultTransactionManager : ITransactionManager
         {
             throw new TransactionAbortedException(
                 $"Transaction {owned.Sequence} is not active (state: {owned.State}).");
+        }
+
+        if (!owned.TryClaimEnd())
+        {
+            throw new TransactionAbortedException(
+                $"Transaction {owned.Sequence} is already ending: its commit or rollback is running.");
         }
 
         return owned;

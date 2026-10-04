@@ -1,3 +1,5 @@
+using System.Threading;
+
 namespace Assimalign.Cohesion.Database.Transactions.Internal;
 
 /// <summary>
@@ -9,6 +11,7 @@ internal sealed class DefaultTransactionContext : ITransactionContext
 {
     private readonly DefaultTransactionManager _manager;
     private readonly TransactionSnapshot _beginSnapshot;
+    private int _ending;
 
     internal DefaultTransactionContext(
         DefaultTransactionManager manager,
@@ -48,4 +51,13 @@ internal sealed class DefaultTransactionContext : ITransactionContext
         IsolationLevel == IsolationLevel.ReadCommitted && State == TransactionState.Active
             ? _manager.CaptureSnapshot(Sequence)
             : _beginSnapshot;
+
+    /// <summary>
+    /// Claims the end of this context for one commit, rollback or abort. Exactly
+    /// one caller wins; the claim is the point after which a rollback runs to
+    /// completion whatever fails or is canceled (#1226), and it keeps a commit
+    /// from racing a rollback of the same writer.
+    /// </summary>
+    /// <returns>True for the one caller that claimed the end.</returns>
+    internal bool TryClaimEnd() => Interlocked.CompareExchange(ref _ending, 1, 0) == 0;
 }

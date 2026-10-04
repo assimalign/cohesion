@@ -68,8 +68,16 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The token is observed only before the rollback starts: a token canceled by
+    /// then leaves the transaction active. A started rollback runs to completion
+    /// and always ends the transaction (#1226) — a rollback stopped half way would
+    /// leave the writer holding its locks.
+    /// </remarks>
     public async ValueTask RollbackAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (_context.State != TransactionState.Active)
         {
             throw new DatabaseException($"Cannot rollback transaction in state '{_context.State}'.");
@@ -77,7 +85,7 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
 
         try
         {
-            await _coordinator.RollbackAsync(_context, cancellationToken).ConfigureAwait(false);
+            await _coordinator.RollbackAsync(_context, CancellationToken.None).ConfigureAwait(false);
         }
         catch (TransactionAbortedException exception)
         {

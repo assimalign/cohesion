@@ -245,4 +245,29 @@ public class KeyValueMvccTests
         reclaimed.ShouldBeGreaterThan(0);
         Text((await database.GetAsync(session, Bytes("k"), TestTimeout.Token()))!.Value.Value).ShouldBe("v2");
     }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Rollback: a token canceled before the rollback starts leaves the transaction and its writes intact")]
+    public async Task Rollback_TokenCanceledBeforeStart_ShouldLeaveTransactionAndItsWritesIntact()
+    {
+        // Arrange
+        var (engine, database) = await CreateAsync();
+        await using var _ = engine;
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
+        await database.PutAsync(session, Bytes("k"), Bytes("kept"), cancellationToken: TestTimeout.Token());
+        using var canceled = new System.Threading.CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act
+        await Should.ThrowAsync<System.OperationCanceledException>(async () => await transaction.RollbackAsync(canceled.Token));
+
+        // Assert: nothing of the rollback ran (#1226), so no purge pass may undo the still-active
+        // writer, and its commit keeps the value.
+        var instance = (Internal.KeyValueDatabaseInstance)database;
+        transaction.State.ShouldBe(TransactionState.Active);
+        instance.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        instance.Coordinator.RunVersionPurgePass(TestTimeout.Token());
+        await transaction.CommitAsync(TestTimeout.Token());
+        Text((await database.GetAsync(session, Bytes("k"), TestTimeout.Token()))!.Value.Value).ShouldBe("kept");
+    }
 }
