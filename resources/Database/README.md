@@ -8,7 +8,7 @@ The multi-model OLTP database engine family for Cohesion: five independent datab
 every model: engine, database, session, and transaction contracts; the provisioning
 seam and compiled-schema identity; object ownership; value objects; and exceptions.
 It composes the **child roots** `Types`, `Language`, `Storage`, `Transactions`,
-`Indexing`, `Execution`, `Protocol`, `Security`, and `Governance`. The dependency
+`Indexing`, `Execution`, `Protocol`, and `Security`. The dependency
 arrow always points **root → child**; a child root never references the area root.
 
 **A project whose name contains a model segment — `*.Sql.*`, `*.Documents.*`,
@@ -97,18 +97,18 @@ In the repo's L1/L2/L3 model (see `docs/programs/DELIVERY_ROADMAP.md`), this are
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Database` | Area root: engine/database/session/transaction contracts, exceptions, application composition, model-agnostic `CompiledSchema` identity and provisioning seam, and object ownership — **rolls up the child roots** (`Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`/`Governance`; child roots never reference the root) |
+| `Assimalign.Cohesion.Database` | Area root: engine/database/session/transaction contracts, exceptions, application composition, model-agnostic `CompiledSchema` identity and provisioning seam, and object ownership — **rolls up the child roots** (`Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`; child roots never reference the root) |
 | `Assimalign.Cohesion.Database.Storage` | Child root — pages, buffer pool, free-space map, journal (WAL), recovery, backup |
 | `Assimalign.Cohesion.Database.Transactions` | Child root — MVCC snapshots, isolation levels, lock manager, transaction log seam, `TransactionId`/`TransactionState` |
 | `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors (child root; rolled up by the root) |
 | `Assimalign.Cohesion.Database.Types` | Child root — shared scalar type system: identity, comparison/collation, binary encoding |
-| `Assimalign.Cohesion.Database.Execution` | Child root — query request/result families, execution pipeline contracts |
+| `Assimalign.Cohesion.Database.Execution` | Child root — query request/result families (`QueryRequest`, `QueryResult`, `QueryResultSet`, `QueryRow`) |
 | `Assimalign.Cohesion.Database.Language` | Child root — shared lexer/parser/diagnostics infrastructure for the model languages |
 | `Assimalign.Cohesion.Database.Memory` | In-memory storage strategy (tests, embedded scenarios) |
 
 ### Model engines
 
-Each model follows the same matrix: root (engine + public interface), plus `.Language`*, `.Storage`, `.Catalog`, `.Client`, `.Security`, `.Replication` satellites.
+Each model follows the same matrix: root (engine + public interface), plus `.Language`*, `.Storage`, `.Catalog`, `.Client`, `.Security` satellites. (The empty `.Replication` satellites and the shared `Database.Replication` and `Database.Governance` placeholders were deleted with #1257; replication returns as its own design when it is built.)
 
 | Model | Root project | Notes |
 |---|---|---|
@@ -139,9 +139,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 |---|---|
 | `Assimalign.Cohesion.Database.Protocol` | Child root — framing, handshake, lifecycle, errors, version negotiation, and immutable model-family binding |
 | `Assimalign.Cohesion.Database.Client` | Shared client core: connection settings, pooling, handshake, framing, and model-exchange lifetime; model clients materialize results |
-| `Assimalign.Cohesion.Database.Security` | Child root — authN/authZ contracts (principals, roles, permissions) |
-| `Assimalign.Cohesion.Database.Replication` | Shared replication contracts (WAL log-shipping seam) |
-| `Assimalign.Cohesion.Database.Governance` | Child root — quotas, tenancy boundaries, audit events |
+| `Assimalign.Cohesion.Database.Security` | Child root — the authentication contract (`IDatabaseAuthenticator`, `DatabaseAuthenticator.AllowAll`) |
 | `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; implements `DatabaseApplication.CreateBuilder(args)`, which honors an enabled executable's ambient `Hosting.Resources` `ResourceContext` and generated default-control-plane registration and stays plain otherwise. Additional services, including `builder.Provision`/`AddDatabase`, start before the per-model servers, so provisioning always precedes accept. The internal admin service privately hosts `Web.Hosting` + `Web.Health` for health, readiness, liveness, endpoint observation, commands, and graceful stop. |
 | `Assimalign.Cohesion.Database.ApplicationModel` | Manifest-backed `DatabaseResource : PlannedResource`, `AddDatabase(manifest, options)`, the platform-neutral Database planner (stable identity, sized per-replica volume claims, one headless governing service), and the Database default-control-plane factory registered by generated executable code through `Hosting.Resources` |
 | `Assimalign.Cohesion.Database.Testing` | The area's sole hosting-isolation exemption holder; `DatabaseApplicationTestFactory.FromProgram<Program>()` runs the resource's real entry point inside `Hosting.Resources` `ResourceRuntime.CreateScope(...)`, waits on the `admin` control plane, and stops it through the graceful control-plane path |

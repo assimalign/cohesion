@@ -1,6 +1,6 @@
 # Graph storage API
 
-`GraphStorage.Create` and `Open` own three streams and expose the shared `IStorage`
+`GraphStorage.Create` and `Open` own three streams and expose the shared `Storage`
 surface, `WriteAheadJournal`, and `Records` for coordinator construction. Their raw
 owner-zero record methods support Graph.Catalog. `PackLocation` and `UnpackLocation`
 convert the stable page/slot reference format.

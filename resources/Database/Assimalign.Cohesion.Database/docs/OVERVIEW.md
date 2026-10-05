@@ -16,7 +16,7 @@ exception root (`DatabaseException`, `DatabaseNotFoundException`,
 objects (`DatabaseName`, `EngineState`, `EngineModel`). The root is also the
 area's **rollup**: it
 references every child root (Types, Language, Storage, Transactions, Execution,
-Indexing, Protocol, Security, Governance), so one reference to the root delivers
+Indexing, Protocol, Security), so one reference to the root delivers
 the whole base surface — including child-owned vocabulary the contracts speak
 (`TransactionId` and `TransactionState` from `Database.Transactions`,
 `ProtocolVersion` from `Database.Protocol`).
@@ -74,9 +74,9 @@ the whole base surface — including child-owned vocabulary the contracts speak
 
 ## Dependencies
 
-`Core`, the nine
+`Core`, the eight
 child roots the root rolls up (`Database.Execution`,
-`Database.Governance`, `Database.Indexing`, `Database.Language`,
+`Database.Indexing`, `Database.Language`,
 `Database.Protocol`, `Database.Security`, `Database.Storage`,
 `Database.Transactions`, `Database.Types` — child roots never reference the
 root), and the existing private `Web` implementation reference (excluded from

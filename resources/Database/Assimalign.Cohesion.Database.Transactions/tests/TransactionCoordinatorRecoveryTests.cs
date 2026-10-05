@@ -34,7 +34,7 @@ public class TransactionCoordinatorRecoveryTests
         using var releaseCheckpoint = new ManualResetEventSlim();
         using var lifecycleStarted = new ManualResetEventSlim();
 
-        storage.BeforeCheckpoint = sequences =>
+        coordinator.BeforeCheckpoint = sequences =>
         {
             sequences.ShouldContain((long)active.Sequence.Value);
             checkpointEntered.Set();
@@ -50,7 +50,7 @@ public class TransactionCoordinatorRecoveryTests
             checkpointEntered.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue();
             // For begin, the allocator signals that the operation reached the
             // coordinator while its journal gate is held by the checkpoint.
-            storage.SequenceReserved = () => lifecycleStarted.Set();
+            coordinator.SequenceReserved = () => lifecycleStarted.Set();
             lifecycle = Task.Factory.StartNew(() =>
             {
                 if (commit)
@@ -313,7 +313,7 @@ public class TransactionCoordinatorRecoveryTests
         await coordinator.ApplyStatementAsync(writer, bracket =>
             storage.Insert(bracket, Stamped(writer.Sequence, TransactionSequence.None)).SlotIndex);
         long[] listed = [];
-        storage.BeforeCheckpoint = sequences => listed = sequences;
+        coordinator.BeforeCheckpoint = sequences => listed = sequences;
 
         // Act
         coordinator.Checkpoint();
@@ -377,7 +377,7 @@ public class TransactionCoordinatorRecoveryTests
         using var storage = CoordinatorStorage.Create();
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
         int checkpoints = 0;
-        storage.BeforeCheckpoint = _ => checkpoints++;
+        coordinator.BeforeCheckpoint = _ => checkpoints++;
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -432,12 +432,12 @@ public class TransactionCoordinatorRecoveryTests
         }, durable: false).AsTask();
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None).ShouldBeFalse();
-        storage.BeforeCheckpoint = _ => throw failure;
+        coordinator.BeforeCheckpoint = _ => throw failure;
 
         // Act
         release.SetResult();
         var statementError = await Record.ExceptionAsync(() => statement.WaitAsync(TimeSpan.FromSeconds(10)));
-        storage.BeforeCheckpoint = null;
+        coordinator.BeforeCheckpoint = null;
         var reported = Should.Throw<InvalidOperationException>(() => coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None));
         bool ranAfterTheReport = coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None);
 
@@ -486,7 +486,7 @@ public class TransactionCoordinatorRecoveryTests
         return bytes;
     }
 
-    private static int RecordCount(IStorage storage)
+    private static int RecordCount(Storage.Storage storage)
     {
         using var iterator = storage.GetUnitIterator();
         int count = 0;
@@ -498,9 +498,10 @@ public class TransactionCoordinatorRecoveryTests
         return count;
     }
 
-    // Only the boundary hooks are test doubles. Pages, record iteration,
-    // transactions, durability, journal replay, and truncation are real Storage.
-    private sealed class CoordinatorStorage : Storage.Storage, IStorage, ITransactionRecordSpace
+    // Only the record-space boundary is a test double. Pages, record iteration,
+    // transactions, durability, journal replay, and truncation are real Storage; the
+    // checkpoint and sequence-reservation hooks are the coordinator's own (#1257).
+    private sealed class CoordinatorStorage : Storage.Storage, ITransactionRecordSpace
     {
         private readonly MemoryStream _data;
         private readonly MemoryStream _journal;
@@ -522,11 +523,7 @@ public class TransactionCoordinatorRecoveryTests
 
         public override StorageModel Model => StorageModel.KeyValue;
 
-        internal IStorageJournal Log => WriteAheadLog;
-
-        internal Action<long[]>? BeforeCheckpoint { get; set; }
-
-        internal Action? SequenceReserved { get; set; }
+        internal StorageJournal Log => WriteAheadLog;
 
         internal static CoordinatorStorage Create() => new(new MemoryStream(), new MemoryStream(), reopen: false);
 
@@ -555,19 +552,6 @@ public class TransactionCoordinatorRecoveryTests
 
         public (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
             => ((PageId)(long)(location >> 16), (int)(location & 0xFFFF));
-
-        void IStorage.Checkpoint(ReadOnlySpan<long> sequences)
-        {
-            BeforeCheckpoint?.Invoke(sequences.ToArray());
-            Checkpoint(sequences);
-        }
-
-        long IStorage.ReserveTransactionSequence()
-        {
-            long sequence = ReserveTransactionSequence();
-            SequenceReserved?.Invoke();
-            return sequence;
-        }
 
         private static MemoryStream Copy(byte[] bytes)
         {

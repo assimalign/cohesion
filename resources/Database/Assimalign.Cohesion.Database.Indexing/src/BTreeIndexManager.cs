@@ -52,7 +52,7 @@ public static class BTreeIndexManager
     /// <param name="storage">The storage whose pages hold the trees.</param>
     /// <param name="registrations">The registrations of the trees to check.</param>
     /// <exception cref="IndexFormatException">A tree's root page is not in page format <see cref="FormatVersion"/>.</exception>
-    public static void EnsureFormat(IStorage storage, IEnumerable<BTreeIndexRegistration> registrations)
+    public static void EnsureFormat(Storage.Storage storage, IEnumerable<BTreeIndexRegistration> registrations)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(registrations);

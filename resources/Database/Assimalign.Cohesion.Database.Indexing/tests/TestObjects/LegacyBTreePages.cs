@@ -124,7 +124,7 @@ public static class LegacyBTreePages
     /// other, so the storage stays consistent).
     /// </summary>
     /// <returns>The number of pages rewritten.</returns>
-    public static int DowngradeIndexPages(IStorage storage)
+    public static int DowngradeIndexPages(Storage.Storage storage)
     {
         int rewritten = 0;
         using var bracket = storage.BeginTransaction();

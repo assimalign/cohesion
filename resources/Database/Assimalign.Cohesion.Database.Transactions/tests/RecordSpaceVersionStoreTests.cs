@@ -201,7 +201,7 @@ public class RecordSpaceVersionStoreTests
         return RecordVersionStamp.WithDeleter(record, deleter);
     }
 
-    private static int CountRecords(IStorage storage)
+    private static int CountRecords(Storage storage)
     {
         using var iterator = storage.GetUnitIterator();
         int count = 0;
@@ -253,7 +253,7 @@ public class RecordSpaceVersionStoreTests
 
         public override StorageModel Model => StorageModel.Custom;
 
-        internal IStorageJournal Log => WriteAheadLog;
+        internal StorageJournal Log => WriteAheadLog;
 
         internal (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, ReadOnlySpan<byte> record)
             => InsertRecord(transaction, record);

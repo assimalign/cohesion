@@ -285,7 +285,7 @@ public sealed class StorageCheckpointAnchorTests
 
         public FaultingMemoryStream JournalStream => _journal;
 
-        public IStorageJournal Log => WriteAheadLog;
+        public StorageJournal Log => WriteAheadLog;
 
         public static AnchorStorage Create() => new(new MemoryStream(), new FaultingMemoryStream(), reopen: false);
 

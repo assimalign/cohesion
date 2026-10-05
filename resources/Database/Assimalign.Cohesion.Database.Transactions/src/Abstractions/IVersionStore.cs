@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// Model storage layers implement this over their page layouts: each logical entry
 /// (row, document, key) heads a chain of versions stamped with the writing
 /// transaction's sequence. Readers resolve the newest chain member visible through
-/// their snapshot; the transaction manager's <see cref="ITransactionManager.OldestActive"/>
+/// their snapshot; the transaction manager's <see cref="TransactionManager.OldestActive"/>
 /// bound drives pruning of versions no snapshot can reach.
 /// </remarks>
 public interface IVersionStore

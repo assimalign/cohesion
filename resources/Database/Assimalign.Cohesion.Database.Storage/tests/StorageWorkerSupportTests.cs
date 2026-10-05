@@ -28,7 +28,7 @@ public sealed class StorageWorkerSupportTests
 
         public override StorageModel Model => StorageModel.Sql;
 
-        public IStorageJournal Wal => WriteAheadLog;
+        public StorageJournal Wal => WriteAheadLog;
 
         public static WorkerStorage Create(Stream data, Stream journal)
             => Create(data, new SimulatedDurableFileHandle(journal));

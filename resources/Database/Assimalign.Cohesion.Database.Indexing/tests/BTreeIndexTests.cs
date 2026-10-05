@@ -536,7 +536,7 @@ public class BTreeIndexTests
     /// must keep no tiebreaker (its neighbours' keys differ), so its key bytes alone
     /// decide its order.
     /// </summary>
-    private static void OverwriteOnlySeparator(IStorage storage, long pageId, IndexKey replacement)
+    private static void OverwriteOnlySeparator(Storage.Storage storage, long pageId, IndexKey replacement)
     {
         using var bracket = storage.BeginTransaction();
         using (var handle = storage.OpenPageForWrite(bracket, pageId))
@@ -557,7 +557,7 @@ public class BTreeIndexTests
         bracket.Commit();
     }
 
-    private static int NodeEntryCount(IStorage storage, long pageId)
+    private static int NodeEntryCount(Storage.Storage storage, long pageId)
     {
         using var handle = storage.PageManager.GetPage(pageId);
         return BinaryPrimitives.ReadUInt16LittleEndian(handle.Page.AsBodySpan()[NodeCountOffset..]);

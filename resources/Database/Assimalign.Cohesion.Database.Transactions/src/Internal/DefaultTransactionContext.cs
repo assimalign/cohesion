@@ -30,7 +30,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Internal;
 /// </remarks>
 internal sealed class DefaultTransactionContext : ITransactionContext
 {
-    private readonly DefaultTransactionManager _manager;
+    private readonly TransactionManager _manager;
     private readonly TransactionSnapshot _beginSnapshot;
     private readonly object _endSync = new();
     private int _applying;
@@ -38,7 +38,7 @@ internal sealed class DefaultTransactionContext : ITransactionContext
     private TaskCompletionSource? _drained;
 
     internal DefaultTransactionContext(
-        DefaultTransactionManager manager,
+        TransactionManager manager,
         TransactionId id,
         TransactionSequence sequence,
         IsolationLevel isolationLevel,
@@ -56,7 +56,7 @@ internal sealed class DefaultTransactionContext : ITransactionContext
     /// Gets the manager that created this context, so a manager can reject a
     /// context begun on a different manager instance.
     /// </summary>
-    internal DefaultTransactionManager Manager => _manager;
+    internal TransactionManager Manager => _manager;
 
     /// <inheritdoc />
     public TransactionId Id { get; }

@@ -4,12 +4,12 @@ The shared ACID substrate for every Cohesion database engine: MVCC visibility sn
 
 ## Scope
 
-- `ITransactionManager` — begin/commit/rollback lifecycle, sequence assignment, snapshot capture
+- `TransactionManager` — begin/commit/rollback lifecycle, sequence assignment, snapshot capture (a sealed type; the coordinator composes the durable one, `TransactionManager.Create` a standalone one over an in-memory log)
 - `ITransactionContext` — the engine-internal state of one in-flight transaction
 - `TransactionId` / `TransactionState` — the transaction vocabulary the area root's `IDatabaseTransaction` contract consumes
 - `TransactionSnapshot` / `TransactionSequence` — MVCC visibility (implemented, tested)
 - `ILockManager` / `LockMode` / `LockResource` — hierarchical write locking with deadlock resolution
-- `ITransactionLog` — the WAL binding (storage owns the physical journal)
+- the transaction log — the WAL binding, an internal seam since #1257 (storage owns the physical journal)
 - `IVersionStore` — the version-chain contract model storage layers implement
 - `TransactionAbortedException` — an independent exception root (inherits `Exception`, not `DatabaseException`)
 

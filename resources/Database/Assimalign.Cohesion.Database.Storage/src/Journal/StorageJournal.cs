@@ -16,6 +16,27 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
+/// <b>Write ordering rules.</b> Appends are serialized: log sequence numbers (LSNs)
+/// are strictly monotonic and match the physical order of records in the journal
+/// stream. A transaction's first modification of a page since the last checkpoint
+/// appends the page's full image; commit appends the changed bytes of every modified
+/// page (a page delta, or a committed full image when most of the page changed) followed
+/// by the commit record (storage format 3, #1253). In durable storage modes this record must
+/// be durable (<see cref="EnsureDurable"/>) before the commit is acknowledged — the write-ahead
+/// rule. In those modes a page may be written to the data file only after the journal is
+/// durable up to that page's LSN, which the buffer pool enforces through the same
+/// <see cref="EnsureDurable"/> gate. Non-durable storage appends the same records and uses
+/// ordinary flushes without a persistence guarantee.
+/// </para>
+/// <para>
+/// <b>Recovery.</b> On open, recovery replays the journal in order: every full page
+/// image is restored, whatever became of its transaction, and the deltas and committed
+/// images of transactions whose commit record is durable are applied on top, each on the
+/// LSN it names. That also overwrites the stolen writes of transactions that never
+/// committed. Corrupted or torn records at the tail of the journal terminate the scan
+/// and are ignored — they belong to work that was never acknowledged.
+/// </para>
+/// <para>
 /// Frame layout: <c>[int frameLength][int magic][body][uint crc32c(body)]</c> where the
 /// body is <c>[byte version][long lsn][long transactionSequence][byte type][long pageId]
 /// [payload]</c>. A record whose length prefix, magic, or checksum does not verify
@@ -91,7 +112,8 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// (<c>issue_xlog_fsync</c>, <c>src/backend/access/transam/xlog.c:9877-9937</c>).
 /// </para>
 /// </remarks>
-public abstract class StorageJournal : IStorageJournal
+// Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+public abstract class StorageJournal : IAsyncDisposable, IDisposable
 {
     /// <summary>
     /// The size the append buffer starts at, allocated by the first append: 64 KiB, PostgreSQL's
@@ -159,7 +181,10 @@ public abstract class StorageJournal : IStorageJournal
     /// </summary>
     protected StorageJournal() { }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the LSN of the most recently appended record, or zero when the journal
+    /// is empty.
+    /// </summary>
     /// <remarks>
     /// The record may still be in the append buffer: <see cref="WrittenLsn"/> is the last one
     /// the medium holds. Everything that reads the medium drains the buffer first.
@@ -188,7 +213,10 @@ public abstract class StorageJournal : IStorageJournal
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the LSN up to which the journal is known durable. Records with LSNs
+    /// beyond this value may be lost on a crash.
+    /// </summary>
     public long DurableLsn
     {
         get
@@ -348,11 +376,30 @@ public abstract class StorageJournal : IStorageJournal
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Appends a transaction-begin record.
+    /// </summary>
+    /// <param name="transactionSequence">The storage-level transaction sequence.</param>
+    /// <returns>The assigned LSN.</returns>
     public long AppendBegin(long transactionSequence)
         => Append(transactionSequence, JournalRecordType.BeginTransaction, default, ReadOnlySpan<byte>.Empty);
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Appends a full page image: the page before a transaction's first change to it
+    /// (<see cref="JournalRecordType.FullPageImage"/>, restored by recovery whatever became of
+    /// the transaction), or the page after a committed transaction's changes
+    /// (<see cref="JournalRecordType.CommittedPageImage"/>, applied only with the transaction's
+    /// commit record, on top of the record its LSN field names).
+    /// </summary>
+    /// <param name="transactionSequence">The storage-level transaction sequence.</param>
+    /// <param name="pageId">The page the image describes.</param>
+    /// <param name="type">
+    /// <see cref="JournalRecordType.FullPageImage"/> or <see cref="JournalRecordType.CommittedPageImage"/>.
+    /// </param>
+    /// <param name="image">The full page buffer, 8 KiB.</param>
+    /// <returns>The assigned LSN.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="type"/> is not a page-image type.</exception>
+    /// <exception cref="ArgumentException"><paramref name="image"/> is not a page.</exception>
     /// <remarks>
     /// The image is encoded as its non-zero byte runs (storage format 3, #1253): the free gap of
     /// a slotted or B-tree page is not journaled, and neither are the LSN and checksum fields. A
@@ -479,19 +526,39 @@ public abstract class StorageJournal : IStorageJournal
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Appends an opaque logical operation record on behalf of a higher layer.
+    /// </summary>
+    /// <param name="transactionSequence">The storage-level transaction sequence.</param>
+    /// <param name="payload">The logical payload.</param>
+    /// <returns>The assigned LSN.</returns>
     public long AppendOperation(long transactionSequence, ReadOnlySpan<byte> payload)
         => Append(transactionSequence, JournalRecordType.Operation, default, payload);
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Appends a transaction-commit record. A caller promising durable commits must
+    /// make the record durable with <see cref="EnsureDurable"/> before acknowledging it.
+    /// </summary>
+    /// <param name="transactionSequence">The storage-level transaction sequence.</param>
+    /// <returns>The assigned LSN.</returns>
     public long AppendCommit(long transactionSequence)
         => Append(transactionSequence, JournalRecordType.CommitTransaction, default, ReadOnlySpan<byte>.Empty);
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Appends a transaction-rollback record.
+    /// </summary>
+    /// <param name="transactionSequence">The storage-level transaction sequence.</param>
+    /// <returns>The assigned LSN.</returns>
     public long AppendRollback(long transactionSequence)
         => Append(transactionSequence, JournalRecordType.RollbackTransaction, default, ReadOnlySpan<byte>.Empty);
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Truncates the journal and writes a fresh checkpoint record. The caller must
+    /// have durably flushed all page state to the data file first — after this call
+    /// the discarded records can no longer drive recovery.
+    /// </summary>
+    /// <param name="activeTransactions">The sequences of transactions active at checkpoint time.</param>
+    /// <returns>The LSN of the checkpoint record (LSNs continue monotonically across truncation).</returns>
     public long Checkpoint(ReadOnlySpan<long> activeTransactions)
         => Checkpoint(activeTransactions, forceDurable: true);
 
@@ -571,7 +638,11 @@ public abstract class StorageJournal : IStorageJournal
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Guarantees the journal is durable up to and including the given LSN,
+    /// flushing if necessary.
+    /// </summary>
+    /// <param name="lsn">The LSN that must be durable.</param>
     /// <remarks>
     /// The append buffer drains first, then the medium is flushed durably. An LSN that was
     /// already durable is confirmed even after the journal went offline: its durability was
@@ -646,7 +717,10 @@ public abstract class StorageJournal : IStorageJournal
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Flushes buffered journal data.
+    /// </summary>
+    /// <param name="forceDurable">When true, requests durable flush semantics where supported.</param>
     /// <remarks>
     /// The append buffer drains first. An offline journal refuses every flush with
     /// <see cref="StorageOfflineException"/>, and a drain or a durable flush that fails takes the
@@ -677,7 +751,11 @@ public abstract class StorageJournal : IStorageJournal
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Reads all valid records from the journal in LSN order. A corrupted or torn
+    /// tail terminates the scan.
+    /// </summary>
+    /// <returns>The decoded record list.</returns>
     /// <remarks>
     /// The append buffer drains first, so the list ends at <see cref="LastLsn"/>. On an offline
     /// journal nothing is written: the list is what the medium holds, which is what the reopen's

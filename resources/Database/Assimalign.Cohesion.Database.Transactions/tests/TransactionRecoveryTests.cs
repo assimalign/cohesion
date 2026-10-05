@@ -7,6 +7,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests;
+using Assimalign.Cohesion.Database.Transactions.Internal;
 
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 

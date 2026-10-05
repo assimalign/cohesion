@@ -1,6 +1,7 @@
 # Database concrete-first types: plan of record
 
-**Status:** Phase 0 landed with this file · **Created:** 2026-10-04 · **Owner:** Chase Crawford
+**Status:** Phase 0 landed with this file; phase 1 (#1257) re-verified and implemented on
+2026-10-05 (§7, §6.9) · **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
 · **Owner decision:** O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md` · **Supersedes:** #1232
 **Branch:** every phase branches from the integration branch
@@ -157,8 +158,8 @@ The phase-0 review (2026-10-04) found more. Each is folded in where it lands:
   a name search. Public `Storage` members return them, and nine shipped assemblies call through
   those members, so the rows become sealed public types in P2 (§5.1).
 - **P1 removes the coordinator tests' hooks.** Deleting `IStorage` and `IStorageJournal` removes
-  the interception six #1226-era coordinator tests rely on. The hooks move to the coordinator in
-  P1 (§6.9).
+  the interception the coordinator tests rely on (eight tests at P1, re-counted in §6.9). The
+  hooks move to the coordinator in P1 (§6.9).
 - **P3 cannot gate on model behavior.** No model derives from the root bases until P4, so P3
   tests the bases through root-level doubles, and each model's P4 PR carries its own #1188,
   #1225 and #1226 gate (§6.4).
@@ -220,8 +221,8 @@ interface is deleted in P6.
 | 11 | `IDatabaseServerSession` | Database `:11` | area root | abstract | `public abstract class DatabaseServerSession`, with a protected constructor taking `(Guid, ProtocolVersion, string? principal)` that backs non-virtual getters. `public abstract DatabaseSession? DatabaseSession`. Leaves stay internal sealed. | P3/P6 |
 | 12 | `IDatabaseSession` | Database `:19` | area root | abstract | `public abstract class DatabaseSession : IAsyncDisposable`. The base owns `State`, `CurrentTransaction` and the one "already active" check, with one message (§6.4). `Database` is non-virtual and field-backed, and leaves re-expose it typed with `new`. NVI `BeginTransactionAsync` and `ExecuteAsync` call `BeginTransactionCoreAsync(IsolationLevel)` and `ExecuteCoreAsync`. | P3/P6 |
 | 13 | `IDatabaseTransaction` | Database `:18` | area root | abstract | `public abstract class DatabaseTransaction : IAsyncDisposable`, with a protected constructor taking `(TransactionId, IsolationLevel)`. It owns the explicit-transaction state machine (§6.4). NVI `CommitAsync` and `RollbackAsync` call `CommitCoreAsync` and `RollbackCoreAsync`. A non-virtual `DisposeAsync` rolls back if the transaction is active, then calls `DisposeAsyncCore`. | P3/P6 |
-| 14 | `IQueryExecutor` | Execution `:13` | child root | delete | `SqlQueryExecutor` stays internal sealed. | P1 |
-| 15 | `IQueryPipeline` | Execution `:18` | child root | delete | Deleted together with `QueryPipelineBuilder`, `QueryExecutionContext`, `Internal/BuiltQueryPipeline`, `QueryPipelineDelegate`, `QueryTransactionStatus`, `QueryStatementResult` and `tests/QueryPipelineTests.cs`. `QueryStatementResult` (`QueryStatementResult.cs:12`) came with the pipeline, and its only constructions are in `QueryPipelineTests.cs:93` and `:272`. This is the Web-style tap-in pipeline the owner ruled out, and no engine consumes it. | P1 |
+| 14 | `IQueryExecutor` | Execution `:13` | child root | delete | `SqlQueryExecutor` stays internal sealed. **At P1:** its public `ExecuteAsync(QueryRequest, CancellationToken)`, which only threw `NotSupportedException` to satisfy the interface, went with it. | P1 |
+| 15 | `IQueryPipeline` | Execution `:18` | child root | delete | Deleted together with `QueryPipelineBuilder`, `QueryExecutionContext`, `Internal/BuiltQueryPipeline`, `QueryPipelineDelegate`, `QueryTransactionStatus`, `QueryStatementResult` and `tests/QueryPipelineTests.cs`. `QueryStatementResult` (`QueryStatementResult.cs:12`) came with the pipeline, and its only constructions are in `QueryPipelineTests.cs:93` and `:272`. This is the Web-style tap-in pipeline the owner ruled out, and no engine consumes it. **At P1:** `Exceptions/QueryExecutionException` went too: its documented scope was "pipeline composition, stage contract violations", and nothing threw it. The Execution test project stays, with a `QueryRequestTests` suite over the surviving request contract instead of an empty shell. | P1 |
 | 16 | `IQueryPipelineStage` | Execution `:11` | child root | delete | Deleted with the pipeline. | P1 |
 | 17 | `IQueryTransactionScope` | Execution `:15` | child root | delete | Deleted with the pipeline. | P1 |
 | 18 | `IResourceGovernor` | Governance `:9` | child root | delete | The interface and the `Database.Governance` project are deleted (D6). | P1 |
@@ -248,7 +249,7 @@ interface is deleted in P6.
 | 39 | `ILockManager` | Transactions `:16` | child root | sealed | `public sealed class LockManager`, with an internal constructor. It absorbs `public static class LockManager` (`LockManager.cs:8`) as `public static LockManager Create()`. The coordinator's view becomes an internal release filter (§6.2). | P2 |
 | 40 | `IRecordVersionIndex` | Transactions `:13` | child root | abstract | `public abstract class RecordVersionIndex` in Transactions, with a protected constructor, because its leaves live in Indexing, Documents.Catalog and Graph.Storage. NVI erase and clear-deleter members call `protected abstract` cores. Indexing's sealed type (`Indexing/src/RecordVersionIndex.cs:17`) is renamed `BTreeRecordVersionIndex`. | P2 |
 | 41 | `ITransactionContext` | Transactions `:14` | child root | sealed | `public sealed class TransactionContext`, with an internal constructor, plus `public TransactionContext PinStatementSnapshot()` (§6.1). It is the most-consumed kernel contract (47 `src` files), and every call becomes non-virtual. | P2 |
-| 42 | `ITransactionLog` | Transactions `:17` | child root | delete | `internal abstract class TransactionLog`. `public static class TransactionLog` (`TransactionLog.cs:12`) is deleted and its factories become internal (§5.2). | P1 |
+| 42 | `ITransactionLog` | Transactions `:17` | child root | delete | `internal abstract class TransactionLog` in `Internal/` (rule 11). `public static class TransactionLog` (`TransactionLog.cs:12`) is deleted and its factories become internal (§5.2). | P1 |
 | 43 | `ITransactionManager` | Transactions `:17` | child root | sealed | `public sealed class TransactionManager`, promoted from `DefaultTransactionManager`, with an internal constructor. It gets a public static `Create`, an internal overload, and stays exposed by the coordinator (§5.2, C1). | P1 (P2 retypes the parameters) |
 | 44 | `ITransactionRecordSpace` | Transactions `:16` | child root | abstract | `public abstract class TransactionRecordSpace`, with a protected constructor, because its leaves live in Sql, KeyValuePair, Graph.Storage, Documents.Storage and Blob.Storage. NVI read, update and delete. | P2 |
 | 45 | `IVersionStore` | Transactions `:17` | child root | abstract | `public abstract class VersionStore`, with a `private protected` constructor, because both leaves (`RecordSpaceVersionStore` and `Internal/InMemoryVersionStore`) live in Transactions. It absorbs `public static class VersionStore` (`VersionStore.cs:8`) as `public static VersionStore CreateInMemory()`. | P2 |
@@ -346,6 +347,9 @@ decision.
 | `SqlProtocolConnectionExtensions.ExecuteAsync` (`Sql.Client/src/Extensions/SqlProtocolConnectionExtensions.cs:24`) | old-style `this IDatabaseConnection` extension | Stays an extension, because `DatabaseConnection` lives in Database.Client. It is retyped to `DatabaseConnection` and moves into an `extension(DatabaseConnection connection)` block (`general-rules.md`, extension containers). | P5 |
 | `SqlCatalog.CaptureSnapshot` (`:72`), `KeyValueCatalog.CaptureSnapshot` (`:41`) | static, taking the catalog interface | Instance methods on the sealed catalogs. | P4 |
 | `BTreeIndexManager.EnsureFormat` (`Indexing/src/BTreeIndexManager.cs:55`) | takes `IStorage` | Takes `Storage`. | P1 |
+| `BTreeIndexManagerOptions.Storage` (`Indexing/src/BTreeIndexManagerOptions.cs:16`) | `IStorage` (found at P1; the review missed it) | `Storage`. | P1 |
+| The five model storages' `WriteAheadJournal` (`SqlStorage`, `KeyValueStorage`, `GraphStorage`, `DocumentStorage`, `BlobStorage`) | return `IStorageJournal` (found at P1) | Return `StorageJournal`. Their engines pass it to the coordinator, so no call site changes. | P1 |
+| `TransactionCoordinator(IStorage, IStorageJournal, ITransactionRecordSpace)` and `TransactionCoordinator.Manager` | take the storage interfaces, expose `ITransactionManager` | Take `Storage` and `StorageJournal`, expose the sealed `TransactionManager`. `IsStorageOffline` and `AnalyzeAndScrub` lose their `is Storage` type tests, and `TransactionRecovery` its `ReadAll` fallback for non-`StorageJournal` journals. | P1 |
 | `EmbeddedDatabase.Engines`, `TryGetEngine(string, …)` and `TryGetEngine(EngineModel, …)` (`Embedded/src/EmbeddedDatabase.cs:32`, `:75`, `:95`; the field at `:21-24`) | typed `IDatabaseEngine` | Typed `DatabaseEngine`. | P6 |
 | The 15 triplet factories: `DatabaseClient`, `DatabaseCommandClient`, `BlobCatalog`, `BlobClient`, `DocumentCatalog`, `GraphCatalog`, `GraphClient`, `GraphSchema`, `GraphStore`, `KeyValueCatalog`, `KeyValueClient`, `SqlCatalog`, `SqlClient`, `BTreeIndexManager`, `DatabaseAuthenticator` | `public static class` + interface + internal implementation | Each collapses into one sealed type of the same name. `DatabaseAuthenticator` becomes abstract, with `AllowAll`. | per row |
 
@@ -550,7 +554,7 @@ statement (#1228).
 
 | Grant | Phase | Needed by |
 |---|---|---|
-| Transactions → `Assimalign.Cohesion.Database.Transactions.Tests` (new `src/Properties/AssemblyInfo.cs`) | P1 | `FailingCommitLog` (`TransactionManagerTests.cs:251`); `ControlledLog` (`TransactionManagerRollbackTests.cs:529`); `ControlledVersionStore` (`:467`, from P2); tests that call the now-internal log factories; the coordinator's three internal test hooks (below) |
+| Transactions → `Assimalign.Cohesion.Database.Transactions.Tests` (**already present** at P1: `src/Properties/AssemblyInfo.cs` landed with the deferred-undo backoff's internal clock, so P1 adds no grant) | P1 | `FailingCommitLog` (`TransactionManagerTests.cs`); `ControlledLog` (`TransactionManagerRollbackTests.cs`); `ControlledVersionStore` (from P2); tests that call the now-internal log factories and the internal `TransactionManager.Create` overload; the coordinator's three internal test hooks (below) |
 | Sql.Schema → `Assimalign.Cohesion.Database.Sql.Schema.Tests` (new `src/Properties/AssemblyInfo.cs`) | P4 (Sql) | `SqlSchemaTests.cs` and `CompiledSchemaTests.cs`, which read the internal declaration model |
 
 Every other derivation goes through a protected constructor, or through a grant that already
@@ -568,55 +572,81 @@ Documents.Language, Blob and Hosting.
 - **Sql.Tests** `SqlMvccBindingTests.cs:63`, `:71` read `database.Coordinator.Manager.OldestActive`.
   They compile unchanged, because `OldestActive` stays public on the sealed type; P1 verifies it.
 - **Transactions.Tests, P1: the coordinator hooks (rows 28 and 32).** P1 retypes
-  `TransactionCoordinator` (`TransactionCoordinator.cs:77`) to `Storage` and `StorageJournal`.
-  The members three doubles intercept are public and non-virtual there
-  (`Storage.ReserveTransactionSequence`, `Storage.cs:467`; `Storage.Checkpoint`, `:549`;
-  `StorageJournal.AppendRollback`, `StorageJournal.cs:78`), and `StreamJournal` is sealed. The
-  doubles also stop compiling in P1, because `IStorage` is in their base lists:
-  - `CoordinatorStorage` (`TransactionCoordinatorRecoveryTests.cs:318`) re-implements
-    `IStorage.Checkpoint` (`:374`) and `IStorage.ReserveTransactionSequence` (`:380`) to fire
-    `BeforeCheckpoint` and `SequenceReserved`;
-  - `RollbackStorage` (`TransactionCoordinatorRollbackTests.cs:926`) re-implements
-    `IStorage.Checkpoint` (`:987`) to fire `BeforeCheckpoint`;
-  - `FaultInjectingJournal` (`:844`) decorates the storage's journal and throws from
+  `TransactionCoordinator` to `Storage` and `StorageJournal`. The members three doubles
+  intercepted are public and non-virtual there (`Storage.ReserveTransactionSequence`,
+  `Storage.Checkpoint`, `StorageJournal.AppendRollback`), and `StreamJournal` is sealed. The
+  doubles also stopped compiling, because `IStorage` was in their base lists:
+  - `CoordinatorStorage` (`TransactionCoordinatorRecoveryTests.cs`) re-implemented
+    `IStorage.Checkpoint` and `IStorage.ReserveTransactionSequence` to fire `BeforeCheckpoint`
+    and `SequenceReserved`;
+  - `RollbackStorage` (`TransactionCoordinatorRollbackTests.cs`) re-implemented
+    `IStorage.Checkpoint` to fire `BeforeCheckpoint`;
+  - `FaultInjectingJournal` (same file) decorated the storage's journal and threw from
     `AppendRollback`.
 
-  **Seam decision.** `TransactionCoordinator` owns three internal hooks, reached through the P1
-  grant. Each sits at the call the double intercepted, inside the same gate, so the tests keep
-  their interleavings:
-  - one invoked under the append gate just before `storage.Checkpoint(actives)` (`:764`), with
-    the captured active list;
-  - one invoked after the allocator's `ReserveTransactionSequence` (`:99`);
-  - one invoked inside the `try` of the rollback append (`:730`), which may throw to reject the
-    record, so the `finally` still drops the sequence from the active set.
+  **Seam decision (re-verified at P1 against #1251 to #1253; landed as planned).**
+  `TransactionCoordinator` owns three internal hooks, reached through the existing
+  Transactions → Transactions.Tests grant. Each sits at the call the double intercepted, inside
+  the same gate, so the tests keep their interleavings:
+  - `BeforeCheckpoint(long[] writers)`, invoked under the append gate just before
+    `storage.Checkpoint(writers)`, inside the same `try`, so a throw still resets the journaled
+    set in the `finally`;
+  - `SequenceReserved()`, invoked in the manager's sequence allocator after
+    `Storage.ReserveTransactionSequence`;
+  - `BeforeAbortRecord(long sequence)`, invoked inside the `try` of the abort record's append; a
+    throw rejects the record, and the `finally` still drops the sequence from the active set.
 
-  `FaultInjectingJournal` is deleted. `CoordinatorStorage` and `RollbackStorage` drop `IStorage`
-  and their explicit re-implementations in P1; only the record-space split (C9) waits for P2. The
-  `RecordCount(IStorage)` and `CountRecords(IStorage)` helpers
-  (`TransactionCoordinatorRecoveryTests.cs:304`, `TransactionCoordinatorRollbackTests.cs:769`,
-  `RecordSpaceVersionStoreTests.cs:204`) and the doubles' `Log` properties retype to `Storage`
-  and `StorageJournal`.
+  `FaultInjectingJournal` is deleted; an `AbortRecordProbe` over `BeforeAbortRecord` keeps its
+  `FailRollbackRecords`, `AppendedRollbacks` and `RejectedRollbacks`. `CoordinatorStorage` and
+  `RollbackStorage` drop `IStorage` and their explicit re-implementations; only the record-space
+  split (C9) waits for P2. The `RecordCount(IStorage)` and `CountRecords(IStorage)` helpers
+  (`TransactionCoordinatorRecoveryTests.cs`, `TransactionCoordinatorRollbackTests.cs`,
+  `TransactionCoordinatorCheckpointCrashTests.cs`, `TransactionCoordinatorScrubCrashTests.cs`,
+  `RecordSpaceVersionStoreTests.cs`) and the doubles' `Log` properties retype to `Storage` and
+  `StorageJournal`.
 
   **Rejected seams.** `protected virtual` observer hooks on `Storage` would add protected surface
   to a public base purely for tests (`general-rules.md`, "Adding a public API to the producer
   purely to serve one consumer"). A `StorageJournal`-derived decorator cannot forward to another
-  instance's protected frame cores (CS1540), and a test cannot hand `Storage` its own journal:
-  `Storage` builds its `StreamJournal` itself (`Storage.cs:270`, `:367`). A stream-level trigger on
-  the rollback frame would tie the tests to the frame layout that #1236 is rewriting.
+  instance's protected frame cores (CS1540), and `StorageJournal` has a `private protected` core
+  besides, and a test cannot hand `Storage` its own journal: `Storage` builds its `StreamJournal`
+  itself. **Corrected at P1:** the plan also rejected a stream-level trigger, because it would tie
+  the tests to the frame layout #1236 was rewriting. #1252 changed that premise. Every journal
+  append is now a write into a user-space buffer, so a failed journal write is a failed *drain*,
+  and a failed drain takes the storage offline; the engines' `FaultInjectingJournal*StorageStrategy`
+  doubles and the coordinator tests below now fail the journal's backing stream
+  (`FaultingMemoryStream.FailWrites`) without reading a frame. P1 therefore uses a stream-level
+  trigger wherever the scenario is "a journal write fails", and keeps a coordinator hook only
+  where no stream failure reproduces the scenario: an interleaving at the checkpoint or the
+  sequence reservation, and an abort record rejected while the storage stays online.
 
-  **The six tests this carries**, from #1226 (`2b97a498`) and the coordinator's checkpoint
-  classification:
-  - `Checkpoint_ConcurrentLifecycleAppend_ShouldPreserveClassification` (`TransactionCoordinatorRecoveryTests.cs:24`, both cases);
-  - `RollbackAsync_JournalRejectsAbortRecord_ShouldReleaseWriterForTheNextOne` (`TransactionCoordinatorRollbackTests.cs:47`);
-  - `RollbackAsync_UndoFails_ShouldHoldLocksAndVisibilityUntilThePurgePassCompletesIt` (`:147`);
-  - `Recovery_WriterWithoutAbortRecord_ShouldBeClassifiedAbortedAndScrubbed` (`:201`);
-  - `RollbackAsync_UndoBracketJournalWriteFails_ShouldDeferTheUndoAndLeaveCheckpointsRunning` (`:279`);
-  - `DisposeAsync_UndoStillFailsAndStorageClosesCleanly_ShouldLeaveTheWriterForRecoveryToScrub` (`:315`).
+  **The tests the hooks carry** (re-counted at P1; the plan's list predated #1242, #1252 and
+  #1254):
+  - `BeforeCheckpoint`: `Checkpoint_ConcurrentLifecycleAppend_ShouldPreserveClassification` (both
+    cases), `Checkpoint_ReadersAndWriters_ShouldAnchorOnlyTheWriters`,
+    `TryCheckpoint_GateHeldByAStatement_ShouldDeferTheCheckpointToTheStatementsEnd` and
+    `TryCheckpoint_DeferredCheckpointFails_ShouldThrowFromTheNextCallNotTheStatement`
+    (`TransactionCoordinatorRecoveryTests.cs`); through the rollback tests' `Checkpoint` helper,
+    `RollbackAsync_JournalRejectsAbortRecord_ShouldReleaseWriterForTheNextOne`,
+    `RollbackAsync_UndoFails_ShouldHoldLocksAndVisibilityUntilThePurgePassCompletesIt` and
+    `DisposeAsync_UndoStillFailsAndStorageClosesCleanly_ShouldLeaveTheWriterForRecoveryToScrub`
+    (the `checkpointFirst` case);
+  - `SequenceReserved`: `Checkpoint_ConcurrentLifecycleAppend_ShouldPreserveClassification` (the
+    begin case);
+  - `BeforeAbortRecord`: `RollbackAsync_JournalRejectsAbortRecord_ShouldReleaseWriterForTheNextOne`,
+    `RollbackAsync_UndoFails_ShouldHoldLocksAndVisibilityUntilThePurgePassCompletesIt` and
+    `Recovery_WriterWithoutAbortRecord_ShouldBeClassifiedAbortedAndScrubbed` (both cases).
 
-  Each asserts that its hook fired, so a hook that is silently never called cannot pass. The
-  `Checkpoint(coordinator, storage)` helper (`TransactionCoordinatorRollbackTests.cs:730`) starts
-  its capture as `null` and asserts it was set; today an empty capture would pass
-  `ShouldNotContain` (`:191`).
+  `RollbackAsync_UndoBracketJournalWriteFails_ShouldDeferTheUndoAndLeaveCheckpointsRunning`, which
+  this list used to name, no longer exists: #1252 renamed it and split it into
+  `RollbackAsync_StorageWentOfflineBeforeTheUndo_ShouldDeferTheUndoAndLeaveTheWriterToRecovery`
+  and `RollbackAsync_UndoRecordsLostAtTheNextDrain_ShouldGoOfflineAndLeaveTheWriterToRecovery`,
+  which use the stream-level trigger and need no hook.
+
+  Each test asserts that its hook fired, so a hook that is silently never called cannot pass. The
+  rollback tests' `Checkpoint(coordinator)` helper starts its capture as `null` and requires it
+  set (an empty capture used to pass `ShouldNotContain`), and
+  `Recovery_WriterWithoutAbortRecord_…` now asserts which abort records the hook rejected.
 - **Transactions.Tests, P2**:
   - the three Storage-and-record-space doubles are split (C9);
   - `BlockingIndex` (`TransactionCoordinatorRollbackTests.cs:782`) and the two `FailingIndex`
@@ -722,27 +752,40 @@ root builds with 0 warnings, as before.
     `resources/Assimalign.Cohesion.Resources.slnx`, the area's
     `resources/Database/Assimalign.Cohesion.Database.slnx`, and
     `resources/Database/Assimalign.Cohesion.Database/Assimalign.Cohesion.Database.slnx:23`;
-  - the Governance child-root lists in `.claude/rules/resource-areas.md:92` and `:289`;
+  - the Governance child-root lists in `.claude/rules/resource-areas.md:92` and `:289`
+    (**open at P1:** the P1 change does not edit `.claude/rules/`; the owner makes that one-word
+    edit, see §12);
   - `resources/Database/README.md:11`, `:100`, `:111` and `:143-144`;
   - `docs/resources/Database/DESIGN.md:43`, `:72`, `:83`, `:90`, `:94`, `:96`, `:120`, `:122`,
     `:130` and `:495` (the decision-log row at `:469` is history and stays);
   - `Database/docs/OVERVIEW.md:19` and `:69`, `Database/docs/DESIGN.md:14`, and
     `Database.Storage/docs/DESIGN.md:646`;
-  - `docs/programs/DATABASE_PROGRAM_PLAN.md` (five mentions);
+  - `docs/programs/DATABASE_PROGRAM_PLAN.md` (five mentions; at P1 only the lane table is current
+    text, and the dated decision-log rows stay as history);
+  - the comment in `build/Targets/Build.Rules.targets` that lists the child roots;
   - re-run `rg -n "Governance|Replication" --glob '*.md' --glob '*.slnx'` before the commit,
     because these lines move.
 - **Execution.** `QueryStatementResult` goes with the pipeline (row 15), and
-  `Database.Execution/docs/OVERVIEW.md:13` with it.
+  `Database.Execution/docs/OVERVIEW.md:13` with it. **At P1** `QueryExecutionException` goes too
+  (row 15), `SqlQueryExecutor` loses the throwing overload that satisfied `IQueryExecutor`
+  (row 14), and the Execution test project keeps a two-test `QueryRequestTests` suite.
 - **Storage.** `Storage.BufferPool` becomes internal (row 30). The `Storage` and `StorageJournal`
-  deviation markers are written (§8).
-- **Transactions.** `TransactionManager`, `TransactionLog` and `TransactionRecovery` per §5.2, the
-  Transactions → Transactions.Tests grant, and the coordinator hooks that replace the `IStorage`
-  and `IStorageJournal` interception (§6.9).
+  deviation markers are written (§8). The members that implemented the interfaces with
+  `<inheritdoc />` carry the interfaces' documentation themselves.
+- **Transactions.** `TransactionManager`, `TransactionLog` and `TransactionRecovery` per §5.2, and
+  the coordinator hooks that replace the `IStorage` and `IStorageJournal` interception (§6.9). The
+  Transactions → Transactions.Tests grant already existed at P1.
+- **Re-verified at P1 against the code after #1251 to #1253 (and #1242, #1254, #1268).** Every
+  deleted interface still had no consumer outside the rows above; three public carriers the
+  review had missed were retyped (§5.2: `BTreeIndexManagerOptions.Storage`, the five
+  `WriteAheadJournal` properties, the coordinator's constructor and `Manager`). The coordinator
+  hooks were still needed (§6.9): #1252's stream-level triggers replaced the one test that failed
+  a journal write, but not the checkpoint, sequence and abort-record interceptions.
 
 *Gate:*
 
 - every Database suite, Indexing.Tests and Sql.Tests by name;
-- the six coordinator tests of §6.9 by name, each asserting that its hook fired;
+- the coordinator tests of §6.9 by name (eight tests at P1), each asserting that its hook fired;
 - `Assert-CohesionReleaseInventory`;
 - `dotnet pack resources/Database/Assimalign.Cohesion.Database.Runtime/src/Assimalign.Cohesion.Database.Runtime.csproj`,
   because the framework loses Governance;
@@ -1015,10 +1058,14 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   needs the same edit.
 - The phase-0 review changed other issue bodies' scope, and they need the same edits: #1255's
   tally becomes 28 delete, 52 sealed, 21 abstract and 5 keep (§5.1); #1257 (P1) loses rows 31,
-  34, 37 and 38 to #1258 (P2) and gains the coordinator hooks and the six named tests (§6.9);
+  34, 37 and 38 to #1258 (P2) and gains the coordinator hooks and the tests §6.9 names (eight
+  at P1, re-counted after #1252 renamed and split one of the original six);
   #1259 (P3) gates on a Database.Tests base suite, and each model PR under #1260 (P4) carries
   its own #1188, #1225 and #1226 gate (§6.4).
 - #1232 is closed as superseded when the Sql PR of P4 lands.
+- `.claude/rules/resource-areas.md` still names `Governance` among the Database child roots
+  (lines 92 and 289) after P1 deleted the project. The P1 change leaves `.claude/rules/` to the
+  owner; the edit is dropping one word from each list.
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never

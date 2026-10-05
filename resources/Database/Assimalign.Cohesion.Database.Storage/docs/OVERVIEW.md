@@ -11,14 +11,14 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
 - **Pages** — 8 KiB `Page` unit with a 96-byte header (id, LSN, CRC-32C checksum, type,
   flags, slot bookkeeping), `SlottedPage` variable-length record layout, `PageSlot`
   directory entries.
-- **Buffer pool** — `IStorageBufferPool` pin/unpin caching over a `StorageStream`;
+- **Buffer pool** — an internal pin/unpin cache over a `StorageStream`;
   checksum stamped on write-back, verified on load. 4,096 pages (32 MiB) by default,
   resizable through `Storage.BufferPoolCapacity`; engines expose it as an option (#1254).
 - **Page management** — `IStoragePageManager` allocation/free/retrieval/flush;
   `IStorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open.
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
   pages and `IStorageUnitIterator` full scans.
-- **Journal** — `IStorageJournal` write-ahead logging with begin/commit/rollback
+- **Journal** — `StorageJournal` write-ahead logging with begin/commit/rollback
   markers and CRC-32C-protected frames. A page is journaled as a full image once per
   checkpoint interval, on its first change since the checkpoint, and each commit journals only
   the bytes it changed (a page delta, or a committed full image past half a page); recovery is

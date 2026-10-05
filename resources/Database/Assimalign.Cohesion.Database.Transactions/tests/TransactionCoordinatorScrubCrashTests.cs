@@ -145,7 +145,7 @@ public sealed class TransactionCoordinatorScrubCrashTests
             return storage.PackLocation(pageId, slotIndex);
         });
 
-    private static int RecordCount(IStorage storage)
+    private static int RecordCount(Storage.Storage storage)
     {
         using var iterator = storage.GetUnitIterator();
         int count = 0;
@@ -182,7 +182,7 @@ public sealed class TransactionCoordinatorScrubCrashTests
 
         public override StorageModel Model => StorageModel.KeyValue;
 
-        internal IStorageJournal Log => WriteAheadLog;
+        internal StorageJournal Log => WriteAheadLog;
 
         internal static CrashStorage Create(int poolCapacity) => new(
             new CrashSimulationStream(writeThrough: true, name: "data"),

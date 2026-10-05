@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 
 /// <summary>
 /// The per-database MVCC composition (area DESIGN §3.8): one
-/// <see cref="ITransactionManager"/> + <see cref="ILockManager"/> +
+/// <see cref="TransactionManager"/> + <see cref="ILockManager"/> +
 /// <see cref="RecordSpaceVersionStore"/> over the database's data storage,
 /// with the manager's transaction log bound to the storage's write-ahead
 /// journal. The coordinator owns the sequence-space unification (the manager
@@ -51,9 +51,9 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 /// </remarks>
 public sealed class TransactionCoordinator : IAsyncDisposable
 {
-    private readonly IStorage _storage;
-    private readonly IStorageJournal _journal;
-    private readonly DefaultTransactionManager _manager;
+    private readonly Storage _storage;
+    private readonly StorageJournal _journal;
+    private readonly TransactionManager _manager;
     private readonly EngineLockManager _lockManager;
     private readonly RecordSpaceVersionStore _versionStore;
     private readonly GatedJournalLog _log;
@@ -85,7 +85,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// indexes, call <see cref="AnalyzeAndScrub"/>, scrub those indexes with its plan,
     /// and call <see cref="CompleteRecovery"/> before admitting any sessions.
     /// </remarks>
-    public TransactionCoordinator(IStorage storage, IStorageJournal journal, ITransactionRecordSpace records)
+    public TransactionCoordinator(Storage storage, StorageJournal journal, ITransactionRecordSpace records)
         : this(storage, journal, records, TimeProvider.System)
     {
     }
@@ -93,7 +93,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// Creates the composition with the clock the deferred-undo retry schedule reads (tests).
     /// </summary>
-    internal TransactionCoordinator(IStorage storage, IStorageJournal journal, ITransactionRecordSpace records, TimeProvider time)
+    internal TransactionCoordinator(Storage storage, StorageJournal journal, ITransactionRecordSpace records, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(journal);
@@ -107,17 +107,61 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         _versionStore = new RecordSpaceVersionStore(storage, records, _applyGate);
         _log = new GatedJournalLog(this);
 
-        // The concrete manager, not the factory's interface: the statement apply
-        // admits a bracket only for a context the manager still holds open, and the
-        // version-purge pass drives its deferred-undo retry. It holds the lock
-        // manager itself; engine code gets the view below.
-        _manager = new DefaultTransactionManager(
+        // The manager over the gated journal log: the statement apply admits a bracket
+        // only for a context the manager still holds open, and the version-purge pass
+        // drives its deferred-undo retry. It holds the lock manager itself; engine code
+        // gets the view below.
+        _manager = new TransactionManager(
             _log,
             locks,
             _versionStore,
-            () => new TransactionSequence((ulong)storage.ReserveTransactionSequence()),
+            ReserveSequence,
             time);
         _lockManager = new EngineLockManager(locks, _manager);
+    }
+
+    /// <summary>
+    /// Test hook: invoked under the lifecycle append gate just before the storage
+    /// checkpoint, with the writers the checkpoint lists; it may block or throw.
+    /// </summary>
+    /// <remarks>
+    /// Null unless a test of this assembly sets it (<c>InternalsVisibleTo</c>). It stands where
+    /// a Transactions.Tests storage double used to intercept the checkpoint through the
+    /// removed <c>IStorage</c> contract (#1257): <see cref="Storage.Checkpoint(ReadOnlySpan{long})"/>
+    /// is non-virtual, so the call that makes it carries the hook (<c>database-area.md</c>,
+    /// "Test doubles"). A throw fails the checkpoint as a storage failure there would.
+    /// </remarks>
+    internal Action<long[]>? BeforeCheckpoint { get; set; }
+
+    /// <summary>
+    /// Test hook: invoked after the manager's sequence allocator reserved a sequence from the
+    /// storage, under the manager's begin lock and before the begin record's append.
+    /// </summary>
+    /// <remarks>
+    /// Null unless a test of this assembly sets it. It replaces the interception of the
+    /// non-virtual <see cref="Storage.ReserveTransactionSequence"/> through <c>IStorage</c> (#1257).
+    /// </remarks>
+    internal Action? SequenceReserved { get; set; }
+
+    /// <summary>
+    /// Test hook: invoked with a transaction's sequence just before its abort record is
+    /// appended; a throw rejects the record, as a failed journal append would.
+    /// </summary>
+    /// <remarks>
+    /// Null unless a test of this assembly sets it. It replaces a journal double that decorated
+    /// the removed <c>IStorageJournal</c> contract (#1257). Since #1252 a real append fails only on
+    /// an offline journal, which also refuses everything after it, so this is the only way to
+    /// exercise a lost abort record on a storage that stays online.
+    /// </remarks>
+    internal Action<long>? BeforeAbortRecord { get; set; }
+
+    // The manager's sequence allocator: the storage's counter, so the journal carries one
+    // sequence namespace.
+    private TransactionSequence ReserveSequence()
+    {
+        var sequence = new TransactionSequence((ulong)_storage.ReserveTransactionSequence());
+        SequenceReserved?.Invoke();
+        return sequence;
     }
 
     /// <summary>
@@ -185,7 +229,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// Gets whether the storage this coordinator composes went offline after a failed durable
     /// flush (#1243): nothing more may be written to it, and only a reopen brings it back.
     /// </summary>
-    public bool IsStorageOffline => _storage is Storage shared ? shared.IsOffline : _journal is StorageJournal journal && journal.IsOffline;
+    public bool IsStorageOffline => _storage.IsOffline;
 
     /// <summary>
     /// Ends every wait for a lock of this database because its storage went offline, and fails
@@ -218,7 +262,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// Gets the transaction manager sessions begin their contexts on.
     /// </summary>
-    public ITransactionManager Manager => _manager;
+    public TransactionManager Manager => _manager;
 
     /// <summary>
     /// Gets the lock manager arbitrating the engine's write conflicts.
@@ -326,7 +370,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <exception cref="TransactionAbortedException">The transaction was aborted instead of committed.</exception>
     /// <exception cref="TransactionCommitUnconfirmedException">
     /// The transaction committed, but its commit record could not be made durable (see
-    /// <see cref="ITransactionManager.CommitAsync"/>). Its tombstones are retained for
+    /// <see cref="TransactionManager.CommitAsync"/>). Its tombstones are retained for
     /// pruning like those of any committed writer.
     /// </exception>
     public async ValueTask CommitAsync(ITransactionContext context, CancellationToken cancellationToken = default)
@@ -533,14 +577,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <returns>The recovery classification, for the caller's own scrub passes.</returns>
     /// <remarks>
     /// The classification also covers the sequences the storage's checkpoint anchor names
-    /// (<see cref="Storage.CheckpointActiveTransactions"/>, for a storage derived from
-    /// the shared <see cref="Storage"/>): the writers a checkpoint truncated the begin
-    /// records of, which stay classified when the checkpoint's own record was lost.
+    /// (<see cref="Storage.CheckpointActiveTransactions"/>): the writers a checkpoint
+    /// truncated the begin records of, which stay classified when the checkpoint's own
+    /// record was lost.
     /// </remarks>
     public TransactionRecoveryPlan AnalyzeAndScrub()
     {
-        IEnumerable<long> anchored = _storage is Storage shared ? shared.CheckpointActiveTransactions : [];
-        var plan = TransactionRecovery.Analyze(_journal, anchored);
+        var plan = TransactionRecovery.Analyze(_journal, _storage.CheckpointActiveTransactions);
 
         _versionStore.ScrubRecovered(plan.Aborted);
 
@@ -797,7 +840,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// Computes the prune bound no live or future snapshot can see below: the
     /// minimum <see cref="TransactionSnapshot.Minimum"/> across open
-    /// transactions, or <see cref="ITransactionManager.OldestActive"/> when
+    /// transactions, or <see cref="TransactionManager.OldestActive"/> when
     /// none are open. The manager's bound alone is NOT safe under load: a live
     /// snapshot can hold a <em>lower</em> minimum than the oldest active
     /// sequence (it captured while an older, since-committed transaction was
@@ -847,7 +890,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// </para>
     /// <para>
     /// So, before rethrowing, the coordinator begins one storage bracket per such writer,
-    /// adopting the writer's own sequence (<see cref="IStorage.BeginTransaction(long)"/>,
+    /// adopting the writer's own sequence (<see cref="Storage.BeginTransaction(long)"/>,
     /// which writes nothing). The writer is then in flight at the physical layer too, and
     /// the storage's close takes its non-idle path: it flushes pages and journal and does
     /// not truncate. The next open finds the writer without a commit record, classifies it
@@ -919,14 +962,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     private sealed class EngineLockManager : ILockManager
     {
         private readonly ILockManager _inner;
-        private readonly DefaultTransactionManager _manager;
+        private readonly TransactionManager _manager;
 
         // Canceled, with the cause kept beside it, once the storage went offline: it ends every
         // wait in progress and fails every later one (AbandonLockWaits).
         private readonly CancellationTokenSource _abandon = new();
         private StorageOfflineException? _abandonCause;
 
-        internal EngineLockManager(ILockManager inner, DefaultTransactionManager manager)
+        internal EngineLockManager(ILockManager inner, TransactionManager manager)
         {
             _inner = inner;
             _manager = manager;
@@ -1021,7 +1064,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// in the current journal, or that the last checkpoint listed, needs no second one.
     /// </para>
     /// </remarks>
-    private sealed class GatedJournalLog : ITransactionLog
+    private sealed class GatedJournalLog : TransactionLog
     {
         private readonly TransactionCoordinator _coordinator;
         private readonly HashSet<long> _activeSequences = new();
@@ -1041,7 +1084,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             _coordinator = coordinator;
         }
 
-        public ValueTask AppendBeginAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
+        public override ValueTask AppendBeginAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -1081,7 +1124,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             }
         }
 
-        public ValueTask AppendCommitAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
+        public override ValueTask AppendCommitAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -1099,7 +1142,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             // non-durably.
             try
             {
-                _coordinator._storage.EnsureCommitDurable(lsn, _coordinator._journal);
+                _coordinator._storage.EnsureCommitDurable(lsn);
             }
             catch (Exception exception)
             {
@@ -1113,7 +1156,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             return default;
         }
 
-        public ValueTask AppendAbortAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
+        public override ValueTask AppendAbortAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -1121,6 +1164,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             {
                 try
                 {
+                    _coordinator.BeforeAbortRecord?.Invoke((long)sequence.Value);
                     _coordinator._journal.AppendRollback((long)sequence.Value);
                 }
                 finally
@@ -1140,7 +1184,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         /// Checkpoints the storage with the writer list captured under the append gate,
         /// so no lifecycle record can land between the capture and the truncation.
         /// </summary>
-        internal void CheckpointUnderGate(IStorage storage)
+        internal void CheckpointUnderGate(Storage storage)
         {
             lock (_gate)
             {
@@ -1158,6 +1202,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
                 try
                 {
+                    _coordinator.BeforeCheckpoint?.Invoke(writers.ToArray());
                     storage.Checkpoint(writers);
                 }
                 finally

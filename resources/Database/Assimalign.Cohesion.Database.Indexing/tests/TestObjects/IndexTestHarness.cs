@@ -24,7 +24,7 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
     {
         Storage = HarnessStorage.Create(data ?? new SimulatedDurableFileHandle(), journal ?? new SimulatedDurableFileHandle());
         LockManager = Transactions.LockManager.Create();
-        Manager = TransactionManager.Create(TransactionLog.CreateInMemory(), LockManager, VersionStore.CreateInMemory());
+        Manager = TransactionManager.Create(LockManager, VersionStore.CreateInMemory());
         IndexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = Storage,
@@ -37,7 +37,7 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
     {
         Storage = storage;
         LockManager = Transactions.LockManager.Create();
-        Manager = TransactionManager.Create(TransactionLog.CreateInMemory(), LockManager, VersionStore.CreateInMemory());
+        Manager = TransactionManager.Create(LockManager, VersionStore.CreateInMemory());
         IndexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = Storage,
@@ -49,7 +49,7 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
 
     public HarnessStorage Storage { get; }
 
-    public ITransactionManager Manager { get; }
+    public TransactionManager Manager { get; }
 
     public ILockManager LockManager { get; }
 

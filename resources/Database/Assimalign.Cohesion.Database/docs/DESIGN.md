@@ -10,8 +10,8 @@ produced it.
 The root is also the area's **rollup**: it references every child root — the
 independently consumable base components a database is made of (`Database.Types`,
 `Database.Language`, `Database.Storage`, `Database.Transactions`,
-`Database.Execution`, `Database.Protocol`, `Database.Security`,
-`Database.Governance`) — so one reference to the root delivers the whole base
+`Database.Execution`, `Database.Indexing`, `Database.Protocol`,
+`Database.Security`) — so one reference to the root delivers the whole base
 surface. Child roots never reference the root.
 
 
@@ -364,12 +364,13 @@ work can survive the reopen: `DatabaseTransactionCommitUnconfirmedException.Crea
 code-led unconfirmed error for it.
 
 **Child roots own independent exception roots** — `StorageException`,
-`DatabaseTypeException`, `QueryExecutionException`, `ProtocolException`,
+`DatabaseTypeException`, `ProtocolException`,
 `TransactionAbortedException` all inherit `Exception` directly. This is the
 point of the child-root inversion: a child root must be independently
-consumable, so its error surface cannot depend on the area contracts. (Storage,
-Types, and Execution were always shaped this way; Protocol and Transactions
-joined them when their root references were inverted, 2026-07-13.)
+consumable, so its error surface cannot depend on the area contracts. (Storage
+and Types were always shaped this way; Protocol and Transactions joined them when
+their root references were inverted, 2026-07-13. Execution has no exception root of its
+own since its unused pipeline was deleted, #1257.)
 
 The consequence, deliberately accepted: `catch (DatabaseException)` does **not**
 catch child-root failures. The layer that owns both vocabularies translates at

@@ -22,7 +22,7 @@ public static class TransactionRecovery
     /// </summary>
     /// <param name="journal">The storage journal to analyze.</param>
     /// <returns>The committed and aborted sequences, and the highest sequence observed.</returns>
-    public static TransactionRecoveryPlan Analyze(IStorageJournal journal) => Analyze(journal, []);
+    public static TransactionRecoveryPlan Analyze(StorageJournal journal) => Analyze(journal, []);
 
     /// <summary>
     /// Reads the journal and classifies every transaction sequence it mentions, and every
@@ -45,9 +45,9 @@ public static class TransactionRecovery
     /// <see cref="TransactionRecoveryPlan.MaxSequence"/> covers what the journal and the
     /// anchor name. A reader whose begin record a checkpoint truncated is in neither, so it
     /// is no floor for new sequences; the storage's own sequence floor
-    /// (<see cref="IStorage.ReserveTransactionSequence"/> resumes above it) is.
+    /// (<see cref="Storage.ReserveTransactionSequence"/> resumes above it) is.
     /// </remarks>
-    public static TransactionRecoveryPlan Analyze(IStorageJournal journal, IEnumerable<long> checkpointActiveTransactions)
+    public static TransactionRecoveryPlan Analyze(StorageJournal journal, IEnumerable<long> checkpointActiveTransactions)
     {
         ArgumentNullException.ThrowIfNull(journal);
         ArgumentNullException.ThrowIfNull(checkpointActiveTransactions);
@@ -72,10 +72,7 @@ public static class TransactionRecovery
             }
         }
 
-        IEnumerable<JournalRecord> records = journal is StorageJournal streaming
-            ? streaming.ReadSequential()
-            : journal.ReadAll();
-        foreach (var record in records)
+        foreach (var record in journal.ReadSequential())
         {
             // A checkpoint record's payload lists the writers that were still in
             // flight when the journal was truncated — their begin records were

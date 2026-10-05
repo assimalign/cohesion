@@ -39,18 +39,18 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange
         using var storage = RollbackStorage.Create();
-        var journal = new FaultInjectingJournal(storage.Log);
-        await using var coordinator = new TransactionCoordinator(storage, journal, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var abortRecords = new AbortRecordProbe(coordinator);
         var writer = await BeginWriterAsync(coordinator, storage);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
-        journal.FailRollbackRecords = true;
+        abortRecords.FailRollbackRecords = true;
 
         // Act
         await coordinator.RollbackAsync(writer);
 
         // Assert: the abort record was lost, and the rollback still ended everything.
-        journal.RejectedRollbacks.ShouldBe([(long)writer.Sequence.Value]);
+        abortRecords.RejectedRollbacks.ShouldBe([(long)writer.Sequence.Value]);
         writer.State.ShouldBe(TransactionState.RolledBack);
         coordinator.GetOpenContexts().ShouldBe([next]);
         coordinator.Manager.OldestActive.ShouldBe(next.Sequence);
@@ -60,10 +60,10 @@ public class TransactionCoordinatorRollbackTests
 
         // The undo completed, so later checkpoints stop carrying the writer; the next
         // transaction has applied nothing yet, and a reader is never listed (#1242).
-        Checkpoint(coordinator, storage).ShouldBeEmpty();
+        Checkpoint(coordinator).ShouldBeEmpty();
 
         // The next writer proceeds to a commit.
-        journal.FailRollbackRecords = false;
+        abortRecords.FailRollbackRecords = false;
         await InsertAsync(coordinator, storage, next);
         await coordinator.CommitAsync(next);
         RecordCount(storage).ShouldBe(1);
@@ -140,8 +140,8 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange
         using var storage = RollbackStorage.Create();
-        var journal = new FaultInjectingJournal(storage.Log);
-        await using var coordinator = new TransactionCoordinator(storage, journal, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var abortRecords = new AbortRecordProbe(coordinator);
         var index = new FailingIndex(failures: 1);
         var writer = await BeginWriterAsync(coordinator, storage, index);
         var location = storage.PackLocation(storage.LastInserted.PageId, storage.LastInserted.SlotIndex);
@@ -167,8 +167,8 @@ public class TransactionCoordinatorRollbackTests
         probe.Snapshot.IsVisible(writer.Sequence).ShouldBeFalse();
         (await coordinator.VersionStore.GetVisibleVersionAsync(0, location, probe.Snapshot)).ShouldBeNull();
         waiting.IsCompleted.ShouldBeFalse();
-        Checkpoint(coordinator, storage).ShouldContain((long)writer.Sequence.Value);
-        journal.AppendedRollbacks.ShouldNotContain((long)writer.Sequence.Value);
+        Checkpoint(coordinator).ShouldContain((long)writer.Sequence.Value);
+        abortRecords.AppendedRollbacks.ShouldNotContain((long)writer.Sequence.Value);
 
         // Act: the version-purge pass retries the undo.
         long undone = coordinator.RunVersionPurgePass(CancellationToken.None);
@@ -177,10 +177,10 @@ public class TransactionCoordinatorRollbackTests
         undone.ShouldBe(2);
         RecordCount(storage).ShouldBe(0);
         coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        journal.AppendedRollbacks.ShouldContain((long)writer.Sequence.Value);
+        abortRecords.AppendedRollbacks.ShouldContain((long)writer.Sequence.Value);
         await waiting.WaitAsync(Timeout);
         coordinator.Manager.OldestActive.ShouldBe(next.Sequence);
-        Checkpoint(coordinator, storage).ShouldNotContain((long)writer.Sequence.Value);
+        Checkpoint(coordinator).ShouldNotContain((long)writer.Sequence.Value);
         coordinator.RunVersionPurgePass(CancellationToken.None).ShouldBe(0);
         await coordinator.CommitAsync(probe);
         await InsertAsync(coordinator, storage, next);
@@ -196,8 +196,8 @@ public class TransactionCoordinatorRollbackTests
         // completed undo, or never attempted because the undo failed and a checkpoint truncated
         // the writer's begin record.
         using var storage = RollbackStorage.Create();
-        var journal = new FaultInjectingJournal(storage.Log) { FailRollbackRecords = true };
-        var coordinator = new TransactionCoordinator(storage, journal, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var abortRecords = new AbortRecordProbe(coordinator) { FailRollbackRecords = true };
         var writer = await BeginWriterAsync(coordinator, storage, undoDeferred ? new FailingIndex(failures: int.MaxValue) : null);
         await coordinator.RollbackAsync(writer);
         writer.State.ShouldBe(TransactionState.RolledBack);
@@ -213,8 +213,10 @@ public class TransactionCoordinatorRollbackTests
         await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
         var plan = recovered.AnalyzeAndScrub();
 
-        // Assert: no commit record, so the writer is aborted and nothing it wrote survives.
-        journal.AppendedRollbacks.ShouldBeEmpty();
+        // Assert: the completed undo's abort record was rejected (a deferred undo never asks
+        // for one); no commit record, so the writer is aborted and nothing it wrote survives.
+        abortRecords.RejectedRollbacks.ShouldBe(undoDeferred ? [] : [(long)writer.Sequence.Value]);
+        abortRecords.AppendedRollbacks.ShouldBeEmpty();
         plan.Committed.ShouldNotContain(writer.Sequence);
         plan.Aborted.ShouldContain(writer.Sequence);
         RecordCount(reopened).ShouldBe(0);
@@ -336,7 +338,7 @@ public class TransactionCoordinatorRollbackTests
         // Arrange: a writer the journal file names, and a transaction waiting for its row.
         var storage = RollbackStorage.Create();
         var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
-        var journal = (StorageJournal)storage.Log;
+        var journal = storage.Log;
         var writer = await BeginWriterAsync(coordinator, storage);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
@@ -392,7 +394,7 @@ public class TransactionCoordinatorRollbackTests
         if (checkpointFirst)
         {
             // The checkpoint truncates the writer's begin record and carries it in its active list.
-            Checkpoint(coordinator, storage).ShouldContain((long)writer.Sequence.Value);
+            Checkpoint(coordinator).ShouldContain((long)writer.Sequence.Value);
         }
 
         // Act: the coordinator reports the undo it could not complete, and the owner closes the
@@ -1101,13 +1103,25 @@ public class TransactionCoordinatorRollbackTests
             return 0;
         }).AsTask().GetAwaiter().GetResult(), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
-    private static long[] Checkpoint(TransactionCoordinator coordinator, RollbackStorage storage)
+    /// <summary>
+    /// Checkpoints through the coordinator and returns the writers the checkpoint listed, as its
+    /// hook saw them. The capture starts unset and must be set, so a hook that never fired fails
+    /// here instead of passing an empty list to a <c>ShouldNotContain</c>.
+    /// </summary>
+    private static long[] Checkpoint(TransactionCoordinator coordinator)
     {
-        long[] captured = [];
-        storage.BeforeCheckpoint = sequences => captured = sequences;
-        coordinator.Checkpoint();
-        storage.BeforeCheckpoint = null;
-        return captured;
+        long[]? captured = null;
+        coordinator.BeforeCheckpoint = sequences => captured = sequences;
+        try
+        {
+            coordinator.Checkpoint();
+        }
+        finally
+        {
+            coordinator.BeforeCheckpoint = null;
+        }
+
+        return captured.ShouldNotBeNull();
     }
 
     /// <summary>
@@ -1140,7 +1154,7 @@ public class TransactionCoordinatorRollbackTests
             return 0;
         });
 
-    private static int RecordCount(IStorage storage)
+    private static int RecordCount(Storage.Storage storage)
     {
         using var iterator = storage.GetUnitIterator();
         int count = 0;
@@ -1226,16 +1240,19 @@ public class TransactionCoordinatorRollbackTests
         }
     }
 
-    /// <summary>The storage's own journal, with rollback records that can be rejected.</summary>
-    private sealed class FaultInjectingJournal : IStorageJournal
+    /// <summary>
+    /// Watches the abort records the coordinator appends and can reject them, through the
+    /// coordinator's abort-record hook. It replaces a decorator of the removed
+    /// <c>IStorageJournal</c> contract (#1257); the journal itself is the storage's own.
+    /// </summary>
+    private sealed class AbortRecordProbe
     {
-        private readonly IStorageJournal _inner;
         private readonly List<long> _appended = new();
         private readonly List<long> _rejected = new();
 
-        internal FaultInjectingJournal(IStorageJournal inner)
+        internal AbortRecordProbe(TransactionCoordinator coordinator)
         {
-            _inner = inner;
+            coordinator.BeforeAbortRecord = OnAbortRecord;
         }
 
         internal bool FailRollbackRecords { get; set; }
@@ -1262,20 +1279,8 @@ public class TransactionCoordinatorRollbackTests
             }
         }
 
-        public long LastLsn => _inner.LastLsn;
-
-        public long DurableLsn => _inner.DurableLsn;
-
-        public long AppendBegin(long transactionSequence) => _inner.AppendBegin(transactionSequence);
-
-        public long AppendPageImage(long transactionSequence, PageId pageId, JournalRecordType type, ReadOnlySpan<byte> image)
-            => _inner.AppendPageImage(transactionSequence, pageId, type, image);
-
-        public long AppendOperation(long transactionSequence, ReadOnlySpan<byte> payload) => _inner.AppendOperation(transactionSequence, payload);
-
-        public long AppendCommit(long transactionSequence) => _inner.AppendCommit(transactionSequence);
-
-        public long AppendRollback(long transactionSequence)
+        // Runs just before the coordinator appends the abort record; a throw rejects it.
+        private void OnAbortRecord(long transactionSequence)
         {
             lock (_appended)
             {
@@ -1287,29 +1292,13 @@ public class TransactionCoordinatorRollbackTests
 
                 _appended.Add(transactionSequence);
             }
-
-            return _inner.AppendRollback(transactionSequence);
         }
-
-        public long Checkpoint(ReadOnlySpan<long> activeTransactions) => _inner.Checkpoint(activeTransactions);
-
-        public void EnsureDurable(long lsn) => _inner.EnsureDurable(lsn);
-
-        public void Flush(bool forceDurable = false) => _inner.Flush(forceDurable);
-
-        public IReadOnlyList<JournalRecord> ReadAll() => _inner.ReadAll();
-
-        // The storage owns and disposes its journal.
-        public void Dispose()
-        {
-        }
-
-        public ValueTask DisposeAsync() => default;
     }
 
-    // Only the boundary hooks are test doubles. Pages, record iteration, transactions,
-    // durability, journal replay, and truncation are real Storage.
-    private sealed class RollbackStorage : Storage.Storage, IStorage, ITransactionRecordSpace
+    // Only the record-space boundary is a test double. Pages, record iteration, transactions,
+    // durability, journal replay, and truncation are real Storage; the checkpoint and
+    // abort-record hooks are the coordinator's own (#1257).
+    private sealed class RollbackStorage : Storage.Storage, ITransactionRecordSpace
     {
         private readonly MemoryStream _data;
         private readonly FaultingMemoryStream _journal;
@@ -1331,12 +1320,10 @@ public class TransactionCoordinatorRollbackTests
 
         public override StorageModel Model => StorageModel.KeyValue;
 
-        internal IStorageJournal Log => WriteAheadLog;
+        internal StorageJournal Log => WriteAheadLog;
 
         /// <summary>Gets the journal's backing stream, whose writes a test can fail.</summary>
         internal FaultingMemoryStream JournalStream => _journal;
-
-        internal Action<long[]>? BeforeCheckpoint { get; set; }
 
         internal (PageId PageId, int SlotIndex) LastInserted { get; private set; }
 
@@ -1369,12 +1356,6 @@ public class TransactionCoordinatorRollbackTests
 
         public (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
             => ((PageId)(long)(location >> 16), (int)(location & 0xFFFF));
-
-        void IStorage.Checkpoint(ReadOnlySpan<long> sequences)
-        {
-            BeforeCheckpoint?.Invoke(sequences.ToArray());
-            Checkpoint(sequences);
-        }
 
         private static FaultingMemoryStream Copy(byte[] bytes)
         {

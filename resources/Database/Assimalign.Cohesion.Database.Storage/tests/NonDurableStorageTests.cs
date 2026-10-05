@@ -169,7 +169,7 @@ public sealed class NonDurableStorageTests
         }
 
         public override StorageModel Model => StorageModel.Custom;
-        public IStorageJournal Wal => WriteAheadLog;
+        public StorageJournal Wal => WriteAheadLog;
 
         public static HarnessStorage Create(ObservedHandle data, ObservedHandle journal)
         {
