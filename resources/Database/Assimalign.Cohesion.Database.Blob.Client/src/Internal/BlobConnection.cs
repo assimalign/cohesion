@@ -186,7 +186,7 @@ internal sealed class BlobConnection : IBlobConnection
     }
 
     private ValueTask<TResult> ExecuteAsync<TResult>(
-        Func<IProtocolFrameReader, IProtocolFrameWriter, CancellationToken, ValueTask<TResult>> action,
+        Func<ProtocolFrameReader, ProtocolFrameWriter, CancellationToken, ValueTask<TResult>> action,
         CancellationToken cancellationToken)
     {
         EnsureOpen();
@@ -194,7 +194,7 @@ internal sealed class BlobConnection : IBlobConnection
     }
 
     private async ValueTask<TResult> ExecuteCoreAsync<TResult>(
-        Func<IProtocolFrameReader, IProtocolFrameWriter, CancellationToken, ValueTask<TResult>> action,
+        Func<ProtocolFrameReader, ProtocolFrameWriter, CancellationToken, ValueTask<TResult>> action,
         CancellationToken cancellationToken)
     {
         try
@@ -233,7 +233,7 @@ internal sealed class BlobConnection : IBlobConnection
         }
     }
 
-    private static async ValueTask<long> ReadCountAsync(IProtocolFrameReader reader, CancellationToken token)
+    private static async ValueTask<long> ReadCountAsync(ProtocolFrameReader reader, CancellationToken token)
     {
         ProtocolFrame frame = await ExpectAsync(reader, token).ConfigureAwait(false);
         if (frame.Type != (ProtocolMessageType)BlobProtocolMessageType.OperationComplete)
@@ -243,11 +243,11 @@ internal sealed class BlobConnection : IBlobConnection
         return BlobOperationCompleteMessage.Decode(frame.Payload.Span).Count;
     }
 
-    private static async ValueTask<ProtocolFrame> ExpectAsync(IProtocolFrameReader reader, CancellationToken token)
+    private static async ValueTask<ProtocolFrame> ExpectAsync(ProtocolFrameReader reader, CancellationToken token)
         => await reader.ReadFrameAsync(token).ConfigureAwait(false)
             ?? throw new ProtocolException("The server closed the connection before completing the Blob exchange.");
 
-    private static async ValueTask WriteAsync(IProtocolFrameWriter writer, BlobProtocolMessageType type,
+    private static async ValueTask WriteAsync(ProtocolFrameWriter writer, BlobProtocolMessageType type,
         ReadOnlyMemory<byte> payload, CancellationToken token)
     {
         await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)type, payload), token).ConfigureAwait(false);
@@ -256,39 +256,39 @@ internal sealed class BlobConnection : IBlobConnection
 
     private sealed class BlobExchange<TResult> : IDatabaseProtocolExchange<TResult>
     {
-        private readonly Func<IProtocolFrameReader, IProtocolFrameWriter, CancellationToken, ValueTask<TResult>> _action;
+        private readonly Func<ProtocolFrameReader, ProtocolFrameWriter, CancellationToken, ValueTask<TResult>> _action;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="BlobExchange{TResult}"/> class.
         /// </summary>
         /// <param name="action">The Blob exchange body to run over the error-normalizing reader and writer.</param>
         public BlobExchange(
-            Func<IProtocolFrameReader, IProtocolFrameWriter, CancellationToken, ValueTask<TResult>> action)
+            Func<ProtocolFrameReader, ProtocolFrameWriter, CancellationToken, ValueTask<TResult>> action)
         {
             _action = action;
         }
 
         public ProtocolMessageFamily Family => BlobProtocol.Family;
 
-        public ValueTask<TResult> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
+        public ValueTask<TResult> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
             CancellationToken cancellationToken = default)
             => _action(new BlobErrorReader(reader), new BlobFrameWriter(writer), cancellationToken);
     }
 
-    private sealed class BlobErrorReader : IProtocolFrameReader
+    private sealed class BlobErrorReader : ProtocolFrameReader
     {
-        private readonly IProtocolFrameReader _reader;
+        private readonly ProtocolFrameReader _reader;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="BlobErrorReader"/> class.
         /// </summary>
         /// <param name="reader">The shared frame reader whose error frames and transport failures are normalized.</param>
-        public BlobErrorReader(IProtocolFrameReader reader)
+        public BlobErrorReader(ProtocolFrameReader reader)
         {
             _reader = reader;
         }
 
-        public async ValueTask<ProtocolFrame?> ReadFrameAsync(CancellationToken cancellationToken = default)
+        protected override async ValueTask<ProtocolFrame?> ReadFrameCoreAsync(CancellationToken cancellationToken)
         {
             ProtocolFrame? frame;
             try
@@ -312,23 +312,23 @@ internal sealed class BlobConnection : IBlobConnection
             return frame;
         }
 
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        // The pooled connection owns the shared reader, so the base's no-op DisposeAsyncCore stays.
     }
 
-    private sealed class BlobFrameWriter : IProtocolFrameWriter
+    private sealed class BlobFrameWriter : ProtocolFrameWriter
     {
-        private readonly IProtocolFrameWriter _writer;
+        private readonly ProtocolFrameWriter _writer;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="BlobFrameWriter"/> class.
         /// </summary>
         /// <param name="writer">The shared frame writer whose transport failures are normalized.</param>
-        public BlobFrameWriter(IProtocolFrameWriter writer)
+        public BlobFrameWriter(ProtocolFrameWriter writer)
         {
             _writer = writer;
         }
 
-        public async ValueTask WriteFrameAsync(ProtocolFrame frame, CancellationToken cancellationToken = default)
+        protected override async ValueTask WriteFrameCoreAsync(ProtocolFrame frame, CancellationToken cancellationToken)
         {
             try
             {
@@ -341,7 +341,7 @@ internal sealed class BlobConnection : IBlobConnection
             }
         }
 
-        public async ValueTask FlushAsync(CancellationToken cancellationToken = default)
+        protected override async ValueTask FlushCoreAsync(CancellationToken cancellationToken)
         {
             try
             {
@@ -354,7 +354,7 @@ internal sealed class BlobConnection : IBlobConnection
             }
         }
 
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        // The pooled connection owns the shared writer, so the base's no-op DisposeAsyncCore stays.
     }
 
     private sealed class BlobDownloadExchange : IDatabaseStreamingExchange
@@ -376,7 +376,7 @@ internal sealed class BlobConnection : IBlobConnection
 
         public ProtocolMessageFamily Family => BlobProtocol.Family;
 
-        public async ValueTask OpenAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
+        public async ValueTask OpenAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
             CancellationToken cancellationToken = default)
         {
             await WriteAsync(writer, BlobProtocolMessageType.Read,
@@ -389,7 +389,7 @@ internal sealed class BlobConnection : IBlobConnection
             _metadata = BlobTransferStartMessage.Decode(start.Payload.Span);
         }
 
-        public async ValueTask CopyToAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
+        public async ValueTask CopyToAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
             Stream destination, CancellationToken cancellationToken = default)
             => await BlobProtocolTransfer.ReceiveAsync(new BlobErrorReader(reader), writer, destination,
                 _metadata ?? throw new InvalidOperationException("The download metadata has not been read."),

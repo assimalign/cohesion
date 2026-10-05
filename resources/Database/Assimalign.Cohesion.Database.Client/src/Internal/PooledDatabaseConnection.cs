@@ -21,8 +21,8 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
     private readonly DatabaseConnectionSettings _settings;
 
     private IConnection? _connection;
-    private IProtocolFrameReader? _reader;
-    private IProtocolFrameWriter? _writer;
+    private ProtocolFrameReader? _reader;
+    private ProtocolFrameWriter? _writer;
     private bool _isOpen;
     private bool _isRented;
     private bool _isClosed;

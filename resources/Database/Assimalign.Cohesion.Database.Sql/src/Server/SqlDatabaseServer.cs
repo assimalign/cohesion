@@ -283,7 +283,7 @@ public sealed class SqlDatabaseServer : IDatabaseServer
         try
         {
             var stream = connection.AsStream();
-            await using var writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+            await using var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
             var error = new ProtocolErrorMessage(ProtocolErrorCode.Unavailable, "The server is at its session limit.");
 
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Error, error.Encode()), hardAbort).ConfigureAwait(false);

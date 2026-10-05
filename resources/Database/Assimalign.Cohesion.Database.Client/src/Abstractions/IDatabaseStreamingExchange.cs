@@ -27,7 +27,7 @@ public interface IDatabaseStreamingExchange
     /// <exception cref="DatabaseClientException">The server rejects the operation or the connection fails.</exception>
     /// <exception cref="ProtocolException">The initial model response is invalid.</exception>
     /// <exception cref="OperationCanceledException">The streaming operation is canceled.</exception>
-    ValueTask OpenAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default);
+    ValueTask OpenAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default);
 
     /// <summary>Copies response content and consumes and validates its terminal completion.</summary>
     /// <param name="reader">The connection's family-validating frame reader.</param>
@@ -43,6 +43,6 @@ public interface IDatabaseStreamingExchange
     /// <exception cref="DatabaseClientException">The server reports a transfer failure or the connection fails.</exception>
     /// <exception cref="ProtocolException">The model response or its terminal completion is invalid.</exception>
     /// <exception cref="OperationCanceledException">The streaming operation is canceled.</exception>
-    ValueTask CopyToAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, Stream destination,
+    ValueTask CopyToAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, Stream destination,
         CancellationToken cancellationToken = default);
 }

@@ -104,10 +104,10 @@ public sealed class DatabaseStatementResponsePhaseTests
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
-    private static async ValueTask<ProtocolFrame> ReadAsync(IProtocolFrameReader reader, CancellationToken cancellationToken)
+    private static async ValueTask<ProtocolFrame> ReadAsync(ProtocolFrameReader reader, CancellationToken cancellationToken)
         => await reader.ReadFrameAsync(cancellationToken) ?? throw new ProtocolException("The scripted SQL peer closed unexpectedly.");
 
-    private static async ValueTask WriteAsync(IProtocolFrameWriter writer, ProtocolMessageType type,
+    private static async ValueTask WriteAsync(ProtocolFrameWriter writer, ProtocolMessageType type,
         ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         await writer.WriteFrameAsync(new ProtocolFrame(type, payload), cancellationToken);

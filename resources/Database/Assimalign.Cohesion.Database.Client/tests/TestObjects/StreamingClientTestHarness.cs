@@ -159,17 +159,17 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
         return encoded;
     }
 
-    private static ValueTask WriteErrorAsync(IProtocolFrameWriter writer, CancellationToken cancellationToken)
+    private static ValueTask WriteErrorAsync(ProtocolFrameWriter writer, CancellationToken cancellationToken)
         => WriteAsync(writer, ProtocolMessageType.Error,
             new ProtocolErrorMessage(ProtocolErrorCode.ExecutionFailure, "Document transfer failed after a storage error.").Encode(), cancellationToken);
 
-    private static async ValueTask WriteAsync(IProtocolFrameWriter writer, ProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    private static async ValueTask WriteAsync(ProtocolFrameWriter writer, ProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         await writer.WriteFrameAsync(new ProtocolFrame(type, payload), cancellationToken);
         await writer.FlushAsync(cancellationToken);
     }
 
-    private static async ValueTask<ProtocolFrame> ReadAsync(IProtocolFrameReader reader, CancellationToken cancellationToken)
+    private static async ValueTask<ProtocolFrame> ReadAsync(ProtocolFrameReader reader, CancellationToken cancellationToken)
     {
         var frame = await reader.ReadFrameAsync(cancellationToken)
             ?? throw new ProtocolException("Document transfer ended before its completion frame.");
@@ -205,7 +205,7 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
 
         public ProtocolMessageFamily Family => StreamingClientTestHarness.Family;
 
-        public async ValueTask OpenAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+        public async ValueTask OpenAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
         {
             await WriteAsync(writer, request, ReadOnlyMemory<byte>.Empty, cancellationToken);
             var frame = await ReadAsync(reader, cancellationToken);
@@ -216,7 +216,7 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
             _length = BinaryPrimitives.ReadInt32LittleEndian(frame.Payload.Span);
         }
 
-        public async ValueTask CopyToAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, Stream destination, CancellationToken cancellationToken = default)
+        public async ValueTask CopyToAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, Stream destination, CancellationToken cancellationToken = default)
         {
             int received = 0;
             while (true)
@@ -255,7 +255,7 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
     {
         public ProtocolMessageFamily Family => StreamingClientTestHarness.Family;
 
-        public async ValueTask<ProtocolMessageType> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+        public async ValueTask<ProtocolMessageType> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
         {
             await WriteAsync(writer, ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty, cancellationToken);
             return (await ReadAsync(reader, cancellationToken)).Type;

@@ -69,7 +69,7 @@ public class DatabaseProtocolExchangeTests
         public ProtocolMessageFamily Family => _family;
         internal bool Started { get; private set; }
 
-        public async ValueTask<ProtocolMessageType> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+        public async ValueTask<ProtocolMessageType> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
         {
             Started = true;
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty), cancellationToken);
@@ -92,7 +92,7 @@ public class DatabaseProtocolExchangeTests
 
         public ProtocolMessageFamily Family => SqlProtocol.Family;
 
-        public async ValueTask<bool> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+        public async ValueTask<bool> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
         {
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty), cancellationToken);
             await writer.FlushAsync(cancellationToken);

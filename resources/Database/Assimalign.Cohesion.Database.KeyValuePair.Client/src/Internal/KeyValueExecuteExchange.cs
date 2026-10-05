@@ -34,7 +34,7 @@ internal sealed class KeyValueExecuteExchange : IDatabaseProtocolExchange<KeyVal
 
     public bool IsResponseComplete { get; private set; }
 
-    public async ValueTask<KeyValueProtocolResult> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+    public async ValueTask<KeyValueProtocolResult> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
     {
         IsResponseComplete = false;
         await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)KeyValueProtocolMessageType.Execute, _request.Encode()), cancellationToken).ConfigureAwait(false);

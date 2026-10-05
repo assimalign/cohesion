@@ -28,7 +28,7 @@ internal sealed class GraphPathsExchange
 
     public ProtocolMessageFamily Family => GraphProtocol.Family;
 
-    public async ValueTask OpenAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
+    public async ValueTask OpenAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
         CancellationToken cancellationToken = default)
     {
         await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)GraphProtocolMessageType.ExecutePaths, _request.Encode()),
@@ -38,7 +38,7 @@ internal sealed class GraphPathsExchange
         ValidateFrame(_initial);
     }
 
-    public async ValueTask CopyToAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
+    public async ValueTask CopyToAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
         Stream destination, CancellationToken cancellationToken = default)
     {
         ProtocolFrame frame = _initial;
@@ -81,7 +81,7 @@ internal sealed class GraphPathsExchange
         }
     }
 
-    private static async ValueTask<ProtocolFrame> ReadAsync(IProtocolFrameReader reader, CancellationToken cancellationToken)
+    private static async ValueTask<ProtocolFrame> ReadAsync(ProtocolFrameReader reader, CancellationToken cancellationToken)
     {
         ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new ProtocolException("The server closed the connection before completing the graph path exchange.");

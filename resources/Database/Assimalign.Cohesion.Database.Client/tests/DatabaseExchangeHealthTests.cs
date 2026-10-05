@@ -95,7 +95,7 @@ public sealed class DatabaseExchangeHealthTests
 
         public ProtocolMessageFamily Family => SqlProtocol.Family;
 
-        public async ValueTask<bool> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+        public async ValueTask<bool> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
         {
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty), cancellationToken);
             await writer.FlushAsync(cancellationToken);
@@ -109,7 +109,7 @@ public sealed class DatabaseExchangeHealthTests
         public ProtocolMessageFamily Family => SqlProtocol.Family;
         public bool IsResponseComplete { get; private set; }
 
-        public async ValueTask<bool> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+        public async ValueTask<bool> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
         {
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty), cancellationToken);
             await writer.FlushAsync(cancellationToken);

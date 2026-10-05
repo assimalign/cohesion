@@ -29,5 +29,5 @@ public interface IDatabaseProtocolExchange<TResult>
     /// <param name="cancellationToken">Cancellation token for the exchange.</param>
     /// <returns>The model-owned result.</returns>
     /// <exception cref="DatabaseClientException">The server rejects the operation or its response is invalid.</exception>
-    ValueTask<TResult> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default);
+    ValueTask<TResult> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default);
 }

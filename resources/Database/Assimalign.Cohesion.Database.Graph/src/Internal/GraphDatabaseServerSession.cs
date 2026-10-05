@@ -28,8 +28,8 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
     private readonly CancellationTokenSource _lifetimeSource;
 
     private ProtocolChannel? _channel;
-    private IProtocolFrameReader? _reader;
-    private IProtocolFrameWriter? _writer;
+    private ProtocolFrameReader? _reader;
+    private ProtocolFrameWriter? _writer;
     private GraphDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
 

@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Protocol.Internal;
 /// payload. The payload bound is enforced from the header before any payload
 /// allocation — an untrusted length prefix can never drive memory use.
 /// </summary>
-internal sealed class ProtocolStreamFrameReader : IProtocolFrameReader
+internal sealed class ProtocolStreamFrameReader : ProtocolFrameReader
 {
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
@@ -24,7 +24,7 @@ internal sealed class ProtocolStreamFrameReader : IProtocolFrameReader
     }
 
     /// <inheritdoc />
-    public async ValueTask<ProtocolFrame?> ReadFrameAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask<ProtocolFrame?> ReadFrameCoreAsync(CancellationToken cancellationToken)
     {
         int headerRead = await ReadUpToAsync(_header, ProtocolFrameHeader.Size, cancellationToken).ConfigureAwait(false);
 
@@ -62,7 +62,7 @@ internal sealed class ProtocolStreamFrameReader : IProtocolFrameReader
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    protected override ValueTask DisposeAsyncCore()
     {
         if (!_leaveOpen)
         {

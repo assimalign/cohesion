@@ -29,8 +29,8 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
     private readonly IDatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
 
-    private IProtocolFrameReader? _reader;
-    private IProtocolFrameWriter? _writer;
+    private ProtocolFrameReader? _reader;
+    private ProtocolFrameWriter? _writer;
     private IDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
 
