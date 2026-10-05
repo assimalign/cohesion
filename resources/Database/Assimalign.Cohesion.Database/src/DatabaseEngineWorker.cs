@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Database.Internal;
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
-/// The guided base class for engine-owned background workers: implements the blocking pump loop,
+/// The base of every engine-owned background worker: implements the blocking pump loop,
 /// the loop's failure handling, and the per-database failure record, so an implementer only
 /// supplies the trigger wait and the per-pass work.
 /// </summary>
@@ -61,12 +61,25 @@ namespace Assimalign.Cohesion.Database;
 /// offline (a failed durable flush, #1243, a failed drain of its journal's append buffer, #1252, or
 /// a failed file header write, #1268) takes its database offline, the
 /// workers skip that database from then on, and the engine lists it in
-/// <see cref="IDatabaseEngine.OfflineDatabases"/>. Only an <see cref="OutOfMemoryException"/>
+/// <see cref="DatabaseEngine.OfflineDatabases"/>. Only an <see cref="OutOfMemoryException"/>
 /// leaves the loop, and the thread with it, which ends the process: nothing ends the loop silently.
 /// </para>
+/// <para>
+/// <b>Shape (concrete-types plan, phase 3, #1259).</b> Every public member is non-virtual.
+/// <see cref="Name"/>, <see cref="Kind"/> and <see cref="Interval"/> are fixed by the protected
+/// constructor, so reading them makes no virtual call; a leaf supplies only the per-pass work
+/// (<see cref="RunIterationCore"/>) and, when it is signal-driven, its trigger wait
+/// (<see cref="WaitForTrigger"/>, the one lifecycle hook). The leaves live in the model
+/// assemblies, so the constructor is <c>protected</c>.
+/// </para>
 /// </remarks>
+// Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DatabaseEngineWorker : IDatabaseEngineWorker
 {
+    private readonly string _name;
+    private readonly DatabaseEngineWorkerKind _kind;
+    private readonly TimeSpan _interval;
+
     // Held for the whole of a pass: passes never overlap.
     private readonly object _passGate = new();
 
@@ -89,9 +102,24 @@ public abstract class DatabaseEngineWorker : IDatabaseEngineWorker
     private long _failureCount;
 
     /// <summary>
-    /// Initializes a new worker.
+    /// Initializes a new worker with its diagnostic name, its role and its cadence.
     /// </summary>
-    protected DatabaseEngineWorker() { }
+    /// <param name="name">
+    /// The diagnostic name, unique within the owning engine (for example <c>sql-engine/checkpoint</c>).
+    /// </param>
+    /// <param name="kind">The worker's role.</param>
+    /// <param name="interval">
+    /// The cadence of the pump: the bound on how long the default trigger waits between passes. The
+    /// owning engine validates the option it comes from; the value is fixed for the worker's life.
+    /// </param>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
+    protected DatabaseEngineWorker(string name, DatabaseEngineWorkerKind kind, TimeSpan interval)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        _name = name;
+        _kind = kind;
+        _interval = interval;
+    }
 
     /// <summary>
     /// Gets how long a database whose failure was reported is skipped before the worker tries it
@@ -102,14 +130,22 @@ public abstract class DatabaseEngineWorker : IDatabaseEngineWorker
     /// </summary>
     public static TimeSpan FailureBackoff { get; } = TimeSpan.FromSeconds(1);
 
-    /// <inheritdoc />
-    public abstract string Name { get; }
+    /// <summary>
+    /// Gets the diagnostic name of this worker, unique within its engine
+    /// (for example <c>sql-engine/checkpoint</c>), as the constructor set it.
+    /// </summary>
+    public string Name => _name;
 
-    /// <inheritdoc />
-    public abstract DatabaseEngineWorkerKind Kind { get; }
+    /// <summary>
+    /// Gets the role of this worker, as the constructor set it.
+    /// </summary>
+    public DatabaseEngineWorkerKind Kind => _kind;
 
-    /// <inheritdoc />
-    public abstract TimeSpan Interval { get; }
+    /// <summary>
+    /// Gets the cadence of the worker's pump: the bound on how long the default trigger waits
+    /// between passes, as the constructor set it from the owning engine's options.
+    /// </summary>
+    public TimeSpan Interval => _interval;
 
     /// <summary>
     /// Gets the newest failure the worker still holds, or null while it is healthy: the failure of

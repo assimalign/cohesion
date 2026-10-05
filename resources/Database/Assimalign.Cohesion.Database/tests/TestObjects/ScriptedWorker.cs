@@ -10,16 +10,17 @@ namespace Assimalign.Cohesion.Database.Tests;
 internal sealed class ScriptedWorker : DatabaseEngineWorker
 {
     private readonly Action<ScriptedWorker, int> _pass;
-    private readonly TimeSpan _interval;
-    private readonly string _name;
     private int _passes;
     private int _failTriggers;
 
-    public ScriptedWorker(Action<ScriptedWorker, int> pass, TimeSpan? interval = null, string name = "scripted")
+    public ScriptedWorker(
+        Action<ScriptedWorker, int> pass,
+        TimeSpan? interval = null,
+        string name = "scripted",
+        DatabaseEngineWorkerKind kind = DatabaseEngineWorkerKind.Checkpoint)
+        : base(name, kind, interval ?? TimeSpan.FromHours(1))
     {
         _pass = pass;
-        _interval = interval ?? TimeSpan.FromHours(1);
-        _name = name;
     }
 
     /// <summary>Gets or sets the number of upcoming trigger waits that throw.</summary>
@@ -31,12 +32,6 @@ internal sealed class ScriptedWorker : DatabaseEngineWorker
 
     /// <summary>Gets the number of passes run so far.</summary>
     public int Passes => Volatile.Read(ref _passes);
-
-    public override string Name => _name;
-
-    public override DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.Checkpoint;
-
-    public override TimeSpan Interval => _interval;
 
     public bool Begin(string database) => BeginDatabase(database);
 

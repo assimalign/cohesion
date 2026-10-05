@@ -97,7 +97,7 @@ In the repo's L1/L2/L3 model (see `docs/programs/DELIVERY_ROADMAP.md`), this are
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Database` | Area root: engine/database/session/transaction contracts, exceptions, application composition, model-agnostic `CompiledSchema` identity and provisioning seam, and object ownership — **rolls up the child roots** (`Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`; child roots never reference the root) |
+| `Assimalign.Cohesion.Database` | Area root: engine/database/session/transaction contracts and, since phase 3 of the concrete-types plan, the abstract bases that replace them (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`), exceptions, application composition, model-agnostic `CompiledSchema` identity and provisioning seam, and object ownership — **rolls up the child roots** (`Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`; child roots never reference the root) |
 | `Assimalign.Cohesion.Database.Storage` | Child root — pages, buffer pool, free-space map, journal (WAL), recovery, backup |
 | `Assimalign.Cohesion.Database.Transactions` | Child root — MVCC snapshots, isolation levels, lock manager, transaction log seam, `TransactionId`/`TransactionState` |
 | `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors (child root; rolled up by the root) |

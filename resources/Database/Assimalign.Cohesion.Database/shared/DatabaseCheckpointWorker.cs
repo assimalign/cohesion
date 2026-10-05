@@ -10,8 +10,11 @@ namespace Assimalign.Cohesion.Database;
 
 /// <summary>
 /// The engine-owned checkpointer every engine model runs: one copy of the pass the five engines
-/// share (database-area.md rule 8), until the root engine base of the concrete-types plan
-/// (phase 3) takes it over. A model supplies its databases and what a checkpoint of one is.
+/// share (database-area.md rule 8), compiled into each model, because the checkpointer is each
+/// engine's internal worker rather than root API. Its name (<c>{engine}/checkpoint</c>), kind and
+/// cadence are fixed by its constructor, as every <see cref="DatabaseEngineWorker"/>'s are since
+/// phase 3 of the concrete-types plan (#1259). A model supplies its databases and what a checkpoint
+/// of one is.
 /// </summary>
 /// <typeparam name="TDatabase">The model's database type.</typeparam>
 /// <remarks>
@@ -67,16 +70,16 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     private readonly DatabaseCheckpointLanes _lanes;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="DatabaseCheckpointWorker{TDatabase}"/> class.
+    /// Initializes a new instance of the <see cref="DatabaseCheckpointWorker{TDatabase}"/> class,
+    /// named <c>{engineName}/checkpoint</c>, of kind <see cref="DatabaseEngineWorkerKind.Checkpoint"/>.
     /// </summary>
     /// <param name="engineName">The name of the engine whose databases are checkpointed.</param>
-    protected DatabaseCheckpointWorker(string engineName)
+    /// <param name="interval">The engine's checkpoint interval: the time backstop between checkpoints.</param>
+    protected DatabaseCheckpointWorker(string engineName, TimeSpan interval)
+        : base(engineName + "/checkpoint", DatabaseEngineWorkerKind.Checkpoint, interval)
     {
         _lanes = new DatabaseCheckpointLanes(engineName + "/" + DatabaseEngineWorkerKind.Checkpoint + " lane");
     }
-
-    /// <inheritdoc />
-    public sealed override DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.Checkpoint;
 
     /// <summary>
     /// Gets the engine's checkpoint signal: set when a journal reaches the checkpoint size.

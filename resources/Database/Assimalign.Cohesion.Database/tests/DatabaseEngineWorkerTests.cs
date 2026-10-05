@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Tests;
 /// </summary>
 public class DatabaseEngineWorkerTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Database] - Worker: a pass that throws is recorded, never thrown, and the next pass that runs to its end clears it")]
     public void RunIteration_PassThrows_ShouldRecordTheFailureUntilAPassRunsToItsEnd()
@@ -359,7 +359,7 @@ public class DatabaseEngineWorkerTests
         // Act: let a fail for about two backoffs.
         bool retried = SpinUntil(() => Volatile.Read(ref attemptsOnA) >= 3);
         stop.Cancel();
-        bool stopped = thread.Join(Timeout);
+        bool stopped = thread.Join(_timeout);
         var elapsed = watch.Elapsed;
         int attempts = Volatile.Read(ref attemptsOnA);
         int passes = Volatile.Read(ref passesOverB);
@@ -386,7 +386,7 @@ public class DatabaseEngineWorkerTests
         // Act: let it fail for about three backoffs.
         bool retried = SpinUntil(() => worker.ConsecutiveFailures >= 3);
         stop.Cancel();
-        bool stopped = thread.Join(Timeout);
+        bool stopped = thread.Join(_timeout);
         var elapsed = watch.Elapsed;
 
         // Assert: still retrying, one failure held (the last), and no faster than the backoff: a
@@ -416,7 +416,7 @@ public class DatabaseEngineWorkerTests
         // Act
         bool recovered = SpinUntil(() => worker.Passes > 3 && worker.Fault is null);
         stop.Cancel();
-        thread.Join(Timeout).ShouldBeTrue();
+        thread.Join(_timeout).ShouldBeTrue();
 
         // Assert
         recovered.ShouldBeTrue();
@@ -435,7 +435,7 @@ public class DatabaseEngineWorkerTests
         // Act
         bool ran = SpinUntil(() => worker.Passes >= 2 && worker.Fault is null);
         stop.Cancel();
-        thread.Join(Timeout).ShouldBeTrue();
+        thread.Join(_timeout).ShouldBeTrue();
 
         // Assert
         ran.ShouldBeTrue();
@@ -454,7 +454,7 @@ public class DatabaseEngineWorkerTests
         // Act
         var watch = Stopwatch.StartNew();
         stop.Cancel();
-        bool stopped = thread.Join(Timeout);
+        bool stopped = thread.Join(_timeout);
 
         // Assert
         stopped.ShouldBeTrue();
@@ -492,6 +492,30 @@ public class DatabaseEngineWorkerTests
         worker.Fault.ShouldBeNull();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker: the name, kind and cadence are the constructor's, through the interface too")]
+    public void Constructor_Identity_ShouldBeFixed()
+    {
+        // Arrange / Act
+        var worker = new ScriptedWorker((_, _) => { }, TimeSpan.FromSeconds(5), "sql-engine/version-purge", DatabaseEngineWorkerKind.VersionPurge);
+        IDatabaseEngineWorker bridged = worker;
+
+        // Assert
+        worker.Name.ShouldBe("sql-engine/version-purge");
+        worker.Kind.ShouldBe(DatabaseEngineWorkerKind.VersionPurge);
+        worker.Interval.ShouldBe(TimeSpan.FromSeconds(5));
+        bridged.Name.ShouldBe(worker.Name);
+        bridged.Kind.ShouldBe(worker.Kind);
+        bridged.Interval.ShouldBe(worker.Interval);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker: a worker without a diagnostic name is refused")]
+    public void Constructor_BlankName_ShouldThrow()
+    {
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => new ScriptedWorker((_, _) => { }, name: " "));
+        Should.Throw<ArgumentNullException>(() => new ScriptedWorker((_, _) => { }, name: null!));
+    }
+
     private static Thread StartPump(DatabaseEngineWorker worker, CancellationToken cancellationToken)
     {
         var thread = new Thread(() => worker.Run(cancellationToken)) { IsBackground = true, Name = worker.Name };
@@ -504,7 +528,7 @@ public class DatabaseEngineWorkerTests
         var watch = Stopwatch.StartNew();
         while (!condition())
         {
-            if (watch.Elapsed > Timeout)
+            if (watch.Elapsed > _timeout)
             {
                 return false;
             }

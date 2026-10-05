@@ -26,18 +26,10 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
     private readonly KeyValueDatabaseEngine _engine;
 
     internal KeyValuePageWriteBackWorker(KeyValueDatabaseEngine engine)
+        : base(engine.Name + "/page-writeback", DatabaseEngineWorkerKind.PageWriteBack, engine.EngineOptions.PageWriteBackInterval)
     {
         _engine = engine;
     }
-
-    /// <inheritdoc />
-    public override string Name => _engine.Name + "/page-writeback";
-
-    /// <inheritdoc />
-    public override DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.PageWriteBack;
-
-    /// <inheritdoc />
-    public override TimeSpan Interval => _engine.EngineOptions.PageWriteBackInterval;
 
     /// <inheritdoc />
     protected override void RunIterationCore(CancellationToken cancellationToken)

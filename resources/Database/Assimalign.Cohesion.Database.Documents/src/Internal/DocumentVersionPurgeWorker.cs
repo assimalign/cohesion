@@ -50,18 +50,10 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
     private long _lastFullPass = Stopwatch.GetTimestamp();
 
     internal DocumentVersionPurgeWorker(DocumentDatabaseEngine engine)
+        : base(engine.Name + "/version-purge", DatabaseEngineWorkerKind.VersionPurge, engine.EngineOptions.MaintenanceInterval)
     {
         _engine = engine;
     }
-
-    /// <inheritdoc />
-    public override string Name => _engine.Name + "/version-purge";
-
-    /// <inheritdoc />
-    public override DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.VersionPurge;
-
-    /// <inheritdoc />
-    public override TimeSpan Interval => _engine.EngineOptions.MaintenanceInterval;
 
     /// <inheritdoc />
     protected override void WaitForTrigger(CancellationToken cancellationToken)
