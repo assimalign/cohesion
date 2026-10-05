@@ -24,12 +24,12 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
     private readonly IConnection _connection;
     private readonly GraphDatabaseServerOptions _options;
     private readonly IDatabaseEngine _engine;
-    private readonly IDatabaseAuthenticator _authenticator;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
 
     private ProtocolChannel? _channel;
-    private IProtocolFrameReader? _reader;
-    private IProtocolFrameWriter? _writer;
+    private ProtocolFrameReader? _reader;
+    private ProtocolFrameWriter? _writer;
     private GraphDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
 
@@ -38,7 +38,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
         IConnection connection,
         GraphDatabaseServerOptions options,
         IDatabaseEngine engine,
-        IDatabaseAuthenticator authenticator)
+        DatabaseAuthenticator authenticator)
     {
         _server = server;
         _connection = connection;

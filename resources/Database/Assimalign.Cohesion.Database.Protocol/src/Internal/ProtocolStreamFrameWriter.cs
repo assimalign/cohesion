@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Protocol.Internal;
 /// Writes frames to a stream: header then payload, flushed on demand so callers
 /// batch small frames (logical values) into one transport write.
 /// </summary>
-internal sealed class ProtocolStreamFrameWriter : IProtocolFrameWriter
+internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
 {
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
@@ -22,8 +22,10 @@ internal sealed class ProtocolStreamFrameWriter : IProtocolFrameWriter
     }
 
     /// <inheritdoc />
-    public async ValueTask WriteFrameAsync(ProtocolFrame frame, CancellationToken cancellationToken = default)
+    protected override async ValueTask WriteFrameCoreAsync(ProtocolFrame frame, CancellationToken cancellationToken)
     {
+        // The payload bound belongs to the one writer that encodes the envelope; the
+        // decorating writers forward here, so every frame that reaches the wire is checked.
         if ((uint)frame.Payload.Length > ProtocolFrameHeader.MaxPayloadLength)
         {
             throw new ProtocolException(
@@ -40,13 +42,13 @@ internal sealed class ProtocolStreamFrameWriter : IProtocolFrameWriter
     }
 
     /// <inheritdoc />
-    public ValueTask FlushAsync(CancellationToken cancellationToken = default)
+    protected override ValueTask FlushCoreAsync(CancellationToken cancellationToken)
     {
         return new ValueTask(_stream.FlushAsync(cancellationToken));
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    protected override ValueTask DisposeAsyncCore()
     {
         if (!_leaveOpen)
         {

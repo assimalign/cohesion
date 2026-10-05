@@ -37,8 +37,8 @@ internal sealed class GraphCatalogTestExchange : IDatabaseProtocolExchange<Graph
 
     public bool IsResponseComplete { get; private set; }
 
-    public async ValueTask<GraphCatalogTestResult> ExecuteAsync(IProtocolFrameReader reader,
-        IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+    public async ValueTask<GraphCatalogTestResult> ExecuteAsync(ProtocolFrameReader reader,
+        ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
     {
         IsResponseComplete = false;
         await writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.Execute,

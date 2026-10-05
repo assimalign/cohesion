@@ -199,9 +199,9 @@ public class KeyValueClientTests
                 KeyValueClientTestHarness.Timeout()));
     }
 
-    private sealed class RejectingAuthenticator : IDatabaseAuthenticator
+    private sealed class RejectingAuthenticator : DatabaseAuthenticator
     {
-        public ValueTask<bool> AuthenticateAsync(string database, string principal, ReadOnlyMemory<byte> evidence, System.Threading.CancellationToken cancellationToken = default)
+        protected override ValueTask<bool> AuthenticateCoreAsync(string database, string principal, ReadOnlyMemory<byte> evidence, System.Threading.CancellationToken cancellationToken)
             => ValueTask.FromResult(false);
     }
 }

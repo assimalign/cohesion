@@ -9,8 +9,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// <summary>
 /// An authenticator that rejects every principal, for handshake-failure tests.
 /// </summary>
-internal sealed class RejectingAuthenticator : IDatabaseAuthenticator
+internal sealed class RejectingAuthenticator : DatabaseAuthenticator
 {
-    public ValueTask<bool> AuthenticateAsync(string database, string principal, ReadOnlyMemory<byte> evidence, CancellationToken cancellationToken = default)
+    protected override ValueTask<bool> AuthenticateCoreAsync(string database, string principal, ReadOnlyMemory<byte> evidence, CancellationToken cancellationToken)
         => ValueTask.FromResult(false);
 }

@@ -82,9 +82,36 @@ one family when composed and reject exchanges belonging to another family. Paylo
 interpretation belongs exclusively to that endpoint's model codec. Unknown identifiers
 are protocol violations; session code reports Error(ProtocolViolation) and closes.
 
-The low-level ProtocolFraming reader/writer remain available for diagnostics and
-framing tests. They deliberately do not dispatch payloads or infer model semantics.
-Applications use ProtocolChannel for their endpoint's validated exchange.
+`ProtocolFrameReader.Create` and `ProtocolFrameWriter.Create` return the low-level
+stream reader and writer, for diagnostics, framing tests and a server's at-capacity
+rejection (one Error frame written before any session or channel exists). They
+deliberately do not dispatch payloads or infer model semantics. Applications use
+ProtocolChannel for their endpoint's validated exchange.
+
+## Frame reader and writer types
+
+`ProtocolFrameReader` and `ProtocolFrameWriter` are public abstract classes, not
+interfaces: the Database area is concrete-first (`.claude/rules/database-area.md`).
+Each has a variant set. The stream reader and writer behind `Create` encode the
+envelope; every other leaf decorates one of them:
+
+| Leaf | Assembly | Adds |
+| --- | --- | --- |
+| stream reader / writer (internal) | Database.Protocol | the envelope and the payload bound |
+| `ProtocolChannel`'s family reader / writer (private) | Database.Protocol | the family check in both directions |
+| `ClientFrameReader` / `ClientFrameWriter` (internal) | Database.Client | a closed pipe's `InvalidOperationException` becomes `IOException` |
+| Blob's error reader / frame writer (private) | Database.Blob.Client | closed pipes, and on the reader Error frames, become `DatabaseClientException` |
+
+Because leaves live in three assemblies, the constructors are `protected`. The public
+members (`ReadFrameAsync`, `WriteFrameAsync`, `FlushAsync`, `DisposeAsync`) are
+non-virtual and call `protected abstract` cores (`ReadFrameCoreAsync`,
+`WriteFrameCoreAsync`, `FlushCoreAsync`); `DisposeAsyncCore` is a `protected virtual`
+lifecycle hook whose default does nothing, so a view over a shared reader or writer
+(Blob's) does not override it. The public members add no check of their own: the
+payload bound stays in the stream writer's core, the one writer that encodes the
+envelope, so a decorating writer that rejects a frame for another reason (the
+family check) keeps rejecting it first. The `Create` factories replace the former
+`ProtocolFraming` static class, the `Aes.Create()` shape.
 
 ## Shared exchange and payloads
 

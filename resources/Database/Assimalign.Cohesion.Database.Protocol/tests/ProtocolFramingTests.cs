@@ -19,7 +19,7 @@ public class ProtocolFramingTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        await using (var writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true))
+        await using (var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true))
         {
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Startup, new byte[] { 1, 2, 3 }));
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty));
@@ -30,7 +30,7 @@ public class ProtocolFramingTests
         stream.Position = 0;
 
         // Act / Assert
-        await using var reader = ProtocolFraming.CreateReader(stream, leaveOpen: true);
+        await using var reader = ProtocolFrameReader.Create(stream, leaveOpen: true);
 
         var first = await reader.ReadFrameAsync();
         first!.Value.Type.ShouldBe(ProtocolMessageType.Startup);
@@ -52,7 +52,7 @@ public class ProtocolFramingTests
         truncated.Write(new byte[] { 1, 2 });
         truncated.Position = 0;
 
-        await using (var reader = ProtocolFraming.CreateReader(truncated, leaveOpen: true))
+        await using (var reader = ProtocolFrameReader.Create(truncated, leaveOpen: true))
         {
             await Should.ThrowAsync<ProtocolException>(async () => await reader.ReadFrameAsync());
         }
@@ -66,7 +66,7 @@ public class ProtocolFramingTests
         oversized.Write(bad);
         oversized.Position = 0;
 
-        await using (var reader = ProtocolFraming.CreateReader(oversized, leaveOpen: true))
+        await using (var reader = ProtocolFrameReader.Create(oversized, leaveOpen: true))
         {
             await Should.ThrowAsync<ProtocolException>(async () => await reader.ReadFrameAsync());
         }

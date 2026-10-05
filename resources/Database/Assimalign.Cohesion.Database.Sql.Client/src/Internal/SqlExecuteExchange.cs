@@ -34,7 +34,7 @@ internal sealed class SqlExecuteExchange : IDatabaseProtocolExchange<DatabaseCli
 
     public bool IsResponseComplete { get; private set; }
 
-    public async ValueTask<DatabaseClientResult> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+    public async ValueTask<DatabaseClientResult> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
     {
         IsResponseComplete = false;
         await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)SqlProtocolMessageType.Execute, _request.Encode()), cancellationToken).ConfigureAwait(false);

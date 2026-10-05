@@ -174,10 +174,10 @@ contracts in this sense and stay.
 
 ## Marking the deviation
 
-Every public abstract base the program adds, or strips of its interface (`Storage` and
-`StorageJournal` included), carries this marker at its declaration. So does each model engine and
-each model engine builder, as the model's entry point (`deviations.md`, step 4). The plan lists
-them:
+Every public abstract base the program adds, or strips of its interface (`Storage` included;
+P2 sealed `StorageJournal`, which carries none), carries this marker at its declaration. So does
+each model engine and each model engine builder, as the model's entry point (`deviations.md`,
+step 4). The plan lists them:
 
 ```csharp
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).

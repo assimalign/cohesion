@@ -291,7 +291,7 @@ internal sealed class DatabaseDownloadStream : Stream
         public ProtocolMessageFamily Family => _exchange.Family;
         internal bool Entered { get; private set; }
 
-        public async ValueTask<bool> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
+        public async ValueTask<bool> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
             CancellationToken cancellationToken = default)
         {
             Entered = true;

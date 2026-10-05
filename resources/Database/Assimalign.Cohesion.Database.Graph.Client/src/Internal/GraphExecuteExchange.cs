@@ -27,7 +27,7 @@ internal sealed class GraphExecuteExchange
     public ProtocolMessageFamily Family => GraphProtocol.Family;
     public bool IsResponseComplete { get; private set; }
 
-    public async ValueTask<GraphResultSet> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
+    public async ValueTask<GraphResultSet> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
         CancellationToken cancellationToken = default)
     {
         IsResponseComplete = false;

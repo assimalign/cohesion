@@ -1335,7 +1335,7 @@ record moves with the machinery):
   server probed a *list* of engines in registration order; one engine per server
   removed that ambiguity.)
 - **Authenticate exchange (MVP):** the challenge frame carries no payload (the
-  trust method); the client's response bytes pass to `IDatabaseAuthenticator`
+  trust method); the client's response bytes pass to `DatabaseAuthenticator`
   as opaque evidence. Method-specific payload schemas arrive with real
   authenticators.
 - **`MaxSessions` counts handshaking sessions too** — an unauthenticated

@@ -7,20 +7,20 @@ using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Client.Internal;
 
-internal sealed class ClientFrameWriter : IProtocolFrameWriter
+internal sealed class ClientFrameWriter : ProtocolFrameWriter
 {
-    private readonly IProtocolFrameWriter _writer;
+    private readonly ProtocolFrameWriter _writer;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ClientFrameWriter"/> class.
     /// </summary>
     /// <param name="writer">The underlying protocol frame writer whose completed-pipe failures are translated.</param>
-    public ClientFrameWriter(IProtocolFrameWriter writer)
+    public ClientFrameWriter(ProtocolFrameWriter writer)
     {
         _writer = writer;
     }
 
-    public async ValueTask WriteFrameAsync(ProtocolFrame frame, CancellationToken cancellationToken = default)
+    protected override async ValueTask WriteFrameCoreAsync(ProtocolFrame frame, CancellationToken cancellationToken)
     {
         try
         {
@@ -32,7 +32,7 @@ internal sealed class ClientFrameWriter : IProtocolFrameWriter
         }
     }
 
-    public async ValueTask FlushAsync(CancellationToken cancellationToken = default)
+    protected override async ValueTask FlushCoreAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -44,5 +44,5 @@ internal sealed class ClientFrameWriter : IProtocolFrameWriter
         }
     }
 
-    public ValueTask DisposeAsync() => _writer.DisposeAsync();
+    protected override ValueTask DisposeAsyncCore() => _writer.DisposeAsync();
 }

@@ -1,7 +1,7 @@
 # Database concrete-first types: plan of record
 
-**Status:** Phase 0 landed with this file; phase 1 (#1257) re-verified and implemented on
-2026-10-05 (§7, §6.9) · **Created:** 2026-10-04 · **Owner:** Chase Crawford
+**Status:** Phase 0 landed with this file; phases 1 (#1257) and 2 (#1258, kernel and wire tracks)
+re-verified and implemented on 2026-10-05 (§7, §6.9) · **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
 · **Owner decision:** O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md` · **Supersedes:** #1232
 **Branch:** every phase branches from the integration branch
@@ -231,10 +231,10 @@ interface is deleted in P6.
 | 21 | `IIndexManager` | Indexing `:14` | child root | sealed | One `public sealed class BTreeIndexManager` for the manager and the registry. It absorbs `public static class BTreeIndexManager` (`BTreeIndexManager.cs:13`, `Create` at `:38`). **At P2:** landed; the internal `DefaultIndexManager` was folded in, and the constructor is private behind `Create`. `CreateIndexAsync`, `TryGetIndex` and `GetIndexes` return `BTreeIndex`. | P2 |
 | 22 | `IIndexRegistry` | Indexing `:17` | child root | sealed | Merged into `BTreeIndexManager` (row 21). **At P2:** landed; the 23 `IIndexRegistry` casts in Sql, KeyValuePair, Documents.Catalog, Graph.Storage and their tests became direct `ExportRegistrations()` calls. | P2 |
 | 23 | `IStorageTransactionSource` | Indexing `:16` | child root | delete | `BTreeIndexManagerOptions` takes a per-engine delegate, `Func<TransactionContext, StorageTransaction>` (§6.3). **At P2:** landed as `required Func<TransactionContext, StorageTransaction> TransactionSource` (the property kept its name). Each engine passes a private `ResolveStatementBracket` method that replaced its wrapper class with the same message (§6.3). | P2 |
-| 24 | `IProtocolFrameReader` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameReader : IAsyncDisposable`, with a protected constructor, because its leaves live in Protocol, Database.Client and Blob.Client. NVI `ReadFrameAsync` calls `ReadFrameCoreAsync`, and a non-virtual `DisposeAsync` calls `DisposeAsyncCore` (the interface extends `IAsyncDisposable` today, `IProtocolFrameReader.cs:10`). `public static ProtocolFrameReader Create(Stream, bool leaveOpen = false)` replaces `ProtocolFraming.CreateReader`. | P2 |
-| 25 | `IProtocolFrameWriter` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameWriter : IAsyncDisposable`. NVI `WriteFrameAsync` calls `WriteFrameCoreAsync`, and `DisposeAsync` calls `DisposeAsyncCore`. `Create(Stream, bool)` replaces `ProtocolFraming.CreateWriter`. | P2 |
+| 24 | `IProtocolFrameReader` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameReader : IAsyncDisposable`, with a protected constructor, because its leaves live in Protocol, Database.Client and Blob.Client. NVI `ReadFrameAsync` calls `ReadFrameCoreAsync`, and a non-virtual `DisposeAsync` calls `DisposeAsyncCore` (the interface extends `IAsyncDisposable` today, `IProtocolFrameReader.cs:10`). `public static ProtocolFrameReader Create(Stream, bool leaveOpen = false)` replaces `ProtocolFraming.CreateReader`. **Landed at P2 (re-verified):** four leaves, as counted: the internal stream reader, `ProtocolChannel`'s private family reader, Database.Client's `ClientFrameReader` and Blob.Client's private error reader. `DisposeAsyncCore` is a `protected virtual` lifecycle hook with an empty default, which Blob's view over the pooled reader keeps. The NVI members add no check, so the frame path behaves as before: the interfaces carried none, the reader's one argument is the token its stream leaf already passes to every `Stream.ReadAsync`, and the writer's one frame check stays in its stream leaf (row 25). Row 27's base checks are the track's only behaviour change. Public carriers retyped with it: `ProtocolChannel.Reader`, the parameters of Database.Client's `IDatabaseProtocolExchange<TResult>.ExecuteAsync` and `IDatabaseStreamingExchange.OpenAsync`/`CopyToAsync` (the interfaces themselves go in P5, rows 51 and 52), and `BlobProtocolTransfer`'s three frame-endpoint overloads. | P2 |
+| 25 | `IProtocolFrameWriter` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameWriter : IAsyncDisposable`. NVI `WriteFrameAsync` calls `WriteFrameCoreAsync`, and `DisposeAsync` calls `DisposeAsyncCore`. `Create(Stream, bool)` replaces `ProtocolFraming.CreateWriter`. **Landed at P2 (re-verified):** the interface also had `FlushAsync`, which the plan missed; it becomes an NVI member over `protected abstract FlushCoreAsync`. Four leaves, mirroring row 24. The payload bound (`ProtocolFrameHeader.MaxPayloadLength`) stays in the stream writer's core, the one writer that encodes the envelope; in the base it would run before `ProtocolChannel`'s family check and change which error a frame failing both reports. `ProtocolChannel.Writer` and the carriers of row 24 are retyped. | P2 |
 | 26 | `IAuthorizationService` | Security `:9` | child root | delete | It has no implementer anywhere. | P1 |
-| 27 | `IDatabaseAuthenticator` | Security `:18` | child root | abstract | `public abstract class DatabaseAuthenticator`, with a protected constructor. NVI `AuthenticateAsync` calls `AuthenticateCoreAsync`. It absorbs `public static class DatabaseAuthenticator` (`DatabaseAuthenticator.cs:8`) as `public static DatabaseAuthenticator AllowAll`. | P2 |
+| 27 | `IDatabaseAuthenticator` | Security `:18` | child root | abstract | `public abstract class DatabaseAuthenticator`, with a protected constructor. NVI `AuthenticateAsync` calls `AuthenticateCoreAsync`. It absorbs `public static class DatabaseAuthenticator` (`DatabaseAuthenticator.cs:8`) as `public static DatabaseAuthenticator AllowAll`. **Landed at P2 (re-verified):** `AuthenticateAsync` rejects a null database or principal (`ArgumentNullException`) and a canceled token before the core runs. The cancellation check moved out of the internal `AllowAllDatabaseAuthenticator`, which already made it, so the shipped path is unchanged; the servers pass decoded wire strings, which are never null. Public carriers retyped: the four servers' `Authenticator` option (`Sql`, `KeyValue`, `Graph` and `Blob` `DatabaseServerOptions`); Studio sets it to `null` and compiles unchanged. A new Database.Security test project pins the base's checks (Security had none). | P2 |
 | 28 | `IStorage` | Storage `:16` | child root | delete | Consumers retype to the existing abstract `Storage`. The default member `EnsureCommitDurable` (`IStorage.cs:218`) already exists as `Storage.EnsureCommitDurable` (`Storage.cs:219`), and the explicit implementation (`Storage.cs:241`) goes. Two Transactions.Tests doubles re-implement `IStorage.Checkpoint` and `ReserveTransactionSequence`, which are non-virtual on `Storage` (`:549`, `:467`); their hooks move to the coordinator in P1 (§6.9). | P1 |
 | 29 | `IStorageBackupManager` | Storage `:9` | child root | delete | It has no implementer and no reference. | P1 |
 | 30 | `IStorageBufferPool` | Storage `:15` | child root | delete | `StorageBufferPool` stays internal sealed, and the public `Storage.BufferPool` (`Storage.cs:117`) becomes internal. Only Storage.Tests reads it (`StorageConcurrencyTests.cs:211`, `:338`), through Storage's existing grant. | P1 |
@@ -336,7 +336,7 @@ decision.
 | `TransactionLog` (`TransactionLog.cs:12`, `CreateInMemory` at `:19`, `CreateJournalBound(IStorageJournal)` at `:28`) | `public static class` | The public class is deleted. The name passes to `internal abstract class TransactionLog`, and its factories become internal statics on it. [Certain] Only tests called them: Transactions.Tests, and Indexing.Tests through the harness, which the new `Create` no longer needs. | P1 |
 | `VersionStore` (`VersionStore.cs:8`, `CreateInMemory` at `:16`) | `public static class`, returns `IVersionStore` | The name passes to `public abstract class VersionStore` (row 45), and `CreateInMemory()` stays as a static on the base. **At P2:** landed as planned. | P2 |
 | `SqlSchemaCompiler` (`Sql.Schema/src/SqlSchemaCompiler.cs:13`, `Compile(ISqlSchema, EngineModel)` at `:20`) | `public static class` | Becomes `internal static`. The public compile entry points are `SqlSchema.Compile(name, configure)` (static, unchanged) and the instance `SqlSchema.Compile()`. [Certain] Outside Sql.Schema, only Sql.Schema's own tests call it. | P4 |
-| `ProtocolFraming` (`Protocol/src/ProtocolFraming.cs:11`, `CreateReader` at `:19`, `CreateWriter` at `:31`) | `public static class`, returns the frame interfaces | Deleted. The factories move onto the abstract bases (`ProtocolFrameReader.Create`, `ProtocolFrameWriter.Create`), the `Aes.Create()` shape. The callers are the four model servers, `ProtocolChannel`, two test clients and the Protocol tests. | P2 |
+| `ProtocolFraming` (`Protocol/src/ProtocolFraming.cs:11`, `CreateReader` at `:19`, `CreateWriter` at `:31`) | `public static class`, returns the frame interfaces | Deleted. The factories move onto the abstract bases (`ProtocolFrameReader.Create`, `ProtocolFrameWriter.Create`), the `Aes.Create()` shape. The callers are the four model servers, `ProtocolChannel`, two test clients and the Protocol tests. **Landed at P2:** the caller list held (the servers' at-capacity rejection writer, the Sql and KeyValuePair test protocol clients, `ProtocolFramingTests` and `ProtocolFamilyTests`). | P2 |
 | `TransactionRecovery` (`TransactionRecovery.cs:18`, `Analyze` at `:25` and `:40`) | `public static class` taking `IStorageJournal` | Kept as a public static class: it is a stateless analysis with no interface twin. The parameter is retyped to `StorageJournal`. | P1 |
 | `Sql.Sum<TSource>` (`Sql/src/Sql.cs:23`) | returns `ISqlAggregateExpression` | Returns `SqlAggregateExpression` (row 81). | P4 |
 | `<Model>DatabaseEngine.CreateBuilder()` (`SqlDatabaseEngine.cs:181`, `KeyValueDatabaseEngine.cs:152`, Graph, Documents and Blob at `:67`) | return builder interfaces | Return the sealed builders. | P4 |
@@ -695,6 +695,11 @@ Documents.Language, Blob and Hosting.
 - **Authenticator doubles** derive from `DatabaseAuthenticator` (P2). They are in KeyValuePair
   (`TestObjects/RejectingAuthenticator.cs:12`), Sql (`TestObjects/RejectingAuthenticator.cs:12`),
   Blob (`BlobDatabaseServerTests.cs:381`) and KeyValuePair.Client (`KeyValueClientTests.cs:202`).
+  **Landed at P2:** each overrides `AuthenticateCoreAsync`; Blob's `RejectAuthenticator` drops
+  its own cancellation check, which the base now makes. The frame-endpoint parameters of the
+  client exchange doubles (P5, below) and of the Sql, KeyValuePair and Graph test protocol
+  clients and exchanges are retyped to the bases in P2; the doubles still implement the P5
+  exchange interfaces.
 - **Client exchange doubles** derive from the exchange bases (P5):
   - Database.Client `StreamingClientTestHarness.cs:184` and `:254`;
   - `DatabaseProtocolExchangeTests.cs:58` and `:82`;
@@ -850,6 +855,30 @@ dependency order, and each updates its consumers mechanically:
 4. **Protocol:** rows 24 and 25, and the `ProtocolFraming` removal.
 5. **Security:** row 27.
 
+**Protocol and Security, re-verified and landed at P2 (wire track).** Rows 24, 25 and 27 held
+against the code after #1251 to #1253 and P1, with two corrections: `IProtocolFrameWriter` also
+had `FlushAsync` (row 25), and the public carriers the rows did not name are retyped with them
+(`ProtocolChannel.Reader`/`Writer`, the Database.Client exchange interfaces' frame parameters,
+`BlobProtocolTransfer`, the four servers' `Authenticator` option). Neither project had a §5.3
+audit. The Protocol and Security `Abstractions/` folders are gone with their last interfaces
+(rule 11). No caller in Hosting, Embedded, Testing, Studio or the Sdk named these types. The
+Protocol, Database.Client, every model client and server suite, Hosting and Embedded run
+unchanged; Database.Security gains its first test project (`DatabaseAuthenticatorTests`, five
+tests) for the base's argument and cancellation checks.
+
+Row 27 is the track's one behaviour change, pending owner confirmation at merge: an
+application authenticator's core no longer sees a null database or principal
+(`ArgumentNullException`) or an already-canceled token (`OperationCanceledException`). No
+shipped caller can observe it: the four servers pass strings decoded by
+`ProtocolPayload.ReadString`, which never returns null, and `AllowAll` already threw on a
+canceled token. Also pending owner confirmation: row 25 keeps the payload bound in the stream
+leaf, not in the base's public member. P8's cohesion-docs sweep picks up the deleted names in
+`docs/dotnet-apis/resources/database/`: `assimalign-cohesion-database-client/examples/database-protocol-exchange-tests.md`,
+`assimalign-cohesion-database-keyvaluepair-client/examples/key-value-client-tests.md`,
+`assimalign-cohesion-database-security/` (`index.md`, `design.md`),
+`assimalign-cohesion-database-protocol/` (`index.md`, `design.md`) and
+`assimalign-cohesion-database-sql/design.md`.
+
 *Gate:* the crash and durability suites (`CrashRecoveryTests`, the crash-capture and
 fault-injection strategies), and #1226's lock-retention tests. An optional NativeAOT
 microbenchmark of the insert path runs before and after.
@@ -895,11 +924,9 @@ says what landed.
   text was fixed: the Storage OVERVIEW snippet (a constructor-set model, not an override), the
   journal's note on its former leaf, "an `TransactionContext`" at six sites, and the lane table of
   `DATABASE_PROGRAM_PLAN.md`, which still named `ITransactionContext`.
-- **Left for later.** `.claude/rules/database-area.md` still lists `StorageJournal` among the
-  marked bases ("Marking the deviation"); rule text changes with the owner (§12). The plan's
-  header Status line still records P0 and P1 only; it changes at the P2 merge, once the sibling
-  Protocol/Security track lands beside this one. Whether `StorageJournal` and
-  `BTreeRecordVersionIndex` keep public constructors is an owner question (§5.3, row 40).
+- **Left for later.** The marker sentence of `database-area.md` and the header Status line were
+  updated at the P2 merge. Whether `StorageJournal` and `BTreeRecordVersionIndex` keep public
+  constructors is an owner question (§5.3, row 40).
 
 **P3, #1259: root bridge bases.** Rows 1, 5, 9, 11, 12 and 13 add `DatabaseEngine`,
 `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer` and
@@ -1054,7 +1081,7 @@ it). [Certain] The implementers were counted with rg on 2026-10-04.
 
 Internal abstract bases (the strategies and `TransactionLog`) are not public API and carry no
 marker. Other sealed leaves are covered by `database-area.md`. Each marker lands in the phase that
-writes its type, or, for `Storage` and `StorageJournal`, strips its interface.
+writes its type, or, for `Storage`, strips its interface.
 
 ## 9. Performance evidence
 
@@ -1160,10 +1187,6 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   instance: the argument check's message says "not created by this storage instance", but it
   only ever tested the type (found at P2, row 36). Checking the owner is a behavior change, so P2
   left it for its own fix.
-- `.claude/rules/database-area.md`, "Marking the deviation", names `Storage` and `StorageJournal`
-  as the bases P1 stripped of their interfaces. P2 collapsed `StorageJournal` into a sealed type
-  without a marker (§5.3, §8), so the sentence should name `Storage` alone; a rule-text change,
-  left for the owner at the P2 merge.
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never

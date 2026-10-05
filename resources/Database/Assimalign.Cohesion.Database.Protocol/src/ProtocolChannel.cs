@@ -25,18 +25,18 @@ public sealed class ProtocolChannel : IAsyncDisposable
         _stream = stream;
         _leaveOpen = leaveOpen;
         Family = family;
-        Reader = new FamilyReader(ProtocolFraming.CreateReader(stream, leaveOpen: true), family);
-        Writer = new FamilyWriter(ProtocolFraming.CreateWriter(stream, leaveOpen: true), family);
+        Reader = new FamilyReader(ProtocolFrameReader.Create(stream, leaveOpen: true), family);
+        Writer = new FamilyWriter(ProtocolFrameWriter.Create(stream, leaveOpen: true), family);
     }
 
     /// <summary>Gets the family fixed when the channel was created.</summary>
     public ProtocolMessageFamily Family { get; }
 
     /// <summary>Gets the reader that rejects identifiers outside the bound family.</summary>
-    public IProtocolFrameReader Reader { get; }
+    public ProtocolFrameReader Reader { get; }
 
     /// <summary>Gets the writer that rejects identifiers outside the bound family.</summary>
-    public IProtocolFrameWriter Writer { get; }
+    public ProtocolFrameWriter Writer { get; }
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
@@ -57,9 +57,9 @@ public sealed class ProtocolChannel : IAsyncDisposable
         }
     }
 
-    private sealed class FamilyReader : IProtocolFrameReader
+    private sealed class FamilyReader : ProtocolFrameReader
     {
-        private readonly IProtocolFrameReader _reader;
+        private readonly ProtocolFrameReader _reader;
         private readonly ProtocolMessageFamily _family;
 
         /// <summary>
@@ -67,13 +67,13 @@ public sealed class ProtocolChannel : IAsyncDisposable
         /// </summary>
         /// <param name="reader">The framed reader whose frames are validated.</param>
         /// <param name="family">The family every read identifier must belong to.</param>
-        public FamilyReader(IProtocolFrameReader reader, ProtocolMessageFamily family)
+        public FamilyReader(ProtocolFrameReader reader, ProtocolMessageFamily family)
         {
             _reader = reader;
             _family = family;
         }
 
-        public async ValueTask<ProtocolFrame?> ReadFrameAsync(CancellationToken cancellationToken = default)
+        protected override async ValueTask<ProtocolFrame?> ReadFrameCoreAsync(CancellationToken cancellationToken)
         {
             ProtocolFrame? frame = await _reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
             if (frame is { } value)
@@ -83,12 +83,12 @@ public sealed class ProtocolChannel : IAsyncDisposable
             return frame;
         }
 
-        public ValueTask DisposeAsync() => _reader.DisposeAsync();
+        protected override ValueTask DisposeAsyncCore() => _reader.DisposeAsync();
     }
 
-    private sealed class FamilyWriter : IProtocolFrameWriter
+    private sealed class FamilyWriter : ProtocolFrameWriter
     {
-        private readonly IProtocolFrameWriter _writer;
+        private readonly ProtocolFrameWriter _writer;
         private readonly ProtocolMessageFamily _family;
 
         /// <summary>
@@ -96,19 +96,19 @@ public sealed class ProtocolChannel : IAsyncDisposable
         /// </summary>
         /// <param name="writer">The framed writer that receives validated frames.</param>
         /// <param name="family">The family every written identifier must belong to.</param>
-        public FamilyWriter(IProtocolFrameWriter writer, ProtocolMessageFamily family)
+        public FamilyWriter(ProtocolFrameWriter writer, ProtocolMessageFamily family)
         {
             _writer = writer;
             _family = family;
         }
 
-        public ValueTask WriteFrameAsync(ProtocolFrame frame, CancellationToken cancellationToken = default)
+        protected override ValueTask WriteFrameCoreAsync(ProtocolFrame frame, CancellationToken cancellationToken)
         {
             Validate(_family, frame.Type);
             return _writer.WriteFrameAsync(frame, cancellationToken);
         }
 
-        public ValueTask FlushAsync(CancellationToken cancellationToken = default) => _writer.FlushAsync(cancellationToken);
-        public ValueTask DisposeAsync() => _writer.DisposeAsync();
+        protected override ValueTask FlushCoreAsync(CancellationToken cancellationToken) => _writer.FlushAsync(cancellationToken);
+        protected override ValueTask DisposeAsyncCore() => _writer.DisposeAsync();
     }
 }

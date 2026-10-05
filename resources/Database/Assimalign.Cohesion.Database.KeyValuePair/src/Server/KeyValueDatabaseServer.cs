@@ -46,7 +46,7 @@ public sealed class KeyValueDatabaseServer : IDatabaseServer
 {
     private readonly KeyValueDatabaseServerOptions _options;
     private readonly IConnectionListener _listener;
-    private readonly IDatabaseAuthenticator _authenticator;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly KeyValueDatabaseServerContext _context;
     private readonly ConcurrentDictionary<Guid, KeyValueDatabaseServerSession> _sessions = new();
 
@@ -284,7 +284,7 @@ public sealed class KeyValueDatabaseServer : IDatabaseServer
         try
         {
             var stream = connection.AsStream();
-            await using var writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+            await using var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
             var error = new ProtocolErrorMessage(ProtocolErrorCode.Unavailable, "The server is at its session limit.");
 
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Error, error.Encode()), hardAbort).ConfigureAwait(false);

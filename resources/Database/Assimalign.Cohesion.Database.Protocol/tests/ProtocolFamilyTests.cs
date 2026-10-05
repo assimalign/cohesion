@@ -45,7 +45,7 @@ public class ProtocolFamilyTests
             await channel.Writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)65, new byte[] { 1 }), CancellationToken.None));
         stream.Length.ShouldBe(0);
 
-        await using var raw = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+        await using var raw = ProtocolFrameWriter.Create(stream, leaveOpen: true);
         await raw.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)65, ReadOnlyMemory<byte>.Empty), CancellationToken.None);
         stream.Position = 0;
         await Should.ThrowAsync<ProtocolException>(async () => await channel.Reader.ReadFrameAsync(CancellationToken.None));

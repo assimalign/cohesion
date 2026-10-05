@@ -26,11 +26,11 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
     private readonly IConnection _connection;
     private readonly KeyValueDatabaseServerOptions _options;
     private readonly IDatabaseEngine _engine;
-    private readonly IDatabaseAuthenticator _authenticator;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
 
-    private IProtocolFrameReader? _reader;
-    private IProtocolFrameWriter? _writer;
+    private ProtocolFrameReader? _reader;
+    private ProtocolFrameWriter? _writer;
     private IDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
 
@@ -39,7 +39,7 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
         IConnection connection,
         KeyValueDatabaseServerOptions options,
         IDatabaseEngine engine,
-        IDatabaseAuthenticator authenticator)
+        DatabaseAuthenticator authenticator)
     {
         _server = server;
         _connection = connection;

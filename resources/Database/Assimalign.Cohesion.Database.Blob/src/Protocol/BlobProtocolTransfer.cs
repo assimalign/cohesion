@@ -48,7 +48,7 @@ public static class BlobProtocolTransfer
     /// <exception cref="OperationCanceledException">The transfer is canceled.</exception>
     /// <remarks>The caller must hold exclusive access to both endpoints for the entire transfer.</remarks>
     public static async ValueTask<long> SendAsync(
-        IProtocolFrameReader reader, IProtocolFrameWriter writer, Stream source,
+        ProtocolFrameReader reader, ProtocolFrameWriter writer, Stream source,
         BlobTransferStartMessage metadata, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reader);
@@ -121,7 +121,7 @@ public static class BlobProtocolTransfer
     /// <exception cref="ProtocolException">The transfer is malformed, truncated or terminated by an error.</exception>
     /// <exception cref="OperationCanceledException">The transfer is canceled.</exception>
     public static async ValueTask<BlobTransferStartMessage> ReceiveAsync(
-        IProtocolFrameReader reader, IProtocolFrameWriter writer, Stream destination,
+        ProtocolFrameReader reader, ProtocolFrameWriter writer, Stream destination,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reader);
@@ -153,7 +153,7 @@ public static class BlobProtocolTransfer
     /// <exception cref="OperationCanceledException">The transfer is canceled.</exception>
     /// <remarks>The caller retains exclusive access and owns rollback, disposal and publication.</remarks>
     public static async ValueTask<BlobTransferStartMessage> ReceiveAsync(
-        IProtocolFrameReader reader, IProtocolFrameWriter writer, Stream destination,
+        ProtocolFrameReader reader, ProtocolFrameWriter writer, Stream destination,
         BlobTransferStartMessage metadata, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reader);
@@ -213,7 +213,7 @@ public static class BlobProtocolTransfer
         return total + count;
     }
 
-    private static async ValueTask<ProtocolFrame> ReadAsync(IProtocolFrameReader reader, CancellationToken cancellationToken)
+    private static async ValueTask<ProtocolFrame> ReadAsync(ProtocolFrameReader reader, CancellationToken cancellationToken)
     {
         ProtocolFrame? frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
         if (frame is null)
@@ -228,7 +228,7 @@ public static class BlobProtocolTransfer
         return frame.Value;
     }
 
-    private static async ValueTask WriteAsync(IProtocolFrameWriter writer, BlobProtocolMessageType type,
+    private static async ValueTask WriteAsync(ProtocolFrameWriter writer, BlobProtocolMessageType type,
         ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         await writer.WriteFrameAsync(new((ProtocolMessageType)type, payload), cancellationToken).ConfigureAwait(false);
