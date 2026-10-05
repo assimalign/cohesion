@@ -358,7 +358,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   can cost performance but never correctness. SELECT only in this cut;
   UPDATE/DELETE target collection still scans (recorded follow-up).
 - **Seek execution is snapshot-anchored.** The executor drives the B+Tree
-  cursor through the **statement snapshot** (the `IIndex.OpenCursor(snapshot,
+  cursor through the **statement snapshot** (the `BTreeIndex.OpenCursor(snapshot,
   …)` overload — the same snapshot the equivalent scan filters through, which
   is the equivalence anchor under ReadCommitted's per-statement re-capture),
   unpacks each visible entry's packed row location, fetches the row, and
@@ -804,7 +804,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   database's transaction manager, whose sequences come from the storage's own
   counter (one namespace). The shared `Database.Transactions.TransactionCoordinator` owns
   the composition (manager + lock manager + record-space version store +
-  journal-bound log). The instance's thin `IStorageTransactionSource` adapter
+  journal-bound log). The instance's thin `TransactionSource` resolver (the index manager's delegate since #1258)
   resolves a context's *current statement bracket* and retains the engine's
   `DatabaseException` for a missing pairing. Commit flows
   through the manager: its journal-bound log appends the commit record and
@@ -839,7 +839,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   `SqlRowCodec` retains SQL tuple encoding, while
   its stamp operations delegate to the shared `RecordVersionStamp` contract
   ([layout](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#record-stamp-prefix-the-16-byte-contract)).
-  `RecordVersionIndex` in Indexing binds each live secondary index to the
+  `BTreeRecordVersionIndex` in Indexing binds each live secondary index to the
   shared undo ledger. Recovery ordering is unchanged: check the data-storage
   format, re-attach indexes, analyze and scrub records, scrub indexes with the
   same classification, then complete the deferred checkpoint.
@@ -916,7 +916,7 @@ description + exported registrations), the engine binds them.
   of aborted inserts, deleter-clear of aborted tombstones — the Indexing
   `EraseAsync`/`ClearDeleterAsync` undo surfaces), and the open-time recovery
   scrub purges unproven writers out of every tree in one walk
-  (`IIndexManager.PurgeWritersAsync`, driven by the same
+  (`BTreeIndexManager.PurgeWritersAsync`, driven by the same
   `TransactionRecovery.Analyze` classification that scrubs the record space).
   The ledger route was chosen for live rollback (surgical, O(transaction
   effects)) and the tree walk for open-time scrub (the ledger dies with the
@@ -1840,7 +1840,7 @@ four independently shippable steps:
 1. **Binding — delivered (#907):** `SqlDatabaseSession` begins an
    `TransactionContext` on the database's transaction manager alongside the
    storage bracket (one shared sequence), paired through the coordinator's
-   `IStorageTransactionSource`; commit/rollback flow through the manager
+   statement-bracket resolver; commit/rollback flow through the manager
    (journal-bound log), the storage transaction stays the physical WAL bracket.
    The carried `IsolationLevel` is real per-level snapshot semantics — see
    "Transactions" under the execution model. **Scope decision:** the MVCC

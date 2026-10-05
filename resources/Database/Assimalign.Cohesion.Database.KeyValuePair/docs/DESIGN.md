@@ -449,8 +449,8 @@ codec. `KeyValueRecordCodec` retains key/value payload encoding and delegates
 stamp operations to `RecordVersionStamp`; the shared
 [16-byte layout](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#record-stamp-prefix-the-16-byte-contract)
 is the contract for subsequent models. The instance's thin
-`IStorageTransactionSource` adapter retains the engine's `DatabaseException`
-for a missing statement bracket; Indexing's `RecordVersionIndex` binds the
+`TransactionSource` resolver (the index manager's delegate since #1258) retains the engine's `DatabaseException`
+for a missing statement bracket; Indexing's `BTreeRecordVersionIndex` binds the
 primary index to the shared undo ledger without a reverse dependency.
 
 Recovery ordering is unchanged: re-attach the primary index, analyze and scrub

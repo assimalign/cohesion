@@ -226,11 +226,11 @@ interface is deleted in P6.
 | 16 | `IQueryPipelineStage` | Execution `:11` | child root | delete | Deleted with the pipeline. | P1 |
 | 17 | `IQueryTransactionScope` | Execution `:15` | child root | delete | Deleted with the pipeline. | P1 |
 | 18 | `IResourceGovernor` | Governance `:9` | child root | delete | The interface and the `Database.Governance` project are deleted (D6). | P1 |
-| 19 | `IIndex` | Indexing `:28` | child root | sealed | `public sealed class BTreeIndex`, with an internal constructor; `BTreeIndexManager` creates it. | P2 |
-| 20 | `IIndexCursor` | Indexing `:10` | child root | sealed | `BTreeCursor`: public sealed if a public `BTreeIndex` member returns it, otherwise internal sealed. | P2 |
-| 21 | `IIndexManager` | Indexing `:14` | child root | sealed | One `public sealed class BTreeIndexManager` for the manager and the registry. It absorbs `public static class BTreeIndexManager` (`BTreeIndexManager.cs:13`, `Create` at `:38`). | P2 |
-| 22 | `IIndexRegistry` | Indexing `:17` | child root | sealed | Merged into `BTreeIndexManager` (row 21). | P2 |
-| 23 | `IStorageTransactionSource` | Indexing `:16` | child root | delete | `BTreeIndexManagerOptions` takes a per-engine delegate, `Func<TransactionContext, StorageTransaction>` (§6.3). | P2 |
+| 19 | `IIndex` | Indexing `:28` | child root | sealed | `public sealed class BTreeIndex`, with an internal constructor; `BTreeIndexManager` creates it. **At P2:** landed, promoted from the internal class and moved out of `Internal/`. | P2 |
+| 20 | `IIndexCursor` | Indexing `:10` | child root | sealed | `BTreeCursor`: public sealed if a public `BTreeIndex` member returns it, otherwise internal sealed. **At P2:** public sealed: both `BTreeIndex.OpenCursor` overloads return it. It keeps `IAsyncDisposable`, whose `DisposeAsync` releases nothing (the cursor materializes its range when it opens), so that a cursor that pins pages later changes no call site. | P2 |
+| 21 | `IIndexManager` | Indexing `:14` | child root | sealed | One `public sealed class BTreeIndexManager` for the manager and the registry. It absorbs `public static class BTreeIndexManager` (`BTreeIndexManager.cs:13`, `Create` at `:38`). **At P2:** landed; the internal `DefaultIndexManager` was folded in, and the constructor is private behind `Create`. `CreateIndexAsync`, `TryGetIndex` and `GetIndexes` return `BTreeIndex`. | P2 |
+| 22 | `IIndexRegistry` | Indexing `:17` | child root | sealed | Merged into `BTreeIndexManager` (row 21). **At P2:** landed; the 23 `IIndexRegistry` casts in Sql, KeyValuePair, Documents.Catalog, Graph.Storage and their tests became direct `ExportRegistrations()` calls. | P2 |
+| 23 | `IStorageTransactionSource` | Indexing `:16` | child root | delete | `BTreeIndexManagerOptions` takes a per-engine delegate, `Func<TransactionContext, StorageTransaction>` (§6.3). **At P2:** landed as `required Func<TransactionContext, StorageTransaction> TransactionSource` (the property kept its name). Each engine passes a private `ResolveStatementBracket` method that replaced its wrapper class with the same message (§6.3). | P2 |
 | 24 | `IProtocolFrameReader` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameReader : IAsyncDisposable`, with a protected constructor, because its leaves live in Protocol, Database.Client and Blob.Client. NVI `ReadFrameAsync` calls `ReadFrameCoreAsync`, and a non-virtual `DisposeAsync` calls `DisposeAsyncCore` (the interface extends `IAsyncDisposable` today, `IProtocolFrameReader.cs:10`). `public static ProtocolFrameReader Create(Stream, bool leaveOpen = false)` replaces `ProtocolFraming.CreateReader`. | P2 |
 | 25 | `IProtocolFrameWriter` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameWriter : IAsyncDisposable`. NVI `WriteFrameAsync` calls `WriteFrameCoreAsync`, and `DisposeAsync` calls `DisposeAsyncCore`. `Create(Stream, bool)` replaces `ProtocolFraming.CreateWriter`. | P2 |
 | 26 | `IAuthorizationService` | Security `:9` | child root | delete | It has no implementer anywhere. | P1 |
@@ -436,6 +436,12 @@ lambda that keeps its own exception. The coordinator is **not** injected into In
 wrapper classes go. The Indexing harness supplies its own delegate (`IndexTestHarness.cs:18`,
 `BTreePageFormatTests.cs:53`).
 
+**At P2:** landed as designed, re-verified first: the four wrappers and their messages were as
+the table says. The property kept its name, `TransactionSource`. Each engine passes a method
+group, a private `ResolveStatementBracket` over its readonly coordinator field with the wrapper's
+body, rather than a lambda; the harness passes `GetStorageTransaction`, its pairing table's
+lookup, and no longer implements anything.
+
 ### 6.4 Shared session and transaction behavior moves into the root bases (rows 12 and 13)
 
 **The explicit-transaction state machine** (the #1225 follow-up) exists in four copies:
@@ -586,6 +592,8 @@ Documents.Language, Blob and Hosting.
   - `:52-54` retype `Manager`, `LockManager` and `IndexManager` (P1, P2);
   - `:18` stops implementing `IStorageTransactionSource` and supplies the delegate (P2);
   - `BTreePageFormatTests.cs:53` supplies the delegate too (P2).
+  - **As landed (P2):** all four, plus the registry casts in the Indexing tests, which call
+    `ExportRegistrations()` on the sealed manager directly.
 - **Sql.Tests** `SqlMvccBindingTests.cs:63`, `:71` read `database.Coordinator.Manager.OldestActive`.
   They compile unchanged, because `OldestActive` stays public on the sealed type; P1 verifies it.
 - **Transactions.Tests, P1: the coordinator hooks (rows 28 and 32).** P1 retypes
@@ -863,6 +871,21 @@ says what landed.
   this commit (row 40). The engines changed only by retype, apart from the five record-space
   adapters and two index-undo adapters, which override the protected cores, and the three
   statement decorators, which became `PinStatementSnapshot` calls.
+- **Indexing.** Rows 19 to 23 and §6.3 landed, and the project's `Abstractions/` is gone:
+  `BTreeIndex`, `BTreeCursor` and one `BTreeIndexManager` for manager and registry are sealed,
+  and `BTreeIndexManagerOptions.TransactionSource` is the per-engine delegate. The four engine
+  wrappers became private `ResolveStatementBracket` methods with their messages unchanged.
+- **Gate, as run.** Every Database suite passes with the baseline counts after each of the three
+  commits (Storage.Tests 293, Transactions.Tests 101, Indexing.Tests 75, Sql.Tests 1087 and the
+  rest as listed in the phase brief), including the crash and fault-injection suites
+  (`CrashRecoveryTests`, the coordinator checkpoint and scrub crash tests, each model's crash
+  doubles) and the #1226 lock-retention and #1268 abandon tests. One run of Sql.Tests after the
+  Indexing commit failed the timing guard
+  `Delete_WideFanOutCascade_ShouldTakeTimeLinearInChildren` (a per-child cost ratio) while other
+  builds loaded the machine; it passed three isolated reruns and a full rerun (1087). No
+  NativeAOT microbenchmark was run.
+- **Left for later.** `.claude/rules/database-area.md` still lists `StorageJournal` among the
+  marked bases ("Marking the deviation"); rule text changes with the owner (§12).
 
 **P3, #1259: root bridge bases.** Rows 1, 5, 9, 11, 12 and 13 add `DatabaseEngine`,
 `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer` and
@@ -1123,6 +1146,10 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   instance: the argument check's message says "not created by this storage instance", but it
   only ever tested the type (found at P2, row 36). Checking the owner is a behavior change, so P2
   left it for its own fix.
+- `.claude/rules/database-area.md`, "Marking the deviation", names `Storage` and `StorageJournal`
+  as the bases P1 stripped of their interfaces. P2 collapsed `StorageJournal` into a sealed type
+  without a marker (§5.3, §8), so the sentence should name `Storage` alone; a rule-text change,
+  left for the owner at the P2 merge.
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never

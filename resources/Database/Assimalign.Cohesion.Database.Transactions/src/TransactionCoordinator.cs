@@ -18,8 +18,9 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 /// journal. The coordinator owns the sequence-space unification (the manager
 /// allocates from the storage's counter, so the journal carries one sequence
 /// namespace), the per-statement physical brackets and their apply gate, the
-/// pairing seam (<c>IStorageTransactionSource</c> resolves a context's
-/// current statement bracket), and the checkpoint interlock that keeps
+/// pairing seam (<see cref="TryGetStorageTransaction"/> resolves a context's
+/// current statement bracket; each engine wraps it in the index manager's
+/// <c>TransactionSource</c> delegate), and the checkpoint interlock that keeps
 /// truncation classification-safe while logical transactions are in flight.
 /// </summary>
 /// <remarks>

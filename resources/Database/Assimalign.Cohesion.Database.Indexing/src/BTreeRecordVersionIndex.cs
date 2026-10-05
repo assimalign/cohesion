@@ -18,13 +18,13 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// </remarks>
 public sealed class BTreeRecordVersionIndex : RecordVersionIndex
 {
-    private readonly IIndex _index;
+    private readonly BTreeIndex _index;
 
     /// <summary>
     /// Initializes a binding to the index whose versions the ledger tracks.
     /// </summary>
     /// <param name="index">The index to undo through.</param>
-    public BTreeRecordVersionIndex(IIndex index)
+    public BTreeRecordVersionIndex(BTreeIndex index)
     {
         ArgumentNullException.ThrowIfNull(index);
         _index = index;

@@ -49,7 +49,7 @@ internal sealed partial class SqlPlanExecutor
     private IEnumerable<object?[]> EnumerateJoinRows(SqlJoinPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var access = plan.Access;
-        IIndex? index = null;
+        BTreeIndex? index = null;
         if (access is not null && !_indexManager.TryGetIndex(plan.Bindings[access.InnerBinding].Table.ObjectId, access.Index.Name, out index))
         {
             access = null; // A detached index changes cost, never the result.

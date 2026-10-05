@@ -194,7 +194,7 @@ public class BTreeEntryTimingTests
         private const int targets = 16;
 
         private readonly IndexTestHarness _harness;
-        private readonly IIndex _index;
+        private readonly BTreeIndex _index;
         private readonly Operation _operation;
         private readonly IndexKey _key;
         private readonly int _versions;
@@ -202,7 +202,7 @@ public class BTreeEntryTimingTests
         private readonly TransactionSequence _deleter;
         private readonly ulong[] _targets;
 
-        internal VersionedRun(IndexTestHarness harness, IIndex index, Operation operation, IndexKey key, int versions,
+        internal VersionedRun(IndexTestHarness harness, BTreeIndex index, Operation operation, IndexKey key, int versions,
             int referencesPerTarget, TransactionSequence deleter)
         {
             _harness = harness;
@@ -304,7 +304,7 @@ public class BTreeEntryTimingTests
     private sealed class Run
     {
         private readonly IndexTestHarness _harness;
-        private readonly IIndex _index;
+        private readonly BTreeIndex _index;
         private readonly Operation _operation;
         private readonly IndexKey _key;
         private readonly int _length;
@@ -312,7 +312,7 @@ public class BTreeEntryTimingTests
         private readonly TransactionSequence _deleter;
         private readonly ulong[] _targets;
 
-        internal Run(IndexTestHarness harness, IIndex index, Operation operation, IndexKey key, int firstReference, int length,
+        internal Run(IndexTestHarness harness, BTreeIndex index, Operation operation, IndexKey key, int firstReference, int length,
             TransactionSequence writer, TransactionSequence deleter)
         {
             _harness = harness;

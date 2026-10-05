@@ -95,10 +95,10 @@ internal sealed class KeyValueOperationExecutor
     private readonly DatabaseName _databaseName;
     private readonly IKeyValueCatalog _catalog;
     private readonly KeyValueStorage _storage;
-    private readonly IIndex _primaryIndex;
+    private readonly BTreeIndex _primaryIndex;
     private readonly BTreeRecordVersionIndex _primaryIndexVersions;
 
-    internal KeyValueOperationExecutor(DatabaseName databaseName, IKeyValueCatalog catalog, KeyValueStorage storage, IIndex primaryIndex)
+    internal KeyValueOperationExecutor(DatabaseName databaseName, IKeyValueCatalog catalog, KeyValueStorage storage, BTreeIndex primaryIndex)
     {
         _databaseName = databaseName;
         _catalog = catalog;

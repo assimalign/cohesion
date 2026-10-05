@@ -17,7 +17,7 @@ internal sealed partial class DefaultGraphStore
     private const ulong AdjacencyId = ulong.MaxValue;
     private const string TreeName = "graph";
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
-    private IIndexManager _indexes = null!;
+    private BTreeIndexManager _indexes = null!;
 
     public bool HasIndex(string label, string propertyKey, TransactionSnapshot snapshot) => Definition(label, propertyKey, snapshot) is not null;
 
@@ -126,7 +126,7 @@ internal sealed partial class DefaultGraphStore
         }
     }
 
-    private IIndex ResolveIndex(ulong id) => _indexes.TryGetIndex(id, TreeName, out var index)
+    private BTreeIndex ResolveIndex(ulong id) => _indexes.TryGetIndex(id, TreeName, out var index)
         ? index : throw new StorageCorruptionException($"Missing graph B+Tree registration '{id}'.");
 
     private static IndexKey Composite(IndexKey prefix, ulong id)
@@ -161,7 +161,7 @@ internal sealed partial class DefaultGraphStore
         _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = _storage,
-            TransactionSource = new TransactionSource(_coordinator),
+            TransactionSource = ResolveStatementBracket,
             ExistingIndexes = registrations
         });
     }
@@ -200,7 +200,7 @@ internal sealed partial class DefaultGraphStore
 
     private void SaveRegistrations(StorageTransaction bracket)
     {
-        foreach (var registration in ((IIndexRegistry)_indexes).ExportRegistrations())
+        foreach (var registration in _indexes.ExportRegistrations())
         {
             if (_registrations.TryGetValue(registration.ObjectId, out var prior) && prior.Root == registration.RootPageId) { continue; }
             using var stream = new MemoryStream();
@@ -220,20 +220,10 @@ internal sealed partial class DefaultGraphStore
         }
     }
 
-    private sealed class TransactionSource : IStorageTransactionSource
-    {
-        private readonly TransactionCoordinator _coordinator;
-
-        /// <summary>Initializes a new instance of the <see cref="TransactionSource"/> class.</summary>
-        /// <param name="coordinator">The coordinator that owns the shared statement brackets.</param>
-        public TransactionSource(TransactionCoordinator coordinator)
-        {
-            _coordinator = coordinator;
-        }
-
-        public StorageTransaction GetStorageTransaction(TransactionContext context) => _coordinator.TryGetStorageTransaction(context, out var bracket)
-            ? bracket : throw new InvalidOperationException("Graph index mutation requires a shared statement bracket.");
-    }
+    // The index manager's storage transaction for a context: the shared statement bracket the
+    // coordinator owns, or this store's own error when there is none.
+    private StorageTransaction ResolveStatementBracket(TransactionContext context) => _coordinator.TryGetStorageTransaction(context, out var bracket)
+        ? bracket : throw new InvalidOperationException("Graph index mutation requires a shared statement bracket.");
 
     private sealed class IndexUndo : RecordVersionIndex
     {

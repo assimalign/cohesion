@@ -663,8 +663,8 @@ Every rule below is stated for a storage transaction (a *bracket*):
    is only correct because two transactions can never interleave on one page. This division is
    permanent in the MVCC integration design (area DESIGN.md §3.8): storage
    transactions remain the **physical WAL bracket** — the MVCC manager layers
-   row-grain snapshots/locks *above* them (paired per transaction via
-   `IStorageTransactionSource`), and page locks stop being the user-visible
+   row-grain snapshots/locks *above* them (paired per statement through
+   the index manager's `TransactionSource` resolver), and page locks stop being the user-visible
    conflict surface without ever weakening the invariant that makes page logging correct.
 8. **Nothing changes a pooled page outside a bracket's touch.** A change made outside one is in
    no delta and would be lost, or corrupt the page, at the next recovery; on a page not imaged

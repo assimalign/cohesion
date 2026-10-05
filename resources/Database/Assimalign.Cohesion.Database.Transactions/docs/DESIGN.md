@@ -451,8 +451,8 @@ work items under #862). The integration kept this package exactly as shaped:
   sequence allocator (above) unifies the sequence namespace, and per-statement
   storage brackets are the physical WAL brackets beneath the manager (their
   commit records ride the same journal; the manager's commit record owns
-  durability through journal ordering). `IStorageTransactionSource` (in
-  `Database.Indexing`) is the pairing seam the engine adapts from the shared coordinator —
+  durability through journal ordering). `BTreeIndexManagerOptions.TransactionSource` (in
+  `Database.Indexing`, a delegate since #1258) is the pairing seam the engine adapts from the shared coordinator —
   resolving a context's current statement bracket. Recovery drives the
   version store's aborted-writer purge from `TransactionRecovery.Analyze` at
   every database open — and `Analyze` reads the active-sequence list out of
@@ -494,7 +494,7 @@ The seam follows the executable differences between the original implementations
   retains its key/value tuple and entry APIs. Their current location encoding is
   `(pageId << 16) | (ushort)slotIndex`, but the ledger treats it as an opaque identity.
 - `RecordVersionIndex` supplies stamp-checked erase and clear-deleter operations
-  over encoded key bytes. Indexing's `BTreeRecordVersionIndex` adapts `IIndex` to this
+  over encoded key bytes. Indexing's `BTreeRecordVersionIndex` adapts `BTreeIndex` to this
   contract, and Documents.Catalog and Graph.Storage supply their own adapters. Indexing
   already references Transactions; the reverse reference would form a cycle. The ledger
   copies keys at registration, keeps index undo in the same physical bracket as record

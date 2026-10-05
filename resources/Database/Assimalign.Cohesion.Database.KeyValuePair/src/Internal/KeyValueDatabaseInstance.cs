@@ -27,8 +27,8 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     private readonly KeyValueStorage _catalogStorage;
     private readonly IKeyValueCatalog _catalog;
     private readonly TransactionCoordinator _coordinator;
-    private readonly IIndexManager _indexManager;
-    private readonly IIndex _primaryIndex;
+    private readonly BTreeIndexManager _indexManager;
+    private readonly BTreeIndex _primaryIndex;
     private bool _disposed;
 
     internal KeyValueDatabaseInstance(string name, IDatabaseEngine engine, KeyValueStorage storage, KeyValueStorage catalogStorage, bool recover = false)
@@ -100,7 +100,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
             _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
             {
                 Storage = storage,
-                TransactionSource = new StatementTransactionSource(_coordinator),
+                TransactionSource = ResolveStatementBracket,
                 LockManager = _coordinator.LockManager,
                 ExistingIndexes = _catalog.GetIndexRegistrations(),
             });
@@ -144,7 +144,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     /// a crash could revert), and the format marker, then the registration, persist
     /// as catalog self-commits after it.
     /// </summary>
-    private IIndex EnsurePrimaryIndex()
+    private BTreeIndex EnsurePrimaryIndex()
     {
         if (_indexManager.TryGetIndex(KeyValueOperationExecutor.KeySpaceObjectId, KeyValueOperationExecutor.PrimaryIndexName, out var existing))
         {
@@ -157,7 +157,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         var context = _coordinator.BeginAsync(IsolationLevel.Snapshot)
             .AsTask().GetAwaiter().GetResult();
 
-        IIndex index;
+        BTreeIndex index;
         try
         {
             index = _coordinator.ApplyStatementAsync(
@@ -186,7 +186,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         // registration, and the next open bootstraps again).
         _catalog.SetEntrySpaceFormatVersionAsync(KeyValueRecordCodec.EntrySpaceFormatVersion)
             .AsTask().GetAwaiter().GetResult();
-        _catalog.SaveIndexRegistrationsAsync(((IIndexRegistry)_indexManager).ExportRegistrations())
+        _catalog.SaveIndexRegistrationsAsync(_indexManager.ExportRegistrations())
             .AsTask().GetAwaiter().GetResult();
 
         return index;
@@ -253,7 +253,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     /// Gets the database's index manager (the live B+Tree directory over the data
     /// file set), for the engine's background workers and tests.
     /// </summary>
-    internal IIndexManager IndexManager => _indexManager;
+    internal BTreeIndexManager IndexManager => _indexManager;
 
     /// <summary>
     /// Gets the database's transaction coordinator (the MVCC composition sessions
@@ -270,7 +270,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     /// </summary>
     internal void SaveIndexRegistrationsIfChanged()
     {
-        var current = ((IIndexRegistry)_indexManager).ExportRegistrations();
+        var current = _indexManager.ExportRegistrations();
         var stored = _catalog.GetIndexRegistrations();
 
         if (RegistrationsEqual(current, stored))
@@ -586,33 +586,21 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     }
 
     /// <summary>
-    /// Keeps the area's pairing error at the engine boundary while the shared
-    /// coordinator owns the current statement bracket.
+    /// Resolves the index manager's storage transaction for a context: the statement bracket
+    /// the shared coordinator owns, with the area's pairing error at the engine boundary.
     /// </summary>
-    private sealed class StatementTransactionSource : IStorageTransactionSource
+    /// <param name="context">The transaction an index mutation belongs to.</param>
+    /// <returns>The context's current statement bracket.</returns>
+    /// <exception cref="DatabaseException">No statement of the transaction is applying on this database.</exception>
+    private StorageTransaction ResolveStatementBracket(TransactionContext context)
     {
-        private readonly TransactionCoordinator _coordinator;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="StatementTransactionSource"/> class.
-        /// </summary>
-        /// <param name="coordinator">The coordinator that owns each transaction's current statement bracket.</param>
-        public StatementTransactionSource(TransactionCoordinator coordinator)
+        if (_coordinator.TryGetStorageTransaction(context, out var transaction))
         {
-            _coordinator = coordinator;
+            return transaction;
         }
 
-        /// <inheritdoc />
-        public StorageTransaction GetStorageTransaction(TransactionContext context)
-        {
-            if (_coordinator.TryGetStorageTransaction(context, out var transaction))
-            {
-                return transaction;
-            }
-
-            throw new DatabaseException(
-                $"Transaction {context.Sequence} has no statement bracket applying on this database.");
-        }
+        throw new DatabaseException(
+            $"Transaction {context.Sequence} has no statement bracket applying on this database.");
     }
 
     private void ThrowIfDisposed()

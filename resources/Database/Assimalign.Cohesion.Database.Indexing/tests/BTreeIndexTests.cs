@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// </summary>
 public class BTreeIndexTests
 {
-    private static async Task<(IndexTestHarness Harness, IIndex Index)> CreateIndexAsync(bool unique = false)
+    private static async Task<(IndexTestHarness Harness, BTreeIndex Index)> CreateIndexAsync(bool unique = false)
     {
         var harness = new IndexTestHarness();
         var setup = await harness.BeginAsync();
@@ -31,7 +31,7 @@ public class BTreeIndexTests
         return (harness, index);
     }
 
-    private static async Task<List<(long Key, ulong Reference)>> ScanAsync(IIndex index, TransactionContext context, IndexKeyRange range, bool reverse = false)
+    private static async Task<List<(long Key, ulong Reference)>> ScanAsync(BTreeIndex index, TransactionContext context, IndexKeyRange range, bool reverse = false)
     {
         var results = new List<(long, ulong)>();
         await using var cursor = index.OpenCursor(context, range, reverse);
@@ -74,7 +74,7 @@ public class BTreeIndexTests
         results.ShouldBe(new[] { (42L, 4242UL) });
     }
 
-    private static Task<List<(long Key, ulong Reference)>> ScanAsync(TransactionContext context, IIndex index, IndexKey exact)
+    private static Task<List<(long Key, ulong Reference)>> ScanAsync(TransactionContext context, BTreeIndex index, IndexKey exact)
         => ScanAsync(index, context, new IndexKeyRange(exact, exact, IsStartInclusive: true, IsEndInclusive: true));
 
     [Theory(DisplayName = "Cohesion Test [Database.Indexing] - BTree: folded keys seek correctly and enforce unique equality")]
@@ -352,7 +352,7 @@ public class BTreeIndexTests
         }
         await harness.CommitAsync(setup);
 
-        var registrations = ((IIndexRegistry)harness.IndexManager).ExportRegistrations();
+        var registrations = harness.IndexManager.ExportRegistrations();
 
         // The doomed transaction: enough inserts to split leaves (and likely the root).
         var doomed = await harness.BeginAsync();
@@ -394,7 +394,7 @@ public class BTreeIndexTests
         }
         await harness.CommitAsync(setup);
 
-        var registrations = ((IIndexRegistry)harness.IndexManager).ExportRegistrations();
+        var registrations = harness.IndexManager.ExportRegistrations();
 
         // Crash WITHOUT any page flush: only the WAL is durable.
         byte[] crashedData = data.CaptureDurable();
@@ -432,7 +432,7 @@ public class BTreeIndexTests
         // Arrange: a committed single-leaf tree.
         var (harness, index) = await CreateIndexAsync();
         await using var harnessLifetime = harness;
-        var registry = (IIndexRegistry)harness.IndexManager;
+        var registry = harness.IndexManager;
 
         var setup = await harness.BeginAsync();
         for (long i = 0; i < 10; i++)
@@ -482,7 +482,7 @@ public class BTreeIndexTests
 
         var setup = await harness.BeginAsync();
         var index = await harness.IndexManager.CreateIndexAsync(setup, 1, new IndexDefinition("ix_root"));
-        var registrations = ((IIndexRegistry)harness.IndexManager).ExportRegistrations();
+        var registrations = harness.IndexManager.ExportRegistrations();
 
         for (long i = 0; i < 2_000; i++)
         {
@@ -582,7 +582,7 @@ public class BTreeIndexTests
         // every key of the child to its right. Keys past it route to that child, and
         // the child's next split promotes one of its own keys, which sorts below the
         // separator it would be placed after.
-        long root = ((IIndexRegistry)harness.IndexManager).ExportRegistrations().Single().RootPageId;
+        long root = harness.IndexManager.ExportRegistrations().Single().RootPageId;
         OverwriteOnlySeparator(harness.Storage, root, WideKey(5_000));
 
         // Act
@@ -623,7 +623,7 @@ public class BTreeIndexTests
         found.Name.ShouldBe("ix_test");
         harness.IndexManager.GetIndexes(1).Count.ShouldBe(1);
 
-        ((IIndexRegistry)harness.IndexManager).ExportRegistrations().Count.ShouldBe(1);
+        harness.IndexManager.ExportRegistrations().Count.ShouldBe(1);
 
         await harness.IndexManager.DropIndexAsync(transaction, 1, "ix_test");
         harness.IndexManager.TryGetIndex(1, "ix_test", out var afterDrop).ShouldBeFalse();

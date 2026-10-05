@@ -108,7 +108,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     /// The root page the index manager currently registers for the named index.
     /// </summary>
     private static long RootPageOf(IDatabase database, string indexName)
-        => ((IIndexRegistry)((SqlDatabaseInstance)database).IndexManager).ExportRegistrations()
+        => ((SqlDatabaseInstance)database).IndexManager.ExportRegistrations()
             .Single(registration => registration.Definition.Name == indexName).RootPageId;
 
     private static byte[] Int32Key(int value)

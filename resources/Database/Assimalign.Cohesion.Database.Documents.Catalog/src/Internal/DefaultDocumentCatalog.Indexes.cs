@@ -17,7 +17,7 @@ internal sealed partial class DefaultDocumentCatalog
 {
     private readonly Dictionary<(Guid CollectionId, string Name), List<Reference>> _indexDefinitions = new();
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
-    private IIndexManager _indexes = null!;
+    private BTreeIndexManager _indexes = null!;
 
     public IReadOnlyList<DocumentIndexMetadata> GetIndexes(Guid collectionId, TransactionSnapshot snapshot)
     {
@@ -202,7 +202,7 @@ internal sealed partial class DefaultDocumentCatalog
         }
     }
 
-    private IIndex ResolveIndex(DocumentIndexMetadata metadata)
+    private BTreeIndex ResolveIndex(DocumentIndexMetadata metadata)
         => _indexes.TryGetIndex(metadata.ObjectId, metadata.Name, out var index)
             ? index : throw new DocumentCatalogException($"Missing physical tree for index '{metadata.Name}'.");
 
@@ -234,7 +234,7 @@ internal sealed partial class DefaultDocumentCatalog
         _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = _storage,
-            TransactionSource = new TransactionSource(_coordinator),
+            TransactionSource = ResolveStatementBracket,
             ExistingIndexes = registrations
         });
     }
@@ -276,7 +276,7 @@ internal sealed partial class DefaultDocumentCatalog
 
     private void SaveRegistrations(StorageTransaction bracket)
     {
-        foreach (var registration in ((IIndexRegistry)_indexes).ExportRegistrations())
+        foreach (var registration in _indexes.ExportRegistrations())
         {
             if (_registrations.TryGetValue(registration.ObjectId, out var prior) && prior.Root == registration.RootPageId)
             {
@@ -307,23 +307,11 @@ internal sealed partial class DefaultDocumentCatalog
 
     private readonly record struct IndexChange(DocumentIndexMetadata Metadata, IndexKey? OldKey, IndexKey? NewKey, ulong OldLocation);
 
-    private sealed class TransactionSource : IStorageTransactionSource
-    {
-        private readonly TransactionCoordinator _coordinator;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="TransactionSource"/> class.
-        /// </summary>
-        /// <param name="coordinator">The coordinator that owns each transaction's shared statement bracket.</param>
-        public TransactionSource(TransactionCoordinator coordinator)
-        {
-            _coordinator = coordinator;
-        }
-
-        public StorageTransaction GetStorageTransaction(TransactionContext context)
-            => _coordinator.TryGetStorageTransaction(context, out var bracket)
-                ? bracket : throw new InvalidOperationException("Index mutation requires a shared statement bracket.");
-    }
+    // The index manager's storage transaction for a context: the shared statement bracket the
+    // coordinator owns, or this catalog's own error when there is none.
+    private StorageTransaction ResolveStatementBracket(TransactionContext context)
+        => _coordinator.TryGetStorageTransaction(context, out var bracket)
+            ? bracket : throw new InvalidOperationException("Index mutation requires a shared statement bracket.");
 
     private sealed class IndexUndo : RecordVersionIndex
     {

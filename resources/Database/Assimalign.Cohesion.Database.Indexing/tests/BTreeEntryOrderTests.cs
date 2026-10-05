@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// </summary>
 public class BTreeEntryOrderTests
 {
-    private static async Task<(IndexTestHarness Harness, IIndex Index)> CreateIndexAsync(IndexTestHarness? harness = null, bool unique = false)
+    private static async Task<(IndexTestHarness Harness, BTreeIndex Index)> CreateIndexAsync(IndexTestHarness? harness = null, bool unique = false)
     {
         harness ??= new IndexTestHarness();
         var setup = await harness.BeginAsync();
@@ -32,7 +32,7 @@ public class BTreeEntryOrderTests
     }
 
     private static async Task<List<(byte[] Key, ulong Reference)>> ReadAsync(
-        IIndex index, TransactionContext reader, IndexKeyRange range, bool reverse = false)
+        BTreeIndex index, TransactionContext reader, IndexKeyRange range, bool reverse = false)
     {
         var results = new List<(byte[] Key, ulong Reference)>();
         await using var cursor = index.OpenCursor(reader, range, reverse);
@@ -199,7 +199,7 @@ public class BTreeEntryOrderTests
         }
 
         // Act
-        long root = ((IIndexRegistry)harness.IndexManager).ExportRegistrations().Single().RootPageId;
+        long root = harness.IndexManager.ExportRegistrations().Single().RootPageId;
         var separators = ReadSeparators(harness.Storage, root);
 
         // Assert
@@ -376,7 +376,7 @@ public class BTreeEntryOrderTests
             build.Commit();
         }
 
-        long root = ((IIndexRegistry)harness.IndexManager).ExportRegistrations().Single().RootPageId;
+        long root = harness.IndexManager.ExportRegistrations().Single().RootPageId;
 
         async Task<List<ulong>> VisibleAsync()
         {
@@ -635,7 +635,7 @@ public class BTreeEntryOrderTests
     }
 
     private static async Task VerifyAsync(
-        IndexTestHarness harness, IIndex index, IReadOnlyDictionary<ulong, byte[]> model, Random random, Func<byte[]> nextKey)
+        IndexTestHarness harness, BTreeIndex index, IReadOnlyDictionary<ulong, byte[]> model, Random random, Func<byte[]> nextKey)
     {
         var reader = await harness.BeginAsync();
         var scan = await ReadAsync(index, reader, IndexKeyRange.All);
@@ -686,7 +686,7 @@ public class BTreeEntryOrderTests
         await harness.RollbackAsync(reader);
 
         // Splits, rolled-back splits and root growth keep both leaf links consistent.
-        ShouldHaveConsistentLeafChain(harness.Storage, ((IIndexRegistry)harness.IndexManager).ExportRegistrations().Single().RootPageId);
+        ShouldHaveConsistentLeafChain(harness.Storage, harness.IndexManager.ExportRegistrations().Single().RootPageId);
     }
 
     // ── Recovery ────────────────────────────────────────────────────────
@@ -720,7 +720,7 @@ public class BTreeEntryOrderTests
             await index.DeleteAsync(setup, key, reference);
         }
         await harness.CommitAsync(setup);
-        var registrations = ((IIndexRegistry)harness.IndexManager).ExportRegistrations();
+        var registrations = harness.IndexManager.ExportRegistrations();
 
         var doomed = await harness.BeginAsync();
         for (ulong reference = 10_001; reference <= 11_500; reference++)

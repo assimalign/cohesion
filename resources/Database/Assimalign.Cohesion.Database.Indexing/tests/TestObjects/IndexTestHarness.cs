@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 /// manager, and the pairing between logical transaction contexts and their storage
 /// transactions (the engine's job in production).
 /// </summary>
-public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposable
+public sealed class IndexTestHarness : IAsyncDisposable
 {
     private readonly Dictionary<TransactionContext, StorageTransaction> _pairs = new();
     private readonly object _sync = new();
@@ -28,7 +28,7 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
         IndexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = Storage,
-            TransactionSource = this,
+            TransactionSource = GetStorageTransaction,
             LockManager = LockManager,
         });
     }
@@ -41,7 +41,7 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
         IndexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = Storage,
-            TransactionSource = this,
+            TransactionSource = GetStorageTransaction,
             LockManager = LockManager,
             ExistingIndexes = registrations,
         });
@@ -53,7 +53,7 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
 
     public LockManager LockManager { get; }
 
-    public IIndexManager IndexManager { get; }
+    public BTreeIndexManager IndexManager { get; }
 
     /// <summary>
     /// Reopens crashed (or cleanly closed) storage bytes and re-attaches indexes
@@ -137,7 +137,12 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
         await Manager.RollbackAsync(context);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Resolves the storage transaction paired with a context: the harness's
+    /// <see cref="BTreeIndexManagerOptions.TransactionSource"/>, the engine's job in production.
+    /// </summary>
+    /// <param name="context">The logical transaction context.</param>
+    /// <returns>The paired storage transaction.</returns>
     public StorageTransaction GetStorageTransaction(TransactionContext context)
     {
         lock (_sync)
