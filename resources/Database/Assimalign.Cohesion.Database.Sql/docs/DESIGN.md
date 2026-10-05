@@ -1054,12 +1054,20 @@ or a busy storage, keeps the record of a database that failed and records nothin
 did not. Before the review the backoff was the worker's: while one database's page writes kept
 failing, a second database got at most one checkpoint a second (a probe with a 256 KiB size
 trigger measured 6 truncations in 6 s instead of 458, and a journal peak 700-884 times the
-trigger); `SqlWorkerResilienceTests` now checks that the healthy database keeps at least half its
-no-fault checkpoint count (measured: 4,332 against 4,199 in two seconds, where the worker-wide
-backoff gave 1, with a journal peak of 210 MB). A failure that took a database offline (a failed durable
-flush, #1243, a failed drain of the journal's append buffer, #1252, or a failed header slot write,
-#1268) is not the worker's: the workers skip
-that database and the engine lists it in `OfflineDatabases`. The engine's pump runs a
+trigger); `SqlWorkerResilienceTests` now checks that the healthy database keeps checkpointing at a
+pace the worker-wide backoff cannot reach (measured: 4,332 against 4,199 no-fault checkpoints in
+two seconds, where the worker-wide backoff gave 1, with a journal peak of 210 MB). Both engines
+write over the same six-second window, compared second by second: the median second must keep a
+tenth of the no-fault checkpoints, and the window more than twice the backoff's. A bound of half
+measured the machine, not the fault: each engine's checkpoints come in phases the two engines
+enter independently, and scheduling alone took the share to 0.29 over two seconds and the median
+second to 0.28 over six in loaded runs, while the backoff's share is about 0.001. Each second's
+share is counted over the second and per write, the larger counting, since a writer the scheduler
+starved needs fewer checkpoints whichever engine's it is. The journal peak is reported, no longer
+compared: beside another suite a healthy engine's peak reached the worker-wide backoff's.
+A failure that took a database offline (a failed durable flush, #1243, a failed drain of the
+journal's append buffer, #1252, or a failed header slot write, #1268) is not the worker's: the
+workers skip that database and the engine lists it in `OfflineDatabases`. The engine's pump runs a
 worker again after the backoff if its loop ever ends early (only a worker that implements
 `IDatabaseEngineWorker` without the guided base can let that happen; the engine then reports
 `Faulted` until disposal). Before #1268 the pump caught outside the worker's loop, so one
@@ -1159,10 +1167,10 @@ offline hook now calls `TransactionCoordinator.AbandonLockWaits`, which fails ev
 the database, and every later one, with the storage's offline error, which the session translates
 into `COHSQLT004`; a lock the table can grant at once is still granted, and the storage refuses
 the work. `SqlWorkerResilienceTests` holds a row in an explicit transaction, queues an update of
-the same row, takes the database offline with a header slot write, journal fsync or journal
-drain failure (#1252: the drain goes offline through the same hook), and checks that the queued
-writer is refused within five seconds, naming the cause (before: it waited until the reopen in
-every run).
+the same row, checks that the update's transaction is open and waiting before the fault, takes
+the database offline with a header slot write, journal fsync or journal drain failure (#1252: the
+drain goes offline through the same hook), and checks that the queued writer is refused within
+five seconds, naming the cause (before: it waited until the reopen in every run).
 
 **Buffer pool and checkpoint options (#1254).**
 

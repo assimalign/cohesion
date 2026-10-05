@@ -466,7 +466,10 @@ times, so CI speed and load cancel out:
   leaf: allowed growth 2.5×; the oldest-first walk measured 12.6–14.3×, the
   newest-first lookup 0.87–1.21× (Release and Debug).
 - `SqlCascadeFanOutTests`, 16,000 children against 4,000: allowed growth 2×; the
-  baseline measured 10×.
+  baseline measured 10×. Each round times one 16,000-child cascade against four
+  4,000-child cascades back to back, so both blocks run about as long and load
+  stretches both alike; one 4,000-child cascade against one of 16,000 measured up to
+  2.2× under load with the walk linear.
 
 ## Transactional binding
 

@@ -356,7 +356,9 @@ guided base can, and the engine then reports `Faulted` until disposal). Before #
 unexpected exception ended a worker for good. `KeyValueWorkerResilienceTests` covers a
 checkpoint's and a write-back's page-write failures, a group flush's drain (#1252) or fsync
 failure, a header slot write failure, a registered worker whose loop throws, a database whose
-checkpoints keep failing (the other database keeps at least half its no-fault checkpoint count),
+checkpoints keep failing (the other database keeps a pace a worker-wide backoff cannot reach: in
+most seconds of a shared six-second window at least a tenth of its no-fault checkpoints, and over
+the window more than twice the backoff's),
 and a writer queued for a key lock when the database goes offline (by any of the three device
 faults): it gets `COHDBK002` at once instead of waiting for the
 reopen, because the coordinator ends every lock wait of an offline database

@@ -378,7 +378,9 @@ the other database's work goes on), a group flush's drain or fsync on the flush 
 thread (only its database goes offline, `StorageOfflineCause.JournalFlush` either way), and a
 header slot write (the database goes offline with COHDBD002, naming "a write of the file
 header", and its files stop changing). It also checks that a database whose checkpoints keep
-failing leaves the other database at least half its no-fault checkpoint count, and that a writer
+failing leaves the other database a pace a worker-wide backoff cannot reach (in most seconds of a
+shared six-second window at least a tenth of its no-fault checkpoints, and over the window more
+than twice the backoff's), and that a writer
 queued for the database writer lock when the database goes offline (a header slot write, a
 journal fsync or a journal drain failing) gets COHDBD002 at once instead of waiting for the reopen: an offline
 database undoes nothing, so the writer holding the lock keeps it, and the coordinator ends every

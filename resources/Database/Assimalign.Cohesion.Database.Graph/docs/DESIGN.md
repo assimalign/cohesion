@@ -578,11 +578,12 @@ The engine's pump runs a worker again after the backoff if its loop ever ends ea
 `IDatabaseEngineWorker` without the guided base can; the engine then reports Faulted until
 disposal). Before #1268 one unexpected exception ended a worker for good.
 `GraphWorkerResilienceTests` covers each case, a group flush's drain and its fsync both. It also
-checks that a database whose checkpoints keep failing leaves the other database at least half its
-no-fault checkpoint count, and that a writer queued for the database writer lock when the
-database goes offline (a header slot write, a journal fsync or a journal drain failing) gets the coded refusal at
-once instead of waiting for the reopen: an offline database undoes nothing, so the writer
-holding the lock keeps it, and the coordinator ends every lock wait instead
+checks that a database whose checkpoints keep failing leaves the other database a pace a
+worker-wide backoff cannot reach (in most seconds of a shared six-second window at least a tenth of
+its no-fault checkpoints, and over the window more than twice the backoff's), and that a writer queued for the database writer lock when the database goes offline (a
+header slot write, a journal fsync or a journal drain failing) gets the coded refusal at once
+instead of waiting for the reopen: an offline database undoes nothing, so the writer holding the
+lock keeps it, and the coordinator ends every lock wait instead
 (`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook).
 
 Names are single path components, directory lookup is case insensitive, and enumeration includes
