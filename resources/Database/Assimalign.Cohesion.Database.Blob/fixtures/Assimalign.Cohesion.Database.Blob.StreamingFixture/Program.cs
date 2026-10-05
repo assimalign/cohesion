@@ -158,7 +158,13 @@ internal static class Program
         {
             if (worker.Kind == kind)
             {
-                ((DatabaseEngineWorker)worker).RunIteration(token);
+                // A pass records its failure instead of throwing it (#1268); the fixture fails fast.
+                var guided = (DatabaseEngineWorker)worker;
+                if (!guided.RunIteration(token))
+                {
+                    throw new InvalidOperationException($"The {kind} pass failed.", guided.Fault);
+                }
+
                 return;
             }
         }

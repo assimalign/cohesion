@@ -353,6 +353,7 @@ public sealed class ResourceControlPlaneHostingTests
         before.Status.ShouldBe(HealthStatus.Healthy);
         offline.Status.ShouldBe(HealthStatus.Unhealthy);
         offline.Description.ShouldNotBeNull().ShouldContain("sql/app");
+        offline.Description.ShouldContain("A write or flush of their journal");
         IReadOnlyDictionary<string, object> data = offline.Data.ShouldNotBeNull();
         data["engine.0.state"].ShouldBe(nameof(EngineState.Running));
         data["engine.0.offlineDatabaseCount"].ShouldBe(1);

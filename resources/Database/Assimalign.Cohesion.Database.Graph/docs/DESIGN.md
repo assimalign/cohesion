@@ -556,10 +556,34 @@ Ownership uses the shared dedicated exception rather than an invented graph owne
 ## Lifecycle and delivery
 
 Engine construction starts WAL-flush, page-writeback, checkpoint and version-purge workers, exposed
-through `Workers`. State is Running until a worker fails (Faulted) or disposal begins (Disposed).
-Disposal is idempotent: stop and join workers, abort outstanding transactions, durably flush and
-close each database. Logical commits are synchronous through the coordinator even when physical
-grouped durability is configured. The flush worker still services the storage group-commit seam.
+through `Workers`. State is Running, Faulted while a worker keeps failing, and Disposed once
+disposal begins. Disposal is idempotent: stop and join workers, abort outstanding transactions,
+durably flush and close each database. The coordinator's logical commit goes through the
+storage's commit gate (`Storage.EnsureCommitDurable`), so under grouped durability a commit
+waits for the flush worker's group flush; `GraphWorkerResilienceTests` shows the failing fsync of
+a grouped commit running on the flush worker's thread.
+
+A worker failure never ends a worker (#1268). Each worker catches per database: a failed
+checkpoint, page write-back or group flush of one database is reported
+(`DatabaseEngineWorker.ReportFailure`, the worker's `Fault`), the pass goes on to the next
+database, and later passes skip that database for `DatabaseEngineWorker.FailureBackoff` (one
+second, PostgreSQL's error sleep, `src/backend/postmaster/checkpointer.c:286-346`,
+`bgwriter.c:154-205`) while every other database keeps the worker's full pace (#1268 review); the
+first pass that finishes that database's work clears its record. A failure that took a database offline — a
+failed durable flush (#1243) or drain of the journal's append buffer (#1252), or a header slot
+write that failed (#1268), after which no checkpoint could truncate its journal — is not the
+worker's: every later operation is refused
+with `COHDBG012`, the workers skip the database, and the engine lists it in `OfflineDatabases`.
+The engine's pump runs a worker again after the backoff if its loop ever ends early (only an
+`IDatabaseEngineWorker` without the guided base can; the engine then reports Faulted until
+disposal). Before #1268 one unexpected exception ended a worker for good.
+`GraphWorkerResilienceTests` covers each case, a group flush's drain and its fsync both. It also
+checks that a database whose checkpoints keep failing leaves the other database at least half its
+no-fault checkpoint count, and that a writer queued for the database writer lock when the
+database goes offline (a header slot write, a journal fsync or a journal drain failing) gets the coded refusal at
+once instead of waiting for the reopen: an offline database undoes nothing, so the writer
+holding the lock keeps it, and the coordinator ends every lock wait instead
+(`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook).
 
 Names are single path components, directory lookup is case insensitive, and enumeration includes
 persisted databases not yet open in memory. Root-builder `AddGraph` captures a deferred

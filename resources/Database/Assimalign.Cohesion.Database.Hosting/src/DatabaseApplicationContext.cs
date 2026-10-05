@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -87,10 +88,18 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// </summary>
     /// <param name="cancellationToken">Signals that the health evaluation should be abandoned.</param>
     /// <returns>
-    /// A healthy result when every engine is running, a degraded result when an engine reports a
-    /// worker fault, or an unhealthy result when an engine is disposed or reports an unknown state,
-    /// or when an open database is offline after a failed durable flush (#1243).
+    /// A healthy result when every engine is running, a degraded result while an engine reports a
+    /// worker that keeps failing (the result names each failing worker and the type of its last
+    /// failure, #1268), or an unhealthy result when an engine is disposed or reports an unknown
+    /// state, or when an open database is offline after a failed write or durable flush of its
+    /// journal (#1252, #1243), durable flush of its data file (#1243) or file header write (#1268).
     /// </returns>
+    /// <remarks>
+    /// The health endpoint is served without authentication, so a failure is described by its
+    /// exception types only: an exception's message can carry file paths and storage internals.
+    /// The full failure is written to the <c>Assimalign.Cohesion.Database</c> event source, which
+    /// the application's logging forwards (<c>docs/EVENT_SOURCES.md</c>).
+    /// </remarks>
     public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
     {
         var engines = new List<IDatabaseEngine>(_engines.Count + _servers.Count);
@@ -118,6 +127,11 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
             ["engineCount"] = engines.Count,
         };
         var faultedEngines = new List<string>();
+        var failingWorkers = new List<string>();
+
+        // Faulted engines none of whose guided workers holds a failure: a registered worker's loop
+        // failed, which the engine reports until it is disposed.
+        var latchedEngines = new List<string>();
         var unavailableEngines = new List<string>();
         var offlineDatabases = new List<string>();
         int workerCount = 0;
@@ -134,6 +148,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
             data[$"engine.{engineIndex}.model"] = engine.Model.ToString();
             data[$"engine.{engineIndex}.state"] = state.ToString();
             data[$"engine.{engineIndex}.workerCount"] = workers.Count;
+            int failingInEngine = 0;
 
             for (int workerIndex = 0; workerIndex < workers.Count; workerIndex++)
             {
@@ -145,6 +160,21 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                 data[$"{prefix}.kind"] = worker.Kind.ToString();
                 data[$"{prefix}.intervalMilliseconds"] = worker.Interval.TotalMilliseconds;
                 workerCount++;
+
+                // A worker that keeps failing keeps running; its record says which, and what kind of
+                // failure (the event source carries the rest).
+                if (worker is DatabaseEngineWorker guided)
+                {
+                    data[$"{prefix}.failureCount"] = guided.FailureCount;
+                    if (guided.Fault is { } fault)
+                    {
+                        string kind = DescribeFault(fault);
+                        data[$"{prefix}.consecutiveFailures"] = guided.ConsecutiveFailures;
+                        data[$"{prefix}.fault"] = kind;
+                        failingWorkers.Add($"{worker.Name} ({guided.ConsecutiveFailures} failed pass(es); {kind})");
+                        failingInEngine++;
+                    }
+                }
             }
 
             switch (state)
@@ -153,6 +183,11 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     break;
                 case EngineState.Faulted:
                     faultedEngines.Add(engine.Name);
+                    if (failingInEngine == 0)
+                    {
+                        latchedEngines.Add(engine.Name);
+                    }
+
                     break;
                 case EngineState.Disposed:
                 default:
@@ -160,9 +195,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     break;
             }
 
-            // A database that went offline after a failed durable flush refuses every request
-            // until it is reopened (#1243); the engine itself keeps running, so its state does not
-            // show it. A disposed engine has no databases to report.
+            // A database that went offline after a failed write or flush of its journal, durable
+            // flush of its data file, or file header write refuses every request until it is
+            // reopened (#1243, #1252, #1268); the engine itself keeps running, so its state does
+            // not show it. A disposed engine has no databases to report.
             if (state != EngineState.Disposed)
             {
                 IReadOnlyList<DatabaseName> offline = engine.OfflineDatabases;
@@ -192,16 +228,30 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         else if (offlineDatabases.Count > 0)
         {
             contribution = HealthContribution.Unhealthy(
-                $"Offline databases: {string.Join(", ", offlineDatabases)}. A durable flush of their storage failed, so every " +
-                "operation on them is refused until each is reopened (OpenDatabaseAsync), or the process restarts and opens " +
-                "them again; either runs recovery.",
+                $"Offline databases: {string.Join(", ", offlineDatabases)}. A write or flush of their journal, a durable " +
+                "flush of their data file, or a file header write failed, so every operation on them is refused until each is " +
+                "reopened (OpenDatabaseAsync), or the process restarts and opens them again; either runs recovery.",
                 data);
         }
         else if (faultedEngines.Count > 0)
         {
-            contribution = HealthContribution.Degraded(
-                $"Database engines with worker faults: {string.Join(", ", faultedEngines)}.",
-                data);
+            var description = new StringBuilder($"Database engines with worker faults: {string.Join(", ", faultedEngines)}.");
+            if (failingWorkers.Count > 0)
+            {
+                description.Append($" Failing workers: {string.Join("; ", failingWorkers)}. They keep running and retry");
+                description.Append(latchedEngines.Count == 0
+                    ? "; each engine returns to Running once its workers complete the work their failures left."
+                    : ".");
+            }
+
+            if (latchedEngines.Count > 0)
+            {
+                description.Append(
+                    $" A registered worker's loop failed on {string.Join(", ", latchedEngines)}; the engine runs it again and " +
+                    "reports Faulted until it is disposed.");
+            }
+
+            contribution = HealthContribution.Degraded(description.ToString(), data);
         }
         else
         {
@@ -212,6 +262,18 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
 
         return ValueTask.FromResult(contribution);
     }
+
+    /// <summary>
+    /// Describes a worker's failure for the unauthenticated health output: its exception type, and
+    /// the type of the failure underneath it when there is one. Never the message, which can carry
+    /// file paths and storage internals.
+    /// </summary>
+    /// <param name="fault">The failure.</param>
+    /// <returns>For example <c>StorageIOException (IOException)</c>.</returns>
+    private static string DescribeFault(Exception fault)
+        => fault.InnerException is { } inner
+            ? $"{fault.GetType().Name} ({inner.GetType().Name})"
+            : fault.GetType().Name;
 
     /// <summary>
     /// Binds the composed host services once <see cref="DatabaseApplication"/> has

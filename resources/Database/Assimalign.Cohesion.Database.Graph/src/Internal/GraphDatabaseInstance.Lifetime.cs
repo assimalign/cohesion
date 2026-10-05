@@ -99,6 +99,11 @@ internal sealed partial class GraphDatabaseInstance
     // lock manager owns waits and releases; readers remain snapshot based.
     internal async ValueTask LockWriterAsync(ITransactionContext context, CancellationToken token)
     {
+        // An offline database grants no new writer (#1243). A wait for the lock ends with the
+        // coded refusal when the database goes offline: the coordinator fails it with the
+        // storage's offline error (TransactionCoordinator.AbandonLockWaits), which the caller
+        // translates.
+        ThrowIfOffline();
         await Coordinator.LockManager.AcquireAsync(context.Sequence, LockResource.Database(), LockMode.Exclusive, token).ConfigureAwait(false);
         try
         {
@@ -112,6 +117,7 @@ internal sealed partial class GraphDatabaseInstance
             // which makes it once the undo completes (#1226).
             token.ThrowIfCancellationRequested();
             ThrowIfDisposed();
+            ThrowIfOffline();
             if (context.State != TransactionState.Active)
             {
                 throw new DatabaseException("The graph operation's transaction ended while waiting for the writer lock.");

@@ -9,13 +9,15 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 /// <summary>
 /// A pass-through file handle whose flush fails with an <see cref="IOException"/> once a write
 /// at a chosen offset reached the inner handle, or on demand: an fsync that reports failure for a
-/// write the device may already hold. A write at a chosen offset can fail before it writes
-/// anything. Everything else goes straight to the inner handle.
+/// write the device may already hold. A write at a chosen offset, or the next write, can fail
+/// before it writes anything, and a write at a chosen offset can first run an action. Everything
+/// else goes straight to the inner handle.
 /// </summary>
 public sealed class FlushFaultingHandle : IFileSystemFileHandle
 {
     private readonly IFileSystemFileHandle _inner;
     private bool _failNextFlush;
+    private bool _failNextWrite;
 
     /// <summary>
     /// Initializes a handle over <paramref name="inner"/>.
@@ -35,6 +37,17 @@ public sealed class FlushFaultingHandle : IFileSystemFileHandle
     /// Gets or sets the offset whose next write fails before writing anything; null fails none.
     /// </summary>
     public long? FailWriteAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets an action run once, before anything else, when a write at its offset arrives:
+    /// what another thread does while that write is in flight. Null runs none.
+    /// </summary>
+    public (long Offset, Action Action)? OnWriteAt { get; set; }
+
+    /// <summary>
+    /// Arms the next write, at any offset, to fail before writing anything.
+    /// </summary>
+    public void FailNextWrite() => _failNextWrite = true;
 
     /// <summary>
     /// Gets the number of flushes that succeeded, durable or not.
@@ -94,6 +107,18 @@ public sealed class FlushFaultingHandle : IFileSystemFileHandle
     /// <inheritdoc />
     public void Write(ReadOnlySpan<byte> buffer, long offset)
     {
+        if (OnWriteAt is { } hook && hook.Offset == offset)
+        {
+            OnWriteAt = null;
+            hook.Action();
+        }
+
+        if (_failNextWrite)
+        {
+            _failNextWrite = false;
+            throw new IOException("Injected write failure before any byte was written.");
+        }
+
         if (FailWriteAt == offset)
         {
             FailWriteAt = null;

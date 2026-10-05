@@ -28,11 +28,19 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// </remarks>
 public sealed class StorageJournalFailureTests
 {
+    /// <summary>
+    /// The drain's failure takes the storage offline through the same hook every other offline path
+    /// raises (<see cref="Storage.OnOffline"/>, which the engines wire to the coordinator's
+    /// <c>AbandonLockWaits</c>, #1268), once, with <see cref="StorageOfflineCause.JournalFlush"/>,
+    /// the cause a failed journal fsync reports too; the message names the write.
+    /// </summary>
     [Fact(DisplayName = "Cohesion Test [Storage] - Journal failure: a begin record whose drain fails takes the storage offline and the bracket is not counted")]
     public void BeginTransaction_DrainFails_ShouldGoOfflineWithoutCountingTheBracket()
     {
         // Arrange: a committed row, then a bracket whose begin record must drain the one before.
         using var storage = FailureStorage.Create(out var journal);
+        var raised = new System.Collections.Generic.List<StorageOfflineException>();
+        storage.OnOffline = raised.Add;
         storage.Insert("kept");
         storage.Log.AppendOperation(0, [1, 2, 3]);
         journal.FailWrites = 1;
@@ -41,8 +49,13 @@ public sealed class StorageJournalFailureTests
         var error = Should.Throw<StorageOfflineException>(() => storage.BeginTransaction());
         var images = storage.CaptureImages();
 
-        // Assert: the failure took the storage offline, and it is no active bracket's to end.
+        // Assert: the failure took the storage offline, once, as a journal flush whose message
+        // names the drain's write, and it is no active bracket's to end.
         error.InnerException.ShouldBeOfType<IOException>();
+        error.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        error.Message.ShouldContain("a write of the journal");
+        raised.ShouldHaveSingleItem().ShouldBeSameAs(storage.OfflineError);
+        storage.OfflineError!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
         storage.IsOffline.ShouldBeTrue();
         storage.ActiveTransactionCount.ShouldBe(0);
         journal.FailWrites.ShouldBe(0);

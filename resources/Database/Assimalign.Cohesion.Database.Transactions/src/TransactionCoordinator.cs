@@ -188,6 +188,34 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     public bool IsStorageOffline => _storage is Storage shared ? shared.IsOffline : _journal is StorageJournal journal && journal.IsOffline;
 
     /// <summary>
+    /// Ends every wait for a lock of this database because its storage went offline, and fails
+    /// every wait that would start from then on: each fails with
+    /// <see cref="TransactionAbortedException"/> whose inner exception is
+    /// <paramref name="cause"/>, which an engine translates into its coded offline refusal. A
+    /// request the lock table can grant at once is still granted; the storage refuses the work.
+    /// </summary>
+    /// <param name="cause">The error that took the storage offline.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="cause"/> is null.</exception>
+    /// <remarks>
+    /// <para>
+    /// An offline database undoes nothing: a transaction that was writing when the storage went
+    /// offline keeps its locks until the reopen, whose recovery aborts it, because releasing them
+    /// without the undo would let the next holder build on versions that were never undone (the
+    /// deferred-undo rule of #1226). A request queued behind such a transaction would therefore
+    /// wait for a release that never comes, and only the reopen ended it (#1268 review). An engine
+    /// calls this from its storage's <c>Storage.OnOffline</c> hook. Idempotent: the first cause is
+    /// kept. The waits are failed asynchronously, so a hook that runs under storage locks does no
+    /// lock-table work there.
+    /// </para>
+    /// <para>
+    /// Neo4j's lock client ends the waits of a terminated transaction the same way, by failing
+    /// them instead of letting them wait for a grant
+    /// (<c>community/lock/src/main/java/org/neo4j/kernel/impl/locking/forseti/ForsetiClient.java:1081-1085</c>).
+    /// </para>
+    /// </remarks>
+    public void AbandonLockWaits(StorageOfflineException cause) => _lockManager.Abandon(cause);
+
+    /// <summary>
     /// Gets the transaction manager sessions begin their contexts on.
     /// </summary>
     public ITransactionManager Manager => _manager;
@@ -893,14 +921,61 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         private readonly ILockManager _inner;
         private readonly DefaultTransactionManager _manager;
 
+        // Canceled, with the cause kept beside it, once the storage went offline: it ends every
+        // wait in progress and fails every later one (AbandonLockWaits).
+        private readonly CancellationTokenSource _abandon = new();
+        private StorageOfflineException? _abandonCause;
+
         internal EngineLockManager(ILockManager inner, DefaultTransactionManager manager)
         {
             _inner = inner;
             _manager = manager;
         }
 
+        /// <remarks>
+        /// A request the table grants at once costs no more than before. One that has to wait
+        /// waits on the caller's token and on the storage going offline, which fails it
+        /// (<see cref="Abandon"/>).
+        /// </remarks>
         public ValueTask AcquireAsync(TransactionSequence owner, LockResource resource, LockMode mode, CancellationToken cancellationToken = default)
-            => _inner.AcquireAsync(owner, resource, mode, cancellationToken);
+            => _inner.TryAcquire(owner, resource, mode)
+                ? ValueTask.CompletedTask
+                : WaitAsync(owner, resource, mode, cancellationToken);
+
+        /// <summary>
+        /// Ends every wait in progress and fails every later one, because the storage went offline.
+        /// </summary>
+        internal void Abandon(StorageOfflineException cause)
+        {
+            ArgumentNullException.ThrowIfNull(cause);
+            if (Interlocked.CompareExchange(ref _abandonCause, cause, null) is null)
+            {
+                // Asynchronously: the storage's offline hook may run under its locks.
+                _ = _abandon.CancelAsync();
+            }
+        }
+
+        private async ValueTask WaitAsync(TransactionSequence owner, LockResource resource, LockMode mode, CancellationToken cancellationToken)
+        {
+            if (Volatile.Read(ref _abandonCause) is { } offline)
+            {
+                throw Abandoned(owner, resource, mode, offline);
+            }
+
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _abandon.Token);
+            try
+            {
+                await _inner.AcquireAsync(owner, resource, mode, wait.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && Volatile.Read(ref _abandonCause) is { } cause)
+            {
+                throw Abandoned(owner, resource, mode, cause);
+            }
+        }
+
+        private static TransactionAbortedException Abandoned(TransactionSequence owner, LockResource resource, LockMode mode, StorageOfflineException cause)
+            => new($"Transaction {owner}'s request for {mode} on {resource} was refused: the database's storage went offline, " +
+                "so no lock of it is released until it is reopened.", cause);
 
         public bool TryAcquire(TransactionSequence owner, LockResource resource, LockMode mode)
             => _inner.TryAcquire(owner, resource, mode);

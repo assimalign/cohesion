@@ -87,7 +87,7 @@ public sealed class DocumentStorageOperationsTests
         database.DataStorage.CheckpointJournalSize = 1;
         foreach (var worker in engine.Workers.OfType<DatabaseEngineWorker>())
         {
-            worker.RunIteration(CancellationToken.None);
+            worker.RunIteration(CancellationToken.None).ShouldBeTrue(worker.Fault?.ToString());
         }
 
         await other.DisposeAsync();

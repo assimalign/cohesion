@@ -33,7 +33,7 @@ internal sealed class SqlIndexMaintenanceWorker : DatabaseEngineWorker
     public override TimeSpan Interval => _engine.EngineOptions.MaintenanceInterval;
 
     /// <inheritdoc />
-    public override void RunIteration(CancellationToken cancellationToken)
+    protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         // Stub: the index layer has no compaction to drive yet.
     }

@@ -27,7 +27,13 @@ the whole base surface — including child-owned vocabulary the contracts speak
   are **data machines**: operational from creation, no start/stop ceremony;
   disposal quiesces their background workers and durably flushes. `State` is
   observational (`Running`/`Faulted`/`Disposed`); `Workers` exposes the
-  engine-owned background loops for diagnostics (name, kind, cadence).
+  engine-owned background loops for diagnostics (name, kind, cadence). The
+  guided `DatabaseEngineWorker` base never lets a failure end its loop: it
+  records a database's failure (`Fault`), skips that database for
+  `FailureBackoff` while the others keep the worker's pace, and retries;
+  `Faulted` lasts exactly while a worker holds a failure it has not worked off
+  (#1268). Failures and recoveries are written to the `Assimalign.Cohesion.Database`
+  event source.
 - **Server contracts** — `IDatabaseServer` (start/stop lifecycle — "running"
   lives on the server, never the engine) with its observational
   `IDatabaseServerContext` (the one engine it fronts + active sessions).
@@ -60,8 +66,9 @@ the whole base surface — including child-owned vocabulary the contracts speak
   built above it; `DatabaseNotFoundException` for the exact missing-database
   outcome of `IDatabaseEngine.OpenDatabaseAsync`; `DatabaseParseException` for
   statement text a session's language rejects; `DatabaseOfflineException` (with a model
-  `Code`) for every operation on a database whose journal or data fsync failed, until it is
-  reopened (#1243), and `DatabaseTransactionCommitUnconfirmedException` for work that may
+  `Code`) for every operation on a database whose journal or data fsync (#1243), journal drain
+  (#1252) or header slot write (#1268) failed, until it is reopened, and
+  `DatabaseTransactionCommitUnconfirmedException` for work that may
   have committed when it did. `IDatabaseEngine.OfflineDatabases` lists the offline databases
   for health. Child roots own independent exception roots (see [DESIGN.md](DESIGN.md)).
 

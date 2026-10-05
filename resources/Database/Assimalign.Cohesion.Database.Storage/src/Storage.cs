@@ -100,14 +100,20 @@ public abstract class Storage : IStorage
 
     // Set when a header write failed after its slot write was issued: that slot may already be
     // the newest generation on the media, so no further header write may run in this process.
+    // The failure took the storage offline too (#1268), which is what refuses every later write;
+    // the flag records which failure it was (diagnostics and tests).
     private bool _headerFaulted;
 
     // The checkpoint anchor pages each slot's generation chains, in order. A slot owns its
     // chain alone, so rewriting one slot never touches the pages the other slot reads.
     private readonly List<long>[] _anchorChains = [new List<long>(), new List<long>()];
 
-    // Set once, when a durable flush of the data file failed; the journal keeps its own latch
-    // for a failed durable flush of the journal, and OfflineError reads both (#1243).
+    // The offline latch of a storage that has no journal yet. Once the journal is attached, its
+    // latch is the storage's only one: every path that takes the storage offline (a failed drain
+    // or fsync of the journal, a failed data-file fsync, a failed header slot write, another file
+    // set of the database) sets it, it keeps the first error, and OfflineError reads it, so the
+    // error OnOffline was raised with is the one OfflineError reports for the life of the
+    // instance (#1243, #1252, #1268).
     private StorageOfflineException? _offline;
 
     // The hook raised once when the storage goes offline, and 1 once it was raised.
@@ -282,9 +288,12 @@ public abstract class Storage : IStorage
 
     /// <summary>
     /// Gets the error that took this storage offline, or null while it is online: a durable
-    /// flush of its journal or its data file failed (#1243), or a write of the journal's append
-    /// buffer did (#1252). Once set it stays set for the life of this instance; only reopening
-    /// the storage, which runs recovery, brings the file set back.
+    /// flush of its journal or its data file failed (#1243), a write of the journal's append
+    /// buffer did (#1252), or a write of its file header failed after the header slot write was
+    /// issued (#1268). Once set it stays set for the life of this instance, and it is the error
+    /// <see cref="OnOffline"/> was raised with: when two failures race, the first is kept and the
+    /// later one is refused with it. Only reopening the storage, which runs recovery, brings the
+    /// file set back.
     /// </summary>
     /// <remarks>
     /// While offline the storage writes nothing: every journal append, flush and checkpoint,
@@ -293,10 +302,11 @@ public abstract class Storage : IStorage
     /// closing it writes nothing either. Reads of resident and on-disk pages still work; the
     /// engines refuse every operation of an offline database before it reaches the storage.
     /// </remarks>
-    public StorageOfflineException? OfflineError => Volatile.Read(ref _offline) ?? _journal?.OfflineError;
+    public StorageOfflineException? OfflineError => _journal?.OfflineError ?? Volatile.Read(ref _offline);
 
     /// <summary>
-    /// Gets whether a failed durable flush or journal write took this storage offline (see <see cref="OfflineError"/>).
+    /// Gets whether a failed durable flush, journal write or file header write took this storage
+    /// offline (see <see cref="OfflineError"/>).
     /// </summary>
     public bool IsOffline => OfflineError is not null;
 
@@ -315,19 +325,19 @@ public abstract class Storage : IStorage
     {
         ArgumentNullException.ThrowIfNull(error);
 
-        if (!IsOffline && Interlocked.CompareExchange(ref _offline, error, null) is null)
+        // At once on a storage already offline, without the journal's lock (see OnOffline).
+        if (!IsOffline)
         {
-            _journal?.TakeOffline(error);
-            _groupCommitGate.Abandon();
-            RaiseOffline(error);
+            Latch(error);
         }
     }
 
     /// <summary>
     /// Gets or sets the hook invoked once, with the error, when this storage goes offline: a
-    /// durable flush of its journal or its data file failed, a write of the journal failed
-    /// (#1252), or <see cref="TakeOffline"/> was called (#1243). An engine whose database spans several storages takes the others offline
-    /// from it, so none of them is written after the failure.
+    /// durable flush of its journal or its data file failed (#1243), a write of the journal failed
+    /// (#1252), a write of its file header failed after the slot write was issued (#1268), or
+    /// <see cref="TakeOffline"/> was called. An engine whose database spans several storages takes
+    /// the others offline from it, so none of them is written after the failure.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -338,7 +348,9 @@ public abstract class Storage : IStorage
     /// never wait on each other's journal. It may run while the failing call holds this
     /// storage's header, transaction or buffer-pool lock, so a handler must not call back into
     /// this storage, except <see cref="TakeOffline"/>, which returns at once on a storage
-    /// already offline. It should only take other storages offline and must not throw.
+    /// already offline. It should only take other storages offline, or end the database's lock
+    /// waits (the transaction coordinator's <c>AbandonLockWaits</c>, which does no lock-table work
+    /// on the calling thread), and must not throw.
     /// </para>
     /// <para>
     /// Set it before the storage does any work; a storage already offline when it is set does
@@ -498,8 +510,8 @@ public abstract class Storage : IStorage
     }
 
     /// <summary>
-    /// Gets whether a header write failed after its slot write was issued, so this instance
-    /// refuses every later header write until the storage is reopened (diagnostics and tests).
+    /// Gets whether a header write failed after its slot write was issued, which took this
+    /// instance offline until the storage is reopened (diagnostics and tests).
     /// </summary>
     internal bool HeaderFaulted
     {
@@ -933,7 +945,8 @@ public abstract class Storage : IStorage
     /// later one can succeed.
     /// </exception>
     /// <exception cref="StorageOfflineException">
-    /// The storage is offline, or a durable flush this checkpoint made failed and took it offline.
+    /// The storage is offline, or a durable flush this checkpoint made, or its header slot write,
+    /// failed and took it offline.
     /// </exception>
     public void Checkpoint(ReadOnlySpan<long> activeTransactionSequences)
     {
@@ -1556,24 +1569,16 @@ public abstract class Storage : IStorage
 
         if (IsOffline)
         {
-            // A durable flush failed: nothing may be written after it (#1243). The journal on the
-            // media is what the next open's recovery reads; it decides every unconfirmed commit,
-            // and pages left dirty in the pool are rebuilt from it or were never committed.
+            // A durable flush (#1243), a drain of the journal's append buffer (#1252) or a header
+            // slot write (#1268) failed: nothing may be written after it, and the records still in
+            // the buffer are never written. The journal on the media is what the next open's
+            // recovery reads; it decides every unconfirmed commit, and pages left dirty in the pool
+            // are rebuilt from it or were never committed.
             return;
         }
 
         if (IsUnwrittenSinceOpen())
         {
-            return;
-        }
-
-        if (HeaderFaulted)
-        {
-            // No header write may run in this process (WriteHeader). The journal holds
-            // everything the next open's recovery needs, so it is flushed by the policy and the
-            // header is left as the media has it: either generation a reopen finds is
-            // consistent with an untruncated journal.
-            _journal.Flush(forceDurable: RequiresDurableFlush);
             return;
         }
 
@@ -1625,8 +1630,8 @@ public abstract class Storage : IStorage
     private bool RequiresDurableFlush => CommitDurability != StorageCommitDurability.None;
 
     /// <summary>
-    /// Throws <see cref="StorageOfflineException"/> when a failed durable flush took the storage
-    /// offline.
+    /// Throws <see cref="StorageOfflineException"/> when the storage is offline (see
+    /// <see cref="OfflineError"/>).
     /// </summary>
     private void ThrowIfOffline()
     {
@@ -1648,16 +1653,48 @@ public abstract class Storage : IStorage
     /// <param name="cause">The failed flush.</param>
     /// <returns>The exception the caller throws.</returns>
     private StorageOfflineException TakeOffline(Exception cause)
-    {
-        var offline = StorageOfflineException.Create("a durable flush of the data file", cause);
-        if (Interlocked.CompareExchange(ref _offline, offline, null) is null)
-        {
-            _journal?.TakeOffline(offline);
-            _groupCommitGate.Abandon();
-            RaiseOffline(offline);
-        }
+        => GoOffline(StorageOfflineException.Create(StorageOfflineCause.DataFlush, cause));
 
-        return offline;
+    /// <summary>
+    /// Takes the storage offline with <paramref name="offline"/>, unless it already is (see
+    /// <see cref="Latch"/>).
+    /// </summary>
+    /// <param name="offline">The error that takes the storage offline.</param>
+    /// <returns>
+    /// <paramref name="offline"/> when it took the storage offline; otherwise the refusal of the
+    /// error that did, so a failure that lost a race reports the error <see cref="OfflineError"/>
+    /// and <see cref="OnOffline"/> carry, not its own.
+    /// </returns>
+    private StorageOfflineException GoOffline(StorageOfflineException offline)
+    {
+        Latch(offline);
+        var first = OfflineError ?? offline;
+        return ReferenceEquals(first, offline) ? offline : StorageOfflineException.Refusal(first);
+    }
+
+    /// <summary>
+    /// Takes the storage offline with <paramref name="error"/>, unless it already is. With a journal
+    /// attached, the journal's latch is the storage's: it keeps the first error whichever path set
+    /// it (its own failed drain or fsync included), releases the group-commit waiters
+    /// (<see cref="StorageJournal.WentOffline"/>) and raises <see cref="OnOffline"/> once with that
+    /// first error, on this thread when no other raised it yet. Before #1268's review the storage
+    /// kept a latch of its own beside the journal's and <see cref="OfflineError"/> read it first, so
+    /// a header slot write or data-file fsync that failed after a drain had already taken the
+    /// journal offline replaced the error <see cref="OnOffline"/> had been raised with.
+    /// </summary>
+    /// <param name="error">The error that takes the storage offline.</param>
+    private void Latch(StorageOfflineException error)
+    {
+        if (_journal is { } journal)
+        {
+            // Idempotent: a journal already offline keeps its error and raises at most once.
+            journal.TakeOffline(error);
+        }
+        else if (Interlocked.CompareExchange(ref _offline, error, null) is null)
+        {
+            _groupCommitGate.Abandon();
+            RaiseOffline(error);
+        }
     }
 
     /// <summary>
@@ -1899,13 +1936,18 @@ public abstract class Storage : IStorage
     /// <c>src/backend/access/transam/xlog.c:8055</c> and <c>8140</c>).
     /// </para>
     /// <para>
-    /// <b>A failed slot write stops header writes.</b> Once the slot write is issued, a failure
-    /// (a failed fsync, say) leaves the slot either the previous generation or, on the media
-    /// already, the newest one pointing at this chain. A retry would rewrite that chain in place
-    /// at the same generation, and a crash during it would leave the newest slot pointing at
-    /// pages that do not verify. Every later header write therefore throws until the storage is
-    /// reopened, as PostgreSQL stops on a failed control-file write or fsync
-    /// (<c>src/common/controldata_utils.c:245-265</c>); shutdown then flushes only the journal.
+    /// <b>A failed slot write takes the storage offline (#1268).</b> Once the slot write is
+    /// issued, a failure (a failed write or fsync) leaves the slot either the previous generation
+    /// or, on the media already, the newest one pointing at this chain. A retry would rewrite that
+    /// chain in place at the same generation, and a crash during it would leave the newest slot
+    /// pointing at pages that do not verify, so no header write may run again in this process,
+    /// as PostgreSQL stops on a failed control-file write or fsync
+    /// (<c>src/common/controldata_utils.c:245-265</c>). Without header writes no checkpoint can
+    /// truncate the journal, so the storage goes offline exactly as a failed durable flush takes it
+    /// (<see cref="StorageOfflineException"/>): every later write is refused, its close writes
+    /// nothing, and the engines refuse every operation of its database until it is reopened.
+    /// Before #1268 the storage only refused later header writes, and its database kept accepting
+    /// commits while its journal grew without bound.
     /// </para>
     /// <para>
     /// The LSN floor is the journal's last LSN: every LSN a data page carries came from a
@@ -1914,7 +1956,10 @@ public abstract class Storage : IStorage
     /// transaction lock, under which sequences are assigned, so for a checkpoint it is exact.
     /// </para>
     /// </remarks>
-    /// <exception cref="StorageIOException">An earlier header write of this instance failed after its slot write was issued.</exception>
+    /// <exception cref="StorageOfflineException">
+    /// The storage is offline, a durable flush this write made failed, or the slot write or the
+    /// flush after it failed; the last two take the storage offline.
+    /// </exception>
     private void WriteHeader(ReadOnlySpan<long> anchor)
     {
         if (_pageManager is null || _journal is null || _disposed)
@@ -1924,15 +1969,9 @@ public abstract class Storage : IStorage
 
         lock (_headerLock)
         {
+            // A failed slot write took the storage offline (the catch below), so this refuses
+            // every header write after one too.
             ThrowIfOffline();
-
-            if (_headerFaulted)
-            {
-                throw new StorageIOException(
-                    "The storage refuses to write its file header: an earlier header write failed after its header slot write was " +
-                    "issued, so that slot may already be the newest generation on the media, and rewriting its checkpoint anchor chain " +
-                    "could leave the file unopenable. Reopen the storage; its journal holds everything recovery needs.");
-            }
 
             int target = 1 - _headerSlot;
             long generation = _headerGeneration + 1;
@@ -1994,12 +2033,27 @@ public abstract class Storage : IStorage
                 Data.Write(bytes, offset);
                 FlushData();
             }
-            catch
+            catch (Exception exception)
             {
-                // Whatever failed, the slot may already be on the media (see the remarks). A
-                // failed durable flush has also taken the storage offline (FlushData).
+                // Whatever failed, the slot may already be on the media (see the remarks), so the
+                // storage goes offline. A failed durable flush already took it offline (FlushData);
+                // any other failure takes it offline here, unless something else (a drain of the
+                // journal on another thread) already had, which this write then reports instead of
+                // its own failure. An OutOfMemoryException propagates as itself once the storage is
+                // offline.
                 _headerFaulted = true;
-                throw;
+                if (exception is StorageOfflineException)
+                {
+                    throw;
+                }
+
+                var offline = GoOffline(StorageOfflineException.HeaderWriteFailed(exception));
+                if (exception is OutOfMemoryException)
+                {
+                    throw;
+                }
+
+                throw offline;
             }
 
             _headerSlot = target;

@@ -338,8 +338,30 @@ The checkpointer and the purge worker follow the SQL engine's (#1254, #1226; Sql
 `CheckpointJournalSize` (its storage wakes the worker at once) or when `CheckpointInterval`
 passed and its journal received records; the worker otherwise looks once a second. The purge
 worker retries a deferred undo about 100 ms after the deferral and then at doubling delays up
-to `MaintenanceInterval`, records a failure as a worker fault, clears it after a pass with no
-failure and no undo still deferred, and keeps running. Both skip an offline database.
+to `MaintenanceInterval`, records a failure for its database with no backoff of its own (the
+coordinator paces the retries, so one database's failing undo delays no other's), clears it once
+a pass leaves that database no undo deferred, and keeps running. Both skip an offline database.
+
+**A worker failure never ends a worker (#1268).** Every worker catches per database and per
+file set: a failed checkpoint, page write-back or group flush of one database is reported
+(`DatabaseEngineWorker.ReportFailure`, the worker's `Fault`), the pass goes on to the next
+database, and later passes skip that database for `DatabaseEngineWorker.FailureBackoff` (one
+second, PostgreSQL's error sleep, `src/backend/postmaster/checkpointer.c:286-346`,
+`bgwriter.c:154-205`) while every other database keeps the worker's full pace (#1268 review); the
+first pass that finishes that database's work clears its record; the engine reports `Faulted`
+exactly while a worker holds a failure. A failure that took a database offline is not the
+worker's: the engine lists the database in `OfflineDatabases`. The engine's pump runs a worker
+again after the backoff if its loop ever ends early (only an `IDatabaseEngineWorker` without the
+guided base can, and the engine then reports `Faulted` until disposal). Before #1268 one
+unexpected exception ended a worker for good. `KeyValueWorkerResilienceTests` covers a
+checkpoint's and a write-back's page-write failures, a group flush's drain (#1252) or fsync
+failure, a header slot write failure, a registered worker whose loop throws, a database whose
+checkpoints keep failing (the other database keeps at least half its no-fault checkpoint count),
+and a writer queued for a key lock when the database goes offline (by any of the three device
+faults): it gets `COHDBK002` at once instead of waiting for the
+reopen, because the coordinator ends every lock wait of an offline database
+(`TransactionCoordinator.AbandonLockWaits`, wired to the data file set's offline hook), while
+the writer that holds the lock keeps it, since an offline database undoes nothing.
 
 ## Storage operations (#1243, #1254, #1226)
 
@@ -362,7 +384,10 @@ coded message. The workers skip the database, and closing its sessions writes no
 storage bracket whose commit record was written before its flush failed is reported as
 unconfirmed, never refused (`StorageOfflineException.CommitRecordWritten`). The engine stays
 `Running`; `KeyValueDatabaseEngine.OfflineDatabases` names the database, and `Database.Hosting`
-reports the application unhealthy while it is listed.
+reports the application unhealthy while it is listed. A header slot write that fails takes the
+database offline the same way (#1268): no header write may run again in that process, so no
+checkpoint could truncate the journal, and a database that kept accepting commits would grow it
+without bound; the refusal's message names "a write of the file header".
 `KeyValueDatabaseEngine.OpenDatabaseAsync(name)` disposes the offline instance without writing
 and reopens the file sets; recovery keeps the unconfirmed commit if its record's bytes reached
 the media, and aborts every transaction that was open. `KeyValueStorageOperationsTests` covers

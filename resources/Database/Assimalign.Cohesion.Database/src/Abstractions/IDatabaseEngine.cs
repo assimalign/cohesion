@@ -40,11 +40,18 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Gets the observational state of the engine: <see cref="EngineState.Running"/>
-    /// from creation, <see cref="EngineState.Faulted"/> when a background worker
-    /// fault was recorded (the engine keeps serving — durability self-help holds,
-    /// but the owner should learn the engine runs degraded), and
-    /// <see cref="EngineState.Disposed"/> after disposal.
+    /// from creation, <see cref="EngineState.Faulted"/> while a background worker keeps
+    /// failing (the engine keeps serving — durability self-help holds, but the owner
+    /// should learn the engine runs degraded), and <see cref="EngineState.Disposed"/>
+    /// after disposal.
     /// </summary>
+    /// <remarks>
+    /// A worker deriving from <see cref="DatabaseEngineWorker"/> sets the state with a failure, and
+    /// clears it once a pass finishes the work every failure left (<see cref="DatabaseEngineWorker.Fault"/>),
+    /// so a transient fault does not leave the engine <see cref="EngineState.Faulted"/> for good
+    /// (#1268). A worker's failures never stop the worker, and one database's failure does not
+    /// slow the worker's work on the others.
+    /// </remarks>
     EngineState State { get; }
 
     /// <summary>
@@ -57,9 +64,11 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Gets the names of the open databases that are offline: a durable flush of one of their
-    /// files failed, and every operation on them is refused with
+    /// files failed (#1243), a write of a journal's append buffer failed (#1252), or a write of a
+    /// file header failed after its header slot write was issued (#1268), and every operation on
+    /// them is refused with
     /// <see cref="DatabaseOfflineException"/> until <see cref="OpenDatabaseAsync"/> reopens
-    /// them (#1243). Empty while every open database is online; a point-in-time snapshot.
+    /// them. Empty while every open database is online; a point-in-time snapshot.
     /// </summary>
     /// <remarks>
     /// An offline database is a database the engine cannot serve, not a degraded engine, so it
@@ -88,8 +97,9 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     /// Opens an existing logical database by name.
     /// </summary>
     /// <remarks>
-    /// A database that went offline after a failed durable flush (every operation on it throws
-    /// <see cref="DatabaseOfflineException"/>) is reopened: the offline instance is closed without
+    /// A database that went offline after a failed durable flush, journal write or file header
+    /// write (every operation on it throws <see cref="DatabaseOfflineException"/>; see
+    /// <see cref="OfflineDatabases"/>) is reopened: the offline instance is closed without
     /// writing anything, and the database is opened again from its files, whose recovery decides
     /// the outcome of every commit that was not confirmed (#1243). The returned instance is a new
     /// one; the offline instance stays refused.

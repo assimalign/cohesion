@@ -20,6 +20,16 @@ internal sealed partial class GraphDatabaseInstance : IGraphDatabase
         Engine = engine;
         DataStorage = storage;
         Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+
+        // A wait for the database writer lock ends when the database goes offline (#1268 review):
+        // an offline database undoes nothing, so the writer that holds the lock keeps it until the
+        // reopen, and a writer queued behind it would otherwise wait that long.
+        storage.OnOffline = Coordinator.AbandonLockWaits;
+        if (storage.OfflineError is { } alreadyOffline)
+        {
+            Coordinator.AbandonLockWaits(alreadyOffline);
+        }
+
         if (engine is GraphDatabaseEngine owner)
         {
             // A deferred undo is retried on its own backoff, from about 100 ms up to the

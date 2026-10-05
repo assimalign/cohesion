@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage.Units;
 
@@ -326,5 +327,67 @@ public sealed class StorageOfflineTests
         // Assert
         raised.ShouldHaveSingleItem().ShouldBeSameAs(error);
         error.CommitRecordWritten.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A checkpoint's header slot write is in flight when a drain of the journal fails and takes
+    /// the storage offline; then the slot write itself fails, or the durable flush after it does.
+    /// The drain's error stays the storage's (#1268 review): <see cref="Storage.OnOffline"/> was
+    /// raised with it once, and <see cref="Storage.OfflineError"/>, the failing checkpoint and every
+    /// later refusal report it, not the header write's or the data flush's own failure. Before the
+    /// review the storage kept a latch of its own beside the journal's and read it first, so the
+    /// later failure replaced the error <see cref="Storage.OnOffline"/> had reported: an engine's
+    /// refusals named the header write while the journal's refusals and the abandoned lock waits
+    /// named the drain.
+    /// </summary>
+    /// <param name="failTheFlush">
+    /// True to fail the durable data flush after the slot write (a data-flush failure) rather than
+    /// the slot write itself (a header-write failure).
+    /// </param>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Offline: a header write failing after a drain took the storage offline keeps the drain's error")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OfflineError_HeaderWriteFailsAfterADrainFailed_ShouldKeepTheDrainsError(bool failTheFlush)
+    {
+        // Arrange: the next checkpoint's slot write first fails a drain of the journal, as a drain
+        // on another thread would while that write is in flight, then fails itself.
+        var storage = TornStorage.Create(new CrashPoint());
+        storage.Insert("before the fault");
+        long slotOffset = StorageHeaderPage.SlotOffset(1 - storage.HeaderState.Slot);
+        var raised = new System.Collections.Generic.List<StorageOfflineException>();
+        storage.OnOffline = raised.Add;
+        StorageOfflineException? drainError = null;
+        StorageOfflineException? offlineAfterTheDrain = null;
+        storage.DataFaults.OnWriteAt = (slotOffset, () =>
+        {
+            storage.Log.AppendOperation(0, [1, 2, 3]);
+            storage.JournalFaults.FailNextWrite();
+            drainError = Should.Throw<StorageOfflineException>(() => storage.Log.Flush());
+            offlineAfterTheDrain = storage.OfflineError;
+        });
+        if (failTheFlush)
+        {
+            storage.DataFaults.FailFlushAfterWriteAt = slotOffset;
+        }
+        else
+        {
+            storage.DataFaults.FailWriteAt = slotOffset;
+        }
+
+        // Act
+        var checkpointError = Should.Throw<StorageOfflineException>(() => storage.Checkpoint());
+        var refusal = Should.Throw<StorageOfflineException>(() => storage.BeginTransaction());
+        var journalRefusal = Should.Throw<StorageOfflineException>(() => storage.Log.AppendBegin(1_000));
+        storage.Dispose();
+
+        // Assert: one error throughout, the drain's, and the later failure did happen.
+        var drain = drainError.ShouldNotBeNull();
+        drain.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        offlineAfterTheDrain.ShouldBeSameAs(drain);
+        storage.OfflineError.ShouldBeSameAs(drain);
+        raised.ShouldHaveSingleItem().ShouldBeSameAs(drain);
+        new[] { checkpointError, refusal, journalRefusal }.ShouldAllBe(e => e.Cause == StorageOfflineCause.JournalFlush && e.InnerException == drain.InnerException);
+        storage.HeaderFaulted.ShouldBeTrue();
+        storage.DataFaults.FailedFlushes.ShouldBe(failTheFlush ? 1 : 0);
     }
 }

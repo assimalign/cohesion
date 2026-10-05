@@ -103,6 +103,20 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             OnUndoDeferred = engine.UndoDeferredSignal.Set,
         };
 
+        // A wait for a lock of the database ends when it goes offline (#1268 review): an offline
+        // database undoes nothing, so a writer that holds a lock keeps it until the reopen, and a
+        // writer queued behind it would otherwise wait that long. The catalog file set's hook takes
+        // the data set offline, whose hook ends the waits, so both paths end them.
+        _storage.OnOffline = error =>
+        {
+            _catalogStorage.TakeOffline(error);
+            _coordinator.AbandonLockWaits(error);
+        };
+        if (OfflineError is { } offlineAtOpen)
+        {
+            _coordinator.AbandonLockWaits(offlineAtOpen);
+        }
+
         // Re-attach the persisted secondary indexes before recovery: the
         // open-time scrub must be able to purge unproven writers' entries out of
         // every tree. Index pages live in the SAME data file set as rows (the
