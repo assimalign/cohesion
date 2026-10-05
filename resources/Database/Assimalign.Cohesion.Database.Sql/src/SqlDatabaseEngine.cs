@@ -44,6 +44,9 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     private readonly ManualResetEventSlim _commitPendingSignal = new();
     private readonly Action _signalCommitPending;
 
+    // Runs each database's checkpoint on a lane of its own; its lanes stop after the pumps.
+    private readonly SqlCheckpointWorker _checkpointWorker;
+
     // Woken by a storage whose journal reached the checkpoint size, and by a coordinator that
     // deferred an undo, so the checkpoint and version-purge workers act at once (#1254, #1226).
     private readonly ManualResetEventSlim _checkpointNeededSignal = new();
@@ -102,11 +105,12 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             Directory.CreateDirectory(root);
         }
 
+        _checkpointWorker = new SqlCheckpointWorker(this);
         _workers =
         [
             new SqlWriteAheadFlushWorker(this, _commitPendingSignal),
             new SqlPageWriteBackWorker(this),
-            new SqlCheckpointWorker(this),
+            _checkpointWorker,
             new SqlVersionPurgeWorker(this),
             new SqlIndexMaintenanceWorker(this),
         ];
@@ -575,6 +579,16 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         try
         {
             StopWorkerThreads();
+        }
+        catch (Exception failure) when (failure is not OutOfMemoryException)
+        {
+            failures.Add(failure);
+        }
+
+        try
+        {
+            // A checkpoint the worker left running on its lane ends before the storages close.
+            _checkpointWorker.Dispose();
         }
         catch (Exception failure) when (failure is not OutOfMemoryException)
         {

@@ -31,7 +31,10 @@ namespace Assimalign.Cohesion.Database;
 /// passes that follow skip it (<see cref="BeginDatabase"/> returns false) until
 /// <see cref="FailureBackoff"/> has passed, while every other database keeps the worker's full
 /// pace. A repeated page write failure is therefore retried about once a second, and the
-/// checkpoints of the engine's healthy databases never wait for it. The record ends with the first
+/// checkpoints of the engine's healthy databases never wait for it. The backoff bounds how often a
+/// database is tried, not how long one try blocks: a pass may hand a database's work to a thread of
+/// its own and leave it running, as the engines' checkpointers do with a checkpoint that hangs in
+/// its device, reporting it unfinished until a later pass settles it. The record ends with the first
 /// pass that finishes that database's work, and is forgotten when a pass no longer visits the
 /// database (it was dropped or closed, or went offline). PostgreSQL's background writer,
 /// checkpointer and WAL writer recover the same way: each catches an error per cycle, reports it,

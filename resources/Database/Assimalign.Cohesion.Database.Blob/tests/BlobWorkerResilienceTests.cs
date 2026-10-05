@@ -81,12 +81,25 @@ public sealed class BlobWorkerResilienceTests
     /// stays within a small multiple of the no-fault peak. A worker-wide backoff held it to one
     /// checkpoint a second, and its journal grew to hundreds of times the trigger.
     /// </summary>
+    /// <remarks>
+    /// The two engines write over the same window, so whatever else the machine runs slows both
+    /// alike. Measured one after the other, the parallel test run alone moved the ratio anywhere
+    /// from a quarter to four times, with no fault in either window, and failed the bound on a
+    /// three-core runner.
+    /// </remarks>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a database whose checkpoints keep failing does not slow the other database's checkpoints")]
     public async Task CheckpointWorker_OneDatabaseKeepsFailing_ShouldKeepTheOthersAtFullPace()
     {
-        // Act: the same load with no fault, then with the failing database's page writes failing.
-        var baseline = await MeasureHealthyCheckpointsAsync(fault: false);
-        var faulted = await MeasureHealthyCheckpointsAsync(fault: true);
+        // Act: the same load with no fault and with the failing database's page writes failing,
+        // in two engines whose windows start together, on the thread pool.
+        var baselineReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var faultedReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var start = Task.WhenAll(baselineReady.Task, faultedReady.Task);
+        var paces = await Task.WhenAll(
+            Task.Run(() => MeasureHealthyCheckpointsAsync(fault: false, baselineReady, start)),
+            Task.Run(() => MeasureHealthyCheckpointsAsync(fault: true, faultedReady, start)));
+        var baseline = paces[0];
+        var faulted = paces[1];
 
         // Assert: the fault fired and was retried, and the healthy database kept its pace.
         string report = $"no fault: {baseline}; fault: {faulted}";
@@ -94,6 +107,74 @@ public sealed class BlobWorkerResilienceTests
         ((double)faulted.Checkpoints).ShouldBeGreaterThan(2 * (PaceWindow / DatabaseEngineWorker.FailureBackoff + 1), report);
         ((double)faulted.Checkpoints / baseline.Checkpoints).ShouldBeGreaterThanOrEqualTo(0.5, report);
         ((double)faulted.PeakJournal / Math.Max(baseline.PeakJournal, PacePeakFloor)).ShouldBeLessThanOrEqualTo(16, report);
+    }
+
+    /// <summary>
+    /// One database's checkpoint that hangs in a durable flush of its data file — an fsync its
+    /// device does not answer — must not hold back the checkpoints of the engine's other databases.
+    /// Before the checkpoint lanes, the worker visited the databases one by one on its own thread, so
+    /// the hung fsync stopped every checkpoint of the engine until it returned: a device that took
+    /// seconds to answer, or to fail, stalled every other database's journal truncation for as long.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a database whose checkpoint fsync hangs does not hold back the other database's checkpoints")]
+    public async Task CheckpointWorker_OneDatabaseFsyncHangs_ShouldKeepCheckpointingTheOthers()
+    {
+        // Arrange: checkpoints by journal size; nothing else writes pages back.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.CheckpointJournalSize = PaceJournalSize;
+        await using var engine = BlobDatabaseEngine.Create(options);
+        var stalled = await CreateAsync(engine, Failing);
+        var healthy = await CreateAsync(engine, Healthy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var stalledFaults = strategy.Faults(Failing);
+        var healthyFaults = strategy.Faults(Healthy);
+
+        try
+        {
+            // The stalled database's journal grows past the size with its trigger off, so no
+            // statement takes its checkpoint over: the worker runs it, and hangs in its data fsync.
+            stalled.DataStorage.CheckpointJournalSize = 0;
+            for (int id = 0; stalled.DataStorage.JournalLength < PaceJournalSize; id += 10)
+            {
+                await UploadAsync(stalled, id, 10);
+            }
+
+            stalledFaults.StallDataFlushes();
+            stalled.DataStorage.CheckpointJournalSize = PaceJournalSize;
+            bool hung = await Eventually(() => stalledFaults.StalledDataFlushes > 0);
+            long stalledJournal = stalled.DataStorage.JournalLength;
+
+            // Act: while the fsync hangs, the healthy database's journal passes the size again and again.
+            long checkpoints = healthyFaults.HeaderWrites;
+            var watch = Stopwatch.StartNew();
+            for (int id = 0; healthyFaults.HeaderWrites - checkpoints < 3 && watch.Elapsed < StallWindow; id += 10)
+            {
+                await UploadAsync(healthy, id, 10);
+            }
+
+            long healthyCheckpoints = healthyFaults.HeaderWrites - checkpoints;
+            bool stillHung = stalledFaults.StalledDataFlushes > 0;
+            long stalledJournalDuringTheHang = stalled.DataStorage.JournalLength;
+
+            stalledFaults.ReleaseDataFlushes();
+            bool stalledCheckpointed = await Eventually(() => stalled.DataStorage.JournalLength < stalledJournal);
+
+            // Assert: the healthy database was checkpointed while the other's checkpoint hung, and
+            // the hung checkpoint completed once its device answered.
+            hung.ShouldBeTrue();
+            healthyCheckpoints.ShouldBeGreaterThanOrEqualTo(3, $"healthy checkpoints while the other database's fsync hung for {watch.Elapsed}");
+            stillHung.ShouldBeTrue();
+            stalledJournalDuringTheHang.ShouldBe(stalledJournal);
+            stalledCheckpointed.ShouldBeTrue();
+            worker.Fault.ShouldBeNull();
+            engine.State.ShouldBe(EngineState.Running);
+            engine.OfflineDatabases.ShouldBeEmpty();
+        }
+        finally
+        {
+            stalledFaults.Clear();
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a page write-back that fails is retried after a backoff, and the pages reach the file once the fault clears")]
@@ -337,52 +418,71 @@ public sealed class BlobWorkerResilienceTests
     private const long PaceJournalSize = 64 * 1024;
     private static readonly TimeSpan PaceWindow = TimeSpan.FromSeconds(2);
 
+    // How long the hung-fsync test writes to the healthy database while the other one's fsync hangs.
+    private static readonly TimeSpan StallWindow = TimeSpan.FromSeconds(5);
+
     /// <summary>
     /// Writes to the healthy database for <see cref="PaceWindow"/>, with checkpoints triggered by
     /// journal size, while the failing database's checkpoint is due and, under the fault, fails.
+    /// The window starts with <paramref name="start"/>, once the engine reported itself
+    /// <paramref name="ready"/>.
     /// </summary>
-    private static async Task<CheckpointPace> MeasureHealthyCheckpointsAsync(bool fault)
+    private static async Task<CheckpointPace> MeasureHealthyCheckpointsAsync(bool fault, TaskCompletionSource ready, Task start)
     {
-        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-        var options = Options(strategy);
-        options.CheckpointJournalSize = PaceJournalSize;
-        await using var engine = BlobDatabaseEngine.Create(options);
-        var failing = await CreateAsync(engine, Failing);
-        var healthy = await CreateAsync(engine, Healthy);
-        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-        var failingFaults = strategy.Faults(Failing);
-        var healthyFaults = strategy.Faults(Healthy);
-
-        failingFaults.FailPageWrites = fault;
         try
         {
-            // The failing database's journal reaches the trigger (or, with no fault, is checkpointed).
-            long failingCheckpoints = failingFaults.HeaderWrites;
-            for (int id = 0; failing.DataStorage.JournalLength < PaceJournalSize && failingFaults.HeaderWrites == failingCheckpoints; id += 10)
-            {
-                await UploadAsync(failing, id, 10);
-            }
+            var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+            var options = Options(strategy);
+            options.CheckpointJournalSize = PaceJournalSize;
+            await using var engine = BlobDatabaseEngine.Create(options);
+            var failing = await CreateAsync(engine, Failing);
+            var healthy = await CreateAsync(engine, Healthy);
+            var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+            var failingFaults = strategy.Faults(Failing);
+            var healthyFaults = strategy.Faults(Healthy);
 
-            if (fault)
+            failingFaults.FailPageWrites = fault;
+            try
             {
-                (await Eventually(() => worker.FailureCount >= 1)).ShouldBeTrue();
-            }
+                // The failing database's journal reaches the trigger (or, with no fault, is checkpointed).
+                long failingCheckpoints = failingFaults.HeaderWrites;
+                for (int id = 0; failing.DataStorage.JournalLength < PaceJournalSize && failingFaults.HeaderWrites == failingCheckpoints; id += 10)
+                {
+                    await UploadAsync(failing, id, 10);
+                }
 
-            long checkpoints = healthyFaults.HeaderWrites;
-            long failedPasses = worker.FailureCount;
-            long peak = 0;
-            var watch = Stopwatch.StartNew();
-            for (int id = 0; watch.Elapsed < PaceWindow; id += 10)
+                if (fault)
+                {
+                    (await Eventually(() => worker.FailureCount >= 1)).ShouldBeTrue();
+                }
+
+                // Both windows start together, each on a thread of its own.
+                ready.SetResult();
+                await start;
+                await Task.Yield();
+
+                long checkpoints = healthyFaults.HeaderWrites;
+                long failedPasses = worker.FailureCount;
+                long peak = 0;
+                var watch = Stopwatch.StartNew();
+                for (int id = 0; watch.Elapsed < PaceWindow; id += 10)
+                {
+                    await UploadAsync(healthy, id, 10);
+                    peak = Math.Max(peak, healthy.DataStorage.JournalLength);
+                }
+
+                return new CheckpointPace(healthyFaults.HeaderWrites - checkpoints, peak, worker.FailureCount - failedPasses);
+            }
+            finally
             {
-                await UploadAsync(healthy, id, 10);
-                peak = Math.Max(peak, healthy.DataStorage.JournalLength);
+                failingFaults.Clear();
             }
-
-            return new CheckpointPace(healthyFaults.HeaderWrites - checkpoints, peak, worker.FailureCount - failedPasses);
         }
-        finally
+        catch (Exception exception)
         {
-            failingFaults.Clear();
+            // An engine whose setup failed must not leave the other one's window waiting.
+            ready.TrySetException(exception);
+            throw;
         }
     }
 

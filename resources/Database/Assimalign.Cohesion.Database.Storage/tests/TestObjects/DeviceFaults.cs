@@ -28,8 +28,10 @@ public enum DeviceFault
 /// included, for as long as they are switched on: a data page write fails, a write to page 0 (the
 /// file header's slots) fails, a write of the journal (since #1252 the drain of its append buffer)
 /// fails, or a durable flush of the journal fails. Each counts the failures it injected, so a test
-/// can wait for a worker to hit the fault. Linked into each engine's test project, whose
-/// fault-injecting storage strategy wraps a file set's handles with them (#1268).
+/// can wait for a worker to hit the fault. A durable flush of the data file can also stall until
+/// the test releases it, as a device that does not answer an fsync leaves it. Linked into each
+/// engine's test project, whose fault-injecting storage strategy wraps a file set's handles with
+/// them (#1268).
 /// </summary>
 /// <remarks>
 /// A failed write writes nothing, and a failed flush leaves the bytes written before it where they
@@ -46,6 +48,10 @@ internal sealed class DeviceFaults
     private long _journalFlushFailures;
     private long _journalWriteFailures;
     private long _pageWrites;
+
+    // Open while durable flushes of the data file go through; closed while they stall.
+    private readonly ManualResetEventSlim _dataFlushGate = new(initialState: true);
+    private int _stalledDataFlushes;
 
     /// <summary>
     /// Gets or sets whether every write to a data page (page 1 and beyond) of the data file fails:
@@ -130,7 +136,26 @@ internal sealed class DeviceFaults
     private long _headerWrites;
 
     /// <summary>
-    /// Switches every fault off.
+    /// Gets the number of durable flushes of the data file the stall holds right now
+    /// (<see cref="StallDataFlushes"/>).
+    /// </summary>
+    internal int StalledDataFlushes => Volatile.Read(ref _stalledDataFlushes);
+
+    /// <summary>
+    /// Stalls every durable flush of the data file — the fsync a checkpoint makes after its page
+    /// writes and again after its header slot write — until <see cref="ReleaseDataFlushes"/> or
+    /// <see cref="Clear"/> is called: a device that does not answer an fsync, as a failing disk or
+    /// an unreachable network volume leaves it. A stalled flush then completes normally.
+    /// </summary>
+    internal void StallDataFlushes() => _dataFlushGate.Reset();
+
+    /// <summary>
+    /// Lets the durable flushes of the data file through again, stalled ones included.
+    /// </summary>
+    internal void ReleaseDataFlushes() => _dataFlushGate.Set();
+
+    /// <summary>
+    /// Switches every fault off, and releases stalled flushes.
     /// </summary>
     internal void Clear()
     {
@@ -138,6 +163,7 @@ internal sealed class DeviceFaults
         FailHeaderWrites = false;
         FailJournalFlushes = false;
         FailJournalWrites = false;
+        ReleaseDataFlushes();
     }
 
     /// <summary>
@@ -227,6 +253,24 @@ internal sealed class DeviceFaults
         }
     }
 
+    private void BeforeDurableDataFlush()
+    {
+        if (_dataFlushGate.IsSet)
+        {
+            return;
+        }
+
+        Interlocked.Increment(ref _stalledDataFlushes);
+        try
+        {
+            _dataFlushGate.Wait();
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _stalledDataFlushes);
+        }
+    }
+
     private sealed class FaultingHandle : IFileSystemFileHandle
     {
         private readonly DeviceFaults _faults;
@@ -281,22 +325,31 @@ internal sealed class DeviceFaults
 
         public void Flush(bool durable)
         {
-            if (durable && _journal)
-            {
-                _faults.BeforeDurableFlush();
-            }
-
+            BeforeFlush(durable);
             _inner.Flush(durable);
         }
 
         public ValueTask FlushAsync(bool durable, CancellationToken cancellationToken = default)
         {
-            if (durable && _journal)
+            BeforeFlush(durable);
+            return _inner.FlushAsync(durable, cancellationToken);
+        }
+
+        private void BeforeFlush(bool durable)
+        {
+            if (!durable)
+            {
+                return;
+            }
+
+            if (_journal)
             {
                 _faults.BeforeDurableFlush();
             }
-
-            return _inner.FlushAsync(durable, cancellationToken);
+            else
+            {
+                _faults.BeforeDurableDataFlush();
+            }
         }
 
         public void Dispose() => _inner.Dispose();

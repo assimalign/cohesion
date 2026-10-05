@@ -41,6 +41,9 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     private readonly List<IDatabaseEngineWorker> _customWorkers = [];
     private readonly ManualResetEventSlim _commitPendingSignal = new();
     private readonly Action _signalCommitPending;
+
+    // Runs each database's checkpoint on a lane of its own; its lanes stop after the pumps.
+    private readonly KeyValueCheckpointWorker _checkpointWorker;
     private readonly List<Thread> _workerThreads = new();
     private readonly CancellationTokenSource _workerStopSource = new();
     private readonly IKeyValueStorageStrategy _strategy;
@@ -95,11 +98,12 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
             Directory.CreateDirectory(root);
         }
 
+        _checkpointWorker = new KeyValueCheckpointWorker(this);
         _workers =
         [
             new KeyValueWriteAheadFlushWorker(this, _commitPendingSignal),
             new KeyValuePageWriteBackWorker(this),
-            new KeyValueCheckpointWorker(this),
+            _checkpointWorker,
             new KeyValueVersionPurgeWorker(this),
             new KeyValueIndexMaintenanceWorker(this),
         ];
@@ -515,6 +519,16 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
         try
         {
             StopWorkerThreads();
+        }
+        catch (Exception failure) when (failure is not OutOfMemoryException)
+        {
+            failures.Add(failure);
+        }
+
+        try
+        {
+            // A checkpoint the worker left running on its lane ends before the storages close.
+            _checkpointWorker.Dispose();
         }
         catch (Exception failure) when (failure is not OutOfMemoryException)
         {
