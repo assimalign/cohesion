@@ -8,8 +8,10 @@ namespace Assimalign.Cohesion.Database;
 
 /// <summary>
 /// The worker pump every engine model runs its workers on, and the engine state it reports from
-/// them (#1268): one copy of the behavior the five engines share (database-area.md rule 8), until
-/// the root engine base of the concrete-types plan (phase 3) takes it over.
+/// them (#1268): one copy of the behavior the five engines share (database-area.md rule 8). Since
+/// phase 3 of the concrete-types plan (#1259) the root <see cref="DatabaseEngine"/> base carries
+/// the same pump and fold; a model stops compiling this copy in its phase-4 PR, when its engine
+/// derives from the base, and the last of those PRs deletes it.
 /// </summary>
 internal static class DatabaseEngineWorkerPump
 {

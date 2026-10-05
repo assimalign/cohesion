@@ -1,7 +1,8 @@
 # Database concrete-first types: plan of record
 
 **Status:** Phase 0 landed with this file; phases 1 (#1257) and 2 (#1258, kernel and wire tracks)
-re-verified and implemented on 2026-10-05 (§7, §6.9) · **Created:** 2026-10-04 · **Owner:** Chase Crawford
+re-verified and implemented on 2026-10-05 (§7, §6.9); phase 3 (#1259) re-verified and implemented
+on 2026-10-05 (§7, §6.4, §6.5) · **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
 · **Owner decision:** O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md` · **Supersedes:** #1232
 **Branch:** every phase branches from the integration branch
@@ -123,7 +124,7 @@ items. Each item is resolved below. Line references were re-measured on 2026-10-
 | C2 | Four public static factories collide with the planned type names (`LockManager`, `TransactionManager`, `TransactionLog`, `VersionStore`). Three more take or return deleted interfaces: `SqlSchemaCompiler`, `ProtocolFraming`, `TransactionRecovery`. | Each gets a name decision in §5.2. | P1, P2, P4 |
 | C3 | The statement-snapshot view cannot be internal: Documents, Graph and Blob build it from other assemblies. | `public TransactionContext PinStatementSnapshot()` (§6.1). | P2 |
 | C4 | The four `IStorageTransactionSource` wrappers throw different exception types. Indexing may not reference `DatabaseException`. | A per-engine delegate on `BTreeIndexManagerOptions`. Each engine keeps its own exception vocabulary (§6.3). | P2 |
-| C5 | The root bases need protected attach semantics. A covariant `Engine` contradicts field-backed getters. `DatabaseEngineWorker` breaks NVI. `VersionStore`'s leaves share one assembly. | Non-virtual `protected` attach, frozen after build. Typed fields behind `new` properties. `DatabaseEngineWorker` through NVI. A `private protected` `VersionStore` constructor (§6.5, rows 5, 7 and 45). | P2, P3 |
+| C5 | The root bases need protected attach semantics. A covariant `Engine` contradicts field-backed getters. `DatabaseEngineWorker` breaks NVI. `VersionStore`'s leaves share one assembly. | Non-virtual `protected` attach, frozen after build. Typed fields behind `new` properties. `DatabaseEngineWorker` through NVI. A `private protected` `VersionStore` constructor (§6.5, rows 5, 7 and 45). **At P3:** the attach, the freeze, the base fields and the worker's NVI landed as resolved (§6.5, rows 5 and 7). | P2, P3 |
 | C6 | Option A gives `Dispose` two meanings on one sealed Blob or Documents type. | Option B (§6.6). | P4 |
 | C7 | The Sql.Schema declaration records are positional and cannot be closed. | The declaration model stays internal behind an opaque `public sealed SqlSchema`, and `SqlSchemaCompiler` becomes internal (§6.7). Correction to the critique: Sql.Schema has **no** `InternalsVisibleTo` today. Phase 4 adds Sql.Schema → Sql.Schema.Tests. | P4 |
 | C8 | The existing public abstract hot types were not audited. | Each is audited in the phase that touches it (§5.3). | P2, P3, P8 |
@@ -208,19 +209,19 @@ interface is deleted in P6.
 
 | # | Interface | Project | Layer | Proposal | Target | Phase |
 |---|---|---|---|---|---|---|
-| 1 | `IDatabase` | Database `Abstractions/IDatabase.cs:16` | area root | abstract | `public abstract class DatabaseInstance`, with a protected constructor taking the name, the owning engine and the schema-provisioning capability. `Name` and `Engine` are non-virtual and field-backed, and leaves re-expose `Engine` with `new`. NVI `CreateSessionAsync` calls `CreateSessionCoreAsync`. It absorbs schema provisioning (row 8). | P3/P6 |
+| 1 | `IDatabase` | Database `Abstractions/IDatabase.cs:16` | area root | abstract | `public abstract class DatabaseInstance`, with a protected constructor taking the name, the owning engine and the schema-provisioning capability. `Name` and `Engine` are non-virtual and field-backed, and leaves re-expose `Engine` with `new`. NVI `CreateSessionAsync` calls `CreateSessionCoreAsync`. It absorbs schema provisioning (row 8). **At P3:** landed as planned, with one addition the interface forced: `IDatabase` extends `IDisposable` and `IAsyncDisposable`, so the base owns the disposed flag, and non-virtual `Dispose` and `DisposeAsync` reach `protected abstract DisposeCore` or `DisposeAsyncCore` once. `CreateSessionAsync` checks disposal and the token before its core; each model's offline check stays in its core. | P3/P6 |
 | 2 | `IDatabaseApplication` | Database `:19` | area root | keep | Unchanged; `Context` is retyped transitively. The O34 seam. | — |
 | 3 | `IDatabaseApplicationBuilder` | Database `:7` | area root | keep | Retyped: `AddEngine(DatabaseEngine)` and `AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine>)`. | P6 |
 | 4 | `IDatabaseApplicationContext` | Database `:6` | area root | keep | `Engines` becomes `IReadOnlyList<DatabaseEngine>`, `Servers` becomes `IReadOnlyList<DatabaseServer>`, and `GetEngine` returns `DatabaseEngine`. Adds a static extension `GetEngine<TEngine>(name) where TEngine : DatabaseEngine`. | P6 |
-| 5 | `IDatabaseEngine` | Database `:29` | area root | abstract | `public abstract class DatabaseEngine : IAsyncDisposable, IDisposable`, with a protected constructor taking the name and model. `Name`, `Model`, `State`, `Workers` and `Servers` are non-virtual and field-backed. `protected` non-virtual `AttachWorker` and `AttachServer` are refused after `CompleteComposition()` (§6.5). NVI create, open, drop, list and try-get members call `*Core` members. A non-virtual `DisposeAsync` keeps the order servers, then workers, then `DisposeAsyncCore`. Leaves add `public new ValueTask<SqlDatabase> OpenDatabaseAsync(...)` over the base NVI member. | P3/P6 |
+| 5 | `IDatabaseEngine` | Database `:29` | area root | abstract | `public abstract class DatabaseEngine : IAsyncDisposable, IDisposable`, with a protected constructor taking the name and model. `Name`, `Model`, `State`, `Workers` and `Servers` are non-virtual and field-backed. `protected` non-virtual `AttachWorker` and `AttachServer` are refused after `CompleteComposition()` (§6.5). NVI create, open, drop, list and try-get members call `*Core` members. A non-virtual `DisposeAsync` keeps the order servers, then workers, then `DisposeAsyncCore`. Leaves add `public new ValueTask<SqlDatabase> OpenDatabaseAsync(...)` over the base NVI member. **At P3 (re-verified):** the interface had gained `OfflineDatabases` (#1243) after the plan; it is the base's one abstract public member, state the leaf computes (rule 4). `Workers` is typed `IReadOnlyList<DatabaseEngineWorker>` and `Servers` `IReadOnlyList<DatabaseServer>`, published copies replaced on each attach. `AttachWorker` starts the worker's pump thread at once, as every engine did, and carries the checks the engines and `DatabaseEngineBuilderState` made: unique worker names (Sql and KeyValuePair checked them), no product attached twice, a server that fronts this engine. The disposal order is servers (last attached first), then every pump stopped and joined, then the workers (last attached first), then `DisposeAsyncCore`, continuing past failures into one `AggregateException`. The engines' pump frame and state fold (`shared/DatabaseEngineWorkerPump.cs`) moved into the base; the shared copy cannot be deleted in P3, because no model engine derives from the base yet and the root may grant no model its internals, so each model stops compiling it in its P4 PR and the last deletes it. | P3/P6 |
 | 6 | `IDatabaseEngineBuilder` | Database `:7` | area root | delete | Five `public sealed <Model>DatabaseEngineBuilder` types with internal constructors, typed `AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker>)` and `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)`, and a `Build()` that returns the model engine. Shared logic moves to `DatabaseEngineBuilderState<TEngine>` (P4.0). | P4.0/P4/P6 |
-| 7 | `IDatabaseEngineWorker` | Database `:19` | area root | delete | The existing `DatabaseEngineWorker` (`DatabaseEngineWorker.cs:64`) is already mostly NVI: #1268 and its review landed a non-virtual `Run` (`:146`) and `RunIteration` (`:207`) over `protected abstract void RunIterationCore` (`:230`), with the per-database failure record (`protected` non-virtual `BeginDatabase`, `ReportFailure` and `ReportUnfinished`, `:242-329`), `Fault`, `ConsecutiveFailures`, `FailureCount` and `FailureBackoff`. The review changed the core from `bool` to `void`: a pass reports unfinished work per database (`ReportUnfinished`), so the return value carried nothing. P3 still makes `Name`, `Kind` and `Interval` set by the constructor and non-virtual (abstract today, `:102-108`). The trigger wait (`:350`) stays a `protected virtual` lifecycle hook; the checkpoint, purge and write-ahead flush workers override it (`*WriteAheadFlushWorker.cs:54`). P3 also moves the engines' shared pump and state fold (`shared/DatabaseEngineWorkerPump.cs`, compiled into each model since #1268's review) into the root engine base. **At P3:** landed. `protected DatabaseEngineWorker(string name, DatabaseEngineWorkerKind kind, TimeSpan interval)` rejects a blank name; the interval is not validated there, because the engines validate their options and an invalid one must keep failing the way it does today. The 22 leaves pass their values to the constructor (the shared `DatabaseCheckpointWorker` names itself `{engine}/checkpoint`), so a built-in worker's cadence is captured from the engine's options when the engine is created instead of read on every trigger wait. | P3 (NVI)/P6 |
-| 8 | `IDatabaseSchemaProvisioner` | Database `:7` | area root | delete | Folded into `DatabaseInstance`: a non-virtual `public bool SupportsSchemaProvisioning`, set by `protected DatabaseInstance(Name name, DatabaseEngine engine, bool supportsSchemaProvisioning = false)` (rule 6), and an NVI `ApplySchemaAsync` that throws `NotSupportedException` while the flag is `false` and otherwise calls a `protected virtual ApplySchemaCoreAsync` whose default throws `NotSupportedException`. It is the only capability member on `DatabaseInstance`. **Bridge:** Hosting's type test (`Hosting/src/Internal/DefaultDatabaseProvisioner.cs:49`) still needs the interface until P6, and the Sql PR of P4 deletes `ISqlDatabase` (`Sql/src/Abstractions/ISqlDatabase.cs:6`), which is how `SqlDatabase` carries it today. So `SqlDatabase` keeps `IDatabaseSchemaProvisioner` in its base list until P6, implemented by the inherited NVI member. Only Sql claims the interface, as today, and the SampleHost provisioning test stays green. P6 deletes it and turns the type test into a flag check. | P3/P6 |
-| 9 | `IDatabaseServer` | Database `:26` | area root | abstract | `public abstract class DatabaseServer : IAsyncDisposable`, with a protected constructor taking the engine. `Engine` is non-virtual and field-backed (replacing `Context.Engine`), and leaves re-expose it typed with `new`. NVI `StartAsync` and `StopAsync`, with a state guard, call `StartCoreAsync` and `StopCoreAsync`. `public abstract IReadOnlyCollection<DatabaseServerSession> Sessions`. During the bridge, `Context` stays a temporary abstract member (row 10). | P3/P6 |
+| 7 | `IDatabaseEngineWorker` | Database `:19` | area root | delete | The existing `DatabaseEngineWorker` (`DatabaseEngineWorker.cs:64`) is already mostly NVI: #1268 and its review landed a non-virtual `Run` (`:146`) and `RunIteration` (`:207`) over `protected abstract void RunIterationCore` (`:230`), with the per-database failure record (`protected` non-virtual `BeginDatabase`, `ReportFailure` and `ReportUnfinished`, `:242-329`), `Fault`, `ConsecutiveFailures`, `FailureCount` and `FailureBackoff`. The review changed the core from `bool` to `void`: a pass reports unfinished work per database (`ReportUnfinished`), so the return value carried nothing. P3 still makes `Name`, `Kind` and `Interval` set by the constructor and non-virtual (abstract today, `:102-108`). The trigger wait (`:350`) stays a `protected virtual` lifecycle hook; the checkpoint, purge and write-ahead flush workers override it (`*WriteAheadFlushWorker.cs:54`). P3 also moves the engines' shared pump and state fold (`shared/DatabaseEngineWorkerPump.cs`, compiled into each model since #1268's review) into the root engine base. **At P3:** landed. `protected DatabaseEngineWorker(string name, DatabaseEngineWorkerKind kind, TimeSpan interval)` rejects a blank name; the interval is not validated there, because the engines validate their options and an invalid one must keep failing the way it does today. The 22 leaves pass their values to the constructor (the shared `DatabaseCheckpointWorker` names itself `{engine}/checkpoint`), so a built-in worker's cadence is captured from the engine's options when the engine is created instead of read on every trigger wait. The pump and fold are in `DatabaseEngine` (row 5); the shared copy stays until P4. | P3 (NVI)/P6 |
+| 8 | `IDatabaseSchemaProvisioner` | Database `:7` | area root | delete | Folded into `DatabaseInstance`: a non-virtual `public bool SupportsSchemaProvisioning`, set by `protected DatabaseInstance(Name name, DatabaseEngine engine, bool supportsSchemaProvisioning = false)` (rule 6), and an NVI `ApplySchemaAsync` that throws `NotSupportedException` while the flag is `false` and otherwise calls a `protected virtual ApplySchemaCoreAsync` whose default throws `NotSupportedException`. It is the only capability member on `DatabaseInstance`. **Bridge:** Hosting's type test (`Hosting/src/Internal/DefaultDatabaseProvisioner.cs:49`) still needs the interface until P6, and the Sql PR of P4 deletes `ISqlDatabase` (`Sql/src/Abstractions/ISqlDatabase.cs:6`), which is how `SqlDatabase` carries it today. So `SqlDatabase` keeps `IDatabaseSchemaProvisioner` in its base list until P6, implemented by the inherited NVI member. Only Sql claims the interface, as today, and the SampleHost provisioning test stays green. P6 deletes it and turns the type test into a flag check. **At P3:** landed as planned; `DatabaseInstance` does not list `IDatabaseSchemaProvisioner`. `ApplySchemaAsync` checks disposal, a null schema, the capability and the token, in that order, before the core. | P3/P6 |
+| 9 | `IDatabaseServer` | Database `:26` | area root | abstract | `public abstract class DatabaseServer : IAsyncDisposable`, with a protected constructor taking the engine. `Engine` is non-virtual and field-backed (replacing `Context.Engine`), and leaves re-expose it typed with `new`. NVI `StartAsync` and `StopAsync`, with a state guard, call `StartCoreAsync` and `StopCoreAsync`. `public abstract IReadOnlyCollection<DatabaseServerSession> Sessions`. During the bridge, `Context` stays a temporary abstract member (row 10). **At P3 (re-verified):** the state guard is the lifecycle the four model servers each carried (a lifecycle gate; created inert; a start while running returns; a failed start and any stop are terminal; a start after them throws `ObjectDisposedException`; stop is idempotent and runs for a server that never started, so the leaf releases its listener). `DisposeAsync` is the non-virtual stop. `Context` is public abstract until P6. | P3/P6 |
 | 10 | `IDatabaseServerContext` | Database `:16` | area root | delete | `Engine` and `Sessions` fold into `DatabaseServer`. The four context classes (`Blob`, `Graph`, `KeyValuePair`, `Sql` `Internal/*DatabaseServerContext.cs:9`) and five test-double contexts are deleted **in P6**, because Hosting reads `server.Context.Engine` until P6 retypes it. | P6 |
-| 11 | `IDatabaseServerSession` | Database `:11` | area root | abstract | `public abstract class DatabaseServerSession`, with a protected constructor taking `(Guid, ProtocolVersion, string? principal)` that backs non-virtual getters. `public abstract DatabaseSession? DatabaseSession`. Leaves stay internal sealed. | P3/P6 |
-| 12 | `IDatabaseSession` | Database `:19` | area root | abstract | `public abstract class DatabaseSession : IAsyncDisposable`. The base owns `State`, `CurrentTransaction` and the one "already active" check, with one message (§6.4). `Database` is non-virtual and field-backed, and leaves re-expose it typed with `new`. NVI `BeginTransactionAsync` and `ExecuteAsync` call `BeginTransactionCoreAsync(IsolationLevel)` and `ExecuteCoreAsync`. | P3/P6 |
-| 13 | `IDatabaseTransaction` | Database `:18` | area root | abstract | `public abstract class DatabaseTransaction : IAsyncDisposable`, with a protected constructor taking `(TransactionId, IsolationLevel)`. It owns the explicit-transaction state machine (§6.4). NVI `CommitAsync` and `RollbackAsync` call `CommitCoreAsync` and `RollbackCoreAsync`. A non-virtual `DisposeAsync` rolls back if the transaction is active, then calls `DisposeAsyncCore`. | P3/P6 |
+| 11 | `IDatabaseServerSession` | Database `:11` | area root | abstract | `public abstract class DatabaseServerSession`, with a protected constructor taking `(Guid, ProtocolVersion, string? principal)` that backs non-virtual getters. `public abstract DatabaseSession? DatabaseSession`. Leaves stay internal sealed. **Corrected at P3:** a server session exists from accept, before its handshake (`Start` runs the pump), and its four leaves set `ProtocolVersion` during the handshake and `Principal` after authentication. So the protected constructor takes nothing and generates the `Id` (every leaf did `Guid.NewGuid()`), and the version and principal are base fields set once through protected, non-virtual `SetNegotiatedVersion` and `SetAuthenticatedPrincipal` (rule 6). Disposal is a non-virtual `DisposeAsync` over `protected abstract DisposeAsyncCore`. | P3/P6 |
+| 12 | `IDatabaseSession` | Database `:19` | area root | abstract | `public abstract class DatabaseSession : IAsyncDisposable`. The base owns `State`, `CurrentTransaction` and the one "already active" check, with one message (§6.4). `Database` is non-virtual and field-backed, and leaves re-expose it typed with `new`. NVI `BeginTransactionAsync` and `ExecuteAsync` call `BeginTransactionCoreAsync(IsolationLevel)` and `ExecuteCoreAsync`. **At P3:** landed (§6.4). `Database` is typed `DatabaseInstance`; both `ExecuteAsync` overloads have a core. The session also owns the reservation of a BEGIN in flight and, for models whose sessions run one operation at a time, a protected operation hold (`TryEnterOperation`/`ExitOperation`) that the "already active" check reads, and its teardown order: the leaf's `DisposeAsyncCore` ends its running operations, then the base ends the open transaction. | P3/P6 |
+| 13 | `IDatabaseTransaction` | Database `:18` | area root | abstract | `public abstract class DatabaseTransaction : IAsyncDisposable`, with a protected constructor taking `(TransactionId, IsolationLevel)`. It owns the explicit-transaction state machine (§6.4). NVI `CommitAsync` and `RollbackAsync` call `CommitCoreAsync` and `RollbackCoreAsync`. A non-virtual `DisposeAsync` rolls back if the transaction is active, then calls `DisposeAsyncCore`. **At P3:** landed (§6.4). The cores take no token: the base observes it only before an end starts. The leaf's other vocabulary is `GetKernelState`, `GetOfflineRefusal` and `CreateAbortedException`; `DisposeAsyncCore` is a `protected virtual` lifecycle hook with an empty default, run once. | P3/P6 |
 | 14 | `IQueryExecutor` | Execution `:13` | child root | delete | `SqlQueryExecutor` stays internal sealed. **At P1:** its public `ExecuteAsync(QueryRequest, CancellationToken)`, which only threw `NotSupportedException` to satisfy the interface, went with it. | P1 |
 | 15 | `IQueryPipeline` | Execution `:18` | child root | delete | Deleted together with `QueryPipelineBuilder`, `QueryExecutionContext`, `Internal/BuiltQueryPipeline`, `QueryPipelineDelegate`, `QueryTransactionStatus`, `QueryStatementResult` and `tests/QueryPipelineTests.cs`. `QueryStatementResult` (`QueryStatementResult.cs:12`) came with the pipeline, and its only constructions are in `QueryPipelineTests.cs:93` and `:272`. This is the Web-style tap-in pipeline the owner ruled out, and no engine consumes it. **At P1:** `Exceptions/QueryExecutionException` went too: its documented scope was "pipeline composition, stage contract violations", and nothing threw it. The Execution test project stays, with a `QueryRequestTests` suite over the surviving request contract instead of an empty shell. | P1 |
 | 16 | `IQueryPipelineStage` | Execution `:11` | child root | delete | Deleted with the pipeline. | P1 |
@@ -359,7 +360,7 @@ decision.
 |---|---|---|
 | `Storage.Model` (`Storage/src/Storage.cs:101`) | `public abstract StorageModel Model`. The value is fixed per storage, so it becomes a base field set by the protected constructor (rule 6). **At P2:** `protected Storage(StorageModel model, StorageStream data, ...)`. The five model storages and 21 test doubles (Storage.Tests 15, Transactions.Tests 5, Indexing.Tests 1; counted at P2) pass their model instead of overriding the getter. | P2 |
 | `StorageJournal` (`Storage/src/Journal/StorageJournal.cs:21`) | After P1 it is the type the coordinator and recovery name. It has one shipped leaf, the sealed `StreamJournal` in the same assembly (`StreamJournal.cs:16`), so as it stands it meets none of rule 2's cases, and its constructor is `protected` (`:32`). P2's Storage commit, after #1236 settles the journal format, either collapses `StreamJournal` into one public sealed `StorageJournal`, keeping the file factories (`StreamJournal.cs:75`, `:86`), or records the second variant that justifies the base and narrows the constructor to `private protected` (rule 3). **Decided at P2: collapsed.** No second variant exists: no test or other assembly derives from `StorageJournal`, and #1236 settled the format with one medium. `StreamJournal` is deleted; its medium operations became private members of `public sealed class StorageJournal`, and its three public constructors (over a `Stream`, a `StorageStream`, an `IFileSystemFileHandle`) and two `FromFile` factories became the journal's own. The constructors stay public rather than internal behind new factories: they were already public API on the former leaf, and Transactions.Tests, which no grant reaches, builds journals over memory streams for `TransactionRecovery`. The deviation marker goes with the base (§8). | P2 |
-| `CompiledSchema` (`Database/src/Provisioning/CompiledSchema.cs:12`) | A public abstract class whose leaf (`SqlCompiledSchema`) lives in Sql.Schema. It keeps a protected constructor. Audit its members for NVI when `DatabaseInstance.ApplySchemaAsync` starts taking it. | P3 |
+| `CompiledSchema` (`Database/src/Provisioning/CompiledSchema.cs:12`) | A public abstract class whose leaf (`SqlCompiledSchema`) lives in Sql.Schema. It keeps a protected constructor. Audit its members for NVI when `DatabaseInstance.ApplySchemaAsync` starts taking it. **Audited at P3: conforms, unchanged.** `Format`, `Name`, `Model` and `AllowsDestructiveChanges` are set by the protected constructor and non-virtual (rule 6); `CanonicalDocument` is its one abstract public member, state the leaf computes (rule 4); `Hash` is non-virtual over it; nothing is virtual otherwise, and its one leaf lives in another shipped assembly, so the constructor stays `protected` (rule 3). It keeps no interface twin and is not newly tightened, so it carries no marker (§8). | P3 |
 | `DatabaseEngineWorker` (`Database/src/DatabaseEngineWorker.cs:64`) | Public abstract `Name`, `Kind` and `Interval`, and a virtual `WaitForTrigger`. `Run`, `RunIteration` and the per-database reporting members are non-virtual already (#1268 and its review), over `protected abstract void RunIterationCore`; P3 finishes the NVI conversion (row 7). #1264's body lists it, but P3 is where the root bases are written, so it moves there. **At P3:** converted (row 7) and marked (§8). | P3 |
 | `QueryRow` (`Execution/src/QueryRow.cs:8`) | Nine public abstract getters (`:13-69`). `GetValue` returns `object?` and boxes. It has four leaves in four assemblies (`SqlMaterializedRow`, `KeyValueMaterializedRow`, `GraphQueryRow`, `DocumentQueryRow`), so it is megamorphic in a multi-model host. It gets NVI with the ordinal checks in the base, and typed accessors on the hot path. | P8 |
 | `QueryResultSet` (`QueryResultSet.cs:15`) | `GetRowsAsync` returns `IAsyncEnumerable<QueryRow>` (`:27`), which costs one interface dispatch per row. [Guessing] Replace it with a non-virtual pull shape only if a per-row benchmark shows the dispatch matters. | P8 |
@@ -498,6 +499,48 @@ model PR in P4, so the consolidation lands in two steps:
 **Gate:** P3 runs the new Database.Tests suite. Each model PR in P4 runs that model's #1188, #1225
 and #1226 suites, in process and over the wire.
 
+**At P3 (re-verified, then landed).** The four copies and the five checks were as listed. The
+bases carry the most complete copy, Documents' and Blob's (they had the session teardown Graph
+lacked, and keep a commit after it reporting the coded cause), with KeyValuePair's admission and
+refusal wording folded in:
+
+- `DatabaseTransaction` owns the end gate, `Faulted`, the repeatable rollback, cancellation only
+  before an end starts (its cores take no token), and the offline refusal before a commit or
+  rollback and the no-op teardown on an offline database (#1243). The plan's `Abort(Exception)` is
+  `protected internal AbortAsync`, because the abort rolls back under the end gate; the teardown's
+  `CloseAsync` (Documents, Blob and KeyValuePair carried it) joined it. A commit is refused while an
+  operation of the transaction runs: KeyValuePair's `TryBeginCommand`/`EndCommand` and the other
+  three models' `Operations` counter became one admission under the base's lock,
+  `TryBeginOperation`/`EndOperation`. A model supplies `GetKernelState`, `CommitCoreAsync` and
+  `RollbackCoreAsync` (with its own exception translation), `GetOfflineRefusal` and
+  `CreateAbortedException` (its code). `IsOpen`, `IsUsable` and `CreateRefusal`, which the sessions
+  read, are `protected internal`: the root's session base reads them, and a model re-exposes them
+  to its own session through its leaf.
+- `DatabaseSession` owns the one check, plus the reservation of a BEGIN in flight and a protected
+  operation hold (`TryEnterOperation`/`ExitOperation`) for the models whose sessions run one
+  operation at a time (Graph, Documents and Blob's `_reserved` flag and operation set), and
+  `ThrowIfTransactionRefuses` for the check every model made before a statement. Its teardown runs
+  the leaf's `DisposeAsyncCore` (the models abort their running operations there), then ends the
+  open transaction with the cause "The session closed before the transaction ended."
+- **Messages that change when a model adopts the bases** (P4 updates the assertions, R4): the
+  "already active" check ("A transaction or operation is already active on this session." for
+  all five); a closed session ("The session is closed.", for "The graph session is closed.",
+  "Session is not open. Current state: Closed." and their siblings); a commit or rollback refused by
+  state ("The transaction is {state}." and "The transaction is Committed; a committed transaction
+  cannot roll back.", for KeyValuePair's and SQL's "Cannot commit transaction in state '…'"
+  forms); a refused operation ("… start the operation after it ends." and "The session's
+  transaction ended before the operation started; nothing was written.", for "statement",
+  "command" and Blob's "operation"); a commit with work running ("An operation of the transaction
+  is still running; commit after it completes.", for "Dispose every graph operation …", "Dispose
+  every blob stream …" and KeyValuePair's command message); the teardown cause ("The session
+  closed before the transaction ended.", for the three model-named causes Documents, Blob and
+  KeyValuePair assert). Graph's commit after an abort and a second commit now both report
+  `COHDBG007` with the cause, as Documents and Blob already did.
+- **SQL in P4** gains the end gate, the repeatable rollback and a coded aborted error of its own
+  (a commit of a transaction the kernel ended under its caller fails with that code instead of
+  "Cannot commit transaction in state …"); it keeps the statement-level contract, so it never calls
+  `AbortAsync`.
+
 ### 6.5 Root-base state, attach semantics and typed accessors (rows 1, 5, 9, 12)
 
 - **Attach.** `DatabaseEngine` owns `Workers` and `Servers`. Today a model fills them through the
@@ -514,6 +557,14 @@ and #1226 suites, in process and over the wire.
 - **Async factories.** A `new` typed async member such as
   `public new ValueTask<SqlDatabaseSession> CreateSessionAsync(...)` awaits the base public member
   and casts once. It never calls the `Core` member directly (risk R3).
+
+**At P3:** landed as described; the base also checks the attach preconditions
+`DatabaseEngineBuilderState` checked (a product attached twice, a server fronting another engine).
+**For P4.0 and P4:** a builder cannot call a protected member of the engine it built, so each
+model's leaf exposes one internal composition method that calls `AttachWorker`, `AttachServer`
+and `CompleteComposition`, and `DatabaseEngineBuilderState.Complete` takes it instead of the two
+callbacks and drops the checks the base now makes. An engine created without its builder
+(`SqlDatabaseEngine.Create(options)` and its siblings) completes its composition in `Create`.
 
 ### 6.6 Blob and Documents sessions: option B (rows 54, 61)
 
@@ -718,6 +769,17 @@ Documents.Language, Blob and Hosting.
   - `DatabaseApplicationTests.cs:204`, `DatabaseCompositionTests.cs:391` and
     `ResourceControlPlaneHostingTests.cs:375`;
   - `EmbeddedDatabaseTests.cs:74`.
+  - **At P3:** unchanged, as scheduled: Hosting and Embedded still compose engines through the
+    interfaces the bases keep implementing, so their suites run unchanged and are P3's evidence
+    that the bridge holds. None of them derived from `DatabaseEngineWorker`
+    (`RecordingEngineWorker` implements the interface), so the worker's constructor change did not
+    reach them either.
+- **The base suite's own doubles (P3).** Database.Tests derives from the bases directly through
+  their protected constructors, with no grant: `TestEngine`, `TestDatabase` (and
+  `UnprovisionedTestDatabase`), `TestSession`, `TestTransaction`, `TestServer`,
+  `TestServerSession` and `RecordingWorker` implement only the protected cores over in-memory
+  state. The existing `ScriptedWorker` passes its name, kind and interval to the worker's new
+  constructor.
 - **Test-double contexts** go in P6: `RecordingServerContext` in the Blob (`:277`), Documents
   (`:282`), Graph (`:282`) and Hosting (`RecordingServer.cs:57`) tests, and Sql's `ProbeContext`
   (`:205`).
@@ -946,6 +1008,39 @@ derives from them yet; that happens per model in P4. P3 also:
 cancellation before an end, `Abort`, the one message, attach after freeze refused); every
 existing Database suite unchanged and green; the engine-worker suites of every model.
 
+**P3, as landed (re-verified 2026-10-05 against the code after P1 and P2).** Two commits: the
+worker's NVI conversion, then the six bases. Every row was re-read against the code first; where
+the code had moved, the row now says what landed:
+
+- **Rows 1, 5, 9, 12 and 13** landed as planned, with the members the interfaces had gained since
+  the plan: `OfflineDatabases` (#1243) is the engine's one abstract public member, and
+  `DatabaseInstance` owns idempotent disposal because `IDatabase` is disposable (rows 1 and 5).
+- **Row 11 was corrected:** a server session's version and principal are not known when it is
+  constructed, so they are protected one-shot setters, not constructor parameters.
+- **§6.4** landed with two additions the code required: `Abort` is `AbortAsync`, joined by the
+  teardown's `CloseAsync`, and the commit's refusal while work runs is one admission
+  (`TryBeginOperation`/`EndOperation`) under the base's lock. The messages that change when a
+  model adopts the bases are listed in §6.4 for each P4 PR.
+- **Row 7 and §5.3:** the worker's name, kind and interval are constructor-set; the 22 leaves
+  changed with it. The engines' pump and state fold are in `DatabaseEngine`; the shared copy stays
+  compiled into each model until its P4 PR, because no model engine derives from the base yet.
+  `CompiledSchema` was audited and left unchanged.
+- **Row 8:** `SupportsSchemaProvisioning` and `ApplySchemaAsync` landed as planned.
+- **No caller changed.** Hosting, Embedded, Testing, Studio, the Sdk and every model still compose
+  through the interfaces the bases implement; only the worker leaves and the root suite's
+  `ScriptedWorker` moved to the worker's new constructor. The Hosting and Embedded doubles stay
+  for P6 (§6.9).
+- **Gate, as run.** Every Database project, Sdk.Database and Studio build with no new warning
+  (CS2008 on Database.Refs predates P3). Database.Tests grows from 27 to 101 tests: the base
+  suite (`DatabaseTransactionTests`, `DatabaseSessionTests`, `DatabaseEngineTests`,
+  `DatabaseInstanceTests`, `DatabaseServerTests`) plus two worker-constructor tests. Every other
+  Database suite passes with its baseline count, among them the engine-worker and resilience
+  suites of every model (Sql 1087, KeyValuePair 158, Graph 360, Documents 152, Blob 129) and
+  Hosting (53) and Embedded (4), which exercise the workers through their engines. The Studio
+  `--smoke` run matches its baseline, and the dependency graph check passes (no reference
+  changed). Database.Testing's suite and the SampleHost fixture need a local SDK pack and were
+  not run.
+
 **P4, #1260: one PR per model.**
 
 - **P4.0, its own PR.** Make `Database/shared/DatabaseEngineBuilderState.cs` generic over the
@@ -1082,6 +1177,10 @@ it). [Certain] The implementers were counted with rg on 2026-10-04.
 Internal abstract bases (the strategies and `TransactionLog`) are not public API and carry no
 marker. Other sealed leaves are covered by `database-area.md`. Each marker lands in the phase that
 writes its type, or, for `Storage`, strips its interface.
+
+**At P3:** the seven P3 markers landed: the six root bases and `DatabaseEngineWorker`. The case
+column holds for each as written; `DatabaseServerSession`'s leaves (one per model server) still
+implement the interface until their model's P4 PR. `CompiledSchema` carries none (§5.3).
 
 ## 9. Performance evidence
 

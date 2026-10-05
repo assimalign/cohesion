@@ -23,6 +23,16 @@ the whole base surface — including child-owned vocabulary the contracts speak
 
 ## Scope
 
+- **Root bases (concrete-types plan, phase 3, #1259)** — `DatabaseEngine`,
+  `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer` and
+  `DatabaseServerSession` are the abstract bases that replace the interfaces below under the
+  area's concrete-first rule: non-virtual public members over protected cores, field-backed
+  fixed state, protected attach methods frozen after composition, and one copy of the behavior
+  every model shares (the explicit-transaction state machine, the one "already active" check, the
+  engine's worker pump, state fold and disposal order, the server lifecycle). Each still
+  implements its old interface, so nothing above the root changes until each model moves its
+  leaves onto them (phase 4) and phase 6 deletes the interfaces. `DatabaseEngineWorker`'s name,
+  kind and cadence are fixed by its constructor. See [DESIGN.md](DESIGN.md), "Root bases".
 - **Engine contracts** — create/open/drop/enumerate logical databases. Engines
   are **data machines**: operational from creation, no start/stop ceremony;
   disposal quiesces their background workers and durably flushes. `State` is
