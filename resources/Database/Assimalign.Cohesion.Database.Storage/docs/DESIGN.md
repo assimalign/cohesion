@@ -664,8 +664,16 @@ caller that tells the causes apart reads the enum, never the message:
 
 - **The failing call throws `StorageOfflineException`** (`COHDBS002`), carrying the I/O
   failure as its inner exception. The journal latches the error under its append lock, so no
-  append can slip in behind the failed flush; a data-file failure latches the journal too.
-  `Storage.OfflineError` and `IsOffline` report it for the life of the instance.
+  append can slip in behind the failed flush; a data-file or header failure, and
+  `TakeOffline`, latch the journal too. The journal's latch is the storage's only one: it keeps
+  the first error, and `Storage.OfflineError` and `IsOffline` read it, so they report for the
+  life of the instance the error `OnOffline` was raised with. A failure that loses a race to it
+  (a header slot write or data flush in flight when a drain on another thread fails) throws the
+  refusal of that first error, not its own. Before the #1268 review the storage kept a latch of
+  its own beside the journal's and read it first, so such a failure replaced the reported error
+  after `OnOffline` had run, and an engine's refusals named the header write while the journal's
+  refusals and the abandoned lock waits named the drain (`StorageOfflineTests`, "a header write
+  failing after a drain took the storage offline keeps the drain's error").
 - **Nothing more is written to either file.** Every later journal append, flush, durable
   wait and checkpoint, every page write-back, eviction of a dirty page, file extension and
   `FlushAll` (the buffer pool's write guard), every header write, every new storage
@@ -872,7 +880,10 @@ bytes, and the engines' checkpoint workers died on the refusal. Now the failing 
 takes the storage offline exactly as a failed durable flush does ("A failed durable flush takes
 the storage offline"): it throws `StorageOfflineException` (`Cause` is `HeaderWrite`, the slot write's
 failure the inner exception), raises `OnOffline`, and every
-later write is refused, the close included, until the storage is reopened; the reopen finds a
+later write is refused, the close included, until the storage is reopened. When something else
+took the storage offline while the slot write was in flight (a drain on another thread), the
+header write throws the refusal of that first error instead, which stays the storage's (#1268
+review, "The failing call throws" above). The reopen finds a
 whole generation either way, and the untruncated journal describes everything before the
 failure. `Storage.HeaderFaulted` (internal) still records that the offline state came from a
 failure after the slot write. A failure before the slot write is issued leaves the target slot

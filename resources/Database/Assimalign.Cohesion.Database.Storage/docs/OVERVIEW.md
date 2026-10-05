@@ -23,13 +23,17 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
   to a user-space buffer, frames built in place, which drains to the operating system in one
   write before every commit is acknowledged (every durability mode), every reader, the
   write-ahead gate and a checkpoint's truncation (#1252, PostgreSQL's WAL buffers).
-- **Offline on a failed fsync** — a durable flush of the journal or the data file, or a write
-  of the journal's buffer, that fails takes the storage offline (`StorageOfflineException`,
+- **Offline on a failed journal write, fsync or header write** — a durable flush of the journal
+  or the data file (#1243), a write of the journal's buffer (#1252), or a header slot write
+  that fails once issued (#1268) takes the storage offline (`StorageOfflineException`,
   `COHDBS002`): nothing more is written to either file, closing included, until the file set
   is reopened and its recovery
-  decides every unconfirmed commit (#1243, PostgreSQL's PANIC on a failed WAL fsync).
-  `OnOffline` is raised once when it happens, so an engine takes a database's other file sets
-  offline in the same moment, and `CommitRecordWritten` marks a commit that may survive.
+  decides every unconfirmed commit (PostgreSQL's PANIC on a failed WAL fsync).
+  `StorageOfflineException.Cause` (`StorageOfflineCause`: `JournalFlush`, `DataFlush`,
+  `HeaderWrite`) names what failed, and the first failure is kept for the life of the instance.
+  `OnOffline` is raised once when it happens, with that failure, so an engine takes a
+  database's other file sets offline in the same moment, and `CommitRecordWritten` marks a
+  commit that may survive.
 - **Checkpoint triggers** — `CheckpointJournalSize` asks for a checkpoint when the journal
   reaches a size (`OnCheckpointNeeded`), and `IsCheckpointDue(interval)` adds a time backstop
   that skips idle journals; engines default to 256 MiB and 5 minutes (#1254).

@@ -91,8 +91,8 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// A healthy result when every engine is running, a degraded result while an engine reports a
     /// worker that keeps failing (the result names each failing worker and the type of its last
     /// failure, #1268), or an unhealthy result when an engine is disposed or reports an unknown
-    /// state, or when an open database is offline after a failed durable flush (#1243) or file
-    /// header write (#1268).
+    /// state, or when an open database is offline after a failed write or durable flush of its
+    /// journal (#1252, #1243), durable flush of its data file (#1243) or file header write (#1268).
     /// </returns>
     /// <remarks>
     /// The health endpoint is served without authentication, so a failure is described by its
@@ -195,9 +195,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     break;
             }
 
-            // A database that went offline after a failed durable flush or file header write
-            // refuses every request until it is reopened (#1243, #1268); the engine itself keeps
-            // running, so its state does not show it. A disposed engine has no databases to report.
+            // A database that went offline after a failed write or flush of its journal, durable
+            // flush of its data file, or file header write refuses every request until it is
+            // reopened (#1243, #1252, #1268); the engine itself keeps running, so its state does
+            // not show it. A disposed engine has no databases to report.
             if (state != EngineState.Disposed)
             {
                 IReadOnlyList<DatabaseName> offline = engine.OfflineDatabases;
@@ -227,9 +228,9 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         else if (offlineDatabases.Count > 0)
         {
             contribution = HealthContribution.Unhealthy(
-                $"Offline databases: {string.Join(", ", offlineDatabases)}. A durable flush or a file header write of their " +
-                "storage failed, so every operation on them is refused until each is reopened (OpenDatabaseAsync), or the " +
-                "process restarts and opens them again; either runs recovery.",
+                $"Offline databases: {string.Join(", ", offlineDatabases)}. A write or flush of their journal, a durable " +
+                "flush of their data file, or a file header write failed, so every operation on them is refused until each is " +
+                "reopened (OpenDatabaseAsync), or the process restarts and opens them again; either runs recovery.",
                 data);
         }
         else if (faultedEngines.Count > 0)

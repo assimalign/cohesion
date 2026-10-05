@@ -368,8 +368,8 @@ The integration architecture, in the order the work items landed:
   (the workers catch per database, skip a failing database for a second and retry it while the
   others keep their pace, PostgreSQL's background-worker error recovery), and the degraded result
   names each failing worker with the type of its last failure (never the message, which the
-  `Assimalign.Cohesion.Database` event source carries); a database a failed fsync or header slot
-  write took offline is unhealthy until it is reopened, and every lock wait on it ends with the
+  `Assimalign.Cohesion.Database` event source carries); a database a failed fsync, journal drain
+  or header slot write took offline is unhealthy until it is reopened, and every lock wait on it ends with the
   coded refusal (`TransactionCoordinator.AbandonLockWaits`). User checks added through `builder.AddHealthCheck(name, check)` and
   any other registered `Hosting.Health` `IHealthContributor`s join the same generated control
   plane. `Database.Hosting`'s internal admin service exposes the aggregate over private

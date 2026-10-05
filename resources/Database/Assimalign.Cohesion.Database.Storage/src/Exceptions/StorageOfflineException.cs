@@ -39,7 +39,8 @@ namespace Assimalign.Cohesion.Database.Storage;
 public sealed class StorageOfflineException : StorageException
 {
     /// <summary>
-    /// The code that leads the message: the storage is offline after a failed durable flush.
+    /// The code that leads the message: the storage is offline (a write or flush of the journal, a
+    /// durable flush of the data file, or a write of the file header failed; see <see cref="Cause"/>).
     /// </summary>
     public const string ErrorCode = "COHDBS002";
 

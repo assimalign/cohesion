@@ -19,8 +19,9 @@ using Assimalign.Cohesion.Database.Storage;
 /// commit arriving mid-pass re-sets it and is served by the next pass. In the
 /// synchronous durability mode there is never anything pending and the worker idles.
 /// <para>
-/// A durable flush that fails takes its database offline (#1243): the storage releases the
-/// committers waiting on it, each gets the refusal from its own flush, and the worker keeps
+/// A drain of the journal's append buffer (#1252) or a durable flush (#1243) that fails takes
+/// its database offline: the storage releases the committers waiting on it, each gets the
+/// refusal from its own flush, and the worker keeps
 /// flushing the engine's other databases. Any other failure of one file set is reported for its
 /// database and the pass goes on to the next (#1268); the database is flushed again after
 /// <see cref="DatabaseEngineWorker.FailureBackoff"/>, and its committers self-help within their

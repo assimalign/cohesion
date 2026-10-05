@@ -64,8 +64,9 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Gets the names of the open databases that are offline: a durable flush of one of their
-    /// files failed (#1243), or a write of a file header failed after its header slot write was
-    /// issued (#1268), and every operation on them is refused with
+    /// files failed (#1243), a write of a journal's append buffer failed (#1252), or a write of a
+    /// file header failed after its header slot write was issued (#1268), and every operation on
+    /// them is refused with
     /// <see cref="DatabaseOfflineException"/> until <see cref="OpenDatabaseAsync"/> reopens
     /// them. Empty while every open database is online; a point-in-time snapshot.
     /// </summary>
@@ -96,8 +97,9 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     /// Opens an existing logical database by name.
     /// </summary>
     /// <remarks>
-    /// A database that went offline after a failed durable flush (every operation on it throws
-    /// <see cref="DatabaseOfflineException"/>) is reopened: the offline instance is closed without
+    /// A database that went offline after a failed durable flush, journal write or file header
+    /// write (every operation on it throws <see cref="DatabaseOfflineException"/>; see
+    /// <see cref="OfflineDatabases"/>) is reopened: the offline instance is closed without
     /// writing anything, and the database is opened again from its files, whose recovery decides
     /// the outcome of every commit that was not confirmed (#1243). The returned instance is a new
     /// one; the offline instance stays refused.

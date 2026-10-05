@@ -126,7 +126,9 @@ public abstract class StorageJournal : IStorageJournal
 
     // Set once, by the first failed drain or durable flush (or by the owning storage when a
     // durable flush of its data file or its header slot write failed, or another file set of the
-    // database went offline); never cleared. Guarded by _syncRoot for writes.
+    // database went offline); never cleared. It is the owning storage's latch too: its
+    // OfflineError reads this one, so the first error is the storage's whichever path set it.
+    // Guarded by _syncRoot for writes.
     private StorageOfflineException? _offline;
 
     // 1 once Offline was raised for the latch above, so it is raised exactly once.

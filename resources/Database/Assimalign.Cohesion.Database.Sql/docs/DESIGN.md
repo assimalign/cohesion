@@ -1057,7 +1057,8 @@ trigger measured 6 truncations in 6 s instead of 458, and a journal peak 700-884
 trigger); `SqlWorkerResilienceTests` now checks that the healthy database keeps at least half its
 no-fault checkpoint count (measured: 4,332 against 4,199 in two seconds, where the worker-wide
 backoff gave 1, with a journal peak of 210 MB). A failure that took a database offline (a failed durable
-flush, #1243, or a failed header slot write, #1268) is not the worker's: the workers skip
+flush, #1243, a failed drain of the journal's append buffer, #1252, or a failed header slot write,
+#1268) is not the worker's: the workers skip
 that database and the engine lists it in `OfflineDatabases`. The engine's pump runs a
 worker again after the backoff if its loop ever ends early (only a worker that implements
 `IDatabaseEngineWorker` without the guided base can let that happen; the engine then reports
@@ -1146,7 +1147,7 @@ neither file set changes afterwards, that the slot write was tried once, that th
 database keeps being checkpointed, and that the reopen brings back every row committed before
 the fault. The same suite fails a checkpoint's and a write-back's page writes (the worker
 reports, backs off that database, and recovers once the fault clears, while the other
-database's work goes on at full pace) and a group commit's fsync (only its database goes
+database's work goes on at full pace) and a group commit's drain or fsync (only its database goes
 offline; the flush worker keeps serving the other database's grouped commits within the
 group-commit window).
 

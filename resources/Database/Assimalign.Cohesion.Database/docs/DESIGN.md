@@ -149,8 +149,8 @@ classDiagram
   after N failures, or past a journal ceiling), is an owner decision recorded as a
   follow-up of #1268.
 - **An offline database is reported beside the state, not in it** (#1243 review).
-  A database whose fsync, or since #1268 whose header slot write, failed refuses every
-  request while its engine keeps
+  A database whose fsync (#1243), drain of a journal's append buffer (#1252) or header slot
+  write (#1268) failed refuses every request while its engine keeps
   serving the others, so `EngineState` does not change; `IDatabaseEngine.OfflineDatabases`
   lists the open databases that are offline, and the hosting health aggregate
   reports the application unhealthy while the list is not empty. Before this an
@@ -398,7 +398,15 @@ No counters: a worker's counts are on the worker (`FailureCount`, `ConsecutiveFa
 the hosting health aggregate reports them. The health output names a failing worker and the
 type of its failure only, because the health endpoint is unauthenticated and an exception's
 message can carry file paths; the event carries the message. A database going offline is not a
-worker event: the engines report it through `IDatabaseEngine.OfflineDatabases` and health.
+worker event: the engines report it through `IDatabaseEngine.OfflineDatabases` and health, and
+every refusal carries the failure that took it offline (`DatabaseOfflineException`'s inner
+`StorageOfflineException`, its `Cause` and its I/O error). This source does not write the
+transition either, and cannot without breaking the event-source convention: an engine model sees
+it in its storage's `OnOffline` hook, outside the root, and the root may expose no public entry
+point into this internal source (`.claude/rules/event-source.md`, rule 2). An offline event
+therefore belongs in each engine model's own source, which none has yet: an open follow-up of
+the #1268 review. Until then a database a drain on a worker's thread took offline (#1252) is
+visible as it happens only in health, and its cause in the next refused operation.
 
 ## AOT posture
 
