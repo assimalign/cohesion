@@ -119,7 +119,7 @@ items. Each item is resolved below. Line references were re-measured on 2026-10-
 
 | # | Critique item | Resolution | Phase |
 |---|---|---|---|
-| C1 | **Blocker.** P1 cannot make `ITransactionManager` internal: `TransactionCoordinator.Manager` exposes it (`TransactionCoordinator.cs:106`), Indexing.Tests builds one (`IndexTestHarness.cs:26-27`, `:39-40`, `:52`), and Sql.Tests reads it (`SqlMvccBindingTests.cs:63`, `:71`). | `TransactionManager` stays public as a sealed type with an internal constructor and a public static `Create`. The only grant added is Transactions → Transactions.Tests. Foreign tests are rewritten (§6.9). The gate includes Indexing.Tests and Sql.Tests. | P1 |
+| C1 | **Blocker.** P1 cannot make `ITransactionManager` internal: `TransactionCoordinator.Manager` exposes it (`TransactionCoordinator.cs:106`), Indexing.Tests builds one (`IndexTestHarness.cs:26-27`, `:39-40`, `:52`), and Sql.Tests reads it (`SqlMvccBindingTests.cs:63`, `:71`). | `TransactionManager` stays public as a sealed type with an internal constructor and a public static `Create`. The Transactions → Transactions.Tests grant (already present for the deferred-undo clock) is the only one P1 relies on; P1 adds none. Foreign tests are rewritten (§6.9). The gate includes Indexing.Tests and Sql.Tests. | P1 |
 | C2 | Four public static factories collide with the planned type names (`LockManager`, `TransactionManager`, `TransactionLog`, `VersionStore`). Three more take or return deleted interfaces: `SqlSchemaCompiler`, `ProtocolFraming`, `TransactionRecovery`. | Each gets a name decision in §5.2. | P1, P2, P4 |
 | C3 | The statement-snapshot view cannot be internal: Documents, Graph and Blob build it from other assemblies. | `public TransactionContext PinStatementSnapshot()` (§6.1). | P2 |
 | C4 | The four `IStorageTransactionSource` wrappers throw different exception types. Indexing may not reference `DatabaseException`. | A per-engine delegate on `BTreeIndexManagerOptions`. Each engine keeps its own exception vocabulary (§6.3). | P2 |
@@ -635,7 +635,8 @@ Documents.Language, Blob and Hosting.
     begin case);
   - `BeforeAbortRecord`: `RollbackAsync_JournalRejectsAbortRecord_ShouldReleaseWriterForTheNextOne`,
     `RollbackAsync_UndoFails_ShouldHoldLocksAndVisibilityUntilThePurgePassCompletesIt` and
-    `Recovery_WriterWithoutAbortRecord_ShouldBeClassifiedAbortedAndScrubbed` (both cases).
+    `Recovery_WriterWithoutAbortRecord_ShouldBeClassifiedAbortedAndScrubbed` (the completed-undo
+    case; the deferred case asserts that no abort record was requested).
 
   `RollbackAsync_UndoBracketJournalWriteFails_ShouldDeferTheUndoAndLeaveCheckpointsRunning`, which
   this list used to name, no longer exists: #1252 renamed it and split it into
@@ -756,8 +757,11 @@ root builds with 0 warnings, as before.
     (**open at P1:** the P1 change does not edit `.claude/rules/`; the owner makes that one-word
     edit, see §12);
   - `resources/Database/README.md:11`, `:100`, `:111` and `:143-144`;
-  - `docs/resources/Database/DESIGN.md:43`, `:72`, `:83`, `:90`, `:94`, `:96`, `:120`, `:122`,
-    `:130` and `:495` (the decision-log row at `:469` is history and stays);
+  - `docs/resources/Database/DESIGN.md:43`, `:72`, `:83`, `:90`, `:94`, `:96`, `:120`, `:122`
+    and `:130`. **Corrected at P1:** the two dated decision-log rows, "`Sql.Replication` missing"
+    (`:469`) and "Child roots roll up under the root" (`:495`, which lists `Governance`), are
+    history and stay as written (now `:473` and `:499`), as the dated rows of
+    `DATABASE_PROGRAM_PLAN.md` do;
   - `Database/docs/OVERVIEW.md:19` and `:69`, `Database/docs/DESIGN.md:14`, and
     `Database.Storage/docs/DESIGN.md:646`;
   - `docs/programs/DATABASE_PROGRAM_PLAN.md` (five mentions; at P1 only the lane table is current
@@ -774,13 +778,19 @@ root builds with 0 warnings, as before.
   `<inheritdoc />` carry the interfaces' documentation themselves.
 - **Transactions.** `TransactionManager`, `TransactionLog` and `TransactionRecovery` per §5.2, and
   the coordinator hooks that replace the `IStorage` and `IStorageJournal` interception (§6.9). The
-  Transactions → Transactions.Tests grant already existed at P1.
+  Transactions → Transactions.Tests grant already existed at P1; its comment in
+  `src/Properties/AssemblyInfo.cs` lists every use P1 added. The MVCC binding paragraph of
+  `docs/resources/Database/DESIGN.md` §3.8 (`:352`) names `TransactionManager`, the internal
+  journal-bound log and `Storage.ReserveTransactionSequence`/`BeginTransaction(long)` instead of
+  the deleted interfaces (found by the P1 review).
 - **Re-verified at P1 against the code after #1251 to #1253 (and #1242, #1254, #1268).** Every
   deleted interface still had no consumer outside the rows above; three public carriers the
   review had missed were retyped (§5.2: `BTreeIndexManagerOptions.Storage`, the five
   `WriteAheadJournal` properties, the coordinator's constructor and `Manager`). The coordinator
   hooks were still needed (§6.9): #1252's stream-level triggers replaced the one test that failed
   a journal write, but not the checkpoint, sequence and abort-record interceptions.
+- **Outside the rows.** P1 also removed a duplicate `using Assimalign.Cohesion.ApplicationModel;`
+  (a pre-existing CS0105 warning) from `Database.Testing`'s `DatabaseSampleHostEndToEndTests.cs`.
 
 *Gate:*
 
