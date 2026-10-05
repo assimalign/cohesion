@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 internal sealed class BlobDatabaseEngineBuilder : IBlobDatabaseEngineBuilder
 {
-    private readonly DatabaseEngineBuilderState _state = new();
+    private readonly DatabaseEngineBuilderState<BlobDatabaseEngine, IDatabaseEngineWorker, IDatabaseServer> _state = new();
     private readonly BlobDatabaseEngineOptions _options = new();
 
     public string? EngineName

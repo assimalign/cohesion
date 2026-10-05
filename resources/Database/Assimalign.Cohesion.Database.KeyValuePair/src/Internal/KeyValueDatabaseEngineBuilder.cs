@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 internal sealed class KeyValueDatabaseEngineBuilder : IKeyValueDatabaseEngineBuilder
 {
-    private readonly DatabaseEngineBuilderState _state = new();
+    private readonly DatabaseEngineBuilderState<KeyValueDatabaseEngine, IDatabaseEngineWorker, IDatabaseServer> _state = new();
     private readonly KeyValueDatabaseEngineOptions _options = new();
 
     public string? EngineName

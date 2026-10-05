@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed class DocumentDatabaseEngineBuilder : IDocumentDatabaseEngineBuilder
 {
-    private readonly DatabaseEngineBuilderState _state = new();
+    private readonly DatabaseEngineBuilderState<DocumentDatabaseEngine, IDatabaseEngineWorker, IDatabaseServer> _state = new();
     private readonly DocumentDatabaseEngineOptions _options = new();
 
     public string? EngineName

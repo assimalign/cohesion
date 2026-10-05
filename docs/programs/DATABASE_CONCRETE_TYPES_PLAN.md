@@ -2,7 +2,8 @@
 
 **Status:** Phase 0 landed with this file; phases 1 (#1257) and 2 (#1258, kernel and wire tracks)
 re-verified and implemented on 2026-10-05 (§7, §6.9); phase 3 (#1259) re-verified, implemented
-and reviewed on 2026-10-05, with two owner questions open at its merge (§7, §6.4, §6.5) ·
+and reviewed on 2026-10-05, with two owner questions open at its merge (§7, §6.4, §6.5); step
+P4.0 (#1260) re-verified and implemented on 2026-10-05 (§7, §6.5) ·
 **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
 · **Owner decision:** O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md` · **Supersedes:** #1232
@@ -130,7 +131,7 @@ items. Each item is resolved below. Line references were re-measured on 2026-10-
 | C7 | The Sql.Schema declaration records are positional and cannot be closed. | The declaration model stays internal behind an opaque `public sealed SqlSchema`, and `SqlSchemaCompiler` becomes internal (§6.7). Correction to the critique: Sql.Schema has **no** `InternalsVisibleTo` today. Phase 4 adds Sql.Schema → Sql.Schema.Tests. | P4 |
 | C8 | The existing public abstract hot types were not audited. | Each is audited in the phase that touches it (§5.3). | P2, P3, P8 |
 | C9 | Test doubles that are both a `Storage` and a record space break under single inheritance. | They are split. Verification found three: `CoordinatorStorage` (`TransactionCoordinatorRecoveryTests.cs:318`), `RollbackStorage` (`TransactionCoordinatorRollbackTests.cs:926`) and `RecordStorage` (`RecordSpaceVersionStoreTests.cs:246`). The first two also name `IStorage` in their base lists and re-implement its members, which breaks in P1, not P2: P1 removes those and moves the hooks to the coordinator (§6.9). Only the record-space split waits for P2. **At P2:** five doubles, not three (two crash-suite doubles came later); all split (§6.9). | P1, P2 |
-| C10 | The shared `DatabaseEngineBuilderState.cs` is typed against the root interfaces. The bridge must still satisfy `IDatabaseServer.Context`. | Step P4.0 makes the state generic before the first model PR. The context classes are deleted in P6. | P4.0, P6 |
+| C10 | The shared `DatabaseEngineBuilderState.cs` is typed against the root interfaces. The bridge must still satisfy `IDatabaseServer.Context`. | Step P4.0 makes the state generic before the first model PR. The context classes are deleted in P6. **At P4.0:** generic over the engine and, for the bridge, over the product types; the bridge overload that the unadopted builders use reads `server.Context.Engine` (§6.5, §7). | P4.0, P6 |
 | C11 | The performance numbers were tagged `[Certain, measured]`, but they do not reproduce. | They are retagged `[Likely]`, given as ranges with ±60% variance, and the "whatever the type shape" claim is dropped (§9). | P0 |
 | C12 | Rule conflicts the original rule changes missed: access-modifier rule 1, "internal types are internal", the `Internal/` namespace, one public type per file. | `database-area.md` ("How this relates to the other rules") explains why rule 1 and the checklist line still hold. The moves out of `Internal/`, with their namespace changes and test `using` lines, are counted in P2, P4 and P5 (§10). | P0 |
 | C13 | Smaller gaps: the Execution files `QueryPipelineDelegate.cs` and `QueryTransactionStatus.cs`; `EmbeddedDatabase.TryGetEngine`; Studio's casts index a root-typed collection; cohesion-docs; #1236 is two images per page, not one. | All added: rows 15 and 5, §5.2, P7, P8, and §1. | P1, P6, P7, P8 |
@@ -215,7 +216,7 @@ interface is deleted in P6.
 | 3 | `IDatabaseApplicationBuilder` | Database `:7` | area root | keep | Retyped: `AddEngine(DatabaseEngine)` and `AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine>)`. | P6 |
 | 4 | `IDatabaseApplicationContext` | Database `:6` | area root | keep | `Engines` becomes `IReadOnlyList<DatabaseEngine>`, `Servers` becomes `IReadOnlyList<DatabaseServer>`, and `GetEngine` returns `DatabaseEngine`. Adds a static extension `GetEngine<TEngine>(name) where TEngine : DatabaseEngine`. | P6 |
 | 5 | `IDatabaseEngine` | Database `:29` | area root | abstract | `public abstract class DatabaseEngine : IAsyncDisposable, IDisposable`, with a protected constructor taking the name and model. `Name`, `Model`, `State`, `Workers` and `Servers` are non-virtual and field-backed. `protected` non-virtual `AttachWorker` and `AttachServer` are refused after `CompleteComposition()` (§6.5). NVI create, open, drop, list and try-get members call `*Core` members. A non-virtual `DisposeAsync` keeps the order servers, then workers, then `DisposeAsyncCore`. Leaves add `public new ValueTask<SqlDatabase> OpenDatabaseAsync(...)` over the base NVI member. **At P3 (re-verified):** the interface had gained `OfflineDatabases` (#1243) after the plan; it is the base's one abstract public member, state the leaf computes (rule 4). `Workers` is typed `IReadOnlyList<DatabaseEngineWorker>` and `Servers` `IReadOnlyList<DatabaseServer>`, published copies replaced on each attach. `AttachWorker` starts the worker's pump thread at once, as every engine did, and carries the checks the engines and `DatabaseEngineBuilderState` made: unique worker names (Sql and KeyValuePair checked them), no product attached twice, a server that fronts this engine. The disposal order is servers (last attached first), then every pump stopped and joined, then the workers (last attached first), then `DisposeAsyncCore`, continuing past failures into one `AggregateException`. The engines' pump frame and state fold (`shared/DatabaseEngineWorkerPump.cs`) moved into the base; the shared copy cannot be deleted in P3, because no model engine derives from the base yet and the root may grant no model its internals, so each model stops compiling it in its P4 PR and the last deletes it. **P3 review:** every NVI member checks the name, then disposal, then the token before its core; `GetDatabasesAsync` makes both checks when it is called (the models made the disposal check at the first `MoveNextAsync`), and the constructor rejects a blank name, which every model's options accept today. §6.4 lists these with the other P4 changes. | P3/P6 |
-| 6 | `IDatabaseEngineBuilder` | Database `:7` | area root | delete | Five `public sealed <Model>DatabaseEngineBuilder` types with internal constructors, typed `AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker>)` and `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)`, and a `Build()` that returns the model engine. Shared logic moves to `DatabaseEngineBuilderState<TEngine>` (P4.0). | P4.0/P4/P6 |
+| 6 | `IDatabaseEngineBuilder` | Database `:7` | area root | delete | Five `public sealed <Model>DatabaseEngineBuilder` types with internal constructors, typed `AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker>)` and `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)`, and a `Build()` that returns the model engine. Shared logic moves to `DatabaseEngineBuilderState<TEngine>` (P4.0). **At P4.0 (re-verified):** the state is `DatabaseEngineBuilderState<TEngine, TWorker, TServer>`, not `<TEngine>`. The factories are typed `Func<TEngine, TWorker>` and `Func<TEngine, TServer>`, but the products cannot be fixed to the bases yet: a model that has not adopted them composes `IDatabaseEngineWorker` and `IDatabaseServer` (its servers and its tests' worker and server doubles implement only the interfaces), the one that has composes `DatabaseEngineWorker` and `DatabaseServer`, and during P4 both kinds compile the same shared file. The constraints are `TEngine : class, IDatabaseEngine`, `TWorker : class, IDatabaseEngineWorker` and `TServer : class, IDatabaseServer`, which the bases satisfy until P6. `Complete` takes the leaf's internal compose method (§6.5); a bridge overload over the engine's two attach members serves the builders whose model has not adopted the base. P6 collapses the state to `DatabaseEngineBuilderState<TEngine> where TEngine : DatabaseEngine`, with the products fixed to the bases. | P4.0/P4/P6 |
 | 7 | `IDatabaseEngineWorker` | Database `:19` | area root | delete | The existing `DatabaseEngineWorker` (`DatabaseEngineWorker.cs:64`) is already mostly NVI: #1268 and its review landed a non-virtual `Run` (`:146`) and `RunIteration` (`:207`) over `protected abstract void RunIterationCore` (`:230`), with the per-database failure record (`protected` non-virtual `BeginDatabase`, `ReportFailure` and `ReportUnfinished`, `:242-329`), `Fault`, `ConsecutiveFailures`, `FailureCount` and `FailureBackoff`. The review changed the core from `bool` to `void`: a pass reports unfinished work per database (`ReportUnfinished`), so the return value carried nothing. P3 still makes `Name`, `Kind` and `Interval` set by the constructor and non-virtual (abstract today, `:102-108`). The trigger wait (`:350`) stays a `protected virtual` lifecycle hook; the checkpoint, purge and write-ahead flush workers override it (`*WriteAheadFlushWorker.cs:54`). P3 also moves the engines' shared pump and state fold (`shared/DatabaseEngineWorkerPump.cs`, compiled into each model since #1268's review) into the root engine base. **At P3:** landed. `protected DatabaseEngineWorker(string name, DatabaseEngineWorkerKind kind, TimeSpan interval)` rejects a blank name; the interval is not validated there, because the engines validate their options and an invalid one must keep failing the way it does today. The 22 leaves pass their values to the constructor (the shared `DatabaseCheckpointWorker` names itself `{engine}/checkpoint`), so a built-in worker's cadence is captured from the engine's options when the engine is created instead of read on every trigger wait. The pump and fold are in `DatabaseEngine` (row 5); the shared copy stays until P4. **Scheduled by the P3 review:** `DatabaseEngine` disposes a worker through type tests (`is IAsyncDisposable`, `is IDisposable`), kept from the shared pump, because the model engines that compile that pump dispose the same workers (the shared `DatabaseCheckpointWorker` is `IDisposable`) and the model tests' workers implement `IDatabaseEngineWorker, IDisposable` directly. The P4 PR that deletes the shared pump gives the worker base a non-virtual disposal over a `protected virtual DisposeAsyncCore` lifecycle hook (rule 4), moves `DatabaseCheckpointWorker`'s `Dispose` body into it, and replaces the type tests with the call. The hook's entry point should be `internal` to the root, not public: `DatabaseEngine.Workers` is public, and a public `DisposeAsync` would let outside code dispose a worker the engine still pumps. | P3 (NVI)/P6 |
 | 8 | `IDatabaseSchemaProvisioner` | Database `:7` | area root | delete | Folded into `DatabaseInstance`: a non-virtual `public bool SupportsSchemaProvisioning`, set by `protected DatabaseInstance(Name name, DatabaseEngine engine, bool supportsSchemaProvisioning = false)` (rule 6), and an NVI `ApplySchemaAsync` that throws `NotSupportedException` while the flag is `false` and otherwise calls a `protected virtual ApplySchemaCoreAsync` whose default throws `NotSupportedException`. It is the only capability member on `DatabaseInstance`. **Bridge:** Hosting's type test (`Hosting/src/Internal/DefaultDatabaseProvisioner.cs:49`) still needs the interface until P6, and the Sql PR of P4 deletes `ISqlDatabase` (`Sql/src/Abstractions/ISqlDatabase.cs:6`), which is how `SqlDatabase` carries it today. So `SqlDatabase` keeps `IDatabaseSchemaProvisioner` in its base list until P6, implemented by the inherited NVI member. Only Sql claims the interface, as today, and the SampleHost provisioning test stays green. P6 deletes it and turns the type test into a flag check. **At P3:** landed as planned; `DatabaseInstance` does not list `IDatabaseSchemaProvisioner`. `ApplySchemaAsync` checks disposal, a null schema, the capability and the token, in that order, before the core. | P3/P6 |
 | 9 | `IDatabaseServer` | Database `:26` | area root | abstract | `public abstract class DatabaseServer : IAsyncDisposable`, with a protected constructor taking the engine. `Engine` is non-virtual and field-backed (replacing `Context.Engine`), and leaves re-expose it typed with `new`. NVI `StartAsync` and `StopAsync`, with a state guard, call `StartCoreAsync` and `StopCoreAsync`. `public abstract IReadOnlyCollection<DatabaseServerSession> Sessions`. During the bridge, `Context` stays a temporary abstract member (row 10). **At P3 (re-verified):** the state guard is the lifecycle the Sql, KeyValuePair and Graph servers each carried (a lifecycle gate; created inert; a start while running returns; a failed start and any stop are terminal; a start after them throws `ObjectDisposedException`; stop is idempotent and runs for a server that never started, so the leaf releases its listener). `DisposeAsync` is the non-virtual stop. `Context` is public abstract until P6. **Corrected by the P3 review:** Blob's server differs on one path. It refuses a start while its engine is not `Running` ("The Blob engine is {State} and cannot accept sessions.") before it marks itself stopped, so the server stays inert: a later start can retry, and a later stop still disposes `options.Listener`. Under the base every start that throws is terminal and a later stop skips `StopCoreAsync`, so the Blob PR's `StartCoreAsync` disposes the listener before it rethrows that refusal, and adds a test (a start refused while the engine is `Faulted`, then `DisposeAsync` disposes the listener). Retry after a refused start is lost; keeping it would need a non-terminal refusal path in the base, an owner decision (§7, P3 owner questions). | P3/P6 |
@@ -569,6 +570,20 @@ refusal wording folded in:
     from `Create`.
   - *Blob's server* (row 9). A start refused while the engine is not `Running` becomes terminal;
     the Blob PR's start core disposes the listener before it rethrows.
+  - *Engine composition* (P4.0, §6.5). When a model's builder moves from the bridge to its leaf's
+    compose method, the attach checks are the base's (row 5). A custom worker whose name matches
+    another worker of the engine, built-in or custom (ordinal, ignoring case), is refused with
+    "Worker name '{name}' is already registered." and disposed, then the engine; Graph,
+    Documents and Blob never checked names. SQL's and KeyValuePair's attach-time refusal of a blank
+    name ("A worker must have a diagnostic name.", an `ArgumentException` after which the state
+    disposed the worker) is gone: `DatabaseEngineWorker`'s constructor rejects a blank name inside
+    the factory, so the build fails with the constructor's `ArgumentException` and has no product
+    to dispose. The refusals of a product attached twice and of a server that fronts another engine
+    keep their messages and their disposal: the foreign server is disposed, a repeated product is
+    left to the engine. The pump threads are named for their workers, where Graph, Documents and
+    Blob named them `{engine}/{kind}`. And SQL and KeyValuePair dispose every worker last attached
+    first, instead of their checkpointer and then their custom workers (the root DESIGN listed this
+    at P3; it was missing here until P4.0).
 - **SQL in P4** gains the end gate, the repeatable rollback and a coded aborted error of its own
   (a commit of a transaction the kernel ended under its caller fails with that code instead of
   "Cannot commit transaction in state …"); it keeps the statement-level contract, so it never calls
@@ -604,6 +619,50 @@ model's leaf exposes one internal composition method that calls `AttachWorker`, 
 and `CompleteComposition`, and `DatabaseEngineBuilderState.Complete` takes it instead of the two
 callbacks and drops the checks the base now makes. An engine created without its builder
 (`SqlDatabaseEngine.Create(options)` and its siblings) completes its composition in `Create`.
+
+**At P4.0 (re-verified, then landed).** The code matched this section, with two things the plan
+had not spelled out: the compose method must still let the state run one factory at a time, and
+the state's ownership test was also what kept it from disposing a product the engine owns.
+
+- **The compose method.** `Complete(TEngine engine, Action<IEnumerable<TWorker>, IEnumerable<TServer>> compose)`.
+  A leaf that derives from the base implements it as
+  `internal void Compose(IEnumerable<DatabaseEngineWorker> workers, IEnumerable<DatabaseServer> servers)`:
+  attach each worker, then each server, then `CompleteComposition()`. The state passes lazy
+  sequences, and each request for the next product runs the next factory, so the order is the
+  one the callbacks had (a factory, its attach, the next factory) and a factory still sees the
+  products attached before it.
+- **The checks.** `Complete` makes none of the attach checks; it refuses a null product ("A worker
+  factory returned null.", "A server factory returned null.") and disposes what a failed build
+  leaves unowned. The ownership test stays, as the guard on that disposal only: when the compose
+  method fails, the product it was attaching is disposed unless the engine's `Workers` or
+  `Servers` already holds it. The base refuses a product it owns like any other attach failure,
+  and that product (a repeated factory result, or a built-in worker a factory returned) is the
+  engine's to dispose. The old test's third case, a product that is the engine itself, is
+  dropped: it could never hold, because the five model engines are sealed and implement neither
+  product interface, and `DatabaseEngine` is unrelated to the product bases.
+- **The bridge.** `Complete(TEngine engine, Action<TWorker> attachWorker, Action<TServer> attachServer)`
+  adapts an engine's two internal attach members into a compose method through a lambda and makes
+  the two checks the base makes, with the same messages and disposal: a product attached twice is
+  refused and left to the engine, a server whose `Context.Engine` is another engine is refused and
+  disposed. At P4.0 all five builders use it, unchanged apart from the state's type arguments
+  (`<SqlDatabaseEngine, IDatabaseEngineWorker, IDatabaseServer>` and its siblings). Their
+  interface-typed `AddWorker` and `AddServer` pass the factory to the typed state through delegate
+  variance (`Func<IDatabaseEngine, T>` converts to `Func<SqlDatabaseEngine, T>`), not through a
+  lambda, so a null factory still throws `ArgumentNullException` at registration.
+- **Each model PR in P4** adds the leaf's `Compose`, builds through an internal creation path that
+  leaves composition open (`Create` completes it), calls `_state.Complete(engine, engine.Compose)`,
+  deletes the engine's internal attach members, and moves the state's type arguments to
+  `<…DatabaseEngine, DatabaseEngineWorker, DatabaseServer>`. The model's builder-test doubles
+  derive from the bases in the same PR (§6.9). The last model PR deletes the bridge overload.
+- **Evidence.** Every model's builder and composition tests pass through the bridge, which runs the
+  new `Complete` (§7). No engine in the repository derives from the base yet, so a scratch probe
+  outside the repository composed one that does, through such a `Compose`: products attached in
+  order, a later factory saw the earlier product, and the engine froze; a repeated server and a
+  returned built-in worker were refused and disposed once, by the engine; a foreign server and a
+  worker with a duplicate name were refused and disposed by the state; a null product and a
+  failing factory disposed the engine; and a failure to dispose a refused server was aggregated
+  with the refusal. The KeyValuePair PR's builder tests are the first in-repository run of that
+  path.
 
 ### 6.6 Blob and Documents sessions: option B (rows 54, 61)
 
@@ -1125,6 +1184,27 @@ the code had moved, the row now says what landed:
   `Func<IDatabaseEngine, IDatabaseEngineWorker/IDatabaseServer>` (`:12-13`). Untyped builders
   adapt through a lambda until their model PR lands, and P6 tightens the constraint to
   `DatabaseEngine`.
+  - **As landed (re-verified 2026-10-05 against the code after P3).** Two corrections, both forced
+    by a P4 period in which adopted and unadopted models compile the same shared file (§6.5,
+    row 6):
+    - The state is `DatabaseEngineBuilderState<TEngine, TWorker, TServer>`. An unadopted model's
+      products are the root interfaces and an adopted one's are the bases, so the product types
+      are parameters until P6 fixes them to the bases.
+    - `Complete` takes the leaf's compose method and makes no attach check, but keeps the
+      ownership test as the guard on disposing a refused product. A bridge overload adapts the two
+      attach callbacks into a compose method and makes the checks the base makes.
+
+    The five builders changed only the state's type arguments. Their factories reach the typed
+    state through delegate variance, and their `Build()` calls the bridge. No behavior changed:
+    the messages, the order of factories and attaches, and what is disposed on each failure are
+    the ones the state had. *Gate, as run:* every Database project, Sdk.Database and Studio build
+    with no new warning (CS2008 on Database.Refs predates P4.0); every Database suite keeps its
+    baseline count (Database.Tests 101, Sql 1087, KeyValuePair 158, Graph 360, Documents 152,
+    Blob 129, Hosting 53, Embedded 4, Sdk.Database 18 and the rest unchanged), among them each
+    model's builder and composition tests (repeated product, foreign server, null product, failing
+    factory, the premature-build compensation); the Studio `--smoke` run gives 83 passed, 0
+    failed, 1 skipped, as before; the dependency graph check passes (no reference changed); and the
+    Database runtime producer packs. The scratch probe of §6.5 ran the adopted path.
 - **Then KeyValuePair, Graph, Documents, Blob and Sql, one PR each, serialized.**
   - The leaves derive from the bridge bases and become public sealed.
   - The model deletes its own copy of the explicit-transaction state machine and the "already
@@ -1134,7 +1214,9 @@ the code had moved, the row now says what landed:
     deletes it and gives the worker base its disposal hook (row 7).
   - The `Add<Model>` composition verb is retyped to the sealed builder (§5.2).
   - The model children collapse into sealed types, and the builder becomes sealed with typed
-    `AddServer` and `AddWorker`.
+    `AddServer` and `AddWorker`. The builder composes through its leaf's `Compose` instead of the
+    bridge, and the state's type arguments move to the bases (§6.5); the last model PR deletes
+    the bridge overload.
   - The strategies become internal abstract (D9), and the model's `Abstractions/` folder goes.
   - Promoted types leave `Internal/` and change namespace.
   - The model's tests, fixtures (including the Documents recovery fixture's casts) and Studio
@@ -1174,7 +1256,9 @@ tests against refreshed canonical packs, and the SampleHost provisioning test.
   (`server.Context.Engine` becomes `server.Engine`), `DefaultDatabaseProvisioner.cs:49` (which
   becomes a flag check; `SqlDatabase` and Hosting's `ProvisioningDatabase` double,
   `ProvisioningEngine.cs:101`, drop `IDatabaseSchemaProvisioner`), `DatabaseResourceCommandHandler`
-  and the admin endpoint. Also Embedded (§5.2) and Testing.
+  and the admin endpoint. Also Embedded (§5.2) and Testing. The shared builder state collapses to
+  `DatabaseEngineBuilderState<TEngine> where TEngine : DatabaseEngine`, with the products fixed to
+  `DatabaseEngineWorker` and `DatabaseServer` (row 6).
 - **Doubles and deletions.** The Hosting and Embedded doubles move to the bases (§6.9). Then delete
   the 10 root interfaces (rows 1 and 5 to 13, which include `IDatabaseServerContext`), the four
   context classes, the five double contexts, and the bridge's explicit implementations.
