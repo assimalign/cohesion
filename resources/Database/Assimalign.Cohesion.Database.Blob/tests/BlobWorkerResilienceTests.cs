@@ -146,10 +146,16 @@ public sealed class BlobWorkerResilienceTests
     /// <para>
     /// The window ends early once the healthy database's data file and journal hold
     /// <see cref="PaceFileBound"/> bytes together, so the test double's memory streams stay far
-    /// from their 2 GiB capacity on any runner. An early end only shortens the time in which a
-    /// worker-wide backoff takes its checkpoint a second, so the floor still exceeds twice what such
-    /// a backoff allows, and the seconds after the end have no writes and do not count toward the
-    /// share. The report gives the data file's length, and when the bound ended the window.
+    /// from their 2 GiB capacity on any runner, but never before two backoffs. The window starts
+    /// after the failing database's first failure, and the worker retries it a backoff later, so
+    /// that retry and two seconds that can count toward the share always fall inside the window: a
+    /// window the bound ended in under a second failed a healthy engine for want of a failed pass,
+    /// in 3 of 10 runs with the bound forced to 4 MiB, and in none of 10 once the window ran two
+    /// backoffs. An early end only shortens the time in which a worker-wide backoff takes its
+    /// checkpoint a second, so the floor still exceeds twice what such a backoff allows, and the
+    /// seconds after the end have no writes and do not count toward the share. The bound is a
+    /// backstop, not the window's usual end: the report gives the data file's length, and says when
+    /// the bound ended the window.
     /// </para>
     /// </remarks>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a database whose checkpoints keep failing does not slow the other database's checkpoints")]
@@ -598,8 +604,18 @@ public sealed class BlobWorkerResilienceTests
     // every transaction took a content page of its own, a six-second window on a fast runner grew
     // the document engine's data file past that and failed its test with
     // ArgumentOutOfRangeException. A quarter of the cap keeps both files, and the memory of two
-    // engines' file sets, clear of it on any runner.
+    // engines' file sets, clear of it on any runner. It is a backstop, not the window's usual end,
+    // and the window runs two backoffs before it applies: passing 2 GiB in those two seconds would
+    // take more than 1 GB/s. Blob's uploads are small so that a six-second window stays far below
+    // it too (UploadSize).
     private const long PaceFileBound = 512L * 1024 * 1024;
+
+    // The bytes of each blob UploadAsync writes. The pace test's healthy data file grows with them.
+    // At 2 KiB, three to a page, an upload took 2.8 KB of it, and one window inside a full suite
+    // pinned to three cores grew it to 343 MB in 121,000 uploads: on a runner a few times faster,
+    // the bound would have ended most windows. At 512 bytes an upload takes 0.69 KB, 129 MB in the
+    // fastest such window seen (187,000 uploads).
+    private const int UploadSize = 512;
 
     // How long the hung-fsync test writes to the healthy database while the other one's fsync hangs.
     private static readonly TimeSpan StallWindow = TimeSpan.FromSeconds(5);
@@ -655,7 +671,7 @@ public sealed class BlobWorkerResilienceTests
                 var watch = Stopwatch.StartNew();
                 for (int id = 0; watch.Elapsed < PaceWindow; id += 10)
                 {
-                    if (FileBytes(healthy) >= PaceFileBound)
+                    if (watch.Elapsed >= 2 * DatabaseEngineWorker.FailureBackoff && FileBytes(healthy) >= PaceFileBound)
                     {
                         endedByBound = watch.Elapsed;
                         break;
@@ -788,7 +804,7 @@ public sealed class BlobWorkerResilienceTests
         var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
         for (int id = first; id < first + count; id++)
         {
-            await WriteAsync(files, $"k{id}", new string('x', 2048));
+            await WriteAsync(files, $"k{id}", new string('x', UploadSize));
         }
     }
 
