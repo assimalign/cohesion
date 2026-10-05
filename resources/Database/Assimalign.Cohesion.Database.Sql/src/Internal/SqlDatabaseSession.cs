@@ -16,7 +16,7 @@ using Assimalign.Cohesion.Database.Transactions;
 /// <summary>
 /// Internal implementation of a SQL database session, bound to the database's
 /// MVCC transaction manager: explicit and auto-commit statements alike run under
-/// an <see cref="TransactionContext"/> paired with a storage bracket, so
+/// a <see cref="TransactionContext"/> paired with a storage bracket, so
 /// visibility semantics never fork between the two paths.
 /// </summary>
 internal sealed class SqlDatabaseSession : IDatabaseSession

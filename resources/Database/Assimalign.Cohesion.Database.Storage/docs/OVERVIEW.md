@@ -65,7 +65,10 @@ for the canonical example):
 ```csharp
 public sealed class SqlStorage : Storage
 {
-    public override StorageModel Model => StorageModel.Sql;
+    // The model is fixed per storage: the base keeps it in a field its constructor sets.
+    private SqlStorage(StorageStream data, StorageStream journal, StorageStream backup)
+        : base(StorageModel.Sql, data, journal, backup) { }
+
     // static Create(...)/Open(...) factories call InitializeNew/OpenExisting
 }
 ```

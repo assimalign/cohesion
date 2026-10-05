@@ -247,7 +247,7 @@ interface is deleted in P6.
 | 37 | `IStorageUnit` | Storage `:19` | child root | sealed | `public readonly struct StorageUnit` (internal today, `Internal/StorageUnit.cs:8`), with an internal constructor. The iterator returns it unboxed. **At P2:** landed as planned. | P2 |
 | 38 | `IStorageUnitIterator` | Storage `:10` | child root | sealed | `public sealed class StorageUnitIterator : IEnumerator<StorageUnit>`, with an internal constructor. The public `Storage.GetUnitIterator` (`Storage.cs:837`, `:843`) returns it to Transactions, Sql, the five model catalogs and Graph.Storage. **At P2:** landed; `Next(out StorageUnit)` returns the default unit, not `null`, when the scan is exhausted, and `Current` reads the default unit outside a scan. No caller read either case. | P2 |
 | 39 | `ILockManager` | Transactions `:16` | child root | sealed | `public sealed class LockManager`, with an internal constructor. It absorbs `public static class LockManager` (`LockManager.cs:8`) as `public static LockManager Create()`. The coordinator's view becomes an internal release filter (§6.2). **At P2:** landed; the internal `DefaultLockManager` was folded in. The view had grown since the plan: #1268 gave it the offline abandonment of waits (`AbandonLockWaits`), so the internal mode carries both (§6.2). | P2 |
-| 40 | `IRecordVersionIndex` | Transactions `:13` | child root | abstract | `public abstract class RecordVersionIndex` in Transactions, with a protected constructor, because its leaves live in Indexing, Documents.Catalog and Graph.Storage. NVI erase and clear-deleter members call `protected abstract` cores. Indexing's sealed type (`Indexing/src/RecordVersionIndex.cs:17`) is renamed `BTreeRecordVersionIndex`. **At P2:** landed; the public members check for a null bracket. The rename lands in the Transactions commit, not the Indexing one: Sql's and KeyValuePair's executors import both namespaces, so the two `RecordVersionIndex` types cannot coexist for one commit. | P2 |
+| 40 | `IRecordVersionIndex` | Transactions `:13` | child root | abstract | `public abstract class RecordVersionIndex` in Transactions, with a protected constructor, because its leaves live in Indexing, Documents.Catalog and Graph.Storage. NVI erase and clear-deleter members call `protected abstract` cores. Indexing's sealed type (`Indexing/src/RecordVersionIndex.cs:17`) is renamed `BTreeRecordVersionIndex`. **At P2:** landed; the public members check for a null bracket. The rename lands in the Transactions commit, not the Indexing one: Sql's and KeyValuePair's executors import both namespaces, so the two `RecordVersionIndex` types cannot coexist for one commit. `BTreeRecordVersionIndex` keeps its public constructor over a `BTreeIndex`, on the same terms as the journal's (§5.3): it was public API on Indexing's former `RecordVersionIndex`, and Sql's and KeyValuePair's executors construct it. Owner question at the P2 merge: keep the public constructors, or make both internal behind `Create` factories (rule 1). | P2 |
 | 41 | `ITransactionContext` | Transactions `:14` | child root | sealed | `public sealed class TransactionContext`, with an internal constructor, plus `public TransactionContext PinStatementSnapshot()` (§6.1). It is the most-consumed kernel contract (47 `src` files), and every call becomes non-virtual. **At P2:** landed, promoted from the internal `DefaultTransactionContext`; 69 `.cs` files retyped across the tree. | P2 |
 | 42 | `ITransactionLog` | Transactions `:17` | child root | delete | `internal abstract class TransactionLog` in `Internal/` (rule 11). `public static class TransactionLog` (`TransactionLog.cs:12`) is deleted and its factories become internal (§5.2). | P1 |
 | 43 | `ITransactionManager` | Transactions `:17` | child root | sealed | `public sealed class TransactionManager`, promoted from `DefaultTransactionManager`, with an internal constructor. It gets a public static `Create`, an internal overload, and stays exposed by the coordinator (§5.2, C1). | P1 (P2 retypes the parameters) |
@@ -388,7 +388,11 @@ copies the identity, sequence and isolation level, reads `State` through the tra
 context, and keeps the snapshot it was given. The three decorators are deleted, and each
 operation's `InitializeAsync` calls `_context.PinStatementSnapshot()`. A manager still refuses to
 commit or roll back a view, as it refused a decorator, now through an internal
-`IsStatementView` check instead of the type test on the internal context class.
+`IsStatementView` check instead of the type test on the internal context class. The P2 review
+hardened the view: the end claim, the apply admission and the apply drain are forwarded to the
+transaction's own context, so the end flag and apply count exist once and the shared lock guards
+one set of state. Transactions.Tests' `TransactionStatementViewTests` pins the contract (pinned
+snapshot, shared identity and state, refused commit and rollback, forwarded admission and claim).
 
 ### 6.2 `LockManager` and the coordinator's engine view (row 39)
 
@@ -884,8 +888,18 @@ says what landed.
   `Delete_WideFanOutCascade_ShouldTakeTimeLinearInChildren` (a per-child cost ratio) while other
   builds loaded the machine; it passed three isolated reruns and a full rerun (1087). No
   NativeAOT microbenchmark was run.
+- **Review fixes.** The statement view forwards its end claim and apply admission to the
+  transaction's own context, and a new `TransactionStatementViewTests` suite covers §6.1
+  directly (Transactions.Tests 101 → 108). Recovery reads the sealed journal sequentially with no
+  dead type test, and nine identity casts left in Storage.Tests by the sealing are gone. Stale
+  text was fixed: the Storage OVERVIEW snippet (a constructor-set model, not an override), the
+  journal's note on its former leaf, "an `TransactionContext`" at six sites, and the lane table of
+  `DATABASE_PROGRAM_PLAN.md`, which still named `ITransactionContext`.
 - **Left for later.** `.claude/rules/database-area.md` still lists `StorageJournal` among the
-  marked bases ("Marking the deviation"); rule text changes with the owner (§12).
+  marked bases ("Marking the deviation"); rule text changes with the owner (§12). The plan's
+  header Status line still records P0 and P1 only; it changes at the P2 merge, once the sibling
+  Protocol/Security track lands beside this one. Whether `StorageJournal` and
+  `BTreeRecordVersionIndex` keep public constructors is an owner question (§5.3, row 40).
 
 **P3, #1259: root bridge bases.** Rows 1, 5, 9, 11, 12 and 13 add `DatabaseEngine`,
 `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer` and

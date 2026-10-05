@@ -204,7 +204,7 @@ public sealed class StorageJournalFailureTests
         {
         }
 
-        public StorageJournal Log => (StorageJournal)WriteAheadLog;
+        public StorageJournal Log => WriteAheadLog;
 
         private MemoryStream DataStream { get; init; } = null!;
 

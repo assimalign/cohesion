@@ -166,7 +166,7 @@ public sealed class StorageOwnerChainTests
 
         // Act: scan the small owner and count the pages the iterator pins.
         long pagesVisited;
-        using (var iterator = (StorageUnitIterator)storage.GetUnitIterator(3))
+        using (var iterator = storage.GetUnitIterator(3))
         {
             while (iterator.MoveNext())
             {

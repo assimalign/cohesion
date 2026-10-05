@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
 /// Tests for the MVCC session binding (#907): explicit and auto-commit SQL
-/// statements run under an <c>TransactionContext</c> from the database's
+/// statements run under a <c>TransactionContext</c> from the database's
 /// transaction manager, paired one-to-one with a storage bracket under a single
 /// shared sequence, and transaction-kernel aborts surface wrapped in the area
 /// root's <see cref="DatabaseTransactionAbortedException"/>.

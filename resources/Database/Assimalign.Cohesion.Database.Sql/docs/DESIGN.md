@@ -800,7 +800,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.
 - **Transactions (MVCC session binding, §3.8).** Every statement — explicit
-  transaction or auto-commit — runs under an `TransactionContext` from the
+  transaction or auto-commit — runs under a `TransactionContext` from the
   database's transaction manager, whose sequences come from the storage's own
   counter (one namespace). The shared `Database.Transactions.TransactionCoordinator` owns
   the composition (manager + lock manager + record-space version store +

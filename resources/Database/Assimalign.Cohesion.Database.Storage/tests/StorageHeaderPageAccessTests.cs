@@ -38,7 +38,7 @@ public sealed class StorageHeaderPageAccessTests
     {
         // Arrange
         using var storage = TornStorage.Create();
-        var manager = (StoragePageManager)storage.PageManager;
+        var manager = storage.PageManager;
 
         // Act
         var refusal = Should.Throw<StorageIOException>(() => manager.PinForOverwrite((PageId)0L));

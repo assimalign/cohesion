@@ -172,7 +172,7 @@ public sealed class StorageBufferPoolConcurrencyTests
         using var stream = new StorageStream(new SimulatedDurableFileHandle());
         stream.SetLength(Page.Size);
         using var pool = new StorageBufferPool(2);
-        var handle = (StoragePageHandle)pool.Pin((PageId)0L, stream);
+        var handle = pool.Pin((PageId)0L, stream);
         pool.CheckInvariants();
 
         // Act
@@ -193,7 +193,7 @@ public sealed class StorageBufferPoolConcurrencyTests
         stream.SetLength(Page.Size);
         using var pool = new StorageBufferPool(2);
         StorageBufferPool.BufferEntry entry;
-        using (var handle = (StoragePageHandle)pool.Pin((PageId)0L, stream))
+        using (var handle = pool.Pin((PageId)0L, stream))
         {
             entry = handle.Entry;
         }
@@ -214,7 +214,7 @@ public sealed class StorageBufferPoolConcurrencyTests
         using var stream = new StorageStream(new SimulatedDurableFileHandle());
         stream.SetLength(Page.Size);
         using var pool = new StorageBufferPool(2);
-        var handle = (StoragePageHandle)pool.Pin((PageId)0L, stream);
+        var handle = pool.Pin((PageId)0L, stream);
         var node = handle.Entry.Node;
 
         // Act

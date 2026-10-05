@@ -147,7 +147,7 @@ public sealed class StorageConcurrencyTests
         // The handler runs on the committing thread, so the insert re-enters whatever storage
         // locks the commit holds at that point and sees the page exactly as the commit left it
         // on the list: it must already be unlocked.
-        var freeSpaceMap = (StorageFreeSpaceMap)storage.FreeSpaceMap;
+        var freeSpaceMap = storage.FreeSpaceMap;
         var inserted = new List<PageId>();
         var failures = new List<Exception>();
         freeSpaceMap.Freed = pageId =>
@@ -203,7 +203,7 @@ public sealed class StorageConcurrencyTests
         storage.FreeOwnerPages(dropping, firstOwner).ShouldBe(1);
 
         // Another allocation takes the page each time it joins the free list.
-        var freeSpaceMap = (StorageFreeSpaceMap)storage.FreeSpaceMap;
+        var freeSpaceMap = storage.FreeSpaceMap;
         var handedOut = new List<PageId>();
         freeSpaceMap.Freed = pageId =>
         {

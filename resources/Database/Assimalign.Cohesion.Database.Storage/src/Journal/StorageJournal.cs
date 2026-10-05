@@ -20,7 +20,7 @@ using Assimalign.Cohesion.FileSystem;
 /// <remarks>
 /// <para>
 /// <b>One sealed type (#1258).</b> The journal used to be an abstract base with one leaf,
-/// <c>StorageJournal</c>, in this assembly. A base with a single implementation meets none of
+/// <c>StreamJournal</c>, in this assembly. A base with a single implementation meets none of
 /// <c>database-area.md</c>'s cases for an abstract type, so phase 2 of the concrete-first
 /// program folded the leaf into it: the medium operations below are private members, and the
 /// constructors and file factories are the former leaf's.
