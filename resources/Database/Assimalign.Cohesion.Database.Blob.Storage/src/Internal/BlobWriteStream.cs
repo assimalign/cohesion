@@ -147,7 +147,7 @@ internal sealed class BlobWriteStream : Stream
         var record = BlobChunkCodec.Encode(_buffer.AsSpan(0, _buffered), _context.Sequence);
         ulong next = await _coordinator.ApplyStatementAsync(_context, bracket =>
         {
-            var (page, slot) = _storage.InsertChunk(bracket, _context.Sequence, record);
+            var (page, slot) = _storage.InsertChunk(bracket, record);
             ulong location = BlobStorage.PackLocation(page, slot);
             if (_tail != 0)
             {

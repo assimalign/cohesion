@@ -143,6 +143,14 @@ public sealed class BlobWorkerResilienceTests
     /// backoff reached (470 MB to 1.1 GB), while the checkpoint counts still told the two apart by
     /// hundreds of times. It is reported.
     /// </para>
+    /// <para>
+    /// The window ends early once the healthy database's data file and journal hold
+    /// <see cref="PaceFileBound"/> bytes together, so the test double's memory streams stay far
+    /// from their 2 GiB capacity on any runner. An early end only shortens the time in which a
+    /// worker-wide backoff takes its checkpoint a second, so the floor still exceeds twice what such
+    /// a backoff allows, and the seconds after the end have no writes and do not count toward the
+    /// share. The report gives the data file's length, and when the bound ended the window.
+    /// </para>
     /// </remarks>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a database whose checkpoints keep failing does not slow the other database's checkpoints")]
     public async Task CheckpointWorker_OneDatabaseKeepsFailing_ShouldKeepTheOthersAtFullPace()
@@ -585,6 +593,14 @@ public sealed class BlobWorkerResilienceTests
     private static readonly TimeSpan PaceWindow = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan PaceSecond = TimeSpan.FromSeconds(1);
 
+    // The most the healthy database's data file and journal hold together before the pace window
+    // ends early. Each file is one MemoryStream in the test double, which cannot pass 2 GiB: while
+    // every transaction took a content page of its own, a six-second window on a fast runner grew
+    // the document engine's data file past that and failed its test with
+    // ArgumentOutOfRangeException. A quarter of the cap keeps both files, and the memory of two
+    // engines' file sets, clear of it on any runner.
+    private const long PaceFileBound = 512L * 1024 * 1024;
+
     // How long the hung-fsync test writes to the healthy database while the other one's fsync hangs.
     private static readonly TimeSpan StallWindow = TimeSpan.FromSeconds(5);
 
@@ -635,9 +651,16 @@ public sealed class BlobWorkerResilienceTests
                 var checkpointsBySecond = new long[(int)(PaceWindow / PaceSecond)];
                 var writesBySecond = new long[checkpointsBySecond.Length];
                 int second = 0;
+                TimeSpan? endedByBound = null;
                 var watch = Stopwatch.StartNew();
                 for (int id = 0; watch.Elapsed < PaceWindow; id += 10)
                 {
+                    if (FileBytes(healthy) >= PaceFileBound)
+                    {
+                        endedByBound = watch.Elapsed;
+                        break;
+                    }
+
                     await UploadAsync(healthy, id, 10);
                     writes += 10;
                     peak = Math.Max(peak, healthy.DataStorage.JournalLength);
@@ -654,7 +677,8 @@ public sealed class BlobWorkerResilienceTests
                     writesBySecond[second] = writes;
                 }
 
-                return new CheckpointPace(checkpointsBySecond, writesBySecond, peak, worker.FailureCount - failedPasses);
+                return new CheckpointPace(checkpointsBySecond, writesBySecond, peak, worker.FailureCount - failedPasses,
+                    healthy.DataStorage.Data.Length, endedByBound);
             }
             finally
             {
@@ -671,9 +695,11 @@ public sealed class BlobWorkerResilienceTests
 
     /// <summary>
     /// The healthy database's checkpoints and writes counted at the end of each second of the
-    /// window, its journal peak, and the worker's failed passes over the window.
+    /// window, its journal peak, the worker's failed passes over the window, the healthy data
+    /// file's length at the end, and when <see cref="PaceFileBound"/> ended the window, if it did.
     /// </summary>
-    private sealed record CheckpointPace(long[] CheckpointsBySecond, long[] WritesBySecond, long PeakJournal, long FailedPasses)
+    private sealed record CheckpointPace(long[] CheckpointsBySecond, long[] WritesBySecond, long PeakJournal, long FailedPasses,
+        long DataLength, TimeSpan? EndedByBound)
     {
         /// <summary>Gets the checkpoints over the window.</summary>
         public long Checkpoints => CheckpointsBySecond[^1];
@@ -722,10 +748,15 @@ public sealed class BlobWorkerResilienceTests
         /// <inheritdoc />
         public override string ToString()
             => $"{Checkpoints} checkpoints in {WritesBySecond[^1]} writes (by second {string.Join(" ", CheckpointsBySecond.Select((count, second) => $"{InSecond(CheckpointsBySecond, second)}/{InSecond(WritesBySecond, second)}"))}), " +
-               $"journal peak {PeakJournal}, {FailedPasses} failed passes";
+               $"journal peak {PeakJournal}, {FailedPasses} failed passes, data file {DataLength}" +
+               (EndedByBound is { } ended ? $", window ended by the file bound at {ended.TotalSeconds:F1} s" : "");
 
         private static long InSecond(long[] counts, int second) => counts[second] - (second == 0 ? 0 : counts[second - 1]);
     }
+
+    // What a database's two growing files hold together: the bound the pace window keeps under.
+    private static long FileBytes(BlobDatabaseInstance database)
+        => database.DataStorage.Data.Length + database.DataStorage.JournalLength;
 
     private static BlobDatabaseEngineOptions Options(FaultInjectingJournalStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
     {
