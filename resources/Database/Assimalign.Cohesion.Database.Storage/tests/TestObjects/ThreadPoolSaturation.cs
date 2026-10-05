@@ -24,8 +24,6 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 /// </remarks>
 internal sealed class ThreadPoolSaturation : IDisposable
 {
-    private const int blockerCount = 1024;
-
     // Never disposed: a blocker the pool dequeues after Dispose still waits on the gate (and
     // returns at once), and neither event allocates a kernel handle.
     private readonly ManualResetEventSlim _release = new();
@@ -45,6 +43,11 @@ internal sealed class ThreadPoolSaturation : IDisposable
     /// </summary>
     public static ThreadPoolSaturation Start()
     {
+        // The pool creates workers up to its minimum without delay, so the blockers must outnumber
+        // a minimum raised by configuration (runtimeconfig, DOTNET_ThreadPool_ForceMinWorkerThreads).
+        ThreadPool.GetMinThreads(out int minimumWorkers, out _);
+        int blockerCount = Math.Max(1024, minimumWorkers * 4);
+
         var saturation = new ThreadPoolSaturation();
         for (int i = 0; i < blockerCount; i++)
         {

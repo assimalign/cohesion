@@ -1136,7 +1136,10 @@ public abstract class Storage : IStorage
             // rebuild from the records the truncation is about to discard.
             _consistency?.Checkpointing(ReadPageForAudit);
 
-            long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences, forceDurable: RequiresDurableFlush);
+            // Read once: a CommitDurability change racing the checkpoint must not make it flush
+            // without an fsync and then publish that LSN to the gate as durable.
+            bool durable = RequiresDurableFlush;
+            long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences, forceDurable: durable);
 
             if (checkpointLsn is not null)
             {
@@ -1146,10 +1149,11 @@ public abstract class Storage : IStorage
                 // redo point move.
                 Volatile.Write(ref _redoLsn, checkpointLsn.Value);
 
-                if (RequiresDurableFlush)
+                if (durable)
                 {
-                    // Wake any group-commit bookkeeping past the truncation point.
-                    _groupCommitGate.PublishDurable(checkpointLsn.Value);
+                    // Wake any group-commit bookkeeping past the truncation point. The journal's own
+                    // durable LSN, not the checkpoint's: the gate publishes only what an fsync confirmed.
+                    _groupCommitGate.PublishDurable(_journal!.DurableLsn);
                 }
             }
 
