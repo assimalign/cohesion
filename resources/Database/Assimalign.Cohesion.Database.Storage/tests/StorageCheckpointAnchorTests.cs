@@ -264,7 +264,8 @@ public sealed class StorageCheckpointAnchorTests
         private readonly FaultingMemoryStream _journal;
 
         private AnchorStorage(MemoryStream data, FaultingMemoryStream journal, bool reopen)
-            : base(StorageModel.Custom, 
+            : base(
+                StorageModel.Custom,
                 new StorageStream(new SimulatedDurableFileHandle(data)),
                 new StorageStream(new SimulatedDurableFileHandle(journal)),
                 new StorageStream(new MemoryStream()))

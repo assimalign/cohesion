@@ -185,7 +185,8 @@ public sealed class StoragePreImageTests
         private readonly MemoryStream _journal;
 
         private MemoryStorage(MemoryStream data, MemoryStream journal, int pool)
-            : base(StorageModel.Custom, 
+            : base(
+                StorageModel.Custom,
                 new StorageStream(new SimulatedDurableFileHandle(data)),
                 new StorageStream(new SimulatedDurableFileHandle(journal)),
                 new StorageStream(new MemoryStream()),
