@@ -71,7 +71,12 @@ no-fault checkpoint count, and that a writer queued for the database writer lock
 database goes offline (a header slot write, a journal fsync or a journal drain failing) gets the coded refusal at
 once instead of waiting for the reopen: an offline database undoes nothing, so the writer
 holding the lock keeps it, and the coordinator ends every lock wait instead
-(`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook).
+(`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook). The holder keeps
+the lock even when its own upload's journal drain takes the database offline: the failed upload
+aborts its explicit transaction (#1225), and the abort rolls nothing back and releases nothing, so
+the queued writer is refused, never granted. The queued writer queues before the fault and does
+nothing that drains: a container lookup is an autocommit read whose commit drains the journal, and
+one that commits after the fault gets the unconfirmed commit of #1243 instead of the refusal.
 
 File-backed databases use `<RootPath>/<database>/blob.dat`, `blob.log`, and `blob.bak`.
 Database names are single file-name components, compared ignoring case; invalid path components
