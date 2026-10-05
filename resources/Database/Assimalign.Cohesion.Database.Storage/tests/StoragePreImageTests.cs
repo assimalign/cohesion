@@ -195,7 +195,6 @@ public sealed class StoragePreImageTests
             _journal = journal;
         }
 
-
         public static MemoryStorage Create(int pool)
         {
             var storage = new MemoryStorage(new MemoryStream(), new MemoryStream(), pool);

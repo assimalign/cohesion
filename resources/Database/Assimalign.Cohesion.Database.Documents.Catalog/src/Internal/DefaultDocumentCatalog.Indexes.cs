@@ -38,7 +38,7 @@ internal sealed partial class DefaultDocumentCatalog
     }
 
     public async ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, string path,
-        ITransactionContext context, CancellationToken cancellationToken = default)
+        TransactionContext context, CancellationToken cancellationToken = default)
     {
         EnsureActive(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -91,7 +91,7 @@ internal sealed partial class DefaultDocumentCatalog
         return metadata;
     }
 
-    public async ValueTask DeleteIndexAsync(Guid collectionId, string name, ITransactionContext context,
+    public async ValueTask DeleteIndexAsync(Guid collectionId, string name, TransactionContext context,
         CancellationToken cancellationToken = default)
     {
         Found? previous;
@@ -182,7 +182,7 @@ internal sealed partial class DefaultDocumentCatalog
     }
 
     private async ValueTask ApplyIndexChangesAsync(List<IndexChange> changes, (PageId PageId, int SlotIndex) inserted,
-        ITransactionContext context, CancellationToken cancellationToken)
+        TransactionContext context, CancellationToken cancellationToken)
     {
         foreach (var change in changes)
         {
@@ -206,7 +206,7 @@ internal sealed partial class DefaultDocumentCatalog
         => _indexes.TryGetIndex(metadata.ObjectId, metadata.Name, out var index)
             ? index : throw new DocumentCatalogException($"Missing physical tree for index '{metadata.Name}'.");
 
-    private async ValueTask<T> ApplyAsync<T>(ITransactionContext context,
+    private async ValueTask<T> ApplyAsync<T>(TransactionContext context,
         Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
     {
         try
@@ -320,12 +320,12 @@ internal sealed partial class DefaultDocumentCatalog
             _coordinator = coordinator;
         }
 
-        public StorageTransaction GetStorageTransaction(ITransactionContext context)
+        public StorageTransaction GetStorageTransaction(TransactionContext context)
             => _coordinator.TryGetStorageTransaction(context, out var bracket)
                 ? bracket : throw new InvalidOperationException("Index mutation requires a shared statement bracket.");
     }
 
-    private sealed class IndexUndo : IRecordVersionIndex
+    private sealed class IndexUndo : RecordVersionIndex
     {
         private readonly DefaultDocumentCatalog _catalog;
         private readonly DocumentIndexMetadata _metadata;
@@ -341,12 +341,12 @@ internal sealed partial class DefaultDocumentCatalog
             _metadata = metadata;
         }
 
-        public ValueTask EraseAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
-            TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+            TransactionSequence writer, CancellationToken cancellationToken)
             => _catalog.ResolveIndex(_metadata).EraseAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
 
-        public ValueTask ClearDeleterAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
-            TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+            TransactionSequence writer, CancellationToken cancellationToken)
             => _catalog.ResolveIndex(_metadata).ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
     }
 }

@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Database.Transactions;
 /// <summary>
 /// Internal implementation of a key-value database session, bound to the
 /// database's MVCC transaction manager: explicit and auto-commit commands alike
-/// run under an <see cref="ITransactionContext"/> paired with a storage bracket,
+/// run under an <see cref="TransactionContext"/> paired with a storage bracket,
 /// so visibility semantics never fork between the two paths.
 /// </summary>
 internal sealed class KeyValueDatabaseSession : IDatabaseSession
@@ -89,7 +89,7 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
                 : open.CreateRefusal();
         }
 
-        ITransactionContext context;
+        TransactionContext context;
         try
         {
             context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);

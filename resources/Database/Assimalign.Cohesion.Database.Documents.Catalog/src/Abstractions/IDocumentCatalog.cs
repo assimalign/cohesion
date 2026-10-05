@@ -29,7 +29,7 @@ public interface IDocumentCatalog
     /// <param name="cancellationToken">Cancels the build.</param>
     /// <returns>The new index definition.</returns>
     /// <exception cref="DocumentCatalogException">The collection is absent or index already exists.</exception>
-    ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, string path, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, string path, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Tombstones an index definition, retaining its tree for older snapshots.</summary>
     /// <param name="collectionId">The collection identity.</param>
@@ -37,7 +37,7 @@ public interface IDocumentCatalog
     /// <param name="context">The active transaction.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>A task representing the operation.</returns>
-    ValueTask DeleteIndexAsync(Guid collectionId, string name, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DeleteIndexAsync(Guid collectionId, string name, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Seeks a scalar key range and returns visible documents in ordinal identity order.</summary>
     /// <param name="collectionId">The collection identity.</param>
@@ -74,7 +74,7 @@ public interface IDocumentCatalog
     /// <param name="cancellationToken">Cancels the operation before physical application.</param>
     /// <returns>A task representing the operation.</returns>
     /// <exception cref="ArgumentException">The collection identity or name is invalid.</exception>
-    ValueTask SaveCollectionAsync(DocumentCollectionMetadata collection, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask SaveCollectionAsync(DocumentCollectionMetadata collection, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Tombstones a collection metadata version in the supplied transaction.</summary>
     /// <param name="collectionId">The stable collection identity.</param>
@@ -82,7 +82,7 @@ public interface IDocumentCatalog
     /// <param name="cancellationToken">Cancels the operation before physical application.</param>
     /// <returns>A task representing the operation.</returns>
     /// <remarks>The caller handles ownership enforcement and deletion of contained documents.</remarks>
-    ValueTask DeleteCollectionAsync(Guid collectionId, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DeleteCollectionAsync(Guid collectionId, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Finds a document metadata version visible through a snapshot.</summary>
     /// <param name="collectionId">The stable collection identity.</param>
@@ -104,7 +104,7 @@ public interface IDocumentCatalog
     /// <param name="cancellationToken">Cancels the operation before physical application.</param>
     /// <returns>A task representing the operation.</returns>
     /// <exception cref="ArgumentException">The document identity, name, or length is invalid.</exception>
-    ValueTask SaveDocumentAsync(DocumentCatalogEntry document, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask SaveDocumentAsync(DocumentCatalogEntry document, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Tombstones document metadata in the supplied transaction.</summary>
     /// <param name="collectionId">The stable collection identity.</param>
@@ -113,6 +113,6 @@ public interface IDocumentCatalog
     /// <param name="cancellationToken">Cancels the operation before physical application.</param>
     /// <returns>A task representing the operation.</returns>
     /// <remarks>The caller tombstones the content chain in the same logical transaction.</remarks>
-    ValueTask DeleteDocumentAsync(Guid collectionId, string name, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DeleteDocumentAsync(Guid collectionId, string name, TransactionContext context, CancellationToken cancellationToken = default);
 }
 

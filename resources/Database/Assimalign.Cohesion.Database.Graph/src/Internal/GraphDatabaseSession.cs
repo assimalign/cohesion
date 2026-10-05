@@ -63,7 +63,7 @@ internal sealed class GraphDatabaseSession : IDatabaseSession
             }
             _reserved = true;
         }
-        ITransactionContext? context = null;
+        TransactionContext? context = null;
         try
         {
             context = await _database.Coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);

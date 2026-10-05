@@ -5,12 +5,17 @@ The shared ACID substrate for every Cohesion database engine: MVCC visibility sn
 ## Scope
 
 - `TransactionManager` — begin/commit/rollback lifecycle, sequence assignment, snapshot capture (a sealed type; the coordinator composes the durable one, `TransactionManager.Create` a standalone one over an in-memory log)
-- `ITransactionContext` — the engine-internal state of one in-flight transaction
+- `TransactionContext` — the engine-internal state of one in-flight transaction (sealed;
+  `PinStatementSnapshot` fixes a read-committed statement's snapshot)
 - `TransactionId` / `TransactionState` — the transaction vocabulary the area root's `IDatabaseTransaction` contract consumes
 - `TransactionSnapshot` / `TransactionSequence` — MVCC visibility (implemented, tested)
-- `ILockManager` / `LockMode` / `LockResource` — hierarchical write locking with deadlock resolution
+- `LockManager` / `LockMode` / `LockResource` — hierarchical write locking with deadlock resolution
+  (sealed; `LockManager.Create` for a standalone table)
 - the transaction log — the WAL binding, an internal seam since #1257 (storage owns the physical journal)
-- `IVersionStore` — the version-chain contract model storage layers implement
+- `VersionStore` — the version-chain base; its two leaves, `RecordSpaceVersionStore` and the
+  in-memory store (`VersionStore.CreateInMemory`), both live here
+- `TransactionRecordSpace` / `RecordVersionIndex` — the abstract adapters an engine supplies
+  for its stamped records and its index undo, which the coordinator drives
 - `TransactionAbortedException` — an independent exception root (inherits `Exception`, not `DatabaseException`)
 
 The coordinator's record ledger supports streamed model records: logical rollback,
@@ -20,7 +25,7 @@ analysis streams the shared journal instead of retaining page-image payloads.
 A transaction's end closes it to statements: once a commit, rollback or abort claims
 the end, the coordinator applies no further bracket of it, the end waits for the bracket
 already applying, and the transaction's queued lock requests fail
-(`ILockManager.ReleaseAll`). A statement still running when its transaction ends on
+(`LockManager.ReleaseAll`). A statement still running when its transaction ends on
 another thread therefore fails with `TransactionAbortedException` and leaves nothing
 stamped with the ended sequence. A started rollback always ends its transaction, even
 when its abort record or its undo fails (#1226); a writer whose undo failed keeps its
@@ -51,4 +56,4 @@ substrate stays independently consumable.
 
 ## Consumers
 
-Every model engine (`Sql`, `Documents`, `Graph`, `Blob`, `KeyValuePair`) composes a transaction manager; execution operators carry `ITransactionContext` into storage, index, and catalog operations.
+Every model engine (`Sql`, `Documents`, `Graph`, `Blob`, `KeyValuePair`) composes a transaction manager; execution operators carry `TransactionContext` into storage, index, and catalog operations.

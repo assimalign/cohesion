@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// <summary>
 /// Binds the shared version ledger to key-value entries and their existing packed locations.
 /// </summary>
-internal sealed class KeyValueTransactionRecordSpace : ITransactionRecordSpace
+internal sealed class KeyValueTransactionRecordSpace : TransactionRecordSpace
 {
     private readonly KeyValueStorage _storage;
 
@@ -19,22 +19,22 @@ internal sealed class KeyValueTransactionRecordSpace : ITransactionRecordSpace
     }
 
     /// <inheritdoc />
-    public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex)
+    protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex)
         => _storage.ReadEntry(pageId, slotIndex);
 
     /// <inheritdoc />
-    public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+    protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
         => _storage.UpdateEntry(transaction, pageId, slotIndex, record);
 
     /// <inheritdoc />
-    public void Delete(StorageTransaction transaction, PageId pageId, int slotIndex)
+    protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex)
         => _storage.DeleteEntry(transaction, pageId, slotIndex);
 
     /// <inheritdoc />
-    public ulong PackLocation(PageId pageId, int slotIndex)
+    protected override ulong PackLocationCore(PageId pageId, int slotIndex)
         => KeyValueRecordLocation.Pack(pageId, slotIndex);
 
     /// <inheritdoc />
-    public (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
+    protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location)
         => KeyValueRecordLocation.Unpack(location);
 }

@@ -13,7 +13,7 @@ using Assimalign.Cohesion.Database.Storage;
 /// The rule recovery lives by: <b>a transaction committed if and only if its commit
 /// record is durable in the journal.</b> Everything else — a begin without a commit,
 /// an explicit rollback, a torn tail — is aborted, and its versions must be purged
-/// (<see cref="IVersionStore.PurgeWriterAsync"/>) before the store serves snapshots.
+/// (<see cref="VersionStore.PurgeWriterAsync"/>) before the store serves snapshots.
 /// </remarks>
 public static class TransactionRecovery
 {

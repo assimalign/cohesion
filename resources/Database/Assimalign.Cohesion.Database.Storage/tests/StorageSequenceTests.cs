@@ -22,7 +22,6 @@ public sealed class StorageSequenceTests
         private SequenceStorage(StorageStream data, StorageStream journal)
             : base(StorageModel.Custom, data, journal, new StorageStream(new System.IO.MemoryStream())) { }
 
-
         public static SequenceStorage Create(CrashSimulationStream data, CrashSimulationStream journal)
         {
             var storage = new SequenceStorage(new StorageStream(data), new StorageStream(journal));

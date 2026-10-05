@@ -285,7 +285,7 @@ public class BTreeEntryTimingTests
             return elapsed / targets;
         }
 
-        private async Task<int> CountVisibleAsync(ITransactionContext reader)
+        private async Task<int> CountVisibleAsync(TransactionContext reader)
         {
             int count = 0;
             await using var cursor = _index.OpenCursor(reader, new IndexKeyRange(_key, _key, true, true));
@@ -384,7 +384,7 @@ public class BTreeEntryTimingTests
             return elapsed / block;
         }
 
-        private async Task<int> CountVisibleAsync(ITransactionContext reader)
+        private async Task<int> CountVisibleAsync(TransactionContext reader)
         {
             int count = 0;
             await using var cursor = _index.OpenCursor(reader, new IndexKeyRange(_key, _key, true, true));

@@ -46,22 +46,22 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
     public IReadOnlyList<GraphRelationshipTypeMetadata> GetRelationshipTypes(TransactionSnapshot snapshot)
         => List(2, null, snapshot).Select(item => item.Record.RelationshipType!.Value).ToArray();
 
-    public ValueTask SaveLabelAsync(GraphLabelMetadata label, ITransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask SaveLabelAsync(GraphLabelMetadata label, TransactionContext context, CancellationToken cancellationToken = default)
         => SaveDefinitionAsync(new CatalogRecord(Label: label), context, cancellationToken);
 
-    public ValueTask SaveRelationshipTypeAsync(GraphRelationshipTypeMetadata relationshipType, ITransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask SaveRelationshipTypeAsync(GraphRelationshipTypeMetadata relationshipType, TransactionContext context, CancellationToken cancellationToken = default)
         => SaveDefinitionAsync(new CatalogRecord(RelationshipType: relationshipType), context, cancellationToken);
 
-    public ValueTask DeleteLabelAsync(Guid id, ITransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask DeleteLabelAsync(Guid id, TransactionContext context, CancellationToken cancellationToken = default)
         => DeleteDefinitionAsync(1, id, context, cancellationToken);
 
-    public ValueTask DeleteRelationshipTypeAsync(Guid id, ITransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask DeleteRelationshipTypeAsync(Guid id, TransactionContext context, CancellationToken cancellationToken = default)
         => DeleteDefinitionAsync(2, id, context, cancellationToken);
 
     public IReadOnlyList<GraphPropertyKeyMetadata> GetPropertyKeys(Guid definitionId, TransactionSnapshot snapshot)
         => List(3, definitionId, snapshot).Select(item => item.Record.Property!.Value).ToArray();
 
-    public ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, ITransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, TransactionContext context, CancellationToken cancellationToken = default)
     {
         EnsureActive(context);
         var record = new CatalogRecord(Property: property);
@@ -71,7 +71,7 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
         return SaveAsync(record, EnsureUnchanged(3, property.DefinitionId, property.Name, context), context, cancellationToken);
     }
 
-    public ValueTask DeletePropertyKeyAsync(Guid definitionId, string name, ITransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask DeletePropertyKeyAsync(Guid definitionId, string name, TransactionContext context, CancellationToken cancellationToken = default)
     {
         EnsureActive(context);
         RequireMutableDefinition(definitionId, context.Snapshot, "ALTER");
@@ -82,7 +82,7 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
     public IReadOnlyList<GraphIndexMetadata> GetIndexes(Guid labelId, TransactionSnapshot snapshot)
         => List(4, labelId, snapshot).Select(item => item.Record.Index!.Value).ToArray();
 
-    public ValueTask SaveIndexAsync(GraphIndexMetadata index, ITransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask SaveIndexAsync(GraphIndexMetadata index, TransactionContext context, CancellationToken cancellationToken = default)
     {
         EnsureActive(context);
         var record = new CatalogRecord(Index: index);
@@ -97,7 +97,7 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
         return SaveAsync(record, prior, context, cancellationToken);
     }
 
-    public ValueTask DeleteIndexAsync(Guid labelId, string name, ITransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask DeleteIndexAsync(Guid labelId, string name, TransactionContext context, CancellationToken cancellationToken = default)
     {
         EnsureActive(context);
         RequireMutableDefinition(labelId, context.Snapshot, "ALTER", labelOnly: true);
@@ -105,7 +105,7 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
         return DeleteAsync([EnsureUnchanged(4, labelId, name, context)], context, cancellationToken);
     }
 
-    private ValueTask SaveDefinitionAsync(CatalogRecord record, ITransactionContext context, CancellationToken cancellationToken)
+    private ValueTask SaveDefinitionAsync(CatalogRecord record, TransactionContext context, CancellationToken cancellationToken)
     {
         EnsureActive(context);
         GraphCatalogCodec.Validate(record);
@@ -133,7 +133,7 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
         return SaveAsync(record, previous, context, cancellationToken);
     }
 
-    private ValueTask DeleteDefinitionAsync(byte kind, Guid id, ITransactionContext context, CancellationToken cancellationToken)
+    private ValueTask DeleteDefinitionAsync(byte kind, Guid id, TransactionContext context, CancellationToken cancellationToken)
     {
         EnsureActive(context);
         var previous = List(kind, null, context.Snapshot).FirstOrDefault(item => item.Record.Id == id);
@@ -167,11 +167,11 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
         return DeleteAsync(records, context, cancellationToken);
     }
 
-    private TransactionSnapshot Latest(ITransactionContext context)
+    private TransactionSnapshot Latest(TransactionContext context)
         => new(context.Sequence, TransactionSequence.None, new TransactionSequence(ulong.MaxValue),
             _coordinator.GetOpenContexts().Where(item => item.State == TransactionState.Active).Select(item => item.Sequence));
 
-    private Found? EnsureUnchanged(byte kind, Guid parent, string name, ITransactionContext context)
+    private Found? EnsureUnchanged(byte kind, Guid parent, string name, TransactionContext context)
     {
         var previous = Find(kind, parent, name, context.Snapshot);
         var latest = Find(kind, parent, name, Latest(context));
@@ -182,7 +182,7 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
         return previous;
     }
 
-    private void EnsureParentUnchanged(Guid id, ITransactionContext context)
+    private void EnsureParentUnchanged(Guid id, TransactionContext context)
     {
         var latestSnapshot = Latest(context);
         var previous = List(1, null, context.Snapshot).Concat(List(2, null, context.Snapshot))
@@ -226,7 +226,7 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
         }
     }
 
-    private async ValueTask SaveAsync(CatalogRecord record, Found? previous, ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask SaveAsync(CatalogRecord record, Found? previous, TransactionContext context, CancellationToken cancellationToken)
     {
         byte[] bytes = GraphCatalogCodec.Encode(record, context.Sequence);
         var location = await _coordinator.ApplyStatementAsync(context, bracket =>
@@ -245,7 +245,7 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
         }
     }
 
-    private async ValueTask DeleteAsync(IEnumerable<Found?> records, ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask DeleteAsync(IEnumerable<Found?> records, TransactionContext context, CancellationToken cancellationToken)
     {
         await _coordinator.ApplyStatementAsync(context, bracket =>
         {
@@ -369,7 +369,7 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
         }
     }
 
-    private static void EnsureActive(ITransactionContext context)
+    private static void EnsureActive(TransactionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
         if (context.State != TransactionState.Active)

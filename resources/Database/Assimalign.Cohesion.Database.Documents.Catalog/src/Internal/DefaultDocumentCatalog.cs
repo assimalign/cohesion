@@ -67,7 +67,7 @@ internal sealed partial class DefaultDocumentCatalog : IDocumentCatalog
         }
     }
 
-    public async ValueTask SaveCollectionAsync(DocumentCollectionMetadata collection, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask SaveCollectionAsync(DocumentCollectionMetadata collection, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(collection.Name);
@@ -89,7 +89,7 @@ internal sealed partial class DefaultDocumentCatalog : IDocumentCatalog
         await SaveAsync(new CatalogRecord(collection, null), previous, context, cancellationToken).ConfigureAwait(false);
     }
 
-    public async ValueTask DeleteCollectionAsync(Guid collectionId, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask DeleteCollectionAsync(Guid collectionId, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         Found? previous = null;
@@ -137,7 +137,7 @@ internal sealed partial class DefaultDocumentCatalog : IDocumentCatalog
         }
     }
 
-    public async ValueTask SaveDocumentAsync(DocumentCatalogEntry document, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask SaveDocumentAsync(DocumentCatalogEntry document, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(document.Name);
@@ -154,7 +154,7 @@ internal sealed partial class DefaultDocumentCatalog : IDocumentCatalog
         await SaveAsync(new CatalogRecord(null, document), previous, context, cancellationToken).ConfigureAwait(false);
     }
 
-    public async ValueTask DeleteDocumentAsync(Guid collectionId, string name, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask DeleteDocumentAsync(Guid collectionId, string name, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(context);
@@ -166,7 +166,7 @@ internal sealed partial class DefaultDocumentCatalog : IDocumentCatalog
         await DeleteAsync(previous, context, cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask SaveAsync(CatalogRecord record, Found? previous, ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask SaveAsync(CatalogRecord record, Found? previous, TransactionContext context, CancellationToken cancellationToken)
     {
         EnsureActive(context);
         byte[] bytes = DocumentCatalogCodec.Encode(record, context.Sequence);
@@ -192,7 +192,7 @@ internal sealed partial class DefaultDocumentCatalog : IDocumentCatalog
         }
     }
 
-    private async ValueTask DeleteAsync(Found? previous, ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask DeleteAsync(Found? previous, TransactionContext context, CancellationToken cancellationToken)
     {
         EnsureActive(context);
         cancellationToken.ThrowIfCancellationRequested();
@@ -325,7 +325,7 @@ internal sealed partial class DefaultDocumentCatalog : IDocumentCatalog
         return result;
     }
 
-    private static void EnsureActive(ITransactionContext context)
+    private static void EnsureActive(TransactionContext context)
     {
         if (context.State != TransactionState.Active)
         {

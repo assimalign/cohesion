@@ -800,7 +800,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.
 - **Transactions (MVCC session binding, §3.8).** Every statement — explicit
-  transaction or auto-commit — runs under an `ITransactionContext` from the
+  transaction or auto-commit — runs under an `TransactionContext` from the
   database's transaction manager, whose sequences come from the storage's own
   counter (one namespace). The shared `Database.Transactions.TransactionCoordinator` owns
   the composition (manager + lock manager + record-space version store +
@@ -826,7 +826,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   open the coordinator runs `TransactionRecovery.Analyze` over the recovered
   journal (the storage strategy defers the open-time checkpoint for exactly
   this) and scrubs every unproven writer's stamps out of the record space —
-  the open-time bulk form of `IVersionStore.PurgeWriterAsync`, one pass
+  the open-time bulk form of `VersionStore.PurgeWriterAsync`, one pass
   instead of one scan per writer because the in-memory ledger died with the
   process; the checkpoint worker checkpoints data storages *through the
   coordinator*, so truncating checkpoint records carry in-flight logical
@@ -1007,8 +1007,8 @@ a drop):
   and checkpoints directly.
 - **`SqlVersionPurgeWorker`** — **live** (#910): per pass, per open database, it
   retries the logical undo of any aborted writer whose rollback-time purge
-  failed (`IVersionStore.PurgeWriterAsync`) and physically reclaims versions no
-  snapshot can reach (`IVersionStore.PruneAsync` below the safe prune bound —
+  failed (`VersionStore.PurgeWriterAsync`) and physically reclaims versions no
+  snapshot can reach (`VersionStore.PruneAsync` below the safe prune bound —
   the minimum snapshot floor of every open transaction, anchored above the
   recovered sequence namespace after a reopen, or the manager's oldest-active
   bound when idle; the manager's bound alone would let a live pinned snapshot
@@ -1838,7 +1838,7 @@ The engine is the first adopter of the area's transaction-integration design
 four independently shippable steps:
 
 1. **Binding — delivered (#907):** `SqlDatabaseSession` begins an
-   `ITransactionContext` on the database's transaction manager alongside the
+   `TransactionContext` on the database's transaction manager alongside the
    storage bracket (one shared sequence), paired through the coordinator's
    `IStorageTransactionSource`; commit/rollback flow through the manager
    (journal-bound log), the storage transaction stays the physical WAL bracket.
@@ -1860,7 +1860,7 @@ four independently shippable steps:
    relocation), and the purge worker reclaims dead versions where they lie.
    See "Row format" and "Format rule" under the execution model.
 3. **Row-grain write conflicts — delivered (#909):** exclusive row locks via
-   `ILockManager` (the B+Tree uniqueness-lock precedent) replaced page
+   `LockManager` (the B+Tree uniqueness-lock precedent) replaced page
    conflicts as the user-visible surface — concurrent writers to disjoint rows
    of one table (and one page) both commit; same-row writers wait, then
    resolve first-updater-wins; deadlock victims surface as the root's

@@ -13,7 +13,6 @@ internal sealed class WorkerStorage : Storage
     private WorkerStorage(StorageStream data, StorageStream journal)
         : base(StorageModel.Sql, data, journal, new StorageStream(new MemoryStream())) { }
 
-
     public StorageJournal Wal => WriteAheadLog;
 
     public static WorkerStorage Create(Stream data, Stream journal)

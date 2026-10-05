@@ -12,9 +12,11 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// </summary>
 /// <remarks>
 /// Keeps index keys and trees in Indexing while Transactions records opaque encoded
-/// keys and invokes stamp-checked undo through <see cref="IRecordVersionIndex"/>.
+/// keys and invokes stamp-checked undo through <see cref="RecordVersionIndex"/>. Named for
+/// the B-tree it undoes through; it was <c>RecordVersionIndex</c> until that name passed to the
+/// Transactions base it derives from (#1258).
 /// </remarks>
-public sealed class RecordVersionIndex : IRecordVersionIndex
+public sealed class BTreeRecordVersionIndex : RecordVersionIndex
 {
     private readonly IIndex _index;
 
@@ -22,27 +24,27 @@ public sealed class RecordVersionIndex : IRecordVersionIndex
     /// Initializes a binding to the index whose versions the ledger tracks.
     /// </summary>
     /// <param name="index">The index to undo through.</param>
-    public RecordVersionIndex(IIndex index)
+    public BTreeRecordVersionIndex(IIndex index)
     {
         ArgumentNullException.ThrowIfNull(index);
         _index = index;
     }
 
     /// <inheritdoc />
-    public ValueTask EraseAsync(
+    protected override ValueTask EraseCoreAsync(
         StorageTransaction transaction,
         ReadOnlyMemory<byte> key,
         ulong entryReference,
         TransactionSequence writer,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
         => _index.EraseAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
 
     /// <inheritdoc />
-    public ValueTask ClearDeleterAsync(
+    protected override ValueTask ClearDeleterCoreAsync(
         StorageTransaction transaction,
         ReadOnlyMemory<byte> key,
         ulong entryReference,
         TransactionSequence writer,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
         => _index.ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
 }

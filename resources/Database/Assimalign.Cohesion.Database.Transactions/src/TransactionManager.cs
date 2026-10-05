@@ -20,7 +20,7 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 /// <para>
 /// One manager instance serves one logical database. A database's durable manager is the
 /// one <see cref="TransactionCoordinator"/> composes over the database's storage and
-/// journal (<see cref="TransactionCoordinator.Manager"/>); <see cref="Create(ILockManager, IVersionStore, Func{TransactionSequence})"/>
+/// journal (<see cref="TransactionCoordinator.Manager"/>); <see cref="Create(LockManager, VersionStore, Func{TransactionSequence})"/>
 /// builds a standalone manager over an in-memory log. The type is sealed with an internal
 /// constructor: there is one manager implementation, and nothing outside this assembly
 /// substitutes it (<c>database-area.md</c>).
@@ -64,10 +64,10 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 public sealed class TransactionManager : IAsyncDisposable
 {
     private readonly TransactionLog _log;
-    private readonly ILockManager _lockManager;
-    private readonly IVersionStore _versionStore;
+    private readonly LockManager _lockManager;
+    private readonly VersionStore _versionStore;
     private readonly Func<TransactionSequence>? _sequenceAllocator;
-    private readonly Dictionary<ulong, DefaultTransactionContext> _active = new();
+    private readonly Dictionary<ulong, TransactionContext> _active = new();
 
     // Writers whose transaction ended but whose undo did not complete. Each one is still
     // in _active and still holds its locks.
@@ -91,8 +91,8 @@ public sealed class TransactionManager : IAsyncDisposable
 
     internal TransactionManager(
         TransactionLog log,
-        ILockManager lockManager,
-        IVersionStore versionStore,
+        LockManager lockManager,
+        VersionStore versionStore,
         Func<TransactionSequence>? sequenceAllocator = null,
         TimeProvider? time = null)
     {
@@ -128,7 +128,7 @@ public sealed class TransactionManager : IAsyncDisposable
     /// (<see cref="TransactionCoordinator.Manager"/>).
     /// </para>
     /// <para>
-    /// A rollback whose undo fails (<see cref="IVersionStore.PurgeWriterAsync"/> throws)
+    /// A rollback whose undo fails (<see cref="VersionStore.PurgeWriterAsync"/> throws)
     /// still ends its transaction, but the writer stays in the active table and keeps its
     /// locks until its undo completes, because its versions are still in the store (#1226).
     /// A manager created here has no version-purge pass to retry that undo: only its
@@ -139,8 +139,8 @@ public sealed class TransactionManager : IAsyncDisposable
     /// </para>
     /// </remarks>
     public static TransactionManager Create(
-        ILockManager lockManager,
-        IVersionStore versionStore,
+        LockManager lockManager,
+        VersionStore versionStore,
         Func<TransactionSequence>? sequenceAllocator = null)
     {
         ArgumentNullException.ThrowIfNull(lockManager);
@@ -160,8 +160,8 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <returns>The transaction manager.</returns>
     internal static TransactionManager Create(
         TransactionLog log,
-        ILockManager lockManager,
-        IVersionStore versionStore,
+        LockManager lockManager,
+        VersionStore versionStore,
         Func<TransactionSequence>? sequenceAllocator = null)
     {
         ArgumentNullException.ThrowIfNull(log);
@@ -294,14 +294,14 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The context for the new transaction.</returns>
     /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
-    public async ValueTask<ITransactionContext> BeginAsync(
+    public async ValueTask<TransactionContext> BeginAsync(
         IsolationLevel isolationLevel = IsolationLevel.Snapshot,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         cancellationToken.ThrowIfCancellationRequested();
 
-        DefaultTransactionContext context;
+        TransactionContext context;
 
         lock (_sync)
         {
@@ -328,7 +328,7 @@ public sealed class TransactionManager : IAsyncDisposable
             }
 
             var snapshot = CaptureSnapshotLocked(new TransactionSequence(sequence));
-            context = new DefaultTransactionContext(
+            context = new TransactionContext(
                 this, TransactionId.NewId(), new TransactionSequence(sequence), isolationLevel, snapshot);
             _active[sequence] = context;
         }
@@ -370,7 +370,7 @@ public sealed class TransactionManager : IAsyncDisposable
     /// flush, and the reopen's recovery decides it.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
-    public async ValueTask CommitAsync(ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask CommitAsync(TransactionContext context, CancellationToken cancellationToken = default)
     {
         var owned = ClaimEnd(context);
 
@@ -419,7 +419,7 @@ public sealed class TransactionManager : IAsyncDisposable
     /// Ends a context whose commit record is in the log: it leaves the active table, its
     /// state becomes <see cref="TransactionState.Committed"/>, and its locks are released.
     /// </summary>
-    private void EndCommitted(DefaultTransactionContext context)
+    private void EndCommitted(TransactionContext context)
     {
         lock (_sync)
         {
@@ -430,7 +430,7 @@ public sealed class TransactionManager : IAsyncDisposable
         // release then sees an ended owner and must give the grant back (the engines'
         // post-grant check), and one granted before it is released here.
         context.State = TransactionState.Committed;
-        _lockManager.ReleaseAll(context.Sequence);
+        _lockManager.ReleaseAllUnfiltered(context.Sequence);
     }
 
     /// <summary>
@@ -457,7 +457,7 @@ public sealed class TransactionManager : IAsyncDisposable
     /// commit or rollback is already running.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
-    public async ValueTask RollbackAsync(ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask RollbackAsync(TransactionContext context, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var owned = ClaimEnd(context);
@@ -475,16 +475,16 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <summary>
     /// Admits one statement apply for the context's transaction, which must still be
     /// in the active table and not ending. Every admitted apply is paired with
-    /// <see cref="DefaultTransactionContext.ExitApply"/>.
+    /// <see cref="TransactionContext.ExitApply"/>.
     /// </summary>
     /// <param name="context">The context the statement runs under, or a statement wrapper sharing its sequence.</param>
     /// <returns>The manager's context for the transaction.</returns>
     /// <exception cref="TransactionAbortedException">The transaction has ended or its end has begun.</exception>
-    internal DefaultTransactionContext EnterApply(ITransactionContext context)
+    internal TransactionContext EnterApply(TransactionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        DefaultTransactionContext? owned;
+        TransactionContext? owned;
 
         // By sequence, not by reference: engines hand statement wrappers (a
         // read-committed statement's fixed snapshot) that share the sequence.
@@ -517,7 +517,7 @@ public sealed class TransactionManager : IAsyncDisposable
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        List<DefaultTransactionContext> remaining;
+        List<TransactionContext> remaining;
         lock (_sync)
         {
             if (_disposed)
@@ -673,7 +673,7 @@ public sealed class TransactionManager : IAsyncDisposable
     /// Ends a claimed context as aborted. Throws nothing and observes no token: this is
     /// the part of a rollback that, once started, always completes.
     /// </summary>
-    private async ValueTask EndAbortedAsync(DefaultTransactionContext context, TransactionState outcome)
+    private async ValueTask EndAbortedAsync(TransactionContext context, TransactionState outcome)
     {
         var sequence = context.Sequence;
 
@@ -744,7 +744,7 @@ public sealed class TransactionManager : IAsyncDisposable
             _active.Remove(sequence.Value);
         }
 
-        _lockManager.ReleaseAll(sequence);
+        _lockManager.ReleaseAllUnfiltered(sequence);
     }
 
     /// <summary>
@@ -752,19 +752,15 @@ public sealed class TransactionManager : IAsyncDisposable
     /// a transaction whose undo is deferred.
     /// </summary>
     /// <remarks>
-    /// Only the default lock manager can split the two halves of
-    /// <see cref="ILockManager.ReleaseAll"/>; the public lock-manager contract has no
-    /// such member, and none is added for this (owner direction of 2026-10-03). With
-    /// another lock manager a deferred writer's queued request stays queued until the
-    /// deferred undo completes and the release fails it, or until it is granted and the
-    /// engine's post-grant check refuses the ended transaction.
+    /// The two halves of <see cref="LockManager.ReleaseAll"/> are split by an internal member
+    /// of the lock manager; the public lock-manager surface has no such member, and none is
+    /// added for this (owner direction of 2026-10-03). Since the lock manager became one sealed
+    /// type (#1258), every manager has it; before, a lock manager other than the default one
+    /// left a deferred writer's queued request queued.
     /// </remarks>
     private void AbandonPendingRequests(TransactionSequence sequence)
     {
-        if (_lockManager is DefaultLockManager locks)
-        {
-            locks.AbandonPending(sequence);
-        }
+        _lockManager.AbandonPending(sequence);
     }
 
     private async ValueTask<long> RetryDeferredUndoCoreAsync(CancellationToken cancellationToken)
@@ -828,12 +824,15 @@ public sealed class TransactionManager : IAsyncDisposable
     /// Validates a context and claims its end for the caller. Every successful claim is
     /// paired with one <see cref="ExitEnd"/> when the end returns.
     /// </summary>
-    private DefaultTransactionContext ClaimEnd(ITransactionContext context)
+    private TransactionContext ClaimEnd(TransactionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (context is not DefaultTransactionContext owned || !ReferenceEquals(owned.Manager, this))
+        // A statement view shares its transaction's sequence but is not the context this
+        // manager began, so it cannot end the transaction.
+        var owned = context;
+        if (owned.IsStatementView || !ReferenceEquals(owned.Manager, this))
         {
             throw new TransactionAbortedException("The transaction context was not created by this manager.");
         }

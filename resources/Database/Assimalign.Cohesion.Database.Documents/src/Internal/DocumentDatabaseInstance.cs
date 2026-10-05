@@ -291,7 +291,7 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
 
     // One database writer at a time is deliberately conservative. The shared
     // lock manager owns waits and releases; readers remain snapshot based.
-    internal async ValueTask LockWriterAsync(ITransactionContext context, CancellationToken token)
+    internal async ValueTask LockWriterAsync(TransactionContext context, CancellationToken token)
     {
         // An offline database grants no new writer (#1243). A wait for the lock ends with the
         // coded refusal when the database goes offline: the coordinator fails it with the
@@ -326,7 +326,7 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
 
     // Called only under the database writer lock, after all earlier writers
     // finished. Preserve the caller's own uncommitted writes in the latest view.
-    internal TransactionSnapshot LatestSnapshot(ITransactionContext context) => new(context.Sequence,
+    internal TransactionSnapshot LatestSnapshot(TransactionContext context) => new(context.Sequence,
         TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Select(item => item.Sequence));
 
     internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException("The document catalog changed since this transaction's snapshot. Retry the transaction.");

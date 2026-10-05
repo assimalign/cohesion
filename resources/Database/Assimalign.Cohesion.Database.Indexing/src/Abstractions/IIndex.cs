@@ -57,7 +57,7 @@ public interface IIndex
     /// The key exceeds the maximum key length, or an entry with the same key, entry
     /// reference and writer already exists (a defect: entry identities are unique).
     /// </exception>
-    ValueTask InsertAsync(ITransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default);
+    ValueTask InsertAsync(TransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Deletes a key → entry-reference mapping.
@@ -66,7 +66,7 @@ public interface IIndex
     /// <param name="key">The key to delete.</param>
     /// <param name="entryReference">The entry reference to remove for the key.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    ValueTask DeleteAsync(ITransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default);
+    ValueTask DeleteAsync(TransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Opens a cursor over the specified key range, positioned before the first match.
@@ -79,7 +79,7 @@ public interface IIndex
     /// <param name="range">The key range to scan.</param>
     /// <param name="reverse">Whether to scan in descending key order.</param>
     /// <returns>A cursor over the visible entries in the range.</returns>
-    IIndexCursor OpenCursor(ITransactionContext transaction, IndexKeyRange range, bool reverse = false);
+    IIndexCursor OpenCursor(TransactionContext transaction, IndexKeyRange range, bool reverse = false);
 
     /// <summary>
     /// Opens a cursor over the specified key range through an explicit visibility

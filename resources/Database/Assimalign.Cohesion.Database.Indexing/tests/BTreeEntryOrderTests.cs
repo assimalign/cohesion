@@ -32,7 +32,7 @@ public class BTreeEntryOrderTests
     }
 
     private static async Task<List<(byte[] Key, ulong Reference)>> ReadAsync(
-        IIndex index, ITransactionContext reader, IndexKeyRange range, bool reverse = false)
+        IIndex index, TransactionContext reader, IndexKeyRange range, bool reverse = false)
     {
         var results = new List<(byte[] Key, ulong Reference)>();
         await using var cursor = index.OpenCursor(reader, range, reverse);

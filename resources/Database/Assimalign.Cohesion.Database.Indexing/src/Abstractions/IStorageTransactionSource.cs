@@ -20,5 +20,5 @@ public interface IStorageTransactionSource
     /// </summary>
     /// <param name="context">The logical transaction context.</param>
     /// <returns>The paired storage transaction.</returns>
-    StorageTransaction GetStorageTransaction(ITransactionContext context);
+    StorageTransaction GetStorageTransaction(TransactionContext context);
 }

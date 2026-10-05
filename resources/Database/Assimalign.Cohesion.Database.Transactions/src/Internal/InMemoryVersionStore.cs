@@ -10,21 +10,19 @@ namespace Assimalign.Cohesion.Database.Transactions.Internal;
 /// resolved against snapshots newest-first. Used by engines for uncheckpointed
 /// working state and by tests; page-backed stores arrive with the model engines.
 /// </summary>
-internal sealed class InMemoryVersionStore : IVersionStore
+internal sealed class InMemoryVersionStore : VersionStore
 {
     private readonly Dictionary<(ulong ObjectId, ulong EntryId), List<Version>> _chains = new();
     private readonly object _sync = new();
 
     /// <inheritdoc />
-    public ValueTask AppendVersionAsync(
+    protected override ValueTask AppendVersionCoreAsync(
         ulong objectId,
         ulong entryId,
         ReadOnlyMemory<byte> payload,
         TransactionSequence writer,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
         lock (_sync)
         {
             var key = (objectId, entryId);
@@ -42,15 +40,12 @@ internal sealed class InMemoryVersionStore : IVersionStore
     }
 
     /// <inheritdoc />
-    public ValueTask<ReadOnlyMemory<byte>?> GetVisibleVersionAsync(
+    protected override ValueTask<ReadOnlyMemory<byte>?> GetVisibleVersionCoreAsync(
         ulong objectId,
         ulong entryId,
         TransactionSnapshot snapshot,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        cancellationToken.ThrowIfCancellationRequested();
-
         lock (_sync)
         {
             if (!_chains.TryGetValue((objectId, entryId), out var chain))
@@ -71,7 +66,7 @@ internal sealed class InMemoryVersionStore : IVersionStore
     }
 
     /// <inheritdoc />
-    public ValueTask<long> PruneAsync(TransactionSequence oldestActive, CancellationToken cancellationToken = default)
+    protected override ValueTask<long> PruneCoreAsync(TransactionSequence oldestActive, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -106,7 +101,7 @@ internal sealed class InMemoryVersionStore : IVersionStore
     }
 
     /// <inheritdoc />
-    public ValueTask<long> PurgeWriterAsync(TransactionSequence writer, CancellationToken cancellationToken = default)
+    protected override ValueTask<long> PurgeWriterCoreAsync(TransactionSequence writer, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 

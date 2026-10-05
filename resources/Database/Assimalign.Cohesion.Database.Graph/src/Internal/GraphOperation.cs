@@ -10,11 +10,11 @@ internal sealed class GraphOperation
     private readonly GraphDatabaseInstance _database;
     private readonly GraphDatabaseSession? _session;
     private readonly GraphDatabaseTransaction? _transaction;
-    private readonly ITransactionContext _context;
+    private readonly TransactionContext _context;
     private readonly SemaphoreSlim _completionGate = new(1, 1);
-    private ITransactionContext? _snapshotPin;
+    private TransactionContext? _snapshotPin;
     private int _finished;
-    internal GraphOperation(GraphDatabaseInstance database, GraphDatabaseSession? session, ITransactionContext context, GraphDatabaseTransaction? transaction)
+    internal GraphOperation(GraphDatabaseInstance database, GraphDatabaseSession? session, TransactionContext context, GraphDatabaseTransaction? transaction)
     {
         _database = database;
         _session = session;
@@ -26,7 +26,7 @@ internal sealed class GraphOperation
             transaction.Operations++;
         }
     }
-    internal ITransactionContext Context { get; private set; }
+    internal TransactionContext Context { get; private set; }
     internal async ValueTask InitializeAsync(CancellationToken cancellationToken)
     {
         if (_transaction?.IsolationLevel == IsolationLevel.ReadCommitted)
@@ -35,7 +35,7 @@ internal sealed class GraphOperation
             // may commit while the operation is open, so the refreshing transaction
             // context alone cannot preserve the statement's original horizon.
             _snapshotPin = await _database.Coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false);
-            Context = new GraphStatementContext(_context, _context.Snapshot);
+            Context = _context.PinStatementSnapshot();
         }
     }
     internal void EnsureActive()
@@ -129,28 +129,4 @@ internal sealed class GraphOperation
             await _database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
         }
     }
-}
-
-// One read-committed statement gets one visibility decision, including every
-// metadata lookup and all graph content. Lifecycle operations use the original
-// context; physical brackets and record stamps use this identical writer sequence.
-internal sealed class GraphStatementContext : ITransactionContext
-{
-    private readonly ITransactionContext _context;
-    private readonly TransactionSnapshot _snapshot;
-
-    /// <summary>Initializes a new instance of the <see cref="GraphStatementContext"/> class.</summary>
-    /// <param name="context">The original transaction context whose identity, sequence, isolation level, and state are exposed.</param>
-    /// <param name="snapshot">The statement snapshot that fixes the statement's visibility.</param>
-    public GraphStatementContext(ITransactionContext context, TransactionSnapshot snapshot)
-    {
-        _context = context;
-        _snapshot = snapshot;
-    }
-
-    public TransactionId Id => _context.Id;
-    public TransactionSequence Sequence => _context.Sequence;
-    public IsolationLevel IsolationLevel => _context.IsolationLevel;
-    public TransactionState State => _context.State;
-    public TransactionSnapshot Snapshot => _snapshot;
 }

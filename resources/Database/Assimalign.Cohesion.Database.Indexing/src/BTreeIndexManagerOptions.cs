@@ -27,7 +27,7 @@ public sealed class BTreeIndexManagerOptions
     /// visible state, but concurrent uncommitted writers of the same key are only
     /// serialized by the page write locks.
     /// </summary>
-    public ILockManager? LockManager { get; init; }
+    public LockManager? LockManager { get; init; }
 
     /// <summary>
     /// Gets or sets the registrations of indexes that already exist in storage

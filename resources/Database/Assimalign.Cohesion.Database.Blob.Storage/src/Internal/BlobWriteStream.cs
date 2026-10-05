@@ -10,7 +10,7 @@ internal sealed class BlobWriteStream : Stream
 {
     private readonly BlobStorage _storage;
     private readonly TransactionCoordinator _coordinator;
-    private readonly ITransactionContext _context;
+    private readonly TransactionContext _context;
     private readonly Func<BlobContentReference, ValueTask> _complete;
     private readonly Func<Exception, ValueTask> _abort;
     private readonly CancellationToken _lifetimeCancellation;
@@ -33,7 +33,7 @@ internal sealed class BlobWriteStream : Stream
     public BlobWriteStream(
         BlobStorage storage,
         TransactionCoordinator coordinator,
-        ITransactionContext context,
+        TransactionContext context,
         Func<BlobContentReference, ValueTask> complete,
         Func<Exception, ValueTask> abort,
         CancellationToken lifetimeCancellation)

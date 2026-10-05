@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal readonly struct SqlStatementContext
 {
     internal SqlStatementContext(
-        ITransactionContext transaction,
+        TransactionContext transaction,
         TransactionCoordinator coordinator,
         string? provisioningSchema = null,
         string databaseName = "",
@@ -33,7 +33,7 @@ internal readonly struct SqlStatementContext
     /// <summary>
     /// Gets the MVCC transaction context the statement executes under.
     /// </summary>
-    internal ITransactionContext Transaction { get; }
+    internal TransactionContext Transaction { get; }
 
     /// <summary>
     /// Gets the database's transaction coordinator.

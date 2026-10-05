@@ -26,7 +26,6 @@ public sealed class StorageOwnerChainTests
         {
         }
 
-
         public static ChainStorage Create(CrashSimulationStream data, CrashSimulationStream journal, int poolCapacity = 16)
         {
             var storage = new ChainStorage(new StorageStream(data), new StorageStream(journal), poolCapacity);

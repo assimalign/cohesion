@@ -43,7 +43,6 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
     private DocumentStorage(StorageStream data, StorageStream journal, StorageStream backup)
         : base(StorageModel.Document, data, journal, backup) => Records = new DocumentTransactionRecordSpace(this);
 
-
     /// <summary>
     /// Creates a new document storage file set backed by the given streams.
     /// </summary>

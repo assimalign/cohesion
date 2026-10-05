@@ -508,7 +508,6 @@ public sealed class StorageConcurrencyTests
         {
         }
 
-
         public static ConcurrentStorage Create(MemoryStream data, MemoryStream journal, int capacity)
         {
             var storage = new ConcurrentStorage(

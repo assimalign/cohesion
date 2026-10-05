@@ -117,7 +117,7 @@ format specifies its own format byte and link/payload offsets in the storage doc
 
 ## Atomic publication and recovery
 
-An upload holds one logical `ITransactionContext`. Each full chunk applies in a small physical
+An upload holds one logical `TransactionContext`. Each full chunk applies in a small physical
 statement bracket through `TransactionCoordinator.ApplyStatementAsync`; each created record
 is tracked by the shared version store. The stream holds one chunk buffer, not the object.
 Flush can persist chunks while leaving them unpublished. Successful disposal finishes the last

@@ -32,7 +32,7 @@ public interface IBlobCatalog
     /// <param name="cancellationToken">Cancels the operation before physical application.</param>
     /// <returns>A task representing the operation.</returns>
     /// <exception cref="ArgumentException">The container identity or name is invalid.</exception>
-    ValueTask SaveContainerAsync(BlobContainerMetadata container, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask SaveContainerAsync(BlobContainerMetadata container, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Tombstones a container metadata version in the supplied transaction.</summary>
     /// <param name="containerId">The stable container identity.</param>
@@ -40,7 +40,7 @@ public interface IBlobCatalog
     /// <param name="cancellationToken">Cancels the operation before physical application.</param>
     /// <returns>A task representing the operation.</returns>
     /// <remarks>The caller handles ownership enforcement and deletion of contained blobs.</remarks>
-    ValueTask DeleteContainerAsync(Guid containerId, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DeleteContainerAsync(Guid containerId, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Finds a blob metadata version visible through a snapshot.</summary>
     /// <param name="containerId">The stable container identity.</param>
@@ -62,7 +62,7 @@ public interface IBlobCatalog
     /// <param name="cancellationToken">Cancels the operation before physical application.</param>
     /// <returns>A task representing the operation.</returns>
     /// <exception cref="ArgumentException">The blob identity, name, or length is invalid.</exception>
-    ValueTask SaveBlobAsync(BlobCatalogEntry blob, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask SaveBlobAsync(BlobCatalogEntry blob, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Tombstones blob metadata in the supplied transaction.</summary>
     /// <param name="containerId">The stable container identity.</param>
@@ -71,5 +71,5 @@ public interface IBlobCatalog
     /// <param name="cancellationToken">Cancels the operation before physical application.</param>
     /// <returns>A task representing the operation.</returns>
     /// <remarks>The caller tombstones the content chain in the same logical transaction.</remarks>
-    ValueTask DeleteBlobAsync(Guid containerId, string name, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DeleteBlobAsync(Guid containerId, string name, TransactionContext context, CancellationToken cancellationToken = default);
 }

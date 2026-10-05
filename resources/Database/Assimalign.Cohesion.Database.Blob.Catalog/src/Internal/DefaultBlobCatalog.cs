@@ -66,7 +66,7 @@ internal sealed class DefaultBlobCatalog : IBlobCatalog
         }
     }
 
-    public async ValueTask SaveContainerAsync(BlobContainerMetadata container, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask SaveContainerAsync(BlobContainerMetadata container, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(container.Name);
@@ -88,7 +88,7 @@ internal sealed class DefaultBlobCatalog : IBlobCatalog
         await SaveAsync(new CatalogRecord(container, null), previous, context, cancellationToken).ConfigureAwait(false);
     }
 
-    public async ValueTask DeleteContainerAsync(Guid containerId, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask DeleteContainerAsync(Guid containerId, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         Found? previous = null;
@@ -136,7 +136,7 @@ internal sealed class DefaultBlobCatalog : IBlobCatalog
         }
     }
 
-    public async ValueTask SaveBlobAsync(BlobCatalogEntry blob, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask SaveBlobAsync(BlobCatalogEntry blob, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(blob.Name);
@@ -153,7 +153,7 @@ internal sealed class DefaultBlobCatalog : IBlobCatalog
         await SaveAsync(new CatalogRecord(null, blob), previous, context, cancellationToken).ConfigureAwait(false);
     }
 
-    public async ValueTask DeleteBlobAsync(Guid containerId, string name, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask DeleteBlobAsync(Guid containerId, string name, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(context);
@@ -165,7 +165,7 @@ internal sealed class DefaultBlobCatalog : IBlobCatalog
         await DeleteAsync(previous, context, cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask SaveAsync(CatalogRecord record, Found? previous, ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask SaveAsync(CatalogRecord record, Found? previous, TransactionContext context, CancellationToken cancellationToken)
     {
         EnsureActive(context);
         byte[] bytes = BlobCatalogCodec.Encode(record, context.Sequence);
@@ -188,7 +188,7 @@ internal sealed class DefaultBlobCatalog : IBlobCatalog
         }
     }
 
-    private async ValueTask DeleteAsync(Found? previous, ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask DeleteAsync(Found? previous, TransactionContext context, CancellationToken cancellationToken)
     {
         EnsureActive(context);
         cancellationToken.ThrowIfCancellationRequested();
@@ -310,7 +310,7 @@ internal sealed class DefaultBlobCatalog : IBlobCatalog
         return result;
     }
 
-    private static void EnsureActive(ITransactionContext context)
+    private static void EnsureActive(TransactionContext context)
     {
         if (context.State != TransactionState.Active)
         {

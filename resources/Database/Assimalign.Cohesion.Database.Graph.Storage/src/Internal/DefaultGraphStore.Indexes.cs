@@ -30,7 +30,7 @@ internal sealed partial class DefaultGraphStore
         return indexes;
     }
 
-    public async ValueTask CreateIndexAsync(string label, string propertyKey, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
         ArgumentException.ThrowIfNullOrWhiteSpace(propertyKey);
@@ -57,7 +57,7 @@ internal sealed partial class DefaultGraphStore
         Add(record, inserted, context.Sequence);
     }
 
-    public async ValueTask DropIndexAsync(string label, string propertyKey, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask DropIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
     {
         await LockAsync(context, cancellationToken).ConfigureAwait(false);
         var definition = Definition(label, propertyKey, context.Snapshot)
@@ -118,7 +118,7 @@ internal sealed partial class DefaultGraphStore
         return null;
     }
 
-    private async ValueTask EnsureAdjacencyAsync(ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask EnsureAdjacencyAsync(TransactionContext context, CancellationToken cancellationToken)
     {
         if (!_indexes.TryGetIndex(AdjacencyId, TreeName, out _))
         {
@@ -137,13 +137,13 @@ internal sealed partial class DefaultGraphStore
         return new IndexKey(bytes);
     }
 
-    private async ValueTask InsertIndexAsync(ulong id, IndexKey key, ulong location, ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask InsertIndexAsync(ulong id, IndexKey key, ulong location, TransactionContext context, CancellationToken cancellationToken)
     {
         await ResolveIndex(id).InsertAsync(context, key, location, cancellationToken).ConfigureAwait(false);
         _coordinator.VersionStore.RecordIndexEntryCreated(context.Sequence, new IndexUndo(this, id), key.Encoded, location);
     }
 
-    private async ValueTask DeleteIndexEntryAsync(ulong id, IndexKey key, ulong location, ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask DeleteIndexEntryAsync(ulong id, IndexKey key, ulong location, TransactionContext context, CancellationToken cancellationToken)
     {
         await ResolveIndex(id).DeleteAsync(context, key, location, cancellationToken).ConfigureAwait(false);
         _coordinator.VersionStore.RecordIndexEntryTombstoned(context.Sequence, new IndexUndo(this, id), key.Encoded, location);
@@ -231,11 +231,11 @@ internal sealed partial class DefaultGraphStore
             _coordinator = coordinator;
         }
 
-        public StorageTransaction GetStorageTransaction(ITransactionContext context) => _coordinator.TryGetStorageTransaction(context, out var bracket)
+        public StorageTransaction GetStorageTransaction(TransactionContext context) => _coordinator.TryGetStorageTransaction(context, out var bracket)
             ? bracket : throw new InvalidOperationException("Graph index mutation requires a shared statement bracket.");
     }
 
-    private sealed class IndexUndo : IRecordVersionIndex
+    private sealed class IndexUndo : RecordVersionIndex
     {
         private readonly DefaultGraphStore _store;
         private readonly ulong _id;
@@ -249,12 +249,12 @@ internal sealed partial class DefaultGraphStore
             _id = id;
         }
 
-        public ValueTask EraseAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
-            TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+            TransactionSequence writer, CancellationToken cancellationToken)
             => _store._indexes.TryGetIndex(_id, TreeName, out var index)
                 ? index.EraseAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken) : default;
-        public ValueTask ClearDeleterAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
-            TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+            TransactionSequence writer, CancellationToken cancellationToken)
             => _store._indexes.TryGetIndex(_id, TreeName, out var index)
                 ? index.ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken) : default;
     }

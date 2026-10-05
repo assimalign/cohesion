@@ -96,7 +96,7 @@ internal sealed class KeyValueOperationExecutor
     private readonly IKeyValueCatalog _catalog;
     private readonly KeyValueStorage _storage;
     private readonly IIndex _primaryIndex;
-    private readonly RecordVersionIndex _primaryIndexVersions;
+    private readonly BTreeRecordVersionIndex _primaryIndexVersions;
 
     internal KeyValueOperationExecutor(DatabaseName databaseName, IKeyValueCatalog catalog, KeyValueStorage storage, IIndex primaryIndex)
     {
@@ -104,7 +104,7 @@ internal sealed class KeyValueOperationExecutor
         _catalog = catalog;
         _storage = storage;
         _primaryIndex = primaryIndex;
-        _primaryIndexVersions = new RecordVersionIndex(primaryIndex);
+        _primaryIndexVersions = new BTreeRecordVersionIndex(primaryIndex);
     }
 
     /// <summary>
@@ -305,7 +305,7 @@ internal sealed class KeyValueOperationExecutor
     /// <remarks>
     /// The transaction can end on another thread while its command waits: a caller's
     /// rollback, the session closing, or a host rolling back a wire session's transaction.
-    /// The end fails the requests it finds queued (<c>ILockManager.ReleaseAll</c>), but a
+    /// The end fails the requests it finds queued (<c>LockManager.ReleaseAll</c>), but a
     /// request queued just after that release is granted later, to a transaction that will
     /// never release it again, so every later writer of the key would wait forever. The
     /// kernel already refuses the command's bracket for an ended transaction; this check

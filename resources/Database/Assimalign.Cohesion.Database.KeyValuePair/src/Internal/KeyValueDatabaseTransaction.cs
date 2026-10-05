@@ -32,7 +32,7 @@ using Assimalign.Cohesion.Database.Transactions;
 internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
 {
     private readonly TransactionCoordinator _coordinator;
-    private readonly ITransactionContext _context;
+    private readonly TransactionContext _context;
     private readonly object _sync = new();
 
     // Serializes every path that ends the context (commit, rollback, dispose), so two of them never
@@ -50,7 +50,7 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     // makes its disposal touch nothing; null for a transaction composed without one.
     private readonly KeyValueDatabaseInstance? _database;
 
-    internal KeyValueDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context, KeyValueDatabaseInstance? database = null)
+    internal KeyValueDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, KeyValueDatabaseInstance? database = null)
     {
         _coordinator = coordinator;
         _context = context;
@@ -89,7 +89,7 @@ internal sealed class KeyValueDatabaseTransaction : IDatabaseTransaction
     /// (re-captured per command under <see cref="IsolationLevel.ReadCommitted"/>,
     /// fixed at begin under <see cref="IsolationLevel.Snapshot"/>).
     /// </summary>
-    internal ITransactionContext Context => _context;
+    internal TransactionContext Context => _context;
 
     /// <summary>
     /// Gets whether the transaction is still the session's transaction: the caller has not ended

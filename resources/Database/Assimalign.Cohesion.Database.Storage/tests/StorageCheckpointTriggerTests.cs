@@ -195,7 +195,6 @@ public sealed class StorageCheckpointTriggerTests
         {
         }
 
-
         public static DefaultStorage Create()
         {
             var storage = new DefaultStorage();

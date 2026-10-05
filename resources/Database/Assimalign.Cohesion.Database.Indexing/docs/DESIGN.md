@@ -470,7 +470,7 @@ times, so CI speed and load cancel out:
 
 ## Transactional binding
 
-`IIndex` mutations take an `ITransactionContext` — index entries are stamped and become visible under the same MVCC rules as the data they reference. There is no "non-transactional index write" surface; recovery replays index changes from the same WAL as data changes. Unique enforcement happens at insert against the *latest* state under the key lock (above); a competing in-flight writer of the same key is resolved by the lock manager, not the index.
+`IIndex` mutations take an `TransactionContext` — index entries are stamped and become visible under the same MVCC rules as the data they reference. There is no "non-transactional index write" surface; recovery replays index changes from the same WAL as data changes. Unique enforcement happens at insert against the *latest* state under the key lock (above); a competing in-flight writer of the same key is resolved by the lock manager, not the index.
 
 ### The maintenance surfaces (model-engine consumers)
 
@@ -515,9 +515,10 @@ transaction context — they run where no statement bracket exists:
 
 ### Shared record-version undo binding (#918)
 
-`RecordVersionIndex` implements the new `Database.Transactions.IRecordVersionIndex`
-contract by forwarding encoded key bytes to the existing `IIndex.EraseAsync`
-and `ClearDeleterAsync` operations. Engines supply this bridge to the shared
+`BTreeRecordVersionIndex` derives from `Database.Transactions.RecordVersionIndex`
+(an abstract base since #1258, an interface before; the adapter itself was named
+`RecordVersionIndex` until that name passed to the base) by forwarding encoded key bytes
+to the existing `IIndex.EraseAsync` and `ClearDeleterAsync` operations. Engines supply this bridge to the shared
 `RecordSpaceVersionStore` ledger. Index key construction and stamp verification
 remain in Indexing; Transactions needs no Indexing or area-root reference, and
 the existing `IIndex` and `IStorageTransactionSource` interfaces are unchanged.

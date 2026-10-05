@@ -27,7 +27,7 @@ flowchart LR
 ## Public seam and ownership
 
 `GraphCatalog.Open` returns `IGraphCatalog`; implementation classes and codecs are internal.
-Every mutation takes the caller's `ITransactionContext`, and none commits it. The caller
+Every mutation takes the caller's `TransactionContext`, and none commits it. The caller
 holds the database definition lock to serialize DDL and detect conflicting writes before
 publication. Reads use the caller's snapshot.
 

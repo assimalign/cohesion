@@ -281,7 +281,6 @@ public sealed class StorageCheckpointAnchorTests
             }
         }
 
-
         public FaultingMemoryStream JournalStream => _journal;
 
         public StorageJournal Log => WriteAheadLog;

@@ -221,7 +221,6 @@ public class StorageModelAlignmentTests
         {
         }
 
-
         public static TestStorage Create(Stream data)
         {
             var storage = new TestStorage(

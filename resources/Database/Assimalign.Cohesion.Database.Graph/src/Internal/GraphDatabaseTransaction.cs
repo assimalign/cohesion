@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
 {
     private readonly TransactionCoordinator _coordinator;
-    private readonly ITransactionContext _context;
+    private readonly TransactionContext _context;
     private readonly object _sync = new();
 
     // Serializes every path that ends the context (commit, rollback, dispose, abort), so two of
@@ -36,14 +36,14 @@ internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
     /// <param name="coordinator">The transaction coordinator that commits or rolls back the transaction.</param>
     /// <param name="context">The transaction context the transaction wraps.</param>
     /// <param name="database">The database the transaction runs on, whose offline state it observes.</param>
-    public GraphDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context, GraphDatabaseInstance? database = null)
+    public GraphDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, GraphDatabaseInstance? database = null)
     {
         _database = database;
         _coordinator = coordinator;
         _context = context;
     }
 
-    internal ITransactionContext Context => _context;
+    internal TransactionContext Context => _context;
     internal int Operations { get; set; }
 
     /// <summary>

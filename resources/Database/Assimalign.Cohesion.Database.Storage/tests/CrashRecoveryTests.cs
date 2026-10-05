@@ -30,7 +30,6 @@ public sealed class CrashRecoveryTests
         {
         }
 
-
         public static HarnessStorage Create(CrashSimulationStream data, CrashSimulationStream journal, int poolCapacity = 8)
         {
             var storage = new HarnessStorage(new StorageStream(data), new StorageStream(journal), poolCapacity);

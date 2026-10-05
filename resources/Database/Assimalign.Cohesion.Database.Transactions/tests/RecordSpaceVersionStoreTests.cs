@@ -22,7 +22,7 @@ public class RecordSpaceVersionStoreTests
     public async Task PurgeWriter_FailureAfterCommittedBatches_RetriesIdempotently()
     {
         using var storage = new RecordStorage();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         for (int index = 0; index < 130; index++)
         {
@@ -58,7 +58,7 @@ public class RecordSpaceVersionStoreTests
     {
         // Arrange
         using var storage = new RecordStorage();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
         var versions = coordinator.VersionStore;
         var index = new FailingIndex();
@@ -119,7 +119,7 @@ public class RecordSpaceVersionStoreTests
     {
         // Arrange
         using var storage = new RecordStorage();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
         (PageId PageId, int SlotIndex) revertedLocation = default;
 
@@ -169,7 +169,7 @@ public class RecordSpaceVersionStoreTests
     {
         // Arrange
         using var storage = new RecordStorage();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
         var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
         (PageId PageId, int SlotIndex) location = default;
@@ -213,13 +213,13 @@ public class RecordSpaceVersionStoreTests
         return count;
     }
 
-    private sealed class FailingIndex : IRecordVersionIndex
+    private sealed class FailingIndex : RecordVersionIndex
     {
         private bool _failClear = true;
 
         internal List<(string Operation, byte[] Key, ulong EntryReference, TransactionSequence Writer)> Calls { get; } = new();
 
-        public ValueTask EraseAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             transaction.IsActive.ShouldBeTrue();
@@ -227,7 +227,7 @@ public class RecordSpaceVersionStoreTests
             return default;
         }
 
-        public ValueTask ClearDeleterAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             transaction.IsActive.ShouldBeTrue();
@@ -243,7 +243,7 @@ public class RecordSpaceVersionStoreTests
     }
 
     // Only the model's record access is adapted; WAL brackets and slotted records are real.
-    private sealed class RecordStorage : Assimalign.Cohesion.Database.Storage.Storage, ITransactionRecordSpace
+    private sealed class RecordStorage : Assimalign.Cohesion.Database.Storage.Storage
     {
         internal RecordStorage()
             : base(StorageModel.Custom, new StorageStream(new SimulatedDurableFileHandle()), new StorageStream(new SimulatedDurableFileHandle()), StorageStream.FromInMemory())
@@ -251,24 +251,53 @@ public class RecordSpaceVersionStoreTests
             InitializeNew((Name)"record-version-test");
         }
 
-
         internal StorageJournal Log => WriteAheadLog;
 
         internal (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, ReadOnlySpan<byte> record)
             => InsertRecord(transaction, record);
 
-        public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
+        internal ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
 
-        public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+        internal void Update(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
             => UpdateRecord(transaction, pageId, slotIndex, record);
 
-        public void Delete(StorageTransaction transaction, PageId pageId, int slotIndex)
+        internal void Delete(StorageTransaction transaction, PageId pageId, int slotIndex)
             => DeleteRecord(transaction, pageId, slotIndex);
 
-        public ulong PackLocation(PageId pageId, int slotIndex)
+        internal ulong PackLocation(PageId pageId, int slotIndex)
             => ((ulong)(long)pageId << 16) | (ushort)slotIndex;
 
-        public (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
+        internal (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
             => ((PageId)(long)(location >> 16), (int)(location & 0xFFFF));
+
+        /// <summary>
+        /// Gets the coordinator's record space over this storage's records. The double used to be
+        /// the record space itself; both are abstract classes now, so it is split (plan C9).
+        /// </summary>
+        internal TransactionRecordSpace Records => _records ??= new RecordSpace(this);
+
+        private RecordSpace? _records;
+
+        private sealed class RecordSpace : TransactionRecordSpace
+        {
+            private readonly RecordStorage _storage;
+
+            internal RecordSpace(RecordStorage storage)
+            {
+                _storage = storage;
+            }
+
+            protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex) => _storage.Read(pageId, slotIndex);
+
+            protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+                => _storage.Update(transaction, pageId, slotIndex, record);
+
+            protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex)
+                => _storage.Delete(transaction, pageId, slotIndex);
+
+            protected override ulong PackLocationCore(PageId pageId, int slotIndex) => _storage.PackLocation(pageId, slotIndex);
+
+            protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location) => _storage.UnpackLocation(location);
+        }
     }
 }

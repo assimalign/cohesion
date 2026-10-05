@@ -39,7 +39,7 @@ internal sealed class BTreeIndex : IIndex
 {
     private readonly Storage.Storage _storage;
     private readonly IStorageTransactionSource _transactionSource;
-    private readonly ILockManager? _lockManager;
+    private readonly LockManager? _lockManager;
     private readonly ulong _objectId;
     private readonly ReaderWriterLockSlim _latch = new(LockRecursionPolicy.NoRecursion);
     private readonly long _rootPageId;
@@ -47,7 +47,7 @@ internal sealed class BTreeIndex : IIndex
     internal BTreeIndex(
         Storage.Storage storage,
         IStorageTransactionSource transactionSource,
-        ILockManager? lockManager,
+        LockManager? lockManager,
         ulong objectId,
         IndexDefinition definition,
         long rootPageId)
@@ -125,7 +125,7 @@ internal sealed class BTreeIndex : IIndex
     }
 
     /// <inheritdoc />
-    public async ValueTask InsertAsync(ITransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default)
+    public async ValueTask InsertAsync(TransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
 
@@ -173,7 +173,7 @@ internal sealed class BTreeIndex : IIndex
     }
 
     /// <inheritdoc />
-    public async ValueTask DeleteAsync(ITransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default)
+    public async ValueTask DeleteAsync(TransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();
@@ -220,7 +220,7 @@ internal sealed class BTreeIndex : IIndex
     }
 
     /// <inheritdoc />
-    public IIndexCursor OpenCursor(ITransactionContext transaction, IndexKeyRange range, bool reverse = false)
+    public IIndexCursor OpenCursor(TransactionContext transaction, IndexKeyRange range, bool reverse = false)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         return OpenCursor(transaction.Snapshot, range, reverse);

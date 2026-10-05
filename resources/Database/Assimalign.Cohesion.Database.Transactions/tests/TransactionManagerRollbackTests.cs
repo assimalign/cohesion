@@ -413,7 +413,7 @@ public class TransactionManagerRollbackTests
     /// <summary>A manager over controllable collaborators, with a writer helper.</summary>
     private sealed class Kernel
     {
-        private Kernel(ControlledLog log, ControlledVersionStore versions, ILockManager locks, TransactionManager manager)
+        private Kernel(ControlledLog log, ControlledVersionStore versions, LockManager locks, TransactionManager manager)
         {
             Log = log;
             Versions = versions;
@@ -425,7 +425,7 @@ public class TransactionManagerRollbackTests
 
         internal ControlledVersionStore Versions { get; }
 
-        internal ILockManager Locks { get; }
+        internal LockManager Locks { get; }
 
         internal TransactionManager Manager { get; }
 
@@ -438,7 +438,7 @@ public class TransactionManagerRollbackTests
         }
 
         /// <summary>Begins a transaction that wrote one version and holds the row lock.</summary>
-        internal async Task<ITransactionContext> BeginWriterAsync()
+        internal async Task<TransactionContext> BeginWriterAsync()
         {
             var writer = await Manager.BeginAsync();
             await Versions.AppendVersionAsync(1, 1, Payload("uncommitted"), writer.Sequence);
@@ -465,11 +465,15 @@ public class TransactionManagerRollbackTests
         }
     }
 
-    /// <summary>The in-memory version store with an injectable undo failure and gate.</summary>
-    private sealed class ControlledVersionStore : IVersionStore
+    /// <summary>
+    /// The in-memory version store with an injectable undo failure and gate. It derives from
+    /// <see cref="VersionStore"/>, whose constructor is <c>private protected</c>, through the
+    /// Transactions → Transactions.Tests grant.
+    /// </summary>
+    private sealed class ControlledVersionStore : VersionStore
     {
         internal const string FailureMessage = "Injected undo failure.";
-        private readonly IVersionStore _inner = VersionStore.CreateInMemory();
+        private readonly VersionStore _inner = VersionStore.CreateInMemory();
         private readonly List<CancellationToken> _purgeTokens = new();
         private int _failPurges;
         private int _purgeCalls;
@@ -495,16 +499,16 @@ public class TransactionManagerRollbackTests
             }
         }
 
-        public ValueTask AppendVersionAsync(ulong objectId, ulong entryId, ReadOnlyMemory<byte> payload, TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask AppendVersionCoreAsync(ulong objectId, ulong entryId, ReadOnlyMemory<byte> payload, TransactionSequence writer, CancellationToken cancellationToken)
             => _inner.AppendVersionAsync(objectId, entryId, payload, writer, cancellationToken);
 
-        public ValueTask<ReadOnlyMemory<byte>?> GetVisibleVersionAsync(ulong objectId, ulong entryId, TransactionSnapshot snapshot, CancellationToken cancellationToken = default)
+        protected override ValueTask<ReadOnlyMemory<byte>?> GetVisibleVersionCoreAsync(ulong objectId, ulong entryId, TransactionSnapshot snapshot, CancellationToken cancellationToken)
             => _inner.GetVisibleVersionAsync(objectId, entryId, snapshot, cancellationToken);
 
-        public ValueTask<long> PruneAsync(TransactionSequence oldestActive, CancellationToken cancellationToken = default)
+        protected override ValueTask<long> PruneCoreAsync(TransactionSequence oldestActive, CancellationToken cancellationToken)
             => _inner.PruneAsync(oldestActive, cancellationToken);
 
-        public async ValueTask<long> PurgeWriterAsync(TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override async ValueTask<long> PurgeWriterCoreAsync(TransactionSequence writer, CancellationToken cancellationToken)
         {
             lock (_purgeTokens)
             {

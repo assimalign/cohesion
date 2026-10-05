@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 /// </summary>
 public class TransactionManagerTests
 {
-    private static (TransactionManager Manager, IVersionStore Versions, ILockManager Locks) CreateKernel()
+    private static (TransactionManager Manager, VersionStore Versions, LockManager Locks) CreateKernel()
     {
         var locks = LockManager.Create();
         var versions = VersionStore.CreateInMemory();

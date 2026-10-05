@@ -22,7 +22,6 @@ public sealed class StorageCloseTests
         private CloseStorage(StorageStream data, StorageStream journal)
             : base(StorageModel.Custom, data, journal, new StorageStream(new System.IO.MemoryStream())) { }
 
-
         public static CloseStorage Create(CrashSimulationStream data, CrashSimulationStream journal)
         {
             var storage = new CloseStorage(new StorageStream(data), new StorageStream(journal));

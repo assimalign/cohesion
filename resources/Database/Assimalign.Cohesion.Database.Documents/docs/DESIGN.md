@@ -59,7 +59,7 @@ OQL has one collection source and no database qualification or server commands.
 The inherited `IDatabase.Engine` lifecycle reference remains the frozen root API;
 executing OQL or CRUD never interprets it as session authority over other databases.
 
-Each statement uses one `ITransactionContext`. Automatic operations commit on
+Each statement uses one `TransactionContext`. Automatic operations commit on
 success and roll back on failure. Explicit transaction operations leave commit
 to the caller; a failing operation aborts the whole explicit transaction, which
 then refuses every later statement until the caller rolls it back, as
@@ -306,7 +306,7 @@ not retain a transaction or borrowed storage memory after execution.
 `CREATE INDEX <index-name> ON <collection> (<path>)` and
 `DROP INDEX <index-name> ON <collection>` are OQL statements. `DocumentPlanner` binds them to
 catalog-operation plans and `DocumentPlanExecutor` executes those plans under the statement's
-`ITransactionContext`. This replaces the former extension-member entry point and leaves the
+`TransactionContext`. This replaces the former extension-member entry point and leaves the
 frozen `IDocumentDatabase` member list unchanged; there is no runtime switch on internal database
 implementations.
 

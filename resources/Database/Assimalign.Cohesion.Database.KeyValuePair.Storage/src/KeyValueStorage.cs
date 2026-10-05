@@ -24,7 +24,6 @@ public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Stora
     private KeyValueStorage(StorageStream data, StorageStream journal, StorageStream backup)
         : base(StorageModel.KeyValue, data, journal, backup) { }
 
-
     /// <summary>
     /// Creates a new key-value storage file set backed by the given streams.
     /// </summary>

@@ -43,7 +43,6 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     private SqlStorage(StorageStream data, StorageStream journal, StorageStream backup)
         : base(StorageModel.Sql, data, journal, backup) { }
 
-
     /// <summary>
     /// Creates a new SQL storage file set backed by the given streams.
     /// </summary>

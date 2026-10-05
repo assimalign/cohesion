@@ -44,7 +44,6 @@ internal sealed class TornStorage : Storage
     /// <summary>Gets what the data and journal streams hold right now, durable or not.</summary>
     public (byte[] Data, byte[] Journal) CaptureLive() => (_data.CaptureLive(), _journal.CaptureLive());
 
-
     /// <summary>Gets the journal, for appending lifecycle records and reading it back.</summary>
     public StorageJournal Log => WriteAheadLog;
 

@@ -31,7 +31,7 @@ public class BTreeIndexTests
         return (harness, index);
     }
 
-    private static async Task<List<(long Key, ulong Reference)>> ScanAsync(IIndex index, ITransactionContext context, IndexKeyRange range, bool reverse = false)
+    private static async Task<List<(long Key, ulong Reference)>> ScanAsync(IIndex index, TransactionContext context, IndexKeyRange range, bool reverse = false)
     {
         var results = new List<(long, ulong)>();
         await using var cursor = index.OpenCursor(context, range, reverse);
@@ -74,7 +74,7 @@ public class BTreeIndexTests
         results.ShouldBe(new[] { (42L, 4242UL) });
     }
 
-    private static Task<List<(long Key, ulong Reference)>> ScanAsync(ITransactionContext context, IIndex index, IndexKey exact)
+    private static Task<List<(long Key, ulong Reference)>> ScanAsync(TransactionContext context, IIndex index, IndexKey exact)
         => ScanAsync(index, context, new IndexKeyRange(exact, exact, IsStartInclusive: true, IsEndInclusive: true));
 
     [Theory(DisplayName = "Cohesion Test [Database.Indexing] - BTree: folded keys seek correctly and enforce unique equality")]

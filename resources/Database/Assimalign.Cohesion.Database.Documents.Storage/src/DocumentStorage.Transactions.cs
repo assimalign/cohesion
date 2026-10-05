@@ -15,7 +15,7 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
     public StorageJournal WriteAheadJournal => WriteAheadLog;
 
     /// <summary>Gets the shared version store's record adapter.</summary>
-    public ITransactionRecordSpace Records { get; }
+    public TransactionRecordSpace Records { get; }
 
     /// <summary>Opens an existing document file set through shared physical recovery.</summary>
     /// <param name="data">The data stream.</param>
@@ -98,7 +98,7 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
     /// <param name="abort">Aborts the logical transaction after any upload failure.</param>
     /// <param name="cancellationToken">Cancellation retained for the upload's entire lifetime.</param>
     /// <returns>A non-seekable writable stream holding one chunk buffer.</returns>
-    public Stream OpenWrite(TransactionCoordinator coordinator, ITransactionContext context,
+    public Stream OpenWrite(TransactionCoordinator coordinator, TransactionContext context,
         Func<DocumentContentReference, ValueTask> complete, Func<ValueTask> abort, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(coordinator);
@@ -122,7 +122,7 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
     /// <param name="content">The chain being deleted or replaced.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>A task representing the tombstone operation.</returns>
-    public async ValueTask TombstoneContentAsync(TransactionCoordinator coordinator, ITransactionContext context,
+    public async ValueTask TombstoneContentAsync(TransactionCoordinator coordinator, TransactionContext context,
         DocumentContentReference content, CancellationToken cancellationToken = default)
     {
         ulong location = content.Head;

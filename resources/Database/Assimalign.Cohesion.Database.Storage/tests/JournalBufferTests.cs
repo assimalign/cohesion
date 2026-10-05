@@ -475,7 +475,6 @@ public sealed class JournalBufferTests
             JournalMedium = journal;
         }
 
-
         public StorageJournal Log => (StorageJournal)WriteAheadLog;
 
         public RecordingHandle DataMedium { get; }

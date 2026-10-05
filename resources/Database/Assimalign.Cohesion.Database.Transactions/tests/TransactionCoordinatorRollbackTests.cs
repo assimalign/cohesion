@@ -39,7 +39,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var abortRecords = new AbortRecordProbe(coordinator);
         var writer = await BeginWriterAsync(coordinator, storage);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
@@ -76,7 +76,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var index = new BlockingIndex();
         var writer = await BeginWriterAsync(coordinator, storage, step == UndoAwait.IndexUndo ? index : null);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
@@ -140,7 +140,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var abortRecords = new AbortRecordProbe(coordinator);
         var index = new FailingIndex(failures: 1);
         var writer = await BeginWriterAsync(coordinator, storage, index);
@@ -196,7 +196,7 @@ public class TransactionCoordinatorRollbackTests
         // completed undo, or never attempted because the undo failed and a checkpoint truncated
         // the writer's begin record.
         using var storage = RollbackStorage.Create();
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var abortRecords = new AbortRecordProbe(coordinator) { FailRollbackRecords = true };
         var writer = await BeginWriterAsync(coordinator, storage, undoDeferred ? new FailingIndex(failures: int.MaxValue) : null);
         await coordinator.RollbackAsync(writer);
@@ -210,7 +210,7 @@ public class TransactionCoordinatorRollbackTests
         // Act: crash, reopen, and analyze the surviving journal.
         var images = storage.CaptureImages();
         using var reopened = RollbackStorage.Open(images.Data, images.Journal);
-        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         var plan = recovered.AnalyzeAndScrub();
 
         // Assert: the completed undo's abort record was rejected (a deferred undo never asks
@@ -227,7 +227,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange: a rolled-back writer whose undo failed still holds the row lock.
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: 1));
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
@@ -281,7 +281,7 @@ public class TransactionCoordinatorRollbackTests
         // Arrange: a writer the journal file names, and another transaction whose commit's drain
         // fails, which takes the storage offline.
         var storage = RollbackStorage.Create();
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await BeginWriterAsync(coordinator, storage);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         storage.Log.Flush();
@@ -312,7 +312,7 @@ public class TransactionCoordinatorRollbackTests
         storage.Dispose();
         var images = storage.CaptureClosedImages();
         using var reopened = RollbackStorage.Open(images.Data, images.Journal);
-        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         var plan = recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
 
@@ -337,7 +337,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange: a writer the journal file names, and a transaction waiting for its row.
         var storage = RollbackStorage.Create();
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var journal = storage.Log;
         var writer = await BeginWriterAsync(coordinator, storage);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
@@ -368,7 +368,7 @@ public class TransactionCoordinatorRollbackTests
         storage.Dispose();
         var images = storage.CaptureClosedImages();
         using var reopened = RollbackStorage.Open(images.Data, images.Journal);
-        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         var plan = recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
 
@@ -387,7 +387,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange: a rolled-back writer whose undo fails at the rollback and at every retry.
         var storage = RollbackStorage.Create();
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: int.MaxValue));
         await coordinator.RollbackAsync(writer);
         writer.State.ShouldBe(TransactionState.RolledBack);
@@ -403,7 +403,7 @@ public class TransactionCoordinatorRollbackTests
         storage.Dispose();
         var images = storage.CaptureClosedImages();
         using var reopened = RollbackStorage.Open(images.Data, images.Journal);
-        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         var plan = recovered.AnalyzeAndScrub();
 
         // Assert: the close did not erase the writer's classification, so recovery scrubbed it.
@@ -424,7 +424,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange: a writer whose index undo fails once, and a second insert of it held inside the apply gate.
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: 1));
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
@@ -478,7 +478,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange: the writer holds Row and waits for another row a running transaction holds.
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var otherRow = LockResource.Entry(7, 9);
         var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: 1));
         var blocker = await coordinator.BeginAsync(IsolationLevel.Snapshot);
@@ -519,7 +519,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange: a statement of the writer held inside the apply gate, and a transaction waiting for the writer's row.
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await BeginWriterAsync(coordinator, storage);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
@@ -560,7 +560,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange: a rolled-back writer whose undo keeps failing.
         var storage = RollbackStorage.Create();
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: int.MaxValue));
         var location = storage.PackLocation(storage.LastInserted.PageId, storage.LastInserted.SlotIndex);
         await coordinator.RollbackAsync(writer);
@@ -590,7 +590,7 @@ public class TransactionCoordinatorRollbackTests
 
         using var reopened = RollbackStorage.Open(images.Data, images.Journal);
         var anchored = reopened.CheckpointActiveTransactions;
-        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         var plan = recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
         var reader = await recovered.BeginAsync(IsolationLevel.Snapshot);
@@ -624,8 +624,8 @@ public class TransactionCoordinatorRollbackTests
         // Arrange
         const int writers = 1_000;
         var storage = RollbackStorage.Create();
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
-        var contexts = new ITransactionContext[writers];
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var contexts = new TransactionContext[writers];
         for (int i = 0; i < writers; i++)
         {
             contexts[i] = await coordinator.BeginAsync(IsolationLevel.Snapshot);
@@ -638,7 +638,7 @@ public class TransactionCoordinatorRollbackTests
         Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint()).InnerException.ShouldBeOfType<IOException>();
         var images = storage.CaptureClosedImages();
         using var reopened = RollbackStorage.Open(images.Data, images.Journal);
-        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         var anchored = reopened.CheckpointActiveTransactions;
         var plan = recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
@@ -656,7 +656,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange
         var storage = RollbackStorage.Create();
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await BeginWriterAsync(coordinator, storage);
         var location = storage.PackLocation(storage.LastInserted.PageId, storage.LastInserted.SlotIndex);
 
@@ -667,7 +667,7 @@ public class TransactionCoordinatorRollbackTests
         storage.CheckpointActiveTransactions.ShouldBe([(long)writer.Sequence.Value]);
         var images = storage.CaptureClosedImages();
         using var reopened = RollbackStorage.Open(images.Data, images.Journal);
-        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         var plan = recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
         var reader = await recovered.BeginAsync(IsolationLevel.Snapshot);
@@ -700,7 +700,7 @@ public class TransactionCoordinatorRollbackTests
         // Arrange: a durable commit, then a writer whose undo would fail, another writer, and a
         // transaction waiting for the first writer's row.
         var storage = RollbackStorage.Create();
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var durable = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await InsertAsync(coordinator, storage, durable);
         await coordinator.CommitAsync(durable);
@@ -727,7 +727,7 @@ public class TransactionCoordinatorRollbackTests
         var images = storage.CaptureClosedImages();
         var journal = recordSurvives ? images.Journal : images.Journal[..(int)confirmedJournal];
         using var reopened = RollbackStorage.Open(images.Data, journal);
-        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         var plan = recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
 
@@ -773,7 +773,7 @@ public class TransactionCoordinatorRollbackTests
         // records wait in the append buffer for the transaction's commit.
         using var storage = RollbackStorage.Create();
         storage.CommitDurability = durability;
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await InsertAsync(coordinator, storage, writer);
         var location = storage.PackLocation(storage.LastInserted.PageId, storage.LastInserted.SlotIndex);
@@ -784,7 +784,7 @@ public class TransactionCoordinatorRollbackTests
         await coordinator.CommitAsync(writer);
         var images = storage.CaptureClosedImages();
         using var reopened = RollbackStorage.Open(images.Data, images.Journal);
-        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         var plan = recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
         var reader = await recovered.BeginAsync(IsolationLevel.Snapshot);
@@ -818,7 +818,7 @@ public class TransactionCoordinatorRollbackTests
         // Arrange: a holder of the row, a request queued behind it, and a transaction that will
         // ask later.
         var storage = RollbackStorage.Create();
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         storage.OnOffline = coordinator.AbandonLockWaits;
         var holder = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await coordinator.LockManager.AcquireAsync(holder.Sequence, Row, LockMode.Exclusive);
@@ -878,7 +878,7 @@ public class TransactionCoordinatorRollbackTests
         // Arrange
         var time = new ManualTime();
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage, time)
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records, time)
         {
             DeferredUndoRetryLimit = TimeSpan.FromHours(1),
         };
@@ -919,7 +919,7 @@ public class TransactionCoordinatorRollbackTests
         // Arrange
         var time = new ManualTime();
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage, time)
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records, time)
         {
             DeferredUndoRetryLimit = TimeSpan.FromSeconds(1),
         };
@@ -963,7 +963,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange: four sessions writing back to back.
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         using var stop = new CancellationTokenSource();
         long statements = 0;
         var load = Enumerable.Range(0, 4).Select(_ => Task.Run(async () =>
@@ -1015,7 +1015,7 @@ public class TransactionCoordinatorRollbackTests
         // Arrange: a committed delete leaves a prunable tombstone, then a later writer's rollback
         // defers an undo that keeps failing.
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var creator = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await InsertAsync(coordinator, storage, creator);
         var (pageId, slotIndex) = storage.LastInserted;
@@ -1060,7 +1060,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange
         using var storage = RollbackStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         long lastBeforeTheRollback = 0;
 
@@ -1091,7 +1091,7 @@ public class TransactionCoordinatorRollbackTests
     }
 
     private static Task StartHeldInsert(
-        TransactionCoordinator coordinator, RollbackStorage storage, ITransactionContext writer, ManualResetEventSlim entered, ManualResetEventSlim release)
+        TransactionCoordinator coordinator, RollbackStorage storage, TransactionContext writer, ManualResetEventSlim entered, ManualResetEventSlim release)
         => Task.Factory.StartNew(() => coordinator.ApplyStatementAsync(writer, bracket =>
         {
             entered.Set();
@@ -1128,8 +1128,8 @@ public class TransactionCoordinatorRollbackTests
     /// Begins a transaction that inserted one stamped record (and, given an index, tombstoned one
     /// index entry) and holds the row lock.
     /// </summary>
-    private static async Task<ITransactionContext> BeginWriterAsync(
-        TransactionCoordinator coordinator, RollbackStorage storage, IRecordVersionIndex? index = null)
+    private static async Task<TransactionContext> BeginWriterAsync(
+        TransactionCoordinator coordinator, RollbackStorage storage, RecordVersionIndex? index = null)
     {
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await InsertAsync(coordinator, storage, writer);
@@ -1143,7 +1143,7 @@ public class TransactionCoordinatorRollbackTests
         return writer;
     }
 
-    private static ValueTask<int> InsertAsync(TransactionCoordinator coordinator, RollbackStorage storage, ITransactionContext context)
+    private static ValueTask<int> InsertAsync(TransactionCoordinator coordinator, RollbackStorage storage, TransactionContext context)
         => coordinator.ApplyStatementAsync(context, bracket =>
         {
             byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];
@@ -1167,7 +1167,7 @@ public class TransactionCoordinatorRollbackTests
     }
 
     /// <summary>An index whose entry undo blocks until released, observing the token it is given.</summary>
-    private sealed class BlockingIndex : IRecordVersionIndex
+    private sealed class BlockingIndex : RecordVersionIndex
     {
         private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1188,10 +1188,10 @@ public class TransactionCoordinatorRollbackTests
 
         internal void Release() => _released.TrySetResult();
 
-        public ValueTask EraseAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken)
             => default;
 
-        public async ValueTask ClearDeleterAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override async ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken)
         {
             lock (_tokens)
             {
@@ -1216,7 +1216,7 @@ public class TransactionCoordinatorRollbackTests
     }
 
     /// <summary>An index whose entry undo fails a set number of times.</summary>
-    private sealed class FailingIndex : IRecordVersionIndex
+    private sealed class FailingIndex : RecordVersionIndex
     {
         private int _failures;
 
@@ -1225,10 +1225,10 @@ public class TransactionCoordinatorRollbackTests
             _failures = failures;
         }
 
-        public ValueTask EraseAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken)
             => default;
 
-        public ValueTask ClearDeleterAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken)
         {
             if (_failures > 0)
             {
@@ -1298,7 +1298,7 @@ public class TransactionCoordinatorRollbackTests
     // Only the record-space boundary is a test double. Pages, record iteration, transactions,
     // durability, journal replay, and truncation are real Storage; the checkpoint and
     // abort-record hooks are the coordinator's own (#1257).
-    private sealed class RollbackStorage : Storage.Storage, ITransactionRecordSpace
+    private sealed class RollbackStorage : Storage.Storage
     {
         private readonly MemoryStream _data;
         private readonly FaultingMemoryStream _journal;
@@ -1317,7 +1317,6 @@ public class TransactionCoordinatorRollbackTests
                 InitializeNew((Name)"rollback-test");
             }
         }
-
 
         internal StorageJournal Log => WriteAheadLog;
 
@@ -1342,19 +1341,49 @@ public class TransactionCoordinatorRollbackTests
         internal (PageId PageId, int SlotIndex) Insert(StorageTransaction bracket, ReadOnlySpan<byte> data)
             => LastInserted = InsertRecord(bracket, data);
 
-        public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
+        internal ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
 
-        public void Update(StorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+        internal void Update(StorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
             => UpdateRecord(bracket, pageId, slotIndex, record);
 
-        public void Delete(StorageTransaction bracket, PageId pageId, int slotIndex)
+        internal void Delete(StorageTransaction bracket, PageId pageId, int slotIndex)
             => DeleteRecord(bracket, pageId, slotIndex);
 
-        public ulong PackLocation(PageId pageId, int slotIndex)
+        internal ulong PackLocation(PageId pageId, int slotIndex)
             => ((ulong)(long)pageId << 16) | (ushort)slotIndex;
 
-        public (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
+        internal (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
             => ((PageId)(long)(location >> 16), (int)(location & 0xFFFF));
+
+        /// <summary>
+        /// Gets the coordinator's record space over this storage's records. The double used to be
+        /// the record space itself; both are abstract classes now, so it is split (plan C9).
+        /// </summary>
+        internal TransactionRecordSpace Records => _records ??= new RecordSpace(this);
+
+        private RecordSpace? _records;
+
+        private sealed class RecordSpace : TransactionRecordSpace
+        {
+            private readonly RollbackStorage _storage;
+
+            internal RecordSpace(RollbackStorage storage)
+            {
+                _storage = storage;
+            }
+
+            protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex) => _storage.Read(pageId, slotIndex);
+
+            protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+                => _storage.Update(transaction, pageId, slotIndex, record);
+
+            protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex)
+                => _storage.Delete(transaction, pageId, slotIndex);
+
+            protected override ulong PackLocationCore(PageId pageId, int slotIndex) => _storage.PackLocation(pageId, slotIndex);
+
+            protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location) => _storage.UnpackLocation(location);
+        }
 
         private static FaultingMemoryStream Copy(byte[] bytes)
         {

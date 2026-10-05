@@ -45,7 +45,7 @@ internal sealed class DefaultIndexManager : IIndexManager, IIndexRegistry
     }
 
     /// <inheritdoc />
-    public ValueTask<IIndex> CreateIndexAsync(ITransactionContext transaction, ulong objectId, IndexDefinition definition, CancellationToken cancellationToken = default)
+    public ValueTask<IIndex> CreateIndexAsync(TransactionContext transaction, ulong objectId, IndexDefinition definition, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentException.ThrowIfNullOrWhiteSpace(definition.Name);
@@ -77,7 +77,7 @@ internal sealed class DefaultIndexManager : IIndexManager, IIndexRegistry
     }
 
     /// <inheritdoc />
-    public ValueTask DropIndexAsync(ITransactionContext transaction, ulong objectId, string name, CancellationToken cancellationToken = default)
+    public ValueTask DropIndexAsync(TransactionContext transaction, ulong objectId, string name, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();

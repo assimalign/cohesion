@@ -6,7 +6,7 @@ One transaction substrate for five engines. ACID is the platform's defining requ
 
 ## Why MVCC (and not lock-based isolation)
 
-Readers never block writers and writers never block readers — the OLTP profile all five models share. Locking is retained only where MVCC cannot arbitrate: write-write conflicts, in `ILockManager`, with intent modes so object-level operations (drop table, reindex) coexist with entry-level writes.
+Readers never block writers and writers never block readers — the OLTP profile all five models share. Locking is retained only where MVCC cannot arbitrate: write-write conflicts, in `LockManager`, with intent modes so object-level operations (drop table, reindex) coexist with entry-level writes.
 
 ## A child root — no area dependency
 
@@ -18,12 +18,45 @@ log). The transaction vocabulary lives here — `TransactionId`,
 reference. The contracts in this package speak only Transactions-owned types:
 the earlier doc-level nods to the root's `IDatabaseTransaction` are *named*
 (`<c>`), not referenced (`<see cref>`), and the adaptation between
-`ITransactionContext` and the public `IDatabaseTransaction` surface belongs to
+`TransactionContext` and the public `IDatabaseTransaction` surface belongs to
 whoever owns both vocabularies — the model engines' session/transaction
 implementations above the root (the area's standing cycle-avoidance shape). `Storage`
 is the one reference (child-to-child): the journal/page
 substrate the implementations bind to. The per-database composition below adds
 no project or package dependency, including no dependency on Indexing.
+
+## Type shape: sealed kernel types, three abstract seams (#1257, #1258)
+
+The area is concrete-first (`.claude/rules/database-area.md`); the project declares no
+interface since phase 2 of the concrete-types program
+(`docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md`).
+
+- **Sealed, with internal constructors:** `TransactionManager` (since #1257),
+  `TransactionContext` (the most-consumed kernel contract, so every call on it is direct) and
+  `LockManager` ("The lock manager implementation", below). Each has one implementation and
+  is created here: by `TransactionManager.Create`, `TransactionManager.BeginAsync` and
+  `LockManager.Create`.
+- **`TransactionContext.PinStatementSnapshot()`** returns a statement view: it shares the
+  transaction's id, sequence, isolation level and state, and fixes the snapshot at the call.
+  Documents, Graph and Blob pin one per read-committed operation, so every metadata lookup and
+  every chunk read of the statement makes one visibility decision; each used to carry an
+  identical private decorator for it. The view keys brackets and stamps by the shared sequence,
+  and a manager refuses to commit or roll back a view.
+- **Abstract, for a variant set or an inverted seam:**
+  - `TransactionRecordSpace` (protected constructor): the five model storages each supply one
+    from their own assemblies, and the coordinator drives them;
+  - `RecordVersionIndex` (protected constructor): Indexing's `BTreeRecordVersionIndex` and the
+    Documents.Catalog and Graph.Storage index-undo adapters, which the version store's ledger
+    calls back;
+  - `VersionStore` (`private protected` constructor): both leaves, `RecordSpaceVersionStore` and
+    the in-memory store `VersionStore.CreateInMemory()` returns, live here, so only this
+    assembly and its own tests (through the `InternalsVisibleTo` grant) can derive.
+
+  Each public member is non-virtual and calls a `protected abstract …Core` member. The public
+  member checks what every leaf checked before: a null storage transaction for the adapters, a
+  canceled token for `AppendVersionAsync`, and a null snapshot and a canceled token for
+  `GetVisibleVersionAsync`. `PruneAsync` and `PurgeWriterAsync` check nothing in the base,
+  because the two stores observe cancellation at different points.
 
 ## Identity vs. ordering: `TransactionId` vs. `TransactionSequence`
 
@@ -38,7 +71,7 @@ no project or package dependency, including no dependency on Indexing.
 - `writer < minimum` (decided before the oldest in-flight) → visible;
 - otherwise → visible iff the writer was not in the active set.
 
-Note the deliberate simplification: a version whose writer *aborted* below `minimum` must never be consulted, so the version store — not the snapshot — is responsible for unlinking aborted versions during rollback/recovery. That keeps the snapshot a pure value object with no commit-log lookup. This duty is a contract member: `IVersionStore.PurgeWriterAsync(writer)`, called by the manager on rollback/abort and by recovery for every sequence the journal cannot prove committed.
+Note the deliberate simplification: a version whose writer *aborted* below `minimum` must never be consulted, so the version store — not the snapshot — is responsible for unlinking aborted versions during rollback/recovery. That keeps the snapshot a pure value object with no commit-log lookup. This duty is a contract member: `VersionStore.PurgeWriterAsync(writer)`, called by the manager on rollback/abort and by recovery for every sequence the journal cannot prove committed.
 
 `ReadCommitted` refreshes the snapshot per statement; `Snapshot` (the default) and `Serializable` fix it at begin. The refresh mechanism: the context's `Snapshot` property re-captures from the manager's live active table on every access while the transaction is active — each statement reads it once. `Serializable` layers conflict detection on top and is a post-MVP feature — the enum member exists so the surface doesn't churn.
 
@@ -130,7 +163,7 @@ rollback, and it throws nothing:
    context, if one is running. The wait observes no token and is bounded (nothing
    awaited inside the apply gate may actually wait), so it cannot stop a started
    rollback; a commit drains the same way before its commit record.
-2. **Undo.** `IVersionStore.PurgeWriterAsync(writer)` removes the writer's versions.
+2. **Undo.** `VersionStore.PurgeWriterAsync(writer)` removes the writer's versions.
 3. **State.** The state becomes `RolledBack`, or `Faulted` for an abort a failed commit
    or disposal forced.
 4. **Abort record.** The transaction log's `AppendAbortAsync(writer)`. A failure is ignored.
@@ -358,15 +391,34 @@ cancellation. `ReleaseAll(owner)` ends the owner's participation in the table: i
 releases the owner's grants and fails the owner's own queued requests with
 `TransactionAbortedException`, because a grant arriving after the owner ended would hold
 the resource for a transaction that can never release it (see "Ending a transaction
-under a running statement"). The default lock manager also has an internal
+under a running statement"). The lock manager also has an internal
 `AbandonPending(owner)`, the first half alone: it fails the owner's queued requests and
 keeps its grants, for the end of a rollback whose undo is deferred ("Ending a
 transaction"). Until `ReleaseAll` the owner stays abandoned: `AcquireAsync` refuses its new
 requests with `TransactionAbortedException` and `TryAcquire` returns false, except for a
 resource it already holds in a mode at least as strong, which changes nothing for anyone
-else. No public member was added for it; a lock manager of another type passed
-to `TransactionManager.Create` leaves such a writer's queued requests queued until its
-deferred undo completes.
+else. No public member was added for it.
+
+**One sealed type, with an engine mode (#1258).** `LockManager` is a sealed class with an
+internal constructor and `LockManager.Create()`; the `ILockManager` interface and the internal
+`DefaultLockManager` it fronted are gone, so every manager has `AbandonPending` (before, a
+lock manager of another type passed to `TransactionManager.Create` left a deferred writer's
+queued requests queued). The coordinator used to hand engine code a private decorator over the
+manager's lock manager; a sealed type cannot be decorated, so the decorator became an internal
+mode of the one instance (plan §6.2), installed once by the coordinator
+(`EnterEngineMode(manager.IsTracked)`):
+
+- the public `ReleaseAll` releases nothing for a transaction the transaction manager still
+  tracks, which is what keeps a rolled-back writer whose undo is deferred holding its locks
+  (#1226); the manager releases through the internal `ReleaseAllUnfiltered` when the
+  transaction leaves its active table;
+- a request that has to wait also ends when the storage goes offline (`Abandon`, called by
+  `TransactionCoordinator.AbandonLockWaits`, #1268), failing with `TransactionAbortedException`
+  whose inner exception is the storage's offline error; a request granted at once costs what
+  it did.
+
+A lock manager from `Create` has no mode installed and behaves exactly as before. The #1226
+lock-retention and #1268 abandon tests gate the change.
 
 ## The WAL binding
 
@@ -385,7 +437,7 @@ used — closed with the SQL engine's session binding (area DESIGN.md §3.8;
 work items under #862). The integration kept this package exactly as shaped:
 
 - The **model engine session** binds the root's `IDatabaseTransaction` to an
-  `ITransactionContext` from a per-database `TransactionManager` — the binding
+  `TransactionContext` from a per-database `TransactionManager` — the binding
   lives above both vocabularies (the SQL and KeyValuePair session/transaction adapters),
   per this document's "child root" section; nothing here learned about the area
   contracts. Kernel aborts cross the model boundary wrapped in the root's
@@ -406,12 +458,12 @@ work items under #862). The integration kept this package exactly as shaped:
   every database open — and `Analyze` reads the active-sequence list out of
   checkpoint records, so classification survives journal truncation beneath
   in-flight transactions.
-- The shared `RecordSpaceVersionStore` implements `IVersionStore` over the engine's
+- The shared `RecordSpaceVersionStore` derives from `VersionStore` over the engine's
   record access adapter (the in-memory store remains for tests and
   embedded working state): row versions live in data pages as stamped records,
   and the store is the *ledger* of each writer's effects, which is what makes
   `PurgeWriterAsync` a physical logical-undo and `PruneAsync` a physical
-  space reclamation. `ILockManager` arbitrates row-grain write conflicts
+  space reclamation. `LockManager` arbitrates row-grain write conflicts
   (exclusive locks on row identity, intent locks at table grain for DDL — the
   B+Tree uniqueness precedent generalized), and deadlock victims cross the
   model boundary as the root's `DatabaseTransactionDeadlockException`.
@@ -436,17 +488,17 @@ copy of its ledger, recovery, prune-bound, or journal-gate mechanics.
 
 The seam follows the executable differences between the original implementations:
 
-- `ITransactionRecordSpace` supplies read/update/delete and physical location
+- `TransactionRecordSpace` supplies read/update/delete and physical location
   packing/unpacking. The storage's existing unit iterator scans the stamped
   records. SQL retains its object-id/column tuple and row APIs; KeyValuePair
   retains its key/value tuple and entry APIs. Their current location encoding is
   `(pageId << 16) | (ushort)slotIndex`, but the ledger treats it as an opaque identity.
-- `IRecordVersionIndex` supplies stamp-checked erase and clear-deleter operations
-  over encoded key bytes. Indexing's `RecordVersionIndex` adapts `IIndex` to this
-  new contract. Indexing already references Transactions; the reverse reference
-  would form a cycle. The ledger copies keys at registration, keeps index undo
-  in the same physical bracket as record undo, and retries the same entries on
-  failure. No member was added to any existing interface.
+- `RecordVersionIndex` supplies stamp-checked erase and clear-deleter operations
+  over encoded key bytes. Indexing's `BTreeRecordVersionIndex` adapts `IIndex` to this
+  contract, and Documents.Catalog and Graph.Storage supply their own adapters. Indexing
+  already references Transactions; the reverse reference would form a cycle. The ledger
+  copies keys at registration, keeps index undo in the same physical bracket as record
+  undo, and retries the same entries on failure.
 - The engine adapts `TryGetStorageTransaction` to the existing Indexing pairing
   seam, retaining its `DatabaseException` when no statement bracket exists.
   Transactions never references the area root or its exceptions.
@@ -723,7 +775,7 @@ no stream-level failure rejects one record and leaves the storage online.
 
 - No distributed transactions / two-phase commit — single-node ACID first.
 - No lock escalation policy in the contract — an implementation concern.
-- No savepoints in the MVP surface — add to `ITransactionContext` when a model needs them.
+- No savepoints in the MVP surface — add to `TransactionContext` when a model needs them.
 
 ## AOT posture
 

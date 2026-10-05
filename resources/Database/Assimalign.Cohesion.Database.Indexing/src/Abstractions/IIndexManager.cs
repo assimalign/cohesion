@@ -22,7 +22,7 @@ public interface IIndexManager
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The created index.</returns>
     /// <exception cref="IndexException">Thrown when an index with the same name already exists on the object.</exception>
-    ValueTask<IIndex> CreateIndexAsync(ITransactionContext transaction, ulong objectId, IndexDefinition definition, CancellationToken cancellationToken = default);
+    ValueTask<IIndex> CreateIndexAsync(TransactionContext transaction, ulong objectId, IndexDefinition definition, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Drops an index from the specified object.
@@ -32,7 +32,7 @@ public interface IIndexManager
     /// <param name="name">The name of the index to drop.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <exception cref="IndexException">Thrown when the index does not exist.</exception>
-    ValueTask DropIndexAsync(ITransactionContext transaction, ulong objectId, string name, CancellationToken cancellationToken = default);
+    ValueTask DropIndexAsync(TransactionContext transaction, ulong objectId, string name, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Opens an existing index by name.

@@ -29,7 +29,7 @@ public sealed partial class DocumentStorage
     /// <returns>The immutable content reference for catalog publication.</returns>
     /// <exception cref="JsonException">The content is outside the document format.</exception>
     public async ValueTask<DocumentContentReference> WriteContentAsync(TransactionCoordinator coordinator,
-        ITransactionContext context, ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
+        TransactionContext context, ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ValidateContent(content);

@@ -13,7 +13,7 @@ public interface IGraphStore
     /// <exception cref="System.ArgumentException">A label or property key is null or whitespace, or a property value is not a supported scalar.</exception>
     /// <exception cref="GraphElementTooLargeException">The labels and properties exceed one graph record, or an indexed property value exceeds the index key.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended while waiting for its writer lock.</exception>
-    ValueTask<StoredGraphNode> CreateNodeAsync(IReadOnlyList<string> labels, IReadOnlyDictionary<string, object?> properties, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask<StoredGraphNode> CreateNodeAsync(IReadOnlyList<string> labels, IReadOnlyDictionary<string, object?> properties, TransactionContext context, CancellationToken cancellationToken = default);
     /// <summary>Finds a node visible to a snapshot.</summary>
     /// <param name="id">Node identity.</param><param name="snapshot">Visibility snapshot.</param><returns>The visible node or null.</returns>
     StoredGraphNode? FindNode(ulong id, TransactionSnapshot snapshot);
@@ -26,7 +26,7 @@ public interface IGraphStore
     /// <exception cref="TransactionAbortedException">An endpoint changed after the transaction snapshot.</exception>
     /// <exception cref="System.ArgumentException">The type or a property key is null or whitespace, or a property value is not a supported scalar.</exception>
     /// <exception cref="GraphElementTooLargeException">The type and properties exceed one graph record.</exception>
-    ValueTask<StoredGraphRelationship> CreateRelationshipAsync(ulong sourceId, ulong targetId, string type, IReadOnlyDictionary<string, object?> properties, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask<StoredGraphRelationship> CreateRelationshipAsync(ulong sourceId, ulong targetId, string type, IReadOnlyDictionary<string, object?> properties, TransactionContext context, CancellationToken cancellationToken = default);
     /// <summary>Finds a visible relationship.</summary>
     /// <param name="id">Relationship identity.</param><param name="snapshot">Visibility snapshot.</param><returns>The visible relationship or null.</returns>
     StoredGraphRelationship? FindRelationship(ulong id, TransactionSnapshot snapshot);
@@ -37,22 +37,22 @@ public interface IGraphStore
     /// <param name="id">Node identity.</param><param name="detach">Whether to cascade relationships.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing deletion.</returns>
     /// <exception cref="System.InvalidOperationException">A connected node is deleted without detach.</exception>
     /// <exception cref="TransactionAbortedException">The node or its incident relationships changed after the snapshot.</exception>
-    ValueTask DeleteNodeAsync(ulong id, bool detach, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DeleteNodeAsync(ulong id, bool detach, TransactionContext context, CancellationToken cancellationToken = default);
     /// <summary>Deletes a relationship and its adjacency entries atomically.</summary>
     /// <param name="id">Relationship identity.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing deletion.</returns>
     /// <exception cref="TransactionAbortedException">The relationship changed after the transaction snapshot.</exception>
-    ValueTask DeleteRelationshipAsync(ulong id, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DeleteRelationshipAsync(ulong id, TransactionContext context, CancellationToken cancellationToken = default);
     /// <summary>Builds a transactional B+Tree for a node label and property.</summary>
     /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing index creation.</returns>
     /// <exception cref="System.InvalidOperationException">An index already exists for this label/property pair.</exception>
     /// <exception cref="System.ArgumentException">The label or property name is null or whitespace.</exception>
     /// <exception cref="GraphElementTooLargeException">The names exceed one graph record, or an existing node's value exceeds the index key.</exception>
-    ValueTask CreateIndexAsync(string label, string propertyKey, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default);
     /// <summary>Drops a node-property index definition; older snapshots retain its tree.</summary>
     /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing index deletion.</returns>
     /// <exception cref="System.InvalidOperationException">No visible index exists for this label/property pair.</exception>
     /// <exception cref="TransactionAbortedException">The index changed after the transaction snapshot.</exception>
-    ValueTask DropIndexAsync(string label, string propertyKey, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DropIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default);
     /// <summary>Tests whether an exact property index is visible.</summary>
     /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="snapshot">Visibility snapshot.</param><returns>True when an index is visible.</returns>
     bool HasIndex(string label, string propertyKey, TransactionSnapshot snapshot);

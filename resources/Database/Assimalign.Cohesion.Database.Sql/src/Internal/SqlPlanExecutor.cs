@@ -63,7 +63,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private readonly record struct SqlLiveIndex(SqlCatalogIndex Metadata, IIndex Index, int[] KeyOrdinals)
     {
-        internal RecordVersionIndex Versions { get; } = new(Index);
+        internal BTreeRecordVersionIndex Versions { get; } = new(Index);
     }
 
     internal async Task<QueryResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)

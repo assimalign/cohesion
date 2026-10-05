@@ -24,7 +24,7 @@ public class TransactionCoordinatorRecoveryTests
     public async Task Checkpoint_ConcurrentLifecycleAppend_ShouldPreserveClassification(bool commit)
     {
         using var storage = CoordinatorStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var active = await coordinator.BeginAsync(IsolationLevel.Snapshot);
 
         // A writer: only a transaction that applied a statement is listed (#1242).
@@ -43,7 +43,7 @@ public class TransactionCoordinatorRecoveryTests
 
         var checkpoint = Task.Factory.StartNew(coordinator.Checkpoint,
             CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-        Task<ITransactionContext>? lifecycle = null;
+        Task<TransactionContext>? lifecycle = null;
 
         try
         {
@@ -122,7 +122,7 @@ public class TransactionCoordinatorRecoveryTests
         // while the logical aborted writer has no durable commit record.
         var images = original.CaptureImages();
         using var reopened = CoordinatorStorage.Open(images.Data, images.Journal);
-        await using var coordinator = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var coordinator = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         coordinator.Manager.OldestActive.Value.ShouldBeLessThan(deleted.Value);
 
         var plan = coordinator.AnalyzeAndScrub();
@@ -157,7 +157,7 @@ public class TransactionCoordinatorRecoveryTests
             setup.Commit();
         }
 
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var deleter = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var pinned = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         pinned.Snapshot.Minimum.ShouldBe(deleter.Sequence);
@@ -203,7 +203,7 @@ public class TransactionCoordinatorRecoveryTests
             setup.Commit();
         }
 
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
@@ -235,7 +235,7 @@ public class TransactionCoordinatorRecoveryTests
         var images = storage.CaptureImages();
         await coordinator.DisposeAsync();
         using var reopened = CoordinatorStorage.Open(images.Data, images.Journal);
-        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
         long pruned = recovered.RunVersionPurgePass(CancellationToken.None);
@@ -262,7 +262,7 @@ public class TransactionCoordinatorRecoveryTests
     {
         // Arrange
         using var storage = CoordinatorStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
@@ -306,7 +306,7 @@ public class TransactionCoordinatorRecoveryTests
     {
         // Arrange
         using var storage = CoordinatorStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var secondReader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
@@ -339,7 +339,7 @@ public class TransactionCoordinatorRecoveryTests
     {
         // Arrange: a reader across a checkpoint, which truncates its begin record.
         using var storage = CoordinatorStorage.Create();
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var late = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         coordinator.Checkpoint();
         bool namedAfterTheCheckpoint = storage.Log.ReadAll().Any(record => record.TransactionSequence == (long)late.Sequence.Value);
@@ -353,7 +353,7 @@ public class TransactionCoordinatorRecoveryTests
             .ToArray();
         var images = storage.CaptureImages();
         using var reopened = CoordinatorStorage.Open(images.Data, images.Journal);
-        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
         var plan = recovered.AnalyzeAndScrub();
         recovered.CompleteRecovery();
 
@@ -375,7 +375,7 @@ public class TransactionCoordinatorRecoveryTests
     {
         // Arrange: a statement that holds the gate until the test releases it.
         using var storage = CoordinatorStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         int checkpoints = 0;
         coordinator.BeforeCheckpoint = _ => checkpoints++;
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
@@ -418,7 +418,7 @@ public class TransactionCoordinatorRecoveryTests
     {
         // Arrange
         using var storage = CoordinatorStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var failure = new InvalidOperationException("Injected checkpoint failure.");
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -457,7 +457,7 @@ public class TransactionCoordinatorRecoveryTests
     {
         // Arrange
         using var storage = CoordinatorStorage.Create();
-        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         Exception? direct = null;
         Exception? bounded = null;
@@ -501,7 +501,7 @@ public class TransactionCoordinatorRecoveryTests
     // Only the record-space boundary is a test double. Pages, record iteration,
     // transactions, durability, journal replay, and truncation are real Storage; the
     // checkpoint and sequence-reservation hooks are the coordinator's own (#1257).
-    private sealed class CoordinatorStorage : Storage.Storage, ITransactionRecordSpace
+    private sealed class CoordinatorStorage : Storage.Storage
     {
         private readonly MemoryStream _data;
         private readonly MemoryStream _journal;
@@ -521,7 +521,6 @@ public class TransactionCoordinatorRecoveryTests
             }
         }
 
-
         internal StorageJournal Log => WriteAheadLog;
 
         internal static CoordinatorStorage Create() => new(new MemoryStream(), new MemoryStream(), reopen: false);
@@ -538,19 +537,49 @@ public class TransactionCoordinatorRecoveryTests
         internal (PageId PageId, int SlotIndex) Insert(StorageTransaction bracket, ReadOnlySpan<byte> data)
             => InsertRecord(bracket, data);
 
-        public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
+        internal ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
 
-        public void Update(StorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+        internal void Update(StorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
             => UpdateRecord(bracket, pageId, slotIndex, record);
 
-        public void Delete(StorageTransaction bracket, PageId pageId, int slotIndex)
+        internal void Delete(StorageTransaction bracket, PageId pageId, int slotIndex)
             => DeleteRecord(bracket, pageId, slotIndex);
 
-        public ulong PackLocation(PageId pageId, int slotIndex)
+        internal ulong PackLocation(PageId pageId, int slotIndex)
             => ((ulong)(long)pageId << 16) | (ushort)slotIndex;
 
-        public (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
+        internal (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
             => ((PageId)(long)(location >> 16), (int)(location & 0xFFFF));
+
+        /// <summary>
+        /// Gets the coordinator's record space over this storage's records. The double used to be
+        /// the record space itself; both are abstract classes now, so it is split (plan C9).
+        /// </summary>
+        internal TransactionRecordSpace Records => _records ??= new RecordSpace(this);
+
+        private RecordSpace? _records;
+
+        private sealed class RecordSpace : TransactionRecordSpace
+        {
+            private readonly CoordinatorStorage _storage;
+
+            internal RecordSpace(CoordinatorStorage storage)
+            {
+                _storage = storage;
+            }
+
+            protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex) => _storage.Read(pageId, slotIndex);
+
+            protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+                => _storage.Update(transaction, pageId, slotIndex, record);
+
+            protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex)
+                => _storage.Delete(transaction, pageId, slotIndex);
+
+            protected override ulong PackLocationCore(PageId pageId, int slotIndex) => _storage.PackLocation(pageId, slotIndex);
+
+            protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location) => _storage.UnpackLocation(location);
+        }
 
         private static MemoryStream Copy(byte[] bytes)
         {

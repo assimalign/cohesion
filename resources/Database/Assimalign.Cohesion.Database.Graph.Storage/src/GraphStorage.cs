@@ -13,7 +13,7 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <summary>Gets this file set's write-ahead journal.</summary>
     public StorageJournal WriteAheadJournal => WriteAheadLog;
     /// <summary>Gets the stamped-record adapter for the transaction coordinator.</summary>
-    public ITransactionRecordSpace Records { get; }
+    public TransactionRecordSpace Records { get; }
     /// <summary>Creates a graph file set, taking ownership of its streams.</summary>
     /// <param name="data">Data stream.</param><param name="journal">Journal stream.</param><param name="backup">Backup stream.</param><param name="name">Database name.</param>
     /// <returns>The initialized storage.</returns>
@@ -83,7 +83,7 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="location">Packed location.</param><returns>The page and slot.</returns>
     public static (PageId PageId, int SlotIndex) UnpackLocation(ulong location) => ((PageId)(long)(location >> 16), (int)(location & 0xffff));
     internal (PageId PageId, int SlotIndex) InsertOwned(StorageTransaction transaction, ulong owner, ReadOnlySpan<byte> bytes) => InsertRecord(transaction, owner, bytes);
-    private sealed class RecordSpace : ITransactionRecordSpace
+    private sealed class RecordSpace : TransactionRecordSpace
     {
         private readonly GraphStorage _storage;
         /// <summary>Initializes a new instance of the <see cref="RecordSpace"/> class.</summary>
@@ -92,10 +92,10 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
         {
             _storage = storage;
         }
-        public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => _storage.ReadEntry(pageId, slotIndex);
-        public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record) => _storage.UpdateEntry(transaction, pageId, slotIndex, record);
-        public void Delete(StorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
-        public ulong PackLocation(PageId pageId, int slotIndex) => GraphStorage.PackLocation(pageId, slotIndex);
-        public (PageId PageId, int SlotIndex) UnpackLocation(ulong location) => GraphStorage.UnpackLocation(location);
+        protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex) => _storage.ReadEntry(pageId, slotIndex);
+        protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record) => _storage.UpdateEntry(transaction, pageId, slotIndex, record);
+        protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
+        protected override ulong PackLocationCore(PageId pageId, int slotIndex) => GraphStorage.PackLocation(pageId, slotIndex);
+        protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location) => GraphStorage.UnpackLocation(location);
     }
 }

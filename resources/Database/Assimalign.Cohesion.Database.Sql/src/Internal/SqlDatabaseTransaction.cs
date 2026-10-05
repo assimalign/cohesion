@@ -18,10 +18,10 @@ using Assimalign.Cohesion.Database.Transactions;
 internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
 {
     private readonly TransactionCoordinator _coordinator;
-    private readonly ITransactionContext _context;
+    private readonly TransactionContext _context;
     private readonly SqlDatabaseInstance? _database;
 
-    internal SqlDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context, SqlDatabaseInstance? database = null)
+    internal SqlDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, SqlDatabaseInstance? database = null)
     {
         _coordinator = coordinator;
         _context = context;
@@ -43,7 +43,7 @@ internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
     /// (re-captured per statement under <see cref="IsolationLevel.ReadCommitted"/>,
     /// fixed at begin under <see cref="IsolationLevel.Snapshot"/>).
     /// </summary>
-    internal ITransactionContext Context => _context;
+    internal TransactionContext Context => _context;
 
     /// <inheritdoc />
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
