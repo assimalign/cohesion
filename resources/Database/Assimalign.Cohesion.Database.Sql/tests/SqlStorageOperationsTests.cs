@@ -550,7 +550,10 @@ public sealed class SqlStorageOperationsTests
     /// Under a sustained write load the journal-size trigger keeps the data file set's journal
     /// near its configured size: the checkpoint worker wakes on the size and the coordinator's
     /// checkpoint waits for the statement apply gate, so the load cannot keep it out (#1254).
-    /// The bound is a ratio to the configured size, never an absolute time.
+    /// The bound is a ratio to the configured size, never an absolute time. The rows carry a
+    /// 6,000-character payload: since storage format 3 (#1253) an insert journals the bytes it
+    /// changed rather than two 8 KiB images of each page it touched, so with small rows forty
+    /// sizes of journal took several times as many statements as before.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Checkpoint trigger: the journal stays bounded under a sustained write load")]
     public async Task CheckpointJournalSize_SustainedWrites_ShouldKeepTheJournalBounded()
@@ -565,17 +568,18 @@ public sealed class SqlStorageOperationsTests
         var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("bounded");
         await using (var setup = await database.CreateSessionAsync())
         {
-            await setup.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, payload VARCHAR(200))");
+            await setup.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, payload VARCHAR(6000))");
         }
 
         using var stop = new CancellationTokenSource();
+        string payload = new('x', 6000);
         long inserted = 0;
         var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
         {
             await using var session = await database.CreateSessionAsync();
             for (int i = 0; !stop.IsCancellationRequested; i++)
             {
-                await session.ExecuteAsync($"INSERT INTO t (id, payload) VALUES ({writer * 10_000_000 + i}, '{new string('x', 150)}')");
+                await session.ExecuteAsync($"INSERT INTO t (id, payload) VALUES ({writer * 10_000_000 + i}, '{payload}')");
                 Interlocked.Increment(ref inserted);
             }
         })).ToArray();

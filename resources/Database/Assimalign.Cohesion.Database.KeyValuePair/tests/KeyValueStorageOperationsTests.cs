@@ -324,7 +324,10 @@ public sealed class KeyValueStorageOperationsTests
 
     /// <summary>
     /// Under a sustained write load the journal-size trigger keeps the data file set's journal
-    /// near its configured size (#1254). The bound is a ratio to the configured size.
+    /// near its configured size (#1254). The bound is a ratio to the configured size. The values
+    /// carry 3,000 bytes: since storage format 3 (#1253) a put journals the bytes it changed
+    /// rather than two 8 KiB images of each page it touched, so with small values forty sizes of
+    /// journal took several times as many puts as before.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Checkpoint trigger: the journal stays bounded under a sustained write load")]
     public async Task CheckpointJournalSize_SustainedWrites_ShouldKeepTheJournalBounded()
@@ -344,7 +347,7 @@ public sealed class KeyValueStorageOperationsTests
             await using var session = await database.CreateSessionAsync();
             for (int i = 0; !stop.IsCancellationRequested; i++)
             {
-                await database.PutAsync(session, Bytes($"{writer}-{i}"), Bytes(new string('x', 150)));
+                await database.PutAsync(session, Bytes($"{writer}-{i}"), Bytes(new string('x', 3000)));
             }
         })).ToArray();
 

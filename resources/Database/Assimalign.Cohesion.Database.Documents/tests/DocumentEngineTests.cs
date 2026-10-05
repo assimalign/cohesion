@@ -284,14 +284,14 @@ public sealed class DocumentEngineTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Format: a database in storage format 1 is refused at open with COHDBS001 naming it, its files untouched (#1251)")]
-    public async Task Open_StorageFormatOne_ShouldBeRefusedNamingTheDatabase()
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Format: a database in storage format 2 (the format before #1253) is refused at open with COHDBS001 naming it, its files untouched (#1251, #1253)")]
+    public async Task Open_StorageFormatTwo_ShouldBeRefusedNamingTheDatabase()
     {
         string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-storage-format-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
-            // Arrange: a closed database whose page 0 names storage format 1.
+            // Arrange: a closed database whose page 0 names storage format 2, the format before #1253.
             await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
             {
                 var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("legacy");
@@ -300,7 +300,7 @@ public sealed class DocumentEngineTests
                 await collection.PutAsync(session, "a", Encoding.UTF8.GetBytes("{\"score\":1}"));
             }
 
-            StorageFormatFiles.WriteVersion(Path.Combine(root, "legacy", "document.dat"), version: 1);
+            StorageFormatFiles.WriteVersion(Path.Combine(root, "legacy", "document.dat"), version: 2);
             var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
 
             // Act
@@ -309,8 +309,8 @@ public sealed class DocumentEngineTests
 
             // Assert: the storage's coded refusal, named for the database; nothing written.
             failure.Message.ShouldStartWith("Database 'legacy' cannot be opened. " + StorageFormatException.ErrorCode + ": ", Case.Sensitive);
-            failure.Message.ShouldContain("uses storage format 1, but this engine supports only storage format 2", Case.Sensitive);
-            failure.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(1);
+            failure.Message.ShouldContain("uses storage format 2, but this engine supports only storage format 3", Case.Sensitive);
+            failure.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(2);
             reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
             await reopened.DisposeAsync();
 

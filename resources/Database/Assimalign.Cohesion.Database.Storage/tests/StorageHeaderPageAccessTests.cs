@@ -118,13 +118,15 @@ public sealed class StorageHeaderPageAccessTests
     [Fact(DisplayName = "Cohesion Test [Storage] - Page 0: recovery never replays a journal image onto the file header")]
     public void Open_JournalHoldsACommittedImageOfPageZero_ShouldNotReplayIt()
     {
-        // Arrange: a committed after-image of page 0 full of garbage, then a power loss.
+        // Arrange: a full page image and a committed image of page 0 full of garbage, then a power
+        // loss. Recovery would restore the first whatever became of its transaction.
         var storage = TornStorage.Create(); // abandoned after its simulated power loss
         storage.Checkpoint([3]);
         var garbage = new byte[Page.Size];
         new Random(1251).NextBytes(garbage);
         storage.Log.AppendBegin(777);
-        storage.Log.AppendPageImage(777, (PageId)0L, JournalRecordType.AfterPageImage, garbage);
+        storage.Log.AppendPageImage(777, (PageId)0L, JournalRecordType.FullPageImage, garbage);
+        storage.Log.AppendPageImage(777, (PageId)0L, JournalRecordType.CommittedPageImage, garbage);
         storage.Log.AppendCommit(777);
         var images = storage.CaptureDurable();
         var page0 = images.Data.AsSpan(0, Page.Size).ToArray();

@@ -139,7 +139,7 @@ public sealed class StorageCheckpointAnchorTests
         // chain page holding the new anchor survived it — on disk and in the allocator.
         pages.ShouldContain(chainPage);
         new StreamJournal(new MemoryStream(images.Journal)).ReadAll()
-            .Count(record => record.Type == JournalRecordType.AfterPageImage && (long)record.PageId == chainPage)
+            .Count(record => record.Type is JournalRecordType.PageDelta or JournalRecordType.CommittedPageImage && (long)record.PageId == chainPage)
             .ShouldBeGreaterThan(0);
         reopened.CheckpointActiveTransactions.ShouldBe(anchor);
         reopened.FreeSpaceMap.IsAllocated((PageId)chainPage).ShouldBeTrue();

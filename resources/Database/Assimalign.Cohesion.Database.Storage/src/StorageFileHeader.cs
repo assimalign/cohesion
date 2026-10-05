@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// <remarks>
 /// <para>
 /// Every storage file, regardless of database model, begins with a file header page
-/// (<see cref="PageType.FileHeader"/>). Storage format 2 lays page 0 out as follows:
+/// (<see cref="PageType.FileHeader"/>). Storage formats 2 and 3 lay page 0 out as follows:
 /// </para>
 /// <code>
 /// Page 0 (8 KiB)
@@ -130,12 +130,14 @@ public unsafe struct StorageFileHeader
     public const int ExpectedMagic = 0x434F4845;
 
     /// <summary>
-    /// The current storage format version, the only one this engine opens. Version 2
-    /// (#1251) brought CRC-32C page and journal checksums, journal frame version 3, the
-    /// alternating header slots, the persisted LSN floor and the chained checkpoint anchor.
-    /// There is no upgrade path between versions (#1152).
+    /// The current storage format version, the only one this engine opens. Version 3
+    /// (#1253) replaced the journal's full before- and after-images with a full page image
+    /// once per checkpoint interval and byte-range deltas at commit (journal frame version 4),
+    /// and its recovery with ordered redo. Version 2 (#1251) brought CRC-32C page and journal
+    /// checksums, journal frame version 3, the alternating header slots, the persisted LSN
+    /// floor and the chained checkpoint anchor. There is no upgrade path between versions (#1152).
     /// </summary>
-    public const int CurrentFormatVersion = 2;
+    public const int CurrentFormatVersion = 3;
 
     /// <summary>
     /// Validates that the header names this engine's file format: the expected magic number

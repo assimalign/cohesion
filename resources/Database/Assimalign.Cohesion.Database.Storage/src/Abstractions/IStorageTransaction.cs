@@ -9,13 +9,14 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// <remarks>
 /// <para>
 /// Mutations made through a transaction are staged in the buffer pool and protected
-/// by the write-ahead log: the first modification of each page journals its before
-/// image, and <see cref="Commit"/> journals the after image of every modified page
-/// followed by a commit record. Durable storage modes flush that record before the
-/// call returns; non-durable mode makes no persistence promise. Data pages
+/// by the write-ahead log: the first modification of a page since the last checkpoint
+/// journals its full image, and <see cref="Commit"/> journals the bytes each page changed
+/// (a page delta) followed by a commit record (storage format 3, #1253). Durable storage
+/// modes flush that record before the call returns; non-durable mode makes no persistence
+/// promise. Data pages
 /// are <i>not</i> forced to disk at commit — recovery replays committed changes from
 /// the journal (no-force), and uncommitted changes that reached disk early are
-/// undone from before images (steal).
+/// overwritten by the page's full image and the committed changes after it (steal).
 /// </para>
 /// <para>
 /// Pages modified by an active transaction are write-locked to that transaction
@@ -42,7 +43,7 @@ public interface IStorageTransaction : IDisposable
     bool IsActive { get; }
 
     /// <summary>
-    /// Commits the transaction: journals after images of every modified page and a
+    /// Commits the transaction: journals the changed bytes of every modified page and a
     /// commit record, then applies the owning storage's durability policy. Durable
     /// modes return only after the journal is durable up to that commit record.
     /// </summary>
@@ -51,12 +52,12 @@ public interface IStorageTransaction : IDisposable
 
     /// <summary>
     /// Commits the transaction, optionally without awaiting durability. A
-    /// non-durable commit appends the same records (after images + commit
+    /// non-durable commit appends the same records (page deltas + commit
     /// record) but returns before they are flushed — for inner physical brackets
     /// whose durability is owned by an outer logical commit: the journal is
     /// ordered, so making any later record durable makes these durable first,
-    /// and a crash before that leaves the bracket unproven (its pages are undone
-    /// by recovery), which is exactly the outer transaction's abort semantics.
+    /// and a crash before that leaves the bracket unproven (recovery redoes none
+    /// of its changes), which is exactly the outer transaction's abort semantics.
     /// The write-ahead gate still protects stolen pages regardless.
     /// </summary>
     /// <param name="awaitDurability">False to skip the durable flush; true is equivalent to <see cref="Commit()"/>.</param>
@@ -64,7 +65,7 @@ public interface IStorageTransaction : IDisposable
     void Commit(bool awaitDurability);
 
     /// <summary>
-    /// Rolls the transaction back: restores every modified page to its before image
+    /// Rolls the transaction back: restores every modified page to its pre-image
     /// in the buffer pool and journals a rollback record.
     /// </summary>
     /// <exception cref="StorageTransactionException">The transaction is not active.</exception>

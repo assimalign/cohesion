@@ -186,15 +186,15 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     /// database and the one that was refused, and forwards the refusal like its own format
     /// errors.
     /// </summary>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Storage format: a file set in storage format 1 is refused with COHDBS001 naming the database and the file set, its files untouched (#1251)")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Storage format: a file set in storage format 2 (the format before #1253) is refused with COHDBS001 naming the database and the file set, its files untouched (#1251, #1253)")]
     [InlineData("catalog")]
     [InlineData("data")]
-    public async Task Open_FileSetInStorageFormatOne_ShouldBeRefusedNamingTheDatabaseAndTheFileSet(string role)
+    public async Task Open_FileSetInStorageFormatTwo_ShouldBeRefusedNamingTheDatabaseAndTheFileSet(string role)
     {
-        // Arrange: a closed database whose page 0 in one file set names storage format 1.
+        // Arrange: a closed database whose page 0 in one file set names storage format 2, the format before #1253.
         await CreateDatabaseAsync(formatVersion: null);
         string storageName = role == "catalog" ? TestDatabase + ".catalog" : TestDatabase;
-        StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, storageName, storageName + ".dat"), version: 1);
+        StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, storageName, storageName + ".dat"), version: 2);
         var before = Snapshot();
 
         // Act
@@ -206,8 +206,8 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         refusal.Message.ShouldStartWith(
             $"Database '{TestDatabase}' cannot be opened: its {role} file set '{storageName}' was refused. {StorageFormatException.ErrorCode}: ",
             Case.Sensitive);
-        refusal.Message.ShouldContain("uses storage format 1, but this engine supports only storage format 2", Case.Sensitive);
-        refusal.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(1);
+        refusal.Message.ShouldContain("uses storage format 2, but this engine supports only storage format 3", Case.Sensitive);
+        refusal.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(2);
         engine.TryGetDatabase(TestDatabase, out _).ShouldBeFalse();
         AssertUnchanged(before);
     }

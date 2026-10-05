@@ -186,6 +186,14 @@ public sealed class BlobStorageOperationsTests
     /// Under a sustained upload load the journal-size trigger keeps the journal near its
     /// configured size (#1254). The bound is a ratio to the configured size.
     /// </summary>
+    /// <remarks>
+    /// Each upload is 128 KiB. Since storage format 3 (#1253) the journal carries an upload's
+    /// chunks about once, as page deltas, instead of as a before- and an after-image of every
+    /// touched page, so a 16 KiB upload journals about 18 KiB where it journaled about 130 KiB.
+    /// The larger upload keeps the number of uploads needed to write forty journal sizes near
+    /// what it was: under this load every overwrite leaves a blob version that the catalog's
+    /// lookup walks, so each upload costs more than the one before it.
+    /// </remarks>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Checkpoint trigger: the journal stays bounded under a sustained write load")]
     public async Task CheckpointJournalSize_SustainedWrites_ShouldKeepTheJournalBounded()
     {
@@ -199,7 +207,7 @@ public sealed class BlobStorageOperationsTests
         var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("bounded");
         await database.CreateContainerAsync("files");
         using var stop = new CancellationTokenSource();
-        byte[] payload = new byte[16 * 1024];
+        byte[] payload = new byte[128 * 1024];
         Random.Shared.NextBytes(payload);
 
         // Each writer overwrites its own blob, so the writers never conflict.

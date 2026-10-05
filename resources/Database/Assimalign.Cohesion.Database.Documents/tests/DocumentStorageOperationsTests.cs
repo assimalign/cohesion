@@ -154,7 +154,10 @@ public sealed class DocumentStorageOperationsTests
 
     /// <summary>
     /// Under a sustained write load the journal-size trigger keeps the journal near its
-    /// configured size (#1254). The bound is a ratio to the configured size.
+    /// configured size (#1254). The bound is a ratio to the configured size. The documents carry a
+    /// 5,000-character payload: since storage format 3 (#1253) a put journals the bytes it changed
+    /// rather than two 8 KiB images of each page it touched, and with small documents forty sizes
+    /// of journal took longer than the test's minute.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Checkpoint trigger: the journal stays bounded under a sustained write load")]
     public async Task CheckpointJournalSize_SustainedWrites_ShouldKeepTheJournalBounded()
@@ -174,7 +177,7 @@ public sealed class DocumentStorageOperationsTests
             await using var session = await database.CreateSessionAsync();
             for (int i = 0; !stop.IsCancellationRequested; i++)
             {
-                await collection.PutAsync(session, $"{writer}-{i}", Doc($"{writer}-{i}", "\"payload\":\"" + new string('x', 150) + "\""));
+                await collection.PutAsync(session, $"{writer}-{i}", Doc($"{writer}-{i}", "\"payload\":\"" + new string('x', 5000) + "\""));
             }
         })).ToArray();
 

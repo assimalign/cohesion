@@ -19,7 +19,12 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
   pages and `IStorageUnitIterator` full scans.
 - **Journal** — `IStorageJournal` write-ahead logging with begin/commit/rollback
-  markers, CRC-32C-protected frames, and recovery replay of committed operations. Appends go
+  markers and CRC-32C-protected frames. A page is journaled as a full image once per
+  checkpoint interval, on its first change since the checkpoint, and each commit journals only
+  the bytes it changed (a page delta, or a committed full image past half a page); recovery is
+  ordered redo from the checkpoint, each delta applied on the LSN it names (storage format 3,
+  #1253). A debug consistency check (`COHESION_STORAGE_CONSISTENCY_CHECKS=1`) replays every
+  record onto a shadow page and compares it with the buffer pool. Appends go
   to a user-space buffer, frames built in place, which drains to the operating system in one
   write before every commit is acknowledged (every durability mode), every reader, the
   write-ahead gate and a checkpoint's truncation (#1252, PostgreSQL's WAL buffers).
@@ -40,7 +45,7 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
 - **File header** — page 0: an identity block written at creation and two alternating,
   separately checksummed header slots (LSN and sequence floors, checkpoint anchor, and a
   copy of the identity block), so a torn header write cannot make a file set unopenable.
-  Page 0 is never a data page: the page manager refuses to pin or free it. Storage format 2;
+  Page 0 is never a data page: the page manager refuses to pin or free it. Storage format 3;
   any other format is refused with `StorageFormatException` (`COHDBS001`), with no upgrade
   path (#1152).
 - **File set** — each storage instance owns three streams: data (`.dat`), journal

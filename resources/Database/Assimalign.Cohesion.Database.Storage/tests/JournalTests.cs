@@ -24,11 +24,13 @@ public sealed class JournalTests
         journal.Flush();
         long position = stream.Position;
 
+        // The scan reads the stream in chunks (#1253), so mid-enumeration its cursor may be
+        // anywhere; disposing the enumeration early must still put it back.
         using (var records = journal.ReadSequential().GetEnumerator())
         {
             records.MoveNext().ShouldBeTrue();
             records.Current.Type.ShouldBe(JournalRecordType.BeginTransaction);
-            stream.Position.ShouldBeLessThan(stream.Length);
+            stream.Position = 0;
         }
         stream.Position.ShouldBe(position);
         journal.AppendBegin(8).ShouldBe(4);
@@ -60,7 +62,7 @@ public sealed class JournalTests
         records[2].Type.ShouldBe(JournalRecordType.CommitTransaction);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: page images round-trip with page id and payload")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: page images round-trip with page id and payload, their zero bytes elided")]
     public void Journal_PageImage_ShouldRoundTrip()
     {
         // Arrange
@@ -68,20 +70,30 @@ public sealed class JournalTests
         using var journal = new StreamJournal(stream, leaveOpen: true);
         var image = new byte[Units.Page.Size];
         image[100] = 0xAB;
+        image[Units.Page.LsnFieldOffset] = 0x07;
 
         // Act
-        journal.AppendPageImage(3, (PageId)9L, JournalRecordType.BeforePageImage, image);
+        journal.AppendPageImage(3, (PageId)9L, JournalRecordType.FullPageImage, image);
+        journal.AppendPageImage(3, (PageId)9L, JournalRecordType.CommittedPageImage, image);
         var records = journal.ReadAll();
+        var restored = new byte[Units.Page.Size];
+        string? problem = Internal.PageImageCodec.TryApplyImage(records[0].Payload.Span, restored);
 
-        // Assert
-        records.Count.ShouldBe(1);
-        records[0].Type.ShouldBe(JournalRecordType.BeforePageImage);
+        // Assert: one run of one byte; the LSN field never travels, but a committed image names it
+        // as its base.
+        records.Count.ShouldBe(2);
+        records[0].Type.ShouldBe(JournalRecordType.FullPageImage);
         ((long)records[0].PageId).ShouldBe(9L);
-        records[0].Payload.Length.ShouldBe(Units.Page.Size);
-        records[0].Payload.Span[100].ShouldBe((byte)0xAB);
+        records[0].Payload.Length.ShouldBe(Internal.PageImageCodec.RunHeaderSize + 1);
+        problem.ShouldBeNull();
+        restored[100].ShouldBe((byte)0xAB);
+        restored[Units.Page.LsnFieldOffset].ShouldBe((byte)0);
+        records[1].Type.ShouldBe(JournalRecordType.CommittedPageImage);
+        System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(records[1].Payload.Span).ShouldBe(7L);
+        records[1].Payload.Length.ShouldBe(Internal.PageImageCodec.BaseLsnSize + Internal.PageImageCodec.RunHeaderSize + 1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: page-image append rejects non-image record types")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: page-image append rejects other record types and images that are not a page")]
     public void Journal_AppendPageImage_NonImageType_ShouldThrow()
     {
         // Arrange
@@ -90,7 +102,11 @@ public sealed class JournalTests
 
         // Act / Assert
         Should.Throw<ArgumentOutOfRangeException>(
-            () => journal.AppendPageImage(1, (PageId)1L, JournalRecordType.CommitTransaction, new byte[8]));
+            () => journal.AppendPageImage(1, (PageId)1L, JournalRecordType.CommitTransaction, new byte[Units.Page.Size]));
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => journal.AppendPageImage(1, (PageId)1L, JournalRecordType.PageDelta, new byte[Units.Page.Size]));
+        Should.Throw<ArgumentException>(
+            () => journal.AppendPageImage(1, (PageId)1L, JournalRecordType.FullPageImage, new byte[8]));
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Journal: unsupported EnsureDurable cannot advance the durable LSN")]

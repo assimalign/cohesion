@@ -62,12 +62,27 @@ internal sealed class TornStorage : Storage
     /// False to make the journal flush-gated: an append survives a power loss only once a flush
     /// covered it, as an unsynced write in the operating system's cache.
     /// </param>
-    public static TornStorage Create(CrashPoint? point = null, int poolCapacity = 8, bool journalWriteThrough = true)
+    /// <param name="dataWriteThrough">
+    /// False to make the data file flush-gated too: a page write or an extension of the file
+    /// survives a power loss only once a flush covered it.
+    /// </param>
+    /// <param name="consistencyChecks">True to turn the storage's debug consistency check on.</param>
+    public static TornStorage Create(
+        CrashPoint? point = null,
+        int poolCapacity = 8,
+        bool journalWriteThrough = true,
+        bool dataWriteThrough = true,
+        bool consistencyChecks = false)
     {
         var storage = new TornStorage(
-            new CrashSimulationStream(writeThrough: true, point, "data"),
+            new CrashSimulationStream(dataWriteThrough, point, "data"),
             new CrashSimulationStream(journalWriteThrough, point, "journal"),
             poolCapacity);
+        if (consistencyChecks)
+        {
+            storage.EnableConsistencyChecks();
+        }
+
         storage.InitializeNew((Name)"torn-harness");
         return storage;
     }
@@ -77,11 +92,29 @@ internal sealed class TornStorage : Storage
     /// so the recovered journal and anchor can be inspected.
     /// </summary>
     public static TornStorage Open((byte[] Data, byte[] Journal) images, CrashPoint? point = null, bool checkpointOnOpen = false, int poolCapacity = 8)
-    {
-        var storage = new TornStorage(
+        => Open(
             new CrashSimulationStream(images.Data, writeThrough: true, point, "data"),
             new CrashSimulationStream(images.Journal, writeThrough: true, point, "journal"),
+            checkpointOnOpen,
             poolCapacity);
+
+    /// <summary>
+    /// Opens a file set over streams the caller keeps, so it can inspect what the open wrote, or
+    /// that it wrote nothing.
+    /// </summary>
+    public static TornStorage Open(
+        CrashSimulationStream data,
+        CrashSimulationStream journal,
+        bool checkpointOnOpen = false,
+        int poolCapacity = 8,
+        bool consistencyChecks = false)
+    {
+        var storage = new TornStorage(data, journal, poolCapacity);
+        if (consistencyChecks)
+        {
+            storage.EnableConsistencyChecks();
+        }
+
         storage.OpenExisting(checkpointOnOpen);
         return storage;
     }
@@ -146,6 +179,44 @@ internal sealed class TornStorage : Storage
 
     public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, string text)
         => UpdateRecord(transaction, pageId, slotIndex, Encoding.UTF8.GetBytes(text));
+
+    public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, byte[] record)
+        => UpdateRecord(transaction, pageId, slotIndex, record);
+
+    public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, ulong owner, byte[] record)
+        => InsertRecord(transaction, owner, record);
+
+    public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex)
+        => DeleteRecord(transaction, pageId, slotIndex);
+
+    public byte[] ReadBytes(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex).ToArray();
+
+    /// <summary>Gets the LSN the buffer pool's copy of a page carries.</summary>
+    public long PageLsn(PageId pageId)
+    {
+        using var handle = PageManager.GetPage(pageId);
+        return handle.Page.Lsn;
+    }
+
+    /// <summary>Gets a copy of the buffer pool's page.</summary>
+    public unsafe byte[] PageBytes(PageId pageId)
+    {
+        using var handle = PageManager.GetPage(pageId);
+        return new ReadOnlySpan<byte>(handle.Page.Pointer, Units.Page.Size).ToArray();
+    }
+
+    /// <summary>Reads every record of an owner's chain, in page order.</summary>
+    public List<byte[]> ScanOwner(ulong owner)
+    {
+        var results = new List<byte[]>();
+        using var iterator = GetUnitIterator(owner);
+        while (iterator.MoveNext())
+        {
+            results.Add(iterator.Current.Data.ToArray());
+        }
+
+        return results;
+    }
 
     public string Read(PageId pageId, int slotIndex) => Encoding.UTF8.GetString(ReadRecord(pageId, slotIndex).Span);
 

@@ -36,7 +36,7 @@ public sealed class JournalBufferTests
 
         // Act
         long first = journal.AppendBegin(1);
-        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.BeforePageImage, Image);
+        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.FullPageImage, Image);
         journal.AppendOperation(1, [1, 2, 3]);
         long last = journal.AppendCommit(1);
         int writesBeforeTheDrain = medium.Writes;
@@ -62,7 +62,7 @@ public sealed class JournalBufferTests
         using var journal = new StreamJournal(new StorageStream(medium));
         for (int i = 0; i < 200; i++)
         {
-            journal.AppendPageImage(i, (PageId)1L, JournalRecordType.AfterPageImage, Image);
+            journal.AppendPageImage(i, (PageId)1L, JournalRecordType.CommittedPageImage, Image);
             journal.AppendCommit(i);
         }
 
@@ -70,16 +70,23 @@ public sealed class JournalBufferTests
         journal.BufferCapacity.ShouldBe(StorageJournal.MaximumBufferSize);
         const int frames = 200;
 
-        // Act: as many frames as fit the buffer, then the drain that writes them.
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < frames / 2; i++)
+        // Act: as many frames as fit the buffer, then the drain that writes them; five times,
+        // keeping the least. A garbage collection that another test's allocations start during
+        // the window retires this thread's allocation context, and the context's unused bytes
+        // (up to 8 KiB) then count as allocated by this thread, although nothing was.
+        long allocated = long.MaxValue;
+        for (int round = 0; round < 5; round++)
         {
-            journal.AppendPageImage(i, (PageId)1L, JournalRecordType.AfterPageImage, Image);
-            journal.AppendCommit(i);
-        }
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < frames / 2; i++)
+            {
+                journal.AppendPageImage(i, (PageId)1L, JournalRecordType.CommittedPageImage, Image);
+                journal.AppendCommit(i);
+            }
 
-        journal.Flush();
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            journal.Flush();
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
 
         // Assert: until #1252 every append allocated its frame (8 KiB for a page image).
         allocated.ShouldBeLessThan(1024, $"{allocated} bytes for {frames} frames");
@@ -96,7 +103,7 @@ public sealed class JournalBufferTests
         // Act: 2.5 MiB of page images.
         for (int i = 1; i <= 320; i++)
         {
-            journal.AppendPageImage(i, (PageId)i, JournalRecordType.AfterPageImage, Image);
+            journal.AppendPageImage(i, (PageId)i, JournalRecordType.CommittedPageImage, Image);
             if (capacities.Count == 0 || capacities[^1] != journal.BufferCapacity)
             {
                 capacities.Add(journal.BufferCapacity);
@@ -343,9 +350,9 @@ public sealed class JournalBufferTests
         medium.OnWrite = (_, bytes) => writes.Add(bytes.ToArray());
         using var journal = new StreamJournal(new StorageStream(medium));
         journal.AppendBegin(1);
-        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.BeforePageImage, Image);
+        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.FullPageImage, Image);
         journal.AppendOperation(1, [1, 2, 3]);
-        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.AfterPageImage, Image);
+        journal.AppendPageImage(1, (PageId)3L, JournalRecordType.CommittedPageImage, Image);
         journal.AppendCommit(1);
         journal.AppendRollback(2);
 
@@ -358,8 +365,8 @@ public sealed class JournalBufferTests
         writes.Count.ShouldBe(2);
         JournalRecordType[] appended =
         [
-            JournalRecordType.BeginTransaction, JournalRecordType.BeforePageImage, JournalRecordType.Operation,
-            JournalRecordType.AfterPageImage, JournalRecordType.CommitTransaction, JournalRecordType.RollbackTransaction,
+            JournalRecordType.BeginTransaction, JournalRecordType.FullPageImage, JournalRecordType.Operation,
+            JournalRecordType.CommittedPageImage, JournalRecordType.CommitTransaction, JournalRecordType.RollbackTransaction,
         ];
         appended.ShouldAllBe(type => JournalFrames.Carries(writes[0], type));
         JournalFrames.Carries(writes[0], JournalRecordType.Checkpoint).ShouldBeFalse();

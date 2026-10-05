@@ -103,7 +103,7 @@ public interface IStorage : IAsyncDisposable, IDisposable
     /// <summary>
     /// Releases every data page of the specified owner's record chain inside a
     /// transaction: each page is retyped <see cref="PageType.Free"/> under the
-    /// write-ahead log (before-image covered — a rollback restores the chain), and
+    /// write-ahead log (a rollback restores the chain from the pre-image), and
     /// the pages return to the free-space map when the transaction commits, never
     /// before, so an in-flight release can never be reallocated.
     /// </summary>
@@ -147,7 +147,7 @@ public interface IStorage : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Pins a page for modification inside a transaction: acquires the page's write
-    /// lock for the transaction and captures its before image on first touch, so the
+    /// lock for the transaction and captures its pre-image on first touch, so the
     /// mutation is covered by the write-ahead log like any record operation. Used by
     /// subsystems that own their page layout (index structures, catalogs).
     /// </summary>

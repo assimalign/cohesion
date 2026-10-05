@@ -29,7 +29,8 @@ public sealed class StorageFormatTests
     /// </summary>
     [Theory(DisplayName = "Cohesion Test [Storage] - Format fence: a file of another storage format is refused as a format error, not as corruption")]
     [InlineData(1)]
-    [InlineData(3)]
+    [InlineData(2)]
+    [InlineData(4)]
     [InlineData(0)]
     [InlineData(int.MaxValue)]
     public void Open_OtherFormatVersion_ShouldBeRefusedBeforeAnyChecksum(int version)
@@ -53,20 +54,76 @@ public sealed class StorageFormatTests
         refusal.Message.ShouldContain(version < StorageFileHeader.CurrentFormatVersion ? "does not upgrade" : "newer engine");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: the current format is 2, and a header names it exactly")]
-    public void FileHeader_CurrentFormat_ShouldBeTwoAndExact()
+    [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: the current format is 3, and a header names it exactly")]
+    public void FileHeader_CurrentFormat_ShouldBeThreeAndExact()
     {
         // Arrange
-        var current = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 2 };
-        var older = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 1 };
-        var newer = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 3 };
+        var current = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 3 };
+        var older = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 2 };
+        var newer = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 4 };
 
         // Act
         bool[] valid = [current.IsValid(), older.IsValid(), newer.IsValid()];
 
         // Assert
-        StorageFileHeader.CurrentFormatVersion.ShouldBe(2);
+        StorageFileHeader.CurrentFormatVersion.ShouldBe(3);
         valid.ShouldBe([true, false, false]);
+    }
+
+    /// <summary>
+    /// Storage format 3 (#1253) changed what the journal's page records mean, so a file set of
+    /// format 2 — full before- and after-images, journal frame version 3 — is refused at open with
+    /// <c>COHDBS001</c> before anything reads its journal or writes either file: the data file and
+    /// the journal are left byte for byte as they were, so the engine that wrote them still opens
+    /// them.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: a format-2 file set is refused with COHDBS001 and left byte-identical")]
+    public void Open_FormatTwoFileSet_ShouldBeRefusedAndLeftByteIdentical()
+    {
+        // Arrange: a crashed file set (its journal holds records recovery would replay) whose page
+        // 0 names format 2, with a format-2 journal frame (version 3) appended to its journal.
+        var storage = TornStorage.Create(); // abandoned: a crash
+        storage.Insert("row");
+        storage.Log.Flush();
+        var images = storage.CaptureDurable();
+        BinaryPrimitives.WriteInt32LittleEndian(images.Data.AsSpan(StorageHeaderPage.FormatVersionOffset), 2);
+        byte[] journalBytes = [.. images.Journal, .. FrameOfVersion(3, lsn: 1000)];
+        var data = new CrashSimulationStream(images.Data, writeThrough: true);
+        var journal = new CrashSimulationStream(journalBytes, writeThrough: true);
+
+        // Act
+        var refusal = Should.Throw<StorageFormatException>(() => TornStorage.Open(data, journal));
+        var frameRefusal = Should.Throw<StorageFormatException>(() => new StreamJournal(new MemoryStream(journalBytes)).ReadAll());
+
+        // Assert
+        refusal.Message.ShouldStartWith(StorageFormatException.ErrorCode + ":");
+        refusal.FoundVersion.ShouldBe(2);
+        refusal.SupportedVersion.ShouldBe(3);
+        data.CaptureLive().ShouldBe(images.Data);
+        data.CaptureDurable().ShouldBe(images.Data);
+        journal.CaptureLive().ShouldBe(journalBytes);
+        journal.CaptureDurable().ShouldBe(journalBytes);
+        frameRefusal.FoundVersion.ShouldBe(3);
+        frameRefusal.SupportedVersion.ShouldBe(4);
+        frameRefusal.Message.ShouldContain("journal frame format 3");
+    }
+
+    /// <summary>
+    /// Builds a whole journal frame of another frame version: its length, magic and CRC-32C
+    /// verify, so a reader must refuse it rather than stop at it as a torn tail.
+    /// </summary>
+    private static byte[] FrameOfVersion(byte version, long lsn)
+    {
+        const int bodyLength = 1 + sizeof(long) + sizeof(long) + 1 + sizeof(long);
+        var frame = new byte[sizeof(int) + sizeof(int) + bodyLength + sizeof(uint)];
+        BinaryPrimitives.WriteInt32LittleEndian(frame, bodyLength);
+        BinaryPrimitives.WriteInt32LittleEndian(frame.AsSpan(sizeof(int)), 0x324C4157);
+        var body = frame.AsSpan(sizeof(int) + sizeof(int), bodyLength);
+        body[0] = version;
+        BinaryPrimitives.WriteInt64LittleEndian(body[1..], lsn);
+        body[17] = (byte)JournalRecordType.CommitTransaction;
+        BinaryPrimitives.WriteUInt32LittleEndian(frame.AsSpan(sizeof(int) + sizeof(int) + bodyLength), Crc32C.Compute(body));
+        return frame;
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: a file without the magic number and without a valid header slot is not a storage file")]
@@ -211,8 +268,8 @@ public sealed class StorageFormatTests
     /// record after it, commit records included.
     /// </summary>
     [Theory(DisplayName = "Cohesion Test [Storage] - Format fence: a verified journal frame of another version is a format error, not a torn tail")]
-    [InlineData(2)]
-    [InlineData(4)]
+    [InlineData(3)]
+    [InlineData(5)]
     public void Open_JournalFrameOfAnotherVersion_ShouldBeAFormatError(byte version)
     {
         // Arrange: a crashed file set whose journal holds a transaction; its second frame is
@@ -232,7 +289,7 @@ public sealed class StorageFormatTests
 
         // Assert
         refusal.FoundVersion.ShouldBe(version);
-        refusal.SupportedVersion.ShouldBe(3);
+        refusal.SupportedVersion.ShouldBe(4);
         refusal.Message.ShouldContain("Journal frame 2");
         refusal.Message.ShouldContain("not a torn tail");
         refusal.Message.ShouldContain("#1152");
@@ -245,7 +302,7 @@ public sealed class StorageFormatTests
         // Arrange
         var images = CrashedImages();
         int second = FrameOffsets(images.Journal)[1];
-        images.Journal[second + 8] = 4; // a version byte changed without its CRC: torn, not foreign
+        images.Journal[second + 8] = 5; // a version byte changed without its CRC: torn, not foreign
 
         // Act
         using var reopened = TornStorage.Open(images);
@@ -275,14 +332,16 @@ public sealed class StorageFormatTests
 
     /// <summary>
     /// The crash #1242 names: a checkpoint truncates the journal, then loses its own record.
-    /// Without a floor the journal restarts LSNs at 1 while the data pages keep theirs; the next
-    /// transaction's after-image of page 1 then gets the LSN the stale page already carries,
-    /// recovery's exact-LSN skip takes it for applied, and the committed update is lost.
+    /// Without a floor the journal restarts LSNs at 1 while the data pages keep theirs. In storage
+    /// format 2 the next after-image of page 1 then got the LSN the stale page already carried,
+    /// recovery's exact-LSN skip took it for applied, and the committed update was lost; in
+    /// format 3 (#1253) the redo point would restart at zero too, page 1 (above it) would get no
+    /// full image, and its delta would have no base to chain onto.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Storage] - LSN floor: a journal lost after the truncation does not restart LSNs, and recovery stays correct")]
     public void Open_JournalLostAfterTheTruncation_ShouldResumeAboveTheFloorAndRecoverCorrectly()
     {
-        // Arrange: one committed row (begin 1, before-image 2, after-image 3, commit 4), then a
+        // Arrange: one committed row (begin 1, full page image 2, page delta 3, commit 4), then a
         // checkpoint that truncates the journal and loses power before its record is written.
         var point = new CrashPoint();
         var storage = TornStorage.Create(point); // abandoned after its simulated power loss
@@ -319,15 +378,20 @@ public sealed class StorageFormatTests
         }
 
         using var recovered = TornStorage.Open(afterUpdate);
-        var afterImage = new StreamJournal(new MemoryStream(afterUpdate.Journal)).ReadAll()
-            .Single(record => record.Type == JournalRecordType.AfterPageImage);
+        var records = new StreamJournal(new MemoryStream(afterUpdate.Journal)).ReadAll();
+        var image = records.Single(record => record.Type == JournalRecordType.FullPageImage);
+        var delta = records.Single(record => record.Type == JournalRecordType.PageDelta);
 
         // Assert: the committed update survives first — that is the loss a restarted LSN causes.
+        // The floor is also the redo point after the lost record (#1253): the page carries an LSN
+        // at or below it, so the update journals the page's full image before its delta, which
+        // chains onto that image.
         recovered.Read(pageId, slot).ShouldBe("new");
         images.Journal.ShouldBeEmpty();
         resumedLsn.ShouldBe(lastLsn);
-        afterImage.Lsn.ShouldBeGreaterThan(lastLsn);
-        recovered.Log.AppendBegin(99).ShouldBeGreaterThan(afterImage.Lsn);
+        image.Lsn.ShouldBeGreaterThan(lastLsn);
+        System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(delta.Payload.Span).ShouldBe(image.Lsn);
+        recovered.Log.AppendBegin(99).ShouldBeGreaterThan(delta.Lsn);
     }
 
     // ---------------------------------------------------------------- header slots
@@ -616,17 +680,20 @@ public sealed class StorageFormatTests
     [Fact(DisplayName = "Cohesion Test [Storage] - Torn writes: an append after a torn journal tail lands where the next read finds it")]
     public void Append_AfterATornJournalTail_ShouldSurviveTheNextCrash()
     {
-        // Arrange: a committed row, then a bracket whose begin record and before image are still in
-        // the journal's append buffer; the drain that writes them tears after one sector, inside
-        // the before image (#1252: an append is no longer a write of its own).
+        // Arrange: a committed row beside a 3,000-byte one, a checkpoint, then a bracket whose
+        // begin record and the page's full image (its first change since the checkpoint, #1253)
+        // are still in the journal's append buffer; the drain that writes them tears after one
+        // sector, inside the image (#1252: an append is no longer a write of its own).
         var point = new CrashPoint();
         var storage = TornStorage.Create(point); // abandoned after its simulated power loss
+        storage.Insert(new string('f', 3000));
         var (pageId, slot) = storage.Insert("v1");
+        storage.Checkpoint();
         var torn = storage.BeginTransaction();
         storage.Update(torn, pageId, slot, "v2");
         long drainStart = storage.CaptureDurable().Journal.Length;
         point.DurableSectors = 1;
-        point.CrashWhen = (stream, operation, _, count) => stream == "journal" && operation == "Write" && count > Page.Size;
+        point.CrashWhen = (stream, operation, _, count) => stream == "journal" && operation == "Write" && count > 2 * CrashSimulationStream.SectorSize;
         SimulatedPowerLossException.ShouldBeThrownBy(() => storage.Log.Flush());
         var images = storage.CaptureDurable();
         int verifiedFrames = new StreamJournal(new MemoryStream(images.Journal)).ReadAll().Count;
@@ -648,12 +715,12 @@ public sealed class StorageFormatTests
         using var recovered = TornStorage.Open(second);
 
         // Assert: one sector of the torn drain reached the media — the begin record whole, then
-        // the start of the before image after the verified frames; the new bracket replaced the
+        // the start of the full page image after the verified frames; the new bracket replaced the
         // torn bytes and reads back after the second crash.
         ((long)images.Journal.Length).ShouldBe(drainStart + CrashSimulationStream.SectorSize);
         FrameOffsets(images.Journal)[verifiedFrames].ShouldBeLessThan(images.Journal.Length);
         recovered.Read(pageId, slot).ShouldBe("v3");
-        recovered.Log.ReadAll().Count(record => record.Type == JournalRecordType.CommitTransaction).ShouldBe(2);
+        recovered.Log.ReadAll().Count(record => record.Type == JournalRecordType.CommitTransaction).ShouldBe(1);
         recovered.Log.ReadAll().Take(verifiedFrames).Select(record => record.Lsn)
             .ShouldBe(new StreamJournal(new MemoryStream(images.Journal)).ReadAll().Select(record => record.Lsn));
     }
