@@ -17,7 +17,7 @@ using Assimalign.Cohesion.Database.Storage;
 /// and the plan executor runs it against shared storage inside the session's
 /// storage transaction (which owns write-ahead logging and durability).
 /// </summary>
-internal sealed class SqlQueryExecutor : IQueryExecutor
+internal sealed class SqlQueryExecutor
 {
     private readonly SqlStorage _storage;
     private readonly ISqlCatalog _catalog;
@@ -35,19 +35,9 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
     internal ISqlCatalogSnapshot CaptureCatalogSnapshot() => SqlCatalog.CaptureSnapshot(_catalog);
 
     /// <summary>
-    /// Public interface method — requires a transaction context from the session.
-    /// </summary>
-    public Task<QueryResult> ExecuteAsync(QueryRequest request, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        throw new NotSupportedException(
-            "SQL query execution requires a transaction context. Use IDatabaseSession.ExecuteAsync() instead.");
-    }
-
-    /// <summary>
-    /// Internal execution method that receives the statement's transaction
-    /// context: the MVCC context (write stamps, visibility snapshot) and the
-    /// paired storage bracket the mutations ride.
+    /// Executes a statement inside the statement's transaction context: the MVCC
+    /// context (write stamps, visibility snapshot) and the paired storage bracket
+    /// the mutations ride.
     /// </summary>
     internal Task<QueryResult> ExecuteAsync(QueryRequest request, SqlStatementContext statement, CancellationToken cancellationToken = default)
     {

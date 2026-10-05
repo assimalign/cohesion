@@ -325,7 +325,7 @@ public sealed class StorageConcurrencyTests
         }
 
         wrong.Take(10).ShouldBeEmpty($"{wrong.Count} reads of {locations.Count} committed rows came back wrong");
-        ((StorageBufferPool)storage.BufferPool).CheckInvariants();
+        storage.BufferPool.CheckInvariants();
     }
 
     private static void Check(
@@ -452,7 +452,7 @@ public sealed class StorageConcurrencyTests
             AssertChain(storage, writer, models[writer]);
         }
 
-        ((StorageBufferPool)storage.BufferPool).CheckInvariants();
+        storage.BufferPool.CheckInvariants();
 
         // On the stream: a checkpoint writes every dirty page, and each one verifies.
         storage.Checkpoint();

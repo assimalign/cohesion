@@ -39,7 +39,7 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// pool can never evict it clean and drop the change.
 /// </para>
 /// </remarks>
-internal sealed unsafe class StorageBufferPool : IStorageBufferPool
+internal sealed unsafe class StorageBufferPool : IDisposable
 {
     private readonly Dictionary<long, BufferEntry> _entries = new();
     private readonly LinkedList<long> _accessOrder = new(); // head = least recently used
@@ -82,7 +82,9 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         _capacity = capacity;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the maximum number of pages that can be held in the buffer pool.
+    /// </summary>
     public int Capacity
     {
         get
@@ -159,7 +161,9 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the current number of pages resident in the buffer pool.
+    /// </summary>
     public int Count
     {
         get
@@ -171,7 +175,19 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Retrieves a page from the pool and increments its pin count.
+    /// If the page is not in the pool, it is loaded from the backing storage stream.
+    /// </summary>
+    /// <param name="pageId">The identifier of the page to pin.</param>
+    /// <param name="stream">The storage stream to read from if the page is not cached.</param>
+    /// <returns>A handle to the pinned page.</returns>
+    /// <exception cref="ObjectDisposedException">The pool has been disposed.</exception>
+    /// <exception cref="StorageCorruptionException">
+    /// The page read from <paramref name="stream"/> failed its checksum, or its header
+    /// describes bytes past the end of the page buffer. The page is not cached.
+    /// </exception>
+    /// <exception cref="StorageIOException">The pool is full and every resident page is pinned, or the stream ended inside the page.</exception>
     public IStoragePageHandle Pin(PageId pageId, StorageStream stream)
     {
         lock (_syncRoot)
@@ -273,7 +289,16 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Decrements the pin count for the specified page. When the pin count
+    /// reaches zero, the page becomes eligible for eviction.
+    /// </summary>
+    /// <remarks>
+    /// Releasing a pin the page does not hold is a caller bug. Debug builds throw
+    /// <see cref="InvalidOperationException"/> for it; release builds leave the
+    /// pin count at zero. A page that is not resident is ignored.
+    /// </remarks>
+    /// <param name="pageId">The identifier of the page to unpin.</param>
     public void Unpin(PageId pageId)
     {
         lock (_syncRoot)
@@ -305,7 +330,13 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Attempts to retrieve a page from the pool without loading it from disk.
+    /// </summary>
+    /// <param name="pageId">The identifier of the page to look up.</param>
+    /// <param name="handle">When this method returns, contains the page handle if the page was found; otherwise, <c>null</c>.</param>
+    /// <returns><c>true</c> if the page was found in the pool; otherwise, <c>false</c>.</returns>
+    /// <exception cref="ObjectDisposedException">The pool has been disposed.</exception>
     public bool TryGet(PageId pageId, out IStoragePageHandle? handle)
     {
         lock (_syncRoot)
@@ -326,7 +357,12 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Forces eviction of a specific page from the pool. The page must not be pinned.
+    /// If the page is dirty, it is flushed to disk before eviction.
+    /// </summary>
+    /// <param name="pageId">The identifier of the page to evict.</param>
+    /// <param name="stream">The storage stream to flush to if the page is dirty.</param>
     public void Evict(PageId pageId, StorageStream stream)
     {
         lock (_syncRoot)
@@ -353,7 +389,10 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Flushes all dirty pages in the buffer pool to the backing storage stream.
+    /// </summary>
+    /// <param name="stream">The storage stream to write dirty pages to.</param>
     public void FlushAll(StorageStream stream)
     {
         lock (_syncRoot)

@@ -17,7 +17,7 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     // A logical transaction can span a streamed object larger than RAM. Physical
     // undo/reclamation must bound the page pre-images a storage bracket retains independently of it.
     private const int MutationBatchSize = 64;
-    private readonly IStorage _storage;
+    private readonly Storage _storage;
     private readonly ITransactionRecordSpace _records;
     private readonly SemaphoreSlim _applyGate;
     private readonly Dictionary<ulong, List<LedgerEntry>> _ledger = new();
@@ -25,7 +25,7 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     private readonly HashSet<ulong> _pendingAbortedPurges = new();
     private readonly object _sync = new();
 
-    internal RecordSpaceVersionStore(IStorage storage, ITransactionRecordSpace records, SemaphoreSlim applyGate)
+    internal RecordSpaceVersionStore(Storage storage, ITransactionRecordSpace records, SemaphoreSlim applyGate)
     {
         _storage = storage;
         _records = records;

@@ -34,7 +34,7 @@ public class BTreePageFormatTests
         return (harness, ((IIndexRegistry)harness.IndexManager).ExportRegistrations());
     }
 
-    private static void RewritePage(IStorage storage, long pageId, LegacyBTreePages.BodyRewriter rewrite)
+    private static void RewritePage(Storage.Storage storage, long pageId, LegacyBTreePages.BodyRewriter rewrite)
     {
         using var bracket = storage.BeginTransaction();
         using (var handle = storage.OpenPageForWrite(bracket, pageId))
@@ -224,7 +224,7 @@ public class BTreePageFormatTests
         deleteFailure.PageId.ShouldBe(leaf);
     }
 
-    private static long LeftmostLeaf(IStorage storage, long root)
+    private static long LeftmostLeaf(Storage.Storage storage, long root)
     {
         long current = root;
         while (true)

@@ -20,9 +20,8 @@ the earlier doc-level nods to the root's `IDatabaseTransaction` are *named*
 (`<c>`), not referenced (`<see cref>`), and the adaptation between
 `ITransactionContext` and the public `IDatabaseTransaction` surface belongs to
 whoever owns both vocabularies — the model engines' session/transaction
-implementations above the root (the same place `IQueryTransactionScope` in
-`Execution` puts its engine adaptation, the area's standing cycle-avoidance
-shape). `Storage` is the one reference (child-to-child): the journal/page
+implementations above the root (the area's standing cycle-avoidance shape). `Storage`
+is the one reference (child-to-child): the journal/page
 substrate the implementations bind to. The per-database composition below adds
 no project or package dependency, including no dependency on Indexing.
 
@@ -45,8 +44,16 @@ Note the deliberate simplification: a version whose writer *aborted* below `mini
 
 ## The manager implementation
 
-`TransactionManager.Create(log, lockManager, versionStore, sequenceAllocator?)`
-returns the default manager. Lifecycle ordering encodes the write-ahead rule: commit
+`TransactionManager` is a public sealed type with an internal constructor (#1257, the
+concrete-first rule in `database-area.md`): there is one manager implementation, so the
+`ITransactionManager` interface and the `DefaultTransactionManager` behind it collapsed
+into it. It stays public, not internal, because `TransactionCoordinator.Manager` exposes
+it and foreign test assemblies (Indexing.Tests, Sql.Tests) read it. Two factories build
+one: the public `TransactionManager.Create(lockManager, versionStore, sequenceAllocator?)`
+returns a standalone manager over an in-memory log, and an internal overload that also
+takes the log serves the coordinator's composition and this package's own tests. The
+durable manager of a database is the one `TransactionCoordinator` composes over its
+storage journal. Lifecycle ordering encodes the write-ahead rule: commit
 appends the commit record and awaits durability *while the transaction is still in
 the active table* — no snapshot can observe it as committed before its record is on
 stable storage; only then does it leave the table and release its locks as a set. A
@@ -126,7 +133,7 @@ rollback, and it throws nothing:
 2. **Undo.** `IVersionStore.PurgeWriterAsync(writer)` removes the writer's versions.
 3. **State.** The state becomes `RolledBack`, or `Faulted` for an abort a failed commit
    or disposal forced.
-4. **Abort record.** `ITransactionLog.AppendAbortAsync(writer)`. A failure is ignored.
+4. **Abort record.** The transaction log's `AppendAbortAsync(writer)`. A failure is ignored.
 5. **Release.** The writer leaves the active table, then its locks are released, which
    also fails any lock request of it still queued.
 
@@ -311,7 +318,7 @@ classifies the writer at that open. A storage's clean close would not keep it so
 idle storage closes with a checkpoint that truncates the journal and lists no active
 transaction, which erases the writer's begin record and every checkpoint entry carrying
 it. So the coordinator, before it rethrows, begins one storage bracket per such writer
-under the writer's own sequence (`IStorage.BeginTransaction(long)`, which writes
+under the writer's own sequence (`Storage.BeginTransaction(long)`, which writes
 nothing). The writer is then in flight at the physical layer as well, the storage's
 close takes its non-idle path (flush pages and journal, no truncation), and the next
 open finds the writer without a commit record, classifies it as aborted and scrubs it,
@@ -324,7 +331,7 @@ now do too, where they used to leave their storages open.
 
 **The sequence allocator (why an external hook and not a seed).** An engine that
 pairs manager transactions with storage brackets passes the storage's own
-allocator (`IStorage.ReserveTransactionSequence`) so both layers share **one
+allocator (`Storage.ReserveTransactionSequence`) so both layers share **one
 sequence namespace**. The per-database composition uses separately sequenced
 physical statement brackets; only the logical transaction's own commit proves
 its writer stamp committed. Internally sequenced storage brackets can never
@@ -363,7 +370,9 @@ deferred undo completes.
 
 ## The WAL binding
 
-Storage owns the physical journal (`Database.Storage`); `ITransactionLog` is the *logical* seam: begin/commit/abort records with the write-ahead rule (commit acknowledges only after durability). Group commit is an implementation freedom, not a contract change. This split lets the transaction manager be tested against an in-memory log (`TransactionLog.CreateInMemory()`) while the real one rides the storage journal (`TransactionLog.CreateJournalBound(IStorageJournal)` — commit appends and calls `EnsureDurable`, so concurrent commits naturally share fsyncs). `TransactionRecovery.Analyze(journal)` is the restart-side counterpart: a sequence committed iff its commit record is durable; everything else is aborted and must be purged from version stores.
+Storage owns the physical journal (`Database.Storage`); the transaction log is the *logical* seam: begin/commit/abort records with the write-ahead rule (commit acknowledges only after durability). Group commit is an implementation freedom, not a contract change. This split lets the transaction manager be tested against an in-memory log (`TransactionLog.CreateInMemory()`) while the real one rides the storage journal (`TransactionLog.CreateJournalBound(StorageJournal)` — commit appends and calls `EnsureDurable`, so concurrent commits naturally share fsyncs). `TransactionRecovery.Analyze(journal)` is the restart-side counterpart: a sequence committed iff its commit record is durable; everything else is aborted and must be purged from version stores.
+
+**The log is internal (#1257).** `TransactionLog` is an `internal abstract` class in `Internal/`, and its two factories are internal statics on it: every variant (the in-memory log, the journal-bound log, the coordinator's gated journal log) lives in this assembly, and the only other derivations are this package's own fault-injecting test doubles, which reach it through the assembly's `InternalsVisibleTo` grant. The public `ITransactionLog` interface and the `public static class TransactionLog` factory are gone; only tests ever called the factories.
 
 ## Error model
 
@@ -376,7 +385,7 @@ used — closed with the SQL engine's session binding (area DESIGN.md §3.8;
 work items under #862). The integration kept this package exactly as shaped:
 
 - The **model engine session** binds the root's `IDatabaseTransaction` to an
-  `ITransactionContext` from a per-database `ITransactionManager` — the binding
+  `ITransactionContext` from a per-database `TransactionManager` — the binding
   lives above both vocabularies (the SQL and KeyValuePair session/transaction adapters),
   per this document's "child root" section; nothing here learned about the area
   contracts. Kernel aborts cross the model boundary wrapped in the root's
@@ -663,10 +672,10 @@ failed: the full ledger is requeued, already-undone versions are skipped, and th
 remaining work completes. Recovery scrub keeps at most 64 replacement payloads in
 memory. The ledger and prune candidates still scale with record count.
 
-Transaction recovery consumes `StorageJournal.ReadSequential` for the shared
-journal implementation and falls back to the existing `IStorageJournal.ReadAll`
-contract for custom journals. This changes no public interface. Only sequence
-classification survives iteration; physical page-image payloads are not retained.
+Transaction recovery consumes `StorageJournal.ReadSequential`. Since #1257 every
+journal it reads is a `StorageJournal` (the `IStorageJournal` interface, and with it the
+`ReadAll` fallback for custom journals, is gone). Only sequence classification survives
+iteration; physical page-image payloads are not retained.
 
 The safe prune bound starts at `max(manager.OldestActive, recoveredSequenceFloor)`
 and is reduced to every open context's `Snapshot.Minimum`. A snapshot captured
@@ -677,6 +686,38 @@ fails again no longer ends the pass: the pass still prunes, and rethrows the ret
 failure at its end. A writer still deferred stays in the active table, so the bound never
 passes its sequence and the prune reaches only committed tombstones older than it; before
 this, one undo that kept failing stopped all reclamation.
+
+### The coordinator's test hooks (#1257)
+
+The coordinator takes `Storage` and `StorageJournal`, the abstract bases, since the
+`IStorage` and `IStorageJournal` interfaces were deleted. Three coordinator tests'
+storage and journal doubles used to intercept the coordinator's calls through those
+interfaces: they re-implemented `IStorage.Checkpoint` and
+`IStorage.ReserveTransactionSequence`, and decorated the journal to reject abort records.
+`Storage.Checkpoint`, `Storage.ReserveTransactionSequence` and
+`StorageJournal.AppendRollback` are non-virtual, and a test cannot hand `Storage` a journal
+of its own, so the interception moved to the type that makes the calls
+(`database-area.md`, "Test doubles"). The coordinator carries three internal hooks, reached
+only through this package's `InternalsVisibleTo` grant to its own tests:
+
+| Hook | Where it runs | Used for |
+|---|---|---|
+| `BeforeCheckpoint(long[] writers)` | under the lifecycle append gate, just before `storage.Checkpoint(writers)`, inside the same `try` | the writers a checkpoint lists, a checkpoint held open against a concurrent lifecycle append, a failed checkpoint |
+| `SequenceReserved()` | in the manager's sequence allocator, after the storage reserved the sequence and before the begin record's append | a begin that reached the coordinator while a checkpoint holds the append gate |
+| `BeforeAbortRecord(long sequence)` | inside the `try` of the abort record's append, before the journal append; a throw rejects the record | a lost abort record on a storage that stays online |
+
+Each is `null` unless a test sets it and runs once per checkpoint, sequence reservation or
+abort record, never per row. Each rewritten test asserts that its hook fired: the
+`Checkpoint` helper of the rollback tests starts its capture unset and requires it set.
+
+**Stream-level triggers cover the rest.** #1252 made every journal append a write into a
+user-space buffer, so a failed journal write now happens at a drain, and a failed drain
+takes the storage offline. The tests of an undo whose journal writes fail
+(`RollbackAsync_StorageWentOfflineBeforeTheUndo_…` and
+`RollbackAsync_UndoRecordsLostAtTheNextDrain_…`, which replaced
+`RollbackAsync_UndoBracketJournalWriteFails_…`) fail the journal's backing stream
+(`FaultingMemoryStream.FailWrites`) and need no hook. The abort-record hook stays because
+no stream-level failure rejects one record and leaves the storage online.
 
 ## Non-goals
 

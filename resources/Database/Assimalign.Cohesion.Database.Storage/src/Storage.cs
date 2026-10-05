@@ -18,10 +18,16 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Derived classes (SQL, Document, Graph, KeyValue) provide model-specific APIs that
+/// Derived classes (SQL, Document, Graph, KeyValue, Blob) provide model-specific APIs that
 /// delegate to the record operations defined here. All models share the same
 /// page-based storage infrastructure operating on the <see cref="Data"/> stream, with
-/// a per-database write-ahead log backed by the <see cref="Journal"/> stream.
+/// a per-database write-ahead log backed by the <see cref="Journal"/> stream. Each logical
+/// database an engine manages gets its own instance with isolated file streams.
+/// </para>
+/// <para>
+/// The base is the contract the transaction layer, the indexes and the catalogs program
+/// against; there is no interface beside it. Its five leaves live in the model storage
+/// assemblies, so the constructor is <c>protected</c>.
 /// </para>
 /// <para>
 /// <b>Durability model (steal / no-force).</b> Record mutations run inside an
@@ -51,7 +57,8 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// journal, and a write torn by a crash leaves the other slot to open from.
 /// </para>
 /// </remarks>
-public abstract class Storage : IStorage
+// Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+public abstract class Storage : IAsyncDisposable, IDisposable
 {
     private readonly StorageBufferPool _bufferPool;
     private readonly StorageFreeSpaceMap _freeSpaceMap;
@@ -213,33 +220,65 @@ public abstract class Storage : IStorage
         _freeSpaceMap = new StorageFreeSpaceMap();
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the unique identifier for this storage resource.
+    /// </summary>
     public StorageId Id => _id;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the name of this storage resource.
+    /// </summary>
     public Name Name => _name;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the storage model implemented within this storage resource.
+    /// </summary>
     public abstract StorageModel Model { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the data stream providing page-level I/O for the <c>.dat</c> file.
+    /// </summary>
+    /// <remarks>
+    /// All page-based operations (record storage, indexes, catalog metadata) are performed
+    /// against this stream through the <see cref="PageManager"/>.
+    /// </remarks>
     public StorageStream Data { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the journal stream providing sequential I/O for the <c>.log</c> file.
+    /// </summary>
+    /// <remarks>
+    /// The journal stream backs the write-ahead log that guarantees ACID durability.
+    /// Transaction records are appended sequentially and flushed on commit.
+    /// </remarks>
     public StorageStream Journal { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the backup stream for the <c>.bak</c> file.
+    /// </summary>
+    /// <remarks>
+    /// Used for point-in-time backup snapshots. The backup stream is separate from
+    /// the data and journal streams to avoid contention during normal operations.
+    /// </remarks>
     public StorageStream Backup { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the page manager that coordinates page allocation, retrieval, and flushing
+    /// against the <see cref="Data"/> stream.
+    /// </summary>
     public IStoragePageManager PageManager =>
         _pageManager ?? throw new InvalidOperationException("Storage has not been initialized.");
 
-    /// <inheritdoc />
-    public IStorageBufferPool BufferPool =>
+    /// <summary>
+    /// Gets the buffer pool that caches pages in memory with pin-counting and LRU eviction.
+    /// Only the storage itself and its own tests read it.
+    /// </summary>
+    internal StorageBufferPool BufferPool =>
         _bufferPool ?? throw new InvalidOperationException("Storage has not been initialized.");
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the free space map that tracks allocated and free pages in the data file.
+    /// </summary>
     public IStorageFreeSpaceMap FreeSpaceMap =>
         _freeSpaceMap ?? throw new InvalidOperationException("Storage has not been initialized.");
 
@@ -439,7 +478,7 @@ public abstract class Storage : IStorage
     /// managed by the storage transaction scope — derived classes should not append
     /// page images directly.
     /// </remarks>
-    protected IStorageJournal WriteAheadLog =>
+    protected StorageJournal WriteAheadLog =>
         _journal ?? throw new InvalidOperationException("Storage has not been initialized.");
 
     /// <summary>
@@ -711,8 +750,6 @@ public abstract class Storage : IStorage
         }
     }
 
-    void IStorage.EnsureCommitDurable(long lsn, IStorageJournal journal) => EnsureCommitDurable(lsn);
-
     /// <summary>
     /// Gets or sets the bounded window a grouped commit waits for the flush worker
     /// before flushing inline itself. Only meaningful when
@@ -973,7 +1010,11 @@ public abstract class Storage : IStorage
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Begins a storage-level transaction: the unit of atomicity and durability for
+    /// record mutations. See <see cref="IStorageTransaction"/> for the semantics.
+    /// </summary>
+    /// <returns>The new transaction scope.</returns>
     public IStorageTransaction BeginTransaction()
     {
         if (_journal is null)
@@ -1012,7 +1053,15 @@ public abstract class Storage : IStorage
         return new StorageTransaction(this, sequence);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Reserves the next transaction sequence from this storage's monotonic
+    /// sequence space without beginning a transaction. This is the seam an
+    /// MVCC transaction manager layered above the storage uses as its sequence
+    /// allocator, so logical (manager) and physical (storage) transactions share
+    /// one sequence namespace in the journal — a prerequisite for recovery
+    /// classification to be collision-free.
+    /// </summary>
+    /// <returns>The reserved sequence, unique within this storage instance.</returns>
     public long ReserveTransactionSequence()
     {
         if (_journal is null)
@@ -1027,7 +1076,18 @@ public abstract class Storage : IStorage
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Begins a storage-level transaction that adopts a sequence previously
+    /// obtained from <see cref="ReserveTransactionSequence"/> — the physical
+    /// write-ahead bracket paired with a logical transaction that owns the same
+    /// sequence. Unlike <see cref="BeginTransaction()"/>, no begin record is
+    /// appended: the reserving caller's transaction log owns the lifecycle
+    /// records; the adopted bracket contributes page images and its commit or
+    /// rollback record under the shared sequence.
+    /// </summary>
+    /// <param name="sequence">The reserved sequence the transaction runs under.</param>
+    /// <returns>The new transaction scope.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="sequence"/> is not positive.</exception>
     public IStorageTransaction BeginTransaction(long sequence)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sequence);
@@ -1052,19 +1112,37 @@ public abstract class Storage : IStorage
         }
 
         // Deliberately no begin record: the reserving caller's transaction log owns
-        // the lifecycle records (see IStorage.BeginTransaction(long)); page images
+        // the lifecycle records (see the summary above); page images
         // journaled by this bracket carry the sequence, which is all recovery needs.
         return new StorageTransaction(this, sequence);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Pins a page for modification inside a transaction: acquires the page's write
+    /// lock for the transaction and captures its pre-image on first touch, so the
+    /// mutation is covered by the write-ahead log like any record operation. Used by
+    /// subsystems that own their page layout (index structures, catalogs).
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="pageId">The page to modify.</param>
+    /// <returns>A handle to the pinned page; the caller marks it dirty after mutating.</returns>
+    /// <exception cref="StorageTransactionException">The transaction is not active, or the page is owned by another transaction.</exception>
+    /// <exception cref="StorageIOException">The page is not allocated, or it is page 0, the file header, which is never a data page.</exception>
     public IStoragePageHandle OpenPageForWrite(IStorageTransaction transaction, PageId pageId)
     {
         var owner = ValidateTransaction(transaction);
         return TouchPage(owner, pageId);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Allocates a fresh page inside a transaction, covered by the write-ahead log.
+    /// If the transaction rolls back, the page content reverts to its freshly
+    /// allocated (empty) image; the allocation itself is not undone — a safe leak.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="type">The type of page to allocate.</param>
+    /// <returns>A handle to the new pinned page.</returns>
+    /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
     public IStoragePageHandle AllocatePageForWrite(IStorageTransaction transaction, PageType type)
     {
         var owner = ValidateTransaction(transaction);
@@ -1082,10 +1160,29 @@ public abstract class Storage : IStorage
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Checkpoints the storage: flushes all page state to the data stream using the
+    /// storage's durability policy and truncates the journal, so the next open
+    /// recovers instantly. Non-durable storage does not promise crash persistence.
+    /// </summary>
+    /// <exception cref="StorageTransactionException">A transaction is still active.</exception>
     public void Checkpoint() => Checkpoint(ReadOnlySpan<long>.Empty);
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Checkpoints the storage while logical (manager-level) transactions are in
+    /// flight above it: the truncating checkpoint record carries the given
+    /// sequences, so recovery classification still sees them even though their
+    /// begin records were truncated. Storage-level transactions must still be
+    /// quiescent — the active-count interlock is unchanged. The sequences are also
+    /// recorded in the file header before the truncation
+    /// (<see cref="CheckpointActiveTransactions"/>), so they stay classified when the
+    /// checkpoint record itself is lost; the header holds any number of them.
+    /// </summary>
+    /// <param name="activeTransactionSequences">
+    /// The logical transactions in flight whose row versions the truncation must leave
+    /// classifiable: the transaction layer passes its writers (transactions that can have
+    /// stamped versions or still owe an undo). A reader stamps nothing and needs no entry.
+    /// </param>
     /// <remarks>
     /// <para>
     /// The order is PostgreSQL's (<c>CreateCheckPoint</c> in
@@ -1161,7 +1258,13 @@ public abstract class Storage : IStorage
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Performs one group-commit flush pass on behalf of a write-ahead flush worker:
+    /// makes the journal durable up to the highest commit currently waiting on the
+    /// grouped durability gate and wakes every covered committer. A no-op when
+    /// nothing is pending (including in the synchronous durability mode).
+    /// </summary>
+    /// <returns>True when a durable flush was performed; false when nothing was pending.</returns>
     /// <remarks>An offline storage flushes nothing and returns false.</remarks>
     public bool FlushPendingCommits()
     {
@@ -1182,8 +1285,26 @@ public abstract class Storage : IStorage
         }
     }
 
-    /// <inheritdoc />
-    /// <remarks>An offline storage writes nothing and returns zero.</remarks>
+    /// <summary>
+    /// Writes back up to <paramref name="maxPages"/> dirty buffered pages to the data
+    /// stream — the paced write-back a page-writer worker performs between
+    /// checkpoints so a checkpoint's flush does not spike. Honors the write-ahead
+    /// rule: durable storage makes the journal durable past each page's LSN before
+    /// the page is written; non-durable storage flushes it ordinarily first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Pinned dirty pages are skipped: a pin is how a writer changes a page, so only an
+    /// unpinned page is written as the complete image its last writer left. A skipped page
+    /// stays dirty until a later pass, an eviction, or a checkpoint writes it. The return
+    /// value can therefore be smaller than <paramref name="maxPages"/> while dirty pages
+    /// remain, and a return of zero does not mean the pool is clean.
+    /// </para>
+    /// <para>An offline storage writes nothing and returns zero.</para>
+    /// </remarks>
+    /// <param name="maxPages">The maximum number of dirty pages to write in this pass.</param>
+    /// <returns>The number of pages written.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxPages"/> is not positive.</exception>
     public int WriteBackDirtyPages(int maxPages)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPages);
@@ -1418,19 +1539,37 @@ public abstract class Storage : IStorage
         _journal?.Flush(forceDurable: RequiresDurableFlush);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets an iterator for scanning all storage units (records) across data pages.
+    /// </summary>
+    /// <remarks>
+    /// Best for performing raw full-table scans through the entire storage resource.
+    /// </remarks>
+    /// <returns>A new storage unit iterator.</returns>
     public IStorageUnitIterator GetUnitIterator()
     {
         return new StorageUnitIterator(_pageManager!, _freeSpaceMap);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets an iterator scoped to one owner's record chain: only data pages tagged
+    /// with <paramref name="ownerId"/> are visited, so a scan of one object touches
+    /// O(object) pages instead of O(storage). Owner zero iterates the shared,
+    /// untagged record space.
+    /// </summary>
+    /// <param name="ownerId">The owner whose pages to scan.</param>
+    /// <returns>A new storage unit iterator over the owner's pages.</returns>
     public IStorageUnitIterator GetUnitIterator(ulong ownerId)
     {
         return new StorageUnitIterator(_pageManager!, _freeSpaceMap, SnapshotOwnerPages(ownerId), ownerId);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets a point-in-time snapshot of the data pages currently belonging to the
+    /// specified owner's record chain, in ascending page order.
+    /// </summary>
+    /// <param name="ownerId">The owner whose pages to list.</param>
+    /// <returns>The owner's data pages; empty when the owner holds none.</returns>
     public IReadOnlyList<PageId> GetOwnerPages(ulong ownerId)
     {
         long[] pages = SnapshotOwnerPages(ownerId);
@@ -1444,7 +1583,17 @@ public abstract class Storage : IStorage
         return result;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Releases every data page of the specified owner's record chain inside a
+    /// transaction: each page is retyped <see cref="PageType.Free"/> under the
+    /// write-ahead log (a rollback restores the chain from the pre-image), and
+    /// the pages return to the free-space map when the transaction commits, never
+    /// before, so an in-flight release can never be reallocated.
+    /// </summary>
+    /// <param name="transaction">The owning storage transaction.</param>
+    /// <param name="ownerId">The owner whose chain to release.</param>
+    /// <returns>The number of pages released.</returns>
+    /// <exception cref="StorageTransactionException">The transaction is not active, or a chain page is owned by another transaction.</exception>
     public unsafe int FreeOwnerPages(IStorageTransaction transaction, ulong ownerId)
     {
         var owner = ValidateTransaction(transaction);

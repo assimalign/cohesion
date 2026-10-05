@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database;
 /// <remarks>
 /// Model-specific databases (SQL, Document, Graph, Key-Value) extend this interface
 /// with additional operations relevant to their data model. The storage model is
-/// determined by the engine type — <c>StorageModel</c> remains on <c>IStorage</c>
+/// determined by the engine type — <c>StorageModel</c> remains on <c>Storage</c>
 /// at the physical layer, not here.
 /// </remarks>
 public interface IDatabase : IAsyncDisposable, IDisposable

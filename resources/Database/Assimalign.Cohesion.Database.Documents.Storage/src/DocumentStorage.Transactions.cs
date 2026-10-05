@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Documents.Storage;
 public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     /// <summary>Gets the journal used by this storage and its logical transaction coordinator.</summary>
-    public IStorageJournal WriteAheadJournal => WriteAheadLog;
+    public StorageJournal WriteAheadJournal => WriteAheadLog;
 
     /// <summary>Gets the shared version store's record adapter.</summary>
     public ITransactionRecordSpace Records { get; }

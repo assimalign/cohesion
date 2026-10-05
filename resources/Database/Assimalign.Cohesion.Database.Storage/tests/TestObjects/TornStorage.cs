@@ -47,7 +47,7 @@ internal sealed class TornStorage : Storage
     public override StorageModel Model => StorageModel.Custom;
 
     /// <summary>Gets the journal, for appending lifecycle records and reading it back.</summary>
-    public IStorageJournal Log => WriteAheadLog;
+    public StorageJournal Log => WriteAheadLog;
 
     /// <summary>Gets the anchor pages the newest header generation chains.</summary>
     public IReadOnlyList<long> AnchorChainPages => HeaderState.AnchorChain;

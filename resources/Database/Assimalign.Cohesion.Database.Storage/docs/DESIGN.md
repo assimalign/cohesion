@@ -14,6 +14,34 @@ The guardrails that keep this layer trustworthy are structural: every page load 
 checksum-verified, every write-back is checksum-stamped, and durability flows through
 the journal only — there are no side files.
 
+## Type shape: the abstract bases are the contract (#1257)
+
+The area is concrete-first (`.claude/rules/database-area.md`). `Storage` and
+`StorageJournal` are the contracts the transaction layer, the indexes and the catalogs
+program against; the `IStorage` and `IStorageJournal` interfaces that used to stand beside
+them were deleted in phase 1 of the concrete-types program
+(`docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md`), so both bases carry the deviation marker.
+
+- **`Storage`** is a variant set: its five leaves (`SqlStorage`, `KeyValueStorage`,
+  `GraphStorage`, `DocumentStorage`, `BlobStorage`) live in the model storage assemblies, so
+  the constructor stays `protected`. Its public members are non-virtual; only `Model` is
+  abstract, and phase 2 turns it into a constructor-set field.
+- **`StorageJournal`** has one shipped leaf, the sealed `StreamJournal`, and its medium cores
+  include a `private protected` member, so nothing outside this assembly can derive from it.
+  Phase 2 audits it against the journal format #1236 settles: it either collapses into one
+  sealed type or records the second variant that justifies the base.
+- **The buffer pool is internal.** `Storage.BufferPool` returns the internal
+  `StorageBufferPool`; only the storage and its own tests read it. The page manager, the
+  free-space map and the unit iterator stay public interfaces until phase 2, because public
+  `Storage` members return them to nine shipped assemblies.
+- **The unused `IStorageBackupManager` and `IStorageRecoveryManager` placeholders were
+  deleted**: neither had an implementer or a caller. Backup and recovery are members of
+  `Storage` itself (open-time recovery, checkpoints), not separate managers.
+
+A test that used to intercept a non-virtual member by re-implementing `IStorage` or
+decorating `IStorageJournal` now uses a hook on the type that makes the call (the
+transaction coordinator's internal test hooks), never protected surface on `Storage`.
+
 ## The page model
 
 - **8 KiB pages, 96-byte header.** The header layout (`Page.Header`) is an explicit
@@ -94,7 +122,7 @@ Page 0 (8 KiB)
   The page manager enforces it: it reserves page 0 in the free-space map and refuses to pin,
   overwrite-pin or free it (`StorageIOException`), so a damaged page reference — a B-tree root
   id, a graph record — cannot reach the file header through `GetPage` or
-  `IStorage.OpenPageForWrite`, and recovery never replays a journal image onto page 0. A
+  `Storage.OpenPageForWrite`, and recovery never replays a journal image onto page 0. A
   pooled copy would be stale after the next header write, and a write-back or replay of it
   would roll both slots back.
 - **Tested by tearing.** The test crash simulation (`CrashSimulationStream` with a shared
@@ -461,7 +489,7 @@ object ids, so a table scan stops decoding the whole database.
 
 ## The journal (write-ahead log)
 
-`IStorageJournal` is the durability mechanism — the *only* one. Frames are length-prefixed,
+`StorageJournal` is the durability mechanism — the *only* one. Frames are length-prefixed,
 magic-tagged, versioned (frame version 3) and CRC-32C-protected; a torn or corrupted tail
 terminates the read scan and is ignored — it belongs to work that was never acknowledged —
 and the first write after a reopen cuts it off ("Failed appends" below), while a verified
@@ -971,8 +999,8 @@ a fault-injecting storage strategy and reopens with and without the unconfirmed 
 The MVCC session binding (area DESIGN.md §3.8, first delivered by the SQL
 engine) added three storage-side rules that keep the logical layer sound:
 
-- **One sequence namespace.** `IStorage.ReserveTransactionSequence()` +
-  `IStorage.BeginTransaction(long sequence)` let an engine's transaction manager
+- **One sequence namespace.** `Storage.ReserveTransactionSequence()` +
+  `Storage.BeginTransaction(long sequence)` let an engine's transaction manager
   allocate from the storage's own counter and pair each logical transaction with
   a bracket that *adopts the same sequence*. The bracket's commit record then
   proves the logical transaction at recovery — there is no window in which page
@@ -1418,7 +1446,7 @@ reference is PostgreSQL's `max_wal_size` of 1 GB (`max_wal_size_mb = 1024`,
   fsync per commit, simplest latency profile.
 - **`Grouped`:** commit registers its LSN on the internal group-commit gate, wakes
   the engine's flush worker through the `OnCommitPending` hook, and waits. The worker
-  calls `IStorage.FlushPendingCommits()` — one durable flush covering the highest
+  calls `Storage.FlushPendingCommits()` — one durable flush covering the highest
   pending LSN — and wakes every covered committer, so concurrent commits share one
   fsync. **Self-help invariant:** a committer not woken within `GroupCommitWindow`
   flushes inline itself; a missing, stalled, or misconfigured worker costs bounded
@@ -1466,7 +1494,7 @@ Page write locks release after the durability wait, exactly as in synchronous mo
 
 ### Paced page write-back
 
-`IStorage.WriteBackDirtyPages(maxPages)` writes back a bounded batch of dirty
+`Storage.WriteBackDirtyPages(maxPages)` writes back a bounded batch of dirty
 buffered pages without evicting them — the page-writer worker's pass between
 checkpoints, so a checkpoint's `FlushAll` does not spike. Every write-back path (this
 one, eviction, `FlushAll`) funnels through the buffer pool's single write-back
@@ -1878,6 +1906,6 @@ they share stays in every build for tests to call.
 
 - **No model semantics.** Nothing here knows what a row or document is.
 - **No distributed I/O.** One storage instance = one file set on one machine.
-  Replication rides the journal from `Database.Replication`, not this layer.
+  Replication, when it is built, rides the journal from above this layer.
 - **No encryption yet.** The header reserves nonce/MAC space and `PageFlags.Encrypted`;
   the encryption-at-rest feature (#861) implements it beneath the buffer pool.

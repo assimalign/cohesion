@@ -32,7 +32,7 @@ public sealed class PageWriteLockHolder : IDisposable
     /// </summary>
     /// <param name="storage">The storage whose pages to lock.</param>
     /// <returns>The holder; dispose it to release the pages.</returns>
-    public static PageWriteLockHolder LockEveryPage(IStorage storage)
+    public static PageWriteLockHolder LockEveryPage(Storage storage)
     {
         var bracket = storage.BeginTransaction();
         long count = storage.PageManager.PageCount;

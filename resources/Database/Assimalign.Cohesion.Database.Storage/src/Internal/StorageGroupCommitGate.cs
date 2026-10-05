@@ -39,7 +39,7 @@ internal sealed class StorageGroupCommitGate
     /// first waiting up to <paramref name="window"/> for the flush worker's group
     /// flush, then flushing inline as self-help if the worker did not respond.
     /// </summary>
-    internal void AwaitDurable(long lsn, TimeSpan window, IStorageJournal journal)
+    internal void AwaitDurable(long lsn, TimeSpan window, StorageJournal journal)
     {
         bool signal = false;
 
@@ -95,7 +95,7 @@ internal sealed class StorageGroupCommitGate
     /// durable up to the highest pending commit LSN and wakes every covered waiter.
     /// </summary>
     /// <returns>True when a flush was performed; false when nothing was pending.</returns>
-    internal bool FlushPending(IStorageJournal journal)
+    internal bool FlushPending(StorageJournal journal)
     {
         long target;
 

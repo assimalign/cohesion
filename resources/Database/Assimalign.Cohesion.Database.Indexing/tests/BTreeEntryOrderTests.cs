@@ -237,7 +237,7 @@ public class BTreeEntryOrderTests
     /// per tiebreaker attribute][i64 child]</c>): the tiebreaker attributes each keeps
     /// and its key length. Every page visited must carry the format-2 stamp.
     /// </summary>
-    private static List<(int Tiebreaker, int KeyLength)> ReadSeparators(IStorage storage, long root)
+    private static List<(int Tiebreaker, int KeyLength)> ReadSeparators(Storage.Storage storage, long root)
     {
         var separators = new List<(int, int)>();
         var pending = new Stack<long>();
@@ -474,7 +474,7 @@ public class BTreeEntryOrderTests
     /// Reads the leaf chain from the pages, left to right: each leaf's page and entry
     /// count.
     /// </summary>
-    private static List<(long Page, int Count)> ReadLeafChain(IStorage storage, long root)
+    private static List<(long Page, int Count)> ReadLeafChain(Storage.Storage storage, long root)
     {
         var leaves = new List<(long, int)>();
         long current = LeftmostLeaf(storage, root);
@@ -496,7 +496,7 @@ public class BTreeEntryOrderTests
     /// newest-first lookups walk it leftward — and both ends are the tree's leftmost
     /// and rightmost leaves.
     /// </summary>
-    private static void ShouldHaveConsistentLeafChain(IStorage storage, long root)
+    private static void ShouldHaveConsistentLeafChain(Storage.Storage storage, long root)
     {
         var forward = ReadLeafChain(storage, root).Select(leaf => leaf.Page).ToList();
         var backward = new List<long>();
@@ -517,16 +517,16 @@ public class BTreeEntryOrderTests
         backward.AsEnumerable().Reverse().ShouldBe(forward);
     }
 
-    private static long LeftmostLeaf(IStorage storage, long root) => DescendEdge(storage, root, rightmost: false);
+    private static long LeftmostLeaf(Storage.Storage storage, long root) => DescendEdge(storage, root, rightmost: false);
 
-    private static long RightmostLeaf(IStorage storage, long root) => DescendEdge(storage, root, rightmost: true);
+    private static long RightmostLeaf(Storage.Storage storage, long root) => DescendEdge(storage, root, rightmost: true);
 
     /// <summary>
     /// Descends from <paramref name="root"/> along the first or the last child of every
     /// internal node (format 2: kind at 3, entry count at 4, leftmost child at 24,
     /// directory at 32).
     /// </summary>
-    private static long DescendEdge(IStorage storage, long root, bool rightmost)
+    private static long DescendEdge(Storage.Storage storage, long root, bool rightmost)
     {
         long current = root;
 

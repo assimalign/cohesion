@@ -13,7 +13,7 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <inheritdoc />
     public override StorageModel Model => StorageModel.Graph;
     /// <summary>Gets this file set's write-ahead journal.</summary>
-    public IStorageJournal WriteAheadJournal => WriteAheadLog;
+    public StorageJournal WriteAheadJournal => WriteAheadLog;
     /// <summary>Gets the stamped-record adapter for the transaction coordinator.</summary>
     public ITransactionRecordSpace Records { get; }
     /// <summary>Creates a graph file set, taking ownership of its streams.</summary>

@@ -90,7 +90,7 @@ internal static class StorageRecovery
     /// <exception cref="StorageCorruptionException">A page's chain of records has a gap, or a record does not decode.</exception>
     internal static StorageRecoveryResult Run(
         StorageStream data,
-        IStorageJournal journal,
+        StorageJournal journal,
         bool forceDurable,
         IReadOnlySet<long>? protectedPages = null,
         int cacheCapacity = Storage.DefaultBufferPoolCapacity)

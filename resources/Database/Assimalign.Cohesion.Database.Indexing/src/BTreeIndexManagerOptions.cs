@@ -13,7 +13,7 @@ public sealed class BTreeIndexManagerOptions
     /// <summary>
     /// Gets or sets the storage instance whose pages back the indexes.
     /// </summary>
-    public required IStorage Storage { get; init; }
+    public required Storage.Storage Storage { get; init; }
 
     /// <summary>
     /// Gets or sets the resolver pairing logical transactions with their storage

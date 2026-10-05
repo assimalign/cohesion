@@ -27,9 +27,12 @@ to implementations composed by the host, never here.
   a silent server default — keeps the decision visible at the composition site.
   The server still defaults to it when options leave the authenticator unset;
   that default is documented as the MVP posture on the option itself.
-- **Authentication and authorization are separate seams.** `IAuthorizationService`
-  (principal/resource/action) is evaluated per operation; the authenticator runs
-  once per session. Collapsing them invites session-scoped caching bugs.
+- **Authentication and authorization stay separate seams.** The authenticator runs
+  once per session; an authorization decision (principal/resource/action) is made
+  per operation. Collapsing them invites session-scoped caching bugs. No
+  authorization seam exists yet: the `IAuthorizationService` placeholder had no
+  implementer and no caller, and was deleted with #1257 instead of being kept for
+  later (`database-area.md`: no abstraction "for later").
 
 ## Error model
 
@@ -44,8 +47,8 @@ Contracts plus one branch-free internal implementation — nothing to trim.
 
 ## Non-goals
 
-- No principal/role/permission model here yet — it arrives with the governance
-  work and the per-model security satellites.
+- No principal/role/permission model here yet — it arrives with the per-model
+  security satellites.
 - No credential storage or key material (see `Security.DataProtection` at the
   platform level for that machinery).
 - No transport security: TLS belongs to `Connections.Security` under the server's

@@ -37,7 +37,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Internal;
 /// </remarks>
 internal sealed class BTreeIndex : IIndex
 {
-    private readonly IStorage _storage;
+    private readonly Storage.Storage _storage;
     private readonly IStorageTransactionSource _transactionSource;
     private readonly ILockManager? _lockManager;
     private readonly ulong _objectId;
@@ -45,7 +45,7 @@ internal sealed class BTreeIndex : IIndex
     private readonly long _rootPageId;
 
     internal BTreeIndex(
-        IStorage storage,
+        Storage.Storage storage,
         IStorageTransactionSource transactionSource,
         ILockManager? lockManager,
         ulong objectId,
@@ -82,7 +82,7 @@ internal sealed class BTreeIndex : IIndex
     /// <summary>
     /// Allocates the root leaf of a new tree inside the given storage transaction.
     /// </summary>
-    internal static long CreateRoot(IStorage storage, IStorageTransaction transaction)
+    internal static long CreateRoot(Storage.Storage storage, IStorageTransaction transaction)
     {
         using var handle = storage.AllocatePageForWrite(transaction, PageType.Index);
         BTreeNode.Initialize(handle.Page.AsBodySpan(), BTreeNode.LeafKind);
@@ -98,7 +98,7 @@ internal sealed class BTreeIndex : IIndex
     /// from its root down, so the root's format is the tree's.
     /// </summary>
     /// <exception cref="IndexFormatException">The root page is not a node of this format.</exception>
-    internal static void EnsureFormat(IStorage storage, BTreeIndexRegistration registration)
+    internal static void EnsureFormat(Storage.Storage storage, BTreeIndexRegistration registration)
     {
         int found;
 

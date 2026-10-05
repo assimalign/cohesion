@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Transactions.Internal;
+
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 /// <summary>
@@ -411,7 +413,7 @@ public class TransactionManagerRollbackTests
     /// <summary>A manager over controllable collaborators, with a writer helper.</summary>
     private sealed class Kernel
     {
-        private Kernel(ControlledLog log, ControlledVersionStore versions, ILockManager locks, ITransactionManager manager)
+        private Kernel(ControlledLog log, ControlledVersionStore versions, ILockManager locks, TransactionManager manager)
         {
             Log = log;
             Versions = versions;
@@ -425,7 +427,7 @@ public class TransactionManagerRollbackTests
 
         internal ILockManager Locks { get; }
 
-        internal ITransactionManager Manager { get; }
+        internal TransactionManager Manager { get; }
 
         internal static Kernel Create()
         {
@@ -526,7 +528,7 @@ public class TransactionManagerRollbackTests
     }
 
     /// <summary>An in-memory transaction log with injectable commit and abort-record failures and an abort gate.</summary>
-    private sealed class ControlledLog : ITransactionLog
+    private sealed class ControlledLog : TransactionLog
     {
         private readonly List<CancellationToken> _abortTokens = new();
         private int _abortAttempts;
@@ -559,13 +561,13 @@ public class TransactionManagerRollbackTests
             }
         }
 
-        public ValueTask AppendBeginAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
+        public override ValueTask AppendBeginAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return default;
         }
 
-        public ValueTask AppendCommitAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
+        public override ValueTask AppendCommitAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Interlocked.Increment(ref _commitAttempts);
@@ -579,7 +581,7 @@ public class TransactionManagerRollbackTests
             return FailCommit ? throw new IOException("Injected commit-record failure.") : default;
         }
 
-        public async ValueTask AppendAbortAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
+        public override async ValueTask AppendAbortAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
         {
             lock (_abortTokens)
             {
