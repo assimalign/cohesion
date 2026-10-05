@@ -1186,7 +1186,7 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
 - `Storage`'s record and page operations accept a `StorageTransaction` of another storage
   instance: the argument check's message says "not created by this storage instance", but it
   only ever tested the type (found at P2, row 36). Checking the owner is a behavior change, so P2
-  left it for its own fix.
+  left it for its own fix, #1286.
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never
