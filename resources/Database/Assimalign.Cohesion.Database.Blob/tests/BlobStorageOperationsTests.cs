@@ -304,7 +304,10 @@ public sealed class BlobStorageOperationsTests
         (await Read(container, "keep")).ShouldBe("original");
         options.DeferredUndoRetryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
         firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(options.DeferredUndoRetryDelay);
-        (watch.Elapsed / options.DeferredUndoRetryDelay).ShouldBeLessThan(20);
+        // The regression this guards against waits a full MaintenanceInterval (an hour here) per retry.
+        // 100 retry delays (10 s) still catches it by a factor of 360 and leaves room for a loaded CI
+        // runner; the exact wiring is the firstRetry check above.
+        (watch.Elapsed / options.DeferredUndoRetryDelay).ShouldBeLessThan(100);
         engine.State.ShouldBe(EngineState.Running);
     }
 

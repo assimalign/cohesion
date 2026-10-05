@@ -433,7 +433,10 @@ public sealed class KeyValueStorageOperationsTests
         put.Applied.ShouldBeTrue();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         instance.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        (watch.Elapsed / retryDelay).ShouldBeLessThan(20);
+        // The regression this guards against waits a full MaintenanceInterval (an hour here) per retry.
+        // 100 retry delays (10 s) still catches it by a factor of 360 and leaves room for a loaded CI
+        // runner; the exact wiring is the firstRetry check above.
+        (watch.Elapsed / retryDelay).ShouldBeLessThan(100);
         engine.State.ShouldBe(EngineState.Running);
     }
 

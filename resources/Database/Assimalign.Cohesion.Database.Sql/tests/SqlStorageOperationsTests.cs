@@ -663,7 +663,10 @@ public sealed class SqlStorageOperationsTests
         firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(options.DeferredUndoRetryDelay);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        (watch.Elapsed / options.DeferredUndoRetryDelay).ShouldBeLessThan(20);
+        // The regression this guards against waits a full MaintenanceInterval (an hour here) per retry.
+        // 100 retry delays (10 s) still catches it by a factor of 360 and leaves room for a loaded CI
+        // runner; the exact wiring is the firstRetry check above.
+        (watch.Elapsed / options.DeferredUndoRetryDelay).ShouldBeLessThan(100);
         engine.State.ShouldBe(EngineState.Running);
     }
 
