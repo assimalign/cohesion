@@ -66,15 +66,21 @@ The engine's pump runs a worker again after the backoff if its loop ever ends ea
 `IDatabaseEngineWorker` without the guided base can; the engine then reports Faulted until
 disposal). Before #1268 one unexpected exception ended a worker for good.
 `BlobWorkerResilienceTests` covers each case, a group flush's drain and its fsync both. It also
-checks that a database whose checkpoints keep failing leaves the other database at least half its
-no-fault checkpoint count, and that a writer queued for the database writer lock when the
-database goes offline (a header slot write, a journal fsync or a journal drain failing) gets the coded refusal at
-once instead of waiting for the reopen: an offline database undoes nothing, so the writer
-holding the lock keeps it, and the coordinator ends every lock wait instead
+checks that a database whose checkpoints keep failing leaves the other database a pace a
+worker-wide backoff cannot reach: over a shared six-second window more than twice the backoff's
+checkpoints, the floor that fails every worker-wide backoff or stall of one backoff a pass, with
+the median second's share of the no-fault checkpoints as a secondary signal. A smaller worker-wide
+slowdown can pass; the deterministic signal that would catch it is required follow-up work (the
+SQL engine's DESIGN.md, "Engine-owned background workers"). It also checks that a writer queued
+for the database writer lock when the database goes offline (a
+header slot write, a journal fsync or a journal drain failing) gets the coded refusal at once
+instead of waiting for the reopen: an offline database undoes nothing, so the writer holding the
+lock keeps it, and the coordinator ends every lock wait instead
 (`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook). The holder keeps
 the lock even when its own upload's journal drain takes the database offline: the failed upload
-aborts its explicit transaction (#1225), and the abort rolls nothing back and releases nothing, so
-the queued writer is refused, never granted. The queued writer queues before the fault and does
+aborts its explicit transaction (#1225), and the abort rolls nothing back and releases nothing (the
+holder's context stays open and active, and no undo waits for a retry), so the queued writer is
+refused, never granted. The queued writer queues before the fault and does
 nothing that drains: a container lookup is an autocommit read whose commit drains the journal, and
 one that commits after the fault gets the unconfirmed commit of #1243 instead of the refusal.
 

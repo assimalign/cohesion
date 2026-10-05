@@ -77,16 +77,72 @@ public sealed class KeyValueWorkerResilienceTests
 
     /// <summary>
     /// One database whose checkpoints keep failing must not slow the checkpoints of the engine's
-    /// other databases (#1268 review): only the failing database is backed off. Against the same
-    /// load with no fault, the healthy database keeps at least half its checkpoints and its journal
-    /// stays within a small multiple of the no-fault peak. A worker-wide backoff held it to one
-    /// checkpoint a second, and its journal grew to hundreds of times the trigger.
+    /// other databases (#1268 review): only the failing database is backed off. A worker-wide
+    /// backoff held the healthy database to one checkpoint a second, and its journal grew to
+    /// hundreds of times the trigger. The guarantee is the floor: over the window the healthy
+    /// database must take more than twice the checkpoints such a backoff allows,
+    /// 2 × (window / backoff + 1) = 14, which fails every worker-wide backoff or stall of one
+    /// backoff a pass. A smaller slowdown can pass (the remarks).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The two engines write over the same window, so whatever else the machine runs slows both
     /// alike. Measured one after the other, the parallel test run alone moved the ratio anywhere
     /// from a quarter to four times, with no fault in either window, and failed the bound on a
     /// three-core runner.
+    /// </para>
+    /// <para>
+    /// Measured together, the share of the no-fault checkpoints still moved with the machine, not
+    /// the fault. Under load an engine's checkpoints come in phases: for stretches of a few hundred
+    /// milliseconds to several seconds its writer runs ahead and it takes up to ten times fewer
+    /// per write, and the two engines enter those phases independently. Over a two-second window
+    /// the share fell to 0.29-0.44 beside another engine's suite and to 0.37 pinned to three cores,
+    /// against a bound of half. The window is now six seconds, compared second by second, so a
+    /// stall of a second or two in one engine moves only the seconds it covers; but two engines in
+    /// different phases for the whole window still held the median second's share at 0.28 in a
+    /// parallel run of the whole suite.
+    /// </para>
+    /// <para>
+    /// So the bound that decides comes from the worker-wide backoff's signature instead of from
+    /// half: the floor the test always had. The backoff leaves the healthy database about one
+    /// checkpoint a second whatever it writes, 5 to 7 in the window, where a healthy database took
+    /// 105 to 3,203 in 100 runs pinned to three cores, half of them beside another engine's suite.
+    /// A worker-wide backoff, a pass that stalls a backoff for each failure, and a pass that waits
+    /// out the failing database's backoff instead of skipping it failed the floor in all 45 of
+    /// their runs across the five engines. A smaller slowdown can pass: before storage format 3
+    /// (#1253), a worker-wide pause of 250 ms after every pass left 17 to 23 checkpoints in the
+    /// window and passed 34 of 65 runs on three cores, because a loaded engine with no fault drops
+    /// to a few checkpoints a second itself, and no bound on a count tells the two apart. Catching
+    /// it needs a deterministic signal from the worker, which is required follow-up work (the SQL
+    /// engine's DESIGN.md, "Engine-owned background workers").
+    /// </para>
+    /// <para>
+    /// The median second's share of the no-fault checkpoints is a secondary signal, asserted when
+    /// at least two seconds count: it must reach a tenth, where the backoff's share is near 0.001
+    /// on a three-core runner and 0.03 to 0.06 beside three busy threads. It adds little to the
+    /// floor: the backoff and stall passed it in 2 of their 45 runs. A second counts only when the
+    /// no-fault engine took a checkpoint in it and neither engine's writer was starved in it,
+    /// writing nothing or under a tenth of its mean second. Scored as zero, the seconds in which
+    /// the scheduler gave the faulted engine's writer no CPU failed a run with the engine
+    /// unchanged, its writer idle four seconds of six. It is no rare stall: in 100 runs with the
+    /// engine unchanged, the no-fault engine's writer went a whole second without a write in 14
+    /// and the faulted engine's in 17.
+    /// </para>
+    /// <para>
+    /// Each counted second's share is taken over the second and per write, whichever is larger.
+    /// Now and then the scheduler starved one engine's writer (920 writes against 50,790 over a
+    /// window pinned to three cores): its checkpointer kept up with what little was written, in
+    /// far fewer checkpoints, so the count compared the writers. Per write the comparison is the
+    /// checkpointers' again, except when the starved writer is the no-fault engine's: a
+    /// checkpointer with little to do keeps up better per write than a busy one, and there the
+    /// count is the fair one.
+    /// </para>
+    /// <para>
+    /// The journal peak is no longer compared with the no-fault peak: over six seconds beside
+    /// another suite, a healthy engine's journal peaked at 544 MB, within what the worker-wide
+    /// backoff reached (470 MB to 1.1 GB), while the checkpoint counts still told the two apart by
+    /// hundreds of times. It is reported.
+    /// </para>
     /// </remarks>
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a database whose checkpoints keep failing does not slow the other database's checkpoints")]
     public async Task CheckpointWorker_OneDatabaseKeepsFailing_ShouldKeepTheOthersAtFullPace()
@@ -102,12 +158,17 @@ public sealed class KeyValueWorkerResilienceTests
         var baseline = paces[0];
         var faulted = paces[1];
 
-        // Assert: the fault fired and was retried, and the healthy database kept its pace.
-        string report = $"no fault: {baseline}; fault: {faulted}";
+        // Assert: the fault fired and was retried, and the healthy database kept a pace a
+        // worker-wide backoff cannot reach: more than twice its checkpoints over the window. The
+        // median counted second's share of the no-fault engine's is a secondary signal (the remarks).
+        double[] shares = faulted.SharesOf(baseline);
+        string report = $"no fault: {baseline}; fault: {faulted}; shares of the {shares.Length} seconds that count {string.Join(" ", shares.Select(share => $"{share:F2}"))}";
         faulted.FailedPasses.ShouldBeGreaterThanOrEqualTo(1, report);
         ((double)faulted.Checkpoints).ShouldBeGreaterThan(2 * (PaceWindow / DatabaseEngineWorker.FailureBackoff + 1), report);
-        ((double)faulted.Checkpoints / baseline.Checkpoints).ShouldBeGreaterThanOrEqualTo(0.5, report);
-        ((double)faulted.PeakJournal / Math.Max(baseline.PeakJournal, PacePeakFloor)).ShouldBeLessThanOrEqualTo(16, report);
+        if (shares.Length >= 2)
+        {
+            CheckpointPace.Median(shares).ShouldBeGreaterThanOrEqualTo(PaceShareBound, report);
+        }
     }
 
     /// <summary>
@@ -346,6 +407,14 @@ public sealed class KeyValueWorkerResilienceTests
     /// drain of the journal's append buffer (#1252) goes offline through the same hook, so it ends
     /// the wait too, with <see cref="StorageOfflineCause.JournalFlush"/> as the cause.
     /// </summary>
+    /// <remarks>
+    /// Before the fault switches on, the test checks that the queued writer's transaction is open
+    /// beside the holder's and its write has not completed, on a database still online, as the
+    /// blob engine's test checks; a fixed wait of 100 ms only assumed it. The check does not show
+    /// that the writer reached the lock, since the lock manager cannot be asked about its waiters,
+    /// and a writer still on its way there ends the same way: once the database is offline a lock
+    /// wait is refused as it begins (<c>AbandonLockWaits</c>), with the same coded refusal.
+    /// </remarks>
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a writer queued for the writer lock when the database goes offline ends with the coded refusal")]
     [InlineData(DeviceFault.HeaderWrite)]
     [InlineData(DeviceFault.JournalFlush)]
@@ -363,8 +432,12 @@ public sealed class KeyValueWorkerResilienceTests
         _ = await holder.BeginTransactionAsync();
         await failing.PutAsync(holder, Bytes("key"), Bytes("held"));
         var waiting = failing.PutAsync(queued, Bytes("key"), Bytes("queued")).AsTask();
-        await Task.Delay(TimeSpan.FromMilliseconds(100));
-        bool queuedWhileOnline = !waiting.IsCompleted;
+
+        // The queued writer's transaction is open beside the holder's, and its write has not
+        // completed, on a database still online.
+        await Eventually(() => waiting.IsCompleted || failing.Coordinator.GetOpenContexts().Count == 2);
+        bool queuedWhileOnline = !waiting.IsCompleted && failing.Coordinator.GetOpenContexts().Count == 2 && !failing.IsOffline;
+        string queuedState = $"queued {waiting.Status}, {failing.Coordinator.GetOpenContexts().Count} open contexts, offline {failing.IsOffline}";
 
         // Act: the next checkpoint's header slot write, its journal fsync, or the drain of the
         // journal's append buffer that leads it, fails.
@@ -382,7 +455,7 @@ public sealed class KeyValueWorkerResilienceTests
 
         // Assert: both writers got the coded refusal naming what failed, and the reopen kept
         // neither write.
-        queuedWhileOnline.ShouldBeTrue();
+        queuedWhileOnline.ShouldBeTrue(queuedState);
         offline.ShouldBeTrue();
         ended.ShouldBeTrue("the queued writer was still waiting five seconds after the database went offline");
         queuedRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBK002");
@@ -412,13 +485,14 @@ public sealed class KeyValueWorkerResilienceTests
         worker.Stopped.ShouldBeTrue();
     }
 
-    // The checkpoint trigger and the load window of the pace test. The writer outpaces the
-    // checkpointer in memory, so even with no fault the journal peaks at many times the trigger;
-    // the peak is compared with the no-fault peak, floored at 1 MiB so a quiet baseline run does
-    // not make the bound tighter than the noise. A worker-wide backoff peaked above 150 MB.
-    private const long PacePeakFloor = 1024 * 1024;
+    // The checkpoint trigger, the load window of the pace test, compared second by second, and the
+    // share of the no-fault checkpoints the median counted second must keep (the test's remarks).
+    // The writer outpaces the checkpointer in memory, so even with no fault the journal peaks at
+    // many times the trigger.
     private const long PaceJournalSize = 64 * 1024;
-    private static readonly TimeSpan PaceWindow = TimeSpan.FromSeconds(2);
+    private const double PaceShareBound = 0.1;
+    private static readonly TimeSpan PaceWindow = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan PaceSecond = TimeSpan.FromSeconds(1);
 
     // How long the hung-fsync test writes to the healthy database while the other one's fsync hangs.
     private static readonly TimeSpan StallWindow = TimeSpan.FromSeconds(5);
@@ -466,14 +540,30 @@ public sealed class KeyValueWorkerResilienceTests
                 long checkpoints = healthyFaults.HeaderWrites;
                 long failedPasses = worker.FailureCount;
                 long peak = 0;
+                long writes = 0;
+                var checkpointsBySecond = new long[(int)(PaceWindow / PaceSecond)];
+                var writesBySecond = new long[checkpointsBySecond.Length];
+                int second = 0;
                 var watch = Stopwatch.StartNew();
                 for (int id = 0; watch.Elapsed < PaceWindow; id += 10)
                 {
                     await PutAsync(healthy, id, 10);
+                    writes += 10;
                     peak = Math.Max(peak, healthy.DataStorage.JournalLength);
+                    for (; second < checkpointsBySecond.Length && watch.Elapsed >= PaceSecond * (second + 1); second++)
+                    {
+                        checkpointsBySecond[second] = healthyFaults.HeaderWrites - checkpoints;
+                        writesBySecond[second] = writes;
+                    }
                 }
 
-                return new CheckpointPace(healthyFaults.HeaderWrites - checkpoints, peak, worker.FailureCount - failedPasses);
+                for (; second < checkpointsBySecond.Length; second++)
+                {
+                    checkpointsBySecond[second] = healthyFaults.HeaderWrites - checkpoints;
+                    writesBySecond[second] = writes;
+                }
+
+                return new CheckpointPace(checkpointsBySecond, writesBySecond, peak, worker.FailureCount - failedPasses);
             }
             finally
             {
@@ -488,8 +578,63 @@ public sealed class KeyValueWorkerResilienceTests
         }
     }
 
-    /// <summary>The healthy database's checkpoints and journal peak over the window, and the worker's failed passes.</summary>
-    private readonly record struct CheckpointPace(long Checkpoints, long PeakJournal, long FailedPasses);
+    /// <summary>
+    /// The healthy database's checkpoints and writes counted at the end of each second of the
+    /// window, its journal peak, and the worker's failed passes over the window.
+    /// </summary>
+    private sealed record CheckpointPace(long[] CheckpointsBySecond, long[] WritesBySecond, long PeakJournal, long FailedPasses)
+    {
+        /// <summary>Gets the checkpoints over the window.</summary>
+        public long Checkpoints => CheckpointsBySecond[^1];
+
+        /// <summary>
+        /// Gets, for each second of the window that counts, the share of
+        /// <paramref name="baseline"/>'s checkpoints this pace kept, over the second or per write,
+        /// whichever is larger. A second in which the baseline took no checkpoint, or in which
+        /// either engine's writer was starved (it wrote nothing, or under a tenth of its mean
+        /// second), says nothing about the fault: it is left out, not scored as zero or infinity.
+        /// </summary>
+        /// <param name="baseline">The pace with no fault, over the same window.</param>
+        /// <returns>The shares of the seconds that count, in order.</returns>
+        public double[] SharesOf(CheckpointPace baseline)
+        {
+            double starved = WritesBySecond[^1] / (10.0 * WritesBySecond.Length);
+            double baselineStarved = baseline.WritesBySecond[^1] / (10.0 * WritesBySecond.Length);
+            var shares = new List<double>(CheckpointsBySecond.Length);
+            for (int second = 0; second < CheckpointsBySecond.Length; second++)
+            {
+                long baselineCheckpoints = InSecond(baseline.CheckpointsBySecond, second);
+                long baselineWrites = InSecond(baseline.WritesBySecond, second);
+                long writes = InSecond(WritesBySecond, second);
+                if (baselineCheckpoints == 0 || writes == 0 || writes < starved || baselineWrites < baselineStarved)
+                {
+                    continue;
+                }
+
+                double perSecond = (double)InSecond(CheckpointsBySecond, second) / baselineCheckpoints;
+                shares.Add(Math.Max(perSecond, perSecond * baselineWrites / writes));
+            }
+
+            return [.. shares];
+        }
+
+        /// <summary>Gets the median of <paramref name="values"/>.</summary>
+        /// <param name="values">The values.</param>
+        /// <returns>The median.</returns>
+        public static double Median(double[] values)
+        {
+            var sorted = values.Order().ToArray();
+            int middle = sorted.Length / 2;
+            return sorted.Length % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+        }
+
+        /// <inheritdoc />
+        public override string ToString()
+            => $"{Checkpoints} checkpoints in {WritesBySecond[^1]} writes (by second {string.Join(" ", CheckpointsBySecond.Select((count, second) => $"{InSecond(CheckpointsBySecond, second)}/{InSecond(WritesBySecond, second)}"))}), " +
+               $"journal peak {PeakJournal}, {FailedPasses} failed passes";
+
+        private static long InSecond(long[] counts, int second) => counts[second] - (second == 0 ? 0 : counts[second - 1]);
+    }
 
     private static KeyValueDatabaseEngineOptions Options(FaultInjectingJournalStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
     {

@@ -324,11 +324,22 @@ public sealed class KeyValueStorageOperationsTests
 
     /// <summary>
     /// Under a sustained write load the journal-size trigger keeps the data file set's journal
-    /// near its configured size (#1254). The bound is a ratio to the configured size. The values
-    /// carry 3,000 bytes: since storage format 3 (#1253) a put journals the bytes it changed
-    /// rather than two 8 KiB images of each page it touched, so with small values forty sizes of
-    /// journal took several times as many puts as before.
+    /// near its configured size (#1254). The bounds are ratios to the configured size and to what
+    /// was written, never an absolute time: the test runs until forty sizes of journal were
+    /// written, under a hang guard of minutes. The values carry 3,000 bytes: since storage format 3
+    /// (#1253) a put journals the bytes it changed rather than two 8 KiB images of each page it
+    /// touched, so with small values forty sizes of journal took several times as many puts as
+    /// before.
     /// </summary>
+    /// <remarks>
+    /// The test counts the checkpoints that truncated the journal and bounds the journal written
+    /// per truncation: on average a checkpoint must truncate it before it holds four sizes. Without
+    /// the trigger nothing truncates it, and the one length holds all forty. The largest length
+    /// alone measured the scheduler as much as the trigger: on a loaded three-core machine one
+    /// checkpoint could wait long enough for the four writers to append several sizes, and that
+    /// one cycle took the peak past four sizes while the journal written per truncation stayed
+    /// under two. The peak is reported, not bounded.
+    /// </remarks>
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Checkpoint trigger: the journal stays bounded under a sustained write load")]
     public async Task CheckpointJournalSize_SustainedWrites_ShouldKeepTheJournalBounded()
     {
@@ -351,36 +362,18 @@ public sealed class KeyValueStorageOperationsTests
             }
         })).ToArray();
 
-        // Act: sample the journal while the writers push well past the size many times over.
-        long largest = 0;
-        long written = 0;
-        long previous = 0;
-        var watch = Stopwatch.StartNew();
-        while (written < 40 * size)
-        {
-            // A hang guard, not a throughput floor: a correct run reaches forty sizes however slow the
-            // machine, and the bound under test is the ratio asserted below.
-            if (watch.Elapsed > TimeSpan.FromMinutes(5))
-            {
-                throw new ShouldAssertException($"The writers journaled {written:N0} of {40 * size:N0} bytes in {watch.Elapsed.TotalSeconds:F0} s.");
-            }
-
-            long length = instance.DataStorage.JournalLength;
-            largest = Math.Max(largest, length);
-            written += length >= previous ? length - previous : length;
-            previous = length;
-            await Task.Delay(1);
-        }
-
+        // Act: sample the journal while the writers push well past the size many times over,
+        // counting the checkpoints that truncated it.
+        var journal = await JournalSamples.CollectAsync(() => instance.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
         stop.Cancel();
         await Task.WhenAll(writers).WaitAsync(Timeout);
 
-        // Assert: tens of journal sizes were written, and the journal never held more than a few.
-        // The measured values are in the messages, so a failure on a loaded machine says which.
-        string measured = $"written {written} bytes in {watch.Elapsed}, largest journal {largest} bytes for a size of {size}, " +
-            $"engine {engine.State}";
-        written.ShouldBeGreaterThanOrEqualTo(40 * size, measured);
-        ((double)largest / size).ShouldBeLessThan(4.0, measured);
+        // Assert: tens of journal sizes were written, and checkpoints truncated the journal before
+        // it held four sizes on average. The measured values are in the messages, so a failure on
+        // a loaded machine says which.
+        string measured = journal.Describe(size);
+        journal.Written.ShouldBeGreaterThanOrEqualTo(40 * size, measured);
+        journal.WrittenPerTruncation(size).ShouldBeLessThan(4.0, measured);
         engine.State.ShouldBe(EngineState.Running, measured);
     }
 

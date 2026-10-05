@@ -1422,11 +1422,15 @@ reference is PostgreSQL's `max_wal_size` of 1 GB (`max_wal_size_mb = 1024`,
   A checkpoint here is sharp: it flushes and truncates at once, so the size is close to the
   journal's bound, not a fraction of it. Writes that land while the worker wakes, while the
   statement holding the gate finishes, and while the checkpoint runs overshoot it; the engines'
-  sustained-write tests hold the peak under four times a 4 MiB size, also while another database
-  of the engine holds its gate, and at the default the overshoot is a small fraction
-  ("Measurements"). It is not a hard bound: a single statement journals all of its bracket
-  before the checkpoint can run, so one statement that writes more than the size (a large index
-  build or `INSERT ... SELECT`, a large upload) overshoots it by that much.
+  sustained-write tests require a checkpoint to truncate the journal on average before it holds
+  four times a 4 MiB size, also while another database of the engine holds its gate, and at the
+  default the overshoot is a small fraction ("Measurements"). How far one cycle overshoots is the
+  scheduler's, so the tests report the peak without bounding it: in format 3, on three cores
+  beside another engine's suite, one late checkpoint took a peak to 4.4 sizes while the journal
+  written per truncation stayed between 0.89 and 1.06 sizes (in format 2 a peak reached almost
+  ten). It is not a hard bound: a single statement journals all of its bracket before the
+  checkpoint can run, so one statement that writes more than the size (a large index build or
+  `INSERT ... SELECT`, a large upload) overshoots it by that much.
 - Recovery replayed about 20 ms per MB of journal from a warm file cache in format 2 (the #1251
   table below: a 50.2 MB journal in 0.9–1.2 s), so the bound capped a crash recovery at about five
   seconds. Format 3 (#1253) replays 5–8 ms per MB from a file, a journal of small deltas or of

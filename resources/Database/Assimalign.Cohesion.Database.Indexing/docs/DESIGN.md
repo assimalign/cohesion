@@ -466,7 +466,16 @@ times, so CI speed and load cancel out:
   leaf: allowed growth 2.5×; the oldest-first walk measured 12.6–14.3×, the
   newest-first lookup 0.87–1.21× (Release and Debug).
 - `SqlCascadeFanOutTests`, 16,000 children against 4,000: allowed growth 2×; the
-  baseline measured 10×.
+  baseline measured 10×. Each round times one 16,000-child cascade against four
+  4,000-child cascades back to back, so both blocks run about as long; one
+  4,000-child cascade against one of 16,000 measured up to 2.2× under load with the
+  walk linear. Load still swung a round's wall-clock cost two to four times, so the
+  blocks are timed in the process's CPU time (the timing collection runs alone in its
+  process), after an unmeasured warm-up round of both blocks: pinned to three cores
+  or beside another suite on them, the linear walk measured 0.77–1.27× (the wall
+  clock reached 2.42× once in 40 loaded runs) and the duplicate-run walk #1194
+  removed 2.58–3.58×, failing 20 runs of 20 (on the wall clock it passed 5 of 10
+  loaded runs).
 
 ## Transactional binding
 
