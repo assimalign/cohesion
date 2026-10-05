@@ -33,13 +33,17 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// <para>
 /// <b>Hole elision.</b> Encoding an image against zeros drops every all-zero block, which is the
 /// free gap of both page formats with one: a slotted page's gap between its records and its slot
-/// directory, and a B-tree node's gap between its entry directory and its entry data. Both formats
-/// keep the gap zero (allocation clears the page, and <c>SlottedPage.Initialize</c> and
-/// <c>BTreeNode.Initialize</c> clear the body), so the encoding needs no page-layout contract.
-/// PostgreSQL elides the gap between <c>pd_lower</c> and <c>pd_upper</c> of a standard page
-/// (<c>XLogRecordAssemble</c>, <c>src/backend/access/transam/xloginsert.c:731-756</c>) and
-/// zero-fills it on restore (<c>RestoreBlockImage</c>, <c>src/backend/access/transam/xlogreader.c:2213-2224</c>);
-/// a gap that is not zero here costs bytes, never correctness.
+/// directory, and a B-tree node's gap between its entry directory and its entry data. The gap
+/// starts zero: allocation clears the page, the storage clears a slotted page's body before it
+/// reinitializes one (<c>SlottedPage.Initialize</c> itself only resets the header), and
+/// <c>BTreeNode.Initialize</c> clears the node's body, which a split or a compaction rebuilds through,
+/// and a B-tree entry removal clears the directory slot it vacates. A slotted page's
+/// <c>Compact</c> leaves the old bytes between its new and its previous free-data end in the gap
+/// until the page is reinitialized. So the encoding needs no page-layout contract. PostgreSQL elides the gap between
+/// <c>pd_lower</c> and <c>pd_upper</c> of a standard page (<c>XLogRecordAssemble</c>,
+/// <c>src/backend/access/transam/xloginsert.c:731-756</c>) and zero-fills it on restore
+/// (<c>RestoreBlockImage</c>, <c>src/backend/access/transam/xlogreader.c:2213-2224</c>); a gap
+/// that is not zero here costs bytes, never correctness.
 /// </para>
 /// </remarks>
 internal static class PageImageCodec

@@ -184,9 +184,10 @@ public sealed class StorageCheckpointTriggerTests
         storage.BufferPoolCapacity.ShouldBe(16);
     }
 
-    /// <summary>A storage built with the constructor's default pool capacity.</summary>
+    /// <summary>A row padded to 2,000 bytes, so its page delta carries a measurable payload (#1253).</summary>
     private static string Row(string text) => text.PadRight(2000, '.');
 
+    /// <summary>A storage built with the constructor's default pool capacity.</summary>
     private sealed class DefaultStorage : Storage
     {
         private DefaultStorage()

@@ -615,8 +615,19 @@ public abstract class Storage : IStorage
         _consistencyRequested = true;
         if (_journal is { } journal && _consistency is null)
         {
-            _consistency = new StorageConsistencyCheck(journal);
+            StartConsistencyCheck(journal);
         }
+    }
+
+    /// <summary>
+    /// Creates the debug consistency check over the journal and hooks its write-back audit into
+    /// the buffer pool.
+    /// </summary>
+    private void StartConsistencyCheck(StorageJournal journal)
+    {
+        var check = new StorageConsistencyCheck(journal);
+        _consistency = check;
+        _bufferPool.WriteBackAudit = (pageId, pageLsn) => check.CheckWriteBack(pageId, pageLsn, Volatile.Read(ref _redoLsn));
     }
 
     /// <summary>
@@ -766,6 +777,7 @@ public abstract class Storage : IStorage
         dataHandle.Dispose();
 
         _pageManager.FlushAll();
+        _consistency?.AllWrittenBack();
         MarkCheckpointed();
 
         // The journal is empty and every page carries LSN zero: each one's first change journals a
@@ -788,7 +800,7 @@ public abstract class Storage : IStorage
         _bufferPool.WriteAheadGate = FlushWriteAhead;
         if (_consistencyRequested)
         {
-            _consistency = new StorageConsistencyCheck(journal);
+            StartConsistencyCheck(journal);
         }
     }
 
@@ -856,8 +868,9 @@ public abstract class Storage : IStorage
         // the truncation, so a page above it has a full page image in the journal (invariant P;
         // recovery stamped every page it rebuilt with the LSN of its last record). Without the
         // floor a lost checkpoint record would leave the redo point at zero, no page would be
-        // imaged again, and the next delta of a page would have no image to chain onto.
-        Volatile.Write(ref _redoLsn, Math.Max(header.LsnFloor, recovery.CheckpointLsn));
+        // imaged again, and the next delta of a page would have no image to chain onto. The page
+        // scan below can raise it further.
+        long redoLsn = Math.Max(header.LsnFloor, recovery.CheckpointLsn);
 
         // Rebuild the free-space map and the per-owner page directory in one pass
         // over the on-disk page headers. The stream length is the source of truth
@@ -869,6 +882,8 @@ public abstract class Storage : IStorage
 
         long pageCount = Data.Length / Page.Size;
         var pageHeader = new byte[Page.HeaderSize];
+        byte[]? pageBuffer = null;
+        long strayLsn = 0;
 
         for (long i = 1; i < pageCount; i++)
         {
@@ -876,10 +891,12 @@ public abstract class Storage : IStorage
 
             PageType type;
             ulong pageOwner;
+            long pageLsn;
             fixed (byte* headerPtr = pageHeader)
             {
                 type = ((Page.Header*)headerPtr)->Type;
                 pageOwner = ((Page.Header*)headerPtr)->OwnerId;
+                pageLsn = ((Page.Header*)headerPtr)->Lsn;
             }
 
             // An anchor page off the newest generation's chain is the other slot's (whose
@@ -900,8 +917,40 @@ public abstract class Storage : IStorage
                     // owner's current write page.
                     RegisterOwnerPage(pageOwner, (PageId)i);
                 }
+
+                // A page recovery did not rebuild has no image in the journal, so invariant P
+                // needs its LSN at or below the redo point. One above it outlived the journal
+                // records that stamped it: under CommitDurability.None the write-ahead gate only
+                // drains the journal, so a power loss can keep a stolen page and lose the journal
+                // tail its image and deltas were in; a journal file lost or restored from an older
+                // copy does the same. Its LSN is taken only from a page that verifies — a damaged
+                // header must not move LSNs, and the page fails its checksum when it is read.
+                if (pageLsn > redoLsn && pageLsn > strayLsn && !recovery.RebuiltPages.Contains(i))
+                {
+                    pageBuffer ??= new byte[Page.Size];
+                    Data.ReadPage((PageId)i, pageBuffer);
+                    if (PageChecksum.TryVerify(pageBuffer, out _, out _))
+                    {
+                        strayLsn = pageLsn;
+                    }
+                }
             }
         }
+
+        if (strayLsn > redoLsn)
+        {
+            // LSNs resume above the stray page, so they never fall below one a page carries, and the
+            // redo point moves up to it: the page's next first touch journals its full image, which
+            // its later deltas chain onto. Without this the next LSNs restarted below the page's,
+            // no image was journaled for it (its LSN was above the redo point), and its next delta
+            // named a base no record in the journal produced — the following open refused the file
+            // set with a chain gap (#1253 review). Nothing has been appended since open, which
+            // RaiseLsnFloor requires.
+            _journal.RaiseLsnFloor(strayLsn);
+            redoLsn = strayLsn;
+        }
+
+        Volatile.Write(ref _redoLsn, redoLsn);
 
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap) { WroteOutsideJournal = ForgetShadow };
 
@@ -1514,6 +1563,22 @@ public abstract class Storage : IStorage
     /// </remarks>
     internal unsafe void CommitTransaction(StorageTransaction transaction, bool awaitDurability = true)
     {
+        // A durable wait the journal cannot provide is refused before anything is journaled
+        // (#1018): the bracket stays active and the caller rolls it back, which recovery agrees
+        // with because no commit record exists. Refused after the commit record instead, the
+        // caller's rollback restored pre-images and their base LSNs that the journal had already
+        // moved past, the page's next delta named that old base, and the next open refused the
+        // whole file set with a chain gap (#1253 review). Engines never get here:
+        // ConfigureCommitDurability refuses a durable mode on such a store first, but the public
+        // CommitDurability setter does not, and the journal's handle can change underneath.
+        if (awaitDurability && RequiresDurableFlush && !Journal.SupportsDurableFlush)
+        {
+            throw new NotSupportedException(
+                $"Storage transaction {transaction.Sequence} cannot commit with CommitDurability '{CommitDurability}': the journal's backing " +
+                "handle does not support a durable flush (SupportsDurableFlush = false). Nothing was journaled; the transaction is still " +
+                "active and can be rolled back.");
+        }
+
         // Deterministic page order keeps the journal replayable and testable.
         var pageIds = new List<long>(transaction.PreImages.Keys);
         pageIds.Sort();
@@ -1599,6 +1664,16 @@ public abstract class Storage : IStorage
             // statement whose bracket this was survives the reopen when the record did.
             CompleteCommitted(transaction);
             throw StorageOfflineException.CommitUnconfirmed(offline);
+        }
+        catch
+        {
+            // Any other failure of the wait (the storage disposed under it, a durable flush the
+            // handle stopped supporting after the check above): the commit record is in the journal
+            // all the same, so recovery redoes the bracket whenever the record reaches the media.
+            // The bracket must not roll back in memory — its pages would return to bases the journal
+            // has moved past — so it ends committed, unconfirmed, and the failure propagates.
+            CompleteCommitted(transaction);
+            throw;
         }
 
         CompleteCommitted(transaction);
@@ -1688,9 +1763,15 @@ public abstract class Storage : IStorage
 
     /// <summary>
     /// Tells the debug consistency check that a page was rewritten outside the journal on purpose
-    /// (the page manager's raw <see cref="IStoragePageManager.FreePage"/>).
+    /// (the page manager's allocation clear and its raw <see cref="IStoragePageManager.FreePage"/>).
     /// </summary>
     private void ForgetShadow(long pageId) => _consistency?.Forget(pageId);
+
+    /// <summary>
+    /// Reads the data file's copy of a page for the consistency check's audit of an imaging touch;
+    /// false when the file does not reach the page.
+    /// </summary>
+    private bool ReadStoredPage(long pageId, byte[] buffer) => _bufferPool.TryReadStored((PageId)pageId, Data, buffer);
 
     /// <summary>
     /// Reads a page as the storage holds it now, for the consistency check's checkpoint audit: the
@@ -1708,7 +1789,12 @@ public abstract class Storage : IStorage
             return;
         }
 
-        Data.ReadPage((PageId)pageId, buffer);
+        if (!ReadStoredPage(pageId, buffer))
+        {
+            // A shadowed page past the end of the data file: its records describe a page the file
+            // never reached, which is an inconsistency the compare reports against zeros.
+            Array.Clear(buffer);
+        }
     }
 
     /// <summary>
@@ -1725,14 +1811,14 @@ public abstract class Storage : IStorage
     /// </remarks>
     internal unsafe void RollbackTransaction(StorageTransaction transaction)
     {
-        if (_consistency is not null && transaction.CommitRecordLsn > 0)
+        if (transaction.CommitRecordLsn > 0)
         {
-            // Its commit record is in the journal (its durable wait failed with something other than
-            // the storage going offline, which completes the bracket as committed): recovery would
-            // redo the changes this rollback undoes in memory.
+            // A defect, whatever the check mode: a bracket whose commit record is in the journal
+            // always ends committed (CommitTransaction), because recovery redoes it. Rolling it back
+            // would restore bases its deltas moved past and break the pages' chains (#1018).
             throw new InvalidOperationException(
-                $"Storage consistency check failed: storage transaction {transaction.Sequence} is rolled back in memory, but its commit " +
-                $"record (LSN {transaction.CommitRecordLsn}) is in the journal, so recovery would redo its changes.");
+                $"Storage transaction {transaction.Sequence} cannot roll back: its commit record (LSN {transaction.CommitRecordLsn}) is in " +
+                "the journal, so recovery redoes its changes.");
         }
 
         foreach (var (pageId, preImage) in transaction.PreImages)
@@ -2127,6 +2213,14 @@ public abstract class Storage : IStorage
             bool spill = transaction.PreImageBytes + length + StorageTransaction.PreImageOverhead > PreImageBudget;
             if (imageNeeded || spill)
             {
+                if (imageNeeded)
+                {
+                    // The audit for a page with no record since the checkpoint: the image is about
+                    // to make whatever the pool holds committed content, so it must be what the
+                    // checkpoint wrote (an allocation's clear is exempt).
+                    _consistency?.CheckImagingTouch(pageId, current, ReadStoredPage);
+                }
+
                 long lsn = _journal!.AppendPageRecord(transaction.Sequence, handle.Id, JournalRecordType.FullPageImage, runs, out var location);
                 _consistency?.ImageJournaled(pageId, lsn, runs);
 
@@ -2413,10 +2507,10 @@ public abstract class Storage : IStorage
         {
             // Recorded on the chain as soon as it is allocated, so a failure before the slot
             // is written still leaves the page to the chain's next write (or to the next
-            // open's scan, which frees an anchor page no valid generation chains).
+            // open's scan, which frees an anchor page no valid generation chains). The allocation
+            // reports the page to the consistency check as written outside the journal.
             using var allocated = _pageManager!.AllocatePage(PageType.CheckpointAnchor);
             chain.Add((long)allocated.Id);
-            _consistency?.Forget((long)allocated.Id);
         }
     }
 

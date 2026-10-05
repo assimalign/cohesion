@@ -24,7 +24,8 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
   the bytes it changed (a page delta, or a committed full image past half a page); recovery is
   ordered redo from the checkpoint, each delta applied on the LSN it names (storage format 3,
   #1253). A debug consistency check (`COHESION_STORAGE_CONSISTENCY_CHECKS=1`) replays every
-  record onto a shadow page and compares it with the buffer pool. Appends go
+  record onto a shadow page and compares it with the buffer pool, and refuses any page changed
+  outside a storage transaction, imaged since the checkpoint or not. Appends go
   to a user-space buffer, frames built in place, which drains to the operating system in one
   write before every commit is acknowledged (every durability mode), every reader, the
   write-ahead gate and a checkpoint's truncation (#1252, PostgreSQL's WAL buffers).

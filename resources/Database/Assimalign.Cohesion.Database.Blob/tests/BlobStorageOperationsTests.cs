@@ -227,8 +227,15 @@ public sealed class BlobStorageOperationsTests
         long written = 0;
         long previous = 0;
         var watch = Stopwatch.StartNew();
-        while (written < 40 * size && watch.Elapsed < TimeSpan.FromSeconds(60))
+        while (written < 40 * size)
         {
+            // A hang guard, not a throughput floor: a correct run reaches forty sizes however slow the
+            // machine, and the bound under test is the ratio asserted below.
+            if (watch.Elapsed > TimeSpan.FromMinutes(5))
+            {
+                throw new ShouldAssertException($"The writers journaled {written:N0} of {40 * size:N0} bytes in {watch.Elapsed.TotalSeconds:F0} s.");
+            }
+
             long length = database.DataStorage.JournalLength;
             largest = Math.Max(largest, length);
             written += length >= previous ? length - previous : length;

@@ -72,13 +72,19 @@ internal sealed class StoragePageManager : IStoragePageManager
         page.Type = type;
         handle.MarkDirty();
 
+        // The clear is outside the journal: an allocating storage transaction images the page at
+        // its touch, initialization included (invariant A), and anything else allocating is the
+        // storage itself (its first page, an anchor page) or a raw caller.
+        WroteOutsideJournal?.Invoke((long)pageId);
+
         return handle;
     }
 
     /// <summary>
-    /// Invoked with a page this manager rewrites outside any storage transaction (<see cref="FreePage"/>),
-    /// so the owning storage's debug consistency check stops comparing the page with its journal
-    /// records.
+    /// Invoked with a page this manager rewrites outside any storage transaction (<see cref="AllocatePage"/>,
+    /// <see cref="FreePage"/>), so the owning storage's debug consistency check stops comparing the
+    /// page with its journal records and exempts it from its audit of changes made outside a
+    /// transaction until the next checkpoint writes it.
     /// </summary>
     internal Action<long>? WroteOutsideJournal;
 

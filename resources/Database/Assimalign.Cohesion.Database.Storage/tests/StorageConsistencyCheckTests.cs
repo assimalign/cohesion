@@ -13,8 +13,9 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// The debug consistency check (#1253, PostgreSQL's <c>wal_consistency_checking</c>): every page
 /// record the storage journals is replayed onto a shadow of the page, as recovery would, and the
 /// shadow is compared with the pooled page after every commit and rollback, at every first touch
-/// that journals no image (the audit of changes made outside a storage transaction), and at every
-/// checkpoint.
+/// that journals no image, and at every checkpoint. A page not imaged since the checkpoint has no
+/// shadow: the audit of changes made outside a storage transaction refuses its write-back while it
+/// is dirty, and compares it with the data file's copy at the touch that images it.
 /// </summary>
 public sealed class StorageConsistencyCheckTests
 {
@@ -105,6 +106,112 @@ public sealed class StorageConsistencyCheckTests
         // Assert
         failure.Message.ShouldContain($"page {(long)pageId}");
         failure.Message.ShouldContain("at the checkpoint");
+    }
+
+    /// <summary>
+    /// A page whose last record is older than the checkpoint has no shadow. A change made to it
+    /// outside a storage transaction and marked dirty would reach the data file through the next
+    /// write-back, where no journal record describes it (#1253 review, probe A1): the write-back of
+    /// a dirty page at or below the redo point is refused.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Consistency check: a change outside a transaction to a page not imaged since the checkpoint is caught at its write-back")]
+    public unsafe void ConsistencyCheck_UnimagedPageChangedOutsideATransaction_ShouldFailItsWriteBack()
+    {
+        // Arrange
+        var storage = TornStorage.Create(consistencyChecks: true); // abandoned: its close would checkpoint the changed page
+        var (pageId, _) = storage.Insert("row");
+        storage.Checkpoint();
+        using (var handle = storage.PageManager.GetPage(pageId))
+        {
+            handle.Page.Pointer[Page.Size - 100] ^= 0xFF;
+            handle.MarkDirty();
+        }
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => storage.Checkpoint());
+
+        // Assert
+        failure.Message.ShouldContain($"page {(long)pageId}");
+        failure.Message.ShouldContain($"at or below the redo point {storage.RedoLsn}");
+        failure.Message.ShouldContain("changed outside a storage transaction since the last checkpoint");
+    }
+
+    /// <summary>
+    /// The touch that images a page with no record since the checkpoint would journal whatever the
+    /// pool holds as committed content, a change made outside a storage transaction included
+    /// (#1253 review, probe A2): it compares the pool's copy with the data file's first, which also
+    /// catches a change never marked dirty.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Consistency check: a change outside a transaction to a page not imaged since the checkpoint is caught at the touch that images it")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public unsafe void ConsistencyCheck_UnimagedPageChangedOutsideATransaction_ShouldFailTheImagingTouch(bool markDirty)
+    {
+        // Arrange
+        var storage = TornStorage.Create(consistencyChecks: true); // abandoned: its close would checkpoint the changed page
+        var (pageId, slot) = storage.Insert("row");
+        storage.Checkpoint();
+        long checkpointLsn = storage.Log.LastLsn;
+        using (var handle = storage.PageManager.GetPage(pageId))
+        {
+            handle.Page.Pointer[Page.Size - 100] ^= 0xFF;
+            if (markDirty)
+            {
+                handle.MarkDirty();
+            }
+        }
+
+        var transaction = storage.BeginTransaction();
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => storage.Update(transaction, pageId, slot, "new"));
+
+        // Assert: refused before the image was journaled, and the page left unlocked.
+        failure.Message.ShouldContain($"page {(long)pageId}");
+        failure.Message.ShouldContain("changed outside a storage transaction since the last checkpoint");
+        failure.Message.ShouldContain($"offset {Page.Size - 100}");
+        failure.Message.ShouldContain("the data file holds");
+        storage.Log.ReadAll().ShouldNotContain(record => record.Type == JournalRecordType.FullPageImage && record.Lsn > checkpointLsn);
+        storage.IsPageWriteLocked(pageId).ShouldBeFalse();
+        transaction.Rollback();
+    }
+
+    /// <summary>
+    /// The pages the storage writes outside the journal on purpose — a new file set's first page,
+    /// checkpoint anchor pages as their chains grow and shrink, the page manager's raw allocation
+    /// and free, and a bracket's allocation of a page an anchor chain freed — are exempt from the
+    /// audit of pages at or below the redo point.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Consistency check: pages the storage writes outside the journal on purpose are not reported")]
+    public void ConsistencyCheck_PagesWrittenOutsideTheJournalOnPurpose_ShouldNotBeReported()
+    {
+        // Arrange: an anchor long enough to need a chain of pages in each header slot.
+        var storage = TornStorage.Create(consistencyChecks: true);
+        long[] anchor = [.. Enumerable.Range(1, 1_500).Select(i => (long)i)];
+        storage.Insert("row");
+
+        // Act
+        storage.Checkpoint(anchor);
+        storage.FlushHeader();
+        storage.Checkpoint(anchor);
+        storage.Checkpoint(anchor.AsSpan(0, 10));
+        storage.Checkpoint(anchor.AsSpan(0, 10));
+        long raw;
+        using (var handle = storage.PageManager.AllocatePage(PageType.Data))
+        {
+            raw = (long)handle.Id;
+        }
+
+        storage.Checkpoint();
+        storage.PageManager.FreePage((PageId)raw);
+        storage.Checkpoint();
+        var pages = storage.FillPages(4);
+        storage.Checkpoint();
+        storage.Dispose();
+
+        // Assert
+        storage.ConsistencyCheck!.Checks.ShouldBeGreaterThan(0);
+        pages.Length.ShouldBe(4);
     }
 
     /// <summary>

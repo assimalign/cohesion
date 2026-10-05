@@ -665,7 +665,203 @@ public sealed class StorageRedoTests
         recovered.ScanOwner(9).Single().ShouldBe(record);
     }
 
+    // ---------------------------------------------------------------- a page above the journal at open
+
+    /// <summary>
+    /// Under <see cref="StorageCommitDurability.None"/> the write-ahead gate drains the journal
+    /// without an fsync, so a power loss can keep a page the pool wrote back and lose the journal
+    /// records that stamped it. Open finds the page above every LSN the journal holds: LSNs resume
+    /// above it and the redo point moves up to it, so its next change journals a full image and a
+    /// second crash recovers through it. Before the #1253 review LSNs restarted below the page's,
+    /// its next delta named a base no record produced, and the following open refused the file set
+    /// with a chain gap.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Redo: a page that outlived its journal records under None durability is imaged again and recovers")]
+    public void Open_PageAboveTheDurableJournal_ShouldRaiseTheRedoPointAndImageThePage()
+    {
+        // Arrange: a None-mode commit whose page reaches the data file while its journal records
+        // stay in the operating system's cache, then a power loss.
+        var storage = TornStorage.Create(journalWriteThrough: false, journalDurableFlushesOnly: true); // abandoned: a crash
+        storage.CommitDurability = StorageCommitDurability.None;
+        var (pageId, slot) = storage.Insert("v1");
+        storage.PageManager.FlushAll();
+        long pageLsn = storage.PageLsn(pageId);
+        var lost = storage.CaptureDurable();
+
+        // Act: open (with the consistency check on), change the page durably, lose power, open again.
+        (byte[] Data, byte[] Journal) second;
+        long redoLsn;
+        string afterLoss;
+        using (var reopened = TornStorage.Open(
+            new CrashSimulationStream(lost.Data, writeThrough: true),
+            new CrashSimulationStream(lost.Journal, writeThrough: true),
+            consistencyChecks: true))
+        {
+            redoLsn = reopened.RedoLsn;
+            afterLoss = reopened.Read(pageId, slot);
+            using (var transaction = reopened.BeginTransaction())
+            {
+                reopened.Update(transaction, pageId, slot, "v2");
+                transaction.Commit();
+            }
+
+            second = reopened.CaptureDurable();
+        }
+
+        using var again = TornStorage.Open(second);
+        var pageRecords = JournalImage.PageRecords(second.Journal, (long)pageId);
+
+        // Assert: the journal kept nothing, the page kept its LSN, and the page was imaged above it.
+        JournalImage.Records(lost.Journal).ShouldNotContain(record => StorageRecovery.IsPageRecord(record.Type));
+        DataPageLsn(lost.Data, pageId).ShouldBe(pageLsn);
+        afterLoss.ShouldBe("v1");
+        redoLsn.ShouldBe(pageLsn);
+        pageRecords.Select(record => record.Type).ShouldBe([JournalRecordType.FullPageImage, JournalRecordType.PageDelta]);
+        pageRecords[0].Lsn.ShouldBeGreaterThan(pageLsn);
+        BaseLsn(pageRecords[1]).ShouldBe(pageRecords[0].Lsn);
+        again.Read(pageId, slot).ShouldBe("v2");
+    }
+
+    /// <summary>
+    /// A journal file restored from an older copy (or lost and recreated) leaves data pages above
+    /// every LSN it holds, whatever the durability mode: the same open-time rule resumes LSNs above
+    /// them, so a durable commit made after the open survives the next crash. Before the #1253
+    /// review that commit made the file set unopenable; in storage format 2 it was lost silently.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Redo: a data file newer than its journal resumes LSNs above its pages and keeps later commits")]
+    public void Open_JournalOlderThanTheDataFile_ShouldResumeLsnsAboveThePages()
+    {
+        // Arrange: v1 committed and checkpointed, the journal kept as it stood then; v2 committed
+        // and its page written back; the file set opened with the older journal.
+        var storage = TornStorage.Create(); // abandoned: a crash
+        var (pageId, slot) = storage.Insert("v1");
+        storage.Checkpoint();
+        var olderJournal = storage.CaptureDurable().Journal;
+        using (var transaction = storage.BeginTransaction())
+        {
+            storage.Update(transaction, pageId, slot, "v2");
+            transaction.Commit();
+        }
+
+        storage.PageManager.FlushAll();
+        long pageLsn = storage.PageLsn(pageId);
+        var images = (storage.CaptureDurable().Data, olderJournal);
+
+        // Act: open, commit v3 durably, crash, open again.
+        (byte[] Data, byte[] Journal) second;
+        long nextLsn;
+        using (var reopened = TornStorage.Open(images))
+        {
+            reopened.Read(pageId, slot).ShouldBe("v2");
+            using (var transaction = reopened.BeginTransaction())
+            {
+                reopened.Update(transaction, pageId, slot, "v3");
+                transaction.Commit();
+            }
+
+            nextLsn = JournalImage.PageRecords(reopened.CaptureDurable().Journal, (long)pageId)[0].Lsn;
+            second = reopened.CaptureDurable();
+        }
+
+        using var again = TornStorage.Open(second);
+
+        // Assert
+        nextLsn.ShouldBeGreaterThan(pageLsn);
+        JournalImage.PageRecords(second.Journal, (long)pageId)[0].Type.ShouldBe(JournalRecordType.FullPageImage);
+        again.Read(pageId, slot).ShouldBe("v3");
+    }
+
+    // ---------------------------------------------------------------- a commit's durable wait (#1018)
+
+    /// <summary>
+    /// A commit asking for durability the journal's handle cannot provide is refused before
+    /// anything is journaled, so the caller's rollback agrees with recovery. Refused after the
+    /// commit record (before the #1253 review), the rollback restored a base LSN the journal had
+    /// moved past, and the next commit on the page made the file set unopenable.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Redo: a commit refused for durability journals nothing, and the next commit on its page recovers")]
+    [InlineData(StorageCommitDurability.Synchronous)]
+    [InlineData(StorageCommitDurability.Grouped)]
+    public void Commit_DurabilityTheJournalCannotProvide_ShouldJournalNothingAndKeepTheChain(StorageCommitDurability durability)
+    {
+        // Arrange
+        var storage = TornStorage.Create(consistencyChecks: true); // abandoned: a crash
+        var (pageId, slot) = storage.Insert("v1");
+        storage.CommitDurability = durability;
+        storage.GroupCommitWindow = TimeSpan.Zero;
+        storage.JournalFaults.RefuseDurableFlush = true;
+
+        // Act: the refused commit is rolled back by its scope; then a commit on the same page.
+        long refusedSequence;
+        using (var refused = storage.BeginTransaction())
+        {
+            refusedSequence = refused.Sequence;
+            storage.Update(refused, pageId, slot, "refused");
+            Should.Throw<NotSupportedException>(() => refused.Commit()).Message.ShouldContain("Nothing was journaled");
+            refused.IsActive.ShouldBeTrue();
+        }
+
+        storage.JournalFaults.RefuseDurableFlush = false;
+        storage.CommitDurability = StorageCommitDurability.Synchronous;
+        using (var transaction = storage.BeginTransaction())
+        {
+            storage.Update(transaction, pageId, slot, "v2");
+            transaction.Commit();
+        }
+
+        var images = storage.CaptureDurable();
+        using var recovered = TornStorage.Open(images);
+
+        // Assert
+        JournalImage.Records(images.Journal).ShouldNotContain(record =>
+            record.TransactionSequence == refusedSequence
+            && (record.Type == JournalRecordType.CommitTransaction || record.Type == JournalRecordType.PageDelta));
+        recovered.Read(pageId, slot).ShouldBe("v2");
+    }
+
+    /// <summary>
+    /// A durable wait that fails after the commit record is appended, with something other than
+    /// the storage going offline, ends the bracket committed: recovery redoes it whenever the record
+    /// reaches the media, so rolling it back in memory would put the page on a base the journal has
+    /// moved past.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Redo: a durable wait that fails after the commit record ends the bracket committed, and its page's chain recovers")]
+    public void Commit_DurableWaitFailsAfterTheCommitRecord_ShouldEndCommittedAndRecover()
+    {
+        // Arrange: the journal's handle stops supporting a durable flush after the commit checked it.
+        var storage = TornStorage.Create(consistencyChecks: true); // abandoned: a crash
+        var (pageId, slot) = storage.Insert("v1");
+        storage.JournalFaults.NextDurableFlushFailure = new NotSupportedException("Injected: the handle stopped supporting a durable flush.");
+        var failed = storage.BeginTransaction();
+        storage.Update(failed, pageId, slot, "v2");
+
+        // Act
+        Should.Throw<NotSupportedException>(() => failed.Commit());
+        bool activeAfterFailure = failed.IsActive;
+        failed.Dispose();
+        string inMemory = storage.Read(pageId, slot);
+        using (var transaction = storage.BeginTransaction())
+        {
+            storage.Update(transaction, pageId, slot, "v3");
+            transaction.Commit();
+        }
+
+        var images = storage.CaptureDurable();
+        using var recovered = TornStorage.Open(images);
+        var deltas = JournalImage.PageRecords(images.Journal, (long)pageId).Where(record => record.Type == JournalRecordType.PageDelta).ToArray();
+
+        // Assert: the bracket ended committed and unlocked its page; the next delta chains onto its delta.
+        activeAfterFailure.ShouldBeFalse();
+        storage.ActiveTransactions.ShouldBe(0);
+        inMemory.ShouldBe("v2");
+        BaseLsn(deltas[^1]).ShouldBe(deltas[^2].Lsn);
+        recovered.Read(pageId, slot).ShouldBe("v3");
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private static long DataPageLsn(byte[] data, PageId pageId)
+        => BinaryPrimitives.ReadInt64LittleEndian(data.AsSpan((int)((long)pageId * Page.Size) + Page.LsnFieldOffset));
 
     internal static long BaseLsn(JournalRecord record) => BinaryPrimitives.ReadInt64LittleEndian(record.Payload.Span);
 

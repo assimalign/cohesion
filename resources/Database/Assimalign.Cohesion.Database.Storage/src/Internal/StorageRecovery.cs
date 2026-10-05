@@ -159,7 +159,7 @@ internal static class StorageRecovery
 
         if (plans.Count == 0)
         {
-            return new StorageRecoveryResult(maxSequence, checkpointLsn, 0);
+            return new StorageRecoveryResult(maxSequence, checkpointLsn, new HashSet<long>());
         }
 
         // Pass 3: the ordered replay.
@@ -237,7 +237,7 @@ internal static class StorageRecovery
 
         cache.WriteAll();
         data.Flush(durable: forceDurable);
-        return new StorageRecoveryResult(maxSequence, checkpointLsn, plans.Count);
+        return new StorageRecoveryResult(maxSequence, checkpointLsn, new HashSet<long>(plans.Keys));
     }
 
     /// <summary>

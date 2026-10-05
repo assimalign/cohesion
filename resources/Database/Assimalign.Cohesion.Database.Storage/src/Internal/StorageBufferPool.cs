@@ -68,6 +68,14 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     /// </summary>
     internal Action? WriteGuard;
 
+    /// <summary>
+    /// Invoked with a page's id and LSN before every write-back, after <see cref="WriteGuard"/>:
+    /// the owning storage's debug consistency check audits that no page reaches the stream with a
+    /// change no journal record holds (#1253). Null unless the check is on; it throws to refuse
+    /// the write.
+    /// </summary>
+    internal Action<long, long>? WriteBackAudit;
+
     internal StorageBufferPool(int capacity)
     {
         ValidateCapacity(capacity);
@@ -387,6 +395,35 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     }
 
     /// <summary>
+    /// Reads a page's bytes from the stream as they stand, whether or not the page is resident,
+    /// without verifying or caching them: the debug consistency check's view of what the last
+    /// write-back left (#1253).
+    /// </summary>
+    /// <remarks>
+    /// Under the pool lock, like every page read and write-back of the pool, so the read never
+    /// overlaps a write-back or an extension of the stream.
+    /// </remarks>
+    /// <param name="pageId">The page to read.</param>
+    /// <param name="stream">The stream to read from.</param>
+    /// <param name="destination">A <see cref="Page.Size"/>-byte buffer.</param>
+    /// <returns>False when the page lies past the end of the stream, which holds nothing of it.</returns>
+    internal bool TryReadStored(PageId pageId, StorageStream stream, byte[] destination)
+    {
+        lock (_syncRoot)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            if (((long)pageId + 1) * Page.Size > stream.Length)
+            {
+                return false;
+            }
+
+            stream.ReadPage(pageId, destination);
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Grows the stream to at least <paramref name="requiredLength"/> bytes; never shrinks it.
     /// </summary>
     /// <remarks>
@@ -634,6 +671,8 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         {
             pageLsn = new Page(image).Lsn;
         }
+
+        WriteBackAudit?.Invoke((long)pageId, pageLsn);
 
         if (pageLsn > 0)
         {

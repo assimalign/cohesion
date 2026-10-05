@@ -381,7 +381,7 @@ review rather than fenced with a new Documents or Graph marker.
   copied from are gone, as PostgreSQL's pivot tuples may hold values of tuples
   VACUUM has since removed (`README:34-38`).
 - **Rollback and undo find the exact entry.** A statement's physical rollback
-  restores page images; the logical undo after a multi-statement ROLLBACK erases by
+  restores its bracket's in-memory page pre-images; the logical undo after a multi-statement ROLLBACK erases by
   full identity and clears tombstones from the reference's newest version back,
   both stamp-checked, so a stale or repeated ledger entry is a no-op.
   `BTreeEntryOrderTests` covers a crash with a committed duplicate run and an
@@ -437,7 +437,10 @@ fall from 447 / 912 / 4,491 (insertion, blocks, random) to 80 / 89 / 154. Random
 run at 0.42–0.65 of insertion order at 4,096 pages (0.26–0.46 before) and 0.68–1.11 at 128 pages
 (0.52–0.86). An index 28 times a 128-page pool, taking 100,000 random inserts with a checkpoint
 every 5,000 (so most inserts first-touch their leaf since the checkpoint), journals 2,888 bytes
-per insert instead of 14,402.
+per insert instead of 14,402. The review's independent probe (five alternating runs, its own
+code) reproduced the journal bytes and put random references at 0.67–0.81 of insertion order at
+128 pages and 0.39–0.76 at 4,096, at or above one half in one run of five: #1236's "within 2× of
+ascending" holds at a 128-page pool and is still partial at the 4,096-page (32 MiB) default.
 
 The issue's own measurements of the same baseline (#1194: 124 µs and 7.2 ms per
 delete; 76 ms, 442 ms and 4,526 ms per cascade) were taken on the same kind of

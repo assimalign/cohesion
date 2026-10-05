@@ -555,9 +555,11 @@ The ordering is deliberately the same as in both original engines:
 physical recovery replays each page from its full page image and the committed deltas after it,
 overwriting every stolen write of a bracket that never committed, and writes each rebuilt page
 with the LSN of the last record it applied (`Database.Storage` DESIGN.md, "Recovery replay
-rules"). The journal is not truncated until step 5, so the redo point stays at the journal's
-checkpoint: the scrub's brackets in steps 3 and 4 touch pages above it, journal no new page image,
-and chain their deltas onto the recovered LSNs. A crash during the scrub leaves the original
+rules"). The journal is not truncated until step 5, so the redo point stays where the open set it,
+normally at the journal's checkpoint: the scrub's brackets in steps 3 and 4 touch pages above it,
+journal no new page image, and chain their deltas onto the recovered LSNs. (A recovered page at or
+below the header's LSN floor, which a non-checkpoint header write leaves above the checkpoint, is
+imaged again instead; either way the next open rebuilds it from the journal.) A crash during the scrub leaves the original
 records followed by some of the scrub's; the next open replays both through the same chain, which
 rebuilds the pages the first scrub changed, and scrubs again — idempotently, since the stamp
 checks skip versions already removed. `TransactionCoordinatorScrubCrashTests` cuts power at every

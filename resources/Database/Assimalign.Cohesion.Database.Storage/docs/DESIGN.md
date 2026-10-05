@@ -630,11 +630,14 @@ Every rule below is stated for a storage transaction (a *bracket*):
    `IStorageTransactionSource`), and page locks stop being the user-visible
    conflict surface without ever weakening the invariant that makes page logging correct.
 8. **Nothing changes a pooled page outside a bracket's touch.** A change made outside one is in
-   no delta and would be lost, or corrupt the page, at the next recovery. The storage's own
-   exceptions are page 0 (never in the pool), the checkpoint anchor pages (written only by header
-   writes, never replayed onto, "Checkpoints"), and the page manager's raw `FreePage` (no
-   production caller; its free is lost to a crash before the next checkpoint). The debug
-   consistency check audits the rule ("The debug consistency check").
+   no delta and would be lost, or corrupt the page, at the next recovery; on a page not imaged
+   since the checkpoint, the next image would even make it committed content. The storage's own
+   exceptions are page 0 (never in the pool), allocation's clear (the allocating bracket images
+   the page at its touch, invariant A), the checkpoint anchor pages (written only by header
+   writes, never replayed onto, "Checkpoints"), and the page manager's raw `AllocatePage` and
+   `FreePage` (no production caller; a raw free is lost to a crash before the next checkpoint).
+   The debug consistency check audits the rule on every page, whether or not it was imaged
+   since the checkpoint ("The debug consistency check").
 
 ### Page records (storage format 3, #1253)
 
@@ -666,10 +669,14 @@ one run; RavenDB's Voron diffs in the same 32-byte blocks (`DiffPages.ComputeDif
   its delta would carry.
 - **Hole elision without a layout contract.** An image is encoded against an all-zero page, so
   every all-zero block is dropped: the free gap of a slotted page (between its records and its
-  slot directory) and of a B-tree node (between its entry directory and its entry data). Both
-  formats keep the gap zero — allocation clears the page, and `SlottedPage.Initialize` and
-  `BTreeNode.Initialize` clear the body before a page is (re)built — so storage needs no
-  `pd_lower`/`pd_upper` contract. PostgreSQL elides the gap between `pd_lower` and `pd_upper`
+  slot directory) and of a B-tree node (between its entry directory and its entry data). The gap
+  starts zero and mostly stays so: allocation clears the page; the storage clears a slotted
+  page's body before it reinitializes one (`SlottedPage.Initialize` itself only resets the
+  header); `BTreeNode.Initialize` clears the node's body, and a split or a compaction rebuilds the
+  node through it; a B-tree entry removal clears the directory slot it vacates (#1253 review). A
+  slotted page's `Compact` leaves the old bytes between its new and its previous free-data end
+  in the gap until the page is reinitialized. So storage needs no `pd_lower`/`pd_upper`
+  contract. PostgreSQL elides the gap between `pd_lower` and `pd_upper`
   of a standard page (`src/backend/access/transam/xloginsert.c:731-756`) and zero-fills it on
   restore (`RestoreBlockImage`, `src/backend/access/transam/xlogreader.c:2213-2224`); a gap that is
   not zero costs bytes here, never correctness. A slotted page holding 3,000 bytes of records
@@ -680,9 +687,10 @@ one run; RavenDB's Voron diffs in the same 32-byte blocks (`DiffPages.ComputeDif
   offers only Deflate and Brotli. Measured on the #1236 leaves after hole elision (Release, 549
   leaves, three runs per build): Deflate at `CompressionLevel.Fastest` makes a 6,131-byte image
   1,732 bytes (72% smaller) in 100–144 µs, Brotli at quality 1 makes it 1,319 bytes (78% smaller)
-  in 26–59 µs. A first touch that journals an image costs 8–17 µs in all (encoding, pre-image,
-  append; the touch rows of "Measurements (#1253)"), so Brotli would roughly triple to quintuple
-  the cost of every cold first touch. The bytes it saves matter only where images dominate the
+  in 26–59 µs. A first touch that journals an image costs 2.3–3.4 µs in steady state (encoding,
+  pre-image, append) and its commit 1.3–2.2 µs (the touch rows of "Measurements (#1253)", as
+  re-measured in the review), so Brotli would cost 8 to 25 times the cold first touch, 5 to 16
+  times the touch and its commit together. The bytes it saves matter only where images dominate the
   journal: under a warm workload deltas do (154 bytes per insert in the #1236 benchmark, 662 per
   SQL statement), and in the cold workload with a checkpoint every 5,000 inserts images are nearly
   all of its 2,888 bytes per insert (the same inserts journal about 150 bytes of deltas when warm).
@@ -704,7 +712,12 @@ Two measures bound it now:
   (`StoragePreImageTests`: a bracket allocating ten times a 128-page pool and filling each page
   half-way peaks well under 2% of the 10 MiB of full copies, and spills nothing). A SQL
   `CREATE INDEX` building 3,508 pages over a 1 MiB pool raised the managed heap by 4.4–5.1 MiB
-  at its peak, against 31.8–33.4 MiB in format 2 ("Measurements (#1253)").
+  at its peak, against 31.8–33.4 MiB in format 2 ("Measurements (#1253)"). The Sql suite guards
+  it (`SqlCreateIndexMemoryTests`, #1253 review): a file-backed `CREATE INDEX` builds 1,446
+  pages, eleven times a 1 MiB pool, in one bracket, and the heap a full collection keeps alive
+  at the bracket's peak — inside its commit, with every pre-image held — grows by 1.1 MiB, a
+  tenth of the index's bytes. The test allows a quarter; keeping a full 8 KiB copy per
+  pre-image made it 12.5 MiB, 1.1 times the index.
 - **The spill past a budget.** Each bracket may keep `PreImageBudget` bytes of pre-images, half
   the buffer pool's capacity and at least 16 MiB (16 MiB for the default 32 MiB pool and for the
   1 MiB minimum, about 2,700 pre-images of three-quarters-full pages). The floor is generous on
@@ -713,7 +726,7 @@ Two measures bound it now:
   to 455 leaf pre-images, about 2.7 MB, and a quarter of a 1 MiB pool (the first budget tried) made
   them journal an image per leaf. Past the budget, a first touch journals the page's full image
   even when rule F does not ask for one,
-  stamps the page with it, and keeps only where its frame lies (24 bytes); the commit reads the
+  stamps the page with it, and keeps only where its frame lies; the commit reads the
   image back to compute its delta, and a rollback reads it back to restore the page. The frame
   is still in the append buffer or already on the journal file, and a checkpoint cannot truncate
   it while the bracket is active. A spill image is an ordinary full page image, so recovery and
@@ -723,7 +736,12 @@ Two measures bound it now:
   rewriting ten times a 128-page pool of 7 KB records never holds more than the budget, and
   commits or rolls back correctly, also after a crash).
 
-So a bracket's pre-image memory is at most its budget plus 24 bytes per spilled page. A cap
+So a bracket's pre-image memory is at most its budget plus the bookkeeping of each spilled page:
+its entry in the bracket's pre-image dictionary, a page id, the frame's location and base LSN,
+about 60 bytes, and up to twice that while the dictionary grows. The bookkeeping is not counted
+against the budget (#1253 review: a 75×-pool `UPDATE` spilled 5,456 pre-images and held its
+counted pre-images at exactly the 16 MiB budget), so a bracket touching a million pages beyond
+the budget holds about 60–120 MB of it; the pages themselves are in the journal. A cap
 (refusing brackets past a size) was rejected: it would fail exactly the large DDL and
 `INSERT ... SELECT` statements that need one bracket. Voron bounds its equivalent, the scratch
 pages of a write transaction, with scratch files (`MaxScratchBufferSize`, 256 MiB,
@@ -748,33 +766,57 @@ shadow with the pooled page, outside the LSN and checksum fields:
   touched and left unchanged; a commit's shadows take effect only with its commit record, as
   recovery's do;
 - after every rollback, each page it restored;
-- at every first touch that journals no image — **the audit**: the pre-image a delta will be
-  computed against must be exactly what recovery rebuilds at the page's LSN;
+- at every first touch that journals no image: the pre-image a delta will be computed against
+  must be exactly what recovery rebuilds at the page's LSN;
 - at every checkpoint, every shadowed page, before the truncation discards the records.
+
+Those compares cover the pages with a record since the redo point. **The audit of rule 8** covers
+every other page too (#1253 review). A page at or below the redo point has no shadow, but only a
+bracket's touch may change it, and that touch first journals an image and stamps the page above
+the redo point. So:
+
+- **a write-back of a dirty page at or below the redo point is refused** (the buffer pool's
+  `WriteBackAudit` hook): a checkpoint, a steal or the page writer would otherwise put a change
+  no record describes into the data file;
+- **the touch that images such a page first compares the pool's copy with the data file's**: the
+  image would otherwise journal the change as committed content. The compare also catches a
+  change that was never marked dirty.
+
+Before the review only a page imaged since the checkpoint was checked: a byte flipped through a
+pinned handle right after a checkpoint went unreported whether a checkpoint wrote it out or the
+next bracket's image absorbed it (the review's probes A1 and A2, now `StorageConsistencyCheckTests`
+cases). The pages the storage writes outside the journal on purpose — allocation's clear (the
+allocating bracket images the page at its touch, invariant A), a new file set's first page, the
+checkpoint anchor pages, the page manager's raw `AllocatePage` and `FreePage` — are reported to
+the check and exempt from those two audits until the next checkpoint has written them; page 0
+never enters the pool. What remains unchecked is a change never marked dirty to a page that is
+neither touched nor written back again: readers see it until the page leaves the pool, and
+neither the data file nor the journal ever held it.
 
 A page above the redo point whose image this process did not journal (an open that recovered it
 and deferred its checkpoint) gets its shadow by replaying its records from the journal itself,
 which also checks invariant P: such a page must have an image there. The check is off unless the
 `COHESION_STORAGE_CONSISTENCY_CHECKS` environment variable is `1` or `true` (every storage of the
 process) or a test calls `EnableConsistencyChecks`; it costs a page copy per page imaged since the
-checkpoint and a compare per record.
+checkpoint, a compare per record, and a read of the data file's copy per imaging touch.
 
 With the variable set, the Debug suites of the Database area (Storage, Transactions, Indexing,
 the Sql, Graph, Documents, Blob and KeyValuePair engines with their Storage, Catalog and Client
-projects, Hosting, Embedded and the area root) pass except for four test cases, each failing for
-a known reason. The two `FileSystemDurabilityTests` cases of #1018 roll back a bracket whose
-commit record the journal already holds, which the check reports (below). The two Blob tests that
-stream 128 or 256 MiB under a 64 MiB GC heap cap (`BlobProcessTests`, which also turns checkpoints
-off to keep a journal larger than the blob, and Blob.Client's wire-streaming test) run out of
-memory: the check keeps a shadow of every page imaged since the last checkpoint, and of every
-page a bracket changes until its commit record, so its memory is bounded by the checkpoint and
-the largest bracket, never by a heap cap. The seeded crash fuzz ran 60 seeds, 11,415 crash
+projects, Hosting, Embedded and the area root, 2,991 tests after the #1253 review) pass except
+for two test cases, each failing for a known reason. The two Blob tests that stream 128 or
+256 MiB under a 64 MiB GC heap cap (`BlobProcessTests`, which also turns checkpoints off to keep
+a journal larger than the blob, and Blob.Client's wire-streaming test) run out of memory: the
+check keeps a shadow of every page imaged since the last checkpoint, and of every page a bracket
+changes until its commit record, so its memory is bounded by the checkpoint and the largest
+bracket, never by a heap cap. Before the review the two `FileSystemDurabilityTests` cases of
+#1018 failed too: they rolled back a bracket whose commit record the journal already held, which
+a commit now never leaves behind (below). The audit of pages at or below the redo point added by
+the review reports nothing in those suites. The seeded crash fuzz ran 60 seeds, 11,415 crash
 points, with it on.
 
-The checkpoint anchor pages and the page manager's raw `FreePage` are written outside the journal
-on purpose and leave the check; a rollback of a bracket whose commit record is in the journal (its
-durable wait failed with something other than the storage going offline) is reported as what it
-is: recovery would redo what the rollback undid in memory.
+A rollback of a bracket whose commit record is in the journal is refused in every mode since the
+#1253 review, not only by the check: recovery would redo what the rollback undid in memory, and
+the page's next delta would name a base the journal moved past ("Commit durability modes").
 
 ### Failed appends (#1226)
 
@@ -1018,29 +1060,53 @@ Recovery is ordered, redo-only replay from the checkpoint the journal starts at
   a before-image past the end for the same reason.
 
 **Invariant P.** *If a page's LSN is above the redo point C, the journal holds a full page image
-of the page at an LSN in (C, page LSN].* Proof, by induction over every change of a page's LSN:
+of the page at an LSN no higher than the page's.* Recovery replays the journal from its first
+record, so it rebuilds such a page from that image. C is the rule-F threshold, a conservative
+one: every record the journal no longer holds has an LSN at or below C, but C may lie above
+records the journal still holds (step 1), which only makes rule F image a page sooner. (Before
+the #1253 review P placed the image in (C, page LSN], which a non-checkpoint header write makes
+false; recovery never relied on it.) Proof, by induction over every change of C and of a page's
+LSN:
 
-1. *At the redo point.* C is the LSN of the checkpoint record the journal starts at, or the LSN
-   floor of the newest header generation when that is higher (a checkpoint truncates the journal
-   before it appends its record, and a crash between the two loses the record, #1242). A checkpoint
-   runs with no bracket active and flushes every page first, and every LSN a page carries came from
-   a record appended before the checkpoint record — so every page is at or below C, and P holds
-   vacuously. The floor is load-bearing: without it a lost checkpoint record left C at zero, every
-   page above it, no page imaged again, and the next delta of a page with nothing to chain onto
-   (`StorageFormatTests`, "a journal lost after the truncation").
+1. *Where C is set.* Only a checkpoint and an open set C, and each leaves every page at or below
+   it, or rebuilt from an image in the journal.
+   - *A checkpoint* runs with no bracket active and flushes every page first, and every LSN a page
+     carries came from a record appended before the checkpoint record, whose LSN becomes C. Every
+     page is at or below C, and P holds vacuously.
+   - *An open* sets C to the highest of three LSNs. The journal's checkpoint record. The LSN floor
+     of the newest header generation: a checkpoint truncates the journal before it appends its
+     record, and a crash between the two loses the record (#1242); without the floor C fell to
+     zero, every page was above it, no page was imaged again, and the next delta of a page had
+     nothing to chain onto (`StorageFormatTests`, "a journal lost after the truncation"). Every
+     header generation persists the floor, a non-checkpoint one too (`Flush`, a non-idle
+     shutdown), which truncates nothing: C then lies above images still in the journal, which is
+     why P places the image only below the page's LSN. And the LSN of every page recovery did not
+     rebuild, read by the open's page scan from a page that verifies (#1253 review): such a page
+     has no record in the journal, yet its LSN can be above the other two when the journal lost
+     the records that stamped it — under `CommitDurability.None` the write-ahead gate drains the
+     journal without an fsync, so a power loss can keep a stolen page and lose the journal's tail;
+     a journal file lost, or restored from an older copy, does the same. The open raises the
+     journal's next LSN above that page too, so LSNs never fall below one a page carries
+     (`StorageRedoTests`, "a page that outlived its journal records" and "a data file newer than
+     its journal"). Every page recovery rebuilt starts at an image in the journal (step 5); every
+     other page is at or below C.
 2. *Rule F*, or a spill past the pre-image budget, stamps a page with the LSN of an image it
    just appended: P holds.
 3. *A commit* stamps only pages its bracket touched, each with a delta's LSN, which is above the
-   LSN the page carried after its touch: P's image (from step 2, or from before the bracket) is in
-   (C, page LSN].
+   LSN the page carried after its touch (LSNs only grow, step 1): P's image (from step 2, or from
+   before the bracket) is in the journal below it. Only a bracket whose commit record is appended
+   stamps for good: once the record is in the journal the bracket ends committed whatever its
+   durable wait does, and a commit asking for durability the journal's handle cannot provide is
+   refused before anything is journaled (#1018, #1253 review; "Commit durability modes").
 4. *A rollback* restores the base LSN the touch left — the image's when step 2 ran, otherwise the
    LSN the page already carried — together with that LSN's content.
 5. *Recovery* stamps each page it rebuilt with the LSN of the last record it applied; replay starts
-   every such page at its image (above C), so P holds for every rebuilt page.
+   every such page at its image, so P holds for every rebuilt page.
 6. *Allocation* zeroes the LSN (invariant A): at or below C, P holds vacuously.
 7. *Checkpoint anchor pages* carry the journal's last LSN, written outside the journal: they are
    never touched by a bracket while they belong to a chain, and freeing one clears it (LSN zero).
-8. *Nothing else* stamps a page LSN (rule 8 above); the debug consistency check verifies it.
+8. *Nothing else* stamps a page LSN (rule 8 above); the debug consistency check verifies it on
+   every page.
 
 Two consequences follow. Every record recovery applies to a page is preceded, in the journal, by
 the page's image, so replay rebuilds a page from the journal alone and never reads the data file
@@ -1082,8 +1148,8 @@ active-transaction set). Clean shutdown checkpoints, so a clean reopen recovers 
 set under the transaction lock with no bracket active, so no bracket sees it move: every page
 now carries a lower LSN, the journal holds no record of any page, and each page's next first
 touch journals its full image again (rule F, "Write ordering rules"). An open sets C to the
-journal's checkpoint record or the header's LSN floor, whichever is higher ("Recovery replay
-rules", invariant P).
+highest of the journal's checkpoint record, the header's LSN floor, and the LSN of any page
+recovery did not rebuild ("Recovery replay rules", invariant P).
 
 **What the images cost.** Rule F re-images every page a workload touches once per checkpoint
 interval, so image bytes per row are about `image size × distinct pages first touched in the
@@ -1192,6 +1258,18 @@ image to chain onto (invariant P, "Recovery replay rules"). The field (`LastChec
 existed in format 1 but nothing ever wrote it.
 Voron seeds its transaction counter the same way, from the journal's last transaction or,
 when the journal has none, from the file header (`src/Voron/StorageEnvironment.cs:324`).
+
+The floor bounds only the LSNs a header generation saw. A data page can carry a higher one when
+the journal lost the records that stamped it after the page was written — a power loss under
+`CommitDurability.None`, whose write-ahead gate drains the journal without an fsync, or a journal
+file lost or restored from an older copy. So the open's scan of every page header, which rebuilds
+the free-space map, also reads the LSN of each allocated page recovery did not rebuild; when one
+is above the redo point and the page verifies, the open raises the journal's next LSN above it
+and moves the redo point to it (#1253 review). Without that, LSNs restarted below the page's, the
+page journaled no image (it was above the redo point), its next delta named a base no record
+produced, and the next open refused the file set as a chain gap; in format 2 the same case lost
+the later commit silently. A page that does not verify moves nothing: it fails its checksum when
+it is read.
 
 **The checkpoint anchor (#1226 integration review, #1242).** `Checkpoint(ReadOnlySpan<long>)`
 also writes the logical sequences it is given into the new header generation, before the
@@ -1363,6 +1441,22 @@ backing handles, and the resolved value is visible through `CommitDurability`.
 The policy is applied after the commit record exists; `EnsureCommitDurable` also
 lets an outer logical transaction apply the same policy to its later commit
 record. MVCC visibility, joins, and constraint enforcement do not read this setting.
+
+**A bracket whose commit record is in the journal ends committed (#1018, #1253 review).**
+Recovery redoes a bracket whenever its commit record reaches the media, so the bracket's pages
+must never return to their pre-images in memory once the record is appended: the page's next
+delta would name a base the journal has moved past, and the next open would refuse the file set
+with a chain gap (in format 2 the same rollback was merely redone by recovery). Two rules hold
+it. A commit that awaits durability on a journal whose handle cannot flush durably
+(`SupportsDurableFlush` false — engines never reach this, because `ConfigureCommitDurability`
+refuses a durable mode on such a store first, but the public `CommitDurability` setter does not
+check, and a handle's capability can change under the storage) is refused with
+`NotSupportedException` before any page record is journaled: the bracket stays active and the
+caller's rollback agrees with recovery. And a durable wait that fails after the commit record
+was appended ends the bracket committed before the failure propagates, whatever the failure:
+a failed flush that takes the storage offline (as before, reported as unconfirmed), or anything
+else. A rollback of a bracket with a commit record is refused as a defect in every mode.
+`StorageRedoTests` covers both, each followed by another commit on the same page and a reopen.
 
 The gate lives in storage (not the engine) because commit blocks inside
 `CommitTransaction`; the engine contributes only the worker loop and the wake signal.
@@ -1665,13 +1759,17 @@ after-image per touched page per bracket); after is storage format 3. A probe ou
 repository ran each configuration in its own process on four reserved cores at high priority,
 alternating the builds; each cell is the range over six runs (three for the rows marked †).
 Storage harnesses use in-memory handles unless noted, so the times are CPU cost; the machine's
-other load moved absolute rates by up to 2× between runs, and the journal bytes are exact.
+other load moved absolute rates by up to 2× between runs, and the journal bytes are exact. The
+rows marked ‡ were re-measured in the #1253 review with the performance review's probe: three warm-up
+brackets discarded, twenty measured, each cell the range of the medians of four alternating runs.
+The first measurement timed four brackets with no warm-up, so tier-0 JIT code made its touch
+costs three to four times these, in both builds.
 
 | Workload | Before | After |
 |---|---|---|
-| Touch, 500 random pages of 1,000 per bracket (6 KB of data each), 4,096-page pool, cold (a checkpoint before each bracket, so every first touch journals an image): first touch / commit per page; journal per page | 8.1–23.1 / 5.3–10.1 µs; 16,460 B | 8.4–16.9 / 2.3–4.5 µs; 6,104 B |
-| the same, warm (every page imaged since the checkpoint) | 11.4–18.6 / 6.2–11.5 µs; 16,460 B | 4.7–7.0 / 2.7–4.2 µs; 51 B |
-| the same, cold / warm, 128-page pool (every bracket steals and reloads) | 22.9–30.0 / 19.1–23.8 µs; 22.4–30.1 / 20.5–25.3 µs | 21.0–32.3 / 15.5–23.2 µs; 5.1–20.0 / 4.6–20.1 µs |
+| Touch, 500 random pages of 1,000 per bracket (6 KB of data each), 4,096-page pool, cold (a checkpoint before each bracket, so every first touch journals an image): first touch / commit per page; journal per page ‡ | 2.25–2.62 / 1.52–1.75 µs; 16,460 B | 2.32–3.42 / 1.28–2.18 µs; 6,104 B |
+| the same, warm (every page imaged since the checkpoint) ‡ | 2.26–4.06 / 1.98–3.76 µs; 16,460 B | 1.07–1.63 / 1.24–1.84 µs; 51 B |
+| the same, cold / warm, 128-page pool (every bracket steals and reloads) ‡ | 8.2–18.7 / 5.9–16.5 µs; 6.3–7.7 / 5.4–6.9 µs | 6.2–7.9 / 4.5–6.7 µs; 4.3–5.7 / 4.3–5.5 µs |
 | #1236 benchmark: 100,000 index inserts over 10 INT keys, 1,000 per transaction, random references, 128 / 4,096-page pool | 105k–161k / 194k–265k inserts/s | 137k–245k / 315k–658k inserts/s |
 | the same, references in insertion order | 164k–258k / 511k–928k | 148k–260k / 651k–1,386k |
 | the same, ascending in shuffled 200-reference blocks | 215k–380k / 510k–954k | 196k–411k / 483k–1,303k |
@@ -1688,8 +1786,9 @@ What the rows show:
 
 - **Warm workloads journal 29–76× less.** A page touched again in the checkpoint interval costs
   its delta: 51 bytes for a one-byte change, 154 bytes per random-reference insert (4,491 before),
-  662 bytes for a three-page SQL statement (50,201 before). The commit's per-page cost falls by half or more, and a
-  warm first touch costs an encode of the pre-image (no append, no LSN, no gate fsync on a steal).
+  662 bytes for a three-page SQL statement (50,201 before). A warm commit's per-page cost falls by
+  about half, and a warm first touch costs an encode of the pre-image (no append, no LSN, no gate
+  fsync on a steal), about half of format 2's too.
 - **Cold workloads still gain.** A first touch since the checkpoint journals the page's image, so
   the cold touch costs about what format 2's did, and its image is the page's used bytes (6,104 of
   8,192 here). The critic's case — an index far larger than the pool, checkpointed often enough
@@ -1712,6 +1811,32 @@ What the rows show:
 - **A large bracket's memory is bounded.** The `CREATE INDEX` build held a full copy of every page
   it allocated (32 MiB of pre-images for a 27 MiB index); it now holds their encodings, a few dozen
   bytes each.
+
+### After the #1253 review (2026-10-05)
+
+Three reviews re-ran the change with their own probes; their journal bytes matched the rows above
+exactly wherever the workloads were the same (50,201 → 662 bytes per SQL statement, 16,460 →
+6,104 bytes per cold image, 51 per warm delta). What they changed or added:
+
+- **Touch costs** are the steady-state rows marked ‡ above; the first measurement's tier-0 JIT
+  time had tripled them.
+- **The #1236 ratio at 4,096 pages** was 0.39–0.76 in the performance review's five runs, at or
+  above one half in one of them, against three of six here; at 128 pages it was 0.67–0.81, five of
+  five. So #1236's "within 2× of ascending" holds at a 128-page pool and is still partial at the
+  32 MiB default; the review also measured unique-key inserts in eight configurations, none slower
+  than format 2 (+3% to +46% on the median).
+- **Recovery from a physical file** replayed format 3's 50 MB journal at 3.7–4.6 ms per MB in the
+  performance review (183–231 ms) against about 13 ms per MB for format 2, consistent with the
+  5–8 ms per MB above; the engines' `CheckpointJournalSize` documentation now states it.
+- **Peak memory of a large bracket** is a suite test: `SqlCreateIndexMemoryTests` ("The memory
+  bound of pre-images") builds 1,446 index pages over a 1 MiB pool and keeps 1.1 MiB on the heap
+  at the bracket's peak. The performance review measured a 75×-pool `UPDATE` that spilled 5,456
+  pre-images, held its counted pre-images at exactly the 16 MiB budget, and ran no slower than
+  format 2's.
+- **The review's fixes cost nothing measurable on the paths above**: a commit reads one more flag,
+  the open's page scan reads one more header field per page (and the whole page only for a page
+  above the redo point that recovery did not rebuild), and the consistency check's new audits run
+  only when it is on.
 
 ## Error model
 

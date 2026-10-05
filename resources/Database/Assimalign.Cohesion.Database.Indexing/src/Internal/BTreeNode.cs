@@ -474,6 +474,9 @@ internal readonly ref struct BTreeNode
     /// insert performs when only the orphaned bytes stand between it and a split) or
     /// vacuumed — the removal exists for the rare undo paths (aborted-writer purge),
     /// where the bounded space cost beats a full node rewrite per removed entry.
+    /// The directory slot the shift vacates is cleared: it joins the free gap between the
+    /// directory and the entry data, which a full page image of the node elides only
+    /// while it is zero (Storage DESIGN.md, "Page records").
     /// </summary>
     internal void RemoveLeafEntry(int index)
     {
@@ -481,6 +484,7 @@ internal readonly ref struct BTreeNode
         int start = directoryOffset + DirectorySlotSize * index;
 
         _body.Slice(start + DirectorySlotSize, DirectorySlotSize * (count - index - 1)).CopyTo(_body[start..]);
+        _body.Slice(directoryOffset + DirectorySlotSize * (count - 1), DirectorySlotSize).Clear();
         EntryCount = (ushort)(count - 1);
     }
 }

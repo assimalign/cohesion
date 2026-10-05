@@ -67,16 +67,21 @@ internal sealed class TornStorage : Storage
     /// survives a power loss only once a flush covered it.
     /// </param>
     /// <param name="consistencyChecks">True to turn the storage's debug consistency check on.</param>
+    /// <param name="journalDurableFlushesOnly">
+    /// True to let only a durable flush make the flush-gated journal durable, as an operating
+    /// system's cache does: the flushes <c>CommitDurability.None</c> issues then survive no power loss.
+    /// </param>
     public static TornStorage Create(
         CrashPoint? point = null,
         int poolCapacity = 8,
         bool journalWriteThrough = true,
         bool dataWriteThrough = true,
-        bool consistencyChecks = false)
+        bool consistencyChecks = false,
+        bool journalDurableFlushesOnly = false)
     {
         var storage = new TornStorage(
             new CrashSimulationStream(dataWriteThrough, point, "data"),
-            new CrashSimulationStream(journalWriteThrough, point, "journal"),
+            new CrashSimulationStream(journalWriteThrough, point, "journal") { DurableFlushesOnly = journalDurableFlushesOnly },
             poolCapacity);
         if (consistencyChecks)
         {
