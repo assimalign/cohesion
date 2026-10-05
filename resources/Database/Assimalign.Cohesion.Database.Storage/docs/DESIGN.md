@@ -14,26 +14,35 @@ The guardrails that keep this layer trustworthy are structural: every page load 
 checksum-verified, every write-back is checksum-stamped, and durability flows through
 the journal only — there are no side files.
 
-## Type shape: the abstract bases are the contract (#1257)
+## Type shape: one abstract base, sealed everything else (#1257, #1258)
 
-The area is concrete-first (`.claude/rules/database-area.md`). `Storage` and
-`StorageJournal` are the contracts the transaction layer, the indexes and the catalogs
-program against; the `IStorage` and `IStorageJournal` interfaces that used to stand beside
-them were deleted in phase 1 of the concrete-types program
-(`docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md`), so both bases carry the deviation marker.
+The area is concrete-first (`.claude/rules/database-area.md`). The project declares no
+interface: phase 1 of the concrete-types program
+(`docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md`) deleted `IStorage` and `IStorageJournal`,
+and phase 2 replaced the remaining six with sealed types.
 
-- **`Storage`** is a variant set: its five leaves (`SqlStorage`, `KeyValueStorage`,
-  `GraphStorage`, `DocumentStorage`, `BlobStorage`) live in the model storage assemblies, so
-  the constructor stays `protected`. Its public members are non-virtual; only `Model` is
-  abstract, and phase 2 turns it into a constructor-set field.
-- **`StorageJournal`** has one shipped leaf, the sealed `StreamJournal`, and its medium cores
-  include a `private protected` member, so nothing outside this assembly can derive from it.
-  Phase 2 audits it against the journal format #1236 settles: it either collapses into one
-  sealed type or records the second variant that justifies the base.
+- **`Storage`** is the one abstract base, and a variant set: its five leaves (`SqlStorage`,
+  `KeyValueStorage`, `GraphStorage`, `DocumentStorage`, `BlobStorage`) live in the model
+  storage assemblies, so the constructor stays `protected` and the type carries the deviation
+  marker. Its public members are non-virtual, and none is abstract: `Model` is fixed per
+  storage, so the leaf passes it to the constructor and the getter reads a field (rule 6).
+- **`StorageJournal` is one sealed type.** It had one leaf, `StreamJournal`, in this assembly,
+  and no test or other assembly derived from it, so the audit phase 2 owed it (after #1236's
+  journal format settled) found no second variant to justify a base. The leaf was folded in:
+  the medium operations (frame writes, flushes, the read scan, truncation, the positional read
+  of a spilled pre-image) are private members, and the former leaf's constructors (over a
+  `Stream`, a `StorageStream` or an `IFileSystemFileHandle`) and file factories
+  (`StorageJournal.FromFile`) are the journal's own. Its deviation marker went with the base.
+- **The sub-components a public `Storage` member returns are sealed public types** with
+  internal constructors: `StoragePageManager` (`Storage.PageManager`), `StorageFreeSpaceMap`
+  (`Storage.FreeSpaceMap`), `StorageUnitIterator` (`Storage.GetUnitIterator`) and the
+  `StorageUnit` struct it yields unboxed, `StorageTransaction` (`Storage.BeginTransaction`) and
+  `StoragePageHandle`. Indexing, the model catalogs and stores, Transactions and Sql call
+  through them in other assemblies, so they cannot be internal, and every call on the per-page
+  and per-record paths is now direct. The page manager is not disposable: the storage owns
+  it, and its former `Dispose` did nothing.
 - **The buffer pool is internal.** `Storage.BufferPool` returns the internal
-  `StorageBufferPool`; only the storage and its own tests read it. The page manager, the
-  free-space map and the unit iterator stay public interfaces until phase 2, because public
-  `Storage` members return them to nine shipped assemblies.
+  `StorageBufferPool`; only the storage and its own tests read it.
 - **The unused `IStorageBackupManager` and `IStorageRecoveryManager` placeholders were
   deleted**: neither had an implementer or a caller. Backup and recovery are members of
   `Storage` itself (open-time recovery, checkpoints), not separate managers.
@@ -270,7 +279,7 @@ preserve bytes even when no durable flush was issued.
 
 ## The buffer pool
 
-Pin-counting with RAII handles (`IStoragePageHandle`): a page cannot be evicted while
+Pin-counting with RAII handles (`StoragePageHandle`): a page cannot be evicted while
 pinned, dirty pages are written back (checksum-stamped) before eviction, and handles
 release their pin on dispose. Contrast with a `Memory<byte>`-pooling design: pages are
 *pinned* buffers exposing raw pointers because the slotted-page and header structs
@@ -654,8 +663,8 @@ Every rule below is stated for a storage transaction (a *bracket*):
    is only correct because two transactions can never interleave on one page. This division is
    permanent in the MVCC integration design (area DESIGN.md §3.8): storage
    transactions remain the **physical WAL bracket** — the MVCC manager layers
-   row-grain snapshots/locks *above* them (paired per transaction via
-   `IStorageTransactionSource`), and page locks stop being the user-visible
+   row-grain snapshots/locks *above* them (paired per statement through
+   the index manager's `TransactionSource` resolver), and page locks stop being the user-visible
    conflict surface without ever weakening the invariant that makes page logging correct.
 8. **Nothing changes a pooled page outside a bracket's touch.** A change made outside one is in
    no delta and would be lost, or corrupt the page, at the next recovery; on a page not imaged
@@ -872,7 +881,7 @@ offline" below). The bookkeeping below still holds for every failed append, offl
   open-time checkpoint. A second crash in that window left the scrub's brackets unreadable,
   their stolen page writes with nothing to be rebuilt from — and a journal holding only the
   torn start of a checkpoint record was never truncated at all, so every later commit sat
-  behind it. `StreamJournal` therefore remembers where the last verified frame ended when a
+  behind it. The journal therefore remembers where the last verified frame ended when a
   read scan runs to the end of the verified frames (every journal's initialization does), and
   its first write cuts the stream back to that offset. PostgreSQL resumes WAL insertion at
   the end of the last valid record the same way (`EndOfLog`,
@@ -1838,7 +1847,7 @@ What the rows show:
   (0.4 MB instead of 48.7 MB), and reopens in 6–45 ms instead of 49–1,191 ms. Byte for byte, a
   journal of small deltas costs more to apply in memory (a 50 MB journal holds 456,500 deltas
   against 3,200 images), and from a file it now reads faster because the read scan reads 256 KiB
-  chunks instead of making three reads per frame (`StreamJournal.ReadFrames`): the first version
+  chunks instead of making three reads per frame (`ReadFrames`, then on `StreamJournal`, now on `StorageJournal`): the first version
   of format 3 reopened that journal from a file in 37 s. Recovery always rewrites every page with
   a record in the journal; it no longer skips one already at its target LSN ("Recovery replay
   rules").

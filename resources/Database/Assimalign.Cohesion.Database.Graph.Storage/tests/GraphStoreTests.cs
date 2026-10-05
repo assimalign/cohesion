@@ -433,7 +433,7 @@ public sealed class GraphStoreTests
             Coordinator = new TransactionCoordinator(Storage, Storage.WriteAheadJournal, Storage.Records);
             Store = GraphStore.Open(Storage, Coordinator);
         }
-        internal ValueTask<ITransactionContext> Begin() => Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        internal ValueTask<TransactionContext> Begin() => Coordinator.BeginAsync(IsolationLevel.Snapshot);
         public async ValueTask DisposeAsync()
         {
             await Coordinator.DisposeAsync();

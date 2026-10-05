@@ -28,7 +28,7 @@ internal sealed partial class SqlPlanExecutor
 {
     private readonly SqlStorage _storage;
     private readonly ISqlCatalog _catalog;
-    private readonly IIndexManager _indexManager;
+    private readonly BTreeIndexManager _indexManager;
     private readonly SqlBoundTableCache _definitions;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
@@ -47,7 +47,7 @@ internal sealed partial class SqlPlanExecutor
     /// write and every read of a missing trailing field use.
     /// </param>
     /// <param name="parameters">The statement's bound parameter values.</param>
-    internal SqlPlanExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager, SqlBoundTableCache definitions,
+    internal SqlPlanExecutor(SqlStorage storage, ISqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions,
         IReadOnlyDictionary<string, object?>? parameters)
     {
         _storage = storage;
@@ -61,9 +61,9 @@ internal sealed partial class SqlPlanExecutor
     /// A registered index paired with its live tree and resolved key ordinals —
     /// what one statement's maintenance loop works with.
     /// </summary>
-    private readonly record struct SqlLiveIndex(SqlCatalogIndex Metadata, IIndex Index, int[] KeyOrdinals)
+    private readonly record struct SqlLiveIndex(SqlCatalogIndex Metadata, BTreeIndex Index, int[] KeyOrdinals)
     {
-        internal RecordVersionIndex Versions { get; } = new(Index);
+        internal BTreeRecordVersionIndex Versions { get; } = new(Index);
     }
 
     internal async Task<QueryResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -713,7 +713,7 @@ internal sealed partial class SqlPlanExecutor
     /// the same-length in-place tombstone write — and records it in the
     /// version-store ledger for logical undo and pruning.
     /// </summary>
-    private void TombstoneVersion(SqlStatementContext statement, IStorageTransaction bracket, PageId pageId, int slotIndex)
+    private void TombstoneVersion(SqlStatementContext statement, StorageTransaction bracket, PageId pageId, int slotIndex)
     {
         var current = _storage.ReadRow(pageId, slotIndex);
         byte[] tombstoned = SqlRowCodec.WithDeleter(current.Span, statement.Transaction.Sequence);
@@ -948,7 +948,7 @@ internal sealed partial class SqlPlanExecutor
         // cannot leave a described index without a tree registration (or the
         // reverse). A crash before this write leaves only orphaned tree pages —
         // a safe leak, never a re-attached index.
-        var registrations = ((IIndexRegistry)_indexManager).ExportRegistrations();
+        var registrations = _indexManager.ExportRegistrations();
         await _catalog.CreateIndexAsync(
             new SqlCatalogIndex(
                 plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
@@ -1002,7 +1002,7 @@ internal sealed partial class SqlPlanExecutor
         // manager lookup: catalog names are case-insensitive, directory names
         // are exact.
         var remaining = new List<BTreeIndexRegistration>();
-        foreach (var registration in ((IIndexRegistry)_indexManager).ExportRegistrations())
+        foreach (var registration in _indexManager.ExportRegistrations())
         {
             if (!(registration.ObjectId == plan.Table.ObjectId &&
                   string.Equals(registration.Definition.Name, metadata.Name, StringComparison.Ordinal)))
@@ -1093,7 +1093,7 @@ internal sealed partial class SqlPlanExecutor
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> SeekRows(
         SqlCatalogTable table,
         SqlIndexSeekPath seek,
-        IIndex index,
+        BTreeIndex index,
         SqlStatementContext statement,
         CancellationToken cancellationToken,
         TransactionSnapshot? snapshotOverride = null)

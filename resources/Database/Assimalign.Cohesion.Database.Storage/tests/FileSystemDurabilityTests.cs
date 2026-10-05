@@ -33,7 +33,7 @@ public sealed class FileSystemDurabilityTests
             transaction.Commit();
 
             // #1018: observe the requested operation after the complete Storage ->
-            // StreamJournal -> StorageStream chain, forwarding it to a real physical handle.
+            // StorageJournal -> StorageStream chain, forwarding it to a real physical handle.
             // A recovery-only assertion would pass even if this durable call were lost.
             journalHandle.DurableFlushRequests.ShouldBe(1);
             journalHandle.CompletedDurableFlushes.ShouldBe(1);
@@ -47,7 +47,7 @@ public sealed class FileSystemDurabilityTests
     {
         WithPhysicalFileSystem(fileSystem =>
         {
-            using var journal = StreamJournal.FromFile("direct.log", fileSystem);
+            using var journal = StorageJournal.FromFile("direct.log", fileSystem);
             long lsn = journal.AppendBegin(1);
             journal.EnsureDurable(lsn);
 
@@ -64,7 +64,7 @@ public sealed class FileSystemDurabilityTests
     public void Journal_NonDurableFileSystemFailsAtFirstDurableFlushWithoutAdvancingLsn()
     {
         using var fileSystem = CreateInMemoryFileSystem();
-        using var journal = StreamJournal.FromFile("journal.log", fileSystem);
+        using var journal = StorageJournal.FromFile("journal.log", fileSystem);
         long lsn = journal.AppendBegin(1);
 
         // Opening and ordinary I/O remain valid. #1018 requires the first request
@@ -131,7 +131,7 @@ public sealed class FileSystemDurabilityTests
         WithPhysicalFileSystem(fileSystem =>
         {
             using var stream = StorageStream.FromFile("wrapped.log", fileSystem);
-            using var journal = new StreamJournal((Stream)stream, leaveOpen: true);
+            using var journal = new StorageJournal((Stream)stream, leaveOpen: true);
             var handle = fileSystem.Opened.Single().Handle;
             long lsn = journal.AppendBegin(1);
 
@@ -210,11 +210,10 @@ public sealed class FileSystemDurabilityTests
     private sealed class HarnessStorage : Storage
     {
         private HarnessStorage(IFileSystem fileSystem)
-            : base(StorageStream.FromFile("database.dat", fileSystem),
+            : base(StorageModel.Custom, StorageStream.FromFile("database.dat", fileSystem),
                    StorageStream.FromFile("database.log", fileSystem),
                    StorageStream.FromFile("database.bak", fileSystem)) { }
 
-        public override StorageModel Model => StorageModel.Custom;
         public long JournalDurableLsn => WriteAheadLog.DurableLsn;
         public long JournalLastLsn => WriteAheadLog.LastLsn;
 
@@ -225,7 +224,7 @@ public sealed class FileSystemDurabilityTests
             return storage;
         }
 
-        public void Insert(IStorageTransaction transaction, byte[] data) => InsertRecord(transaction, data);
+        public void Insert(StorageTransaction transaction, byte[] data) => InsertRecord(transaction, data);
     }
 
     private sealed class RecordingHandle : IFileSystemFileHandle

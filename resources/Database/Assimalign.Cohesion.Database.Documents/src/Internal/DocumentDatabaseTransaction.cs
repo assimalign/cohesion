@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal sealed class DocumentDatabaseTransaction : IDatabaseTransaction
 {
     private readonly TransactionCoordinator _coordinator;
-    private readonly ITransactionContext _context;
+    private readonly TransactionContext _context;
     private readonly object _sync = new();
 
     // Serializes every path that ends the context (commit, rollback, dispose, abort), so two of
@@ -38,14 +38,14 @@ internal sealed class DocumentDatabaseTransaction : IDatabaseTransaction
     /// <param name="coordinator">The transaction coordinator that commits and rolls back the transaction.</param>
     /// <param name="context">The transaction context this transaction wraps.</param>
     /// <param name="database">The database the transaction runs on, whose offline state it observes.</param>
-    public DocumentDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context, DocumentDatabaseInstance? database = null)
+    public DocumentDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, DocumentDatabaseInstance? database = null)
     {
         _coordinator = coordinator;
         _context = context;
         _database = database;
     }
 
-    internal ITransactionContext Context => _context;
+    internal TransactionContext Context => _context;
     internal int Operations { get; set; }
 
     /// <summary>

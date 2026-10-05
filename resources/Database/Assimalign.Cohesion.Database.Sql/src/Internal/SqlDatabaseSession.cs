@@ -16,7 +16,7 @@ using Assimalign.Cohesion.Database.Transactions;
 /// <summary>
 /// Internal implementation of a SQL database session, bound to the database's
 /// MVCC transaction manager: explicit and auto-commit statements alike run under
-/// an <see cref="ITransactionContext"/> paired with a storage bracket, so
+/// a <see cref="TransactionContext"/> paired with a storage bracket, so
 /// visibility semantics never fork between the two paths.
 /// </summary>
 internal sealed class SqlDatabaseSession : IDatabaseSession
@@ -129,7 +129,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             throw new DatabaseException("A transaction is already active on this session.");
         }
 
-        ITransactionContext context;
+        TransactionContext context;
         try
         {
             context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
@@ -265,7 +265,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
         // Auto-commit semantics: a one-statement manager transaction, so
         // visibility and conflict semantics are identical to the explicit path.
-        ITransactionContext context;
+        TransactionContext context;
         try
         {
             context = await _coordinator.BeginAsync(_isolationLevel, cancellationToken).ConfigureAwait(false);
@@ -313,7 +313,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     /// would replace the statement's own failure, and the reopen's recovery aborts the
     /// transaction, which has no commit record.
     /// </summary>
-    private async ValueTask RollbackAutoCommitAsync(ITransactionContext context)
+    private async ValueTask RollbackAutoCommitAsync(TransactionContext context)
     {
         if (context.State == TransactionState.Active && Instance?.IsOffline != true)
         {

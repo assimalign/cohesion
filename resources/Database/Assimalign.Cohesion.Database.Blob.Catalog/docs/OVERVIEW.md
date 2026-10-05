@@ -10,7 +10,7 @@ records carry a stable identity, case-sensitive name, `DatabaseObjectOwner`, and
 schema. Blob records carry the container identity, name, length, media type, entity tag,
 creation/modification times, content checksum, and chunk-chain head.
 
-Supply an `ITransactionContext` to every mutation and a `TransactionSnapshot` to every read.
+Supply a `TransactionContext` to every mutation and a `TransactionSnapshot` to every read.
 The caller acquires the model locks and owns commit or rollback. The catalog never commits
 the supplied transaction. Its metadata shares the content storage and journal so publication
 of a new head and its chunks has one logical commit decision.

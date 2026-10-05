@@ -11,9 +11,7 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 internal sealed class WorkerStorage : Storage
 {
     private WorkerStorage(StorageStream data, StorageStream journal)
-        : base(data, journal, new StorageStream(new MemoryStream())) { }
-
-    public override StorageModel Model => StorageModel.Sql;
+        : base(StorageModel.Sql, data, journal, new StorageStream(new MemoryStream())) { }
 
     public StorageJournal Wal => WriteAheadLog;
 
@@ -27,7 +25,7 @@ internal sealed class WorkerStorage : Storage
         return storage;
     }
 
-    public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, ReadOnlySpan<byte> data)
+    public (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, ReadOnlySpan<byte> data)
         => InsertRecord(transaction, data);
 
     public (PageId PageId, int SlotIndex) Insert(ReadOnlySpan<byte> data)

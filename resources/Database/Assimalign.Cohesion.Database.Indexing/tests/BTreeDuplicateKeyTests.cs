@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// </summary>
 public class BTreeDuplicateKeyTests
 {
-    private static async Task<(IndexTestHarness Harness, IIndex Index)> CreateIndexAsync(bool unique = false)
+    private static async Task<(IndexTestHarness Harness, BTreeIndex Index)> CreateIndexAsync(bool unique = false)
     {
         var harness = new IndexTestHarness();
         var setup = await harness.BeginAsync();
@@ -34,7 +34,7 @@ public class BTreeDuplicateKeyTests
     }
 
     private static async Task<List<(byte[] Key, ulong Reference)>> ReadAsync(
-        IIndex index, ITransactionContext reader, IndexKeyRange range, bool reverse = false)
+        BTreeIndex index, TransactionContext reader, IndexKeyRange range, bool reverse = false)
     {
         var results = new List<(byte[] Key, ulong Reference)>();
         await using var cursor = index.OpenCursor(reader, range, reverse);
@@ -109,7 +109,7 @@ public class BTreeDuplicateKeyTests
     /// the full scan holds in that range, in the same order — forward and reversed.
     /// </summary>
     private static async Task SeekShouldMatchScanAsync(
-        IIndex index, ITransactionContext reader, List<(byte[] Key, ulong Reference)> scan, IndexKeyRange range)
+        BTreeIndex index, TransactionContext reader, List<(byte[] Key, ulong Reference)> scan, IndexKeyRange range)
     {
         var expected = scan.Where(entry => InRange(entry.Key, range)).ToList();
 
@@ -274,7 +274,7 @@ public class BTreeDuplicateKeyTests
         var model = new Dictionary<long, int>();
         ulong reference = 0;
 
-        async Task InsertAsync(ITransactionContext transaction, long value)
+        async Task InsertAsync(TransactionContext transaction, long value)
         {
             await index.InsertAsync(transaction, IndexKey.FromInt64(value), reference++);
             model[value] = model.GetValueOrDefault(value) + 1;
@@ -612,7 +612,7 @@ public class BTreeDuplicateKeyTests
         // until the purge clears that stamp (a delete only stamps deleter-free entries).
         var unprovenTombstones = new HashSet<ulong>();
 
-        ITransactionContext? oldReader = null;
+        TransactionContext? oldReader = null;
         Dictionary<ulong, long>? oldModel = null;
 
         var historyWriter = await CommittedSequenceAsync(harness);
@@ -769,7 +769,7 @@ public class BTreeDuplicateKeyTests
     }
 
     private static async Task VerifyAsync(
-        IIndex index, ITransactionContext reader, IReadOnlyDictionary<ulong, long> model,
+        BTreeIndex index, TransactionContext reader, IReadOnlyDictionary<ulong, long> model,
         Func<long, IndexKey> keyOf, int domain, Random random)
     {
         var scan = await ReadAsync(index, reader, IndexKeyRange.All);

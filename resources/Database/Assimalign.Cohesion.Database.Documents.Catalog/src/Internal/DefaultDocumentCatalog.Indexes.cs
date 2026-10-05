@@ -17,7 +17,7 @@ internal sealed partial class DefaultDocumentCatalog
 {
     private readonly Dictionary<(Guid CollectionId, string Name), List<Reference>> _indexDefinitions = new();
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
-    private IIndexManager _indexes = null!;
+    private BTreeIndexManager _indexes = null!;
 
     public IReadOnlyList<DocumentIndexMetadata> GetIndexes(Guid collectionId, TransactionSnapshot snapshot)
     {
@@ -38,7 +38,7 @@ internal sealed partial class DefaultDocumentCatalog
     }
 
     public async ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, string path,
-        ITransactionContext context, CancellationToken cancellationToken = default)
+        TransactionContext context, CancellationToken cancellationToken = default)
     {
         EnsureActive(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -91,7 +91,7 @@ internal sealed partial class DefaultDocumentCatalog
         return metadata;
     }
 
-    public async ValueTask DeleteIndexAsync(Guid collectionId, string name, ITransactionContext context,
+    public async ValueTask DeleteIndexAsync(Guid collectionId, string name, TransactionContext context,
         CancellationToken cancellationToken = default)
     {
         Found? previous;
@@ -182,7 +182,7 @@ internal sealed partial class DefaultDocumentCatalog
     }
 
     private async ValueTask ApplyIndexChangesAsync(List<IndexChange> changes, (PageId PageId, int SlotIndex) inserted,
-        ITransactionContext context, CancellationToken cancellationToken)
+        TransactionContext context, CancellationToken cancellationToken)
     {
         foreach (var change in changes)
         {
@@ -202,12 +202,12 @@ internal sealed partial class DefaultDocumentCatalog
         }
     }
 
-    private IIndex ResolveIndex(DocumentIndexMetadata metadata)
+    private BTreeIndex ResolveIndex(DocumentIndexMetadata metadata)
         => _indexes.TryGetIndex(metadata.ObjectId, metadata.Name, out var index)
             ? index : throw new DocumentCatalogException($"Missing physical tree for index '{metadata.Name}'.");
 
-    private async ValueTask<T> ApplyAsync<T>(ITransactionContext context,
-        Func<IStorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
+    private async ValueTask<T> ApplyAsync<T>(TransactionContext context,
+        Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
     {
         try
         {
@@ -234,7 +234,7 @@ internal sealed partial class DefaultDocumentCatalog
         _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = _storage,
-            TransactionSource = new TransactionSource(_coordinator),
+            TransactionSource = ResolveStatementBracket,
             ExistingIndexes = registrations
         });
     }
@@ -274,9 +274,9 @@ internal sealed partial class DefaultDocumentCatalog
         return registrations;
     }
 
-    private void SaveRegistrations(IStorageTransaction bracket)
+    private void SaveRegistrations(StorageTransaction bracket)
     {
-        foreach (var registration in ((IIndexRegistry)_indexes).ExportRegistrations())
+        foreach (var registration in _indexes.ExportRegistrations())
         {
             if (_registrations.TryGetValue(registration.ObjectId, out var prior) && prior.Root == registration.RootPageId)
             {
@@ -307,25 +307,13 @@ internal sealed partial class DefaultDocumentCatalog
 
     private readonly record struct IndexChange(DocumentIndexMetadata Metadata, IndexKey? OldKey, IndexKey? NewKey, ulong OldLocation);
 
-    private sealed class TransactionSource : IStorageTransactionSource
-    {
-        private readonly TransactionCoordinator _coordinator;
+    // The index manager's storage transaction for a context: the shared statement bracket the
+    // coordinator owns, or this catalog's own error when there is none.
+    private StorageTransaction ResolveStatementBracket(TransactionContext context)
+        => _coordinator.TryGetStorageTransaction(context, out var bracket)
+            ? bracket : throw new InvalidOperationException("Index mutation requires a shared statement bracket.");
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="TransactionSource"/> class.
-        /// </summary>
-        /// <param name="coordinator">The coordinator that owns each transaction's shared statement bracket.</param>
-        public TransactionSource(TransactionCoordinator coordinator)
-        {
-            _coordinator = coordinator;
-        }
-
-        public IStorageTransaction GetStorageTransaction(ITransactionContext context)
-            => _coordinator.TryGetStorageTransaction(context, out var bracket)
-                ? bracket : throw new InvalidOperationException("Index mutation requires a shared statement bracket.");
-    }
-
-    private sealed class IndexUndo : IRecordVersionIndex
+    private sealed class IndexUndo : RecordVersionIndex
     {
         private readonly DefaultDocumentCatalog _catalog;
         private readonly DocumentIndexMetadata _metadata;
@@ -341,12 +329,12 @@ internal sealed partial class DefaultDocumentCatalog
             _metadata = metadata;
         }
 
-        public ValueTask EraseAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
-            TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+            TransactionSequence writer, CancellationToken cancellationToken)
             => _catalog.ResolveIndex(_metadata).EraseAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
 
-        public ValueTask ClearDeleterAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
-            TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+            TransactionSequence writer, CancellationToken cancellationToken)
             => _catalog.ResolveIndex(_metadata).ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
     }
 }

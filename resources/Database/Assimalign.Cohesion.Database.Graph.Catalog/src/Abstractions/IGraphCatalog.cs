@@ -33,7 +33,7 @@ public interface IGraphCatalog
     /// <exception cref="ArgumentException">The definition is invalid.</exception>
     /// <exception cref="GraphCatalogException">The identity or name conflicts with an existing definition.</exception>
     /// <exception cref="DatabaseObjectLockedException">The existing definition is owned by a schema.</exception>
-    ValueTask SaveLabelAsync(GraphLabelMetadata label, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask SaveLabelAsync(GraphLabelMetadata label, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Drops a label and its property/index metadata in the supplied transaction.</summary>
     /// <param name="id">The stable definition identity.</param>
@@ -41,7 +41,7 @@ public interface IGraphCatalog
     /// <param name="cancellationToken">Cancels the mutation.</param>
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The definition is owned by a schema.</exception>
-    ValueTask DeleteLabelAsync(Guid id, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DeleteLabelAsync(Guid id, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Finds a visible relationshipType by its ordinal name.</summary>
     /// <param name="name">The case-sensitive name.</param>
@@ -62,7 +62,7 @@ public interface IGraphCatalog
     /// <exception cref="ArgumentException">The definition is invalid.</exception>
     /// <exception cref="GraphCatalogException">The identity or name conflicts with an existing definition.</exception>
     /// <exception cref="DatabaseObjectLockedException">The existing definition is owned by a schema.</exception>
-    ValueTask SaveRelationshipTypeAsync(GraphRelationshipTypeMetadata relationshipType, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask SaveRelationshipTypeAsync(GraphRelationshipTypeMetadata relationshipType, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Drops a relationshipType and its property/index metadata in the supplied transaction.</summary>
     /// <param name="id">The stable definition identity.</param>
@@ -70,7 +70,7 @@ public interface IGraphCatalog
     /// <param name="cancellationToken">Cancels the mutation.</param>
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The definition is owned by a schema.</exception>
-    ValueTask DeleteRelationshipTypeAsync(Guid id, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DeleteRelationshipTypeAsync(Guid id, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Lists a definition's property keys in ordinal name order.</summary>
     /// <param name="definitionId">The label or relationship-type identity.</param>
@@ -86,7 +86,7 @@ public interface IGraphCatalog
     /// <exception cref="ArgumentException">The property metadata is invalid.</exception>
     /// <exception cref="GraphCatalogException">The owning definition is absent.</exception>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
-    ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Drops property metadata from an existing mutable definition.</summary>
     /// <param name="definitionId">The label or relationship-type identity.</param>
@@ -96,7 +96,7 @@ public interface IGraphCatalog
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="GraphCatalogException">The owning definition is absent.</exception>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
-    ValueTask DeletePropertyKeyAsync(Guid definitionId, string name, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DeletePropertyKeyAsync(Guid definitionId, string name, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Lists index definitions belonging to a label in ordinal name order.</summary>
     /// <param name="labelId">The label identity.</param>
@@ -112,7 +112,7 @@ public interface IGraphCatalog
     /// <exception cref="ArgumentException">The index metadata is invalid.</exception>
     /// <exception cref="GraphCatalogException">The label is absent or the name identifies another property.</exception>
     /// <exception cref="DatabaseObjectLockedException">The label is schema-owned.</exception>
-    ValueTask SaveIndexAsync(GraphIndexMetadata index, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask SaveIndexAsync(GraphIndexMetadata index, TransactionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>Tombstones named index metadata alongside the physical graph-store index.</summary>
     /// <param name="labelId">The label identity.</param>
@@ -122,6 +122,6 @@ public interface IGraphCatalog
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="GraphCatalogException">The label is absent.</exception>
     /// <exception cref="DatabaseObjectLockedException">The label is schema-owned.</exception>
-    ValueTask DeleteIndexAsync(Guid labelId, string name, ITransactionContext context, CancellationToken cancellationToken = default);
+    ValueTask DeleteIndexAsync(Guid labelId, string name, TransactionContext context, CancellationToken cancellationToken = default);
 }
 

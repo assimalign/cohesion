@@ -37,7 +37,7 @@ internal sealed partial class DefaultGraphStore : IGraphStore
     }
 
     public async ValueTask<StoredGraphNode> CreateNodeAsync(IReadOnlyList<string> labels,
-        IReadOnlyDictionary<string, object?> properties, ITransactionContext context, CancellationToken cancellationToken = default)
+        IReadOnlyDictionary<string, object?> properties, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(labels);
         ArgumentNullException.ThrowIfNull(properties);
@@ -77,7 +77,7 @@ internal sealed partial class DefaultGraphStore : IGraphStore
     }
 
     public async ValueTask<StoredGraphRelationship> CreateRelationshipAsync(ulong sourceId, ulong targetId, string type,
-        IReadOnlyDictionary<string, object?> properties, ITransactionContext context, CancellationToken cancellationToken = default)
+        IReadOnlyDictionary<string, object?> properties, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(type);
         ArgumentNullException.ThrowIfNull(properties);
@@ -128,7 +128,7 @@ internal sealed partial class DefaultGraphStore : IGraphStore
         return result;
     }
 
-    public async ValueTask DeleteNodeAsync(ulong id, bool detach, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask DeleteNodeAsync(ulong id, bool detach, TransactionContext context, CancellationToken cancellationToken = default)
     {
         await LockAsync(context, cancellationToken).ConfigureAwait(false);
         EnsureUnchanged(1, id, context);
@@ -158,7 +158,7 @@ internal sealed partial class DefaultGraphStore : IGraphStore
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    public async ValueTask DeleteRelationshipAsync(ulong id, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask DeleteRelationshipAsync(ulong id, TransactionContext context, CancellationToken cancellationToken = default)
     {
         await LockAsync(context, cancellationToken).ConfigureAwait(false);
         EnsureUnchanged(2, id, context);
@@ -171,8 +171,8 @@ internal sealed partial class DefaultGraphStore : IGraphStore
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask RemoveRelationshipAsync(Found found, IStorageTransaction bracket,
-        ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask RemoveRelationshipAsync(Found found, StorageTransaction bracket,
+        TransactionContext context, CancellationToken cancellationToken)
     {
         var relationship = found.Record.Relationship!.Value;
         await DeleteIndexEntryAsync(AdjacencyId, Composite(IndexKey.FromUInt64(relationship.SourceId), relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
@@ -183,14 +183,14 @@ internal sealed partial class DefaultGraphStore : IGraphStore
         Tombstone(bracket, found.Reference, context);
     }
 
-    private ulong Insert(IStorageTransaction bracket, byte[] bytes, ITransactionContext context)
+    private ulong Insert(StorageTransaction bracket, byte[] bytes, TransactionContext context)
     {
         var location = _storage.InsertOwned(bracket, 2, bytes);
         _coordinator.VersionStore.RecordCreated(context.Sequence, location.PageId, location.SlotIndex);
         return GraphStorage.PackLocation(location.PageId, location.SlotIndex);
     }
 
-    private void Tombstone(IStorageTransaction bracket, Reference reference, ITransactionContext context)
+    private void Tombstone(StorageTransaction bracket, Reference reference, TransactionContext context)
     {
         var bytes = _storage.ReadEntry(reference.PageId, reference.SlotIndex);
         _storage.UpdateEntry(bracket, reference.PageId, reference.SlotIndex, RecordVersionStamp.WithDeleter(bytes.Span, context.Sequence));
@@ -247,7 +247,7 @@ internal sealed partial class DefaultGraphStore : IGraphStore
         return new Found(new Reference(page, slot, writer), GraphRecordCodec.Decode(bytes));
     }
 
-    private async ValueTask LockAsync(ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask LockAsync(TransactionContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
         if (context.State != TransactionState.Active) { throw new InvalidOperationException("Graph mutation requires an active transaction."); }
@@ -267,10 +267,10 @@ internal sealed partial class DefaultGraphStore : IGraphStore
         }
     }
 
-    private TransactionSnapshot Latest(ITransactionContext context) => new(context.Sequence, TransactionSequence.None,
+    private TransactionSnapshot Latest(TransactionContext context) => new(context.Sequence, TransactionSequence.None,
         new TransactionSequence(ulong.MaxValue), _coordinator.GetOpenContexts().Where(item => item.State == TransactionState.Active).Select(item => item.Sequence));
 
-    private void EnsureUnchanged(byte kind, ulong id, ITransactionContext context)
+    private void EnsureUnchanged(byte kind, ulong id, TransactionContext context)
     {
         var prior = Find(kind, id, context.Snapshot);
         var latest = Find(kind, id, Latest(context));
@@ -280,7 +280,7 @@ internal sealed partial class DefaultGraphStore : IGraphStore
         }
     }
 
-    private async ValueTask<T> ApplyAsync<T>(ITransactionContext context, Func<IStorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
+    private async ValueTask<T> ApplyAsync<T>(TransactionContext context, Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
     {
         try { return await _coordinator.ApplyStatementAsync(context, apply, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false); }
         catch { OpenIndexes(); throw; }

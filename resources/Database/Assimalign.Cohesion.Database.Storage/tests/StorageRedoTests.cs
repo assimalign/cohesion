@@ -132,7 +132,7 @@ public sealed class StorageRedoTests
         var stream = new StorageStream(new System.IO.MemoryStream());
         var pool = new StorageBufferPool(4);
         var map = new StorageFreeSpaceMap();
-        using var manager = new StoragePageManager(stream, pool, map);
+        var manager = new StoragePageManager(stream, pool, map);
         long pageId;
         using (var first = manager.AllocatePage(PageType.Data))
         {

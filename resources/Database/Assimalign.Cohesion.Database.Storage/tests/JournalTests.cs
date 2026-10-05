@@ -17,7 +17,7 @@ public sealed class JournalTests
     public void ReadSequential_EarlyDisposalRestoresPositionAndAllowsNextAppend()
     {
         using var stream = new MemoryStream();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = new StorageJournal(stream, leaveOpen: true);
         journal.AppendBegin(7);
         journal.AppendOperation(7, new byte[8192]);
         journal.AppendCommit(7);
@@ -42,7 +42,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = new StorageJournal(stream, leaveOpen: true);
 
         // Act
         long begin = journal.AppendBegin(7);
@@ -67,7 +67,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = new StorageJournal(stream, leaveOpen: true);
         var image = new byte[Units.Page.Size];
         image[100] = 0xAB;
         image[Units.Page.LsnFieldOffset] = 0x07;
@@ -98,7 +98,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = new StorageJournal(stream, leaveOpen: true);
 
         // Act / Assert
         Should.Throw<ArgumentOutOfRangeException>(
@@ -114,7 +114,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = new StorageJournal(stream, leaveOpen: true);
 
         long lsn = journal.AppendBegin(1);
         journal.DurableLsn.ShouldBe(0L);
@@ -133,7 +133,7 @@ public sealed class JournalTests
         // Arrange
         using var stream = new MemoryStream();
 
-        using (var journal = new StreamJournal(stream, leaveOpen: true))
+        using (var journal = new StorageJournal(stream, leaveOpen: true))
         {
             journal.AppendBegin(1);
             journal.AppendCommit(1);
@@ -143,7 +143,7 @@ public sealed class JournalTests
         }
 
         // Act
-        using var reopened = new StreamJournal(stream, leaveOpen: true);
+        using var reopened = new StorageJournal(stream, leaveOpen: true);
         long next = reopened.AppendBegin(2);
 
         // Assert
@@ -156,7 +156,7 @@ public sealed class JournalTests
         // Arrange: write two full records, then truncate the stream mid-record.
         using var stream = new MemoryStream();
 
-        using (var journal = new StreamJournal(stream, leaveOpen: true))
+        using (var journal = new StorageJournal(stream, leaveOpen: true))
         {
             journal.AppendBegin(1);
             journal.AppendOperation(1, Encoding.UTF8.GetBytes("keep"));
@@ -167,7 +167,7 @@ public sealed class JournalTests
         stream.SetLength(stream.Length - 5); // tear the last frame
 
         // Act
-        using var reopened = new StreamJournal(stream, leaveOpen: true);
+        using var reopened = new StorageJournal(stream, leaveOpen: true);
         var records = reopened.ReadAll();
 
         // Assert
@@ -181,7 +181,7 @@ public sealed class JournalTests
         // Arrange
         using var stream = new MemoryStream();
 
-        using (var journal = new StreamJournal(stream, leaveOpen: true))
+        using (var journal = new StorageJournal(stream, leaveOpen: true))
         {
             journal.AppendBegin(1);
             journal.AppendOperation(1, Encoding.UTF8.GetBytes("payload"));
@@ -193,7 +193,7 @@ public sealed class JournalTests
         buffer[(int)stream.Length - 6] ^= 0xFF;
 
         // Act
-        using var reopened = new StreamJournal(stream, leaveOpen: true);
+        using var reopened = new StorageJournal(stream, leaveOpen: true);
         var records = reopened.ReadAll();
 
         // Assert
@@ -206,7 +206,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = new StorageJournal(stream, leaveOpen: true);
 
         journal.AppendBegin(1);
         journal.AppendCommit(1);
@@ -231,7 +231,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = new StorageJournal(stream, leaveOpen: true);
 
         // Act
         // #1018: a correctly encoded checkpoint still needs an explicit durable backing.

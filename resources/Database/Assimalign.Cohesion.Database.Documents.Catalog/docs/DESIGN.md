@@ -79,7 +79,7 @@ layer. Document content has its separate multi-page chunk mechanism.
 
 Index definitions are lower-level catalog mutations, not a second public engine entry point. The
 Documents planner turns OQL `CREATE INDEX` and `DROP INDEX` expressions into catalog-operation
-plans, and the plan executor invokes this package under the statement's `ITransactionContext`
+plans, and the plan executor invokes this package under the statement's `TransactionContext`
 after lock acquisition and ownership enforcement. `IDocumentDatabase` therefore needs no index
 members, and the catalog and B+Tree updates retain the same transaction as the DDL statement.
 

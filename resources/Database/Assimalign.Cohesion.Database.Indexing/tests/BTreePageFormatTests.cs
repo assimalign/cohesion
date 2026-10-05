@@ -31,7 +31,7 @@ public class BTreePageFormatTests
             await index.InsertAsync(setup, IndexKey.FromInt64(i), (ulong)i);
         }
         await harness.CommitAsync(setup);
-        return (harness, ((IIndexRegistry)harness.IndexManager).ExportRegistrations());
+        return (harness, harness.IndexManager.ExportRegistrations());
     }
 
     private static void RewritePage(Storage.Storage storage, long pageId, LegacyBTreePages.BodyRewriter rewrite)
@@ -46,11 +46,11 @@ public class BTreePageFormatTests
         bracket.Commit();
     }
 
-    private static IIndexManager Attach(IndexTestHarness harness, IReadOnlyList<BTreeIndexRegistration> registrations)
+    private static BTreeIndexManager Attach(IndexTestHarness harness, IReadOnlyList<BTreeIndexRegistration> registrations)
         => BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = harness.Storage,
-            TransactionSource = harness,
+            TransactionSource = harness.GetStorageTransaction,
             LockManager = harness.LockManager,
             ExistingIndexes = registrations,
         });
@@ -165,7 +165,7 @@ public class BTreePageFormatTests
         await harness.IndexManager.CreateIndexAsync(setup, 1, new IndexDefinition("ix_first"));
         await harness.IndexManager.CreateIndexAsync(setup, 2, new IndexDefinition("ix_second"));
         await harness.CommitAsync(setup);
-        var registrations = ((IIndexRegistry)harness.IndexManager).ExportRegistrations();
+        var registrations = harness.IndexManager.ExportRegistrations();
 
         // Act / Assert: current trees pass; once one is in format 1, it is named.
         BTreeIndexManager.EnsureFormat(harness.Storage, registrations);
@@ -185,7 +185,7 @@ public class BTreePageFormatTests
         await harness.IndexManager.CreateIndexAsync(setup, 1, new IndexDefinition("ix_current"));
         await harness.IndexManager.CreateIndexAsync(setup, 2, new IndexDefinition("ix_legacy"));
         await harness.CommitAsync(setup);
-        var registrations = ((IIndexRegistry)harness.IndexManager).ExportRegistrations();
+        var registrations = harness.IndexManager.ExportRegistrations();
         RewritePage(harness.Storage, registrations.Single(registration => registration.ObjectId == 2).RootPageId, LegacyBTreePages.DowngradeToFormat1);
 
         // Act

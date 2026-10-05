@@ -12,14 +12,15 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 
 /// <summary>
 /// The per-database MVCC composition (area DESIGN §3.8): one
-/// <see cref="TransactionManager"/> + <see cref="ILockManager"/> +
+/// <see cref="TransactionManager"/> + <see cref="LockManager"/> +
 /// <see cref="RecordSpaceVersionStore"/> over the database's data storage,
 /// with the manager's transaction log bound to the storage's write-ahead
 /// journal. The coordinator owns the sequence-space unification (the manager
 /// allocates from the storage's counter, so the journal carries one sequence
 /// namespace), the per-statement physical brackets and their apply gate, the
-/// pairing seam (<c>IStorageTransactionSource</c> resolves a context's
-/// current statement bracket), and the checkpoint interlock that keeps
+/// pairing seam (<see cref="TryGetStorageTransaction"/> resolves a context's
+/// current statement bracket; each engine wraps it in the index manager's
+/// <c>TransactionSource</c> delegate), and the checkpoint interlock that keeps
 /// truncation classification-safe while logical transactions are in flight.
 /// </summary>
 /// <remarks>
@@ -54,7 +55,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     private readonly Storage _storage;
     private readonly StorageJournal _journal;
     private readonly TransactionManager _manager;
-    private readonly EngineLockManager _lockManager;
+    private readonly LockManager _lockManager;
     private readonly RecordSpaceVersionStore _versionStore;
     private readonly GatedJournalLog _log;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
@@ -69,8 +70,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     // to throw, because the statement that ran it must not fail for it.
     private int _checkpointDeferred;
     private ExceptionDispatchInfo? _deferredCheckpointFailure;
-    private readonly Dictionary<ulong, IStorageTransaction> _statementBrackets = new();
-    private readonly Dictionary<ulong, ITransactionContext> _openContexts = new();
+    private readonly Dictionary<ulong, StorageTransaction> _statementBrackets = new();
+    private readonly Dictionary<ulong, TransactionContext> _openContexts = new();
     private readonly object _sync = new();
     private TransactionSequence _recoveredSequenceFloor;
 
@@ -85,7 +86,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// indexes, call <see cref="AnalyzeAndScrub"/>, scrub those indexes with its plan,
     /// and call <see cref="CompleteRecovery"/> before admitting any sessions.
     /// </remarks>
-    public TransactionCoordinator(Storage storage, StorageJournal journal, ITransactionRecordSpace records)
+    public TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records)
         : this(storage, journal, records, TimeProvider.System)
     {
     }
@@ -93,7 +94,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <summary>
     /// Creates the composition with the clock the deferred-undo retry schedule reads (tests).
     /// </summary>
-    internal TransactionCoordinator(Storage storage, StorageJournal journal, ITransactionRecordSpace records, TimeProvider time)
+    internal TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(journal);
@@ -109,15 +110,18 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
         // The manager over the gated journal log: the statement apply admits a bracket
         // only for a context the manager still holds open, and the version-purge pass
-        // drives its deferred-undo retry. It holds the lock manager itself; engine code
-        // gets the view below.
+        // drives its deferred-undo retry. It releases a transaction's locks through the
+        // lock manager's unfiltered release; engine code shares the same lock manager in
+        // its engine mode, whose release-all leaves a tracked transaction to the manager
+        // (see LockManager).
         _manager = new TransactionManager(
             _log,
             locks,
             _versionStore,
             ReserveSequence,
             time);
-        _lockManager = new EngineLockManager(locks, _manager);
+        locks.EnterEngineMode(_manager.IsTracked);
+        _lockManager = locks;
     }
 
     /// <summary>
@@ -270,19 +274,21 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <remarks>
     /// The manager owns the release of every transaction it manages: it releases a
     /// transaction's locks, as a set, at the moment the transaction leaves its active
-    /// table. <see cref="ILockManager.ReleaseAll"/> called through this property for a
+    /// table. <see cref="LockManager.ReleaseAll"/> called through this property for a
     /// transaction the manager still tracks therefore releases nothing; the manager's own
     /// release, which follows, covers every grant the transaction holds by then, including
     /// one an operation of the transaction obtained after it ended. That is what keeps a
     /// rolled-back writer whose undo is deferred holding its locks (#1226): an engine's
     /// clean-up of a late grant cannot hand the next writer a lock over versions the undo
     /// has not removed yet. For a transaction the manager no longer tracks, the call
-    /// releases as usual. The view does not change which requests fail: when a
-    /// transaction ends, the manager fails the requests it still has queued through the
-    /// lock manager underneath (#1225), at its release or, for a rollback whose undo is
-    /// deferred, at the end itself, while the grants stay.
+    /// releases as usual. The engine mode does not change which requests fail: when a
+    /// transaction ends, the manager fails the requests it still has queued (#1225), at its
+    /// release or, for a rollback whose undo is deferred, at the end itself, while the grants
+    /// stay. It is the same lock manager the transaction manager holds, in the engine mode this
+    /// coordinator installs (<see cref="Transactions.LockManager"/>, plan §6.2); until #1258 it
+    /// was a private decorator over it.
     /// </remarks>
-    public ILockManager LockManager => _lockManager;
+    public LockManager LockManager => _lockManager;
 
     /// <summary>
     /// Gets the version store: the ledger over the record space that makes
@@ -309,7 +315,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// Gets the currently open transaction contexts (for the maintenance
     /// workers' safe prune bound).
     /// </summary>
-    public IReadOnlyList<ITransactionContext> GetOpenContexts()
+    public IReadOnlyList<TransactionContext> GetOpenContexts()
     {
         lock (_sync)
         {
@@ -327,7 +333,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// An engine adapts this method to its storage-transaction pairing contract and
     /// supplies its own exception vocabulary when a bracket is missing.
     /// </remarks>
-    public bool TryGetStorageTransaction(ITransactionContext context, [NotNullWhen(true)] out IStorageTransaction? transaction)
+    public bool TryGetStorageTransaction(TransactionContext context, [NotNullWhen(true)] out StorageTransaction? transaction)
     {
         ArgumentNullException.ThrowIfNull(context);
 
@@ -346,7 +352,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <param name="isolationLevel">The isolation level the transaction runs under.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The transaction context.</returns>
-    public async ValueTask<ITransactionContext> BeginAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
+    public async ValueTask<TransactionContext> BeginAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
     {
         var context = await _manager.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
 
@@ -373,7 +379,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <see cref="TransactionManager.CommitAsync"/>). Its tombstones are retained for
     /// pruning like those of any committed writer.
     /// </exception>
-    public async ValueTask CommitAsync(ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask CommitAsync(TransactionContext context, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -409,7 +415,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// until <see cref="RunVersionPurgePass"/> completes the undo; the project
     /// DESIGN.md, "Ending a transaction", records the rule.
     /// </remarks>
-    public async ValueTask RollbackAsync(ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask RollbackAsync(TransactionContext context, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -436,8 +442,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The apply result.</returns>
     public ValueTask<T> ApplyStatementAsync<T>(
-        ITransactionContext context,
-        Func<IStorageTransaction, T> apply,
+        TransactionContext context,
+        Func<StorageTransaction, T> apply,
         CancellationToken cancellationToken = default)
         => ApplyStatementAsync(context, bracket => new ValueTask<T>(apply(bracket)), durable: false, cancellationToken);
 
@@ -473,8 +479,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// reads as committed, and nothing would ever undo it.
     /// </exception>
     public async ValueTask<T> ApplyStatementAsync<T>(
-        ITransactionContext context,
-        Func<IStorageTransaction, ValueTask<T>> apply,
+        TransactionContext context,
+        Func<StorageTransaction, ValueTask<T>> apply,
         bool durable = false,
         CancellationToken cancellationToken = default)
     {
@@ -566,7 +572,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// Runs the first half of open-time transaction recovery: classifies every
     /// sequence in the recovered journal (<see cref="TransactionRecovery.Analyze"/>),
     /// scrubs every unproven writer's stamps out of the record space (the
-    /// open-time form of <see cref="IVersionStore.PurgeWriterAsync"/> — one pass
+    /// open-time form of <see cref="VersionStore.PurgeWriterAsync"/> — one pass
     /// instead of one scan per writer, because the in-memory ledger died with
     /// the process), seeds the prunable set with surviving committed tombstones,
     /// and anchors the prune bound. The caller scrubs any structures of its own
@@ -619,7 +625,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// </summary>
     /// <exception cref="StorageTransactionException">
     /// A storage-level bracket is still active, or the call came from inside a statement apply
-    /// of this coordinator (<see cref="ApplyStatementAsync{T}(ITransactionContext, Func{IStorageTransaction, ValueTask{T}}, bool, CancellationToken)"/>),
+    /// of this coordinator (<see cref="ApplyStatementAsync{T}(TransactionContext, Func{StorageTransaction, ValueTask{T}}, bool, CancellationToken)"/>),
     /// whose apply gate the checkpoint would wait for forever.
     /// </exception>
     public void Checkpoint() => Checkpoint(CancellationToken.None);
@@ -939,7 +945,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     // A commit or rollback refused before it started (a canceled token, or another end
     // already running) leaves the context active: it stays tracked, so its snapshot
     // keeps bounding the prune and its statement bracket stays resolvable.
-    private void UntrackEnded(ITransactionContext context)
+    private void UntrackEnded(TransactionContext context)
     {
         if (context.State == TransactionState.Active)
         {
@@ -950,91 +956,6 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             _statementBrackets.Remove(context.Sequence.Value);
             _openContexts.Remove(context.Sequence.Value);
-        }
-    }
-
-    /// <summary>
-    /// The engine's view of the lock manager (<see cref="LockManager"/>): acquisition is
-    /// forwarded unchanged, and a release-all for a transaction the manager still tracks
-    /// is left to the manager, which releases that transaction's locks when it leaves the
-    /// active table.
-    /// </summary>
-    private sealed class EngineLockManager : ILockManager
-    {
-        private readonly ILockManager _inner;
-        private readonly TransactionManager _manager;
-
-        // Canceled, with the cause kept beside it, once the storage went offline: it ends every
-        // wait in progress and fails every later one (AbandonLockWaits).
-        private readonly CancellationTokenSource _abandon = new();
-        private StorageOfflineException? _abandonCause;
-
-        internal EngineLockManager(ILockManager inner, TransactionManager manager)
-        {
-            _inner = inner;
-            _manager = manager;
-        }
-
-        /// <remarks>
-        /// A request the table grants at once costs no more than before. One that has to wait
-        /// waits on the caller's token and on the storage going offline, which fails it
-        /// (<see cref="Abandon"/>).
-        /// </remarks>
-        public ValueTask AcquireAsync(TransactionSequence owner, LockResource resource, LockMode mode, CancellationToken cancellationToken = default)
-            => _inner.TryAcquire(owner, resource, mode)
-                ? ValueTask.CompletedTask
-                : WaitAsync(owner, resource, mode, cancellationToken);
-
-        /// <summary>
-        /// Ends every wait in progress and fails every later one, because the storage went offline.
-        /// </summary>
-        internal void Abandon(StorageOfflineException cause)
-        {
-            ArgumentNullException.ThrowIfNull(cause);
-            if (Interlocked.CompareExchange(ref _abandonCause, cause, null) is null)
-            {
-                // Asynchronously: the storage's offline hook may run under its locks.
-                _ = _abandon.CancelAsync();
-            }
-        }
-
-        private async ValueTask WaitAsync(TransactionSequence owner, LockResource resource, LockMode mode, CancellationToken cancellationToken)
-        {
-            if (Volatile.Read(ref _abandonCause) is { } offline)
-            {
-                throw Abandoned(owner, resource, mode, offline);
-            }
-
-            using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _abandon.Token);
-            try
-            {
-                await _inner.AcquireAsync(owner, resource, mode, wait.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && Volatile.Read(ref _abandonCause) is { } cause)
-            {
-                throw Abandoned(owner, resource, mode, cause);
-            }
-        }
-
-        private static TransactionAbortedException Abandoned(TransactionSequence owner, LockResource resource, LockMode mode, StorageOfflineException cause)
-            => new($"Transaction {owner}'s request for {mode} on {resource} was refused: the database's storage went offline, " +
-                "so no lock of it is released until it is reopened.", cause);
-
-        public bool TryAcquire(TransactionSequence owner, LockResource resource, LockMode mode)
-            => _inner.TryAcquire(owner, resource, mode);
-
-        public void ReleaseAll(TransactionSequence owner)
-        {
-            // The manager removes a transaction from its active table before it releases the
-            // transaction's locks, so either it still tracks the owner here, and its release
-            // comes later and covers every grant made by now, or it has released already, and
-            // this call releases what was granted since.
-            if (_manager.IsTracked(owner.Value))
-            {
-                return;
-            }
-
-            _inner.ReleaseAll(owner);
         }
     }
 

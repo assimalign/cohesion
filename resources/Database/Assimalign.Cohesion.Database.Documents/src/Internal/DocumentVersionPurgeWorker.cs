@@ -9,9 +9,9 @@ using Assimalign.Cohesion.Database.Storage;
 /// <summary>
 /// The engine-owned MVCC version-purge worker: per pass, per open database, it
 /// retries the logical undo of any aborted writer whose rollback-time purge
-/// failed (<c>IVersionStore.PurgeWriterAsync</c>) and physically reclaims
+/// failed (<c>VersionStore.PurgeWriterAsync</c>) and physically reclaims
 /// versions no snapshot can reach — committed tombstones below the safe prune
-/// bound (<c>IVersionStore.PruneAsync</c>) — so version-space amplification is
+/// bound (<c>VersionStore.PruneAsync</c>) — so version-space amplification is
 /// bounded by the oldest in-flight snapshot.
 /// </summary>
 /// <remarks>

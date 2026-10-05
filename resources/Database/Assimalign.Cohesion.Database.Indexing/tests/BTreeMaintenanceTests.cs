@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// </summary>
 public class BTreeMaintenanceTests
 {
-    private static async Task<(IndexTestHarness Harness, IIndex Index)> CreateIndexAsync(bool unique = false)
+    private static async Task<(IndexTestHarness Harness, BTreeIndex Index)> CreateIndexAsync(bool unique = false)
     {
         var harness = new IndexTestHarness();
         var setup = await harness.BeginAsync();
@@ -29,7 +29,7 @@ public class BTreeMaintenanceTests
         return (harness, index);
     }
 
-    private static async Task<List<ulong>> VisibleReferencesAsync(IndexTestHarness harness, IIndex index)
+    private static async Task<List<ulong>> VisibleReferencesAsync(IndexTestHarness harness, BTreeIndex index)
     {
         var reader = await harness.BeginAsync();
 
@@ -159,7 +159,7 @@ public class BTreeMaintenanceTests
             bracket.Commit();
         }
 
-        long root = ((IIndexRegistry)harness.IndexManager).ExportRegistrations().Single().RootPageId;
+        long root = harness.IndexManager.ExportRegistrations().Single().RootPageId;
 
         // Act
         using (var undo = harness.Storage.BeginTransaction())

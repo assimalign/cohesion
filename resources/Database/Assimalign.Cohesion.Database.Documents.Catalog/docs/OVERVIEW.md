@@ -4,7 +4,7 @@
 internally over the same `DocumentStorage` file set as document content. It stores collection
 ownership, versioned document identities/content references, and secondary index definitions.
 Its B+Trees come from `Database.Indexing`, and every data/index mutation joins the caller's
-`ITransactionContext` through `TransactionCoordinator`.
+`TransactionContext` through `TransactionCoordinator`.
 
 `DocumentCatalog.Open(storage, coordinator)` opens the metadata directory and persisted physical
 trees. `DocumentCatalog.EnsureIndexFormat(storage)` checks, before the coordinator's recovery

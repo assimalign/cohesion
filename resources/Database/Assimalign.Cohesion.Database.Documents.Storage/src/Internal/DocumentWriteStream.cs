@@ -10,7 +10,7 @@ internal sealed class DocumentWriteStream : Stream
 {
     private readonly DocumentStorage _storage;
     private readonly TransactionCoordinator _coordinator;
-    private readonly ITransactionContext _context;
+    private readonly TransactionContext _context;
     private readonly Func<DocumentContentReference, ValueTask> _complete;
     private readonly Func<ValueTask> _abort;
     private readonly CancellationToken _lifetimeCancellation;
@@ -35,7 +35,7 @@ internal sealed class DocumentWriteStream : Stream
     public DocumentWriteStream(
         DocumentStorage storage,
         TransactionCoordinator coordinator,
-        ITransactionContext context,
+        TransactionContext context,
         Func<DocumentContentReference, ValueTask> complete,
         Func<ValueTask> abort,
         CancellationToken lifetimeCancellation)

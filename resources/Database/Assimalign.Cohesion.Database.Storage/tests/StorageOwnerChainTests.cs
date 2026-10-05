@@ -22,11 +22,9 @@ public sealed class StorageOwnerChainTests
     private sealed class ChainStorage : Storage
     {
         private ChainStorage(StorageStream data, StorageStream journal, int poolCapacity)
-            : base(data, journal, new StorageStream(new System.IO.MemoryStream()), poolCapacity)
+            : base(StorageModel.Custom, data, journal, new StorageStream(new System.IO.MemoryStream()), poolCapacity)
         {
         }
-
-        public override StorageModel Model => StorageModel.Custom;
 
         public static ChainStorage Create(CrashSimulationStream data, CrashSimulationStream journal, int poolCapacity = 16)
         {
@@ -45,10 +43,10 @@ public sealed class StorageOwnerChainTests
             return storage;
         }
 
-        public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, ulong ownerId, byte[] data)
+        public (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, ulong ownerId, byte[] data)
             => InsertRecord(transaction, ownerId, data);
 
-        public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex)
+        public void Delete(StorageTransaction transaction, PageId pageId, int slotIndex)
             => DeleteRecord(transaction, pageId, slotIndex);
 
         public string[] ScanText(ulong ownerId)
@@ -168,7 +166,7 @@ public sealed class StorageOwnerChainTests
 
         // Act: scan the small owner and count the pages the iterator pins.
         long pagesVisited;
-        using (var iterator = (StorageUnitIterator)storage.GetUnitIterator(3))
+        using (var iterator = storage.GetUnitIterator(3))
         {
             while (iterator.MoveNext())
             {

@@ -12,20 +12,20 @@ using Assimalign.Cohesion.Database.Storage;
 /// carry the shared 16-byte writer/deleter stamp prefix. Payloads remain in the
 /// record space; the ledger supplies logical undo and safe space reclamation.
 /// </summary>
-public sealed class RecordSpaceVersionStore : IVersionStore
+public sealed class RecordSpaceVersionStore : VersionStore
 {
     // A logical transaction can span a streamed object larger than RAM. Physical
     // undo/reclamation must bound the page pre-images a storage bracket retains independently of it.
     private const int MutationBatchSize = 64;
     private readonly Storage _storage;
-    private readonly ITransactionRecordSpace _records;
+    private readonly TransactionRecordSpace _records;
     private readonly SemaphoreSlim _applyGate;
     private readonly Dictionary<ulong, List<LedgerEntry>> _ledger = new();
     private readonly List<PrunableVersion> _prunable = new();
     private readonly HashSet<ulong> _pendingAbortedPurges = new();
     private readonly object _sync = new();
 
-    internal RecordSpaceVersionStore(Storage storage, ITransactionRecordSpace records, SemaphoreSlim applyGate)
+    internal RecordSpaceVersionStore(Storage storage, TransactionRecordSpace records, SemaphoreSlim applyGate)
     {
         _storage = storage;
         _records = records;
@@ -99,7 +99,7 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     /// <param name="index">The index's stamp-verified undo adapter.</param>
     /// <param name="key">The encoded key; a private copy is retained for undo.</param>
     /// <param name="entryReference">The index entry's record reference.</param>
-    public void RecordIndexEntryCreated(TransactionSequence writer, IRecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
+    public void RecordIndexEntryCreated(TransactionSequence writer, RecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
         => Record(writer, new LedgerEntry(LedgerEntryKind.IndexEntryCreated, entryReference, index, key.ToArray()));
 
     /// <summary>
@@ -111,7 +111,7 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     /// <param name="index">The index's stamp-verified undo adapter.</param>
     /// <param name="key">The encoded key; a private copy is retained for undo.</param>
     /// <param name="entryReference">The index entry's record reference.</param>
-    public void RecordIndexEntryTombstoned(TransactionSequence writer, IRecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
+    public void RecordIndexEntryTombstoned(TransactionSequence writer, RecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
         => Record(writer, new LedgerEntry(LedgerEntryKind.IndexEntryTombstoned, entryReference, index, key.ToArray()));
 
     /// <summary>
@@ -139,10 +139,8 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     }
 
     /// <inheritdoc />
-    public ValueTask AppendVersionAsync(ulong objectId, ulong entryId, ReadOnlyMemory<byte> payload, TransactionSequence writer, CancellationToken cancellationToken = default)
+    protected override ValueTask AppendVersionCoreAsync(ulong objectId, ulong entryId, ReadOnlyMemory<byte> payload, TransactionSequence writer, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
         // The record space holds the payload; the contract member records the
         // creation in the ledger (entryId is the packed location).
         Record(writer, new LedgerEntry(LedgerEntryKind.Created, entryId));
@@ -150,11 +148,8 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     }
 
     /// <inheritdoc />
-    public ValueTask<ReadOnlyMemory<byte>?> GetVisibleVersionAsync(ulong objectId, ulong entryId, TransactionSnapshot snapshot, CancellationToken cancellationToken = default)
+    protected override ValueTask<ReadOnlyMemory<byte>?> GetVisibleVersionCoreAsync(ulong objectId, ulong entryId, TransactionSnapshot snapshot, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        cancellationToken.ThrowIfCancellationRequested();
-
         var (pageId, slotIndex) = _records.UnpackLocation(entryId);
 
         ReadOnlyMemory<byte> record;
@@ -194,7 +189,7 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     /// the deleter, so no one can see the version again. Each candidate is
     /// verified against its current stamps before removal.
     /// </remarks>
-    public async ValueTask<long> PruneAsync(TransactionSequence oldestActive, CancellationToken cancellationToken = default)
+    protected override async ValueTask<long> PruneCoreAsync(TransactionSequence oldestActive, CancellationToken cancellationToken)
     {
         List<PrunableVersion> candidates;
 
@@ -252,7 +247,7 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     /// A failure leaves the writer queued for the version-purge worker to retry
     /// (an aborted writer's stamps must not serve snapshots, so retry is mandatory).
     /// </remarks>
-    public async ValueTask<long> PurgeWriterAsync(TransactionSequence writer, CancellationToken cancellationToken = default)
+    protected override async ValueTask<long> PurgeWriterCoreAsync(TransactionSequence writer, CancellationToken cancellationToken)
     {
         List<LedgerEntry>? entries;
 
@@ -522,7 +517,7 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     private readonly record struct LedgerEntry(
         LedgerEntryKind Kind,
         ulong Location,
-        IRecordVersionIndex? Index = null,
+        RecordVersionIndex? Index = null,
         byte[]? Key = null);
 
     private readonly record struct PrunableVersion(ulong Deleter, ulong Location);

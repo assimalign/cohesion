@@ -17,7 +17,7 @@ internal sealed partial class DefaultGraphStore
     private const ulong AdjacencyId = ulong.MaxValue;
     private const string TreeName = "graph";
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
-    private IIndexManager _indexes = null!;
+    private BTreeIndexManager _indexes = null!;
 
     public bool HasIndex(string label, string propertyKey, TransactionSnapshot snapshot) => Definition(label, propertyKey, snapshot) is not null;
 
@@ -30,7 +30,7 @@ internal sealed partial class DefaultGraphStore
         return indexes;
     }
 
-    public async ValueTask CreateIndexAsync(string label, string propertyKey, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
         ArgumentException.ThrowIfNullOrWhiteSpace(propertyKey);
@@ -57,7 +57,7 @@ internal sealed partial class DefaultGraphStore
         Add(record, inserted, context.Sequence);
     }
 
-    public async ValueTask DropIndexAsync(string label, string propertyKey, ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask DropIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
     {
         await LockAsync(context, cancellationToken).ConfigureAwait(false);
         var definition = Definition(label, propertyKey, context.Snapshot)
@@ -118,7 +118,7 @@ internal sealed partial class DefaultGraphStore
         return null;
     }
 
-    private async ValueTask EnsureAdjacencyAsync(ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask EnsureAdjacencyAsync(TransactionContext context, CancellationToken cancellationToken)
     {
         if (!_indexes.TryGetIndex(AdjacencyId, TreeName, out _))
         {
@@ -126,7 +126,7 @@ internal sealed partial class DefaultGraphStore
         }
     }
 
-    private IIndex ResolveIndex(ulong id) => _indexes.TryGetIndex(id, TreeName, out var index)
+    private BTreeIndex ResolveIndex(ulong id) => _indexes.TryGetIndex(id, TreeName, out var index)
         ? index : throw new StorageCorruptionException($"Missing graph B+Tree registration '{id}'.");
 
     private static IndexKey Composite(IndexKey prefix, ulong id)
@@ -137,13 +137,13 @@ internal sealed partial class DefaultGraphStore
         return new IndexKey(bytes);
     }
 
-    private async ValueTask InsertIndexAsync(ulong id, IndexKey key, ulong location, ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask InsertIndexAsync(ulong id, IndexKey key, ulong location, TransactionContext context, CancellationToken cancellationToken)
     {
         await ResolveIndex(id).InsertAsync(context, key, location, cancellationToken).ConfigureAwait(false);
         _coordinator.VersionStore.RecordIndexEntryCreated(context.Sequence, new IndexUndo(this, id), key.Encoded, location);
     }
 
-    private async ValueTask DeleteIndexEntryAsync(ulong id, IndexKey key, ulong location, ITransactionContext context, CancellationToken cancellationToken)
+    private async ValueTask DeleteIndexEntryAsync(ulong id, IndexKey key, ulong location, TransactionContext context, CancellationToken cancellationToken)
     {
         await ResolveIndex(id).DeleteAsync(context, key, location, cancellationToken).ConfigureAwait(false);
         _coordinator.VersionStore.RecordIndexEntryTombstoned(context.Sequence, new IndexUndo(this, id), key.Encoded, location);
@@ -161,7 +161,7 @@ internal sealed partial class DefaultGraphStore
         _indexes = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = _storage,
-            TransactionSource = new TransactionSource(_coordinator),
+            TransactionSource = ResolveStatementBracket,
             ExistingIndexes = registrations
         });
     }
@@ -198,9 +198,9 @@ internal sealed partial class DefaultGraphStore
         return registrations;
     }
 
-    private void SaveRegistrations(IStorageTransaction bracket)
+    private void SaveRegistrations(StorageTransaction bracket)
     {
-        foreach (var registration in ((IIndexRegistry)_indexes).ExportRegistrations())
+        foreach (var registration in _indexes.ExportRegistrations())
         {
             if (_registrations.TryGetValue(registration.ObjectId, out var prior) && prior.Root == registration.RootPageId) { continue; }
             using var stream = new MemoryStream();
@@ -220,22 +220,12 @@ internal sealed partial class DefaultGraphStore
         }
     }
 
-    private sealed class TransactionSource : IStorageTransactionSource
-    {
-        private readonly TransactionCoordinator _coordinator;
+    // The index manager's storage transaction for a context: the shared statement bracket the
+    // coordinator owns, or this store's own error when there is none.
+    private StorageTransaction ResolveStatementBracket(TransactionContext context) => _coordinator.TryGetStorageTransaction(context, out var bracket)
+        ? bracket : throw new InvalidOperationException("Graph index mutation requires a shared statement bracket.");
 
-        /// <summary>Initializes a new instance of the <see cref="TransactionSource"/> class.</summary>
-        /// <param name="coordinator">The coordinator that owns the shared statement brackets.</param>
-        public TransactionSource(TransactionCoordinator coordinator)
-        {
-            _coordinator = coordinator;
-        }
-
-        public IStorageTransaction GetStorageTransaction(ITransactionContext context) => _coordinator.TryGetStorageTransaction(context, out var bracket)
-            ? bracket : throw new InvalidOperationException("Graph index mutation requires a shared statement bracket.");
-    }
-
-    private sealed class IndexUndo : IRecordVersionIndex
+    private sealed class IndexUndo : RecordVersionIndex
     {
         private readonly DefaultGraphStore _store;
         private readonly ulong _id;
@@ -249,12 +239,12 @@ internal sealed partial class DefaultGraphStore
             _id = id;
         }
 
-        public ValueTask EraseAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
-            TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+            TransactionSequence writer, CancellationToken cancellationToken)
             => _store._indexes.TryGetIndex(_id, TreeName, out var index)
                 ? index.EraseAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken) : default;
-        public ValueTask ClearDeleterAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
-            TransactionSequence writer, CancellationToken cancellationToken = default)
+        protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+            TransactionSequence writer, CancellationToken cancellationToken)
             => _store._indexes.TryGetIndex(_id, TreeName, out var index)
                 ? index.ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken) : default;
     }

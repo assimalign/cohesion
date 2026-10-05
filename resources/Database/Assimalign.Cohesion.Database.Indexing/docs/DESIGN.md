@@ -30,8 +30,9 @@ entries and splits stay correct.
   change since the checkpoint, byte-range deltas at commit (storage format 3, #1253), and an
   in-memory pre-image for rollback. That is the whole crash story: a crash mid-split reverts
   to the consistent pre-transaction tree; committed splits replay from the journal
-  (the crash suites prove both). `IStorageTransactionSource` is how the engine
-  pairs logical transaction contexts with their storage transactions.
+  (the crash suites prove both). `BTreeIndexManagerOptions.TransactionSource`, a
+  per-engine delegate, is how the engine pairs logical transaction contexts with their
+  storage transactions ("Resolving the storage transaction", below).
 - **MVCC entries, tombstone deletes.** Leaf entries carry writer and deleter
   sequence stamps; reads filter through the caller's snapshot (writer visible,
   deleter absent-or-invisible). Deletes stamp — never remove — so old snapshots
@@ -60,12 +61,50 @@ entries and splits stay correct.
   bracket rolled a root split back, and a persisted registration one checkpoint
   stale.) The fixed root is also where the tree's page format is checked (below).
 - **Directory persistence belongs to the catalog.** The manager keeps an in-memory
-  directory and exports `BTreeIndexRegistration`s (`IIndexRegistry`); the model
+  directory and exports `BTreeIndexRegistration`s (`BTreeIndexManager.ExportRegistrations`); the model
   catalog persists them and re-attaches on open (`ExistingIndexes`). Since the
   root page stays put, a registration changes only through index DDL; the
   catalogs' re-export at their persistence points remains as a backstop and
   normally finds nothing to write. Dropping an index is a directory operation;
   its pages await vacuum.
+
+### Type shape: sealed types, no interfaces (#1258)
+
+The area is concrete-first (`.claude/rules/database-area.md`), and the B+Tree is the one
+index structure the engine ships, so phase 2 of the concrete-types program
+(`docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md`) left the project without an interface:
+
+- **`BTreeIndex`** (was `IIndex` over an internal class) and **`BTreeCursor`** (was
+  `IIndexCursor`, returned by `BTreeIndex.OpenCursor`) are sealed public types with internal
+  constructors, moved out of `Internal/`. Every per-entry call is direct.
+- **`BTreeIndexManager`** is one sealed type for the manager and the registry: it absorbed the
+  static factory of the same name (`Create`, `FormatVersion`, `EnsureFormat`), the
+  `IIndexManager` and `IIndexRegistry` interfaces and their internal implementation, so a
+  catalog calls `ExportRegistrations()` without casting.
+- **`BTreeRecordVersionIndex`** derives from the Transactions `RecordVersionIndex` base (the
+  shared undo binding, below).
+
+### Resolving the storage transaction
+
+An index mutation takes the logical `TransactionContext` and must write its pages inside the
+storage transaction the engine paired with it — the statement bracket the coordinator owns.
+`BTreeIndexManagerOptions.TransactionSource` is a delegate,
+`Func<TransactionContext, StorageTransaction>`, that the engine supplies; each engine passes a
+method over `TransactionCoordinator.TryGetStorageTransaction` that throws in its own vocabulary
+when no bracket is paired:
+
+| Engine | Resolver | Throws when no bracket exists |
+|---|---|---|
+| Sql | `SqlDatabaseInstance.ResolveStatementBracket` | `DatabaseException` "Transaction {seq} has no statement bracket applying on this database." |
+| KeyValuePair | `KeyValueDatabaseInstance.ResolveStatementBracket` | the same `DatabaseException` |
+| Documents | `DefaultDocumentCatalog.ResolveStatementBracket` | `InvalidOperationException` "Index mutation requires a shared statement bracket." |
+| Graph | `DefaultGraphStore.ResolveStatementBracket` | `InvalidOperationException` "Graph index mutation requires a shared statement bracket." |
+
+A delegate rather than a type keeps each engine's exception: `DatabaseException` lives in the
+area root, which this child root may never reference, and the coordinator is not injected into
+Indexing. Until #1258 the seam was the `IStorageTransactionSource` interface, and each engine
+carried a private wrapper class implementing it; the wrappers became the methods above,
+with the same messages. The test harness passes its own pairing table's lookup.
 
 ### Entry order: `(key, entry reference, writer)` (#1194)
 
@@ -479,12 +518,12 @@ times, so CI speed and load cancel out:
 
 ## Transactional binding
 
-`IIndex` mutations take an `ITransactionContext` — index entries are stamped and become visible under the same MVCC rules as the data they reference. There is no "non-transactional index write" surface; recovery replays index changes from the same WAL as data changes. Unique enforcement happens at insert against the *latest* state under the key lock (above); a competing in-flight writer of the same key is resolved by the lock manager, not the index.
+`BTreeIndex` mutations take a `TransactionContext` — index entries are stamped and become visible under the same MVCC rules as the data they reference. There is no "non-transactional index write" surface; recovery replays index changes from the same WAL as data changes. Unique enforcement happens at insert against the *latest* state under the key lock (above); a competing in-flight writer of the same key is resolved by the lock manager, not the index.
 
 ### The maintenance surfaces (model-engine consumers)
 
 The SQL engine's index adoption (#912) added a small family of operations that
-deliberately take the **physical bracket** (`IStorageTransaction`) instead of a
+deliberately take the **physical bracket** (`StorageTransaction`) instead of a
 transaction context — they run where no statement bracket exists:
 
 - **`InsertVersionAsync(bracket, key, reference, writer, deleter)`** — the
@@ -505,7 +544,7 @@ transaction context — they run where no statement bracket exists:
   full rebuilds it in place when the orphaned bytes are what stands between it and
   room, and splits only otherwise — an undo can empty a full leaf, and a split
   there would have no entries to divide.
-- **`IIndexManager.PurgeWritersAsync(bracket, writers)`** — the open-time
+- **`BTreeIndexManager.PurgeWritersAsync(bracket, writers)`** — the open-time
   recovery obligation: one walk per tree removes every unproven writer's
   entries and clears their tombstones (the in-memory undo ledger died with the
   process; snapshots have no commit-log awareness, so unproven stamps must not
@@ -524,18 +563,18 @@ transaction context — they run where no statement bracket exists:
 
 ### Shared record-version undo binding (#918)
 
-`RecordVersionIndex` implements the new `Database.Transactions.IRecordVersionIndex`
-contract by forwarding encoded key bytes to the existing `IIndex.EraseAsync`
-and `ClearDeleterAsync` operations. Engines supply this bridge to the shared
+`BTreeRecordVersionIndex` derives from `Database.Transactions.RecordVersionIndex`
+(an abstract base since #1258, an interface before; the adapter itself was named
+`RecordVersionIndex` until that name passed to the base) by forwarding encoded key bytes
+to the existing `BTreeIndex.EraseAsync` and `ClearDeleterAsync` operations. Engines supply this bridge to the shared
 `RecordSpaceVersionStore` ledger. Index key construction and stamp verification
-remain in Indexing; Transactions needs no Indexing or area-root reference, and
-the existing `IIndex` and `IStorageTransactionSource` interfaces are unchanged.
-Open-time index scrubbing still uses `IIndexManager.PurgeWritersAsync` between
+remain in Indexing; Transactions needs no Indexing or area-root reference.
+Open-time index scrubbing still uses `BTreeIndexManager.PurgeWritersAsync` between
 the coordinator's record scrub and its final checkpoint.
 
 ## Entry references are opaque `ulong`s
 
-The index maps keys to entry references the owning storage layer understands (page address, row id, node id). Making the reference generic (`IIndex<TReference>`) would infect every cursor and page layout with a type parameter for zero runtime benefit — models already own both sides of the mapping. The tree compares references as unsigned integers to break ties between equal keys and never interprets them otherwise.
+The index maps keys to entry references the owning storage layer understands (page address, row id, node id). Making the reference generic (`BTreeIndex<TReference>`) would infect every cursor and page layout with a type parameter for zero runtime benefit — models already own both sides of the mapping. The tree compares references as unsigned integers to break ties between equal keys and never interprets them otherwise.
 
 ## Error model
 
@@ -558,7 +597,7 @@ and keep the code and the original exception as the inner exception.
 
 ## Relationship to `Database.Storage`
 
-`Database.Storage` provides the *physical* substrate through `IStoragePageManager` — index pages (`PageType.Index`) are allocated, pinned, and flushed like any other page and live in the same storage files. This project is the *logical* layer: structures, keys, cursors, uniqueness, and the node page format inside each index page's body. The B+Tree implementation binds the two. (An earlier string-based `IStorageIndexManager` stub in `Database.Storage` was removed during the #157 alignment — it duplicated this project's `IIndexManager` at the wrong layer with no design behind it.)
+`Database.Storage` provides the *physical* substrate through `StoragePageManager` — index pages (`PageType.Index`) are allocated, pinned, and flushed like any other page and live in the same storage files. This project is the *logical* layer: structures, keys, cursors, uniqueness, and the node page format inside each index page's body. The B+Tree implementation binds the two. (An earlier string-based `IStorageIndexManager` stub in `Database.Storage` was removed during the #157 alignment — it duplicated this project's index manager (then `IIndexManager`, now `BTreeIndexManager`) at the wrong layer with no design behind it.)
 
 ## Non-goals
 

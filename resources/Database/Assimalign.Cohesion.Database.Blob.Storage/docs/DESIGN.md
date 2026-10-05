@@ -5,7 +5,7 @@
 `BlobStorage` derives from the shared `Storage` implementation. It adds record
 encoding and bounded content streams; it does not implement another allocator,
 page cache, journal, lock manager, or recovery system. `BlobTransactionRecordSpace`
-implements the existing `ITransactionRecordSpace` seam for the coordinator's
+implements the existing `TransactionRecordSpace` seam for the coordinator's
 `RecordSpaceVersionStore`. All catalog records and chunk records begin with the
 same 16-byte writer/deleter prefix.
 

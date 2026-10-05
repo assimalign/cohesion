@@ -236,7 +236,7 @@ public sealed class DocumentCatalogTests
             await Coordinator.CommitAsync(writer);
         }
 
-        internal async Task WriteIn(ITransactionContext writer, string id, string json)
+        internal async Task WriteIn(TransactionContext writer, string id, string json)
         {
             var previous = Catalog.FindDocument(Collection.Id, id, writer.Snapshot);
             var content = await Storage.WriteContentAsync(Coordinator, writer, Encoding.UTF8.GetBytes(json));

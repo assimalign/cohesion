@@ -24,7 +24,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     private readonly SqlStorage _catalogStorage;
     private readonly ISqlCatalog _catalog;
     private readonly TransactionCoordinator _coordinator;
-    private readonly IIndexManager _indexManager;
+    private readonly BTreeIndexManager _indexManager;
     private readonly SqlSchemaProvisioner _schemaProvisioner;
     private readonly SqlBoundTableCache _definitions;
     private readonly SqlDatabaseEngine _engine;
@@ -127,7 +127,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
             {
                 Storage = storage,
-                TransactionSource = new StatementTransactionSource(_coordinator),
+                TransactionSource = ResolveStatementBracket,
                 LockManager = _coordinator.LockManager,
                 ExistingIndexes = _catalog.GetIndexRegistrations(),
             });
@@ -263,7 +263,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// Gets the database's index manager (the live B+Tree directory over the data
     /// file set), for the executor, the engine's background workers, and tests.
     /// </summary>
-    internal IIndexManager IndexManager => _indexManager;
+    internal BTreeIndexManager IndexManager => _indexManager;
 
     /// <summary>
     /// Gets the database's bound table versions — every persisted CHECK and DEFAULT, parsed
@@ -280,7 +280,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// </summary>
     internal void SaveIndexRegistrationsIfChanged()
     {
-        var current = ((IIndexRegistry)_indexManager).ExportRegistrations();
+        var current = _indexManager.ExportRegistrations();
         var stored = _catalog.GetIndexRegistrations();
 
         if (RegistrationsEqual(current, stored))
@@ -542,33 +542,21 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     }
 
     /// <summary>
-    /// Keeps the area's pairing error at the engine boundary while the shared
-    /// coordinator owns the current statement bracket.
+    /// Resolves the index manager's storage transaction for a context: the statement bracket
+    /// the shared coordinator owns, with the area's pairing error at the engine boundary.
     /// </summary>
-    private sealed class StatementTransactionSource : IStorageTransactionSource
+    /// <param name="context">The transaction an index mutation belongs to.</param>
+    /// <returns>The context's current statement bracket.</returns>
+    /// <exception cref="DatabaseException">No statement of the transaction is applying on this database.</exception>
+    private StorageTransaction ResolveStatementBracket(TransactionContext context)
     {
-        private readonly TransactionCoordinator _coordinator;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="StatementTransactionSource"/> class.
-        /// </summary>
-        /// <param name="coordinator">The transaction coordinator that owns the current statement bracket.</param>
-        public StatementTransactionSource(TransactionCoordinator coordinator)
+        if (_coordinator.TryGetStorageTransaction(context, out var transaction))
         {
-            _coordinator = coordinator;
+            return transaction;
         }
 
-        /// <inheritdoc />
-        public IStorageTransaction GetStorageTransaction(ITransactionContext context)
-        {
-            if (_coordinator.TryGetStorageTransaction(context, out var transaction))
-            {
-                return transaction;
-            }
-
-            throw new DatabaseException(
-                $"Transaction {context.Sequence} has no statement bracket applying on this database.");
-        }
+        throw new DatabaseException(
+            $"Transaction {context.Sequence} has no statement bracket applying on this database.");
     }
 
     private void ThrowIfDisposed()

@@ -6,9 +6,11 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Indexing.Internal;
+
 using Separator = Assimalign.Cohesion.Database.Indexing.Internal.BTreeEntryOrder.Separator;
 
-namespace Assimalign.Cohesion.Database.Indexing.Internal;
+namespace Assimalign.Cohesion.Database.Indexing;
 
 /// <summary>
 /// The B+Tree index: sorted-directory nodes on <see cref="PageType.Index"/> pages,
@@ -18,6 +20,24 @@ namespace Assimalign.Cohesion.Database.Indexing.Internal;
 /// it, and never applies an uncommitted bracket's changes).
 /// </summary>
 /// <remarks>
+/// <para>
+/// A single index over an object's entries: ordered key → entry-reference mappings. Index
+/// mutations ride the owning transaction — they are stamped with the writing transaction's
+/// sequence and become visible under the same MVCC rules as the data they reference. Values
+/// are opaque entry references (typically a page address or entry identity) supplied by the
+/// model's storage layer.
+/// </para>
+/// <para>
+/// An entry is identified by its key, its entry reference and its writer stamp, and
+/// that identity is unique: inserting an identity that is already present is a defect
+/// in the caller and fails with <see cref="IndexException"/>. Any operation fails with
+/// <see cref="IndexCorruptionException"/> (<c>COHDBI002</c>) when it reaches a damaged
+/// index page.
+/// </para>
+/// <para>
+/// The type is sealed, and only a <see cref="BTreeIndexManager"/> creates one: it is the one
+/// index structure the engine ships, and every call on it is direct.
+/// </para>
 /// <para>
 /// Concurrency model (MVP): a tree-level reader/writer latch serializes structural
 /// access — writers are exclusive, cursors materialize their results under the read
@@ -35,19 +55,19 @@ namespace Assimalign.Cohesion.Database.Indexing.Internal;
 /// it; seeks start before the first entry of their key, at <c>(key, -inf)</c>.
 /// </para>
 /// </remarks>
-internal sealed class BTreeIndex : IIndex
+public sealed class BTreeIndex
 {
     private readonly Storage.Storage _storage;
-    private readonly IStorageTransactionSource _transactionSource;
-    private readonly ILockManager? _lockManager;
+    private readonly Func<TransactionContext, StorageTransaction> _transactionSource;
+    private readonly LockManager? _lockManager;
     private readonly ulong _objectId;
     private readonly ReaderWriterLockSlim _latch = new(LockRecursionPolicy.NoRecursion);
     private readonly long _rootPageId;
 
     internal BTreeIndex(
         Storage.Storage storage,
-        IStorageTransactionSource transactionSource,
-        ILockManager? lockManager,
+        Func<TransactionContext, StorageTransaction> transactionSource,
+        LockManager? lockManager,
         ulong objectId,
         IndexDefinition definition,
         long rootPageId)
@@ -61,13 +81,19 @@ internal sealed class BTreeIndex : IIndex
         _rootPageId = rootPageId;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the name of the index, unique within its owning object.
+    /// </summary>
     public string Name { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the physical structure backing the index.
+    /// </summary>
     public IndexKind Kind => IndexKind.BTree;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets a value indicating whether the index enforces key uniqueness.
+    /// </summary>
     public bool IsUnique { get; }
 
     /// <summary>
@@ -82,7 +108,7 @@ internal sealed class BTreeIndex : IIndex
     /// <summary>
     /// Allocates the root leaf of a new tree inside the given storage transaction.
     /// </summary>
-    internal static long CreateRoot(Storage.Storage storage, IStorageTransaction transaction)
+    internal static long CreateRoot(Storage.Storage storage, StorageTransaction transaction)
     {
         using var handle = storage.AllocatePageForWrite(transaction, PageType.Index);
         BTreeNode.Initialize(handle.Page.AsBodySpan(), BTreeNode.LeafKind);
@@ -124,8 +150,23 @@ internal sealed class BTreeIndex : IIndex
         throw new IndexFormatException(registration.Definition.Name, registration.ObjectId, registration.RootPageId, found);
     }
 
-    /// <inheritdoc />
-    public async ValueTask InsertAsync(ITransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Inserts a key → entry-reference mapping.
+    /// </summary>
+    /// <param name="transaction">The transaction the mutation belongs to.</param>
+    /// <param name="key">The key to insert.</param>
+    /// <param name="entryReference">The opaque entry reference the key maps to.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task representing the insert.</returns>
+    /// <exception cref="IndexUniqueViolationException">
+    /// The index is unique and the key already maps to a live entry in the latest
+    /// state (not only in the transaction's snapshot).
+    /// </exception>
+    /// <exception cref="IndexException">
+    /// The key exceeds the maximum key length, or an entry with the same key, entry
+    /// reference and writer already exists (a defect: entry identities are unique).
+    /// </exception>
+    public async ValueTask InsertAsync(TransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
 
@@ -148,7 +189,7 @@ internal sealed class BTreeIndex : IIndex
                 cancellationToken).ConfigureAwait(false);
         }
 
-        var storageTransaction = _transactionSource.GetStorageTransaction(transaction);
+        var storageTransaction = _transactionSource(transaction);
 
         _latch.EnterWriteLock();
         try
@@ -172,8 +213,15 @@ internal sealed class BTreeIndex : IIndex
         }
     }
 
-    /// <inheritdoc />
-    public async ValueTask DeleteAsync(ITransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Deletes a key → entry-reference mapping.
+    /// </summary>
+    /// <param name="transaction">The transaction the mutation belongs to.</param>
+    /// <param name="key">The key to delete.</param>
+    /// <param name="entryReference">The entry reference to remove for the key.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task representing the delete.</returns>
+    public async ValueTask DeleteAsync(TransactionContext transaction, IndexKey key, ulong entryReference, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();
@@ -190,7 +238,7 @@ internal sealed class BTreeIndex : IIndex
                 cancellationToken).ConfigureAwait(false);
         }
 
-        var storageTransaction = _transactionSource.GetStorageTransaction(transaction);
+        var storageTransaction = _transactionSource(transaction);
 
         _latch.EnterWriteLock();
         try
@@ -219,15 +267,39 @@ internal sealed class BTreeIndex : IIndex
         }
     }
 
-    /// <inheritdoc />
-    public IIndexCursor OpenCursor(ITransactionContext transaction, IndexKeyRange range, bool reverse = false)
+    /// <summary>
+    /// Opens a cursor over the specified key range, positioned before the first match.
+    /// </summary>
+    /// <remarks>
+    /// Entries with equal keys are returned in entry-reference order (reversed when
+    /// <paramref name="reverse"/> is true).
+    /// </remarks>
+    /// <param name="transaction">The transaction whose snapshot reads resolve through.</param>
+    /// <param name="range">The key range to scan.</param>
+    /// <param name="reverse">Whether to scan in descending key order.</param>
+    /// <returns>A cursor over the visible entries in the range.</returns>
+    public BTreeCursor OpenCursor(TransactionContext transaction, IndexKeyRange range, bool reverse = false)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         return OpenCursor(transaction.Snapshot, range, reverse);
     }
 
-    /// <inheritdoc />
-    public IIndexCursor OpenCursor(TransactionSnapshot snapshot, IndexKeyRange range, bool reverse = false)
+    /// <summary>
+    /// Opens a cursor over the specified key range through an explicit visibility
+    /// snapshot. This is the seam statement-scoped readers use: a statement's
+    /// snapshot is captured once (per-statement under ReadCommitted), and reading
+    /// through the same snapshot the row scan uses is what keeps an index seek
+    /// exactly equivalent to the scan it replaces.
+    /// </summary>
+    /// <remarks>
+    /// Entries with equal keys are returned in entry-reference order (reversed when
+    /// <paramref name="reverse"/> is true).
+    /// </remarks>
+    /// <param name="snapshot">The visibility snapshot entries filter through.</param>
+    /// <param name="range">The key range to scan.</param>
+    /// <param name="reverse">Whether to scan in descending key order.</param>
+    /// <returns>A cursor over the visible entries in the range.</returns>
+    public BTreeCursor OpenCursor(TransactionSnapshot snapshot, IndexKeyRange range, bool reverse = false)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -251,8 +323,27 @@ internal sealed class BTreeIndex : IIndex
         return new BTreeCursor(results);
     }
 
-    /// <inheritdoc />
-    public ValueTask InsertVersionAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, TransactionSequence deleter, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Inserts an entry carrying explicit version stamps inside the given physical
+    /// write-ahead bracket — the offline (DDL-blocking) build path: an index built
+    /// over existing rows preserves each stored version's writer and deleter, so
+    /// snapshots older than the index read exactly what the equivalent row scan
+    /// shows them. No uniqueness check is performed; the builder owns duplicate
+    /// detection over the live versions it feeds in (it holds the object's
+    /// exclusive lock, so no concurrent writer can race the build).
+    /// </summary>
+    /// <param name="transaction">The physical storage bracket the build rides.</param>
+    /// <param name="key">The key to insert.</param>
+    /// <param name="entryReference">The opaque entry reference the key maps to.</param>
+    /// <param name="writer">The version's writer stamp, preserved from the source row.</param>
+    /// <param name="deleter">The version's deleter stamp, preserved from the source row (<see cref="TransactionSequence.None"/> for live versions).</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task representing the insert.</returns>
+    /// <exception cref="IndexException">
+    /// The key exceeds the maximum key length, or an entry with the same key, entry
+    /// reference and writer already exists (a defect: entry identities are unique).
+    /// </exception>
+    public ValueTask InsertVersionAsync(StorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, TransactionSequence deleter, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();
@@ -275,8 +366,21 @@ internal sealed class BTreeIndex : IIndex
         return default;
     }
 
-    /// <inheritdoc />
-    public ValueTask EraseAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Physically removes the entry mapping <paramref name="key"/> to
+    /// <paramref name="entryReference"/> when its writer stamp equals
+    /// <paramref name="writer"/> — the logical undo of an aborted writer's insert.
+    /// Runs inside the given physical bracket (an undo executes while the aborting
+    /// transaction still holds its locks, outside any statement bracket). A no-op
+    /// when no matching entry exists (undo is idempotent by construction).
+    /// </summary>
+    /// <param name="transaction">The physical storage bracket the undo rides.</param>
+    /// <param name="key">The key of the entry to remove.</param>
+    /// <param name="entryReference">The entry reference the key maps to.</param>
+    /// <param name="writer">The writer stamp the entry must carry to be removed.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task representing the undo.</returns>
+    public ValueTask EraseAsync(StorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();
@@ -305,8 +409,19 @@ internal sealed class BTreeIndex : IIndex
         return default;
     }
 
-    /// <inheritdoc />
-    public ValueTask ClearDeleterAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence deleter, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Clears the deleter stamp of the entry mapping <paramref name="key"/> to
+    /// <paramref name="entryReference"/> when it equals <paramref name="deleter"/> —
+    /// the logical undo of an aborted writer's tombstone. Runs inside the given
+    /// physical bracket; a no-op when no matching entry exists.
+    /// </summary>
+    /// <param name="transaction">The physical storage bracket the undo rides.</param>
+    /// <param name="key">The key of the tombstoned entry.</param>
+    /// <param name="entryReference">The entry reference the key maps to.</param>
+    /// <param name="deleter">The deleter stamp the entry must carry to be cleared.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task representing the undo.</returns>
+    public ValueTask ClearDeleterAsync(StorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence deleter, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();
@@ -341,11 +456,11 @@ internal sealed class BTreeIndex : IIndex
     /// <summary>
     /// Walks every leaf once, physically removing entries written by any of the
     /// given writers and clearing tombstones they stamped — the open-time
-    /// aborted-writer purge (see <see cref="IIndexManager.PurgeWritersAsync"/>).
+    /// aborted-writer purge (see <see cref="BTreeIndexManager.PurgeWritersAsync"/>).
     /// Removing entries and clearing deleter stamps never reorders a leaf, and every
     /// separator stays a valid bound for the entries that remain.
     /// </summary>
-    internal long PurgeWriters(IStorageTransaction transaction, IReadOnlySet<TransactionSequence> writers)
+    internal long PurgeWriters(StorageTransaction transaction, IReadOnlySet<TransactionSequence> writers)
     {
         long purged = 0;
 
@@ -363,7 +478,7 @@ internal sealed class BTreeIndex : IIndex
                     var node = OpenNode(handle.Page.AsBodySpan(), leafId);
                     nextLeaf = node.NextLeaf;
 
-                    IStoragePageHandle? writable = null;
+                    StoragePageHandle? writable = null;
                     try
                     {
                         for (int index = 0; index < node.EntryCount;)
@@ -634,7 +749,7 @@ internal sealed class BTreeIndex : IIndex
         return deleter == 0 || !snapshot.IsVisible(new TransactionSequence(deleter));
     }
 
-    private void InsertCore(IStorageTransaction transaction, ReadOnlySpan<byte> key, ulong entryReference, ulong writer, ulong deleter)
+    private void InsertCore(StorageTransaction transaction, ReadOnlySpan<byte> key, ulong entryReference, ulong writer, ulong deleter)
     {
         var position = BTreeSearchKey.AtEntry(key, entryReference, writer);
         var path = new List<PathEntry>();
@@ -741,7 +856,7 @@ internal sealed class BTreeIndex : IIndex
         }
     }
 
-    private void SplitLeaf(IStorageTransaction transaction, List<PathEntry> parentPath, long leafId)
+    private void SplitLeaf(StorageTransaction transaction, List<PathEntry> parentPath, long leafId)
     {
         Separator separator;
         long siblingId;
@@ -844,7 +959,7 @@ internal sealed class BTreeIndex : IIndex
     /// The page now holding the split node's lower half: <paramref name="splitId"/>,
     /// unless that node was the root, whose contents move to a new page.
     /// </returns>
-    private long InsertIntoParent(IStorageTransaction transaction, List<PathEntry> parentPath, long splitId, Separator separator, long childId)
+    private long InsertIntoParent(StorageTransaction transaction, List<PathEntry> parentPath, long splitId, Separator separator, long childId)
     {
         if (parentPath.Count == 0)
         {
@@ -897,7 +1012,7 @@ internal sealed class BTreeIndex : IIndex
     /// rollback or a crash reverts the root page like any other.
     /// </summary>
     /// <returns>The new page holding the old root's contents.</returns>
-    private long GrowRoot(IStorageTransaction transaction, Separator separator, long childId)
+    private long GrowRoot(StorageTransaction transaction, Separator separator, long childId)
     {
         long leftId;
 
@@ -954,7 +1069,7 @@ internal sealed class BTreeIndex : IIndex
     /// page holding the left half (a new page when the root split), and the new
     /// sibling's page.
     /// </returns>
-    private (int Mid, long LeftId, long SiblingId) SplitInternal(IStorageTransaction transaction, List<PathEntry> path)
+    private (int Mid, long LeftId, long SiblingId) SplitInternal(StorageTransaction transaction, List<PathEntry> path)
     {
         long nodeId = path[^1].PageId;
         Separator promoted;

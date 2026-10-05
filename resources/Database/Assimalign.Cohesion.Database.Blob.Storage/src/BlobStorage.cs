@@ -12,16 +12,13 @@ namespace Assimalign.Cohesion.Database.Blob.Storage;
 public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     private BlobStorage(StorageStream data, StorageStream journal, StorageStream backup)
-        : base(data, journal, backup) => Records = new BlobTransactionRecordSpace(this);
-
-    /// <inheritdoc />
-    public override StorageModel Model => StorageModel.Blob;
+        : base(StorageModel.Blob, data, journal, backup) => Records = new BlobTransactionRecordSpace(this);
 
     /// <summary>Gets the journal used by this storage and its logical transaction coordinator.</summary>
     public StorageJournal WriteAheadJournal => WriteAheadLog;
 
     /// <summary>Gets the shared version store's record adapter.</summary>
-    public ITransactionRecordSpace Records { get; }
+    public TransactionRecordSpace Records { get; }
 
     /// <summary>Creates an empty blob file set.</summary>
     /// <param name="data">The data stream.</param>
@@ -93,7 +90,7 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="transaction">The physical statement bracket.</param>
     /// <param name="entry">The complete stamped record.</param>
     /// <returns>The record's physical location.</returns>
-    public (PageId PageId, int SlotIndex) InsertEntry(IStorageTransaction transaction, ReadOnlySpan<byte> entry)
+    public (PageId PageId, int SlotIndex) InsertEntry(StorageTransaction transaction, ReadOnlySpan<byte> entry)
         => InsertRecord(transaction, entry);
 
     /// <summary>Reads a record through the kernel's checksum-validated page path.</summary>
@@ -107,14 +104,14 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="pageId">The record's page.</param>
     /// <param name="slotIndex">The record's slot.</param>
     /// <param name="entry">The replacement bytes.</param>
-    public void UpdateEntry(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> entry)
+    public void UpdateEntry(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> entry)
         => UpdateRecord(transaction, pageId, slotIndex, entry);
 
     /// <summary>Reclaims a record, returning its page to the free map when empty.</summary>
     /// <param name="transaction">The physical statement bracket.</param>
     /// <param name="pageId">The record's page.</param>
     /// <param name="slotIndex">The record's slot.</param>
-    public void DeleteEntry(IStorageTransaction transaction, PageId pageId, int slotIndex)
+    public void DeleteEntry(StorageTransaction transaction, PageId pageId, int slotIndex)
         => DeleteRecord(transaction, pageId, slotIndex);
 
     /// <summary>Packs a page and slot into a stable, nonzero content location.</summary>
@@ -140,7 +137,7 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// </param>
     /// <param name="cancellationToken">Cancellation retained for the upload's entire lifetime.</param>
     /// <returns>A non-seekable writable stream holding one chunk buffer.</returns>
-    public Stream OpenWrite(TransactionCoordinator coordinator, ITransactionContext context,
+    public Stream OpenWrite(TransactionCoordinator coordinator, TransactionContext context,
         Func<BlobContentReference, ValueTask> complete, Func<Exception, ValueTask> abort, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(coordinator);
@@ -164,7 +161,7 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="content">The chain being deleted or replaced.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>A task representing the tombstone operation.</returns>
-    public async ValueTask TombstoneContentAsync(TransactionCoordinator coordinator, ITransactionContext context,
+    public async ValueTask TombstoneContentAsync(TransactionCoordinator coordinator, TransactionContext context,
         BlobContentReference content, CancellationToken cancellationToken = default)
     {
         ulong location = content.Head;
@@ -190,6 +187,6 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
         }
     }
 
-    internal (PageId PageId, int SlotIndex) InsertChunk(IStorageTransaction transaction, TransactionSequence writer, ReadOnlySpan<byte> entry)
+    internal (PageId PageId, int SlotIndex) InsertChunk(StorageTransaction transaction, TransactionSequence writer, ReadOnlySpan<byte> entry)
         => InsertRecord(transaction, writer.Value | (1UL << 63), entry);
 }

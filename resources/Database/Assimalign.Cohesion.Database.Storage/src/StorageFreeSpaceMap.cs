@@ -1,11 +1,12 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Storage.Internal;
+namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
 /// Tracks which pages in a storage file are allocated versus free using an in-memory
 /// free list. New pages are appended; freed pages are recycled in first-freed order.
+/// It performs no I/O: page I/O is the responsibility of <see cref="StoragePageManager"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,7 +22,7 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 /// the same page to two transactions.
 /// </para>
 /// </remarks>
-internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
+public sealed class StorageFreeSpaceMap
 {
     private readonly object _sync = new();
     private readonly Queue<long> _freeQueue = new();
@@ -44,7 +45,9 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
     /// </remarks>
     internal Action<PageId>? Freed;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the total number of pages tracked by this free space map.
+    /// </summary>
     public long TotalPageCount
     {
         get
@@ -56,7 +59,9 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the number of pages currently marked as free.
+    /// </summary>
     public long FreePageCount
     {
         get
@@ -68,7 +73,10 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Allocates the next available free page identifier.
+    /// </summary>
+    /// <returns>The identifier of the newly allocated page.</returns>
     public PageId Allocate()
     {
         lock (_sync)
@@ -88,7 +96,11 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Marks the specified page as free, making it available for future allocation.
+    /// </summary>
+    /// <param name="pageId">The identifier of the page to free.</param>
+    /// <exception cref="StorageIOException">The page was never allocated.</exception>
     public void Free(PageId pageId)
     {
         long id = (long)pageId;
@@ -114,7 +126,11 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Determines whether the specified page is currently allocated.
+    /// </summary>
+    /// <param name="pageId">The identifier of the page to check.</param>
+    /// <returns><c>true</c> if the page is allocated; otherwise, <c>false</c>.</returns>
     public bool IsAllocated(PageId pageId)
     {
         long id = (long)pageId;

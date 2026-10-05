@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
-/// Represents the smallest addressable data entity within a storage file.
-/// A storage unit is a variable-length record stored in a slot within a page.
+/// The smallest addressable data entity within a storage file: a variable-length record
+/// stored in a slot within a page, read as a snapshot of its page location and bytes.
 /// </summary>
 /// <remarks>
 /// At the storage layer, a unit is model-agnostic: it is simply a byte sequence
@@ -15,21 +15,29 @@ namespace Assimalign.Cohesion.Database.Storage;
 ///   <item><b>KeyValuePair:</b> A key-value entry.</item>
 ///   <item><b>Graph:</b> A node record or edge record.</item>
 /// </list>
+/// The <see cref="StorageUnitIterator"/> returns units unboxed.
 /// </remarks>
-public interface IStorageUnit
+public readonly struct StorageUnit
 {
+    internal StorageUnit(PageId pageId, int slotIndex, ReadOnlyMemory<byte> data)
+    {
+        PageId = pageId;
+        SlotIndex = slotIndex;
+        Data = data;
+    }
+
     /// <summary>
     /// Gets the identifier of the page containing this unit.
     /// </summary>
-    PageId PageId { get; }
+    public PageId PageId { get; }
 
     /// <summary>
     /// Gets the zero-based index of the slot within the page.
     /// </summary>
-    int SlotIndex { get; }
+    public int SlotIndex { get; }
 
     /// <summary>
     /// Gets the raw byte data of this storage unit.
     /// </summary>
-    ReadOnlyMemory<byte> Data { get; }
+    public ReadOnlyMemory<byte> Data { get; }
 }

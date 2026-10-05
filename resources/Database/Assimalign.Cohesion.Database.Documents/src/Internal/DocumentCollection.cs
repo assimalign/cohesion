@@ -93,7 +93,7 @@ internal sealed class DocumentCollection : IDocumentCollection
 
     private static void ValidateId(DocumentId id) => ArgumentException.ThrowIfNullOrWhiteSpace(id.Value);
 
-    private void EnsureCurrent(ITransactionContext context, DocumentId id, DocumentCatalogEntry? previous, DocumentVersion? expectedVersion)
+    private void EnsureCurrent(TransactionContext context, DocumentId id, DocumentCatalogEntry? previous, DocumentVersion? expectedVersion)
     {
         if (previous != _database.Catalog.FindDocument(_collection.Id, id.Value, _database.LatestSnapshot(context))) { DocumentDatabaseInstance.ThrowConflict(); }
         if (expectedVersion is not null && previous?.Version != expectedVersion.Value.Value)
@@ -102,7 +102,7 @@ internal sealed class DocumentCollection : IDocumentCollection
         }
     }
 
-    private void EnsureCollection(ITransactionContext context, bool writing = false)
+    private void EnsureCollection(TransactionContext context, bool writing = false)
     {
         var current = _database.Catalog.FindCollection(Name, context.Snapshot);
         if (current?.Id != _collection.Id) { throw new DatabaseException($"Collection '{Name}' is no longer available in this transaction."); }

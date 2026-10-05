@@ -95,9 +95,7 @@ internal static class StorageRecovery
         IReadOnlySet<long>? protectedPages = null,
         int cacheCapacity = Storage.DefaultBufferPoolCapacity)
     {
-        IEnumerable<JournalRecord> ReadRecords() => journal is StorageJournal streaming
-            ? streaming.ReadSequential()
-            : journal.ReadAll();
+        IEnumerable<JournalRecord> ReadRecords() => journal.ReadSequential();
 
         // Pass 1: which transactions committed, the highest sequence, and the checkpoint the
         // journal starts at.

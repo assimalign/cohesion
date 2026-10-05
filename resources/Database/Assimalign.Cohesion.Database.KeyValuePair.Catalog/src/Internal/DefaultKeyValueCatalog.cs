@@ -151,7 +151,7 @@ internal sealed class DefaultKeyValueCatalog : IKeyValueCatalog
     /// Rewrites a record in place when it fits, relocating it otherwise.
     /// </summary>
     private (PageId PageId, int SlotIndex) UpsertRecord(
-        IStorageTransaction transaction,
+        StorageTransaction transaction,
         (PageId PageId, int SlotIndex)? location,
         byte[] record)
     {

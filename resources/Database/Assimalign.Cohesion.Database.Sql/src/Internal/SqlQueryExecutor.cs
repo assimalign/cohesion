@@ -21,10 +21,10 @@ internal sealed class SqlQueryExecutor
 {
     private readonly SqlStorage _storage;
     private readonly ISqlCatalog _catalog;
-    private readonly IIndexManager _indexManager;
+    private readonly BTreeIndexManager _indexManager;
     private readonly SqlBoundTableCache _definitions;
 
-    internal SqlQueryExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager, SqlBoundTableCache definitions)
+    internal SqlQueryExecutor(SqlStorage storage, ISqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions)
     {
         _storage = storage;
         _catalog = catalog;

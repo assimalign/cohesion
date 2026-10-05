@@ -1,25 +1,48 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Storage.Internal;
+namespace Assimalign.Cohesion.Database.Storage;
+
+using Assimalign.Cohesion.Database.Storage.Internal;
 
 /// <summary>
-/// Internal storage transaction scope. Holds the pre-image of every page the transaction
-/// touches: rollback restores it in memory, and commit encodes each page's changes as the byte
-/// runs that differ from it (#1253).
+/// A storage-level transaction scope: the unit of atomicity and durability for
+/// record mutations against a storage file.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A pre-image is kept as its full page image encoding (<see cref="PageImageCodec"/>): the
-/// page's non-zero byte runs. A page the transaction allocated, or one with a large free gap,
-/// costs a few hundred bytes instead of 8 KiB, which is what keeps an index build in one
-/// bracket small. Past the storage's pre-image budget a page's pre-image is not kept at all:
-/// the storage journals it as a full page image and the transaction keeps only where that
-/// record lies (<see cref="StorageJournalLocation"/>), reading it back for its commit or its
-/// rollback.
+/// Mutations made through a transaction are staged in the buffer pool and protected
+/// by the write-ahead log: the first modification of a page since the last checkpoint
+/// journals its full image, and <see cref="Commit()"/> journals the bytes each page changed
+/// (a page delta) followed by a commit record (storage format 3, #1253). Durable storage
+/// modes flush that record before the call returns; non-durable mode makes no persistence
+/// promise. Data pages are <i>not</i> forced to disk at commit — recovery replays committed
+/// changes from the journal (no-force), and uncommitted changes that reached disk early are
+/// overwritten by the page's full image and the committed changes after it (steal).
+/// </para>
+/// <para>
+/// Pages modified by an active transaction are write-locked to that transaction
+/// until it completes; a second transaction touching the same page fails rather
+/// than waits. Fine-grained (record-level) concurrency control is the transaction
+/// layer's responsibility (<c>Database.Transactions</c>), built above this scope.
+/// </para>
+/// <para>
+/// The transaction holds the pre-image of every page it touches: rollback restores it in
+/// memory, and commit encodes each page's changes as the byte runs that differ from it. A
+/// pre-image is kept as its full page image encoding, the page's non-zero byte runs, so a page
+/// the transaction allocated, or one with a large free gap, costs a few hundred bytes instead
+/// of 8 KiB, which is what keeps an index build in one bracket small. Past the storage's
+/// pre-image budget a page's pre-image is not kept at all: the storage journals it as a full
+/// page image and the transaction keeps only where that record lies, reading it back for its
+/// commit or its rollback.
+/// </para>
+/// <para>
+/// Disposing an active transaction rolls it back. The type is sealed and created only by its
+/// <see cref="Storage"/> (<see cref="Storage.BeginTransaction()"/>): every record and page
+/// operation of a statement calls through it.
 /// </para>
 /// </remarks>
-internal sealed class StorageTransaction : IStorageTransaction
+public sealed class StorageTransaction : IDisposable
 {
     /// <summary>
     /// The bytes a kept pre-image costs beyond its runs: the array header, the dictionary entry
@@ -40,10 +63,16 @@ internal sealed class StorageTransaction : IStorageTransaction
         Sequence = sequence;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the storage-level transaction sequence. Sequences are monotonic within
+    /// a storage instance and identify the transaction in the journal.
+    /// </summary>
     public long Sequence { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets a value indicating whether the transaction is still active (neither
+    /// committed nor rolled back).
+    /// </summary>
     public bool IsActive => _active;
 
     /// <summary>
@@ -122,24 +151,46 @@ internal sealed class StorageTransaction : IStorageTransaction
     /// </summary>
     internal void MarkCompleted() => _active = false;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Commits the transaction: journals the changed bytes of every modified page and a
+    /// commit record, then applies the owning storage's durability policy. Durable
+    /// modes return only after the journal is durable up to that commit record.
+    /// </summary>
+    /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
     public void Commit() => Commit(awaitDurability: true);
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Commits the transaction, optionally without awaiting durability. A
+    /// non-durable commit appends the same records (page deltas + commit
+    /// record) but returns before they are flushed — for inner physical brackets
+    /// whose durability is owned by an outer logical commit: the journal is
+    /// ordered, so making any later record durable makes these durable first,
+    /// and a crash before that leaves the bracket unproven (recovery redoes none
+    /// of its changes), which is exactly the outer transaction's abort semantics.
+    /// The write-ahead gate still protects stolen pages regardless.
+    /// </summary>
+    /// <param name="awaitDurability">False to skip the durable flush; true is equivalent to <see cref="Commit()"/>.</param>
+    /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
     public void Commit(bool awaitDurability)
     {
         ThrowIfCompleted();
         _owner.CommitTransaction(this, awaitDurability);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Rolls the transaction back: restores every modified page to its pre-image
+    /// in the buffer pool and journals a rollback record.
+    /// </summary>
+    /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
     public void Rollback()
     {
         ThrowIfCompleted();
         _owner.RollbackTransaction(this);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Rolls the transaction back if it is still active; otherwise does nothing.
+    /// </summary>
     public void Dispose()
     {
         if (_active)

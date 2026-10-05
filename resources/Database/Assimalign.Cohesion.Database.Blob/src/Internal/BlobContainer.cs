@@ -168,7 +168,7 @@ internal sealed class BlobContainer : IBlobContainer
         }
     }
 
-    private void EnsureContainer(ITransactionContext context, bool writing = false)
+    private void EnsureContainer(TransactionContext context, bool writing = false)
     {
         var current = _database.Catalog.FindContainer(Name, context.Snapshot);
         if (current?.Id != _container.Id)

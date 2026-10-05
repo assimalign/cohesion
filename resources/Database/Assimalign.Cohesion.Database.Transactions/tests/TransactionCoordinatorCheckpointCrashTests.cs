@@ -45,7 +45,7 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
                 string at = $"crash at checkpoint write {write} ({point.Log[point.CrashAtWrite - 1]}), {sectors} sectors";
 
                 using var reopened = CrashStorage.Open(scenario.Storage.CaptureDurable());
-                await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+                await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
                 var plan = recovered.AnalyzeAndScrub();
                 recovered.CompleteRecovery();
                 var reader = await recovered.BeginAsync(IsolationLevel.Snapshot);
@@ -83,7 +83,7 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
             SimulatedPowerLossException.ShouldBeThrownBy(() => scenario.Coordinator.Checkpoint(), $"leading drain, {sectors} sectors");
             string at = $"crash at {point.Log[point.CrashAtWrite - 1]}, {sectors} sectors";
             using var reopened = CrashStorage.Open(scenario.Storage.CaptureDurable());
-            await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened);
+            await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
             var plan = recovered.AnalyzeAndScrub();
             recovered.CompleteRecovery();
             var reader = await recovered.BeginAsync(IsolationLevel.Snapshot);
@@ -108,7 +108,7 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
     private static async Task<Scenario> ArrangeAsync(CrashPoint point, bool drain = true)
     {
         var storage = CrashStorage.Create(point);
-        var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
 
         var committed = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var location = await InsertAsync(coordinator, storage, committed);
@@ -131,7 +131,7 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
         return new Scenario(storage, coordinator, writers, location, storage.Log.LastLsn);
     }
 
-    private static ValueTask<ulong> InsertAsync(TransactionCoordinator coordinator, CrashStorage storage, ITransactionContext context)
+    private static ValueTask<ulong> InsertAsync(TransactionCoordinator coordinator, CrashStorage storage, TransactionContext context)
         => coordinator.ApplyStatementAsync(context, bracket =>
         {
             byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];
@@ -164,13 +164,13 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
     /// <summary>
     /// A record space over write-through crash-simulation streams sharing one crash point.
     /// </summary>
-    private sealed class CrashStorage : Storage.Storage, ITransactionRecordSpace
+    private sealed class CrashStorage : Storage.Storage
     {
         private readonly CrashSimulationStream _data;
         private readonly CrashSimulationStream _journal;
 
         private CrashStorage(CrashSimulationStream data, CrashSimulationStream journal, bool reopen)
-            : base(new StorageStream(data), new StorageStream(journal), new StorageStream(new MemoryStream()))
+            : base(StorageModel.KeyValue, new StorageStream(data), new StorageStream(journal), new StorageStream(new MemoryStream()))
         {
             _data = data;
             _journal = journal;
@@ -183,8 +183,6 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
                 InitializeNew((Name)"checkpoint-crash");
             }
         }
-
-        public override StorageModel Model => StorageModel.KeyValue;
 
         internal StorageJournal Log => WriteAheadLog;
 
@@ -200,21 +198,51 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
 
         internal (byte[] Data, byte[] Journal) CaptureDurable() => (_data.CaptureDurable(), _journal.CaptureDurable());
 
-        internal (PageId PageId, int SlotIndex) Insert(IStorageTransaction bracket, ReadOnlySpan<byte> data)
+        internal (PageId PageId, int SlotIndex) Insert(StorageTransaction bracket, ReadOnlySpan<byte> data)
             => InsertRecord(bracket, data);
 
-        public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
+        internal ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
 
-        public void Update(IStorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+        internal void Update(StorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
             => UpdateRecord(bracket, pageId, slotIndex, record);
 
-        public void Delete(IStorageTransaction bracket, PageId pageId, int slotIndex)
+        internal void Delete(StorageTransaction bracket, PageId pageId, int slotIndex)
             => DeleteRecord(bracket, pageId, slotIndex);
 
-        public ulong PackLocation(PageId pageId, int slotIndex)
+        internal ulong PackLocation(PageId pageId, int slotIndex)
             => ((ulong)(long)pageId << 16) | (ushort)slotIndex;
 
-        public (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
+        internal (PageId PageId, int SlotIndex) UnpackLocation(ulong location)
             => ((PageId)(long)(location >> 16), (int)(location & 0xFFFF));
+
+        /// <summary>
+        /// Gets the coordinator's record space over this storage's records. The double used to be
+        /// the record space itself; both are abstract classes now, so it is split (plan C9).
+        /// </summary>
+        internal TransactionRecordSpace Records => _records ??= new RecordSpace(this);
+
+        private RecordSpace? _records;
+
+        private sealed class RecordSpace : TransactionRecordSpace
+        {
+            private readonly CrashStorage _storage;
+
+            internal RecordSpace(CrashStorage storage)
+            {
+                _storage = storage;
+            }
+
+            protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex) => _storage.Read(pageId, slotIndex);
+
+            protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+                => _storage.Update(transaction, pageId, slotIndex, record);
+
+            protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex)
+                => _storage.Delete(transaction, pageId, slotIndex);
+
+            protected override ulong PackLocationCore(PageId pageId, int slotIndex) => _storage.PackLocation(pageId, slotIndex);
+
+            protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location) => _storage.UnpackLocation(location);
+        }
     }
 }

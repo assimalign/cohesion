@@ -90,7 +90,7 @@ empty byte chain, but catalog publication rejects it as a document.
 A write buffers one chunk, inserts it in a shared physical statement bracket, and links the
 previous tail in that same bracket. All chunks and the later metadata version carry the same
 logical writer. They remain invisible until the transaction commits. Replacing/deleting content
-tombstones every old chunk through `ITransactionContext`; snapshot readers retain the old chain
+tombstones every old chunk through `TransactionContext`; snapshot readers retain the old chain
 until the shared purge bound allows reclamation. The shared version ledger removes all created
 chunks and clears old tombstones on rollback. A crash uses the shared recovery scrub instead of
 an in-memory undo ledger. Tests flush the journal ordinarily and clone serialized memory-stream

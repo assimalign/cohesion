@@ -21,7 +21,7 @@ using Assimalign.Cohesion.Database.Storage;
 /// Internal: the variants are the in-memory log, the journal-bound log and the coordinator's
 /// gated journal log, all in this assembly, plus the fault-injecting doubles of this
 /// assembly's own tests. A durable manager is the one <see cref="TransactionCoordinator"/>
-/// composes; a standalone <see cref="TransactionManager.Create(ILockManager, IVersionStore, Func{TransactionSequence})"/>
+/// composes; a standalone <see cref="TransactionManager.Create(LockManager, VersionStore, Func{TransactionSequence})"/>
 /// runs over the in-memory log.
 /// </para>
 /// </remarks>

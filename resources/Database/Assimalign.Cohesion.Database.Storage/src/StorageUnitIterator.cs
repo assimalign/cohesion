@@ -2,29 +2,32 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Storage.Internal;
+namespace Assimalign.Cohesion.Database.Storage;
 
 using Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
-/// Iterates over all non-deleted storage units (records) across data pages
-/// in a storage file, or — when constructed with an owner's page snapshot —
-/// across only that owner's record chain.
+/// A depth-first iterator that enumerates the live <see cref="StorageUnit"/> records across
+/// the data pages of a storage file, or — when obtained for an owner
+/// (<see cref="Storage.GetUnitIterator(ulong)"/>) — across only that owner's record chain.
 /// </summary>
-internal sealed unsafe class StorageUnitIterator : IStorageUnitIterator
+/// <remarks>
+/// The iterator pins at most one page at a time; disposing it releases that pin.
+/// </remarks>
+public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
 {
-    private readonly IStoragePageManager _pageManager;
-    private readonly IStorageFreeSpaceMap _freeSpaceMap;
+    private readonly StoragePageManager _pageManager;
+    private readonly StorageFreeSpaceMap _freeSpaceMap;
     private readonly long _pageCount;
     private readonly long[]? _ownerPages;
     private readonly ulong _ownerId;
     private long _pagePosition;
     private int _currentSlotIndex;
     private long _pagesVisited;
-    private IStorageUnit? _current;
-    private IStoragePageHandle? _currentHandle;
+    private StorageUnit _current;
+    private StoragePageHandle? _currentHandle;
 
-    internal StorageUnitIterator(IStoragePageManager pageManager, IStorageFreeSpaceMap freeSpaceMap)
+    internal StorageUnitIterator(StoragePageManager pageManager, StorageFreeSpaceMap freeSpaceMap)
     {
         _pageManager = pageManager;
         _freeSpaceMap = freeSpaceMap;
@@ -34,8 +37,8 @@ internal sealed unsafe class StorageUnitIterator : IStorageUnitIterator
     }
 
     internal StorageUnitIterator(
-        IStoragePageManager pageManager,
-        IStorageFreeSpaceMap freeSpaceMap,
+        StoragePageManager pageManager,
+        StorageFreeSpaceMap freeSpaceMap,
         long[] ownerPages,
         ulong ownerId)
     {
@@ -54,14 +57,23 @@ internal sealed unsafe class StorageUnitIterator : IStorageUnitIterator
     /// </summary>
     internal long PagesVisited => _pagesVisited;
 
-    /// <inheritdoc />
-    public IStorageUnit Current => _current!;
+    /// <summary>
+    /// Gets the unit at the current position.
+    /// </summary>
+    /// <remarks>
+    /// The default unit before the first <see cref="MoveNext"/> and after the scan is exhausted.
+    /// </remarks>
+    public StorageUnit Current => _current;
 
     /// <inheritdoc />
-    object IEnumerator.Current => _current!;
+    object IEnumerator.Current => _current;
 
-    /// <inheritdoc />
-    public bool Next(out IStorageUnit? unit)
+    /// <summary>
+    /// Attempts to advance to the next storage unit.
+    /// </summary>
+    /// <param name="unit">When this method returns <c>true</c>, contains the next unit; otherwise, the default unit.</param>
+    /// <returns><c>true</c> if the iterator advanced to a valid unit; otherwise, <c>false</c>.</returns>
+    public bool Next(out StorageUnit unit)
     {
         if (MoveNext())
         {
@@ -69,11 +81,14 @@ internal sealed unsafe class StorageUnitIterator : IStorageUnitIterator
             return true;
         }
 
-        unit = null;
+        unit = default;
         return false;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Advances to the next live unit, pinning the page that holds it.
+    /// </summary>
+    /// <returns><c>true</c> if the iterator advanced to a valid unit; otherwise, <c>false</c>.</returns>
     public bool MoveNext()
     {
         while (_pagePosition < _pageCount)
@@ -128,11 +143,13 @@ internal sealed unsafe class StorageUnitIterator : IStorageUnitIterator
 
         _currentHandle?.Dispose();
         _currentHandle = null;
-        _current = null;
+        _current = default;
         return false;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Returns the iterator to its start, releasing the page it pins.
+    /// </summary>
     public void Reset()
     {
         _currentHandle?.Dispose();
@@ -140,10 +157,12 @@ internal sealed unsafe class StorageUnitIterator : IStorageUnitIterator
         _pagePosition = _ownerPages is null ? 1 : 0;
         _currentSlotIndex = -1;
         _pagesVisited = 0;
-        _current = null;
+        _current = default;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Releases the page the iterator pins.
+    /// </summary>
     public void Dispose()
     {
         _currentHandle?.Dispose();

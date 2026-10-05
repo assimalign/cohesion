@@ -127,7 +127,7 @@ items. Each item is resolved below. Line references were re-measured on 2026-10-
 | C6 | Option A gives `Dispose` two meanings on one sealed Blob or Documents type. | Option B (§6.6). | P4 |
 | C7 | The Sql.Schema declaration records are positional and cannot be closed. | The declaration model stays internal behind an opaque `public sealed SqlSchema`, and `SqlSchemaCompiler` becomes internal (§6.7). Correction to the critique: Sql.Schema has **no** `InternalsVisibleTo` today. Phase 4 adds Sql.Schema → Sql.Schema.Tests. | P4 |
 | C8 | The existing public abstract hot types were not audited. | Each is audited in the phase that touches it (§5.3). | P2, P3, P8 |
-| C9 | Test doubles that are both a `Storage` and a record space break under single inheritance. | They are split. Verification found three: `CoordinatorStorage` (`TransactionCoordinatorRecoveryTests.cs:318`), `RollbackStorage` (`TransactionCoordinatorRollbackTests.cs:926`) and `RecordStorage` (`RecordSpaceVersionStoreTests.cs:246`). The first two also name `IStorage` in their base lists and re-implement its members, which breaks in P1, not P2: P1 removes those and moves the hooks to the coordinator (§6.9). Only the record-space split waits for P2. | P1, P2 |
+| C9 | Test doubles that are both a `Storage` and a record space break under single inheritance. | They are split. Verification found three: `CoordinatorStorage` (`TransactionCoordinatorRecoveryTests.cs:318`), `RollbackStorage` (`TransactionCoordinatorRollbackTests.cs:926`) and `RecordStorage` (`RecordSpaceVersionStoreTests.cs:246`). The first two also name `IStorage` in their base lists and re-implement its members, which breaks in P1, not P2: P1 removes those and moves the hooks to the coordinator (§6.9). Only the record-space split waits for P2. **At P2:** five doubles, not three (two crash-suite doubles came later); all split (§6.9). | P1, P2 |
 | C10 | The shared `DatabaseEngineBuilderState.cs` is typed against the root interfaces. The bridge must still satisfy `IDatabaseServer.Context`. | Step P4.0 makes the state generic before the first model PR. The context classes are deleted in P6. | P4.0, P6 |
 | C11 | The performance numbers were tagged `[Certain, measured]`, but they do not reproduce. | They are retagged `[Likely]`, given as ranges with ±60% variance, and the "whatever the type shape" claim is dropped (§9). | P0 |
 | C12 | Rule conflicts the original rule changes missed: access-modifier rule 1, "internal types are internal", the `Internal/` namespace, one public type per file. | `database-area.md` ("How this relates to the other rules") explains why rule 1 and the checklist line still hold. The moves out of `Internal/`, with their namespace changes and test `using` lines, are counted in P2, P4 and P5 (§10). | P0 |
@@ -226,11 +226,11 @@ interface is deleted in P6.
 | 16 | `IQueryPipelineStage` | Execution `:11` | child root | delete | Deleted with the pipeline. | P1 |
 | 17 | `IQueryTransactionScope` | Execution `:15` | child root | delete | Deleted with the pipeline. | P1 |
 | 18 | `IResourceGovernor` | Governance `:9` | child root | delete | The interface and the `Database.Governance` project are deleted (D6). | P1 |
-| 19 | `IIndex` | Indexing `:28` | child root | sealed | `public sealed class BTreeIndex`, with an internal constructor; `BTreeIndexManager` creates it. | P2 |
-| 20 | `IIndexCursor` | Indexing `:10` | child root | sealed | `BTreeCursor`: public sealed if a public `BTreeIndex` member returns it, otherwise internal sealed. | P2 |
-| 21 | `IIndexManager` | Indexing `:14` | child root | sealed | One `public sealed class BTreeIndexManager` for the manager and the registry. It absorbs `public static class BTreeIndexManager` (`BTreeIndexManager.cs:13`, `Create` at `:38`). | P2 |
-| 22 | `IIndexRegistry` | Indexing `:17` | child root | sealed | Merged into `BTreeIndexManager` (row 21). | P2 |
-| 23 | `IStorageTransactionSource` | Indexing `:16` | child root | delete | `BTreeIndexManagerOptions` takes a per-engine delegate, `Func<TransactionContext, StorageTransaction>` (§6.3). | P2 |
+| 19 | `IIndex` | Indexing `:28` | child root | sealed | `public sealed class BTreeIndex`, with an internal constructor; `BTreeIndexManager` creates it. **At P2:** landed, promoted from the internal class and moved out of `Internal/`. | P2 |
+| 20 | `IIndexCursor` | Indexing `:10` | child root | sealed | `BTreeCursor`: public sealed if a public `BTreeIndex` member returns it, otherwise internal sealed. **At P2:** public sealed: both `BTreeIndex.OpenCursor` overloads return it. It keeps `IAsyncDisposable`, whose `DisposeAsync` releases nothing (the cursor materializes its range when it opens), so that a cursor that pins pages later changes no call site. | P2 |
+| 21 | `IIndexManager` | Indexing `:14` | child root | sealed | One `public sealed class BTreeIndexManager` for the manager and the registry. It absorbs `public static class BTreeIndexManager` (`BTreeIndexManager.cs:13`, `Create` at `:38`). **At P2:** landed; the internal `DefaultIndexManager` was folded in, and the constructor is private behind `Create`. `CreateIndexAsync`, `TryGetIndex` and `GetIndexes` return `BTreeIndex`. | P2 |
+| 22 | `IIndexRegistry` | Indexing `:17` | child root | sealed | Merged into `BTreeIndexManager` (row 21). **At P2:** landed; the 23 `IIndexRegistry` casts in Sql, KeyValuePair, Documents.Catalog, Graph.Storage and their tests became direct `ExportRegistrations()` calls. | P2 |
+| 23 | `IStorageTransactionSource` | Indexing `:16` | child root | delete | `BTreeIndexManagerOptions` takes a per-engine delegate, `Func<TransactionContext, StorageTransaction>` (§6.3). **At P2:** landed as `required Func<TransactionContext, StorageTransaction> TransactionSource` (the property kept its name). Each engine passes a private `ResolveStatementBracket` method that replaced its wrapper class with the same message (§6.3). | P2 |
 | 24 | `IProtocolFrameReader` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameReader : IAsyncDisposable`, with a protected constructor, because its leaves live in Protocol, Database.Client and Blob.Client. NVI `ReadFrameAsync` calls `ReadFrameCoreAsync`, and a non-virtual `DisposeAsync` calls `DisposeAsyncCore` (the interface extends `IAsyncDisposable` today, `IProtocolFrameReader.cs:10`). `public static ProtocolFrameReader Create(Stream, bool leaveOpen = false)` replaces `ProtocolFraming.CreateReader`. | P2 |
 | 25 | `IProtocolFrameWriter` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameWriter : IAsyncDisposable`. NVI `WriteFrameAsync` calls `WriteFrameCoreAsync`, and `DisposeAsync` calls `DisposeAsyncCore`. `Create(Stream, bool)` replaces `ProtocolFraming.CreateWriter`. | P2 |
 | 26 | `IAuthorizationService` | Security `:9` | child root | delete | It has no implementer anywhere. | P1 |
@@ -238,21 +238,21 @@ interface is deleted in P6.
 | 28 | `IStorage` | Storage `:16` | child root | delete | Consumers retype to the existing abstract `Storage`. The default member `EnsureCommitDurable` (`IStorage.cs:218`) already exists as `Storage.EnsureCommitDurable` (`Storage.cs:219`), and the explicit implementation (`Storage.cs:241`) goes. Two Transactions.Tests doubles re-implement `IStorage.Checkpoint` and `ReserveTransactionSequence`, which are non-virtual on `Storage` (`:549`, `:467`); their hooks move to the coordinator in P1 (§6.9). | P1 |
 | 29 | `IStorageBackupManager` | Storage `:9` | child root | delete | It has no implementer and no reference. | P1 |
 | 30 | `IStorageBufferPool` | Storage `:15` | child root | delete | `StorageBufferPool` stays internal sealed, and the public `Storage.BufferPool` (`Storage.cs:117`) becomes internal. Only Storage.Tests reads it (`StorageConcurrencyTests.cs:211`, `:338`), through Storage's existing grant. | P1 |
-| 31 | `IStorageFreeSpaceMap` | Storage `:15` | child root | sealed | `public sealed class StorageFreeSpaceMap`, with an internal constructor. The public `Storage.FreeSpaceMap` (`Storage.cs:121`) returns it, and Graph.Catalog and Graph.Storage call `IsAllocated` through it (`Internal/DefaultGraphCatalog.cs:298`, `Internal/DefaultGraphStore.cs:234`). | P2 |
+| 31 | `IStorageFreeSpaceMap` | Storage `:15` | child root | sealed | `public sealed class StorageFreeSpaceMap`, with an internal constructor. The public `Storage.FreeSpaceMap` (`Storage.cs:121`) returns it, and Graph.Catalog and Graph.Storage call `IsAllocated` through it (`Internal/DefaultGraphCatalog.cs:298`, `Internal/DefaultGraphStore.cs:234`). **At P2:** landed as planned, moved out of `Internal/`; its public members are the interface's, unchanged. | P2 |
 | 32 | `IStorageJournal` | Storage `:31` | child root | delete | Consumers retype to the existing abstract `StorageJournal`. `FaultInjectingJournal` (`TransactionCoordinatorRollbackTests.cs:844`) decorates the interface to reject rollback records; `StorageJournal.AppendRollback` is non-virtual (`StorageJournal.cs:78`), so the double is deleted and its fault moves to the coordinator in P1 (§6.9). `StorageJournal` itself is audited in P2 (§5.3). | P1 |
-| 33 | `IStoragePageHandle` | Storage `:26` | child root | sealed | `public sealed class StoragePageHandle`, with an internal constructor. It is on the per-page hot path. | P2 |
-| 34 | `IStoragePageManager` | Storage `:22` | child root | sealed | `public sealed class StoragePageManager`, with an internal constructor. The public `Storage.PageManager` (`Storage.cs:113`) returns it. Indexing's `BTreeIndex` calls `PageManager.GetPage` on the per-page hot path (`Internal/BTreeIndex.cs:104` and seven more sites), as do Graph.Catalog and Graph.Storage, so every call becomes non-virtual. | P2 |
+| 33 | `IStoragePageHandle` | Storage `:26` | child root | sealed | `public sealed class StoragePageHandle`, with an internal constructor. It is on the per-page hot path. **At P2:** landed as planned. | P2 |
+| 34 | `IStoragePageManager` | Storage `:22` | child root | sealed | `public sealed class StoragePageManager`, with an internal constructor. The public `Storage.PageManager` (`Storage.cs:113`) returns it. Indexing's `BTreeIndex` calls `PageManager.GetPage` on the per-page hot path (`Internal/BTreeIndex.cs:104` and seven more sites), as do Graph.Catalog and Graph.Storage, so every call becomes non-virtual. **At P2:** landed, and the type is no longer disposable: the interface extended `IAsyncDisposable` and `IDisposable`, but both members were empty and the storage owns the manager, so a public `Dispose` only invited callers to "dispose" a component they do not own. The storage's two no-op calls and five Storage.Tests `using` declarations went with them. | P2 |
 | 35 | `IStorageRecoveryManager` | Storage `:9` | child root | delete | It has no implementer and no reference. | P1 |
-| 36 | `IStorageTransaction` | Storage `:30` | child root | sealed | `public sealed class StorageTransaction`, with an internal constructor. | P2 |
-| 37 | `IStorageUnit` | Storage `:19` | child root | sealed | `public readonly struct StorageUnit` (internal today, `Internal/StorageUnit.cs:8`), with an internal constructor. The iterator returns it unboxed. | P2 |
-| 38 | `IStorageUnitIterator` | Storage `:10` | child root | sealed | `public sealed class StorageUnitIterator : IEnumerator<StorageUnit>`, with an internal constructor. The public `Storage.GetUnitIterator` (`Storage.cs:837`, `:843`) returns it to Transactions, Sql, the five model catalogs and Graph.Storage. | P2 |
-| 39 | `ILockManager` | Transactions `:16` | child root | sealed | `public sealed class LockManager`, with an internal constructor. It absorbs `public static class LockManager` (`LockManager.cs:8`) as `public static LockManager Create()`. The coordinator's view becomes an internal release filter (§6.2). | P2 |
-| 40 | `IRecordVersionIndex` | Transactions `:13` | child root | abstract | `public abstract class RecordVersionIndex` in Transactions, with a protected constructor, because its leaves live in Indexing, Documents.Catalog and Graph.Storage. NVI erase and clear-deleter members call `protected abstract` cores. Indexing's sealed type (`Indexing/src/RecordVersionIndex.cs:17`) is renamed `BTreeRecordVersionIndex`. | P2 |
-| 41 | `ITransactionContext` | Transactions `:14` | child root | sealed | `public sealed class TransactionContext`, with an internal constructor, plus `public TransactionContext PinStatementSnapshot()` (§6.1). It is the most-consumed kernel contract (47 `src` files), and every call becomes non-virtual. | P2 |
+| 36 | `IStorageTransaction` | Storage `:30` | child root | sealed | `public sealed class StorageTransaction`, with an internal constructor. **At P2:** landed as planned. `Storage`'s argument check lost its type test (`is not StorageTransaction`), which a sealed parameter type can no longer fail; it never checked that the transaction belongs to the same storage instance, and still does not (no behavior change; §12). | P2 |
+| 37 | `IStorageUnit` | Storage `:19` | child root | sealed | `public readonly struct StorageUnit` (internal today, `Internal/StorageUnit.cs:8`), with an internal constructor. The iterator returns it unboxed. **At P2:** landed as planned. | P2 |
+| 38 | `IStorageUnitIterator` | Storage `:10` | child root | sealed | `public sealed class StorageUnitIterator : IEnumerator<StorageUnit>`, with an internal constructor. The public `Storage.GetUnitIterator` (`Storage.cs:837`, `:843`) returns it to Transactions, Sql, the five model catalogs and Graph.Storage. **At P2:** landed; `Next(out StorageUnit)` returns the default unit, not `null`, when the scan is exhausted, and `Current` reads the default unit outside a scan. No caller read either case. | P2 |
+| 39 | `ILockManager` | Transactions `:16` | child root | sealed | `public sealed class LockManager`, with an internal constructor. It absorbs `public static class LockManager` (`LockManager.cs:8`) as `public static LockManager Create()`. The coordinator's view becomes an internal release filter (§6.2). **At P2:** landed; the internal `DefaultLockManager` was folded in. The view had grown since the plan: #1268 gave it the offline abandonment of waits (`AbandonLockWaits`), so the internal mode carries both (§6.2). | P2 |
+| 40 | `IRecordVersionIndex` | Transactions `:13` | child root | abstract | `public abstract class RecordVersionIndex` in Transactions, with a protected constructor, because its leaves live in Indexing, Documents.Catalog and Graph.Storage. NVI erase and clear-deleter members call `protected abstract` cores. Indexing's sealed type (`Indexing/src/RecordVersionIndex.cs:17`) is renamed `BTreeRecordVersionIndex`. **At P2:** landed; the public members check for a null bracket. The rename lands in the Transactions commit, not the Indexing one: Sql's and KeyValuePair's executors import both namespaces, so the two `RecordVersionIndex` types cannot coexist for one commit. `BTreeRecordVersionIndex` keeps its public constructor over a `BTreeIndex`, on the same terms as the journal's (§5.3): it was public API on Indexing's former `RecordVersionIndex`, and Sql's and KeyValuePair's executors construct it. Owner question at the P2 merge: keep the public constructors, or make both internal behind `Create` factories (rule 1). | P2 |
+| 41 | `ITransactionContext` | Transactions `:14` | child root | sealed | `public sealed class TransactionContext`, with an internal constructor, plus `public TransactionContext PinStatementSnapshot()` (§6.1). It is the most-consumed kernel contract (47 `src` files), and every call becomes non-virtual. **At P2:** landed, promoted from the internal `DefaultTransactionContext`; 69 `.cs` files retyped across the tree. | P2 |
 | 42 | `ITransactionLog` | Transactions `:17` | child root | delete | `internal abstract class TransactionLog` in `Internal/` (rule 11). `public static class TransactionLog` (`TransactionLog.cs:12`) is deleted and its factories become internal (§5.2). | P1 |
 | 43 | `ITransactionManager` | Transactions `:17` | child root | sealed | `public sealed class TransactionManager`, promoted from `DefaultTransactionManager`, with an internal constructor. It gets a public static `Create`, an internal overload, and stays exposed by the coordinator (§5.2, C1). | P1 (P2 retypes the parameters) |
-| 44 | `ITransactionRecordSpace` | Transactions `:16` | child root | abstract | `public abstract class TransactionRecordSpace`, with a protected constructor, because its leaves live in Sql, KeyValuePair, Graph.Storage, Documents.Storage and Blob.Storage. NVI read, update and delete. | P2 |
-| 45 | `IVersionStore` | Transactions `:17` | child root | abstract | `public abstract class VersionStore`, with a `private protected` constructor, because both leaves (`RecordSpaceVersionStore` and `Internal/InMemoryVersionStore`) live in Transactions. It absorbs `public static class VersionStore` (`VersionStore.cs:8`) as `public static VersionStore CreateInMemory()`. | P2 |
+| 44 | `ITransactionRecordSpace` | Transactions `:16` | child root | abstract | `public abstract class TransactionRecordSpace`, with a protected constructor, because its leaves live in Sql, KeyValuePair, Graph.Storage, Documents.Storage and Blob.Storage. NVI read, update and delete. **At P2:** landed; location packing and unpacking are NVI too, and update and delete check for a null bracket. | P2 |
+| 45 | `IVersionStore` | Transactions `:17` | child root | abstract | `public abstract class VersionStore`, with a `private protected` constructor, because both leaves (`RecordSpaceVersionStore` and `Internal/InMemoryVersionStore`) live in Transactions. It absorbs `public static class VersionStore` (`VersionStore.cs:8`) as `public static VersionStore CreateInMemory()`. **At P2:** landed. The base's public members carry the checks both leaves made (a canceled token on append and read, a null snapshot on read); prune and purge check nothing in the base, because the two stores observe cancellation at different points. | P2 |
 | 46 | `IReplicationCoordinator` | Replication (unshipped) | other | delete | The project is deleted with the other Replication placeholders (D6). | P1 |
 | 47 | `ISqlReplicationSource` | Sql.Replication (unshipped) | model child | delete | The project is deleted. | P1 |
 | 48 | `IDatabaseClient` | Client `:17` | client | sealed | `public sealed class DatabaseClient`. It absorbs the static class (`DatabaseClient.cs:10`). | P5 |
@@ -331,10 +331,10 @@ decision.
 
 | Type or member | Today | Decision | Phase |
 |---|---|---|---|
-| `LockManager` (`Transactions/src/LockManager.cs:8`, `Create` at `:16`) | `public static class`, returns `ILockManager` | The name passes to the sealed `LockManager`, and `public static LockManager Create()` moves onto it, so call sites are unchanged. | P2 |
-| `TransactionManager` (`TransactionManager.cs:12`, `Create` at `:40`) | `public static class`, `Create(ITransactionLog, ILockManager, IVersionStore, Func<TransactionSequence>?)` | The name passes to the public sealed `TransactionManager`. A public `Create(LockManager, VersionStore, Func<TransactionSequence>? = null)` builds a standalone, non-durable manager over an in-memory log. The durable manager is the one `TransactionCoordinator` builds. An internal overload takes a `TransactionLog`, for the coordinator and Transactions.Tests. In P1 the parameters are still the interfaces; P2 retypes them. | P1/P2 |
+| `LockManager` (`Transactions/src/LockManager.cs:8`, `Create` at `:16`) | `public static class`, returns `ILockManager` | The name passes to the sealed `LockManager`, and `public static LockManager Create()` moves onto it, so call sites are unchanged. **At P2:** landed as planned. | P2 |
+| `TransactionManager` (`TransactionManager.cs:12`, `Create` at `:40`) | `public static class`, `Create(ITransactionLog, ILockManager, IVersionStore, Func<TransactionSequence>?)` | The name passes to the public sealed `TransactionManager`. A public `Create(LockManager, VersionStore, Func<TransactionSequence>? = null)` builds a standalone, non-durable manager over an in-memory log. The durable manager is the one `TransactionCoordinator` builds. An internal overload takes a `TransactionLog`, for the coordinator and Transactions.Tests. In P1 the parameters are still the interfaces; P2 retypes them. **At P2:** retyped to `LockManager` and `VersionStore`, both overloads. | P1/P2 |
 | `TransactionLog` (`TransactionLog.cs:12`, `CreateInMemory` at `:19`, `CreateJournalBound(IStorageJournal)` at `:28`) | `public static class` | The public class is deleted. The name passes to `internal abstract class TransactionLog`, and its factories become internal statics on it. [Certain] Only tests called them: Transactions.Tests, and Indexing.Tests through the harness, which the new `Create` no longer needs. | P1 |
-| `VersionStore` (`VersionStore.cs:8`, `CreateInMemory` at `:16`) | `public static class`, returns `IVersionStore` | The name passes to `public abstract class VersionStore` (row 45), and `CreateInMemory()` stays as a static on the base. | P2 |
+| `VersionStore` (`VersionStore.cs:8`, `CreateInMemory` at `:16`) | `public static class`, returns `IVersionStore` | The name passes to `public abstract class VersionStore` (row 45), and `CreateInMemory()` stays as a static on the base. **At P2:** landed as planned. | P2 |
 | `SqlSchemaCompiler` (`Sql.Schema/src/SqlSchemaCompiler.cs:13`, `Compile(ISqlSchema, EngineModel)` at `:20`) | `public static class` | Becomes `internal static`. The public compile entry points are `SqlSchema.Compile(name, configure)` (static, unchanged) and the instance `SqlSchema.Compile()`. [Certain] Outside Sql.Schema, only Sql.Schema's own tests call it. | P4 |
 | `ProtocolFraming` (`Protocol/src/ProtocolFraming.cs:11`, `CreateReader` at `:19`, `CreateWriter` at `:31`) | `public static class`, returns the frame interfaces | Deleted. The factories move onto the abstract bases (`ProtocolFrameReader.Create`, `ProtocolFrameWriter.Create`), the `Aes.Create()` shape. The callers are the four model servers, `ProtocolChannel`, two test clients and the Protocol tests. | P2 |
 | `TransactionRecovery` (`TransactionRecovery.cs:18`, `Analyze` at `:25` and `:40`) | `public static class` taking `IStorageJournal` | Kept as a public static class: it is a stateless analysis with no interface twin. The parameter is retyped to `StorageJournal`. | P1 |
@@ -357,8 +357,8 @@ decision.
 
 | Type | Finding | Phase |
 |---|---|---|
-| `Storage.Model` (`Storage/src/Storage.cs:101`) | `public abstract StorageModel Model`. The value is fixed per storage, so it becomes a base field set by the protected constructor (rule 6). | P2 |
-| `StorageJournal` (`Storage/src/Journal/StorageJournal.cs:21`) | After P1 it is the type the coordinator and recovery name. It has one shipped leaf, the sealed `StreamJournal` in the same assembly (`StreamJournal.cs:16`), so as it stands it meets none of rule 2's cases, and its constructor is `protected` (`:32`). P2's Storage commit, after #1236 settles the journal format, either collapses `StreamJournal` into one public sealed `StorageJournal`, keeping the file factories (`StreamJournal.cs:75`, `:86`), or records the second variant that justifies the base and narrows the constructor to `private protected` (rule 3). | P2 |
+| `Storage.Model` (`Storage/src/Storage.cs:101`) | `public abstract StorageModel Model`. The value is fixed per storage, so it becomes a base field set by the protected constructor (rule 6). **At P2:** `protected Storage(StorageModel model, StorageStream data, ...)`. The five model storages and 21 test doubles (Storage.Tests 15, Transactions.Tests 5, Indexing.Tests 1; counted at P2) pass their model instead of overriding the getter. | P2 |
+| `StorageJournal` (`Storage/src/Journal/StorageJournal.cs:21`) | After P1 it is the type the coordinator and recovery name. It has one shipped leaf, the sealed `StreamJournal` in the same assembly (`StreamJournal.cs:16`), so as it stands it meets none of rule 2's cases, and its constructor is `protected` (`:32`). P2's Storage commit, after #1236 settles the journal format, either collapses `StreamJournal` into one public sealed `StorageJournal`, keeping the file factories (`StreamJournal.cs:75`, `:86`), or records the second variant that justifies the base and narrows the constructor to `private protected` (rule 3). **Decided at P2: collapsed.** No second variant exists: no test or other assembly derives from `StorageJournal`, and #1236 settled the format with one medium. `StreamJournal` is deleted; its medium operations became private members of `public sealed class StorageJournal`, and its three public constructors (over a `Stream`, a `StorageStream`, an `IFileSystemFileHandle`) and two `FromFile` factories became the journal's own. The constructors stay public rather than internal behind new factories: they were already public API on the former leaf, and Transactions.Tests, which no grant reaches, builds journals over memory streams for `TransactionRecovery`. The deviation marker goes with the base (§8). | P2 |
 | `CompiledSchema` (`Database/src/Provisioning/CompiledSchema.cs:12`) | A public abstract class whose leaf (`SqlCompiledSchema`) lives in Sql.Schema. It keeps a protected constructor. Audit its members for NVI when `DatabaseInstance.ApplySchemaAsync` starts taking it. | P3 |
 | `DatabaseEngineWorker` (`Database/src/DatabaseEngineWorker.cs:64`) | Public abstract `Name`, `Kind` and `Interval`, and a virtual `WaitForTrigger`. `Run`, `RunIteration` and the per-database reporting members are non-virtual already (#1268 and its review), over `protected abstract void RunIterationCore`; P3 finishes the NVI conversion (row 7). #1264's body lists it, but P3 is where the root bases are written, so it moves there. | P3 |
 | `QueryRow` (`Execution/src/QueryRow.cs:8`) | Nine public abstract getters (`:13-69`). `GetValue` returns `object?` and boxes. It has four leaves in four assemblies (`SqlMaterializedRow`, `KeyValueMaterializedRow`, `GraphQueryRow`, `DocumentQueryRow`), so it is megamorphic in a multi-model host. It gets NVI with the ordinal checks in the base, and typed accessors on the hot path. | P8 |
@@ -383,6 +383,17 @@ the call. Sharing `Sequence` is safe because the coordinator pairs statement bra
 Sql's `SqlStatementContext` and KeyValuePair's `KeyValueStatementContext` are statement scopes
 over the coordinator, not context decorators, and they are unaffected.
 
+**At P2:** landed as designed. The view is a second, private constructor of the sealed type: it
+copies the identity, sequence and isolation level, reads `State` through the transaction's own
+context, and keeps the snapshot it was given. The three decorators are deleted, and each
+operation's `InitializeAsync` calls `_context.PinStatementSnapshot()`. A manager still refuses to
+commit or roll back a view, as it refused a decorator, now through an internal
+`IsStatementView` check instead of the type test on the internal context class. The P2 review
+hardened the view: the end claim, the apply admission and the apply drain are forwarded to the
+transaction's own context, so the end flag and apply count exist once and the shared lock guards
+one set of state. Transactions.Tests' `TransactionStatementViewTests` pins the contract (pinned
+snapshot, shared identity and state, refused commit and rollback, forwarded admission and claim).
+
 ### 6.2 `LockManager` and the coordinator's engine view (row 39)
 
 `TransactionCoordinator` builds one lock manager (`TransactionCoordinator.cs:87`). It hands that
@@ -398,6 +409,16 @@ an internal mode of the one type:
 
 A standalone `LockManager.Create()`, such as the Indexing harness uses, has no filter and behaves
 as today. The #1226 tests in `TransactionCoordinatorRollbackTests.cs` gate this change.
+
+**At P2:** the view had grown after this note was written. #1268's review gave it a second job:
+`TransactionCoordinator.AbandonLockWaits` cancels, once the storage goes offline, every lock wait
+in progress and every later one, through a cancellation source the view linked into each wait.
+The internal mode therefore carries both: `EnterEngineMode(manager.IsTracked)` installs the
+release filter and the abandon source together, `Abandon(cause)` fires the source, the public
+`AcquireAsync` tries the grant at once and otherwise waits on the linked token, and the
+transaction manager's two releases call the internal `ReleaseAllUnfiltered`. The manager's
+`AbandonPending` call lost its type test, since every lock manager is the one type. A
+standalone lock manager has no mode and runs the old `DefaultLockManager` code unchanged.
 
 ### 6.3 Resolving an index's storage transaction (row 23)
 
@@ -418,6 +439,12 @@ per-engine delegate, `Func<TransactionContext, StorageTransaction>`, and each en
 lambda that keeps its own exception. The coordinator is **not** injected into Indexing. The four
 wrapper classes go. The Indexing harness supplies its own delegate (`IndexTestHarness.cs:18`,
 `BTreePageFormatTests.cs:53`).
+
+**At P2:** landed as designed, re-verified first: the four wrappers and their messages were as
+the table says. The property kept its name, `TransactionSource`. Each engine passes a method
+group, a private `ResolveStatementBracket` over its readonly coordinator field with the wrapper's
+body, rather than a lambda; the harness passes `GetStorageTransaction`, its pairing table's
+lookup, and no longer implements anything.
 
 ### 6.4 Shared session and transaction behavior moves into the root bases (rows 12 and 13)
 
@@ -569,6 +596,8 @@ Documents.Language, Blob and Hosting.
   - `:52-54` retype `Manager`, `LockManager` and `IndexManager` (P1, P2);
   - `:18` stops implementing `IStorageTransactionSource` and supplies the delegate (P2);
   - `BTreePageFormatTests.cs:53` supplies the delegate too (P2).
+  - **As landed (P2):** all four, plus the registry casts in the Indexing tests, which call
+    `ExportRegistrations()` on the sealed manager directly.
 - **Sql.Tests** `SqlMvccBindingTests.cs:63`, `:71` read `database.Coordinator.Manager.OldestActive`.
   They compile unchanged, because `OldestActive` stays public on the sealed type; P1 verifies it.
 - **Transactions.Tests, P1: the coordinator hooks (rows 28 and 32).** P1 retypes
@@ -652,6 +681,14 @@ Documents.Language, Blob and Hosting.
   - the three Storage-and-record-space doubles are split (C9);
   - `BlockingIndex` (`TransactionCoordinatorRollbackTests.cs:782`) and the two `FailingIndex`
     doubles (`:819`, `RecordSpaceVersionStoreTests.cs:216`) derive from `RecordVersionIndex`.
+  - **As landed:** five doubles were both a `Storage` and a record space, not three: the two
+    crash suites' `CrashStorage` (`TransactionCoordinatorCheckpointCrashTests.cs`,
+    `TransactionCoordinatorScrubCrashTests.cs`) joined `CoordinatorStorage`, `RollbackStorage`
+    and `RecordStorage` after the plan was written. Each keeps its record helpers, now internal,
+    and nests a `RecordSpace : TransactionRecordSpace` adapter over them, exposed as `Records`;
+    the 55 coordinator constructions pass the storage's `Records`. The three index doubles override the
+    protected cores, and `ControlledVersionStore` (`TransactionManagerRollbackTests.cs`) derives
+    from `VersionStore` through the existing grant, whose comment now lists it.
 - **Storage sub-components (rows 31, 34, 37, 38), P2.** No test names their interfaces. Their
   consumers reach them through `var` and member access, and compile unchanged against the sealed
   types.
@@ -817,6 +854,53 @@ dependency order, and each updates its consumers mechanically:
 fault-injection strategies), and #1226's lock-retention tests. An optional NativeAOT
 microbenchmark of the insert path runs before and after.
 
+**Kernel track (Storage, Transactions, Indexing), as landed.** Each row was re-verified against
+the code after #1251 to #1254, #1268 and P1 before it changed; where the code had moved, the row
+says what landed.
+
+- **Storage.** Rows 31, 33, 34, 36, 37 and 38 landed as sealed public types moved out of
+  `Internal/`, and `Abstractions/` is gone from the project. Two departures from the rows: the page
+  manager is no longer disposable (row 34), and the unit iterator's `Next` reports the default unit
+  instead of `null` (row 38). `Storage.Model` is a constructor-set field (§5.3), and the
+  `StorageJournal` audit collapsed the journal into one sealed type with the former leaf's public
+  constructors (§5.3, §8). No behavior changed: Storage.Tests (293), Transactions.Tests (101) and
+  Indexing.Tests (75) pass unchanged apart from the retypes and the dropped page-manager `using`
+  declarations.
+- **Transactions.** Rows 39 to 41, 44 and 45 landed, and the project's `Abstractions/` is gone:
+  `TransactionContext` and `LockManager` are sealed (promoted from `Internal/`), and
+  `TransactionRecordSpace`, `RecordVersionIndex` (both `protected`) and `VersionStore`
+  (`private protected`) are NVI bases with deviation markers. §6.1 and §6.2 landed, §6.2 with the
+  #1268 wait abandonment the plan predates; C9 split five doubles, not three (§6.9);
+  `TransactionManager.Create` is retyped. Indexing's adapter became `BTreeRecordVersionIndex` in
+  this commit (row 40). The engines changed only by retype, apart from the five record-space
+  adapters and two index-undo adapters, which override the protected cores, and the three
+  statement decorators, which became `PinStatementSnapshot` calls.
+- **Indexing.** Rows 19 to 23 and §6.3 landed, and the project's `Abstractions/` is gone:
+  `BTreeIndex`, `BTreeCursor` and one `BTreeIndexManager` for manager and registry are sealed,
+  and `BTreeIndexManagerOptions.TransactionSource` is the per-engine delegate. The four engine
+  wrappers became private `ResolveStatementBracket` methods with their messages unchanged.
+- **Gate, as run.** Every Database suite passes with the baseline counts after each of the three
+  commits (Storage.Tests 293, Transactions.Tests 101, Indexing.Tests 75, Sql.Tests 1087 and the
+  rest as listed in the phase brief), including the crash and fault-injection suites
+  (`CrashRecoveryTests`, the coordinator checkpoint and scrub crash tests, each model's crash
+  doubles) and the #1226 lock-retention and #1268 abandon tests. One run of Sql.Tests after the
+  Indexing commit failed the timing guard
+  `Delete_WideFanOutCascade_ShouldTakeTimeLinearInChildren` (a per-child cost ratio) while other
+  builds loaded the machine; it passed three isolated reruns and a full rerun (1087). No
+  NativeAOT microbenchmark was run.
+- **Review fixes.** The statement view forwards its end claim and apply admission to the
+  transaction's own context, and a new `TransactionStatementViewTests` suite covers §6.1
+  directly (Transactions.Tests 101 → 108). Recovery reads the sealed journal sequentially with no
+  dead type test, and nine identity casts left in Storage.Tests by the sealing are gone. Stale
+  text was fixed: the Storage OVERVIEW snippet (a constructor-set model, not an override), the
+  journal's note on its former leaf, "an `TransactionContext`" at six sites, and the lane table of
+  `DATABASE_PROGRAM_PLAN.md`, which still named `ITransactionContext`.
+- **Left for later.** `.claude/rules/database-area.md` still lists `StorageJournal` among the
+  marked bases ("Marking the deviation"); rule text changes with the owner (§12). The plan's
+  header Status line still records P0 and P1 only; it changes at the P2 merge, once the sibling
+  Protocol/Security track lands beside this one. Whether `StorageJournal` and
+  `BTreeRecordVersionIndex` keep public constructors is an owner question (§5.3, row 40).
+
 **P3, #1259: root bridge bases.** Rows 1, 5, 9, 11, 12 and 13 add `DatabaseEngine`,
 `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer` and
 `DatabaseServerSession`. Each still **explicitly implements** its old root interface, so
@@ -933,10 +1017,11 @@ kept interfaces.
 
 ## 8. Deviation markers
 
-There are 29 markers, each with the exact text in `database-area.md`:
+There are 28 markers, each with the exact text in `database-area.md`:
 
-- **19 public abstract bases**: the 16 of §5.1, the existing `DatabaseEngineWorker`, and the
-  existing `Storage` and `StorageJournal`, which P1 strips of their interfaces;
+- **18 public abstract bases**: the 16 of §5.1, the existing `DatabaseEngineWorker`, and the
+  existing `Storage`, which P1 strips of its interface. P1 marked `StorageJournal` too; P2
+  collapsed it into one sealed type and removed the marker (§5.3);
 - **5 model engines**;
 - **5 model engine builders**.
 
@@ -955,7 +1040,7 @@ it). [Certain] The implementers were counted with rg on 2026-10-04.
 | `DatabaseServerSession` | V | one per model server | `protected` | P3 |
 | `DatabaseEngineWorker` | H, V | 22 workers in the model assemblies | `protected` | P3 |
 | `Storage` | V | `SqlStorage`, `KeyValueStorage`, `GraphStorage`, `DocumentStorage`, `BlobStorage` | `protected` (existing) | P1 |
-| `StorageJournal` | none yet | `StreamJournal` only; audited in P2, and the marker goes if the type collapses (§5.3) | `protected` until the audit | P1 |
+| `StorageJournal` | none | `StreamJournal` only; collapsed into one sealed `StorageJournal` at P2 (§5.3), so its P1 marker was removed | — (sealed) | P1, removed P2 |
 | `TransactionRecordSpace` | V, S | five model record spaces; the coordinator drives them | `protected` | P2 |
 | `RecordVersionIndex` | V, S | Indexing's `BTreeRecordVersionIndex` and the Documents.Catalog and Graph.Storage undo indexes | `protected` | P2 |
 | `VersionStore` | V | `RecordSpaceVersionStore` and `InMemoryVersionStore`, both in Transactions | `private protected` | P2 |
@@ -1071,6 +1156,14 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   #1259 (P3) gates on a Database.Tests base suite, and each model PR under #1260 (P4) carries
   its own #1188, #1225 and #1226 gate (§6.4).
 - #1232 is closed as superseded when the Sql PR of P4 lands.
+- `Storage`'s record and page operations accept a `StorageTransaction` of another storage
+  instance: the argument check's message says "not created by this storage instance", but it
+  only ever tested the type (found at P2, row 36). Checking the owner is a behavior change, so P2
+  left it for its own fix.
+- `.claude/rules/database-area.md`, "Marking the deviation", names `Storage` and `StorageJournal`
+  as the bases P1 stripped of their interfaces. P2 collapsed `StorageJournal` into a sealed type
+  without a marker (§5.3, §8), so the sentence should name `Storage` alone; a rule-text change,
+  left for the owner at the P2 merge.
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never

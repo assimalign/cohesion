@@ -15,9 +15,9 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 /// </remarks>
 public sealed class PageWriteLockHolder : IDisposable
 {
-    private readonly IStorageTransaction _bracket;
+    private readonly StorageTransaction _bracket;
 
-    private PageWriteLockHolder(IStorageTransaction bracket, int pages)
+    private PageWriteLockHolder(StorageTransaction bracket, int pages)
     {
         _bracket = bracket;
         Pages = pages;

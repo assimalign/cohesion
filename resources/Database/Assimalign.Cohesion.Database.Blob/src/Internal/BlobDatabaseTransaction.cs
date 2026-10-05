@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 internal sealed class BlobDatabaseTransaction : IDatabaseTransaction
 {
     private readonly TransactionCoordinator _coordinator;
-    private readonly ITransactionContext _context;
+    private readonly TransactionContext _context;
     private readonly object _sync = new();
 
     // Serializes every path that ends the context (commit, rollback, dispose, abort), so two of
@@ -38,14 +38,14 @@ internal sealed class BlobDatabaseTransaction : IDatabaseTransaction
     /// <param name="coordinator">The transaction coordinator that commits and rolls back the transaction.</param>
     /// <param name="context">The transaction context this transaction wraps.</param>
     /// <param name="database">The database the transaction runs on, whose offline state it observes.</param>
-    public BlobDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context, BlobDatabaseInstance? database = null)
+    public BlobDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, BlobDatabaseInstance? database = null)
     {
         _coordinator = coordinator;
         _context = context;
         _database = database;
     }
 
-    internal ITransactionContext Context => _context;
+    internal TransactionContext Context => _context;
     internal int Operations { get; set; }
 
     /// <summary>
