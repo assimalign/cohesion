@@ -15,7 +15,7 @@ using Assimalign.Cohesion.Database.Storage;
 public sealed class RecordSpaceVersionStore : IVersionStore
 {
     // A logical transaction can span a streamed object larger than RAM. Physical
-    // undo/reclamation must bound retained page before-images independently of it.
+    // undo/reclamation must bound the page pre-images a storage bracket retains independently of it.
     private const int MutationBatchSize = 64;
     private readonly IStorage _storage;
     private readonly ITransactionRecordSpace _records;
@@ -497,7 +497,7 @@ public sealed class RecordSpaceVersionStore : IVersionStore
         catch (ArgumentOutOfRangeException)
         {
             // The slot no longer exists: a failed statement's bracket rollback
-            // restored the page's before-image, reverting the very insert this
+            // restored the page's in-memory pre-image, reverting the very insert this
             // ledger entry recorded. Nothing to undo.
             return false;
         }

@@ -322,12 +322,12 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
     /// A database has a data and a catalog file set, so the engine names the database and the
     /// one that was refused.
     /// </summary>
-    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: a file set in storage format 1 is refused at open with COHDBS001 naming the database and the file set, its files untouched (#1251)")]
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: a file set in storage format 2 (the format before #1253) is refused at open with COHDBS001 naming the database and the file set, its files untouched (#1251, #1253)")]
     [InlineData("data")]
     [InlineData("catalog")]
-    public async Task Open_FileSetInStorageFormatOne_ShouldBeRefusedNamingTheDatabaseAndTheFileSet(string role)
+    public async Task Open_FileSetInStorageFormatTwo_ShouldBeRefusedNamingTheDatabaseAndTheFileSet(string role)
     {
-        // Arrange: a closed database whose page 0 in one file set names storage format 1.
+        // Arrange: a closed database whose page 0 in one file set names storage format 2, the format before #1253.
         await using (var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
         {
             var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
@@ -336,7 +336,7 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         }
 
         string storageName = role == "catalog" ? "kv" + KeyValueDatabaseEngine.CatalogSuffix : "kv";
-        StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, storageName, storageName + ".dat"), version: 1);
+        StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, storageName, storageName + ".dat"), version: 2);
         var before = Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
 
         // Act
@@ -347,8 +347,8 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         failure.Message.ShouldStartWith(
             $"Database 'kv' cannot be opened: its {role} file set '{storageName}' was refused. {StorageFormatException.ErrorCode}: ",
             Case.Sensitive);
-        failure.Message.ShouldContain("uses storage format 1, but this engine supports only storage format 2", Case.Sensitive);
-        failure.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(1);
+        failure.Message.ShouldContain("uses storage format 2, but this engine supports only storage format 3", Case.Sensitive);
+        failure.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(2);
         reopened.TryGetDatabase("kv", out _).ShouldBeFalse();
         Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).Length.ShouldBe(before.Count);
         foreach (var (path, bytes) in before)

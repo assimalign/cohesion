@@ -64,15 +64,36 @@ public sealed class FlushFaultingHandle : IFileSystemFileHandle
     /// </summary>
     public int FailedFlushes { get; private set; }
 
+    /// <summary>
+    /// Gets or sets whether the handle reports that it cannot flush durably, as a provider whose
+    /// contract rejects a durable flush does (#1018); the storage stream then refuses every durable
+    /// flush before it reaches the handle.
+    /// </summary>
+    public bool RefuseDurableFlush { get; set; }
+
     /// <inheritdoc />
-    public bool SupportsDurableFlush => _inner.SupportsDurableFlush;
+    public bool SupportsDurableFlush => !RefuseDurableFlush && _inner.SupportsDurableFlush;
 
     /// <inheritdoc />
     public long Length => _inner.Length;
 
+    /// <summary>
+    /// Gets or sets the exception the next durable flush throws instead of flushing, whatever the
+    /// handle reports through <see cref="SupportsDurableFlush"/>: a handle that stops supporting a
+    /// durable flush after the storage checked it. Null throws none.
+    /// </summary>
+    public Exception? NextDurableFlushFailure { get; set; }
+
     /// <inheritdoc />
     public void Flush(bool durable = false)
     {
+        if (durable && NextDurableFlushFailure is { } failure)
+        {
+            NextDurableFlushFailure = null;
+            FailedFlushes++;
+            throw failure;
+        }
+
         // Only a durable flush fails: an fsync, not the ordinary flush that hands bytes to the
         // operating system.
         if (_failNextFlush && durable)

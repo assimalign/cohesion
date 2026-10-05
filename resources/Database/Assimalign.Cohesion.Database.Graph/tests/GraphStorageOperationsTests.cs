@@ -175,7 +175,10 @@ public sealed class GraphStorageOperationsTests
 
     /// <summary>
     /// Under a sustained write load the journal-size trigger keeps the journal near its
-    /// configured size (#1254). The bound is a ratio to the configured size.
+    /// configured size (#1254). The bound is a ratio to the configured size. The nodes carry a
+    /// 3,000-character payload: since storage format 3 (#1253) a write journals the bytes it
+    /// changed rather than two 8 KiB images of each page it touched, so with small nodes forty
+    /// sizes of journal took several times as many writes as before.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Checkpoint trigger: the journal stays bounded under a sustained write load")]
     public async Task CheckpointJournalSize_SustainedWrites_ShouldKeepTheJournalBounded()
@@ -189,7 +192,7 @@ public sealed class GraphStorageOperationsTests
         });
         var database = (GraphDatabaseInstance)await engine.CreateDatabaseAsync("bounded");
         using var stop = new CancellationTokenSource();
-        string payload = new('x', 150);
+        string payload = new('x', 3000);
         await using (var setup = await database.CreateSessionAsync())
         {
             // The label and property key exist before the writers race to use them.
@@ -210,8 +213,15 @@ public sealed class GraphStorageOperationsTests
         long written = 0;
         long previous = 0;
         var watch = Stopwatch.StartNew();
-        while (written < 40 * size && watch.Elapsed < TimeSpan.FromSeconds(60))
+        while (written < 40 * size)
         {
+            // A hang guard, not a throughput floor: a correct run reaches forty sizes however slow the
+            // machine, and the bound under test is the ratio asserted below.
+            if (watch.Elapsed > TimeSpan.FromMinutes(5))
+            {
+                throw new ShouldAssertException($"The writers journaled {written:N0} of {40 * size:N0} bytes in {watch.Elapsed.TotalSeconds:F0} s.");
+            }
+
             long length = database.DataStorage.JournalLength;
             largest = Math.Max(largest, length);
             written += length >= previous ? length - previous : length;

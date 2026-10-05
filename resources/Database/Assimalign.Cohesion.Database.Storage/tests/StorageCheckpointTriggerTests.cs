@@ -40,7 +40,7 @@ public sealed class StorageCheckpointTriggerTests
         // Assert: every count is the journal's own byte length.
         empty.ShouldBe(0);
         afterInserts.ShouldBe(journalBytes);
-        afterInserts.ShouldBeGreaterThan(2L * Page.Size);
+        afterInserts.ShouldBeGreaterThan(afterCheckpoint);
         afterCheckpoint.ShouldBe(checkpointBytes);
         afterCheckpoint.ShouldBeLessThan(100);
         reopened.JournalLength.ShouldBe(images.Journal.Length);
@@ -49,7 +49,8 @@ public sealed class StorageCheckpointTriggerTests
     [Fact(DisplayName = "Cohesion Test [Storage] - Checkpoint trigger: crossing the size asks for one checkpoint per cycle")]
     public void OnCheckpointNeeded_JournalCrossesTheSize_ShouldBeInvokedOncePerCheckpointCycle()
     {
-        // Arrange: two page images (about 16.5 KB) per committed single-page bracket.
+        // Arrange: a 2,000-byte row per committed single-page bracket, whose page delta carries
+        // it (#1253: a bracket no longer journals two 8 KiB images of its page).
         var storage = TornStorage.Create();
         int signals = 0;
         storage.CheckpointJournalSize = 64 * 1024;
@@ -59,14 +60,14 @@ public sealed class StorageCheckpointTriggerTests
         int inserts = 0;
         while (Volatile.Read(ref signals) == 0)
         {
-            storage.Insert("row " + inserts++);
+            storage.Insert(Row("row " + inserts++));
             inserts.ShouldBeLessThan(100);
         }
 
         bool dueAtTheSignal = storage.IsCheckpointDue(TimeSpan.FromHours(1));
         for (int i = 0; i < 10; i++)
         {
-            storage.Insert("past the size " + i);
+            storage.Insert(Row("past the size " + i));
         }
 
         int signalsBeforeTheCheckpoint = Volatile.Read(ref signals);
@@ -74,7 +75,7 @@ public sealed class StorageCheckpointTriggerTests
         bool dueAfterTheCheckpoint = storage.IsCheckpointDue(TimeSpan.FromHours(1));
         while (Volatile.Read(ref signals) == signalsBeforeTheCheckpoint)
         {
-            storage.Insert("next cycle " + inserts++);
+            storage.Insert(Row("next cycle " + inserts++));
             inserts.ShouldBeLessThan(200);
         }
 
@@ -182,6 +183,9 @@ public sealed class StorageCheckpointTriggerTests
         pinned.Message.ShouldContain("2 pages are pinned");
         storage.BufferPoolCapacity.ShouldBe(16);
     }
+
+    /// <summary>A row padded to 2,000 bytes, so its page delta carries a measurable payload (#1253).</summary>
+    private static string Row(string text) => text.PadRight(2000, '.');
 
     /// <summary>A storage built with the constructor's default pool capacity.</summary>
     private sealed class DefaultStorage : Storage

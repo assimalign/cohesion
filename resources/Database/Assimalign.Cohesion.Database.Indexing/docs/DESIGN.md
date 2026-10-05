@@ -26,8 +26,9 @@ end, key capacity capped (`MaxKeyLength` = 1 KiB) so a node always holds several
 entries and splits stay correct.
 
 - **Every page mutation rides the owning storage transaction** through the storage
-  layer's `OpenPageForWrite`/`AllocatePageForWrite` — before-images at first touch,
-  after-images at commit. That is the whole crash story: a crash mid-split reverts
+  layer's `OpenPageForWrite`/`AllocatePageForWrite` — a full page image on a page's first
+  change since the checkpoint, byte-range deltas at commit (storage format 3, #1253), and an
+  in-memory pre-image for rollback. That is the whole crash story: a crash mid-split reverts
   to the consistent pre-transaction tree; committed splits replay from the journal
   (the crash suites prove both). `IStorageTransactionSource` is how the engine
   pairs logical transaction contexts with their storage transactions.
@@ -53,7 +54,7 @@ entries and splits stay correct.
   page and rewrites the root in place as an internal node over that page and the
   new sibling (SQLite's balance-deeper). The root id a catalog registered when the
   tree was created therefore stays valid: a rolled-back split reverts the root
-  page with its before-image like any other page, and a crash between a committed
+  page from its pre-image like any other page, and a crash between a committed
   split and the catalog's next persistence point loses nothing. (A moving root
   left the in-memory root pointing at an unallocated page after a statement
   bracket rolled a root split back, and a persisted registration one checkpoint
@@ -215,8 +216,9 @@ baseline.
   with insertion order.** An entry now goes to its reference's place in the run,
   not to the run's end, so inserts whose references arrive out of order land on
   different leaves of the run. Each leaf a transaction writes for the first time
-  costs the storage layer's 8 KiB before-image (about 25 µs), and a run larger than
-  the buffer pool also reloads pages. Measured with 100,000 inserts over 10 INT keys
+  costs the storage layer a pre-image and, at commit, a delta (since storage format 3,
+  #1253; until then an 8 KiB before-image and an 8 KiB after-image, about 25 µs each),
+  and a run larger than the buffer pool also reloads pages. Measured with 100,000 inserts over 10 INT keys
   in 1,000-insert transactions (Release, see "Measurements"): references in
   insertion order are unaffected; references ascending within shuffled 200-reference
   blocks (pages a table reuses) insert about 1.5–2× slower; fully random references
@@ -226,9 +228,9 @@ baseline.
   PostgreSQL makes the same trade, heap TID order within a key. The SQL engine
   appends new row versions to a table's current write page and takes its next page
   from the free-space map, so its row locations ascend within a page and follow
-  page allocation across pages, close to the block pattern above. The before-image
-  cost is the storage follow-up named under "Measurements"; #1196 addresses fill,
-  not locality.
+  page allocation across pages, close to the block pattern above. The per-leaf
+  journal cost was the storage follow-up named under "Measurements" (#1236; storage
+  formats 2 and 3, #1251 and #1253); #1196 addresses fill, not locality.
 - **A split attaches its new node by position.** The insert's descent records the
   child slot it took at every level, and the new right half goes directly after the
   node that split, so the child order always equals the leaf chain. (With unique
@@ -370,15 +372,16 @@ review rather than fenced with a new Documents or Graph marker.
   and a storage page write lock held by another bracket fails fast
   (`StorageTransactionException`) instead of waiting, so no wait-for cycle can form
   with the tree latch.
-- **Recovery replays pages, so it is order-agnostic.** The journal carries before-
-  and after-images of whole pages: a crash mid-split reverts to the pre-transaction
-  tree, and committed inserts, deletes and splits replay byte for byte in the order
-  they were written. The open-time purge removes and restores entries in place and
+- **Recovery replays pages, so it is order-agnostic.** The journal carries each page's
+  full image once per checkpoint interval and the bytes each committed bracket changed
+  (storage format 3, #1253): a crash mid-split leaves the pre-transaction tree, because no
+  change of an uncommitted bracket is redone, and committed inserts, deletes and splits
+  replay byte for byte in the order they were written. The open-time purge removes and restores entries in place and
   never reorders a leaf; a separator stays a valid bound after the entries it was
   copied from are gone, as PostgreSQL's pivot tuples may hold values of tuples
   VACUUM has since removed (`README:34-38`).
 - **Rollback and undo find the exact entry.** A statement's physical rollback
-  restores page images; the logical undo after a multi-statement ROLLBACK erases by
+  restores its bracket's in-memory page pre-images; the logical undo after a multi-statement ROLLBACK erases by
   full identity and clears tombstones from the reference's newest version back,
   both stamp-checked, so a stale or repeated ledger entry is a no-op.
   `BTreeEntryOrderTests` covers a crash with a committed duplicate run and an
@@ -423,13 +426,29 @@ references 11.6k–14.0k → 77.7k–80.6k inserts/s at the 128-page pool and 34
 348k–408k; shuffled blocks 115k–128k → 200k–261k and 113k–166k → 380k–450k. The full
 before- and after-image per leaf per transaction remains (#1252, #1253).
 
+**Since storage format 3 (#1253, 2026-10-04).** A leaf is journaled as a full image once per
+checkpoint interval, on its first change since the checkpoint, and each commit journals only the
+bytes it changed. The duplicate-run rows, measured the same way (`Database.Storage` DESIGN.md,
+"Measurements (#1253)", six alternating runs, the machine's other load moving rates by up to
+2×), read: random references 105k–161k → 137k–245k inserts/s at the 128-page pool and 194k–265k
+→ 315k–658k at 4,096 pages; insertion order 164k–258k → 148k–260k and 511k–928k → 651k–1,386k;
+shuffled blocks 215k–380k → 196k–411k and 510k–954k → 483k–1,303k. The journal bytes per insert
+fall from 447 / 912 / 4,491 (insertion, blocks, random) to 80 / 89 / 154. Random references now
+run at 0.42–0.65 of insertion order at 4,096 pages (0.26–0.46 before) and 0.68–1.11 at 128 pages
+(0.52–0.86). An index 28 times a 128-page pool, taking 100,000 random inserts with a checkpoint
+every 5,000 (so most inserts first-touch their leaf since the checkpoint), journals 2,888 bytes
+per insert instead of 14,402. The review's independent probe (five alternating runs, its own
+code) reproduced the journal bytes and put random references at 0.67–0.81 of insertion order at
+128 pages and 0.39–0.76 at 4,096, at or above one half in one run of five: #1236's "within 2× of
+ascending" holds at a 128-page pool and is still partial at the 4,096-page (32 MiB) default.
+
 The issue's own measurements of the same baseline (#1194: 124 µs and 7.2 ms per
 delete; 76 ms, 442 ms and 4,526 ms per cascade) were taken on the same kind of
 build; the rows above vary with the machine's other load by up to 2×, which is why
 the timing guards compare ratios. The random-delete rows still grow with the run
-because the storage layer journals an 8 KiB before-image the first time a
-transaction writes a page (25–50 µs), and random deletes in a longer run touch
-more distinct leaves; the block rows hold the leaves touched constant and show the
+because the storage layer journaled an 8 KiB before-image the first time a
+transaction wrote a page (25–50 µs; since #1253 a pre-image in memory and a delta at commit), and
+random deletes in a longer run touch more distinct leaves; the block rows hold the leaves touched constant and show the
 descent itself does not grow. That before-image is also what the versions rows'
 flat 26 µs is: one first write per delete. With the entry order but a reference's
 versions read oldest first (#1194's first commit, `f2f9a7f2`), the same versions

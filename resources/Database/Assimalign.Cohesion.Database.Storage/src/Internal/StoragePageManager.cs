@@ -59,19 +59,46 @@ internal sealed class StoragePageManager : IStoragePageManager
 
         // Initialize the fresh page (local copy shares the same pointer). The clear spans
         // the pool buffer's fixed size, never a length read from the page's own header.
+        //
+        // Invariant A (#1253): allocation zeroes the page LSN, with every other byte. Zero is at
+        // or below the redo point, so the allocating transaction's first touch journals the page's
+        // full image, initialization included. A page freed and reallocated within one checkpoint
+        // interval otherwise kept the LSN of its free, its next delta chained onto the freed page,
+        // and the initialization done before the touch (type, owner tag, slotted header) was in
+        // no record: recovery would rebuild the free page plus the delta, a page that never existed.
         var page = handle.Page;
         new Span<byte>(page.Pointer, Page.Size).Clear();
         page.Id = (long)pageId;
         page.Type = type;
         handle.MarkDirty();
 
+        // The clear is outside the journal: an allocating storage transaction images the page at
+        // its touch, initialization included (invariant A), and anything else allocating is the
+        // storage itself (its first page, an anchor page) or a raw caller.
+        WroteOutsideJournal?.Invoke((long)pageId);
+
         return handle;
     }
 
+    /// <summary>
+    /// Invoked with a page this manager rewrites outside any storage transaction (<see cref="AllocatePage"/>,
+    /// <see cref="FreePage"/>), so the owning storage's debug consistency check stops comparing the
+    /// page with its journal records and exempts it from its audit of changes made outside a
+    /// transaction until the next checkpoint writes it.
+    /// </summary>
+    internal Action<long>? WroteOutsideJournal;
+
     /// <inheritdoc />
+    /// <remarks>
+    /// The free is not journaled: the page is rewritten as <see cref="PageType.Free"/> and written
+    /// back at once, outside any storage transaction. A crash before the next checkpoint therefore
+    /// rebuilds the page from its journal records, as it stood before the free. Storage
+    /// transactions free pages through the storage's record operations, which are journaled.
+    /// </remarks>
     public unsafe void FreePage(PageId pageId)
     {
         ThrowIfHeaderPage(pageId);
+        WroteOutsideJournal?.Invoke((long)pageId);
 
         // Stamp the page as free on disk so the free-space map can be rebuilt from
         // page headers when the file is reopened, then return it to the map.

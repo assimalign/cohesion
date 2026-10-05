@@ -261,7 +261,7 @@ same way (`community/lock/src/main/java/org/neo4j/kernel/impl/locking/forseti/Fo
 Any failure inside the undo is an undo failure like any other. The undo's
 storage bracket fails to begin, to touch a page or to commit, rolls itself back, and
 the writer is deferred. A storage bracket ends even when its own begin or rollback
-record cannot be appended, and a page whose before image cannot be appended is left
+record cannot be appended, and a page whose full page image cannot be appended is left
 unlocked (`Database.Storage` DESIGN.md, "Failed appends"), so a failed undo leaves
 nothing behind in the storage: checkpoints keep running while the writer waits, and
 the retry can touch the same pages. A failure that is a journal write takes the storage
@@ -551,6 +551,23 @@ The ordering is deliberately the same as in both original engines:
 5. `CompleteRecovery` checkpoints last, before sessions can begin. Truncating
    earlier would erase the lifecycle records needed to classify index entries.
 
+**The scrub writes on top of redo-only physical recovery (storage format 3, #1253).** Step 1's
+physical recovery replays each page from its full page image and the committed deltas after it,
+overwriting every stolen write of a bracket that never committed, and writes each rebuilt page
+with the LSN of the last record it applied (`Database.Storage` DESIGN.md, "Recovery replay
+rules"). The journal is not truncated until step 5, so the redo point stays where the open set it,
+normally at the journal's checkpoint: the scrub's brackets in steps 3 and 4 touch pages above it,
+journal no new page image, and chain their deltas onto the recovered LSNs. (A recovered page at or
+below the header's LSN floor, which a non-checkpoint header write leaves above the checkpoint, is
+imaged again instead; either way the next open rebuilds it from the journal.) A crash during the scrub leaves the original
+records followed by some of the scrub's; the next open replays both through the same chain, which
+rebuilds the pages the first scrub changed, and scrubs again — idempotently, since the stamp
+checks skip versions already removed. `TransactionCoordinatorScrubCrashTests` cuts power at every
+write the scrub makes (journal drains and pages it steals through a three-page pool, whole and
+torn) and checks after each that the reopened coordinator scrubs every writer and keeps the
+committed version, and that the scrub's records are deltas based on the recovered LSNs with no new
+image.
+
 During normal operation, begin/commit/abort appends and changes to the log's
 active and writer sets share one monitor with checkpoint capture and truncation.
 A begin cannot land between capturing the checkpoint's list and truncating
@@ -637,8 +654,10 @@ review the call hung.
 
 Logical undo, pruning, and recovery scrub apply at most 64 record/index mutations
 per physical bracket. A blob transaction can contain many thousands of chunks;
-retaining every touched page's before-image in one undo bracket would otherwise
-buffer the entire object. Each batch commits before the next begins. Stamp checks
+retaining every touched page's pre-image in one undo bracket would otherwise
+buffer the entire object (the storage also bounds a bracket's pre-images since #1253, by
+spilling them to the journal past a budget, but batching keeps undo brackets short). Each
+batch commits before the next begins. Stamp checks
 make retries idempotent even when earlier batches committed before a later batch
 failed: the full ledger is requeued, already-undone versions are skipped, and the
 remaining work completes. Recovery scrub keeps at most 64 replacement payloads in

@@ -93,13 +93,15 @@ public sealed class StorageJournalFailureTests
         reopened.ReadAllText().ShouldBe(["kept"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Journal failure: a before image whose drain fails leaves its page unlocked")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal failure: a full page image whose drain fails leaves its page unlocked")]
     public void InsertRecord_DrainFails_ShouldLeaveThePageUnlockedAndGoOffline()
     {
-        // Arrange: the before image of the insert's page is the first append that must drain (the
-        // begin record ahead of it is buffered).
+        // Arrange: after a checkpoint the insert's page is at the redo point, so its first touch
+        // journals the page's full image (#1253), the first append that must drain (the begin
+        // record ahead of it is buffered).
         using var storage = FailureStorage.Create(out var journal);
         var (pageId, _) = storage.Insert("kept");
+        storage.Checkpoint();
         var transaction = storage.BeginTransaction();
         journal.FailWrites = 1;
 

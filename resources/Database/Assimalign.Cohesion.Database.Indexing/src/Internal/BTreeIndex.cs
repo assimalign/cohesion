@@ -13,8 +13,9 @@ namespace Assimalign.Cohesion.Database.Indexing.Internal;
 /// <summary>
 /// The B+Tree index: sorted-directory nodes on <see cref="PageType.Index"/> pages,
 /// MVCC-stamped leaf entries, and page mutations that ride the owning transaction's
-/// write-ahead scope (a crash mid-split reverts to a consistent pre-transaction tree
-/// through the storage before-images).
+/// write-ahead scope (a crash mid-split recovers the tree its committed brackets left:
+/// recovery rebuilds every page from its full page image and the committed deltas after
+/// it, and never applies an uncommitted bracket's changes).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -73,7 +74,7 @@ internal sealed class BTreeIndex : IIndex
     /// Gets the root page. It never moves: a root split relocates the root's contents
     /// to a new child and rewrites the root page in place, so the id a catalog
     /// registered when the tree was created stays valid — through a rollback of the
-    /// split (the root page reverts with its before-image) and through a crash
+    /// split (the root page reverts to the bracket's in-memory pre-image) and through a crash
     /// between the split and the catalog's next persistence point.
     /// </summary>
     internal long RootPageId => _rootPageId;

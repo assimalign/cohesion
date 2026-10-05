@@ -324,7 +324,10 @@ public sealed class KeyValueStorageOperationsTests
 
     /// <summary>
     /// Under a sustained write load the journal-size trigger keeps the data file set's journal
-    /// near its configured size (#1254). The bound is a ratio to the configured size.
+    /// near its configured size (#1254). The bound is a ratio to the configured size. The values
+    /// carry 3,000 bytes: since storage format 3 (#1253) a put journals the bytes it changed
+    /// rather than two 8 KiB images of each page it touched, so with small values forty sizes of
+    /// journal took several times as many puts as before.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Checkpoint trigger: the journal stays bounded under a sustained write load")]
     public async Task CheckpointJournalSize_SustainedWrites_ShouldKeepTheJournalBounded()
@@ -344,7 +347,7 @@ public sealed class KeyValueStorageOperationsTests
             await using var session = await database.CreateSessionAsync();
             for (int i = 0; !stop.IsCancellationRequested; i++)
             {
-                await database.PutAsync(session, Bytes($"{writer}-{i}"), Bytes(new string('x', 150)));
+                await database.PutAsync(session, Bytes($"{writer}-{i}"), Bytes(new string('x', 3000)));
             }
         })).ToArray();
 
@@ -353,8 +356,15 @@ public sealed class KeyValueStorageOperationsTests
         long written = 0;
         long previous = 0;
         var watch = Stopwatch.StartNew();
-        while (written < 40 * size && watch.Elapsed < TimeSpan.FromSeconds(60))
+        while (written < 40 * size)
         {
+            // A hang guard, not a throughput floor: a correct run reaches forty sizes however slow the
+            // machine, and the bound under test is the ratio asserted below.
+            if (watch.Elapsed > TimeSpan.FromMinutes(5))
+            {
+                throw new ShouldAssertException($"The writers journaled {written:N0} of {40 * size:N0} bytes in {watch.Elapsed.TotalSeconds:F0} s.");
+            }
+
             long length = instance.DataStorage.JournalLength;
             largest = Math.Max(largest, length);
             written += length >= previous ? length - previous : length;

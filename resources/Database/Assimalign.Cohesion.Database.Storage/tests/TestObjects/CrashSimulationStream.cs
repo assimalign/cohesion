@@ -79,6 +79,14 @@ public sealed class CrashSimulationStream : IFileSystemFileHandle
     public int FlushCount { get; private set; }
 
     /// <summary>
+    /// Gets or sets whether only a durable flush makes the stream's writes durable. False (the
+    /// default) treats every flush as durable. True models a file whose ordinary flushes only hand
+    /// bytes to the operating system's cache, as <c>CommitDurability.None</c> issues them: a power
+    /// loss keeps nothing an fsync did not cover. Meaningful only for a flush-gated stream.
+    /// </summary>
+    public bool DurableFlushesOnly { get; init; }
+
+    /// <summary>
     /// Returns the bytes that would survive a crash (power loss) right now.
     /// </summary>
     public byte[] CaptureDurable() => (byte[])_durable.Clone();
@@ -102,7 +110,10 @@ public sealed class CrashSimulationStream : IFileSystemFileHandle
         // Preserve the fixture's flush-gated persistence, including ordinary
         // flushes. Durable requests now have an explicit, simulated contract.
         FlushCount++;
-        _durable = _live.ToArray();
+        if (durable || !DurableFlushesOnly)
+        {
+            _durable = _live.ToArray();
+        }
     }
 
     /// <inheritdoc />

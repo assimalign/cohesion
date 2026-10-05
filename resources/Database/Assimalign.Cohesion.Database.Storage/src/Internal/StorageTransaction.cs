@@ -4,15 +4,34 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 /// <summary>
-/// Internal storage transaction scope. Tracks the before image of every page the
-/// transaction touches so rollback can restore in-memory state and recovery can
-/// undo stolen writes.
+/// Internal storage transaction scope. Holds the pre-image of every page the transaction
+/// touches: rollback restores it in memory, and commit encodes each page's changes as the byte
+/// runs that differ from it (#1253).
 /// </summary>
+/// <remarks>
+/// <para>
+/// A pre-image is kept as its full page image encoding (<see cref="PageImageCodec"/>): the
+/// page's non-zero byte runs. A page the transaction allocated, or one with a large free gap,
+/// costs a few hundred bytes instead of 8 KiB, which is what keeps an index build in one
+/// bracket small. Past the storage's pre-image budget a page's pre-image is not kept at all:
+/// the storage journals it as a full page image and the transaction keeps only where that
+/// record lies (<see cref="StorageJournalLocation"/>), reading it back for its commit or its
+/// rollback.
+/// </para>
+/// </remarks>
 internal sealed class StorageTransaction : IStorageTransaction
 {
+    /// <summary>
+    /// The bytes a kept pre-image costs beyond its runs: the array header, the dictionary entry
+    /// and the entry's value. An estimate for the budget, not a measurement.
+    /// </summary>
+    internal const int PreImageOverhead = 64;
+
     private readonly Storage _owner;
-    private readonly Dictionary<long, byte[]> _beforeImages = new();
+    private readonly Dictionary<long, StoragePreImage> _preImages = new();
     private Dictionary<long, ulong>? _pendingFrees;
+    private long _preImageBytes;
+    private int _spilledPreImages;
     private bool _active = true;
 
     internal StorageTransaction(Storage owner, long sequence)
@@ -28,20 +47,56 @@ internal sealed class StorageTransaction : IStorageTransaction
     public bool IsActive => _active;
 
     /// <summary>
-    /// Gets the pages this transaction has modified, keyed by page id, with the
-    /// full page image captured before the first modification.
+    /// Gets the pages this transaction has touched, each with the pre-image captured before its
+    /// first change.
     /// </summary>
-    internal IReadOnlyDictionary<long, byte[]> BeforeImages => _beforeImages;
+    internal IReadOnlyDictionary<long, StoragePreImage> PreImages => _preImages;
 
     /// <summary>
-    /// Returns true when the transaction has already captured the page's before image.
+    /// Gets the bytes the pre-images this transaction keeps in memory cost
+    /// (<see cref="PreImageOverhead"/> each, plus their runs).
     /// </summary>
-    internal bool HasTouched(long pageId) => _beforeImages.ContainsKey(pageId);
+    internal long PreImageBytes => _preImageBytes;
 
     /// <summary>
-    /// Records the before image of a page on first touch.
+    /// Gets the number of pre-images this transaction spilled to the journal.
     /// </summary>
-    internal void RecordBeforeImage(long pageId, byte[] image) => _beforeImages.Add(pageId, image);
+    internal int SpilledPreImages => _spilledPreImages;
+
+    /// <summary>
+    /// Gets or sets the LSN of the transaction's commit record once it is appended; zero before.
+    /// </summary>
+    internal long CommitRecordLsn { get; set; }
+
+    /// <summary>
+    /// Returns true when the transaction has already captured the page's pre-image.
+    /// </summary>
+    internal bool HasTouched(long pageId) => _preImages.ContainsKey(pageId);
+
+    /// <summary>
+    /// Records the pre-image of a page on first touch, kept in memory as its encoded runs.
+    /// </summary>
+    /// <param name="pageId">The page.</param>
+    /// <param name="runs">The page's full image encoding (<see cref="PageImageCodec.EncodeImage"/>).</param>
+    /// <param name="baseLsn">The LSN of the page's last record once touched (<see cref="StoragePreImage.BaseLsn"/>).</param>
+    /// <returns>The bytes the pre-image costs.</returns>
+    internal long RecordPreImage(long pageId, byte[] runs, long baseLsn)
+    {
+        _preImages.Add(pageId, new StoragePreImage(runs, default, baseLsn));
+        long cost = runs.Length + PreImageOverhead;
+        _preImageBytes += cost;
+        return cost;
+    }
+
+    /// <summary>
+    /// Records that a page's pre-image was spilled: journaled as a full page image whose frame
+    /// lies at <paramref name="location"/>, which is also the page's base LSN.
+    /// </summary>
+    internal void RecordSpilledPreImage(long pageId, StorageJournalLocation location)
+    {
+        _preImages.Add(pageId, new StoragePreImage(null, location, location.Lsn));
+        _spilledPreImages++;
+    }
 
     /// <summary>
     /// Gets the pages this transaction has released, keyed by page id, with the owner
@@ -101,3 +156,4 @@ internal sealed class StorageTransaction : IStorageTransaction
         }
     }
 }
+

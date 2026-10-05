@@ -47,8 +47,8 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// <para>
 /// <b>A failed drain takes the journal offline (#1252), like a failed durable flush.</b> The
 /// buffered records belong to work no caller was told is durable, but pages in the buffer pool
-/// already carry their LSNs, and a before image that never reaches the medium could not undo a
-/// stolen page. The failing call throws <see cref="StorageOfflineException"/> and nothing more
+/// already carry their LSNs, and a full page image that never reaches the medium could not be
+/// the redo base of a stolen page. The failing call throws <see cref="StorageOfflineException"/> and nothing more
 /// is written; the reopen's recovery reads what the medium holds. PostgreSQL raises
 /// <c>PANIC</c> on any failed WAL write ("could not write to log file",
 /// <c>src/backend/access/transam/xlog.c:2514-2532</c>).
@@ -58,10 +58,18 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// is not a torn tail: it was written whole, in a format this engine does not read, and
 /// stopping the scan there would silently drop it and every record after it. The read
 /// refuses it with <see cref="StorageFormatException"/> instead (storage format 2, #1251).
-/// The checksum polynomial changed with frame version 3 (CRC-32C), so a frame written by
-/// an older engine fails its checksum and reads as a torn tail; the data file's own format
-/// fence (<see cref="StorageFileHeader.CurrentFormatVersion"/>) refuses such a file set
-/// before its journal is read.
+/// Frame version 4 (storage format 3, #1253) keeps version 3's CRC-32C, so a frame of storage
+/// format 2 verifies and is refused by this check; a frame of storage format 1 (IEEE CRC) fails
+/// its checksum and reads as a torn tail. Either way the data file's own format fence
+/// (<see cref="StorageFileHeader.CurrentFormatVersion"/>) refuses such a file set before its
+/// journal is read.
+/// </para>
+/// <para>
+/// <b>Page records (storage format 3, #1253).</b> A storage journals the full image of a page
+/// once per checkpoint interval, on the page's first change since the last checkpoint, and at
+/// commit only the byte runs that changed (<see cref="JournalRecordType.PageDelta"/>), or a
+/// committed full image when the delta passes half a page. Payloads are byte runs
+/// (<c>PageImageCodec</c>), so the free gap of a slotted or B-tree page is never journaled.
 /// </para>
 /// <para>
 /// LSNs never restart: a reopened journal resumes after its last record, and the storage
@@ -345,14 +353,130 @@ public abstract class StorageJournal : IStorageJournal
         => Append(transactionSequence, JournalRecordType.BeginTransaction, default, ReadOnlySpan<byte>.Empty);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The image is encoded as its non-zero byte runs (storage format 3, #1253): the free gap of
+    /// a slotted or B-tree page is not journaled, and neither are the LSN and checksum fields. A
+    /// <see cref="JournalRecordType.CommittedPageImage"/> takes its base LSN from the image's own
+    /// LSN field: the LSN of the last record applied to the page before this one.
+    /// </remarks>
     public long AppendPageImage(long transactionSequence, PageId pageId, JournalRecordType type, ReadOnlySpan<byte> image)
     {
-        if (type is not (JournalRecordType.BeforePageImage or JournalRecordType.AfterPageImage))
+        if (type is not (JournalRecordType.FullPageImage or JournalRecordType.CommittedPageImage))
         {
-            throw new ArgumentOutOfRangeException(nameof(type), type, "Page image records must be before or after images.");
+            throw new ArgumentOutOfRangeException(nameof(type), type, "Page image records must be full page images or committed page images.");
         }
 
-        return Append(transactionSequence, type, pageId, image);
+        if (image.Length != Units.Page.Size)
+        {
+            throw new ArgumentException($"A page image is {Units.Page.Size} bytes, not {image.Length}.", nameof(image));
+        }
+
+        byte[] payload = ArrayPool<byte>.Shared.Rent(PageImageCodec.MaximumPayloadLength);
+        try
+        {
+            int length;
+            if (type == JournalRecordType.FullPageImage)
+            {
+                length = PageImageCodec.EncodeImage(image, payload);
+            }
+            else
+            {
+                long baseLsn = BinaryPrimitives.ReadInt64LittleEndian(image[Units.Page.LsnFieldOffset..]);
+                BinaryPrimitives.WriteInt64LittleEndian(payload, baseLsn);
+                length = PageImageCodec.BaseLsnSize + PageImageCodec.EncodeImage(image, payload.AsSpan(PageImageCodec.BaseLsnSize));
+            }
+
+            return Append(transactionSequence, type, pageId, payload.AsSpan(0, length));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(payload);
+        }
+    }
+
+    /// <summary>
+    /// Appends a page record whose payload the storage already encoded (a full page image, a page
+    /// delta or a committed page image; <see cref="PageImageCodec"/>), and reports where its frame
+    /// lies, so a spilled pre-image can be read back (<see cref="ReadPageRecord"/>).
+    /// </summary>
+    /// <param name="transactionSequence">The storage-level transaction sequence.</param>
+    /// <param name="pageId">The page the record describes.</param>
+    /// <param name="type">The page record type.</param>
+    /// <param name="payload">The encoded payload.</param>
+    /// <param name="location">Where the record's frame lies.</param>
+    /// <returns>The assigned LSN.</returns>
+    internal long AppendPageRecord(long transactionSequence, PageId pageId, JournalRecordType type, ReadOnlySpan<byte> payload, out StorageJournalLocation location)
+    {
+        long lsn = Append(transactionSequence, type, pageId, payload, out long offset, out int frameLength);
+        location = new StorageJournalLocation(lsn, offset, frameLength);
+        return lsn;
+    }
+
+    /// <summary>
+    /// Reads back the payload of a page record this journal appended (a spilled pre-image, #1253):
+    /// from the append buffer when the frame is still there, otherwise from the medium, after
+    /// checking the frame's length, magic, checksum, version and LSN.
+    /// </summary>
+    /// <param name="location">Where the frame lies (<see cref="AppendPageRecord"/>).</param>
+    /// <param name="payload">At least <see cref="PageImageCodec.MaximumPayloadLength"/> bytes.</param>
+    /// <returns>The number of payload bytes copied.</returns>
+    /// <exception cref="StorageCorruptionException">The frame no longer verifies or no longer carries the record.</exception>
+    /// <remarks>
+    /// Reads also work on an offline journal: the frames a failed drain did not write stay in the
+    /// buffer, and the frames before them are on the medium. A checkpoint cannot truncate the
+    /// journal while the transaction that appended the record is active, so the frame is where it
+    /// was appended.
+    /// </remarks>
+    internal int ReadPageRecord(in StorageJournalLocation location, Span<byte> payload)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+
+        byte[] frame = ArrayPool<byte>.Shared.Rent(location.Length);
+        try
+        {
+            var bytes = frame.AsSpan(0, location.Length);
+            lock (_syncRoot)
+            {
+                ThrowIfDisposed();
+                long bufferStart = _length - _buffered;
+                if (location.Offset >= bufferStart && location.Offset + location.Length <= _length)
+                {
+                    _buffer.AsSpan((int)(location.Offset - bufferStart), location.Length).CopyTo(bytes);
+                }
+                else if (location.Offset + location.Length <= bufferStart)
+                {
+                    ReadAtCore(location.Offset, bytes);
+                }
+                else
+                {
+                    throw new StorageCorruptionException(
+                        $"The journal frame of record {location.Lsn} at offset {location.Offset} lies outside the journal's {_length} bytes.");
+                }
+            }
+
+            int bodyLength = location.Length - FramePrefixSize - sizeof(uint);
+            var body = bytes.Slice(FramePrefixSize, bodyLength);
+            if (bodyLength < BodyHeaderSize
+                || BinaryPrimitives.ReadInt32LittleEndian(bytes) != bodyLength
+                || BinaryPrimitives.ReadInt32LittleEndian(bytes[sizeof(int)..]) != Magic
+                || Crc32C.Compute(body) != BinaryPrimitives.ReadUInt32LittleEndian(bytes[(FramePrefixSize + bodyLength)..])
+                || body[0] != CurrentVersion
+                || BinaryPrimitives.ReadInt64LittleEndian(body[1..]) != location.Lsn)
+            {
+                throw new StorageCorruptionException(
+                    $"The journal frame of record {location.Lsn} at offset {location.Offset} does not verify: it was overwritten or damaged " +
+                    "while the storage transaction that appended it was still active.");
+            }
+
+            var source = body[BodyHeaderSize..];
+            source.CopyTo(payload);
+            return source.Length;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(frame);
+        }
     }
 
     /// <inheritdoc />
@@ -403,7 +527,7 @@ public abstract class StorageJournal : IStorageJournal
                 TruncateCore();
                 Volatile.Write(ref _length, 0);
                 _checkpointSignaled = false;
-                long lsn = AppendLocked(0, JournalRecordType.Checkpoint, default, ReadOnlySpan<byte>.Empty, activeTransactions);
+                long lsn = AppendLocked(0, JournalRecordType.Checkpoint, default, ReadOnlySpan<byte>.Empty, activeTransactions, out _, out _);
                 DrainLocked(durable: forceDurable);
                 if (forceDurable)
                 {
@@ -686,6 +810,9 @@ public abstract class StorageJournal : IStorageJournal
     }
 
     private long Append(long transactionSequence, JournalRecordType type, PageId pageId, ReadOnlySpan<byte> payload)
+        => Append(transactionSequence, type, pageId, payload, out _, out _);
+
+    private long Append(long transactionSequence, JournalRecordType type, PageId pageId, ReadOnlySpan<byte> payload, out long offset, out int frameLength)
     {
         ThrowIfDisposed();
         EnsureInitialized();
@@ -706,7 +833,7 @@ public abstract class StorageJournal : IStorageJournal
                 // after the final drain and return an LSN that is never written.
                 ThrowIfDisposed();
                 ThrowIfOfflineLocked();
-                lsn = AppendLocked(transactionSequence, type, pageId, payload, ReadOnlySpan<long>.Empty);
+                lsn = AppendLocked(transactionSequence, type, pageId, payload, ReadOnlySpan<long>.Empty, out offset, out frameLength);
 
                 if (_checkpointThreshold > 0 && _length >= _checkpointThreshold && !_checkpointSignaled)
                 {
@@ -830,13 +957,23 @@ public abstract class StorageJournal : IStorageJournal
     /// buffer first when the frame does not fit and the buffer cannot grow. A frame larger than
     /// the buffer may grow to is encoded in a pooled array and written directly, after the
     /// buffer. The payload is <paramref name="payload"/> followed by <paramref name="words"/>,
-    /// little-endian.
+    /// little-endian. <paramref name="offset"/> receives the frame's offset in the journal since
+    /// the last truncation: the bytes of every earlier frame, written or buffered, which is where
+    /// the medium holds or will hold it.
     /// </summary>
-    private long AppendLocked(long transactionSequence, JournalRecordType type, PageId pageId, ReadOnlySpan<byte> payload, ReadOnlySpan<long> words)
+    private long AppendLocked(
+        long transactionSequence,
+        JournalRecordType type,
+        PageId pageId,
+        ReadOnlySpan<byte> payload,
+        ReadOnlySpan<long> words,
+        out long offset,
+        out int frameLength)
     {
         long lsn = _lastLsn + 1;
         int payloadLength = payload.Length + words.Length * sizeof(long);
-        int frameLength = FramePrefixSize + BodyHeaderSize + payloadLength + sizeof(uint);
+        frameLength = FramePrefixSize + BodyHeaderSize + payloadLength + sizeof(uint);
+        offset = _length;
 
         if (frameLength > _maximumBufferSize)
         {
@@ -1049,6 +1186,16 @@ public abstract class StorageJournal : IStorageJournal
     protected abstract void TruncateCore();
 
     /// <summary>
+    /// Reads <paramref name="destination"/>'s length of bytes the medium holds at
+    /// <paramref name="offset"/> (counted from the last truncation), under the append lock: how a
+    /// spilled pre-image is read back (#1253). Implemented by the journals of this assembly only.
+    /// </summary>
+    /// <param name="offset">The offset of the first byte.</param>
+    /// <param name="destination">The bytes to fill.</param>
+    /// <exception cref="StorageCorruptionException">The medium ends before the range does.</exception>
+    private protected abstract void ReadAtCore(long offset, Span<byte> destination);
+
+    /// <summary>
     /// Releases implementation-specific resources.
     /// </summary>
     protected abstract void DisposeCore();
@@ -1064,11 +1211,12 @@ public abstract class StorageJournal : IStorageJournal
     protected const int BodyHeaderSize = 1 + sizeof(long) + sizeof(long) + 1 + sizeof(long);
 
     /// <summary>
-    /// Journal frame format version: 3 since storage format 2 (#1251), whose frames are
-    /// checksummed with CRC-32C. A verified frame of any other version is refused with
-    /// <see cref="StorageFormatException"/>.
+    /// Journal frame format version: 4 since storage format 3 (#1253), whose page records are
+    /// full page images, page deltas and committed page images, encoded as byte runs; 3 was
+    /// storage format 2's (CRC-32C frames carrying full before- and after-images, #1251). A
+    /// verified frame of any other version is refused with <see cref="StorageFormatException"/>.
     /// </summary>
-    protected const byte CurrentVersion = 3;
+    protected const byte CurrentVersion = 4;
 
     /// <summary>
     /// Journal frame magic value ('WAL2').

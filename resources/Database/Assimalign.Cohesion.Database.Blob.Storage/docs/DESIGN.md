@@ -108,9 +108,10 @@ returns an empty page to the free-space map at physical commit; rollback restore
 the page and its owner membership. Reused pages can belong to another upload.
 
 The version store batches undo, pruning, and recovery scrub at 64 mutations per
-physical bracket so their retained before-images cannot grow to object size.
-Journal recovery streams page images and retains only transaction identities and
-winning image LSNs per page. Live ledger entries and page directories still use
+physical bracket so their retained pre-images cannot grow to object size (since #1253 a
+bracket also spills pre-images past a budget to the journal, Storage DESIGN.md "The memory
+bound of pre-images"). Journal recovery streams page records and retains only transaction
+identities, the last applying LSN per page and a bounded page cache. Live ledger entries and page directories still use
 memory proportional to chunk count, approximately one entry per 8 KB; payload
 memory is bounded independently of the object length.
 

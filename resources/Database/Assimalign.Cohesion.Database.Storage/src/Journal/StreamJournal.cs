@@ -143,58 +143,130 @@ public sealed class StreamJournal : StorageJournal
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The scan reads the medium in <see cref="ReadChunkSize"/> chunks, one positional read each,
+    /// and cuts the frames out of the chunk; a frame larger than a chunk is read whole. It used to
+    /// make three reads per frame (prefix, body, checksum), which cost nothing beside two 8 KiB
+    /// page images per touched page but dominated recovery once a commit journals a few dozen
+    /// bytes per page (#1253): about 470,000 small frames took 37 s to reopen from a file, three
+    /// passes of three system calls each.
+    /// </remarks>
     protected override IEnumerable<ReadOnlyMemory<byte>> ReadFrames()
     {
         long originalPosition = _stream.Position;
 
         try
         {
-            _stream.Seek(0, SeekOrigin.Begin);
-            var prefix = new byte[FramePrefixSize];
-            long verifiedEnd = 0;
+            long length = _handle.Length;
+            var chunk = new byte[(int)Math.Min(ReadChunkSize, Math.Max(length, FramePrefixSize))];
+            long chunkOffset = 0;
+            int chunkCount = 0;
+            long position = 0;
 
-            while (_stream.Position + FramePrefixSize <= _stream.Length)
+            while (position + FramePrefixSize <= length)
             {
-                if (!ReadExactly(prefix))
+                if (!Fill(ref chunk, ref chunkOffset, ref chunkCount, position, FramePrefixSize, length))
                 {
                     break;
                 }
 
-                int bodyLength = BinaryPrimitives.ReadInt32LittleEndian(prefix);
-                int magic = BinaryPrimitives.ReadInt32LittleEndian(prefix.AsSpan(4));
-
-                if (magic != Magic || bodyLength < BodyHeaderSize ||
-                    _stream.Position + bodyLength + sizeof(uint) > _stream.Length)
+                int start = (int)(position - chunkOffset);
+                int bodyLength = BinaryPrimitives.ReadInt32LittleEndian(chunk.AsSpan(start));
+                int magic = BinaryPrimitives.ReadInt32LittleEndian(chunk.AsSpan(start + sizeof(int)));
+                if (magic != Magic || bodyLength < BodyHeaderSize || position + FramePrefixSize + bodyLength + sizeof(uint) > length)
                 {
                     break;
                 }
 
-                var body = new byte[bodyLength];
-                var checksumBuffer = new byte[sizeof(uint)];
-
-                if (!ReadExactly(body) || !ReadExactly(checksumBuffer))
+                int frameLength = FramePrefixSize + bodyLength + sizeof(uint);
+                if (!Fill(ref chunk, ref chunkOffset, ref chunkCount, position, frameLength, length))
                 {
                     break;
                 }
 
-                uint expected = BinaryPrimitives.ReadUInt32LittleEndian(checksumBuffer);
+                start = (int)(position - chunkOffset);
+                var body = chunk.AsSpan(start + FramePrefixSize, bodyLength).ToArray();
+                uint expected = BinaryPrimitives.ReadUInt32LittleEndian(chunk.AsSpan(start + FramePrefixSize + bodyLength));
                 if (Crc32C.Compute(body) != expected)
                 {
                     break;
                 }
 
-                verifiedEnd = _stream.Position;
+                position += frameLength;
                 yield return body;
             }
 
             // Reached only when the scan ran to the end of the verified frames, never when the
             // caller stopped enumerating early: the next append goes here.
-            _appendOffset = verifiedEnd;
+            _appendOffset = position;
             _tailUnchecked = true;
         }
         finally
         {
             _stream.Seek(originalPosition, SeekOrigin.Begin);
+        }
+    }
+
+    /// <summary>
+    /// The size of the chunks a read scan reads the medium in.
+    /// </summary>
+    private const int ReadChunkSize = 256 * 1024;
+
+    /// <summary>
+    /// Makes the <paramref name="count"/> bytes at <paramref name="position"/> available in the
+    /// chunk, reading the medium from <paramref name="position"/> when they are not (growing the
+    /// chunk for a frame larger than it).
+    /// </summary>
+    /// <returns>False when the medium ends before the bytes do.</returns>
+    private bool Fill(ref byte[] chunk, ref long chunkOffset, ref int chunkCount, long position, int count, long length)
+    {
+        if (position >= chunkOffset && position + count <= chunkOffset + chunkCount)
+        {
+            return true;
+        }
+
+        if (position + count > length)
+        {
+            return false;
+        }
+
+        if (count > chunk.Length)
+        {
+            chunk = new byte[count];
+        }
+
+        int wanted = (int)Math.Min(chunk.Length, length - position);
+        int total = 0;
+        while (total < wanted)
+        {
+            int read = _handle.Read(chunk.AsSpan(total, wanted - total), position + total);
+            if (read <= 0)
+            {
+                break;
+            }
+
+            total += read;
+        }
+
+        chunkOffset = position;
+        chunkCount = total;
+        return total >= count;
+    }
+
+    /// <inheritdoc />
+    private protected override void ReadAtCore(long offset, Span<byte> destination)
+    {
+        int total = 0;
+        while (total < destination.Length)
+        {
+            int read = _handle.Read(destination[total..], offset + total);
+            if (read <= 0)
+            {
+                throw new StorageCorruptionException(
+                    $"The journal holds {_handle.Length} bytes; reading {destination.Length} bytes at offset {offset} passed its end.");
+            }
+
+            total += read;
         }
     }
 
@@ -213,21 +285,5 @@ public sealed class StreamJournal : StorageJournal
         {
             _stream.Dispose();
         }
-    }
-
-    private bool ReadExactly(byte[] buffer)
-    {
-        int totalRead = 0;
-        while (totalRead < buffer.Length)
-        {
-            int bytesRead = _stream.Read(buffer, totalRead, buffer.Length - totalRead);
-            if (bytesRead == 0)
-            {
-                return false;
-            }
-            totalRead += bytesRead;
-        }
-
-        return true;
     }
 }
