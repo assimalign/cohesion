@@ -178,9 +178,12 @@ public sealed class StorageOfflineTests
     /// are released at once with the offline error, not after their self-help window.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Storage] - Offline: a failed group flush releases its waiting committers at once")]
-    public async Task FlushPendingCommits_GroupFlushFails_ShouldReleaseWaitingCommittersAtOnce()
+    public void FlushPendingCommits_GroupFlushFails_ShouldReleaseWaitingCommittersAtOnce()
     {
-        // Arrange: a window far longer than the test, so only the release can end the wait.
+        // Arrange: a window far longer than the test, so only the release can end the wait. The
+        // committer has a thread of its own and the waits block this one: parallel test classes can
+        // keep a pool work item, or an await's continuation, waiting for seconds
+        // (StorageWorkerSupportTests.AssertGroupedCommitCompletesOnWorkerFlush).
         var storage = TornStorage.Create(journalWriteThrough: false);
         storage.CommitDurability = StorageCommitDurability.Grouped;
         storage.GroupCommitWindow = TimeSpan.FromMinutes(5);
@@ -189,13 +192,14 @@ public sealed class StorageOfflineTests
         var transaction = storage.BeginTransaction();
         storage.Insert(transaction, "grouped");
         var watch = Stopwatch.StartNew();
-        var commit = Task.Run(() => transaction.Commit());
+        var commit = Task.Factory.StartNew(transaction.Commit, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         pending.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
         storage.JournalFaults.FailNextFlush();
 
         // Act: the worker's pass.
         bool flushed = storage.FlushPendingCommits();
-        var error = await Should.ThrowAsync<StorageOfflineException>(async () => await commit.WaitAsync(TimeSpan.FromSeconds(30)));
+        ((IAsyncResult)commit).AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+        var error = Should.Throw<StorageOfflineException>(() => commit.GetAwaiter().GetResult());
         watch.Stop();
 
         // Assert: released long before the window would have run out.
@@ -275,8 +279,13 @@ public sealed class StorageOfflineTests
             second.TakeOffline(error);
             secondOfflineInTheHook = second.IsOffline;
             // A flush takes the journal's lock (and is refused): it completes only if the hook
-            // does not hold that lock.
-            journalLockFreeInTheHook = Task.Run(() => Record.Exception(() => first.Log.Flush())).Wait(TimeSpan.FromSeconds(10));
+            // does not hold that lock. It runs on a thread of its own: started with Task.Run it
+            // waited behind parallel test classes' pool work for over 4 s on 4 cores.
+            journalLockFreeInTheHook = Task.Factory.StartNew(
+                () => Record.Exception(() => first.Log.Flush()),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default).Wait(TimeSpan.FromSeconds(10));
         };
         second.OnOffline = error =>
         {
