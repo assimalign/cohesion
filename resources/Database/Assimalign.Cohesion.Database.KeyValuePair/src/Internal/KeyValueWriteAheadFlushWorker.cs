@@ -34,22 +34,14 @@ internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
     private readonly ManualResetEventSlim _commitPending;
 
     internal KeyValueWriteAheadFlushWorker(KeyValueDatabaseEngine engine, ManualResetEventSlim commitPending)
+        : base(engine.Name + "/wal-flush", DatabaseEngineWorkerKind.WriteAheadFlush,
+            engine.EngineOptions.Durability == StorageCommitDurability.Grouped
+                ? engine.EngineOptions.GroupCommitWindow
+                : TimeSpan.FromSeconds(1))
     {
         _engine = engine;
         _commitPending = commitPending;
     }
-
-    /// <inheritdoc />
-    public override string Name => _engine.Name + "/wal-flush";
-
-    /// <inheritdoc />
-    public override DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.WriteAheadFlush;
-
-    /// <inheritdoc />
-    public override TimeSpan Interval
-        => _engine.EngineOptions.Durability == StorageCommitDurability.Grouped
-            ? _engine.EngineOptions.GroupCommitWindow
-            : TimeSpan.FromSeconds(1);
 
     /// <inheritdoc />
     protected override void WaitForTrigger(CancellationToken cancellationToken)

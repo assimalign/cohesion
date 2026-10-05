@@ -27,16 +27,10 @@ internal sealed class DocumentCheckpointWorker : DatabaseCheckpointWorker<Docume
     /// </summary>
     /// <param name="engine">The document database engine whose open databases are checkpointed.</param>
     public DocumentCheckpointWorker(DocumentDatabaseEngine engine)
-        : base(engine.Name)
+        : base(engine.Name, engine.EngineOptions.CheckpointInterval)
     {
         _engine = engine;
     }
-
-    /// <inheritdoc />
-    public override string Name => _engine.Name + "/checkpoint";
-
-    /// <inheritdoc />
-    public override TimeSpan Interval => _engine.EngineOptions.CheckpointInterval;
 
     /// <inheritdoc />
     protected override ManualResetEventSlim CheckpointNeededSignal => _engine.CheckpointNeededSignal;

@@ -492,6 +492,30 @@ public class DatabaseEngineWorkerTests
         worker.Fault.ShouldBeNull();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker: the name, kind and cadence are the constructor's, through the interface too")]
+    public void Constructor_Identity_ShouldBeFixed()
+    {
+        // Arrange / Act
+        var worker = new ScriptedWorker((_, _) => { }, TimeSpan.FromSeconds(5), "sql-engine/version-purge", DatabaseEngineWorkerKind.VersionPurge);
+        IDatabaseEngineWorker bridged = worker;
+
+        // Assert
+        worker.Name.ShouldBe("sql-engine/version-purge");
+        worker.Kind.ShouldBe(DatabaseEngineWorkerKind.VersionPurge);
+        worker.Interval.ShouldBe(TimeSpan.FromSeconds(5));
+        bridged.Name.ShouldBe(worker.Name);
+        bridged.Kind.ShouldBe(worker.Kind);
+        bridged.Interval.ShouldBe(worker.Interval);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker: a worker without a diagnostic name is refused")]
+    public void Constructor_BlankName_ShouldThrow()
+    {
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => new ScriptedWorker((_, _) => { }, name: " "));
+        Should.Throw<ArgumentNullException>(() => new ScriptedWorker((_, _) => { }, name: null!));
+    }
+
     private static Thread StartPump(DatabaseEngineWorker worker, CancellationToken cancellationToken)
     {
         var thread = new Thread(() => worker.Run(cancellationToken)) { IsBackground = true, Name = worker.Name };

@@ -119,7 +119,11 @@ classDiagram
   running pass. Only cancellation and `OutOfMemoryException` leave the loop. The
   engines' pumps (one shared copy, `shared/DatabaseEngineWorkerPump.cs`, until the
   phase-3 engine base takes it over) also run a worker's `Run` again after the backoff
-  if it ever throws or returns early. This is PostgreSQL's recovery for its background
+  if it ever throws or returns early. A worker's name, kind and cadence are fixed by its
+  constructor since phase 3 (#1259): they used to be abstract getters, so the cadence of the
+  built-in workers was read from the engine's options object on every trigger wait, and a change
+  to that object after the engine was created changed it; now the value the engine was created
+  with holds for the worker's life. This is PostgreSQL's recovery for its background
   writer, checkpointer and WAL writer, which catch an error per cycle, report it,
   release what the cycle held and sleep a second before the loop continues ("A write
   error is likely to be repeated", `src/backend/postmaster/bgwriter.c:154-205`,
