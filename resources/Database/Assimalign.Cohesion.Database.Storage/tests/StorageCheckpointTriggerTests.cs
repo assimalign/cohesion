@@ -191,11 +191,10 @@ public sealed class StorageCheckpointTriggerTests
     private sealed class DefaultStorage : Storage
     {
         private DefaultStorage()
-            : base(new StorageStream(new SimulatedDurableFileHandle()), new StorageStream(new SimulatedDurableFileHandle()), new StorageStream(new MemoryStream()))
+            : base(StorageModel.Custom, new StorageStream(new SimulatedDurableFileHandle()), new StorageStream(new SimulatedDurableFileHandle()), new StorageStream(new MemoryStream()))
         {
         }
 
-        public override StorageModel Model => StorageModel.Custom;
 
         public static DefaultStorage Create()
         {

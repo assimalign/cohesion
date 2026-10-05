@@ -736,7 +736,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     /// Rewrites a record in place when it fits, relocating it otherwise.
     /// </summary>
     private (PageId PageId, int SlotIndex) UpsertRecord(
-        IStorageTransaction transaction,
+        StorageTransaction transaction,
         (PageId PageId, int SlotIndex)? location,
         byte[] record)
     {
@@ -757,7 +757,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         }
     }
 
-    private void PersistCounter(IStorageTransaction transaction)
+    private void PersistCounter(StorageTransaction transaction)
     {
         var writer = new DatabaseKeyWriter();
         writer.AppendInt32(counterRecordKind).AppendInt64((long)_nextObjectId);

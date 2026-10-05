@@ -73,7 +73,7 @@ public sealed partial class DocumentStorage
     /// <param name="transaction">The statement bracket that changes the tree root.</param>
     /// <param name="entry">The registration, including the zero stamp prefix.</param>
     /// <returns>The physical registration location.</returns>
-    public (PageId PageId, int SlotIndex) InsertIndexRegistration(IStorageTransaction transaction, ReadOnlySpan<byte> entry)
+    public (PageId PageId, int SlotIndex) InsertIndexRegistration(StorageTransaction transaction, ReadOnlySpan<byte> entry)
         => InsertRecord(transaction, 1, entry);
 
     private static void Validate(JsonElement element)

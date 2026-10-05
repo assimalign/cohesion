@@ -170,7 +170,7 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
         private readonly CrashSimulationStream _journal;
 
         private CrashStorage(CrashSimulationStream data, CrashSimulationStream journal, bool reopen)
-            : base(new StorageStream(data), new StorageStream(journal), new StorageStream(new MemoryStream()))
+            : base(StorageModel.KeyValue, new StorageStream(data), new StorageStream(journal), new StorageStream(new MemoryStream()))
         {
             _data = data;
             _journal = journal;
@@ -184,7 +184,6 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
             }
         }
 
-        public override StorageModel Model => StorageModel.KeyValue;
 
         internal StorageJournal Log => WriteAheadLog;
 
@@ -200,15 +199,15 @@ public sealed class TransactionCoordinatorCheckpointCrashTests
 
         internal (byte[] Data, byte[] Journal) CaptureDurable() => (_data.CaptureDurable(), _journal.CaptureDurable());
 
-        internal (PageId PageId, int SlotIndex) Insert(IStorageTransaction bracket, ReadOnlySpan<byte> data)
+        internal (PageId PageId, int SlotIndex) Insert(StorageTransaction bracket, ReadOnlySpan<byte> data)
             => InsertRecord(bracket, data);
 
         public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
 
-        public void Update(IStorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+        public void Update(StorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
             => UpdateRecord(bracket, pageId, slotIndex, record);
 
-        public void Delete(IStorageTransaction bracket, PageId pageId, int slotIndex)
+        public void Delete(StorageTransaction bracket, PageId pageId, int slotIndex)
             => DeleteRecord(bracket, pageId, slotIndex);
 
         public ulong PackLocation(PageId pageId, int slotIndex)

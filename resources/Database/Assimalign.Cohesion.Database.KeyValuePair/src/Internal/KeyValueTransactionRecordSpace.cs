@@ -23,11 +23,11 @@ internal sealed class KeyValueTransactionRecordSpace : ITransactionRecordSpace
         => _storage.ReadEntry(pageId, slotIndex);
 
     /// <inheritdoc />
-    public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+    public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
         => _storage.UpdateEntry(transaction, pageId, slotIndex, record);
 
     /// <inheritdoc />
-    public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex)
+    public void Delete(StorageTransaction transaction, PageId pageId, int slotIndex)
         => _storage.DeleteEntry(transaction, pageId, slotIndex);
 
     /// <inheritdoc />

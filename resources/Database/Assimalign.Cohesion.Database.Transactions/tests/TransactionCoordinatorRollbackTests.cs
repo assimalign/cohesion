@@ -791,7 +791,7 @@ public class TransactionCoordinatorRollbackTests
 
         // Assert: the statement's records were still buffered before the commit; after it the
         // reopen's recovery reads the writer as committed, and a new snapshot sees its version.
-        new StreamJournal(new MemoryStream(beforeTheCommit.Journal)).ReadAll()
+        new StorageJournal(new MemoryStream(beforeTheCommit.Journal)).ReadAll()
             .ShouldNotContain(record => record.TransactionSequence == (long)writer.Sequence.Value);
         plan.Committed.ShouldContain(writer.Sequence);
         plan.Aborted.ShouldNotContain(writer.Sequence);
@@ -1066,7 +1066,7 @@ public class TransactionCoordinatorRollbackTests
 
         // Act: the statement writes a record, a drain of the records it buffered fails, and the
         // statement fails.
-        Func<IStorageTransaction, int> failingStatement = bracket =>
+        Func<StorageTransaction, int> failingStatement = bracket =>
         {
             byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];
             RecordVersionStamp.WriteWriter(record, writer.Sequence);
@@ -1188,10 +1188,10 @@ public class TransactionCoordinatorRollbackTests
 
         internal void Release() => _released.TrySetResult();
 
-        public ValueTask EraseAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        public ValueTask EraseAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
             => default;
 
-        public async ValueTask ClearDeleterAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        public async ValueTask ClearDeleterAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
         {
             lock (_tokens)
             {
@@ -1225,10 +1225,10 @@ public class TransactionCoordinatorRollbackTests
             _failures = failures;
         }
 
-        public ValueTask EraseAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        public ValueTask EraseAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
             => default;
 
-        public ValueTask ClearDeleterAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        public ValueTask ClearDeleterAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
         {
             if (_failures > 0)
             {
@@ -1304,7 +1304,7 @@ public class TransactionCoordinatorRollbackTests
         private readonly FaultingMemoryStream _journal;
 
         private RollbackStorage(MemoryStream data, FaultingMemoryStream journal, bool reopen)
-            : base(new StorageStream(new SimulatedDurableFileHandle(data)), new StorageStream(new SimulatedDurableFileHandle(journal)), new StorageStream(new MemoryStream()))
+            : base(StorageModel.KeyValue, new StorageStream(new SimulatedDurableFileHandle(data)), new StorageStream(new SimulatedDurableFileHandle(journal)), new StorageStream(new MemoryStream()))
         {
             _data = data;
             _journal = journal;
@@ -1318,7 +1318,6 @@ public class TransactionCoordinatorRollbackTests
             }
         }
 
-        public override StorageModel Model => StorageModel.KeyValue;
 
         internal StorageJournal Log => WriteAheadLog;
 
@@ -1340,15 +1339,15 @@ public class TransactionCoordinatorRollbackTests
         /// <summary>Gets the bytes a closed storage left behind (a memory stream keeps them after disposal).</summary>
         internal (byte[] Data, byte[] Journal) CaptureClosedImages() => (_data.ToArray(), _journal.ToArray());
 
-        internal (PageId PageId, int SlotIndex) Insert(IStorageTransaction bracket, ReadOnlySpan<byte> data)
+        internal (PageId PageId, int SlotIndex) Insert(StorageTransaction bracket, ReadOnlySpan<byte> data)
             => LastInserted = InsertRecord(bracket, data);
 
         public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
 
-        public void Update(IStorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+        public void Update(StorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
             => UpdateRecord(bracket, pageId, slotIndex, record);
 
-        public void Delete(IStorageTransaction bracket, PageId pageId, int slotIndex)
+        public void Delete(StorageTransaction bracket, PageId pageId, int slotIndex)
             => DeleteRecord(bracket, pageId, slotIndex);
 
         public ulong PackLocation(PageId pageId, int slotIndex)

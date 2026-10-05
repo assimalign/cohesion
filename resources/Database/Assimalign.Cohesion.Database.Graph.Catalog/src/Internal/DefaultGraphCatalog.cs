@@ -261,7 +261,7 @@ internal sealed class DefaultGraphCatalog : IGraphCatalog
         }, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    private void Tombstone(IStorageTransaction bracket, Reference reference, TransactionSequence writer)
+    private void Tombstone(StorageTransaction bracket, Reference reference, TransactionSequence writer)
     {
         var bytes = _storage.ReadEntry(reference.PageId, reference.SlotIndex);
         _storage.UpdateEntry(bracket, reference.PageId, reference.SlotIndex, RecordVersionStamp.WithDeleter(bytes.Span, writer));

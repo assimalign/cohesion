@@ -123,7 +123,7 @@ public sealed class StorageJournalFailureTests
     {
         // Arrange: a written record, then two buffered ones whose drain tears half-way.
         var stream = new FaultingMemoryStream();
-        var journal = new StreamJournal(stream, leaveOpen: true);
+        var journal = new StorageJournal(stream, leaveOpen: true);
         journal.AppendBegin(1);
         journal.Flush();
         long lengthBefore = stream.Length;
@@ -145,7 +145,7 @@ public sealed class StorageJournalFailureTests
         var readOffline = journal.ReadAll();
         journal.Dispose();
         long lengthAfterClose = stream.Length;
-        using var reopened = new StreamJournal(new MemoryStream(stream.ToArray()));
+        using var reopened = new StorageJournal(new MemoryStream(stream.ToArray()));
         var recovered = reopened.ReadAll();
         reopened.AppendBegin(3);
         reopened.Flush();
@@ -172,7 +172,7 @@ public sealed class StorageJournalFailureTests
     {
         // Arrange
         var stream = new FaultingMemoryStream();
-        using var journal = new StreamJournal(new StorageStream(new SimulatedDurableFileHandle(stream)));
+        using var journal = new StorageJournal(new StorageStream(new SimulatedDurableFileHandle(stream)));
         long durable = journal.AppendCommit(1);
         journal.EnsureDurable(durable);
         long written = journal.AppendCommit(2);
@@ -200,11 +200,10 @@ public sealed class StorageJournalFailureTests
     private sealed class FailureStorage : Storage
     {
         private FailureStorage(StorageStream data, StorageStream journal)
-            : base(data, journal, new StorageStream(new MemoryStream()))
+            : base(StorageModel.Custom, data, journal, new StorageStream(new MemoryStream()))
         {
         }
 
-        public override StorageModel Model => StorageModel.Custom;
 
         public StorageJournal Log => (StorageJournal)WriteAheadLog;
 
@@ -250,7 +249,7 @@ public sealed class StorageJournalFailureTests
         /// <summary>Gets what the files hold right now: what a process crash would leave.</summary>
         public (byte[] Data, byte[] Journal) CaptureImages() => (DataStream.ToArray(), JournalStream.ToArray());
 
-        public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, string text)
+        public (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, string text)
             => InsertRecord(transaction, Encoding.UTF8.GetBytes(text));
 
         public (PageId PageId, int SlotIndex) Insert(string text)

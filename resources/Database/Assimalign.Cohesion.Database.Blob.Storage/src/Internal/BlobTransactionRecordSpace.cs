@@ -19,9 +19,9 @@ internal sealed class BlobTransactionRecordSpace : ITransactionRecordSpace
     }
 
     public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => _storage.ReadEntry(pageId, slotIndex);
-    public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+    public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
         => _storage.UpdateEntry(transaction, pageId, slotIndex, record);
-    public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
+    public void Delete(StorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
     public ulong PackLocation(PageId pageId, int slotIndex) => BlobStorage.PackLocation(pageId, slotIndex);
     public (PageId PageId, int SlotIndex) UnpackLocation(ulong location) => BlobStorage.UnpackLocation(location);
 }

@@ -32,7 +32,7 @@ public interface ITransactionRecordSpace
     /// <param name="pageId">The page holding the record.</param>
     /// <param name="slotIndex">The record's slot within that page.</param>
     /// <param name="record">The complete replacement record.</param>
-    void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record);
+    void Update(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record);
 
     /// <summary>
     /// Physically deletes a version inside a storage bracket.
@@ -40,7 +40,7 @@ public interface ITransactionRecordSpace
     /// <param name="transaction">The active storage bracket.</param>
     /// <param name="pageId">The page holding the record.</param>
     /// <param name="slotIndex">The record's slot within that page.</param>
-    void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex);
+    void Delete(StorageTransaction transaction, PageId pageId, int slotIndex);
 
     /// <summary>
     /// Encodes a record's physical location as a ledger entry identifier.

@@ -121,7 +121,7 @@ internal sealed class DefaultIndexManager : IIndexManager, IIndexRegistry
     }
 
     /// <inheritdoc />
-    public ValueTask<long> PurgeWritersAsync(IStorageTransaction transaction, IReadOnlySet<TransactionSequence> writers, CancellationToken cancellationToken = default)
+    public ValueTask<long> PurgeWritersAsync(StorageTransaction transaction, IReadOnlySet<TransactionSequence> writers, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(writers);

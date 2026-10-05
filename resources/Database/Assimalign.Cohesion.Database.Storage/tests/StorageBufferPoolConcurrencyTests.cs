@@ -261,7 +261,7 @@ public sealed class StorageBufferPoolConcurrencyTests
         pool.CheckInvariants();
     }
 
-    private static void WriteVersion(IStoragePageHandle handle, long pageId, int version)
+    private static void WriteVersion(StoragePageHandle handle, long pageId, int version)
     {
         var body = handle.Page.AsBodySpan();
         body.Fill(Pattern(pageId, version));

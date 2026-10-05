@@ -25,7 +25,7 @@ public class TransactionRecoveryTests
     {
         // Arrange
         using var stream = new SimulatedDurableFileHandle();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = new StorageJournal(stream, leaveOpen: true);
         var manager = TransactionManager.Create(
             TransactionLog.CreateJournalBound(journal), LockManager.Create(), VersionStore.CreateInMemory());
         await using var _ = manager;
@@ -46,7 +46,7 @@ public class TransactionRecoveryTests
     {
         // Arrange: lifecycle records the journal has not written yet.
         using var stream = new SimulatedDurableFileHandle();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = new StorageJournal(stream, leaveOpen: true);
         journal.AppendBegin(1);
         journal.AppendCommit(1);
         journal.AppendBegin(2);
@@ -74,7 +74,7 @@ public class TransactionRecoveryTests
         TransactionSequence crashedSequence;
 
         {
-            using var journal = new StreamJournal(stream, leaveOpen: true);
+            using var journal = new StorageJournal(stream, leaveOpen: true);
             var versions = VersionStore.CreateInMemory();
             var manager = TransactionManager.Create(
                 TransactionLog.CreateJournalBound(journal), LockManager.Create(), versions);
@@ -94,7 +94,7 @@ public class TransactionRecoveryTests
         // Act: restart — analyze the journal and rebuild the version store the way
         // an engine would (re-appending committed work from its own storage replay,
         // purging anything the journal does not prove committed).
-        using var reopenedJournal = new StreamJournal(stream, leaveOpen: true);
+        using var reopenedJournal = new StorageJournal(stream, leaveOpen: true);
         var plan = TransactionRecovery.Analyze(reopenedJournal);
 
         // Assert
@@ -128,7 +128,7 @@ public class TransactionRecoveryTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = new StorageJournal(stream, leaveOpen: true);
         var manager = TransactionManager.Create(
             TransactionLog.CreateJournalBound(journal), LockManager.Create(), VersionStore.CreateInMemory());
         await using var _ = manager;
@@ -151,7 +151,7 @@ public class TransactionRecoveryTests
         // away but carries it as active; transaction 8 begins after and commits.
         // A crash follows.
         using var stream = new SimulatedDurableFileHandle();
-        using var journal = new StreamJournal(stream, leaveOpen: true);
+        using var journal = new StorageJournal(stream, leaveOpen: true);
 
         journal.AppendBegin(7);
         journal.Checkpoint([7L]);

@@ -504,11 +504,10 @@ public sealed class StorageConcurrencyTests
     private sealed class ConcurrentStorage : Storage
     {
         private ConcurrentStorage(StorageStream data, StorageStream journal, int capacity)
-            : base(data, journal, new StorageStream(new MemoryStream()), capacity)
+            : base(StorageModel.Custom, data, journal, new StorageStream(new MemoryStream()), capacity)
         {
         }
 
-        public override StorageModel Model => StorageModel.Custom;
 
         public static ConcurrentStorage Create(MemoryStream data, MemoryStream journal, int capacity)
         {
@@ -542,13 +541,13 @@ public sealed class StorageConcurrencyTests
             return storage;
         }
 
-        public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, ulong ownerId, byte[] data)
+        public (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, ulong ownerId, byte[] data)
             => InsertRecord(transaction, ownerId, data);
 
-        public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, byte[] data)
+        public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, byte[] data)
             => UpdateRecord(transaction, pageId, slotIndex, data);
 
-        public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex)
+        public void Delete(StorageTransaction transaction, PageId pageId, int slotIndex)
             => DeleteRecord(transaction, pageId, slotIndex);
 
         public byte[] Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex).ToArray();

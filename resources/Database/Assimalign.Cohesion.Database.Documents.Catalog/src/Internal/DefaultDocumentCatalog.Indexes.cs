@@ -207,7 +207,7 @@ internal sealed partial class DefaultDocumentCatalog
             ? index : throw new DocumentCatalogException($"Missing physical tree for index '{metadata.Name}'.");
 
     private async ValueTask<T> ApplyAsync<T>(ITransactionContext context,
-        Func<IStorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
+        Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
     {
         try
         {
@@ -274,7 +274,7 @@ internal sealed partial class DefaultDocumentCatalog
         return registrations;
     }
 
-    private void SaveRegistrations(IStorageTransaction bracket)
+    private void SaveRegistrations(StorageTransaction bracket)
     {
         foreach (var registration in ((IIndexRegistry)_indexes).ExportRegistrations())
         {
@@ -320,7 +320,7 @@ internal sealed partial class DefaultDocumentCatalog
             _coordinator = coordinator;
         }
 
-        public IStorageTransaction GetStorageTransaction(ITransactionContext context)
+        public StorageTransaction GetStorageTransaction(ITransactionContext context)
             => _coordinator.TryGetStorageTransaction(context, out var bracket)
                 ? bracket : throw new InvalidOperationException("Index mutation requires a shared statement bracket.");
     }
@@ -341,11 +341,11 @@ internal sealed partial class DefaultDocumentCatalog
             _metadata = metadata;
         }
 
-        public ValueTask EraseAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+        public ValueTask EraseAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken = default)
             => _catalog.ResolveIndex(_metadata).EraseAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
 
-        public ValueTask ClearDeleterAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+        public ValueTask ClearDeleterAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken = default)
             => _catalog.ResolveIndex(_metadata).ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
     }

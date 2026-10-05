@@ -198,7 +198,7 @@ internal sealed partial class DefaultGraphStore
         return registrations;
     }
 
-    private void SaveRegistrations(IStorageTransaction bracket)
+    private void SaveRegistrations(StorageTransaction bracket)
     {
         foreach (var registration in ((IIndexRegistry)_indexes).ExportRegistrations())
         {
@@ -231,7 +231,7 @@ internal sealed partial class DefaultGraphStore
             _coordinator = coordinator;
         }
 
-        public IStorageTransaction GetStorageTransaction(ITransactionContext context) => _coordinator.TryGetStorageTransaction(context, out var bracket)
+        public StorageTransaction GetStorageTransaction(ITransactionContext context) => _coordinator.TryGetStorageTransaction(context, out var bracket)
             ? bracket : throw new InvalidOperationException("Graph index mutation requires a shared statement bracket.");
     }
 
@@ -249,11 +249,11 @@ internal sealed partial class DefaultGraphStore
             _id = id;
         }
 
-        public ValueTask EraseAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+        public ValueTask EraseAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken = default)
             => _store._indexes.TryGetIndex(_id, TreeName, out var index)
                 ? index.EraseAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken) : default;
-        public ValueTask ClearDeleterAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
+        public ValueTask ClearDeleterAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken = default)
             => _store._indexes.TryGetIndex(_id, TreeName, out var index)
                 ? index.ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken) : default;

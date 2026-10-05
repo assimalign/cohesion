@@ -117,7 +117,7 @@ public interface IIndex
     /// The key exceeds the maximum key length, or an entry with the same key, entry
     /// reference and writer already exists (a defect: entry identities are unique).
     /// </exception>
-    ValueTask InsertVersionAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, TransactionSequence deleter, CancellationToken cancellationToken = default);
+    ValueTask InsertVersionAsync(StorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, TransactionSequence deleter, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Physically removes the entry mapping <paramref name="key"/> to
@@ -132,7 +132,7 @@ public interface IIndex
     /// <param name="entryReference">The entry reference the key maps to.</param>
     /// <param name="writer">The writer stamp the entry must carry to be removed.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    ValueTask EraseAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default);
+    ValueTask EraseAsync(StorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Clears the deleter stamp of the entry mapping <paramref name="key"/> to
@@ -145,5 +145,5 @@ public interface IIndex
     /// <param name="entryReference">The entry reference the key maps to.</param>
     /// <param name="deleter">The deleter stamp the entry must carry to be cleared.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    ValueTask ClearDeleterAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence deleter, CancellationToken cancellationToken = default);
+    ValueTask ClearDeleterAsync(StorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence deleter, CancellationToken cancellationToken = default);
 }

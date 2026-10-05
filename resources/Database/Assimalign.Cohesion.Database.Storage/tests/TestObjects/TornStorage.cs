@@ -30,7 +30,7 @@ internal sealed class TornStorage : Storage
         FlushFaultingHandle dataFaults,
         FlushFaultingHandle journalFaults,
         int poolCapacity)
-        : base(new StorageStream(dataFaults), new StorageStream(journalFaults), new StorageStream(new MemoryStream()), poolCapacity)
+        : base(StorageModel.Custom, new StorageStream(dataFaults), new StorageStream(journalFaults), new StorageStream(new MemoryStream()), poolCapacity)
     {
         _data = data;
         _journal = journal;
@@ -44,7 +44,6 @@ internal sealed class TornStorage : Storage
     /// <summary>Gets what the data and journal streams hold right now, durable or not.</summary>
     public (byte[] Data, byte[] Journal) CaptureLive() => (_data.CaptureLive(), _journal.CaptureLive());
 
-    public override StorageModel Model => StorageModel.Custom;
 
     /// <summary>Gets the journal, for appending lifecycle records and reading it back.</summary>
     public StorageJournal Log => WriteAheadLog;
@@ -179,19 +178,19 @@ internal sealed class TornStorage : Storage
         return location;
     }
 
-    public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, string text)
+    public (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, string text)
         => InsertRecord(transaction, Encoding.UTF8.GetBytes(text));
 
-    public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, string text)
+    public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, string text)
         => UpdateRecord(transaction, pageId, slotIndex, Encoding.UTF8.GetBytes(text));
 
-    public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, byte[] record)
+    public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, byte[] record)
         => UpdateRecord(transaction, pageId, slotIndex, record);
 
-    public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, ulong owner, byte[] record)
+    public (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, ulong owner, byte[] record)
         => InsertRecord(transaction, owner, record);
 
-    public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex)
+    public void Delete(StorageTransaction transaction, PageId pageId, int slotIndex)
         => DeleteRecord(transaction, pageId, slotIndex);
 
     public byte[] ReadBytes(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex).ToArray();

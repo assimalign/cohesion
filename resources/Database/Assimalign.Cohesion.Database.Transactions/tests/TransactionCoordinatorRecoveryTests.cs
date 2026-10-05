@@ -507,7 +507,7 @@ public class TransactionCoordinatorRecoveryTests
         private readonly MemoryStream _journal;
 
         private CoordinatorStorage(MemoryStream data, MemoryStream journal, bool reopen)
-            : base(new StorageStream(new SimulatedDurableFileHandle(data)), new StorageStream(new SimulatedDurableFileHandle(journal)), new StorageStream(new MemoryStream()))
+            : base(StorageModel.KeyValue, new StorageStream(new SimulatedDurableFileHandle(data)), new StorageStream(new SimulatedDurableFileHandle(journal)), new StorageStream(new MemoryStream()))
         {
             _data = data;
             _journal = journal;
@@ -521,7 +521,6 @@ public class TransactionCoordinatorRecoveryTests
             }
         }
 
-        public override StorageModel Model => StorageModel.KeyValue;
 
         internal StorageJournal Log => WriteAheadLog;
 
@@ -536,15 +535,15 @@ public class TransactionCoordinatorRecoveryTests
             return (_data.ToArray(), _journal.ToArray());
         }
 
-        internal (PageId PageId, int SlotIndex) Insert(IStorageTransaction bracket, ReadOnlySpan<byte> data)
+        internal (PageId PageId, int SlotIndex) Insert(StorageTransaction bracket, ReadOnlySpan<byte> data)
             => InsertRecord(bracket, data);
 
         public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
 
-        public void Update(IStorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+        public void Update(StorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
             => UpdateRecord(bracket, pageId, slotIndex, record);
 
-        public void Delete(IStorageTransaction bracket, PageId pageId, int slotIndex)
+        public void Delete(StorageTransaction bracket, PageId pageId, int slotIndex)
             => DeleteRecord(bracket, pageId, slotIndex);
 
         public ulong PackLocation(PageId pageId, int slotIndex)

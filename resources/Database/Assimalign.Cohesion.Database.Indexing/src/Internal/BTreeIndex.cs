@@ -82,7 +82,7 @@ internal sealed class BTreeIndex : IIndex
     /// <summary>
     /// Allocates the root leaf of a new tree inside the given storage transaction.
     /// </summary>
-    internal static long CreateRoot(Storage.Storage storage, IStorageTransaction transaction)
+    internal static long CreateRoot(Storage.Storage storage, StorageTransaction transaction)
     {
         using var handle = storage.AllocatePageForWrite(transaction, PageType.Index);
         BTreeNode.Initialize(handle.Page.AsBodySpan(), BTreeNode.LeafKind);
@@ -252,7 +252,7 @@ internal sealed class BTreeIndex : IIndex
     }
 
     /// <inheritdoc />
-    public ValueTask InsertVersionAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, TransactionSequence deleter, CancellationToken cancellationToken = default)
+    public ValueTask InsertVersionAsync(StorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, TransactionSequence deleter, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();
@@ -276,7 +276,7 @@ internal sealed class BTreeIndex : IIndex
     }
 
     /// <inheritdoc />
-    public ValueTask EraseAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+    public ValueTask EraseAsync(StorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();
@@ -306,7 +306,7 @@ internal sealed class BTreeIndex : IIndex
     }
 
     /// <inheritdoc />
-    public ValueTask ClearDeleterAsync(IStorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence deleter, CancellationToken cancellationToken = default)
+    public ValueTask ClearDeleterAsync(StorageTransaction transaction, IndexKey key, ulong entryReference, TransactionSequence deleter, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();
@@ -345,7 +345,7 @@ internal sealed class BTreeIndex : IIndex
     /// Removing entries and clearing deleter stamps never reorders a leaf, and every
     /// separator stays a valid bound for the entries that remain.
     /// </summary>
-    internal long PurgeWriters(IStorageTransaction transaction, IReadOnlySet<TransactionSequence> writers)
+    internal long PurgeWriters(StorageTransaction transaction, IReadOnlySet<TransactionSequence> writers)
     {
         long purged = 0;
 
@@ -363,7 +363,7 @@ internal sealed class BTreeIndex : IIndex
                     var node = OpenNode(handle.Page.AsBodySpan(), leafId);
                     nextLeaf = node.NextLeaf;
 
-                    IStoragePageHandle? writable = null;
+                    StoragePageHandle? writable = null;
                     try
                     {
                         for (int index = 0; index < node.EntryCount;)
@@ -634,7 +634,7 @@ internal sealed class BTreeIndex : IIndex
         return deleter == 0 || !snapshot.IsVisible(new TransactionSequence(deleter));
     }
 
-    private void InsertCore(IStorageTransaction transaction, ReadOnlySpan<byte> key, ulong entryReference, ulong writer, ulong deleter)
+    private void InsertCore(StorageTransaction transaction, ReadOnlySpan<byte> key, ulong entryReference, ulong writer, ulong deleter)
     {
         var position = BTreeSearchKey.AtEntry(key, entryReference, writer);
         var path = new List<PathEntry>();
@@ -741,7 +741,7 @@ internal sealed class BTreeIndex : IIndex
         }
     }
 
-    private void SplitLeaf(IStorageTransaction transaction, List<PathEntry> parentPath, long leafId)
+    private void SplitLeaf(StorageTransaction transaction, List<PathEntry> parentPath, long leafId)
     {
         Separator separator;
         long siblingId;
@@ -844,7 +844,7 @@ internal sealed class BTreeIndex : IIndex
     /// The page now holding the split node's lower half: <paramref name="splitId"/>,
     /// unless that node was the root, whose contents move to a new page.
     /// </returns>
-    private long InsertIntoParent(IStorageTransaction transaction, List<PathEntry> parentPath, long splitId, Separator separator, long childId)
+    private long InsertIntoParent(StorageTransaction transaction, List<PathEntry> parentPath, long splitId, Separator separator, long childId)
     {
         if (parentPath.Count == 0)
         {
@@ -897,7 +897,7 @@ internal sealed class BTreeIndex : IIndex
     /// rollback or a crash reverts the root page like any other.
     /// </summary>
     /// <returns>The new page holding the old root's contents.</returns>
-    private long GrowRoot(IStorageTransaction transaction, Separator separator, long childId)
+    private long GrowRoot(StorageTransaction transaction, Separator separator, long childId)
     {
         long leftId;
 
@@ -954,7 +954,7 @@ internal sealed class BTreeIndex : IIndex
     /// page holding the left half (a new page when the root split), and the new
     /// sibling's page.
     /// </returns>
-    private (int Mid, long LeftId, long SiblingId) SplitInternal(IStorageTransaction transaction, List<PathEntry> path)
+    private (int Mid, long LeftId, long SiblingId) SplitInternal(StorageTransaction transaction, List<PathEntry> path)
     {
         long nodeId = path[^1].PageId;
         Separator promoted;

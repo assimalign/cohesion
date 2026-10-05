@@ -30,7 +30,7 @@ public sealed class TransactionCoordinatorScrubCrashTests
     {
         // Arrange
         var crashed = await CrashedAsync();
-        var originalRecords = new StreamJournal(new MemoryStream(crashed.Journal)).ReadAll();
+        var originalRecords = new StorageJournal(new MemoryStream(crashed.Journal)).ReadAll();
         long originalEnd = originalRecords[^1].Lsn;
         var lastRecordOfPage = originalRecords
             .Where(record => record.Type is JournalRecordType.FullPageImage or JournalRecordType.PageDelta or JournalRecordType.CommittedPageImage)
@@ -166,7 +166,7 @@ public sealed class TransactionCoordinatorScrubCrashTests
         private readonly CrashSimulationStream _journal;
 
         private CrashStorage(CrashSimulationStream data, CrashSimulationStream journal, int poolCapacity, bool reopen)
-            : base(new StorageStream(data), new StorageStream(journal), new StorageStream(new MemoryStream()), poolCapacity)
+            : base(StorageModel.KeyValue, new StorageStream(data), new StorageStream(journal), new StorageStream(new MemoryStream()), poolCapacity)
         {
             _data = data;
             _journal = journal;
@@ -180,7 +180,6 @@ public sealed class TransactionCoordinatorScrubCrashTests
             }
         }
 
-        public override StorageModel Model => StorageModel.KeyValue;
 
         internal StorageJournal Log => WriteAheadLog;
 
@@ -198,15 +197,15 @@ public sealed class TransactionCoordinatorScrubCrashTests
 
         internal (byte[] Data, byte[] Journal) CaptureDurable() => (_data.CaptureDurable(), _journal.CaptureDurable());
 
-        internal (PageId PageId, int SlotIndex) Insert(IStorageTransaction bracket, ReadOnlySpan<byte> data)
+        internal (PageId PageId, int SlotIndex) Insert(StorageTransaction bracket, ReadOnlySpan<byte> data)
             => InsertRecord(bracket, data);
 
         public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
 
-        public void Update(IStorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+        public void Update(StorageTransaction bracket, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
             => UpdateRecord(bracket, pageId, slotIndex, record);
 
-        public void Delete(IStorageTransaction bracket, PageId pageId, int slotIndex)
+        public void Delete(StorageTransaction bracket, PageId pageId, int slotIndex)
             => DeleteRecord(bracket, pageId, slotIndex);
 
         public ulong PackLocation(PageId pageId, int slotIndex)

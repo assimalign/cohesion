@@ -22,7 +22,7 @@ public interface IRecordVersionIndex
     /// <param name="writer">The aborted writer whose entry may be erased.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>A task representing completion of the index mutation.</returns>
-    ValueTask EraseAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default);
+    ValueTask EraseAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Clears an entry's deleter only when it matches the aborted writer; an
@@ -34,5 +34,5 @@ public interface IRecordVersionIndex
     /// <param name="writer">The aborted writer whose tombstone may be cleared.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>A task representing completion of the index mutation.</returns>
-    ValueTask ClearDeleterAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default);
+    ValueTask ClearDeleterAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default);
 }

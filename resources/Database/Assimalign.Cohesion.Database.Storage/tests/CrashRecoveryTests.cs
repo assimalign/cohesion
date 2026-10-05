@@ -26,11 +26,10 @@ public sealed class CrashRecoveryTests
     private sealed class HarnessStorage : Storage
     {
         private HarnessStorage(StorageStream data, StorageStream journal, int poolCapacity)
-            : base(data, journal, new StorageStream(new MemoryStream()), poolCapacity)
+            : base(StorageModel.Custom, data, journal, new StorageStream(new MemoryStream()), poolCapacity)
         {
         }
 
-        public override StorageModel Model => StorageModel.Custom;
 
         public static HarnessStorage Create(CrashSimulationStream data, CrashSimulationStream journal, int poolCapacity = 8)
         {
@@ -49,12 +48,12 @@ public sealed class CrashRecoveryTests
             return storage;
         }
 
-        public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, byte[] data)
+        public (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, byte[] data)
             => InsertRecord(transaction, data);
 
         public (PageId PageId, int SlotIndex) Insert(byte[] data) => InsertRecord(data);
 
-        public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, byte[] data)
+        public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, byte[] data)
             => UpdateRecord(transaction, pageId, slotIndex, data);
 
         public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
@@ -248,7 +247,7 @@ public sealed class CrashRecoveryTests
 
         // Assert: everything is in the data file; the journal carries only a checkpoint.
         reopened.ScanText().ShouldBe(new[] { "persisted" });
-        using var journalReader = new StreamJournal(new MemoryStream(shutdownJournal), leaveOpen: false);
+        using var journalReader = new StorageJournal(new MemoryStream(shutdownJournal), leaveOpen: false);
         var records = journalReader.ReadAll();
         records.Count.ShouldBe(1);
         records[0].Type.ShouldBe(JournalRecordType.Checkpoint);

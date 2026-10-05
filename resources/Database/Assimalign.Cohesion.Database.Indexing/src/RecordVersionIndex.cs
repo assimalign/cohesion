@@ -30,7 +30,7 @@ public sealed class RecordVersionIndex : IRecordVersionIndex
 
     /// <inheritdoc />
     public ValueTask EraseAsync(
-        IStorageTransaction transaction,
+        StorageTransaction transaction,
         ReadOnlyMemory<byte> key,
         ulong entryReference,
         TransactionSequence writer,
@@ -39,7 +39,7 @@ public sealed class RecordVersionIndex : IRecordVersionIndex
 
     /// <inheritdoc />
     public ValueTask ClearDeleterAsync(
-        IStorageTransaction transaction,
+        StorageTransaction transaction,
         ReadOnlyMemory<byte> key,
         ulong entryReference,
         TransactionSequence writer,

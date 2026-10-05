@@ -63,5 +63,5 @@ public interface IIndexManager
     /// <param name="writers">The transaction sequences the journal cannot prove committed.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The number of entries removed or restored.</returns>
-    ValueTask<long> PurgeWritersAsync(IStorageTransaction transaction, IReadOnlySet<TransactionSequence> writers, CancellationToken cancellationToken = default);
+    ValueTask<long> PurgeWritersAsync(StorageTransaction transaction, IReadOnlySet<TransactionSequence> writers, CancellationToken cancellationToken = default);
 }

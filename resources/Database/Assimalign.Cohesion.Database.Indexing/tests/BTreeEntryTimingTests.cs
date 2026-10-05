@@ -224,7 +224,7 @@ public class BTreeEntryTimingTests
         /// <c>writers[v]</c> and deleted by <c>writers[v + 1]</c>; the newest deleted
         /// by <paramref name="newestDeleter"/>.
         /// </summary>
-        internal async Task BuildAsync(IStorageTransaction build, TransactionSequence[] writers, TransactionSequence newestDeleter)
+        internal async Task BuildAsync(StorageTransaction build, TransactionSequence[] writers, TransactionSequence newestDeleter)
         {
             for (int reference = 0; reference < References; reference++)
             {

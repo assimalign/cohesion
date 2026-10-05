@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 /// </summary>
 public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposable
 {
-    private readonly Dictionary<ITransactionContext, IStorageTransaction> _pairs = new();
+    private readonly Dictionary<ITransactionContext, StorageTransaction> _pairs = new();
     private readonly object _sync = new();
 
     public IndexTestHarness(IFileSystemFileHandle? data = null, IFileSystemFileHandle? journal = null)
@@ -86,7 +86,7 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
 
     public async Task CommitAsync(ITransactionContext context)
     {
-        IStorageTransaction storageTransaction;
+        StorageTransaction storageTransaction;
         lock (_sync)
         {
             storageTransaction = _pairs[context];
@@ -99,7 +99,7 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
 
     public async Task RollbackAsync(ITransactionContext context)
     {
-        IStorageTransaction storageTransaction;
+        StorageTransaction storageTransaction;
         lock (_sync)
         {
             storageTransaction = _pairs[context];
@@ -117,9 +117,9 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
     /// bracket while the transaction still holds its locks, and only then does the
     /// transaction leave the active table as aborted.
     /// </summary>
-    public async Task LogicalRollbackAsync(ITransactionContext context, Func<IStorageTransaction, Task> undo)
+    public async Task LogicalRollbackAsync(ITransactionContext context, Func<StorageTransaction, Task> undo)
     {
-        IStorageTransaction storageTransaction;
+        StorageTransaction storageTransaction;
         lock (_sync)
         {
             storageTransaction = _pairs[context];
@@ -138,7 +138,7 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
     }
 
     /// <inheritdoc />
-    public IStorageTransaction GetStorageTransaction(ITransactionContext context)
+    public StorageTransaction GetStorageTransaction(ITransactionContext context)
     {
         lock (_sync)
         {
@@ -159,11 +159,10 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
     public sealed class HarnessStorage : Database.Storage.Storage
     {
         private HarnessStorage(StorageStream data, StorageStream journal)
-            : base(data, journal, new StorageStream(new MemoryStream()), bufferPoolCapacity: 64)
+            : base(StorageModel.Custom, data, journal, new StorageStream(new MemoryStream()), bufferPoolCapacity: 64)
         {
         }
 
-        public override StorageModel Model => StorageModel.Custom;
 
         public static HarnessStorage Create(IFileSystemFileHandle data, IFileSystemFileHandle journal)
         {

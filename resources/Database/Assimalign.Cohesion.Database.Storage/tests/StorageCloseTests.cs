@@ -20,9 +20,8 @@ public sealed class StorageCloseTests
     private sealed class CloseStorage : Storage
     {
         private CloseStorage(StorageStream data, StorageStream journal)
-            : base(data, journal, new StorageStream(new System.IO.MemoryStream())) { }
+            : base(StorageModel.Custom, data, journal, new StorageStream(new System.IO.MemoryStream())) { }
 
-        public override StorageModel Model => StorageModel.Custom;
 
         public static CloseStorage Create(CrashSimulationStream data, CrashSimulationStream journal)
         {

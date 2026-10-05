@@ -203,7 +203,7 @@ internal sealed class DefaultBlobCatalog : IBlobCatalog
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private void Tombstone(IStorageTransaction bracket, Reference reference, TransactionSequence writer)
+    private void Tombstone(StorageTransaction bracket, Reference reference, TransactionSequence writer)
     {
         var bytes = _storage.ReadEntry(reference.PageId, reference.SlotIndex);
         var tombstoned = RecordVersionStamp.WithDeleter(bytes.Span, writer);

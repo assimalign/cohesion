@@ -69,7 +69,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     // to throw, because the statement that ran it must not fail for it.
     private int _checkpointDeferred;
     private ExceptionDispatchInfo? _deferredCheckpointFailure;
-    private readonly Dictionary<ulong, IStorageTransaction> _statementBrackets = new();
+    private readonly Dictionary<ulong, StorageTransaction> _statementBrackets = new();
     private readonly Dictionary<ulong, ITransactionContext> _openContexts = new();
     private readonly object _sync = new();
     private TransactionSequence _recoveredSequenceFloor;
@@ -327,7 +327,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// An engine adapts this method to its storage-transaction pairing contract and
     /// supplies its own exception vocabulary when a bracket is missing.
     /// </remarks>
-    public bool TryGetStorageTransaction(ITransactionContext context, [NotNullWhen(true)] out IStorageTransaction? transaction)
+    public bool TryGetStorageTransaction(ITransactionContext context, [NotNullWhen(true)] out StorageTransaction? transaction)
     {
         ArgumentNullException.ThrowIfNull(context);
 
@@ -437,7 +437,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <returns>The apply result.</returns>
     public ValueTask<T> ApplyStatementAsync<T>(
         ITransactionContext context,
-        Func<IStorageTransaction, T> apply,
+        Func<StorageTransaction, T> apply,
         CancellationToken cancellationToken = default)
         => ApplyStatementAsync(context, bracket => new ValueTask<T>(apply(bracket)), durable: false, cancellationToken);
 
@@ -474,7 +474,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// </exception>
     public async ValueTask<T> ApplyStatementAsync<T>(
         ITransactionContext context,
-        Func<IStorageTransaction, ValueTask<T>> apply,
+        Func<StorageTransaction, ValueTask<T>> apply,
         bool durable = false,
         CancellationToken cancellationToken = default)
     {
@@ -619,7 +619,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// </summary>
     /// <exception cref="StorageTransactionException">
     /// A storage-level bracket is still active, or the call came from inside a statement apply
-    /// of this coordinator (<see cref="ApplyStatementAsync{T}(ITransactionContext, Func{IStorageTransaction, ValueTask{T}}, bool, CancellationToken)"/>),
+    /// of this coordinator (<see cref="ApplyStatementAsync{T}(ITransactionContext, Func{StorageTransaction, ValueTask{T}}, bool, CancellationToken)"/>),
     /// whose apply gate the checkpoint would wait for forever.
     /// </exception>
     public void Checkpoint() => Checkpoint(CancellationToken.None);

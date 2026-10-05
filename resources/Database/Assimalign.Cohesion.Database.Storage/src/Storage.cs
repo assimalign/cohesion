@@ -31,7 +31,7 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// </para>
 /// <para>
 /// <b>Durability model (steal / no-force).</b> Record mutations run inside an
-/// <see cref="IStorageTransaction"/>: the first change of a page since the last checkpoint
+/// <see cref="StorageTransaction"/>: the first change of a page since the last checkpoint
 /// journals its full image, commit journals the bytes each page changed (a delta) plus a
 /// commit record and returns once the journal meets the selected durability policy
 /// (storage format 3, #1253). Data pages flush lazily — the
@@ -65,6 +65,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     private readonly Dictionary<long, long> _pageWriteLocks = new();
     private readonly object _transactionLock = new();
     private readonly StorageGroupCommitGate _groupCommitGate = new();
+    private readonly StorageModel _model;
 
     // Per-owner record chains: which data pages belong to which owner, and each
     // owner's current write page. Rebuilt from page headers on open (the same scan
@@ -77,7 +78,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     private readonly object _ownerLock = new();
 
     private StoragePageManager? _pageManager;
-    private StreamJournal? _journal;
+    private StorageJournal? _journal;
     private long _nextTransactionSequence;
     private int _activeTransactionCount;
     private StorageId _id;
@@ -200,6 +201,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <summary>
     /// Initializes the storage with the specified backing streams for data, journal, and backup.
     /// </summary>
+    /// <param name="model">The storage model the leaf implements; fixed for the life of the instance.</param>
     /// <param name="data">The data stream providing page-level I/O for the <c>.dat</c> file.</param>
     /// <param name="journal">The journal stream for the <c>.log</c> file (write-ahead log).</param>
     /// <param name="backup">The backup stream for the <c>.bak</c> file.</param>
@@ -207,12 +209,13 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// Maximum number of pages to cache in memory; <see cref="DefaultBufferPoolCapacity"/>
     /// (32 MiB) unless given. <see cref="BufferPoolCapacity"/> changes it later.
     /// </param>
-    protected Storage(StorageStream data, StorageStream journal, StorageStream backup, int bufferPoolCapacity = DefaultBufferPoolCapacity)
+    protected Storage(StorageModel model, StorageStream data, StorageStream journal, StorageStream backup, int bufferPoolCapacity = DefaultBufferPoolCapacity)
     {
         ArgumentNullException.ThrowIfNull(data);
         ArgumentNullException.ThrowIfNull(journal);
         ArgumentNullException.ThrowIfNull(backup);
 
+        _model = model;
         Data = data;
         Journal = journal;
         Backup = backup;
@@ -233,7 +236,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <summary>
     /// Gets the storage model implemented within this storage resource.
     /// </summary>
-    public abstract StorageModel Model { get; }
+    /// <remarks>
+    /// Fixed per storage, so the leaf passes it to the protected constructor and the getter reads
+    /// a field (<c>database-area.md</c>, type shape rule 6).
+    /// </remarks>
+    public StorageModel Model => _model;
 
     /// <summary>
     /// Gets the data stream providing page-level I/O for the <c>.dat</c> file.
@@ -266,7 +273,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// Gets the page manager that coordinates page allocation, retrieval, and flushing
     /// against the <see cref="Data"/> stream.
     /// </summary>
-    public IStoragePageManager PageManager =>
+    public StoragePageManager PageManager =>
         _pageManager ?? throw new InvalidOperationException("Storage has not been initialized.");
 
     /// <summary>
@@ -279,7 +286,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <summary>
     /// Gets the free space map that tracks allocated and free pages in the data file.
     /// </summary>
-    public IStorageFreeSpaceMap FreeSpaceMap =>
+    public StorageFreeSpaceMap FreeSpaceMap =>
         _freeSpaceMap ?? throw new InvalidOperationException("Storage has not been initialized.");
 
     /// <summary>
@@ -829,7 +836,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     private void AttachJournal()
     {
-        var journal = new StreamJournal(Journal, leaveOpen: true);
+        var journal = new StorageJournal(Journal, leaveOpen: true);
         journal.WentOffline = _groupCommitGate.Abandon;
         journal.Offline = RaiseOffline;
         journal.ConfigureCheckpointTrigger(CheckpointJournalSize, _onCheckpointNeeded);
@@ -1012,10 +1019,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Begins a storage-level transaction: the unit of atomicity and durability for
-    /// record mutations. See <see cref="IStorageTransaction"/> for the semantics.
+    /// record mutations. See <see cref="StorageTransaction"/> for the semantics.
     /// </summary>
     /// <returns>The new transaction scope.</returns>
-    public IStorageTransaction BeginTransaction()
+    public StorageTransaction BeginTransaction()
     {
         if (_journal is null)
         {
@@ -1088,7 +1095,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="sequence">The reserved sequence the transaction runs under.</param>
     /// <returns>The new transaction scope.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="sequence"/> is not positive.</exception>
-    public IStorageTransaction BeginTransaction(long sequence)
+    public StorageTransaction BeginTransaction(long sequence)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sequence);
 
@@ -1128,7 +1135,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <returns>A handle to the pinned page; the caller marks it dirty after mutating.</returns>
     /// <exception cref="StorageTransactionException">The transaction is not active, or the page is owned by another transaction.</exception>
     /// <exception cref="StorageIOException">The page is not allocated, or it is page 0, the file header, which is never a data page.</exception>
-    public IStoragePageHandle OpenPageForWrite(IStorageTransaction transaction, PageId pageId)
+    public StoragePageHandle OpenPageForWrite(StorageTransaction transaction, PageId pageId)
     {
         var owner = ValidateTransaction(transaction);
         return TouchPage(owner, pageId);
@@ -1143,7 +1150,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="type">The type of page to allocate.</param>
     /// <returns>A handle to the new pinned page.</returns>
     /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
-    public IStoragePageHandle AllocatePageForWrite(IStorageTransaction transaction, PageType type)
+    public StoragePageHandle AllocatePageForWrite(StorageTransaction transaction, PageType type)
     {
         var owner = ValidateTransaction(transaction);
         var handle = _pageManager!.AllocatePage(type);
@@ -1326,7 +1333,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <returns>The page identifier and slot index where the record was stored.</returns>
     /// <exception cref="SlottedPageException">The record is larger than a single page can hold.</exception>
     /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
-    protected (PageId PageId, int SlotIndex) InsertRecord(IStorageTransaction transaction, ReadOnlySpan<byte> data)
+    protected (PageId PageId, int SlotIndex) InsertRecord(StorageTransaction transaction, ReadOnlySpan<byte> data)
         => InsertRecord(transaction, 0, data);
 
     /// <summary>
@@ -1341,7 +1348,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <returns>The page identifier and slot index where the record was stored.</returns>
     /// <exception cref="SlottedPageException">The record is larger than a single page can hold.</exception>
     /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
-    protected unsafe (PageId PageId, int SlotIndex) InsertRecord(IStorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> data)
+    protected unsafe (PageId PageId, int SlotIndex) InsertRecord(StorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> data)
     {
         var owner = ValidateTransaction(transaction);
 
@@ -1351,7 +1358,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 $"Record of {data.Length} bytes exceeds the maximum record size of {SlottedPage.MaxRecordSize} bytes.");
         }
 
-        IStoragePageHandle handle;
+        StoragePageHandle handle;
         SlottedPage slotted;
 
         PageId? currentWritePage;
@@ -1445,7 +1452,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="pageId">The page containing the record.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
     /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
-    protected unsafe void DeleteRecord(IStorageTransaction transaction, PageId pageId, int slotIndex)
+    protected unsafe void DeleteRecord(StorageTransaction transaction, PageId pageId, int slotIndex)
     {
         var owner = ValidateTransaction(transaction);
 
@@ -1494,7 +1501,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="slotIndex">The slot index within the page.</param>
     /// <param name="data">The new record data.</param>
     /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
-    protected unsafe void UpdateRecord(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> data)
+    protected unsafe void UpdateRecord(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> data)
     {
         var owner = ValidateTransaction(transaction);
 
@@ -1546,7 +1553,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// Best for performing raw full-table scans through the entire storage resource.
     /// </remarks>
     /// <returns>A new storage unit iterator.</returns>
-    public IStorageUnitIterator GetUnitIterator()
+    public StorageUnitIterator GetUnitIterator()
     {
         return new StorageUnitIterator(_pageManager!, _freeSpaceMap);
     }
@@ -1559,7 +1566,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="ownerId">The owner whose pages to scan.</param>
     /// <returns>A new storage unit iterator over the owner's pages.</returns>
-    public IStorageUnitIterator GetUnitIterator(ulong ownerId)
+    public StorageUnitIterator GetUnitIterator(ulong ownerId)
     {
         return new StorageUnitIterator(_pageManager!, _freeSpaceMap, SnapshotOwnerPages(ownerId), ownerId);
     }
@@ -1594,7 +1601,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="ownerId">The owner whose chain to release.</param>
     /// <returns>The number of pages released.</returns>
     /// <exception cref="StorageTransactionException">The transaction is not active, or a chain page is owned by another transaction.</exception>
-    public unsafe int FreeOwnerPages(IStorageTransaction transaction, ulong ownerId)
+    public unsafe int FreeOwnerPages(StorageTransaction transaction, ulong ownerId)
     {
         var owner = ValidateTransaction(transaction);
         long[] pages = SnapshotOwnerPages(ownerId);
@@ -1918,7 +1925,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Tells the debug consistency check that a page was rewritten outside the journal on purpose
-    /// (the page manager's allocation clear and its raw <see cref="IStoragePageManager.FreePage"/>).
+    /// (the page manager's allocation clear and its raw <see cref="StoragePageManager.FreePage"/>).
     /// </summary>
     private void ForgetShadow(long pageId) => _consistency?.Forget(pageId);
 
@@ -2014,7 +2021,6 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             }
             finally
             {
-                _pageManager?.Dispose();
                 _bufferPool.Dispose();
 
                 // Dispose all three streams
@@ -2039,11 +2045,6 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 if (_journal != null)
                 {
                     await _journal.DisposeAsync();
-                }
-
-                if (_pageManager != null)
-                {
-                    await _pageManager.DisposeAsync();
                 }
             }
             finally
@@ -2255,30 +2256,25 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
     }
 
-    private StorageTransaction ValidateTransaction(IStorageTransaction transaction)
+    private StorageTransaction ValidateTransaction(StorageTransaction transaction)
     {
         ArgumentNullException.ThrowIfNull(transaction);
 
-        if (transaction is not StorageTransaction owner)
+        if (!transaction.IsActive)
         {
-            throw new StorageTransactionException("The transaction was not created by this storage instance.");
-        }
-
-        if (!owner.IsActive)
-        {
-            throw new StorageTransactionException($"Storage transaction {owner.Sequence} has already completed.");
+            throw new StorageTransactionException($"Storage transaction {transaction.Sequence} has already completed.");
         }
 
         // A record change would extend the file or dirty a page that can never be written.
         ThrowIfOffline();
-        return owner;
+        return transaction;
     }
 
     /// <summary>
     /// Pins a page for modification by a transaction: acquires the page write lock
     /// and captures the pre-image on first touch.
     /// </summary>
-    private IStoragePageHandle TouchPage(StorageTransaction transaction, PageId pageId)
+    private StoragePageHandle TouchPage(StorageTransaction transaction, PageId pageId)
     {
         var handle = _pageManager!.GetPage(pageId);
 
@@ -2300,7 +2296,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// rollback restores an allocated-but-empty page still belonging to the chain —
     /// a safe leak the owner's next insert reuses.
     /// </summary>
-    private IStoragePageHandle AllocateDataPage(StorageTransaction transaction, ulong ownerId, out SlottedPage slotted)
+    private StoragePageHandle AllocateDataPage(StorageTransaction transaction, ulong ownerId, out SlottedPage slotted)
     {
         var handle = _pageManager!.AllocatePage(PageType.Data);
 
@@ -2323,7 +2319,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
     }
 
-    private unsafe void RegisterTouch(StorageTransaction transaction, IStoragePageHandle handle)
+    private unsafe void RegisterTouch(StorageTransaction transaction, StoragePageHandle handle)
     {
         long pageId = (long)handle.Id;
         bool locked = false;

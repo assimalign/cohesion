@@ -448,7 +448,7 @@ internal sealed class KeyValueOperationExecutor
     /// same-length in-place tombstone write — and records it in the version-store
     /// ledger for logical undo and pruning.
     /// </summary>
-    private void TombstoneVersion(KeyValueStatementContext context, IStorageTransaction bracket, ulong entryReference)
+    private void TombstoneVersion(KeyValueStatementContext context, StorageTransaction bracket, ulong entryReference)
     {
         var (pageId, slotIndex) = KeyValueRecordLocation.Unpack(entryReference);
         var current = _storage.ReadEntry(pageId, slotIndex);

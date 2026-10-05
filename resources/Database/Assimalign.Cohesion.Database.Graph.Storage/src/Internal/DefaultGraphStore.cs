@@ -171,7 +171,7 @@ internal sealed partial class DefaultGraphStore : IGraphStore
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask RemoveRelationshipAsync(Found found, IStorageTransaction bracket,
+    private async ValueTask RemoveRelationshipAsync(Found found, StorageTransaction bracket,
         ITransactionContext context, CancellationToken cancellationToken)
     {
         var relationship = found.Record.Relationship!.Value;
@@ -183,14 +183,14 @@ internal sealed partial class DefaultGraphStore : IGraphStore
         Tombstone(bracket, found.Reference, context);
     }
 
-    private ulong Insert(IStorageTransaction bracket, byte[] bytes, ITransactionContext context)
+    private ulong Insert(StorageTransaction bracket, byte[] bytes, ITransactionContext context)
     {
         var location = _storage.InsertOwned(bracket, 2, bytes);
         _coordinator.VersionStore.RecordCreated(context.Sequence, location.PageId, location.SlotIndex);
         return GraphStorage.PackLocation(location.PageId, location.SlotIndex);
     }
 
-    private void Tombstone(IStorageTransaction bracket, Reference reference, ITransactionContext context)
+    private void Tombstone(StorageTransaction bracket, Reference reference, ITransactionContext context)
     {
         var bytes = _storage.ReadEntry(reference.PageId, reference.SlotIndex);
         _storage.UpdateEntry(bracket, reference.PageId, reference.SlotIndex, RecordVersionStamp.WithDeleter(bytes.Span, context.Sequence));
@@ -280,7 +280,7 @@ internal sealed partial class DefaultGraphStore : IGraphStore
         }
     }
 
-    private async ValueTask<T> ApplyAsync<T>(ITransactionContext context, Func<IStorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
+    private async ValueTask<T> ApplyAsync<T>(ITransactionContext context, Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
     {
         try { return await _coordinator.ApplyStatementAsync(context, apply, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false); }
         catch { OpenIndexes(); throw; }

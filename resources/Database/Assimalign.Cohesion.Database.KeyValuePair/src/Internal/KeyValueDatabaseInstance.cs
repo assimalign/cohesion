@@ -603,7 +603,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         }
 
         /// <inheritdoc />
-        public IStorageTransaction GetStorageTransaction(ITransactionContext context)
+        public StorageTransaction GetStorageTransaction(ITransactionContext context)
         {
             if (_coordinator.TryGetStorageTransaction(context, out var transaction))
             {

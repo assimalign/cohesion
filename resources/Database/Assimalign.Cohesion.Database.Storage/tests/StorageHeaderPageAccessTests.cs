@@ -99,7 +99,7 @@ public sealed class StorageHeaderPageAccessTests
         using var stream = new StorageStream(new MemoryStream());
         var pool = new StorageBufferPool(4);
         var map = new StorageFreeSpaceMap();
-        using var manager = new StoragePageManager(stream, pool, map);
+        var manager = new StoragePageManager(stream, pool, map);
 
         // Act
         using var first = manager.AllocatePage(PageType.Data);

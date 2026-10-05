@@ -713,7 +713,7 @@ internal sealed partial class SqlPlanExecutor
     /// the same-length in-place tombstone write — and records it in the
     /// version-store ledger for logical undo and pruning.
     /// </summary>
-    private void TombstoneVersion(SqlStatementContext statement, IStorageTransaction bracket, PageId pageId, int slotIndex)
+    private void TombstoneVersion(SqlStatementContext statement, StorageTransaction bracket, PageId pageId, int slotIndex)
     {
         var current = _storage.ReadRow(pageId, slotIndex);
         byte[] tombstoned = SqlRowCodec.WithDeleter(current.Span, statement.Transaction.Sequence);

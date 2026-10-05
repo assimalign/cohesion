@@ -219,7 +219,7 @@ public class RecordSpaceVersionStoreTests
 
         internal List<(string Operation, byte[] Key, ulong EntryReference, TransactionSequence Writer)> Calls { get; } = new();
 
-        public ValueTask EraseAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        public ValueTask EraseAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             transaction.IsActive.ShouldBeTrue();
@@ -227,7 +227,7 @@ public class RecordSpaceVersionStoreTests
             return default;
         }
 
-        public ValueTask ClearDeleterAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
+        public ValueTask ClearDeleterAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             transaction.IsActive.ShouldBeTrue();
@@ -246,24 +246,23 @@ public class RecordSpaceVersionStoreTests
     private sealed class RecordStorage : Assimalign.Cohesion.Database.Storage.Storage, ITransactionRecordSpace
     {
         internal RecordStorage()
-            : base(new StorageStream(new SimulatedDurableFileHandle()), new StorageStream(new SimulatedDurableFileHandle()), StorageStream.FromInMemory())
+            : base(StorageModel.Custom, new StorageStream(new SimulatedDurableFileHandle()), new StorageStream(new SimulatedDurableFileHandle()), StorageStream.FromInMemory())
         {
             InitializeNew((Name)"record-version-test");
         }
 
-        public override StorageModel Model => StorageModel.Custom;
 
         internal StorageJournal Log => WriteAheadLog;
 
-        internal (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, ReadOnlySpan<byte> record)
+        internal (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, ReadOnlySpan<byte> record)
             => InsertRecord(transaction, record);
 
         public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
 
-        public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
+        public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
             => UpdateRecord(transaction, pageId, slotIndex, record);
 
-        public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex)
+        public void Delete(StorageTransaction transaction, PageId pageId, int slotIndex)
             => DeleteRecord(transaction, pageId, slotIndex);
 
         public ulong PackLocation(PageId pageId, int slotIndex)

@@ -185,7 +185,7 @@ public sealed class StoragePreImageTests
         private readonly MemoryStream _journal;
 
         private MemoryStorage(MemoryStream data, MemoryStream journal, int pool)
-            : base(
+            : base(StorageModel.Custom, 
                 new StorageStream(new SimulatedDurableFileHandle(data)),
                 new StorageStream(new SimulatedDurableFileHandle(journal)),
                 new StorageStream(new MemoryStream()),
@@ -195,7 +195,6 @@ public sealed class StoragePreImageTests
             _journal = journal;
         }
 
-        public override StorageModel Model => StorageModel.Custom;
 
         public static MemoryStorage Create(int pool)
         {
@@ -217,10 +216,10 @@ public sealed class StoragePreImageTests
 
         public (byte[] Data, byte[] Journal) Capture() => (_data.ToArray(), _journal.ToArray());
 
-        public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, ulong owner, byte[] record)
+        public (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, ulong owner, byte[] record)
             => InsertRecord(transaction, owner, record);
 
-        public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, byte[] record)
+        public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, byte[] record)
             => UpdateRecord(transaction, pageId, slotIndex, record);
 
         public byte[] ReadBytes(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex).ToArray();

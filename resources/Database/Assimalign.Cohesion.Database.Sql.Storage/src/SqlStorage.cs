@@ -41,10 +41,8 @@ using Assimalign.Cohesion.Database.Storage;
 public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     private SqlStorage(StorageStream data, StorageStream journal, StorageStream backup)
-        : base(data, journal, backup) { }
+        : base(StorageModel.Sql, data, journal, backup) { }
 
-    /// <inheritdoc />
-    public override StorageModel Model => StorageModel.Sql;
 
     /// <summary>
     /// Creates a new SQL storage file set backed by the given streams.
@@ -173,7 +171,7 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="row">The serialized row bytes.</param>
     /// <returns>The page and slot location where the row was written.</returns>
-    public (PageId PageId, int SlotIndex) InsertRow(IStorageTransaction transaction, ReadOnlySpan<byte> row)
+    public (PageId PageId, int SlotIndex) InsertRow(StorageTransaction transaction, ReadOnlySpan<byte> row)
     {
         return InsertRecord(transaction, row);
     }
@@ -188,7 +186,7 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="ownerId">The owning table's object id; zero is the shared space.</param>
     /// <param name="row">The serialized row bytes.</param>
     /// <returns>The page and slot location where the row was written.</returns>
-    public (PageId PageId, int SlotIndex) InsertRow(IStorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> row)
+    public (PageId PageId, int SlotIndex) InsertRow(StorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> row)
     {
         return InsertRecord(transaction, ownerId, row);
     }
@@ -222,7 +220,7 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="pageId">The page containing the row.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
     /// <param name="row">The new row bytes.</param>
-    public void UpdateRow(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> row)
+    public void UpdateRow(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> row)
     {
         UpdateRecord(transaction, pageId, slotIndex, row);
     }
@@ -243,7 +241,7 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="pageId">The page containing the row.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
-    public void DeleteRow(IStorageTransaction transaction, PageId pageId, int slotIndex)
+    public void DeleteRow(StorageTransaction transaction, PageId pageId, int slotIndex)
     {
         DeleteRecord(transaction, pageId, slotIndex);
     }

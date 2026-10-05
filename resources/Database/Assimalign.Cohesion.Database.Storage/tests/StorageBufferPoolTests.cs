@@ -332,7 +332,7 @@ public class StorageBufferPoolTests
         using var stream = NewStream();
         var pool = new StorageBufferPool(4);
         var map = new StorageFreeSpaceMap();
-        using var manager = new StoragePageManager(stream, pool, map);
+        var manager = new StoragePageManager(stream, pool, map);
 
         var first = manager.AllocatePage(PageType.Data);
         long firstId = (long)first.Id;
@@ -356,7 +356,7 @@ public class StorageBufferPoolTests
         using var stream = NewStream();
         var pool = new StorageBufferPool(4);
         var map = new StorageFreeSpaceMap();
-        using var manager = new StoragePageManager(stream, pool, map);
+        var manager = new StoragePageManager(stream, pool, map);
 
         // Act / Assert
         Should.Throw<StorageIOException>(() => manager.GetPage((PageId)7L));
@@ -420,7 +420,7 @@ public class StorageBufferPoolTests
         var map = new StorageFreeSpaceMap();
         map.MarkAllocated((PageId)0L);
         map.MarkFree((PageId)1L);
-        using var manager = new StoragePageManager(stream, pool, map);
+        var manager = new StoragePageManager(stream, pool, map);
 
         // Act
         using var handle = manager.AllocatePage(PageType.Data);

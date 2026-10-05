@@ -2,13 +2,15 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Storage.Internal;
+namespace Assimalign.Cohesion.Database.Storage;
 
+using Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
-/// Coordinates page-level operations by managing the buffer pool, free space map,
-/// and storage stream together.
+/// Coordinates page-level operations for a storage file — allocation, deallocation, retrieval
+/// and flushing — by managing the buffer pool, free space map, and storage stream together.
+/// Every database model uses it, through <see cref="Storage.PageManager"/>, for its page storage.
 /// </summary>
 /// <remarks>
 /// Page 0 is the file header (storage format 2). The storage rewrites its header slots in place
@@ -17,8 +19,9 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// never be caught. A write-back of one, or a journaled image of it that recovery replays, would
 /// roll both header slots back. The manager therefore reserves page 0 in the free-space map and
 /// refuses to pin or free it, whatever page id a caller (a damaged B-tree reference, say) hands it.
+/// The owning storage creates and owns the manager; it is not disposable on its own.
 /// </remarks>
-internal sealed class StoragePageManager : IStoragePageManager
+public sealed class StoragePageManager
 {
     private readonly StorageStream _stream;
     private readonly StorageBufferPool _bufferPool;
@@ -34,14 +37,22 @@ internal sealed class StoragePageManager : IStoragePageManager
         _freeSpaceMap.MarkAllocated((PageId)0L);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the total number of pages currently allocated in the storage file.
+    /// </summary>
     public long PageCount => _freeSpaceMap.TotalPageCount;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the number of free (unallocated) pages available for use.
+    /// </summary>
     public long FreePageCount => _freeSpaceMap.FreePageCount;
 
-    /// <inheritdoc />
-    public unsafe IStoragePageHandle AllocatePage(PageType type)
+    /// <summary>
+    /// Allocates a new page of the specified type from the storage file.
+    /// </summary>
+    /// <param name="type">The type of page to allocate.</param>
+    /// <returns>A handle to the newly allocated page, pinned in the buffer pool.</returns>
+    public unsafe StoragePageHandle AllocatePage(PageType type)
     {
         var pageId = _freeSpaceMap.Allocate();
 
@@ -88,7 +99,11 @@ internal sealed class StoragePageManager : IStoragePageManager
     /// </summary>
     internal Action<long>? WroteOutsideJournal;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Returns a page to the free space map, making it available for reuse.
+    /// </summary>
+    /// <param name="pageId">The identifier of the page to free.</param>
+    /// <exception cref="StorageIOException">The page is page 0, the file header, which is never allocated or freed.</exception>
     /// <remarks>
     /// The free is not journaled: the page is rewritten as <see cref="PageType.Free"/> and written
     /// back at once, outside any storage transaction. A crash before the next checkpoint therefore
@@ -121,7 +136,7 @@ internal sealed class StoragePageManager : IStoragePageManager
     /// </summary>
     /// <param name="pageId">The allocated page to pin.</param>
     /// <returns>A handle on the pinned page; its content is undefined until the caller writes it.</returns>
-    internal IStoragePageHandle PinForOverwrite(PageId pageId)
+    internal StoragePageHandle PinForOverwrite(PageId pageId)
     {
         ThrowIfHeaderPage(pageId);
 
@@ -133,8 +148,16 @@ internal sealed class StoragePageManager : IStoragePageManager
         return _bufferPool.PinForOverwrite(pageId, _stream);
     }
 
-    /// <inheritdoc />
-    public IStoragePageHandle GetPage(PageId pageId)
+    /// <summary>
+    /// Retrieves a page by its identifier. The page is loaded from the buffer pool
+    /// if cached, or read from the storage stream if not.
+    /// </summary>
+    /// <param name="pageId">The identifier of the page to retrieve.</param>
+    /// <returns>A handle to the page, pinned in the buffer pool.</returns>
+    /// <exception cref="StorageIOException">
+    /// The page is not allocated, or it is page 0, the file header, which never enters the buffer pool.
+    /// </exception>
+    public StoragePageHandle GetPage(PageId pageId)
     {
         ThrowIfHeaderPage(pageId);
 
@@ -155,40 +178,43 @@ internal sealed class StoragePageManager : IStoragePageManager
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Flushes a specific dirty page to the underlying storage stream.
+    /// </summary>
+    /// <param name="pageId">The identifier of the page to flush.</param>
     public void FlushPage(PageId pageId)
     {
         _bufferPool.FlushPage(pageId, _stream);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Flushes a specific dirty page to the underlying storage stream asynchronously.
+    /// </summary>
+    /// <param name="pageId">The identifier of the page to flush.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>A task representing the asynchronous flush operation.</returns>
     public ValueTask FlushPageAsync(PageId pageId, CancellationToken cancellationToken = default)
     {
         FlushPage(pageId);
         return default;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Flushes all dirty pages to the underlying storage stream.
+    /// </summary>
     public void FlushAll()
     {
         _bufferPool.FlushAll(_stream);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Flushes all dirty pages to the underlying storage stream asynchronously.
+    /// </summary>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>A task representing the asynchronous flush operation.</returns>
     public ValueTask FlushAllAsync(CancellationToken cancellationToken = default)
     {
         FlushAll();
-        return default;
-    }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-    }
-
-    /// <inheritdoc />
-    public ValueTask DisposeAsync()
-    {
         return default;
     }
 }

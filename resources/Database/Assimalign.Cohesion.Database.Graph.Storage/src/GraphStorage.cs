@@ -8,10 +8,8 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 /// <summary>Owns graph pages and delegates journaling, allocation, and recovery to the shared kernel.</summary>
 public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
-    private GraphStorage(StorageStream data, StorageStream journal, StorageStream backup) : base(data, journal, backup)
+    private GraphStorage(StorageStream data, StorageStream journal, StorageStream backup) : base(StorageModel.Graph, data, journal, backup)
         => Records = new RecordSpace(this);
-    /// <inheritdoc />
-    public override StorageModel Model => StorageModel.Graph;
     /// <summary>Gets this file set's write-ahead journal.</summary>
     public StorageJournal WriteAheadJournal => WriteAheadLog;
     /// <summary>Gets the stamped-record adapter for the transaction coordinator.</summary>
@@ -68,23 +66,23 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
         => Open(new StorageStream(data), new StorageStream(journal), new StorageStream(backup), checkpointOnOpen);
     /// <summary>Inserts a stamped catalog record on owner-zero pages.</summary>
     /// <param name="transaction">Physical statement bracket.</param><param name="entry">Stamped record.</param><returns>The record location.</returns>
-    public (PageId PageId, int SlotIndex) InsertEntry(IStorageTransaction transaction, ReadOnlySpan<byte> entry) => InsertRecord(transaction, entry);
+    public (PageId PageId, int SlotIndex) InsertEntry(StorageTransaction transaction, ReadOnlySpan<byte> entry) => InsertRecord(transaction, entry);
     /// <summary>Reads a checksum-validated record.</summary>
     /// <param name="pageId">Page identity.</param><param name="slotIndex">Slot number.</param><returns>The record bytes.</returns>
     public ReadOnlyMemory<byte> ReadEntry(PageId pageId, int slotIndex) => ReadRecord(pageId, slotIndex);
     /// <summary>Replaces a record within a statement bracket.</summary>
     /// <param name="transaction">Physical statement bracket.</param><param name="pageId">Page identity.</param><param name="slotIndex">Slot number.</param><param name="entry">Replacement record.</param>
-    public void UpdateEntry(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> entry) => UpdateRecord(transaction, pageId, slotIndex, entry);
+    public void UpdateEntry(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> entry) => UpdateRecord(transaction, pageId, slotIndex, entry);
     /// <summary>Reclaims a record within a statement bracket.</summary>
     /// <param name="transaction">Physical statement bracket.</param><param name="pageId">Page identity.</param><param name="slotIndex">Slot number.</param>
-    public void DeleteEntry(IStorageTransaction transaction, PageId pageId, int slotIndex) => DeleteRecord(transaction, pageId, slotIndex);
+    public void DeleteEntry(StorageTransaction transaction, PageId pageId, int slotIndex) => DeleteRecord(transaction, pageId, slotIndex);
     /// <summary>Packs a page and slot into a stable physical reference.</summary>
     /// <param name="pageId">Page identity.</param><param name="slotIndex">Slot number.</param><returns>The packed location.</returns>
     public static ulong PackLocation(PageId pageId, int slotIndex) => ((ulong)(long)pageId << 16) | checked((ushort)slotIndex);
     /// <summary>Decodes a packed physical reference.</summary>
     /// <param name="location">Packed location.</param><returns>The page and slot.</returns>
     public static (PageId PageId, int SlotIndex) UnpackLocation(ulong location) => ((PageId)(long)(location >> 16), (int)(location & 0xffff));
-    internal (PageId PageId, int SlotIndex) InsertOwned(IStorageTransaction transaction, ulong owner, ReadOnlySpan<byte> bytes) => InsertRecord(transaction, owner, bytes);
+    internal (PageId PageId, int SlotIndex) InsertOwned(StorageTransaction transaction, ulong owner, ReadOnlySpan<byte> bytes) => InsertRecord(transaction, owner, bytes);
     private sealed class RecordSpace : ITransactionRecordSpace
     {
         private readonly GraphStorage _storage;
@@ -95,8 +93,8 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
             _storage = storage;
         }
         public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => _storage.ReadEntry(pageId, slotIndex);
-        public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record) => _storage.UpdateEntry(transaction, pageId, slotIndex, record);
-        public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
+        public void Update(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record) => _storage.UpdateEntry(transaction, pageId, slotIndex, record);
+        public void Delete(StorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
         public ulong PackLocation(PageId pageId, int slotIndex) => GraphStorage.PackLocation(pageId, slotIndex);
         public (PageId PageId, int SlotIndex) UnpackLocation(ulong location) => GraphStorage.UnpackLocation(location);
     }

@@ -20,9 +20,8 @@ public sealed class StorageSequenceTests
     private sealed class SequenceStorage : Storage
     {
         private SequenceStorage(StorageStream data, StorageStream journal)
-            : base(data, journal, new StorageStream(new System.IO.MemoryStream())) { }
+            : base(StorageModel.Custom, data, journal, new StorageStream(new System.IO.MemoryStream())) { }
 
-        public override StorageModel Model => StorageModel.Custom;
 
         public static SequenceStorage Create(CrashSimulationStream data, CrashSimulationStream journal)
         {
@@ -40,7 +39,7 @@ public sealed class StorageSequenceTests
             return storage;
         }
 
-        public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, byte[] data)
+        public (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, byte[] data)
             => InsertRecord(transaction, data);
     }
 

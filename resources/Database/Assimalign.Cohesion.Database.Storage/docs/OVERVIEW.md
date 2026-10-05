@@ -14,10 +14,10 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
 - **Buffer pool** — an internal pin/unpin cache over a `StorageStream`;
   checksum stamped on write-back, verified on load. 4,096 pages (32 MiB) by default,
   resizable through `Storage.BufferPoolCapacity`; engines expose it as an option (#1254).
-- **Page management** — `IStoragePageManager` allocation/free/retrieval/flush;
-  `IStorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open.
+- **Page management** — the sealed `StoragePageManager` (allocation/free/retrieval/flush);
+  the sealed `StorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open.
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
-  pages and `IStorageUnitIterator` full scans.
+  pages, storage transactions (`StorageTransaction`), and `StorageUnitIterator` full scans.
 - **Journal** — `StorageJournal` write-ahead logging with begin/commit/rollback
   markers and CRC-32C-protected frames. A page is journaled as a full image once per
   checkpoint interval, on its first change since the checkpoint, and each commit journals only

@@ -33,7 +33,7 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// writer is changing the page while it is written.
 /// </para>
 /// <para>
-/// Dirty tracking: every <see cref="IStoragePageHandle.MarkDirty"/> advances the entry's
+/// Dirty tracking: every <see cref="StoragePageHandle.MarkDirty"/> advances the entry's
 /// modification version, and a write-back records the page clean only up to the version
 /// it copied. A change made while the page is being written keeps the page dirty, so the
 /// pool can never evict it clean and drop the change.
@@ -188,7 +188,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     /// describes bytes past the end of the page buffer. The page is not cached.
     /// </exception>
     /// <exception cref="StorageIOException">The pool is full and every resident page is pinned, or the stream ended inside the page.</exception>
-    public IStoragePageHandle Pin(PageId pageId, StorageStream stream)
+    public StoragePageHandle Pin(PageId pageId, StorageStream stream)
     {
         lock (_syncRoot)
         {
@@ -258,7 +258,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     /// <param name="pageId">The page to pin.</param>
     /// <param name="stream">The stream to evict to when the pool is full.</param>
     /// <returns>A handle on the pinned page.</returns>
-    internal IStoragePageHandle PinForOverwrite(PageId pageId, StorageStream stream)
+    internal StoragePageHandle PinForOverwrite(PageId pageId, StorageStream stream)
     {
         lock (_syncRoot)
         {
@@ -337,7 +337,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     /// <param name="handle">When this method returns, contains the page handle if the page was found; otherwise, <c>null</c>.</param>
     /// <returns><c>true</c> if the page was found in the pool; otherwise, <c>false</c>.</returns>
     /// <exception cref="ObjectDisposedException">The pool has been disposed.</exception>
-    public bool TryGet(PageId pageId, out IStoragePageHandle? handle)
+    public bool TryGet(PageId pageId, out StoragePageHandle? handle)
     {
         lock (_syncRoot)
         {

@@ -559,7 +559,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         }
 
         /// <inheritdoc />
-        public IStorageTransaction GetStorageTransaction(ITransactionContext context)
+        public StorageTransaction GetStorageTransaction(ITransactionContext context)
         {
             if (_coordinator.TryGetStorageTransaction(context, out var transaction))
             {
