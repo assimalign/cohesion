@@ -437,11 +437,15 @@ public sealed class BlobWorkerResilienceTests
         bool queuedWithoutADrain = !waiting.IsCompleted && failing.Coordinator.GetOpenContexts().Count == 2
             && faults.JournalWriteFailures == 0 && !failing.IsOffline;
 
-        // Act: the holder uploads more than the append buffer holds.
+        // Act: the holder uploads more than the append buffer holds. The bytes are not zero: since
+        // #1253 a fresh page's pre-image is zero and the journal records only bytes that differ,
+        // so a zero upload would journal almost nothing and never reach the failing drain.
+        var payload = new byte[4 * 1024 * 1024];
+        new Random(1268).NextBytes(payload);
         var holderRefusal = await Record.ExceptionAsync(async () =>
         {
             await using var stream = await holderFiles.OpenWriteAsync("large");
-            await stream.WriteAsync(new byte[4 * 1024 * 1024]);
+            await stream.WriteAsync(payload);
         });
         bool ended = await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromSeconds(5))) == waiting;
         var queuedRefusal = ended ? await Record.ExceptionAsync(() => waiting) : null;
