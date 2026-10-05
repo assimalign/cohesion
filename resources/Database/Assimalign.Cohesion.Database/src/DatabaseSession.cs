@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -34,8 +33,10 @@ namespace Assimalign.Cohesion.Database;
 /// <b>Disposal</b> closes the session, lets the leaf end its running operations
 /// (<see cref="DisposeAsyncCore"/>), and then ends the open transaction as the session's teardown:
 /// it is rolled back, and a caller that still holds it gets the model's coded error from a later
-/// commit. A session never commits implicitly. Sessions are single-threaded by contract; the base's
-/// checks only keep a contract violation from corrupting the session's state.
+/// commit. Both steps run whatever the first threw, and the failures are reported together in one
+/// <see cref="AggregateException"/>. A session never commits implicitly. Sessions are
+/// single-threaded by contract; the base's checks only keep a contract violation from corrupting
+/// the session's state.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 3, #1259).</b> Every public member is non-virtual and calls
@@ -226,7 +227,7 @@ public abstract class DatabaseSession : IDatabaseSession
     /// then the open transaction is rolled back as the session's teardown. Idempotent.
     /// </summary>
     /// <returns>A task that completes once the session is closed.</returns>
-    /// <exception cref="AggregateException">More than one step failed; the steps that failed are its inner exceptions.</exception>
+    /// <exception cref="AggregateException">One or both steps failed; both ran, and the failures are its inner exceptions.</exception>
     public async ValueTask DisposeAsync()
     {
         lock (_sync)
@@ -270,11 +271,8 @@ public abstract class DatabaseSession : IDatabaseSession
             }
         }
 
-        if (failures is { Count: 1 })
-        {
-            ExceptionDispatchInfo.Throw(failures[0]);
-        }
-
+        // Always an aggregate, as the engine's disposal and the Graph, Documents and Blob sessions
+        // report theirs: a caller catches one type whatever failed.
         if (failures is not null)
         {
             throw new AggregateException("The session failed to close.", failures);

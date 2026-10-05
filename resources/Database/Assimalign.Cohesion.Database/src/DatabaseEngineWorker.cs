@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Database.Internal;
 namespace Assimalign.Cohesion.Database;
 
 /// <summary>
-/// The guided base class for engine-owned background workers: implements the blocking pump loop,
+/// The base of every engine-owned background worker: implements the blocking pump loop,
 /// the loop's failure handling, and the per-database failure record, so an implementer only
 /// supplies the trigger wait and the per-pass work.
 /// </summary>
@@ -61,7 +61,7 @@ namespace Assimalign.Cohesion.Database;
 /// offline (a failed durable flush, #1243, a failed drain of its journal's append buffer, #1252, or
 /// a failed file header write, #1268) takes its database offline, the
 /// workers skip that database from then on, and the engine lists it in
-/// <see cref="IDatabaseEngine.OfflineDatabases"/>. Only an <see cref="OutOfMemoryException"/>
+/// <see cref="DatabaseEngine.OfflineDatabases"/>. Only an <see cref="OutOfMemoryException"/>
 /// leaves the loop, and the thread with it, which ends the process: nothing ends the loop silently.
 /// </para>
 /// <para>

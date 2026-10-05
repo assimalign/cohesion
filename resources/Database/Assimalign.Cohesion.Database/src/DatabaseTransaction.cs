@@ -251,7 +251,10 @@ public abstract class DatabaseTransaction : IDatabaseTransaction
     /// <param name="cancellationToken">Observed only until the rollback starts.</param>
     /// <returns>A task that completes once the rollback ended.</returns>
     /// <exception cref="OperationCanceledException">The token was canceled before the rollback started.</exception>
-    /// <exception cref="DatabaseException">The transaction is committed.</exception>
+    /// <exception cref="DatabaseException">
+    /// The transaction is committed, or its database is offline (the model's refusal, #1243); the
+    /// kernel's own refusal of the rollback, translated by the model, besides.
+    /// </exception>
     public async ValueTask RollbackAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -286,6 +289,10 @@ public abstract class DatabaseTransaction : IDatabaseTransaction
     /// database.
     /// </summary>
     /// <returns>A task that completes once the transaction is ended.</returns>
+    /// <exception cref="DatabaseException">
+    /// The kernel refused the rollback (the model's translation); the leaf's
+    /// <see cref="DisposeAsyncCore"/> still ran.
+    /// </exception>
     public async ValueTask DisposeAsync()
     {
         try
@@ -323,7 +330,7 @@ public abstract class DatabaseTransaction : IDatabaseTransaction
     /// <param name="cause">The failure the caller observed from the operation.</param>
     /// <returns>A task that completes once the rollback ended.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="cause"/> is null.</exception>
-    protected internal async ValueTask AbortAsync(Exception cause)
+    protected async ValueTask AbortAsync(Exception cause)
     {
         ArgumentNullException.ThrowIfNull(cause);
         lock (_sync)

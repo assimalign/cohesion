@@ -62,8 +62,9 @@ phase-4 PR, and phase 6 deletes the interfaces. Every base carries the deviation
   engine, a session's database, a server's engine) are base fields; a leaf re-exposes them typed
   with `new` over a typed field of its own, and re-exposes a typed async factory with a `new`
   member that awaits the base's public member, never its core. The only `protected virtual`
-  members are lifecycle hooks with empty or throwing defaults (`DatabaseInstance.ApplySchemaCoreAsync`
-  behind the `SupportsSchemaProvisioning` capability, the session's and transaction's
+  members are the two cases rule 4 allows here: the optional-capability core
+  `DatabaseInstance.ApplySchemaCoreAsync` (throws `NotSupportedException` by default, paired with
+  `SupportsSchemaProvisioning`) and lifecycle hooks (the session's and transaction's empty
   `DisposeAsyncCore`, the worker's `WaitForTrigger`).
 - **Engine composition is attached, then frozen** (§6.5 of the plan). A leaf's constructor attaches
   its built-in workers and its build path attaches the composed workers and servers through the
@@ -78,13 +79,19 @@ phase-4 PR, and phase 6 deletes the interfaces. Every base carries the deviation
   stopped and joined, then the workers (last attached first, a disposable worker such as the
   checkpointer ending the work it left on its lanes), then the leaf closes its databases
   (`DisposeAsyncCore`). Every step runs whatever an earlier one threw, and the failures are
-  reported together in one `AggregateException`.
+  reported together in one `AggregateException`. The base finds a disposable worker by type test,
+  as the shared pump does, because the model engines that still compile that pump dispose the same
+  workers; the worker base gains a disposal lifecycle hook in the phase-4 PR that deletes the
+  shared pump (plan row 7).
 - **The explicit-transaction state machine lives once, in `DatabaseTransaction`** (§6.4 of the
   plan; #1188, #1225, #1226). Graph, Documents, Blob and KeyValuePair each carried a copy. One end
   gate serializes commit, rollback, disposal, an abort for a failed operation (`AbortAsync`) and
-  the session's teardown (`CloseAsync`). A token is observed only before an end starts; the cores
-  take none, because a started rollback must end the transaction and a canceled commit could only
-  abort work the caller asked to keep (PostgreSQL holds interrupts through `AbortTransaction`). A
+  the session's teardown (`CloseAsync`). `AbortAsync` is `protected`: no root type calls it, and a
+  model session reaches it through its own leaf either way. `IsOpen`, `IsUsable`, `CreateRefusal`
+  and `CloseAsync` are `protected internal`, because the root's `DatabaseSession` reads or calls
+  them. A token is observed only before an end starts; the cores take none, because a started
+  rollback must end the transaction and a canceled commit could only abort work the caller asked
+  to keep (PostgreSQL holds interrupts through `AbortTransaction`). A
   transaction that did not commit accepts any number of rollbacks; a commit ends it whatever its
   outcome, and one after an abort completes the rollback and fails with the model's coded error
   (`COHDBG007`, `COHDBD001`, `COHDBB001`, `COHDBK001` in the models' vocabularies). `State`
@@ -102,25 +109,46 @@ phase-4 PR, and phase 6 deletes the interfaces. Every base carries the deviation
   transaction's coded refusal instead, as in PostgreSQL's failed transaction block. Disposal
   closes the session, lets the leaf end its running operations, then ends the open transaction as
   the teardown ("The session closed before the transaction ended." is the cause a later commit
-  names).
-- **The server lifecycle the four model servers each carried** lives in `DatabaseServer`: a server
+  names). Both steps run whatever the first threw, and any failure is reported in one
+  `AggregateException` ("The session failed to close."), as the engine reports its own.
+- **The server lifecycle Sql, KeyValuePair and Graph carried** lives in `DatabaseServer`: a server
   is created inert, starts once, and a failed start or any stop is terminal (a start after it
   throws `ObjectDisposedException`); stop is idempotent and runs for a server that never started,
   so the leaf releases its listener either way; disposal stops. One gate serializes start and
-  stop.
+  stop. Blob's server differs on one path, which its phase-4 PR changes (below).
 - **Departures from the plan's rows, as landed.** The plan's `DatabaseServerSession` constructor
   took the protocol version and principal; a server session exists from accept, before either is
   known, so the base generates the identity and takes the two values through protected one-shot
-  setters. The plan's `Abort(Exception)` is `AbortAsync`, because the abort rolls back under the
-  end gate, and the teardown's `CloseAsync` (Documents, Blob and KeyValuePair carried it) joined
-  it. `IDatabaseEngine.OfflineDatabases` arrived after the plan (#1243) and is the engine's one
+  setters. Rule 6 of `database-area.md` still lists the protocol version and principal among the
+  values fixed at construction; amending it is an owner decision, open at the phase-3 merge (plan
+  §7). The plan's `Abort(Exception)` is `AbortAsync`, because the abort rolls back under the end
+  gate, and the teardown's `CloseAsync` (Documents, Blob and KeyValuePair carried it) joined it.
+  `IDatabaseEngine.OfflineDatabases` arrived after the plan (#1243) and is the engine's one
   abstract public member.
 - **What moves in phase 4, per model.** Adopting the bases changes a model's behavior only where
-  the base consolidates: the messages above, the transaction state machine for SQL (which gains
-  the end gate, the repeatable rollback and the coded aborted error), the worker-name uniqueness
-  check for the models that did not check it, and the engine disposal order for SQL and
-  KeyValuePair (all workers last attached first, instead of the checkpointer first). Each
-  model's PR runs its #1188, #1225 and #1226 suites in process and over the wire.
+  the base consolidates; §6.4 of the plan lists each change, and each model's PR updates the
+  assertions it moves:
+  - the messages above, the session-disposal shape (always an `AggregateException` named "The
+    session failed to close.": Graph, Documents and Blob change only the message, while SQL and
+    KeyValuePair, whose teardown let the transaction's failure out unwrapped, gain the wrapper) and
+    the engine-disposal message ("One or more components of engine '{name}' failed to close.");
+  - the order of BEGIN's refusals: every model refused an unsupported isolation level and an
+    offline database before its "already active" check, and the base runs that check first;
+  - the engine's guards: `GetDatabasesAsync` checks disposal and the token when called, not at
+    the first `MoveNextAsync`; the guards run name, disposal, token in that order; and the
+    constructor rejects a blank engine name, which every model's options accept today;
+  - the transaction state machine for SQL, which gains the end gate, the repeatable rollback and
+    a coded aborted error, observes a commit's token only before the commit starts, reports
+    `Faulted` for a transaction the kernel ended under its caller, and ends the open transaction
+    at session disposal with the teardown cause;
+  - Blob's server, whose start refused while its engine is not running left the server inert (a
+    later start could retry, and a later stop disposed the listener): under the base that start is
+    terminal, so its start core disposes the listener before it rethrows;
+  - the worker-name uniqueness check for the models that did not check it, and the engine disposal
+    order for SQL and KeyValuePair (all workers last attached first, instead of the checkpointer
+    first).
+
+  Each model's PR runs its #1188, #1225 and #1226 suites in process and over the wire.
 
 ## Why-this-not-that decisions
 

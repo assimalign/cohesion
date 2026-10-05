@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Tests;
 /// </summary>
 public class DatabaseEngineTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Database] - Engine: the name and model are the constructor's, and the name is required")]
     public void Constructor_NameAndModel_ShouldBeFixed()
@@ -45,7 +45,7 @@ public class DatabaseEngineTests
 
         // Act
         engine.Attach(worker);
-        bool pumping = worker.Waiting.Wait(Timeout);
+        bool pumping = worker.Waiting.Wait(_timeout);
 
         // Assert
         pumping.ShouldBeTrue();
@@ -129,8 +129,8 @@ public class DatabaseEngineTests
         engine.Attach(new TestServer(engine, log, "server-b"));
         engine.Complete();
         await engine.CreateDatabaseAsync("appdb");
-        first.Waiting.Wait(Timeout).ShouldBeTrue();
-        second.Waiting.Wait(Timeout).ShouldBeTrue();
+        first.Waiting.Wait(_timeout).ShouldBeTrue();
+        second.Waiting.Wait(_timeout).ShouldBeTrue();
 
         // Act
         await engine.DisposeAsync();
@@ -217,6 +217,7 @@ public class DatabaseEngineTests
         await Should.ThrowAsync<OperationCanceledException>(async () => await engine.CreateDatabaseAsync("appdb", source.Token));
         await Should.ThrowAsync<OperationCanceledException>(async () => await engine.OpenDatabaseAsync("appdb", source.Token));
         await Should.ThrowAsync<OperationCanceledException>(async () => await engine.DropDatabaseAsync("appdb", source.Token));
+        Should.Throw<OperationCanceledException>(() => engine.GetDatabasesAsync(source.Token));
         engine.CoreCalls.ShouldBe(0);
 
         // Act / Assert: a disposed engine.

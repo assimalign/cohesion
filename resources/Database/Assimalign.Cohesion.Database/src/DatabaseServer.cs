@@ -17,9 +17,11 @@ namespace Assimalign.Cohesion.Database;
 /// is the thing that starts and stops.
 /// </para>
 /// <para>
-/// <b>The lifecycle is one state machine the base owns</b>, as the four model servers each carried
-/// it before the bases: a server is created inert; <see cref="StartAsync"/> starts it once (a
-/// second start while it runs returns), and a start that fails leaves it stopped for good;
+/// <b>The lifecycle is one state machine the base owns</b>, as the Sql, KeyValuePair and Graph
+/// servers each carried it before the bases (Blob's differs on one path: a start it refused because
+/// its engine was not running left it inert): a server is created inert; <see cref="StartAsync"/>
+/// starts it once (a second start while it runs returns), and a start that fails leaves it stopped
+/// for good, so a leaf releases what it owns before a refusal it throws from its start core;
 /// <see cref="StopAsync"/> is terminal and idempotent, and stops a server that never started as
 /// well, so the leaf releases what it owns either way; a start after a stop throws
 /// <see cref="ObjectDisposedException"/>. One gate serializes start and stop.
@@ -39,13 +41,13 @@ namespace Assimalign.Cohesion.Database;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DatabaseServer : IDatabaseServer
 {
-    private const int Created = 0;
-    private const int Running = 1;
-    private const int Stopped = 2;
+    private const int created = 0;
+    private const int running = 1;
+    private const int stopped = 2;
 
     private readonly DatabaseEngine _engine;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
-    private int _lifecycle = Created;
+    private int _lifecycle = created;
 
     /// <summary>
     /// Initializes a new, inert server over the engine it fronts.
@@ -64,7 +66,8 @@ public abstract class DatabaseServer : IDatabaseServer
     public DatabaseEngine Engine => _engine;
 
     /// <summary>
-    /// Gets a point-in-time snapshot of the sessions currently active on this server.
+    /// Gets a point-in-time snapshot of the sessions currently active on this server. Never null;
+    /// empty while no session is active (rule 9 of <c>database-area.md</c>).
     /// </summary>
     public abstract IReadOnlyCollection<DatabaseServerSession> Sessions { get; }
 
@@ -78,7 +81,7 @@ public abstract class DatabaseServer : IDatabaseServer
     /// <summary>
     /// Gets whether the server is running: started, and not yet stopped.
     /// </summary>
-    protected bool IsRunning => Volatile.Read(ref _lifecycle) == Running;
+    protected bool IsRunning => Volatile.Read(ref _lifecycle) == running;
 
     /// <summary>
     /// Starts accepting connections. A start while the server runs returns at once; a start that
@@ -95,8 +98,8 @@ public abstract class DatabaseServer : IDatabaseServer
         try
         {
             int lifecycle = Volatile.Read(ref _lifecycle);
-            ObjectDisposedException.ThrowIf(lifecycle == Stopped, this);
-            if (lifecycle == Running)
+            ObjectDisposedException.ThrowIf(lifecycle == stopped, this);
+            if (lifecycle == running)
             {
                 return;
             }
@@ -109,11 +112,11 @@ public abstract class DatabaseServer : IDatabaseServer
             {
                 // A failed start is terminal: the leaf released what the start acquired, and a
                 // later stop has nothing left to do.
-                Volatile.Write(ref _lifecycle, Stopped);
+                Volatile.Write(ref _lifecycle, stopped);
                 throw;
             }
 
-            Volatile.Write(ref _lifecycle, Running);
+            Volatile.Write(ref _lifecycle, running);
         }
         finally
         {
@@ -134,12 +137,12 @@ public abstract class DatabaseServer : IDatabaseServer
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (Volatile.Read(ref _lifecycle) == Stopped)
+            if (Volatile.Read(ref _lifecycle) == stopped)
             {
                 return;
             }
 
-            Volatile.Write(ref _lifecycle, Stopped);
+            Volatile.Write(ref _lifecycle, stopped);
             await StopCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         finally

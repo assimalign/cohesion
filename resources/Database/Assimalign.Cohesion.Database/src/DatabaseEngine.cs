@@ -208,14 +208,17 @@ public abstract class DatabaseEngine : IDatabaseEngine
     }
 
     /// <summary>
-    /// Enumerates the logical databases the engine manages.
+    /// Enumerates the logical databases the engine manages. The engine state and the token are
+    /// checked when the call is made, not when the enumeration starts.
     /// </summary>
     /// <param name="cancellationToken">Cancels the enumeration.</param>
     /// <returns>An async sequence of the databases.</returns>
     /// <exception cref="ObjectDisposedException">The engine has been disposed when the call is made.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled when the call is made.</exception>
     public IAsyncEnumerable<DatabaseInstance> GetDatabasesAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
         return GetDatabasesCore(cancellationToken);
     }
 
@@ -304,7 +307,9 @@ public abstract class DatabaseEngine : IDatabaseEngine
         }
 
         // A worker may hold work of its own (a checkpoint left running on its lane); it ends
-        // before the storages close.
+        // before the storages close. The type tests are a bridge: the model engines that still
+        // compile the shared pump dispose the same workers by them, so the worker base gains its
+        // disposal hook in the P4 PR that deletes the shared pump (concrete-types plan, row 7).
         for (int index = workers.Length - 1; index >= 0; index--)
         {
             try
@@ -476,9 +481,9 @@ public abstract class DatabaseEngine : IDatabaseEngine
 
     /// <summary>
     /// Enumerates the engine's databases; <see cref="GetDatabasesAsync"/> checked the engine state
-    /// when the call was made.
+    /// and the token when the call was made.
     /// </summary>
-    /// <param name="cancellationToken">Cancels the enumeration.</param>
+    /// <param name="cancellationToken">Cancels the enumeration; not canceled when the call starts.</param>
     /// <returns>An async sequence of the databases.</returns>
     protected abstract IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken);
 

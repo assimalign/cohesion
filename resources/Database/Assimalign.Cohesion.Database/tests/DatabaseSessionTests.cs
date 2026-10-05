@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Transactions;
-
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Tests;
 
@@ -18,8 +18,8 @@ namespace Assimalign.Cohesion.Database.Tests;
 /// </summary>
 public class DatabaseSessionTests
 {
-    private const string AlreadyActive = "A transaction or operation is already active on this session.";
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+    private const string alreadyActive = "A transaction or operation is already active on this session.";
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Database] - Session: a BEGIN registers the transaction at the requested level, Snapshot by default")]
     public async Task BeginTransactionAsync_OpenSession_ShouldRegisterTheTransaction()
@@ -53,7 +53,7 @@ public class DatabaseSessionTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
 
         // Assert
-        error.Message.ShouldBe(AlreadyActive);
+        error.Message.ShouldBe(alreadyActive);
         session.BeginCores.ShouldBe(1);
         session.CurrentTransaction.ShouldBeSameAs(transaction);
     }
@@ -94,7 +94,7 @@ public class DatabaseSessionTests
         var transaction = await session.BeginTransactionAsync();
 
         // Assert
-        error.Message.ShouldBe(AlreadyActive);
+        error.Message.ShouldBe(alreadyActive);
         second.ShouldBeFalse();
         session.CurrentTransaction.ShouldBeSameAs(transaction);
     }
@@ -107,16 +107,16 @@ public class DatabaseSessionTests
         var session = CreateSession();
         session.BeginBarrier = release.Task;
         var first = session.BeginTransactionAsync().AsTask();
-        await session.BeginStarted.Task.WaitAsync(Timeout);
+        await session.BeginStarted.Task.WaitAsync(_timeout);
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
         bool operation = session.EnterOperation();
         release.SetResult();
-        var transaction = await first.WaitAsync(Timeout);
+        var transaction = await first.WaitAsync(_timeout);
 
         // Assert
-        error.Message.ShouldBe(AlreadyActive);
+        error.Message.ShouldBe(alreadyActive);
         operation.ShouldBeFalse();
         session.BeginCores.ShouldBe(1);
         session.CurrentTransaction.ShouldBeSameAs(transaction);
@@ -245,12 +245,12 @@ public class DatabaseSessionTests
         var session = CreateSession();
         session.BeginBarrier = release.Task;
         var begin = session.BeginTransactionAsync().AsTask();
-        await session.BeginStarted.Task.WaitAsync(Timeout);
+        await session.BeginStarted.Task.WaitAsync(_timeout);
 
         // Act
         await session.DisposeAsync();
         release.SetResult();
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await begin.WaitAsync(Timeout));
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await begin.WaitAsync(_timeout));
 
         // Assert
         error.Message.ShouldBe("The session is closed.");
@@ -260,7 +260,7 @@ public class DatabaseSessionTests
         session.CurrentTransaction.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Session: a failure of the leaf's teardown still closes the transaction and is rethrown as itself")]
+    [Fact(DisplayName = "Cohesion Test [Database] - Session: a failure of the leaf's teardown still closes the transaction and is reported in an aggregate")]
     public async Task DisposeAsync_LeafTeardownFails_ShouldStillCloseTheTransaction()
     {
         // Arrange
@@ -270,10 +270,11 @@ public class DatabaseSessionTests
         var transaction = (TestTransaction)await session.BeginTransactionAsync();
 
         // Act
-        var error = await Should.ThrowAsync<InvalidOperationException>(async () => await session.DisposeAsync());
+        var error = await Should.ThrowAsync<AggregateException>(async () => await session.DisposeAsync());
 
         // Assert
-        error.ShouldBeSameAs(failure);
+        error.Message.ShouldStartWith("The session failed to close.");
+        error.InnerExceptions.ShouldBe(new Exception[] { failure });
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.State.ShouldBe(SessionState.Closed);
     }

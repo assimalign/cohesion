@@ -2,10 +2,10 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Transactions;
-
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Tests;
 
@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Database.Tests;
 /// </summary>
 public class DatabaseTransactionTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Database] - Transaction: the identity and isolation level are the constructor's")]
     public void Constructor_IdentityAndLevel_ShouldBeFixed()
@@ -83,10 +83,10 @@ public class DatabaseTransactionTests
 
         // Act
         var commit = transaction.CommitAsync(source.Token).AsTask();
-        await transaction.CommitStarted.Task.WaitAsync(Timeout);
+        await transaction.CommitStarted.Task.WaitAsync(_timeout);
         source.Cancel();
         release.SetResult();
-        await commit.WaitAsync(Timeout);
+        await commit.WaitAsync(_timeout);
 
         // Assert
         transaction.State.ShouldBe(TransactionState.Committed);
@@ -102,10 +102,10 @@ public class DatabaseTransactionTests
 
         // Act
         var rollback = transaction.RollbackAsync(source.Token).AsTask();
-        await transaction.RollbackStarted.Task.WaitAsync(Timeout);
+        await transaction.RollbackStarted.Task.WaitAsync(_timeout);
         source.Cancel();
         release.SetResult();
-        await rollback.WaitAsync(Timeout);
+        await rollback.WaitAsync(_timeout);
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
@@ -136,15 +136,15 @@ public class DatabaseTransactionTests
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var transaction = new TestTransaction { RollbackBarrier = release.Task };
         var abort = transaction.Abort(new InvalidOperationException("statement failed")).AsTask();
-        await transaction.RollbackStarted.Task.WaitAsync(Timeout);
+        await transaction.RollbackStarted.Task.WaitAsync(_timeout);
         using var source = new CancellationTokenSource();
 
         // Act
         var commit = transaction.CommitAsync(source.Token).AsTask();
         source.Cancel();
-        await Should.ThrowAsync<OperationCanceledException>(async () => await commit.WaitAsync(Timeout));
+        await Should.ThrowAsync<OperationCanceledException>(async () => await commit.WaitAsync(_timeout));
         release.SetResult();
-        await abort.WaitAsync(Timeout);
+        await abort.WaitAsync(_timeout);
 
         // Assert: the commit never started, so the aborted transaction still waits for its rollback.
         transaction.Commits.ShouldBe(0);
@@ -268,13 +268,13 @@ public class DatabaseTransactionTests
         var transaction = new TestTransaction { RollbackBarrier = release.Task };
         var cause = new InvalidOperationException("statement failed");
         var abort = transaction.Abort(cause).AsTask();
-        await transaction.RollbackStarted.Task.WaitAsync(Timeout);
+        await transaction.RollbackStarted.Task.WaitAsync(_timeout);
 
         // Act
         var commit = transaction.CommitAsync().AsTask();
         release.SetResult();
-        await abort.WaitAsync(Timeout);
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await commit.WaitAsync(Timeout));
+        await abort.WaitAsync(_timeout);
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await commit.WaitAsync(_timeout));
 
         // Assert: the commit saw the abort's outcome through the gate and undid nothing twice.
         error.Message.ShouldStartWith(TestTransaction.AbortedCode + ": The session's transaction is aborted and cannot commit");
@@ -318,14 +318,14 @@ public class DatabaseTransactionTests
 
         // Act
         var rollback = transaction.RollbackAsync().AsTask();
-        await transaction.RollbackStarted.Task.WaitAsync(Timeout);
+        await transaction.RollbackStarted.Task.WaitAsync(_timeout);
         var commit = transaction.CommitAsync().AsTask();
         await Task.Delay(50);
         bool commitWaited = !commit.IsCompleted;
         var refusalWhileEnding = transaction.Refusal();
         release.SetResult();
-        await rollback.WaitAsync(Timeout);
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await commit.WaitAsync(Timeout));
+        await rollback.WaitAsync(_timeout);
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await commit.WaitAsync(_timeout));
 
         // Assert
         commitWaited.ShouldBeTrue();
