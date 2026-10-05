@@ -802,7 +802,7 @@ checkpoint, a compare per record, and a read of the data file's copy per imaging
 
 With the variable set, the Debug suites of the Database area (Storage, Transactions, Indexing,
 the Sql, Graph, Documents, Blob and KeyValuePair engines with their Storage, Catalog and Client
-projects, Hosting, Embedded and the area root, 2,991 tests after the #1253 review) pass except
+projects, Hosting, Embedded and the area root, 2,993 tests after the #1253 review) pass except
 for two test cases, each failing for a known reason. The two Blob tests that stream 128 or
 256 MiB under a 64 MiB GC heap cap (`BlobProcessTests`, which also turns checkpoints off to keep
 a journal larger than the blob, and Blob.Client's wire-streaming test) run out of memory: the
