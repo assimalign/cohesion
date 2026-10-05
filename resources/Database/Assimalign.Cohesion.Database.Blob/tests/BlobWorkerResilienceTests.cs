@@ -12,6 +12,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -344,6 +345,20 @@ public sealed class BlobWorkerResilienceTests
     /// hook, so it ends the wait too, with <see cref="StorageOfflineCause.JournalFlush"/> as the
     /// cause.
     /// </summary>
+    /// <remarks>
+    /// The queued session looks its container up before the fault, and its write is started on the
+    /// test's own flow. The lookup is an autocommit read of its own, whose commit appends a commit
+    /// record and drains the journal for it. Inside a <c>Task.Run</c> body, as the test had it, the
+    /// lookup committed after the fault whenever the thread pool started that body more than the
+    /// 100 ms the test waited late (a three-core macOS runner under the whole suite): its drain was
+    /// the first to fail, and the queued session got
+    /// <see cref="DatabaseTransactionCommitUnconfirmedException"/>, which is right for a commit whose
+    /// record was appended before its flush failed (#1243), while its write never reached the lock.
+    /// <see cref="IBlobContainer.OpenWriteAsync"/> returns only once its request waits for the lock:
+    /// the operation's begin and every step before the wait complete synchronously and append only
+    /// its begin record, so the writer is queued, and nothing of its own drains, before the fault
+    /// switches on.
+    /// </remarks>
     [Theory(DisplayName = "Cohesion Test [Database.Blob] - Workers: a writer queued for the writer lock when the database goes offline ends with the coded refusal")]
     [InlineData(DeviceFault.HeaderWrite)]
     [InlineData(DeviceFault.JournalFlush)]
@@ -358,11 +373,11 @@ public sealed class BlobWorkerResilienceTests
         var faults = strategy.Faults(Failing);
         await using var holder = await failing.CreateSessionAsync();
         await using var queued = await failing.CreateSessionAsync();
+        var queuedFiles = await ((IBlobDatabase)queued.Database).GetContainerAsync("files");
         _ = await holder.BeginTransactionAsync();
         await WriteAsync(await ((IBlobDatabase)holder.Database).GetContainerAsync("files"), "held", "held");
-        var waiting = Task.Run(async () => await WriteAsync(await ((IBlobDatabase)queued.Database).GetContainerAsync("files"), "queued", "queued"));
-        await Task.Delay(TimeSpan.FromMilliseconds(100));
-        bool queuedWhileOnline = !waiting.IsCompleted;
+        var waiting = WriteAsync(queuedFiles, "queued", "queued");
+        bool queuedWhileOnline = !waiting.IsCompleted && failing.Coordinator.GetOpenContexts().Count == 2;
 
         // Act: the next checkpoint's header slot write, its journal fsync, or the drain of the
         // journal's append buffer that leads it, fails.
@@ -386,6 +401,72 @@ public sealed class BlobWorkerResilienceTests
         queuedRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBB002");
         StorageOfflineException.Find(queuedRefusal)!.Cause.ShouldBe(fault == DeviceFault.HeaderWrite ? StorageOfflineCause.HeaderWrite : StorageOfflineCause.JournalFlush);
         holderRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBB002");
+        reopened.IsOffline.ShouldBeFalse();
+        (await CountAsync(reopened)).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The holder's own upload takes the database offline: its chunks overflow the journal's
+    /// append buffer (#1252), whose drain fails. The failed operation aborts the holder's explicit
+    /// transaction (#1225), but an offline database undoes nothing (#1268), so the abort rolls
+    /// nothing back and releases no lock: the holder keeps the database writer lock, and the writer
+    /// queued behind it ends with the coded refusal instead of being granted the lock. The queued
+    /// writer is started after the fault switched on, the latest it can start, and still drains
+    /// nothing before it waits, so the holder's drain is the one failure. Nothing else drains: the
+    /// workers' intervals are an hour.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a holder whose upload's journal drain fails keeps the writer lock through its abort, and the queued writer gets the coded refusal")]
+    public async Task QueuedWriter_HolderUploadDrainFails_ShouldKeepTheHolderLockAndRefuseTheQueuedWriter()
+    {
+        // Arrange: one writer holds the database writer lock in an explicit transaction; the other
+        // session has looked its container up, and every journal write fails from now on.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = BlobDatabaseEngine.Create(Options(strategy));
+        var failing = await CreateAsync(engine, Failing);
+        var faults = strategy.Faults(Failing);
+        await using var holder = await failing.CreateSessionAsync();
+        await using var queued = await failing.CreateSessionAsync();
+        var queuedFiles = await ((IBlobDatabase)queued.Database).GetContainerAsync("files");
+        var transaction = await holder.BeginTransactionAsync();
+        var holderFiles = await ((IBlobDatabase)holder.Database).GetContainerAsync("files");
+        await WriteAsync(holderFiles, "held", "held");
+        var holderSequence = ((BlobDatabaseTransaction)transaction).Context.Sequence;
+        faults.SwitchOn(DeviceFault.JournalWrite);
+
+        var waiting = WriteAsync(queuedFiles, "queued", "queued");
+        bool queuedWithoutADrain = !waiting.IsCompleted && failing.Coordinator.GetOpenContexts().Count == 2
+            && faults.JournalWriteFailures == 0 && !failing.IsOffline;
+
+        // Act: the holder uploads more than the append buffer holds.
+        var holderRefusal = await Record.ExceptionAsync(async () =>
+        {
+            await using var stream = await holderFiles.OpenWriteAsync("large");
+            await stream.WriteAsync(new byte[4 * 1024 * 1024]);
+        });
+        bool ended = await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromSeconds(5))) == waiting;
+        var queuedRefusal = ended ? await Record.ExceptionAsync(() => waiting) : null;
+
+        // The database writer lock is still the holder's: another owner cannot take it, the
+        // holder's own request is a re-grant.
+        var locks = failing.Coordinator.LockManager;
+        bool heldByAnother = !locks.TryAcquire(new TransactionSequence(ulong.MaxValue), LockResource.Database(), LockMode.Exclusive);
+        bool heldByTheHolder = locks.TryAcquire(holderSequence, LockResource.Database(), LockMode.Exclusive);
+        var holderState = transaction.State;
+
+        faults.Clear();
+        var reopened = (BlobDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+
+        // Assert
+        queuedWithoutADrain.ShouldBeTrue();
+        holderRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBB002");
+        StorageOfflineException.Find(holderRefusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        faults.JournalWriteFailures.ShouldBe(1);
+        holderState.ShouldBe(TransactionState.Faulted);
+        ended.ShouldBeTrue("the queued writer was still waiting five seconds after the database went offline");
+        queuedRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBB002");
+        StorageOfflineException.Find(queuedRefusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        heldByAnother.ShouldBeTrue();
+        heldByTheHolder.ShouldBeTrue();
         reopened.IsOffline.ShouldBeFalse();
         (await CountAsync(reopened)).ShouldBe(0);
     }
