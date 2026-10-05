@@ -51,7 +51,9 @@ public sealed class TransactionContext
     private readonly TransactionSnapshot _beginSnapshot;
 
     // The transaction's own context when this one is a statement view (PinStatementSnapshot),
-    // null for the context the manager begins. A view shares the end lock below with it.
+    // null for the context the manager begins. The end flag, the apply count and the drain
+    // signal below live on the transaction's own context only: a view forwards every member
+    // that touches them, so one lock always guards one set of state.
     private readonly TransactionContext? _transaction;
     private readonly object _endSync;
     private TransactionState _state;
@@ -169,6 +171,11 @@ public sealed class TransactionContext
     /// <returns>True for the one caller that claimed the end.</returns>
     internal bool TryClaimEnd()
     {
+        if (_transaction is not null)
+        {
+            return _transaction.TryClaimEnd();
+        }
+
         lock (_endSync)
         {
             if (_ending)
@@ -188,6 +195,11 @@ public sealed class TransactionContext
     /// <returns>True when the apply may run.</returns>
     internal bool TryEnterApply()
     {
+        if (_transaction is not null)
+        {
+            return _transaction.TryEnterApply();
+        }
+
         lock (_endSync)
         {
             if (_ending || State != TransactionState.Active)
@@ -205,6 +217,12 @@ public sealed class TransactionContext
     /// </summary>
     internal void ExitApply()
     {
+        if (_transaction is not null)
+        {
+            _transaction.ExitApply();
+            return;
+        }
+
         TaskCompletionSource? drained = null;
 
         lock (_endSync)
@@ -231,6 +249,11 @@ public sealed class TransactionContext
     /// </remarks>
     internal Task WaitForAppliesAsync()
     {
+        if (_transaction is not null)
+        {
+            return _transaction.WaitForAppliesAsync();
+        }
+
         lock (_endSync)
         {
             if (_applying == 0)

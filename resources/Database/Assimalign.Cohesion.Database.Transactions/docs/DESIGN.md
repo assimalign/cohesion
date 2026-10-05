@@ -41,7 +41,9 @@ interface since phase 2 of the concrete-types program
   Documents, Graph and Blob pin one per read-committed operation, so every metadata lookup and
   every chunk read of the statement makes one visibility decision; each used to carry an
   identical private decorator for it. The view keys brackets and stamps by the shared sequence,
-  and a manager refuses to commit or roll back a view.
+  and a manager refuses to commit or roll back a view. The end claim and the apply admission
+  live on the transaction's own context only; a view forwards them, so an apply admitted
+  through a view is one the transaction's end waits for.
 - **Abstract, for a variant set or an inverted seam:**
   - `TransactionRecordSpace` (protected constructor): the five model storages each supply one
     from their own assemblies, and the coordinator drives them;
