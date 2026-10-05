@@ -148,7 +148,22 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
         }
     }
 
-    internal (PageId PageId, int SlotIndex) InsertChunk(StorageTransaction transaction, TransactionSequence writer, ReadOnlySpan<byte> entry)
-        => InsertRecord(transaction, writer.Value | (1UL << 63), entry);
+    /// <summary>
+    /// The owner of every content chunk page. Bit 63 keeps chunk pages out of the owner-zero catalog
+    /// and owner-one tree-registration scans.
+    /// </summary>
+    /// <remarks>
+    /// One owner for all transactions, never one per transaction: the kernel fills only an owner's
+    /// current write page, so a per-transaction owner gave every transaction a page of its own, and
+    /// a 180-byte document took a whole 8 KiB page that no later transaction wrote to. PostgreSQL
+    /// keeps its insert target per relation for the same reason, the "one-tuple-per-page syndrome"
+    /// (<c>src/backend/access/heap/hio.c</c>, <c>RelationGetBufferForTuple</c>). Visibility is per
+    /// record (the stamped writer and deleter), and every chunk bracket runs under the coordinator's
+    /// apply gate, so transactions sharing a page need no further coordination.
+    /// </remarks>
+    internal const ulong ContentOwner = 1UL << 63;
+
+    internal (PageId PageId, int SlotIndex) InsertChunk(StorageTransaction transaction, ReadOnlySpan<byte> entry)
+        => InsertRecord(transaction, ContentOwner, entry);
 }
 

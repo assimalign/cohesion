@@ -31,10 +31,20 @@ A database has the kernel's data, journal, and backup streams. Data pages are
 record directory entries. Kernel page CRC covers every persisted page, including
 the chunk header and content. Blob adds no separate physical file header.
 
-Catalog records occupy owner-zero data pages. Chunk pages use the creating
-transaction sequence with bit 63 set as their owner ID; this separates payload
-pages from metadata. Several writes in one transaction can share that owner.
-Owner IDs are locality hints, never content identity or visibility proofs.
+Catalog records occupy owner-zero data pages. Every chunk page carries one
+content owner, `1UL << 63` (`BlobStorage.ContentOwner`), which separates payload
+pages from metadata. All transactions share it. The kernel fills only an owner's
+current write page, so the former owner per creating transaction gave every
+upload a fresh page: a 2 KiB blob took a whole 8 KiB page, 1.012 pages per
+upload. With the shared owner three such chunks fill a page, as PostgreSQL's
+per-relation insert target packs tuples (`src/backend/access/heap/hio.c:571-596`,
+`RelationGetBufferForTuple`). Owner IDs are locality hints, never content
+identity or visibility proofs: visibility is per record, and every chunk bracket
+runs under the coordinator's apply gate. A full 8,064-byte chunk still takes a
+page alone; the partly filled page it passes over is not revisited until the
+kernel tracks partial free space (Database.Storage DESIGN.md, "Per-owner record
+chains"). A file written with per-transaction owners needs no migration: its
+chunks stay readable, and its pages simply take no new chunks.
 
 Every integer in a chunk record is unsigned little-endian unless stated otherwise.
 The chunk format is version 1:
@@ -105,7 +115,8 @@ the deleting logical context. The catalog tombstone shares that logical context,
 so rollback restores both. Committed tombstones are reclaimed only after every
 snapshot that could see their content has closed. The shared `DeleteRecord`
 returns an empty page to the free-space map at physical commit; rollback restores
-the page and its owner membership. Reused pages can belong to another upload.
+the page and its owner membership. A page holds chunks of several uploads, so it
+is reclaimed only with the last of them. Reused pages can belong to another upload.
 
 The version store batches undo, pruning, and recovery scrub at 64 mutations per
 physical bracket so their retained pre-images cannot grow to object size (since #1253 a

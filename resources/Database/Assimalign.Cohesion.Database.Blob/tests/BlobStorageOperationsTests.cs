@@ -308,6 +308,42 @@ public sealed class BlobStorageOperationsTests
         engine.State.ShouldBe(EngineState.Running);
     }
 
+    /// <summary>
+    /// Automatic uploads of small blobs share data pages. Every transaction used to own the pages of
+    /// its content chunks, so each 2 KiB upload took a fresh 8 KiB page, 1.012 pages an upload, and
+    /// the worker pace test's in-memory data file grew toward its 2 GiB capacity. With one content
+    /// owner, three chunks fill a page and the catalog records pack beside them.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Space: automatic uploads of small blobs share data pages")]
+    public async Task OpenWriteAsync_SmallBlobsAutoCommitted_ShouldShareDataPages()
+    {
+        // Arrange
+        const int uploads = 600;
+        await using var engine = BlobDatabaseEngine.Create(new()
+        {
+            StorageStrategy = new FaultInjectingJournalStorageStrategy(),
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        });
+        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("space");
+        var container = await database.CreateContainerAsync("files");
+        long pagesBefore = database.DataStorage.PageManager.PageCount;
+
+        // Act: each upload is its own transaction.
+        for (int id = 0; id < uploads; id++)
+        {
+            await Write(container, $"k{id}", new string('x', 2048));
+        }
+
+        // Assert: three chunks to a page is 200 pages, and the catalog adds a few; a page per upload
+        // was 607.
+        long pages = database.DataStorage.PageManager.PageCount - pagesBefore;
+        pages.ShouldBeLessThanOrEqualTo(uploads / 2, $"{pages} data pages for {uploads} uploads of 2 KiB");
+        (await Names(container)).Count.ShouldBe(uploads);
+        (await Read(container, $"k{uploads - 1}")).ShouldBe(new string('x', 2048));
+    }
+
     private static async Task Write(IBlobContainer container, string name, string content, CancellationToken cancellationToken = default)
     {
         await using var stream = await container.OpenWriteAsync(name, cancellationToken: cancellationToken);

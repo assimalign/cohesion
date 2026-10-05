@@ -40,8 +40,10 @@ public readonly record struct JournalSamples(long Written, int Truncations, long
     public static TimeSpan HangGuard { get; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// Samples a journal's length about every millisecond, on a thread of its own, until the
-    /// samples saw <paramref name="target"/> bytes appended or <paramref name="writers"/> ended.
+    /// Samples a journal's length on a thread of its own, sleeping a millisecond between samples,
+    /// until the samples saw <paramref name="target"/> bytes appended or <paramref name="writers"/>
+    /// ended. The sleep is the system timer's: about a millisecond on Linux, but 10 to 13 ms
+    /// measured on Windows, so there a fast writer leaves fewer samples a cycle.
     /// </summary>
     /// <param name="length">Reads the journal's current length.</param>
     /// <param name="target">The bytes to see appended.</param>

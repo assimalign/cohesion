@@ -461,6 +461,24 @@ needed), `GetUnitIterator(ownerId)` iterates only the owner's pages, and
 "scan one object" from O(storage) into O(object) — the SQL engine passes table
 object ids, so a table scan stops decoding the whole database.
 
+- **An owner is a long-lived object, never a transaction.** Each owner has one current
+  write page, and the free-space map holds only whole free pages, so a record shares a page
+  only with earlier records of its own owner. An owner per transaction therefore gives every
+  transaction a page of its own. The document and blob engines tagged content chunks
+  `writer | 1 << 63` until a 180-byte document took a whole 8 KiB page (1.009 pages per
+  auto-commit put) and a six-second pace test grew an in-memory data file past 2 GiB on a fast
+  runner; they now share one content owner. PostgreSQL keeps its insert target per relation
+  and tries the last page before extending, "to avoid one-tuple-per-page syndrome"
+  (`src/backend/access/heap/hio.c:571-596`, `RelationGetBufferForTuple`), and RavenDB puts
+  small values in the table's shared active section (`src/Voron/Data/Tables/Table.cs:725-747`,
+  `Insert`). Owners are tables, key spaces, graph stores and content spaces. Visibility is per
+  record, so logical transactions share a page freely as long as their physical brackets do not
+  overlap on it: a bracket that touches a page another open bracket holds fails with a
+  write-lock error, and the coordinator's apply gate runs a database's brackets one at a time.
+  A record that does not fit the current write page moves the owner to a fresh page, and
+  the page it leaves is not revisited: reusing partly free pages needs a free-space map that
+  records free bytes per page, as PostgreSQL's does (`GetPageWithFreeSpace`,
+  `src/backend/storage/freespace/freespace.c`).
 - **The directory is in-memory only, page headers are the truth.** The per-owner
   page directory is rebuilt on open by the same header scan that rebuilds the
   free-space map (no extra I/O) and maintained at allocation/free time. A persisted

@@ -259,6 +259,42 @@ public sealed class DocumentStorageOperationsTests
         engine.State.ShouldBe(EngineState.Running);
     }
 
+    /// <summary>
+    /// Auto-commit puts of small documents share data pages. Every transaction used to own the page
+    /// of its content chunk, so each put of a 180-byte document took a fresh 8 KiB page, 1.009 pages
+    /// a put, and the worker pace test's in-memory data file passed its 2 GiB capacity within six
+    /// seconds on a fast runner (ArgumentOutOfRangeException from the data file's SetLength). With
+    /// one content owner, a put's chunk and catalog record take about 300 bytes.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Space: auto-commit puts of small documents share data pages")]
+    public async Task PutAsync_SmallDocumentsAutoCommitted_ShouldShareDataPages()
+    {
+        // Arrange
+        const int puts = 1000;
+        await using var engine = DocumentDatabaseEngine.Create(new()
+        {
+            StorageStrategy = new FaultInjectingJournalStorageStrategy(),
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        });
+        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("space");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var session = await database.CreateSessionAsync();
+        long pagesBefore = database.DataStorage.PageManager.PageCount;
+
+        // Act: each put is its own transaction.
+        for (int id = 0; id < puts; id++)
+        {
+            await collection.PutAsync(session, $"k{id}", Doc($"k{id}", "\"payload\":\"" + new string('x', 150) + "\""));
+        }
+
+        // Assert: about 300 bytes a put is under 40 pages; a page per put was 1,009.
+        long pages = database.DataStorage.PageManager.PageCount - pagesBefore;
+        pages.ShouldBeLessThanOrEqualTo(puts / 10, $"{pages} data pages for {puts} puts of 180-byte documents");
+        (await Ids(session)).Count.ShouldBe(puts);
+    }
+
     private static ReadOnlyMemory<byte> Doc(string id, string? members = null)
         => Encoding.UTF8.GetBytes(members is null ? $"{{\"id\":\"{id}\"}}" : $"{{\"id\":\"{id}\",{members}}}");
 
