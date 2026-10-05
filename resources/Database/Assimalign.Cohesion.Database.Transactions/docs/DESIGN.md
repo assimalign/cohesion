@@ -625,8 +625,7 @@ waits for the statement applying now and runs before the next one is admitted. W
 sustained statement load kept a bracket open almost all the time, the engines' checkpoint
 workers were refused as busy on nearly every pass, and the journal grew without bound; the
 engines' sustained-write tests (a checkpoint truncating the journal on average before it holds
-four times a 4 MiB size, and the journal never holding half of what was written) and the
-1.5 GiB SQL measurement (peak 256.4 MiB at the 256 MiB default, `Database.Storage` DESIGN.md,
+four times a 4 MiB size, over forty sizes written) and the 1.5 GiB SQL measurement (peak 256.4 MiB at the 256 MiB default, `Database.Storage` DESIGN.md,
 "Measurements (#1254)") rest on it. Statement brackets commit non-durably unless the caller
 selects the existing durable DDL/bootstrap path; the logical commit makes earlier statement
 records durable by journal ordering. Open-time scrub remains ungated because no sessions exist
@@ -654,8 +653,8 @@ of them ends by running the deferred request. `TransactionCoordinatorRecoveryTes
 deferral and the failure hand-off, and the SQL engine's
 `CheckpointJournalSize_LongStatementInAnotherDatabase_ShouldKeepTheJournalBounded` holds one
 database's gate while another is written past forty sizes, with the written database's journal
-truncated on average before it held four sizes, never holding half of what was written, and the
-held one checkpointed as its statement ends.
+truncated on average before it held four sizes, and the held one checkpointed as its statement
+ends.
 
 **A checkpoint is refused inside a statement apply.** The semaphore is not reentrant, so a
 checkpoint asked for from an `ApplyStatementAsync` callback would wait forever for the semaphore

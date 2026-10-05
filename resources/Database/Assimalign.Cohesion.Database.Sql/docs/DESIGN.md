@@ -965,9 +965,11 @@ description + exported registrations), the engine binds them.
   a ROLLBACK find each entry in one descent however long its key's run. An
   `ON DELETE CASCADE` over one parent's children is linear in the child count
   (16,000 children: 6.2 s before, 0.43 s after; `SqlCascadeFanOutTests` guards the
-  growth ratio). The UNIQUE check still reads its key's dead versions until a
-  live one, so a row updated thousands of times under a UNIQUE index slows
-  linearly per update until dead versions are pruned (#1195). Measurements and
+  growth ratio, timing four 4,000-child cascades against one of 16,000 in the
+  process's CPU time, so another process's load cannot stretch one block alone).
+  The UNIQUE check still reads its key's dead versions until a live one, so a row
+  updated thousands of times under a UNIQUE index slows linearly per update until
+  dead versions are pruned (#1195). Measurements and
   the design are in the `Database.Indexing` DESIGN ("Entry order").
 
 ## Engine-owned background workers
@@ -1057,14 +1059,34 @@ trigger measured 6 truncations in 6 s instead of 458, and a journal peak 700-884
 trigger); `SqlWorkerResilienceTests` now checks that the healthy database keeps checkpointing at a
 pace the worker-wide backoff cannot reach (measured: 4,332 against 4,199 no-fault checkpoints in
 two seconds, where the worker-wide backoff gave 1, with a journal peak of 210 MB). Both engines
-write over the same six-second window, compared second by second: the median second must keep a
-tenth of the no-fault checkpoints, and the window more than twice the backoff's. A bound of half
-measured the machine, not the fault: each engine's checkpoints come in phases the two engines
-enter independently, and scheduling alone took the share to 0.29 over two seconds and the median
-second to 0.28 over six in loaded runs, while the backoff's share is about 0.001. Each second's
-share is counted over the second and per write, the larger counting, since a writer the scheduler
-starved needs fewer checkpoints whichever engine's it is. The journal peak is reported, no longer
-compared: beside another suite a healthy engine's peak reached the worker-wide backoff's.
+write over the same six-second window. The guarantee is the floor: the healthy database must take
+more than twice the checkpoints the backoff allows over the window, 2 × (window / backoff + 1) =
+14, which fails every worker-wide backoff or stall of one backoff a pass. A worker-wide backoff, a
+pass that stalls a backoff for each failure, and a pass that waits out the failing database's
+backoff instead of skipping it failed it in all 45 runs across the five engines, while a healthy
+database took 105 to 3,203 checkpoints in 100 runs on three cores, half of them beside another
+engine's suite (34 to 12,444 before storage format 3, #1253). The median second's share of
+the no-fault checkpoints, which must reach a tenth, is a secondary signal (the backoff and stall
+passed it in 2 of their 45 runs). A second counts only when the no-fault engine checkpointed in it
+and neither engine's writer was starved in it, since the scheduler sometimes gives one writer no
+CPU for seconds, and a counted second's share is taken over the second and per write, the larger
+counting. A bound of half measured the machine, not the fault: each engine's checkpoints come in
+phases the two engines enter independently, and scheduling alone took the share to 0.29 over two
+seconds and the median second to 0.28 over six in loaded runs, while the backoff's share is about
+0.001. The journal peak is reported, no longer compared: beside another suite a healthy engine's
+peak reached the worker-wide backoff's.
+
+The pace test cannot be relied on to catch a slowdown smaller than one backoff a pass. Before
+storage format 3, a worker-wide pause of 250 ms after every pass left the healthy database 17 to
+23 checkpoints in the window and passed 34 of 65 runs on three cores (8 of 25 with starved seconds
+left out), because a loaded engine with no fault drops to a few checkpoints a second itself (as
+low as 0 to 9 in some seconds of 100 runs since): no bound on a count tells the two apart.
+**Required follow-up:** a deterministic signal from the checkpoint worker that does not depend on
+the machine's speed, such as an internal record of each pass and of the databases it skipped for a
+backoff, so the engines' tests can require that while one database's failures last every pass
+still visits the healthy database and the passes keep the worker's pace. The worker exposes no
+per-pass record today, so this is an engine change with a ticket of its own, not a test change.
+
 A failure that took a database offline (a failed durable flush, #1243, a failed drain of the
 journal's append buffer, #1252, or a failed header slot write, #1268) is not the worker's: the
 workers skip that database and the engine lists it in `OfflineDatabases`. The engine's pump runs a
@@ -1167,10 +1189,13 @@ offline hook now calls `TransactionCoordinator.AbandonLockWaits`, which fails ev
 the database, and every later one, with the storage's offline error, which the session translates
 into `COHSQLT004`; a lock the table can grant at once is still granted, and the storage refuses
 the work. `SqlWorkerResilienceTests` holds a row in an explicit transaction, queues an update of
-the same row, checks that the update's transaction is open and waiting before the fault, takes
-the database offline with a header slot write, journal fsync or journal drain failure (#1252: the
-drain goes offline through the same hook), and checks that the queued writer is refused within
-five seconds, naming the cause (before: it waited until the reopen in every run).
+the same row, checks before the fault that the update's transaction is open beside the holder's
+and its statement has not completed, takes the database offline with a header slot write, journal
+fsync or journal drain failure (#1252: the drain goes offline through the same hook), and checks
+that the queued writer is refused within five seconds, naming the cause (before: it waited until
+the reopen in every run). The check before the fault cannot show that the update reached the lock,
+since the lock manager reports no waiters; an update still on its way ends the same way, because a
+lock wait that begins after the database went offline is refused at once.
 
 **Buffer pool and checkpoint options (#1254).**
 

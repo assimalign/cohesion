@@ -185,23 +185,27 @@ public sealed class BlobStorageOperationsTests
     /// <summary>
     /// Under a sustained upload load the journal-size trigger keeps the journal near its
     /// configured size (#1254). The bounds are ratios to the configured size and to what was
-    /// written.
+    /// written, never an absolute time: the test runs until forty sizes of journal were written,
+    /// under a hang guard of minutes.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Each upload is 128 KiB. Since storage format 3 (#1253) the journal carries an upload's
     /// chunks about once, as page deltas, instead of as a before- and an after-image of every
     /// touched page, so a 16 KiB upload journals about 18 KiB where it journaled about 130 KiB.
     /// The larger upload keeps the number of uploads needed to write forty journal sizes near
     /// what it was: under this load every overwrite leaves a blob version that the catalog's
     /// lookup walks, so each upload costs more than the one before it.
-    ///
+    /// </para>
+    /// <para>
     /// The test counts the checkpoints that truncated the journal and bounds the journal written
     /// per truncation: on average a checkpoint must truncate it before it holds four sizes. Without
-    /// the trigger nothing truncates it, and it holds everything written, so the journal must also
-    /// never hold half of that. The largest length alone measured the scheduler as much as the
-    /// trigger: on a loaded three-core machine one checkpoint could wait long enough for the four
-    /// writers to append several sizes, and that one cycle took the peak past four sizes while
-    /// the journal written per truncation stayed under two.
+    /// the trigger nothing truncates it, and the one length holds all forty. The largest length
+    /// alone measured the scheduler as much as the trigger: on a loaded three-core machine one
+    /// checkpoint could wait long enough for the four writers to append several sizes, and that
+    /// one cycle took the peak past four sizes while the journal written per truncation stayed
+    /// under two. The peak is reported, not bounded.
+    /// </para>
     /// </remarks>
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Checkpoint trigger: the journal stays bounded under a sustained write load")]
     public async Task CheckpointJournalSize_SustainedWrites_ShouldKeepTheJournalBounded()
@@ -233,16 +237,15 @@ public sealed class BlobStorageOperationsTests
 
         // Act: sample the journal while the writers push well past the size many times over,
         // counting the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => database.DataStorage.JournalLength, 40 * size);
+        var journal = await JournalSamples.CollectAsync(() => database.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
         stop.Cancel();
         await Task.WhenAll(writers).WaitAsync(Timeout);
 
-        // Assert: tens of journal sizes were written; checkpoints truncated the journal before it
-        // held four sizes on average, and it never held half of what was written.
+        // Assert: tens of journal sizes were written, and checkpoints truncated the journal before
+        // it held four sizes on average.
         string measured = journal.Describe(size);
         journal.Written.ShouldBeGreaterThanOrEqualTo(40 * size, measured);
         journal.WrittenPerTruncation(size).ShouldBeLessThan(4.0, measured);
-        ((double)journal.Largest / journal.Written).ShouldBeLessThan(0.5, measured);
         engine.State.ShouldBe(EngineState.Running, measured);
     }
 

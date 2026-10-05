@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Text;
@@ -56,8 +55,20 @@ public sealed class SqlTimingCollection
 /// beside three busy threads, the large cascade cost up to 2.2 times the fastest single small
 /// cascade, while the two blocks stayed within 0.6 and 1.1 of each other. The quadratic walk
 /// still costs four times as much in the large block, since each small cascade walks runs a
-/// quarter as long. Each block takes the fastest of three rounds, which alternate which block
-/// runs first, after a warm-up cascade.
+/// quarter as long.
+/// </para>
+/// <para>
+/// A block is timed in the process's CPU time, not on the wall clock. The timing collection
+/// runs alone in its process (<see cref="SqlTimingCollection"/>), so another process on the
+/// machine stretches the wall clock but not the CPU this one spends deleting. On the wall
+/// clock, with another engine's suite running on the same three cores, load swung each round's
+/// cost two to four times: the engine unchanged reached 2.42 against the bound once in 40 runs,
+/// and the duplicate-run walk #1194 removed passed it in 5 of 10. In CPU time the engine
+/// unchanged measured 0.77 to 1.27, pinned to three cores or beside another suite, and the walk
+/// 2.58 to 3.58, failing all 20 of its runs. Each block takes the fastest of three rounds, which
+/// alternate which block runs first, after a warm-up round of both blocks that is not measured:
+/// the warm-up's small block cost two to three times what later ones did, the cost of compiling
+/// and tiering the paths it was first to run.
 /// </para>
 /// </remarks>
 [Collection(SqlTimingCollection.Name)]
@@ -72,7 +83,7 @@ public sealed class SqlCascadeFanOutTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Cascade: deleting a parent of 16,000 children costs per child what 4,000 children cost (#1194)")]
     public async Task Delete_WideFanOutCascade_ShouldTakeTimeLinearInChildren()
     {
-        // Arrange: a warm-up parent, then per round four small parents and one large parent,
+        // Arrange: per round four small parents and one large parent, the first round a warm-up,
         // plus a bystander parent whose children must survive every cascade.
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "cascade-fan-out" });
         var database = await engine.CreateDatabaseAsync("db");
@@ -81,8 +92,8 @@ public sealed class SqlCascadeFanOutTests
         await session.ExecuteAsync("CREATE TABLE c (id INT PRIMARY KEY, pid INT, CONSTRAINT fk_c FOREIGN KEY(pid) REFERENCES p(id) ON DELETE CASCADE)");
         await session.ExecuteAsync("CREATE INDEX c_pid ON c(pid)");
 
-        var fanOuts = new List<int> { 500 };
-        for (int round = 0; round < rounds; round++)
+        var fanOuts = new List<int>();
+        for (int round = 0; round <= rounds; round++)
         {
             fanOuts.AddRange(Enumerable.Repeat(smallFanOut, smallPerBlock));
             fanOuts.Add(largeFanOut);
@@ -97,14 +108,14 @@ public sealed class SqlCascadeFanOutTests
             nextChild = await InsertChildrenAsync(session, parent, fanOuts[parent - 1], nextChild);
         }
 
-        // Act: a warm-up cascade, then each round's two blocks, the round's order alternating.
-        await CascadeAsync(session, [1], fanOuts[0]);
+        // Act: a warm-up round, then each measured round's two blocks, the round's order alternating.
         double small = double.MaxValue;
         double large = double.MaxValue;
         var measured = new List<string>();
-        for (int round = 0; round < rounds; round++)
+        string warmUp = "";
+        for (int round = 0; round <= rounds; round++)
         {
-            int first = 2 + round * (smallPerBlock + 1);
+            int first = 1 + round * (smallPerBlock + 1);
             int[] smallParents = [.. Enumerable.Range(first, smallPerBlock)];
             int[] largeParent = [first + smallPerBlock];
             double roundSmall;
@@ -120,6 +131,13 @@ public sealed class SqlCascadeFanOutTests
                 roundSmall = await CascadeAsync(session, smallParents, smallFanOut);
             }
 
+            if (round == 0)
+            {
+                // The warm-up round pays for compiling and tiering the cascade's paths.
+                warmUp = $"{roundSmall:F1}/{roundLarge:F1}";
+                continue;
+            }
+
             small = Math.Min(small, roundSmall);
             large = Math.Min(large, roundLarge);
             measured.Add($"{roundSmall:F1}/{roundLarge:F1}");
@@ -127,8 +145,8 @@ public sealed class SqlCascadeFanOutTests
 
         // Assert: linear in the child count, and the bystander's children are intact.
         (large / small).ShouldBeLessThan(allowedGrowth,
-            $"{small:F1} us per child cascading {smallPerBlock} parents of {smallFanOut:N0} children, {large:F1} us per child cascading one of " +
-            $"{largeFanOut:N0} (fastest of the rounds' small/large: {string.Join(", ", measured)})");
+            $"{small:F1} us of CPU per child cascading {smallPerBlock} parents of {smallFanOut:N0} children, {large:F1} us per child cascading one of " +
+            $"{largeFanOut:N0} (fastest of the rounds' small/large: {string.Join(", ", measured)}; warm-up round {warmUp})");
         (await ScalarAsync(session, "SELECT COUNT(*) FROM c")).ShouldBe(100L);
         (await ScalarAsync(session, $"SELECT COUNT(*) FROM c WHERE pid = {bystander}")).ShouldBe(100L);
     }
@@ -154,19 +172,19 @@ public sealed class SqlCascadeFanOutTests
 
     /// <summary>
     /// Deletes the parents one statement each, back to back, each cascading to its
-    /// <paramref name="children"/> children, and returns the microseconds the statements
-    /// took per child.
+    /// <paramref name="children"/> children, and returns the microseconds of the process's CPU
+    /// time the statements took per child (the class remarks).
     /// </summary>
     private static async Task<double> CascadeAsync(IDatabaseSession session, int[] parents, int children)
     {
         var affected = new long[parents.Length];
-        long start = Stopwatch.GetTimestamp();
+        TimeSpan start = Environment.CpuUsage.TotalTime;
         for (int i = 0; i < parents.Length; i++)
         {
             affected[i] = (await session.ExecuteAsync($"DELETE FROM p WHERE id = {parents[i]}", cancellationToken: Timeout())).AffectedCount;
         }
 
-        double elapsed = Stopwatch.GetElapsedTime(start).TotalMicroseconds;
+        double elapsed = (Environment.CpuUsage.TotalTime - start).TotalMicroseconds;
 
         affected.ShouldAllBe(count => count == 1);
         foreach (int parent in parents)
