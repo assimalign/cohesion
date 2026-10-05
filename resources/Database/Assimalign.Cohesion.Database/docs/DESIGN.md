@@ -140,6 +140,27 @@ classDiagram
   like the fsync's. Before #1268 the engines' pumps caught outside
   `Run`'s loop, so one unexpected exception (a page write the checkpoint could not
   make) ended a checkpoint, write-back or flush worker for the life of the engine.
+- **A checkpoint that hangs or crawls holds back its own database only.** The per-database
+  backoff above bounds how often a failing database is tried, not how long one try takes:
+  the checkpoint worker used to run every database's checkpoint on its own thread, so a
+  device that took seconds to answer an fsync, or to fail a write, stopped every other
+  database's journal truncation for as long (a hung data-file fsync in one database left
+  the other with no checkpoint at all in five seconds of writes). The engines' checkpointer
+  is now one shared copy, `shared/DatabaseCheckpointWorker.cs`, that runs each database's
+  checkpoint on a lane (`shared/DatabaseCheckpointLanes.cs`): a dedicated lane thread,
+  at most one checkpoint per database at a time. The pass waits for the lane while no
+  other database needs the worker, so a checkpoint that ends is settled by the pass that
+  started it, as before. Once another database's journal reaches its size (the engine's
+  checkpoint signal), or the poll interval passes, the pass leaves the checkpoint running
+  alone; later passes skip that database, keeping a failure recorded for it, until the
+  checkpoint ends, and the pass that finds it ended settles it. Engine disposal waits for
+  a checkpoint left running before it closes the storages. This is the isolation Neo4j
+  gets from one checkpoint job per database, each rescheduled only after its run ended
+  (`community/kernel/src/main/java/org/neo4j/kernel/database/Database.java:1155-1157`,
+  `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:51-84`),
+  and PostgreSQL from one checkpointer per cluster and WAL
+  (`src/backend/postmaster/checkpointer.c:5`). The page write-back, flush and purge
+  workers still visit their databases on their own thread (follow-up).
 - **A failure that never clears is retried forever (owner decision pending).** A page
   write the checkpoint can never make leaves its database's journal untruncated, so the
   journal grows until the fault clears or the disk fills, with the engine `Faulted` and

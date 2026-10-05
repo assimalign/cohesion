@@ -1182,9 +1182,11 @@ defaults and their reasoning — PostgreSQL's 128 MB `shared_buffers`, 1 GB `max
 triggers"). The same options are on `ISqlDatabaseEngineBuilder`. The configured capacity applies
 to databases created and reopened.
 
-The checkpoint worker visits the engine's databases in turn on one thread and never waits for a
-statement: when one holds a database's apply gate, `TransactionCoordinator.TryCheckpoint` defers
-that database's checkpoint to the statement's end, and the worker moves on. Before the #1254
+The checkpoint worker visits the engine's databases in turn and never waits for a statement: when
+one holds a database's apply gate, `TransactionCoordinator.TryCheckpoint` defers that database's
+checkpoint to the statement's end, and the worker moves on. Each database's checkpoint, its data
+set and then its catalog set, runs on a lane of its own, so a checkpoint that hangs in its device
+holds back that database only (the engines' shared checkpointer, `Database` DESIGN.md). Before the #1254
 review it waited for the gate without a bound, so a long statement in one database (an index
 build, an `INSERT ... SELECT`) stopped every other database's checkpoints, and a probe's second
 database grew its journal to 130 times a 4 MiB size in six seconds. A checkpoint stalls every

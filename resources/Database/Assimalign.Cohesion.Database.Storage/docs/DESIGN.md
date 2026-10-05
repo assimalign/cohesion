@@ -1000,8 +1000,9 @@ matter how often the worker tried. A data storage's checkpoint therefore runs un
 transaction coordinator's statement apply gate (`Database.Transactions` DESIGN.md, "Recovery
 and checkpoint interlock"), between two statements.
 
-One worker visits every database of an engine in turn, so it must not wait for any one
-database's gate: a long statement there (an index build, an `INSERT ... SELECT`, a large upload
+One worker visits every database of an engine in turn (each checkpoint then runs on a lane of
+its own, so a device that hangs holds back its database only; `Database` DESIGN.md), so it must
+not wait for any one database's gate: a long statement there (an index build, an `INSERT ... SELECT`, a large upload
 bracket) would stop every other database's checkpoints, and the #1254 review measured a second
 database's journal at 130 times a 4 MiB size after six seconds of that. The worker calls
 `TransactionCoordinator.TryCheckpoint(TimeSpan.Zero, …)`: when the gate is free it checkpoints at
