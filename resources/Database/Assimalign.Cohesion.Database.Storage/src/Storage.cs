@@ -923,13 +923,15 @@ public abstract class Storage : IStorage
                 // records that stamped it: under CommitDurability.None the write-ahead gate only
                 // drains the journal, so a power loss can keep a stolen page and lose the journal
                 // tail its image and deltas were in; a journal file lost or restored from an older
-                // copy does the same. Its LSN is taken only from a page that verifies — a damaged
-                // header must not move LSNs, and the page fails its checksum when it is read.
+                // copy does the same. Its LSN is taken only from a page whose stamped checksum
+                // verifies, as every write-back leaves it: a damaged header must not move LSNs (the
+                // page fails its checksum when it is read), and neither may a page whose checksum
+                // field reads zero, which is never verified.
                 if (pageLsn > redoLsn && pageLsn > strayLsn && !recovery.RebuiltPages.Contains(i))
                 {
                     pageBuffer ??= new byte[Page.Size];
                     Data.ReadPage((PageId)i, pageBuffer);
-                    if (PageChecksum.TryVerify(pageBuffer, out _, out _))
+                    if (PageChecksum.TryVerify(pageBuffer, out uint stored, out _) && stored != 0)
                     {
                         strayLsn = pageLsn;
                     }

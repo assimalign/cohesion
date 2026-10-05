@@ -1081,7 +1081,7 @@ LSN:
      header generation persists the floor, a non-checkpoint one too (`Flush`, a non-idle
      shutdown), which truncates nothing: C then lies above images still in the journal, which is
      why P places the image only below the page's LSN. And the LSN of every page recovery did not
-     rebuild, read by the open's page scan from a page that verifies (#1253 review): such a page
+     rebuild, read by the open's page scan from a page whose stamped checksum verifies (#1253 review): such a page
      has no record in the journal, yet its LSN can be above the other two when the journal lost
      the records that stamped it — under `CommitDurability.None` the write-ahead gate drains the
      journal without an fsync, so a power loss can keep a stolen page and lose the journal's tail;
@@ -1264,12 +1264,13 @@ the journal lost the records that stamped it after the page was written — a po
 `CommitDurability.None`, whose write-ahead gate drains the journal without an fsync, or a journal
 file lost or restored from an older copy. So the open's scan of every page header, which rebuilds
 the free-space map, also reads the LSN of each allocated page recovery did not rebuild; when one
-is above the redo point and the page verifies, the open raises the journal's next LSN above it
-and moves the redo point to it (#1253 review). Without that, LSNs restarted below the page's, the
-page journaled no image (it was above the redo point), its next delta named a base no record
-produced, and the next open refused the file set as a chain gap; in format 2 the same case lost
-the later commit silently. A page that does not verify moves nothing: it fails its checksum when
-it is read.
+is above the redo point and the page's stamped checksum verifies, the open raises the journal's
+next LSN above it and moves the redo point to it (#1253 review). Without that, LSNs restarted
+below the page's, the page journaled no image (it was above the redo point), its next delta named
+a base no record produced, and the next open refused the file set as a chain gap; in format 2 the
+same case lost the later commit silently. A page that does not verify moves nothing (it fails its
+checksum when it is read), and neither does one whose checksum field reads zero, which no
+write-back leaves and nothing verifies (`StorageRedoTests`, "a damaged page's header LSN").
 
 **The checkpoint anchor (#1226 integration review, #1242).** `Checkpoint(ReadOnlySpan<long>)`
 also writes the logical sequences it is given into the new header generation, before the

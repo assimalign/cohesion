@@ -771,6 +771,38 @@ public sealed class StorageRedoTests
         again.Read(pageId, slot).ShouldBe("v3");
     }
 
+    /// <summary>
+    /// Only a page whose stamped checksum verifies may move LSNs at open: a damaged header — or one
+    /// whose checksum field was zeroed, which reads as a page never stamped — would otherwise push
+    /// every later LSN toward the end of the range.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Redo: a damaged page's header LSN moves neither the redo point nor the next LSN")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Open_DamagedPageAboveTheJournal_ShouldNotMoveLsns(bool zeroChecksum)
+    {
+        // Arrange: a checkpointed page whose LSN field is overwritten on the media, its checksum
+        // left stale or zeroed.
+        const long damagedLsn = long.MaxValue / 2;
+        var storage = TornStorage.Create(); // abandoned: a crash
+        var (pageId, _) = storage.Insert("v1");
+        storage.Checkpoint();
+        var images = storage.CaptureDurable();
+        int pageStart = (int)((long)pageId * Page.Size);
+        BinaryPrimitives.WriteInt64LittleEndian(images.Data.AsSpan(pageStart + Page.LsnFieldOffset), damagedLsn);
+        if (zeroChecksum)
+        {
+            images.Data.AsSpan(pageStart + Page.ChecksumFieldOffset, sizeof(uint)).Clear();
+        }
+
+        // Act
+        using var reopened = TornStorage.Open(images);
+
+        // Assert
+        reopened.RedoLsn.ShouldBeLessThan(damagedLsn);
+        reopened.Log.LastLsn.ShouldBeLessThan(damagedLsn);
+    }
+
     // ---------------------------------------------------------------- a commit's durable wait (#1018)
 
     /// <summary>
