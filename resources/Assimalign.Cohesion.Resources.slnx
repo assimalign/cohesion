@@ -505,6 +505,9 @@
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Security/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Security/src/Assimalign.Cohesion.Database.Security.csproj" />
 	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Security/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Security/tests/Assimalign.Cohesion.Database.Security.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql/docs/">
 		<File Path="Database/Assimalign.Cohesion.Database.Sql/docs/DESIGN.md" />

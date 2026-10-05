@@ -3,11 +3,23 @@
 Security contracts shared by all five models (area architecture:
 [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)). This project stays a leaf of
 contracts: mechanisms (key storage, token validation, credential stores) belong
-to implementations composed by the host, never here.
+to implementations composed by the host, never here. Its tests
+(`tests/DatabaseAuthenticatorTests.cs`) pin what the base checks before an
+implementation's core runs.
 
 ## Why-this-not-that decisions
 
-- **`IDatabaseAuthenticator` lives here, not with the server runtime
+- **`DatabaseAuthenticator` is an abstract class, not an interface.** The Database
+  area is concrete-first (`.claude/rules/database-area.md`), and this base is an
+  inverted seam: the model servers in other assemblies call it, and the application
+  implements it, so its constructor is `protected`. The public `AuthenticateAsync` is
+  non-virtual. It rejects a null database or principal and a canceled token, then
+  calls the `protected abstract AuthenticateCoreAsync`, so an implementation never
+  sees a null name or an already-canceled call. `AllowAll` is a static property on the
+  base that returns an internal leaf (the `Aes.Create()` shape). The base replaced the
+  `IDatabaseAuthenticator` interface and the static `DatabaseAuthenticator` factory
+  class in #1258.
+- **The authenticator lives here, not with the server runtime
   (`Database.Hosting`).** The server
   *drives* the handshake, but who-is-this is a security question that embedded
   hosts, replication peers, and future admin surfaces also need to answer. Homing
@@ -39,11 +51,12 @@ to implementations composed by the host, never here.
 None of its own yet: authenticators return false rather than throw for a failed
 attempt (the server maps false to the wire's `AuthenticationFailed` error);
 throwing is reserved for infrastructure failures, which surface as the
-implementation's own exceptions.
+implementation's own exceptions. The base throws only `ArgumentNullException` and
+`OperationCanceledException`, before the core runs.
 
 ## AOT posture
 
-Contracts plus one branch-free internal implementation — nothing to trim.
+One abstract base plus one branch-free internal implementation — nothing to trim.
 
 ## Non-goals
 

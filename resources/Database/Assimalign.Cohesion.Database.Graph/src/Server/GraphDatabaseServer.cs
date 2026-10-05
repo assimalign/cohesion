@@ -30,7 +30,7 @@ public sealed class GraphDatabaseServer : IDatabaseServer
 {
     private readonly GraphDatabaseServerOptions _options;
     private readonly IConnectionListener _listener;
-    private readonly IDatabaseAuthenticator _authenticator;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly GraphDatabaseServerContext _context;
     private readonly ConcurrentDictionary<Guid, GraphDatabaseServerSession> _sessions = new();
 

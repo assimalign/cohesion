@@ -404,6 +404,9 @@
 	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Security/src/">
 		<Project Path="Assimalign.Cohesion.Database.Security/src/Assimalign.Cohesion.Database.Security.csproj" />
 	</Folder>
+	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Security/tests/">
+		<Project Path="Assimalign.Cohesion.Database.Security/tests/Assimalign.Cohesion.Database.Security.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql/" />
 	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql/docs/">
 		<File Path="Assimalign.Cohesion.Database.Sql/docs/DESIGN.md" />

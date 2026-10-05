@@ -30,7 +30,7 @@ public sealed class GraphDatabaseServerOptions
     /// the MVP development posture, which accepts every principal. Production
     /// deployments must supply a real implementation.
     /// </summary>
-    public IDatabaseAuthenticator? Authenticator { get; set; }
+    public DatabaseAuthenticator? Authenticator { get; set; }
 
     /// <summary>
     /// Gets or sets the maximum number of concurrent sessions the server accepts.

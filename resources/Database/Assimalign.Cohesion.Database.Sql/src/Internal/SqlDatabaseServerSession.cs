@@ -24,7 +24,7 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
     private readonly IConnection _connection;
     private readonly SqlDatabaseServerOptions _options;
     private readonly IDatabaseEngine _engine;
-    private readonly IDatabaseAuthenticator _authenticator;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
 
     private ProtocolFrameReader? _reader;
@@ -37,7 +37,7 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
         IConnection connection,
         SqlDatabaseServerOptions options,
         IDatabaseEngine engine,
-        IDatabaseAuthenticator authenticator)
+        DatabaseAuthenticator authenticator)
     {
         _server = server;
         _connection = connection;

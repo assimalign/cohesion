@@ -45,7 +45,7 @@ public sealed class SqlDatabaseServer : IDatabaseServer
 {
     private readonly SqlDatabaseServerOptions _options;
     private readonly IConnectionListener _listener;
-    private readonly IDatabaseAuthenticator _authenticator;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly SqlDatabaseServerContext _context;
     private readonly ConcurrentDictionary<Guid, SqlDatabaseServerSession> _sessions = new();
 

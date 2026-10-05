@@ -23,7 +23,7 @@ public sealed class BlobDatabaseServer : IDatabaseServer
 {
     private readonly BlobDatabaseServerOptions _options;
     private readonly IConnectionListener _listener;
-    private readonly IDatabaseAuthenticator _authenticator;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly BlobDatabaseServerContext _context;
     private readonly ConcurrentDictionary<Guid, BlobDatabaseServerSession> _sessions = new();
     private readonly ConcurrentDictionary<Guid, Task> _rejections = new();

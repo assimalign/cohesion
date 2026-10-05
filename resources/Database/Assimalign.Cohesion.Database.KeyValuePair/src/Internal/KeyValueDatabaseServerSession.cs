@@ -26,7 +26,7 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
     private readonly IConnection _connection;
     private readonly KeyValueDatabaseServerOptions _options;
     private readonly IDatabaseEngine _engine;
-    private readonly IDatabaseAuthenticator _authenticator;
+    private readonly DatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
 
     private ProtocolFrameReader? _reader;
@@ -39,7 +39,7 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
         IConnection connection,
         KeyValueDatabaseServerOptions options,
         IDatabaseEngine engine,
-        IDatabaseAuthenticator authenticator)
+        DatabaseAuthenticator authenticator)
     {
         _server = server;
         _connection = connection;

@@ -378,14 +378,14 @@ public sealed class BlobDatabaseServerTests
         }
     }
 
-    private sealed class RejectAuthenticator : IDatabaseAuthenticator
+    private sealed class RejectAuthenticator : DatabaseAuthenticator
     {
         internal string? Database { get; private set; }
         internal string? Principal { get; private set; }
         internal byte[]? Evidence { get; private set; }
-        public ValueTask<bool> AuthenticateAsync(string database, string principal, ReadOnlyMemory<byte> evidence, CancellationToken cancellationToken = default)
+        // The base's AuthenticateAsync observes a canceled token before this core runs.
+        protected override ValueTask<bool> AuthenticateCoreAsync(string database, string principal, ReadOnlyMemory<byte> evidence, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
             Database = database;
             Principal = principal;
             Evidence = evidence.ToArray();

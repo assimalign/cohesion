@@ -234,7 +234,7 @@ interface is deleted in P6.
 | 24 | `IProtocolFrameReader` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameReader : IAsyncDisposable`, with a protected constructor, because its leaves live in Protocol, Database.Client and Blob.Client. NVI `ReadFrameAsync` calls `ReadFrameCoreAsync`, and a non-virtual `DisposeAsync` calls `DisposeAsyncCore` (the interface extends `IAsyncDisposable` today, `IProtocolFrameReader.cs:10`). `public static ProtocolFrameReader Create(Stream, bool leaveOpen = false)` replaces `ProtocolFraming.CreateReader`. **Landed at P2 (re-verified):** four leaves, as counted: the internal stream reader, `ProtocolChannel`'s private family reader, Database.Client's `ClientFrameReader` and Blob.Client's private error reader. `DisposeAsyncCore` is a `protected virtual` lifecycle hook with an empty default, which Blob's view over the pooled reader keeps. The NVI members add no check: the interface carried none, and P2 changes no behaviour. Public carriers retyped with it: `ProtocolChannel.Reader`, the parameters of Database.Client's `IDatabaseProtocolExchange<TResult>.ExecuteAsync` and `IDatabaseStreamingExchange.OpenAsync`/`CopyToAsync` (the interfaces themselves go in P5, rows 51 and 52), and `BlobProtocolTransfer`'s three frame-endpoint overloads. | P2 |
 | 25 | `IProtocolFrameWriter` | Protocol `:10` | child root | abstract | `public abstract class ProtocolFrameWriter : IAsyncDisposable`. NVI `WriteFrameAsync` calls `WriteFrameCoreAsync`, and `DisposeAsync` calls `DisposeAsyncCore`. `Create(Stream, bool)` replaces `ProtocolFraming.CreateWriter`. **Landed at P2 (re-verified):** the interface also had `FlushAsync`, which the plan missed; it becomes an NVI member over `protected abstract FlushCoreAsync`. Four leaves, mirroring row 24. The payload bound (`ProtocolFrameHeader.MaxPayloadLength`) stays in the stream writer's core, the one writer that encodes the envelope; in the base it would run before `ProtocolChannel`'s family check and change which error a frame failing both reports. `ProtocolChannel.Writer` and the carriers of row 24 are retyped. | P2 |
 | 26 | `IAuthorizationService` | Security `:9` | child root | delete | It has no implementer anywhere. | P1 |
-| 27 | `IDatabaseAuthenticator` | Security `:18` | child root | abstract | `public abstract class DatabaseAuthenticator`, with a protected constructor. NVI `AuthenticateAsync` calls `AuthenticateCoreAsync`. It absorbs `public static class DatabaseAuthenticator` (`DatabaseAuthenticator.cs:8`) as `public static DatabaseAuthenticator AllowAll`. | P2 |
+| 27 | `IDatabaseAuthenticator` | Security `:18` | child root | abstract | `public abstract class DatabaseAuthenticator`, with a protected constructor. NVI `AuthenticateAsync` calls `AuthenticateCoreAsync`. It absorbs `public static class DatabaseAuthenticator` (`DatabaseAuthenticator.cs:8`) as `public static DatabaseAuthenticator AllowAll`. **Landed at P2 (re-verified):** `AuthenticateAsync` rejects a null database or principal (`ArgumentNullException`) and a canceled token before the core runs. The cancellation check moved out of the internal `AllowAllDatabaseAuthenticator`, which already made it, so the shipped path is unchanged; the servers pass decoded wire strings, which are never null. Public carriers retyped: the four servers' `Authenticator` option (`Sql`, `KeyValue`, `Graph` and `Blob` `DatabaseServerOptions`); Studio sets it to `null` and compiles unchanged. A new Database.Security test project pins the base's checks (Security had none). | P2 |
 | 28 | `IStorage` | Storage `:16` | child root | delete | Consumers retype to the existing abstract `Storage`. The default member `EnsureCommitDurable` (`IStorage.cs:218`) already exists as `Storage.EnsureCommitDurable` (`Storage.cs:219`), and the explicit implementation (`Storage.cs:241`) goes. Two Transactions.Tests doubles re-implement `IStorage.Checkpoint` and `ReserveTransactionSequence`, which are non-virtual on `Storage` (`:549`, `:467`); their hooks move to the coordinator in P1 (§6.9). | P1 |
 | 29 | `IStorageBackupManager` | Storage `:9` | child root | delete | It has no implementer and no reference. | P1 |
 | 30 | `IStorageBufferPool` | Storage `:15` | child root | delete | `StorageBufferPool` stays internal sealed, and the public `Storage.BufferPool` (`Storage.cs:117`) becomes internal. Only Storage.Tests reads it (`StorageConcurrencyTests.cs:211`, `:338`), through Storage's existing grant. | P1 |
@@ -658,6 +658,11 @@ Documents.Language, Blob and Hosting.
 - **Authenticator doubles** derive from `DatabaseAuthenticator` (P2). They are in KeyValuePair
   (`TestObjects/RejectingAuthenticator.cs:12`), Sql (`TestObjects/RejectingAuthenticator.cs:12`),
   Blob (`BlobDatabaseServerTests.cs:381`) and KeyValuePair.Client (`KeyValueClientTests.cs:202`).
+  **Landed at P2:** each overrides `AuthenticateCoreAsync`; Blob's `RejectAuthenticator` drops
+  its own cancellation check, which the base now makes. The frame-endpoint parameters of the
+  client exchange doubles (P5, below) and of the Sql, KeyValuePair and Graph test protocol
+  clients and exchanges are retyped to the bases in P2; the doubles still implement the P5
+  exchange interfaces.
 - **Client exchange doubles** derive from the exchange bases (P5):
   - Database.Client `StreamingClientTestHarness.cs:184` and `:254`;
   - `DatabaseProtocolExchangeTests.cs:58` and `:82`;
@@ -812,6 +817,17 @@ dependency order, and each updates its consumers mechanically:
 3. **Indexing:** rows 19 to 23, and §6.3.
 4. **Protocol:** rows 24 and 25, and the `ProtocolFraming` removal.
 5. **Security:** row 27.
+
+**Protocol and Security, re-verified and landed at P2 (wire track).** Rows 24, 25 and 27 held
+against the code after #1251 to #1253 and P1, with two corrections: `IProtocolFrameWriter` also
+had `FlushAsync` (row 25), and the public carriers the rows did not name are retyped with them
+(`ProtocolChannel.Reader`/`Writer`, the Database.Client exchange interfaces' frame parameters,
+`BlobProtocolTransfer`, the four servers' `Authenticator` option). Neither project had a §5.3
+audit. The Protocol and Security `Abstractions/` folders are gone with their last interfaces
+(rule 11). No caller in Hosting, Embedded, Testing, Studio or the Sdk named these types. The
+Protocol, Database.Client, every model client and server suite, Hosting and Embedded run
+unchanged; Database.Security gains its first test project (`DatabaseAuthenticatorTests`, five
+tests) for the base's argument and cancellation checks.
 
 *Gate:* the crash and durability suites (`CrashRecoveryTests`, the crash-capture and
 fault-injection strategies), and #1226's lock-retention tests. An optional NativeAOT
