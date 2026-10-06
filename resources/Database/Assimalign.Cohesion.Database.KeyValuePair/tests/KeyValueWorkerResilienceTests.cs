@@ -675,7 +675,7 @@ public sealed class KeyValueWorkerResilienceTests
     }
 
     // What a database's two growing files hold together: the bound the pace window keeps under.
-    private static long FileBytes(KeyValueDatabaseInstance database)
+    private static long FileBytes(KeyValueDatabase database)
         => database.DataStorage.Data.Length + database.DataStorage.JournalLength;
 
     private static KeyValueDatabaseEngineOptions Options(FaultInjectingJournalStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
