@@ -2,12 +2,12 @@
 
 `Assimalign.Cohesion.Database.Graph` is the embedded property-graph engine. It creates, opens,
 enumerates and drops logical databases, opens database-bound sessions, and implements the frozen
-`IGraphDatabase` node, relationship and traversal operations. A session executes the bounded GQL
+node, relationship and traversal operations of `GraphDatabase`. A session executes the bounded GQL
 subset described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).
 
 ```csharp
 await using var engine = GraphDatabaseEngine.Create(new() { RootPath = "graphs" });
-var graph = (IGraphDatabase)await engine.CreateDatabaseAsync("people");
+var graph = await engine.CreateDatabaseAsync("people");
 await using var session = await graph.CreateSessionAsync();
 await session.ExecuteAsync("INSERT (a:Person {name:'Ada'})-[r:KNOWS]->(b:Person {name:'Grace'})");
 await GraphSchema.Open(graph, session).CreateIndexAsync("Person", "by_name", "name");
@@ -18,10 +18,16 @@ await using var result = await session.ExecuteAsync(
 `GraphSchema.Open` supplies session-bound label/type discovery, property metadata, ownership
 enforcement and node-property index creation. `AddGraph((context, engine) => ...)`
 captures construction through `IDatabaseApplicationBuilder` and returns that builder.
-The callback runs at Build with `IGraphDatabaseEngineBuilder`, whose options include
-an optional borrowed `IGraphStorageStrategy`. Workers and servers register as nested
-factories; the built engine owns their products. Creating the engine starts its four
-built-in maintenance workers; application Start starts the nested servers.
+The callback runs at Build with the sealed `GraphDatabaseEngineBuilder`. Workers and
+servers register as nested factories typed over `GraphDatabaseEngine`; the built engine
+owns their products. Creating the engine starts its four built-in maintenance workers;
+application Start starts the nested servers.
+
+The engine, database, session, transaction, server and builder are sealed types; the first
+five are leaves of the area root's bases (`DatabaseEngine`, `DatabaseInstance`,
+`DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`), which own the shared lifecycle,
+the explicit-transaction state machine and their checks, so the typed members need no casts
+(concrete-types plan, phase 4; DESIGN.md, "Concrete types").
 
 A failed journal or data fsync takes the database offline: every later operation, in process
 and over the server, is refused with `DatabaseOfflineException` (`COHDBG012`) until

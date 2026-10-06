@@ -108,7 +108,7 @@ public sealed class GqlProfileExecutionTests
                 statement.Diagnostics.ShouldBeEmpty($"{clause}: {executionCase.Statement}");
                 UsesClause(clause, statement.GqlExpression).ShouldBeTrue($"The {clause} case must exercise its clause: {executionCase.Statement}");
                 await using var engine = GraphDatabaseEngine.Create(new());
-                var database = (IGraphDatabase)await engine.CreateDatabaseAsync("audit", token);
+                var database = await engine.CreateDatabaseAsync("audit", token);
                 await using var session = await database.CreateSessionAsync(token);
                 await GraphSchema.Open(database, session).SaveLabelAsync(new(_personLabelId, "Person"), token);
                 await GraphSchema.Open(database, session).SaveLabelAsync(new(_robotLabelId, "Robot"), token);
@@ -208,7 +208,7 @@ public sealed class GqlProfileExecutionTests
     private static ExecutionCase Mutation(string statement, long affectedCount, params ExecutionCase[] verification)
         => new(statement, [], affectedCount, verification);
 
-    private static async Task ExecuteAndVerifyAsync(IDatabaseSession session, ExecutionCase executionCase,
+    private static async Task ExecuteAndVerifyAsync(GraphDatabaseSession session, ExecutionCase executionCase,
         string clause, CancellationToken cancellationToken)
     {
         string context = $"{clause}: {executionCase.Statement}";

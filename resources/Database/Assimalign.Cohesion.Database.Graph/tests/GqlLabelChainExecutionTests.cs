@@ -112,7 +112,7 @@ public sealed class GqlLabelChainExecutionTests
     {
         // Arrange: ten nodes, each carrying 50 of D0..D499.
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("distinct", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("distinct", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         string[] names = Enumerable.Range(0, 500).Select(i => "D" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
         string insert = "INSERT " + string.Join(", ", names.Chunk(50).Select((group, index) =>
@@ -197,7 +197,7 @@ public sealed class GqlLabelChainExecutionTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("precedence", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("precedence", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("INSERT (:A {name: 'a'}), (:B {name: 'b'}), (:C {name: 'c'}), (:A:B {name: 'ab'}), " +
             "(:B:C {name: 'bc'}), ({name: 'u'})", cancellationToken: CancellationToken.None);
@@ -418,7 +418,7 @@ public sealed class GqlLabelChainExecutionTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("keys", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("keys", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         string longName = new('n', 600);
         await session.ExecuteAsync("INSERT (:X {name: 'x'}), (:Y {name: '" + longName + "'})", cancellationToken: CancellationToken.None);
@@ -454,7 +454,7 @@ public sealed class GqlLabelChainExecutionTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("anchor-cost", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("anchor-cost", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         string[] hundred = labels.Take(100).ToArray();
         await session.ExecuteAsync("INSERT (:" + string.Join("&", hundred) + " {name: 'all'}), (:A:B {p: 1, q: 2, name: 'ab'}), " +
@@ -507,7 +507,7 @@ public sealed class GqlLabelChainExecutionTests
         string emoji = string.Concat(Enumerable.Repeat("\U0001F600", 200));
         var expression = new GqlLabelDisjunction([new GqlLabelName(emoji), new GqlLabelName("X")]);
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("surrogates", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("surrogates", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var strict = new UTF8Encoding(false, true);
 
@@ -526,9 +526,9 @@ public sealed class GqlLabelChainExecutionTests
     }
 
     // all: L0..L199; even: the even ones; x: X; u: unlabeled. all has one T<i> edge to even per type.
-    private static async Task<IDatabaseSession> SeedAsync(GraphDatabaseEngine engine)
+    private static async Task<GraphDatabaseSession> SeedAsync(GraphDatabaseEngine engine)
     {
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("chains", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("chains", CancellationToken.None);
         var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("INSERT (:" + string.Join("&", labels) + " {name: 'all'}), " +
             "(:" + string.Join("&", labels.Where((_, i) => i % 2 == 0)) + " {name: 'even'}), (:X {name: 'x'}), ({name: 'u'})",
@@ -542,7 +542,7 @@ public sealed class GqlLabelChainExecutionTests
     private static string Chain(string[] names, string separator)
         => string.Join(separator, Enumerable.Range(0, chainLength).Select(i => names[i % names.Length]));
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string gql)
+    private static async Task<List<object?[]>> RowsAsync(GraphDatabaseSession session, string gql)
     {
         await using var result = (QueryResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
         var rows = new List<object?[]>();
@@ -553,14 +553,13 @@ public sealed class GqlLabelChainExecutionTests
         return rows;
     }
 
-    private static async Task<List<string?>> ColumnAsync(IDatabaseSession session, string gql)
+    private static async Task<List<string?>> ColumnAsync(GraphDatabaseSession session, string gql)
         => (await RowsAsync(session, gql)).Select(row => (string?)row[0]).ToList();
 
-    private static ValueTask<GraphPlan> PlanAsync(IGraphDatabase database, IDatabaseSession session, string gql)
+    private static ValueTask<GraphPlan> PlanAsync(GraphDatabase database, GraphDatabaseSession session, string gql)
     {
-        var instance = (GraphDatabaseInstance)database;
-        return instance.RunAsync((GraphDatabaseSession)session, operation => new ValueTask<GraphPlan>(
-            new GraphPlanner(instance, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql(gql).Statement.GqlExpression)), CancellationToken.None);
+        return database.RunAsync(session, operation => new ValueTask<GraphPlan>(
+            new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql(gql).Statement.GqlExpression)), CancellationToken.None);
     }
 
     /// <summary>

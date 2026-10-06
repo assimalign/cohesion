@@ -5,7 +5,7 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>
-/// The definitions an <see cref="IGraphSchema"/> read returns, with the warnings the read reported.
+/// The definitions a <see cref="GraphSchema"/> read returns, with the warnings the read reported.
 /// </summary>
 /// <typeparam name="T">The definition type.</typeparam>
 /// <remarks>

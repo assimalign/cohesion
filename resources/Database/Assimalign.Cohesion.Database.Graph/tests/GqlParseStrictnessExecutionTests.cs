@@ -38,7 +38,7 @@ public sealed class GqlParseStrictnessExecutionTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("strictness", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("strictness", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync(Seed, cancellationToken: CancellationToken.None);
         var statement = (GqlQueryStatement)new GqlQueryParser().Parse(gql);
@@ -57,7 +57,7 @@ public sealed class GqlParseStrictnessExecutionTests
         (await NamesAsync(session, "MATCH (a)-[r:KNOWS]->(b) RETURN b.name")).ShouldBe(["Bob"]);
     }
 
-    private static async Task<List<string?>> NamesAsync(IDatabaseSession session, string gql)
+    private static async Task<List<string?>> NamesAsync(GraphDatabaseSession session, string gql)
     {
         await using var result = (QueryResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
         var names = new List<string?>();

@@ -82,7 +82,7 @@ public sealed class GraphLabelChainWireTests
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.ExecuteAsync("CREATE (:L0 {name: 'one'})", cancellationToken: harness.Token);
-        Guid sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
@@ -94,7 +94,7 @@ public sealed class GraphLabelChainWireTests
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (n) RETURN n.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("one");
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
     /// <summary>300 labels of 33 characters, and a 9,000-character property.</summary>
@@ -115,7 +115,7 @@ public sealed class GraphLabelChainWireTests
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.ExecuteAsync("CREATE (:L0 {name: 'one'})", cancellationToken: harness.Token);
-        Guid sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
@@ -128,7 +128,7 @@ public sealed class GraphLabelChainWireTests
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (n) RETURN n.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("one");
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
     /// <summary>
@@ -157,7 +157,7 @@ public sealed class GraphLabelChainWireTests
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.ExecuteAsync("CREATE (:L0 {name: 'one'})", cancellationToken: harness.Token);
-        Guid sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         string gql = string.Format(CultureInfo.InvariantCulture, template,
             string.Concat(Enumerable.Repeat(open, depth)) + leaf + new string(')', depth));
 
@@ -171,7 +171,7 @@ public sealed class GraphLabelChainWireTests
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (n:L0|%) RETURN n.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("one");
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
     private static string Chain(string separator) => Chain(labels, separator);

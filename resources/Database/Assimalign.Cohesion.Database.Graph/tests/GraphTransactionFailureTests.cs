@@ -6,7 +6,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Catalog;
-using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
@@ -36,7 +35,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Keep {name: 'k'})-[:LINK]->(:Keep {name: 'j'})");
         var transaction = await session.BeginTransactionAsync(isolation);
@@ -69,7 +68,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var seed = await database.CreateNodeAsync(session, ["Keep"]);
         var schema = GraphSchema.Open(database, session);
@@ -115,7 +114,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:Pending {name: 'p'})");
@@ -142,7 +141,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:Pending)");
@@ -165,7 +164,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange: Required demands an Int64 'age' on every Required node, so the second node of the insert fails.
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, session);
         var required = new GraphLabelMetadata(Guid.NewGuid(), "Required");
@@ -192,7 +191,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var failed = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
         await using var transaction = await failed.BeginTransactionAsync();
@@ -215,7 +214,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Keep)");
 
@@ -236,7 +235,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN m.name"));
@@ -257,7 +256,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:Pending)");
@@ -282,7 +281,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var blocker = await database.CreateSessionAsync();
         await using var waiting = await database.CreateSessionAsync();
         var blocking = await blocker.BeginTransactionAsync();
@@ -313,7 +312,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:Pending)");
@@ -335,7 +334,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var seed = await database.CreateNodeAsync(session, ["Keep"]);
         var transaction = await session.BeginTransactionAsync();
@@ -371,7 +370,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var rolledBack = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:Discarded)");
@@ -384,8 +383,8 @@ public sealed class GraphTransactionFailureTests
         await rolledBack.RollbackAsync();
         var refusal = await Should.ThrowAsync<DatabaseException>(async () => await committed.RollbackAsync());
 
-        // Assert
-        refusal.Message.ShouldContain("Committed", Case.Sensitive);
+        // Assert: the root base's message (concrete-types plan §6.4), the one the model carried.
+        refusal.Message.ShouldBe("The transaction is Committed; a committed transaction cannot roll back.");
         rolledBack.State.ShouldBe(TransactionState.RolledBack);
         committed.State.ShouldBe(TransactionState.Committed);
         (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Kept"]);
@@ -397,7 +396,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:First)");
@@ -418,6 +417,354 @@ public sealed class GraphTransactionFailureTests
     }
 
     /// <summary>
+    /// A commit of a transaction its caller already rolled back is refused by state, with the root
+    /// base's message (concrete-types plan §6.4), the one the model carried.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: COMMIT after ROLLBACK is refused with the transaction's state")]
+    public async Task CommitAsync_AfterRollback_ShouldBeRefusedWithTheState()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT (:Discarded)");
+        await transaction.RollbackAsync();
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+
+        // Assert
+        refusal.Message.ShouldBe("The transaction is RolledBack.");
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await Rows(session, "SHOW LABELS")).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Every commit of a transaction a statement aborted reports <c>COHDBG007</c> with the
+    /// statement's failure as its cause (concrete-types plan §6.4): the second one too, where the
+    /// model's own state machine reported "The transaction is RolledBack." once the first commit
+    /// had ended the transaction.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: every COMMIT of an aborted transaction reports COHDBG007 with the cause")]
+    public async Task CommitAsync_AgainAfterAbortedCommit_ShouldReportTheCodedCause()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT (:Pending)");
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN m.name"));
+
+        // Act
+        var first = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        var second = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        await transaction.RollbackAsync();
+
+        // Assert
+        first.Message.ShouldStartWith("COHDBG007: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        second.Message.ShouldBe(first.Message);
+        second.InnerException.ShouldBeSameAs(failure);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await Rows(session, "SHOW LABELS")).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A transaction whose session closed before the caller ended it was rolled back by the
+    /// session's teardown, and a later commit reports <c>COHDBG007</c> naming why (concrete-types
+    /// plan §6.4): "The session closed before the transaction ended." for an active transaction,
+    /// and the statement's failure for one a statement aborted first. The model's own teardown
+    /// disposed the transaction without a cause, and the commit reported "The transaction is
+    /// RolledBack." either way.
+    /// </summary>
+    /// <param name="aborted">True when a statement aborted the transaction before the session closed.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Transaction: COMMIT after the session closed reports COHDBG007 naming why nothing committed")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CommitAsync_AfterSessionClosed_ShouldReportWhyNothingCommitted(bool aborted)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT (:Pending)");
+        DatabaseException? failure = aborted
+            ? await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN m.name"))
+            : null;
+        await session.DisposeAsync();
+
+        // Act
+        var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+
+        // Assert
+        commit.Message.ShouldStartWith("COHDBG007: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        if (failure is null)
+        {
+            commit.Message.ShouldEndWith("Cause: The session closed before the transaction ended.", Case.Sensitive);
+        }
+        else
+        {
+            commit.InnerException.ShouldBeSameAs(failure);
+        }
+
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        session.CurrentTransaction.ShouldBeNull();
+        await using var observer = await database.CreateSessionAsync();
+        (await Rows(observer, "SHOW LABELS")).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Closing a session aborts the statement running on it, and the statement's abort is the
+    /// cause a later commit of its transaction reports with <c>COHDBG007</c> (concrete-types plan
+    /// §6.4): the teardown's own cause does not replace it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: closing a session aborts its running statement, whose cause a later COMMIT reports")]
+    public async Task DisposeAsync_SessionWithRunningStatement_ShouldAbortItAndReportItsCause()
+    {
+        // Arrange: another transaction holds the writer lock, so the session's statement waits.
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var blocker = await database.CreateSessionAsync();
+        var session = await database.CreateSessionAsync();
+        var blocking = await blocker.BeginTransactionAsync();
+        await blocker.ExecuteAsync("INSERT (:Blocker)");
+        var transaction = await session.BeginTransactionAsync();
+        var pending = session.ExecuteAsync("INSERT (:Waiting)").AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+
+        // Act
+        await session.DisposeAsync();
+        var statement = await Should.ThrowAsync<Exception>(async () => await pending.WaitAsync(TimeSpan.FromSeconds(10)));
+        var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        await blocking.CommitAsync();
+
+        // Assert
+        statement.ShouldNotBeOfType<TimeoutException>();
+        commit.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        commit.Message.ShouldEndWith("Cause: The graph session closed while the operation was running.", Case.Sensitive);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        await using var observer = await database.CreateSessionAsync();
+        (await Rows(observer, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Blocker"]);
+    }
+
+    /// <summary>
+    /// A commit while a statement of the transaction still runs is refused with the root base's
+    /// message (concrete-types plan §6.4), for the model's former "Dispose every graph operation
+    /// before committing its transaction.", and leaves the transaction active: it commits once the
+    /// statement completed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: COMMIT while a statement of the transaction runs is refused and leaves it active")]
+    public async Task CommitAsync_WhileStatementRuns_ShouldBeRefusedAndLeaveTheTransactionActive()
+    {
+        // Arrange: another transaction holds the writer lock, so the statement waits.
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var blocker = await database.CreateSessionAsync();
+        await using var session = await database.CreateSessionAsync();
+        var blocking = await blocker.BeginTransactionAsync();
+        await blocker.ExecuteAsync("INSERT (:Blocker)");
+        var transaction = await session.BeginTransactionAsync();
+        var pending = session.ExecuteAsync("INSERT (:Waiting)").AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        var stateAfterRefusal = transaction.State;
+        await blocking.CommitAsync();
+        (await pending.WaitAsync(TimeSpan.FromSeconds(10))).AffectedCount.ShouldBe(1);
+        await transaction.CommitAsync();
+
+        // Assert
+        refusal.Message.ShouldBe("An operation of the transaction is still running; commit after it completes.");
+        stateAfterRefusal.ShouldBe(TransactionState.Active);
+        transaction.State.ShouldBe(TransactionState.Committed);
+        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Blocker", "Waiting"]);
+    }
+
+    /// <summary>
+    /// BEGIN on a session whose transaction is active is refused with the root base's one message
+    /// before the model's isolation-level refusal, and a closed session before both (concrete-types
+    /// plan §6.4, BEGIN's refusal order): the model refused an unsupported isolation level first.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Session: BEGIN is refused for a closed session, then an active transaction, before the isolation level")]
+    public async Task BeginTransactionAsync_WhileActiveOrClosed_ShouldRefuseBeforeTheIsolationLevel()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+
+        // Act
+        var again = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
+        var serializable = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable));
+        await transaction.RollbackAsync();
+        var unsupported = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable));
+        await session.DisposeAsync();
+        var closed = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable));
+
+        // Assert
+        again.Message.ShouldBe("A transaction or operation is already active on this session.");
+        serializable.Message.ShouldBe("A transaction or operation is already active on this session.");
+        unsupported.Message.ShouldBe("The graph engine supports Snapshot and ReadCommitted isolation.");
+        closed.Message.ShouldBe("The session is closed.");
+    }
+
+    /// <summary>
+    /// A closed session refuses BEGIN, both execute seams, the typed operations and the schema
+    /// surface with the root base's message (concrete-types plan §6.4), for the model's former
+    /// "The graph session is closed.".
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Session: a closed session refuses every operation with one message")]
+    public async Task ExecuteAsync_OnClosedSession_ShouldRefuseWithOneMessage()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        var session = await database.CreateSessionAsync();
+        var schema = GraphSchema.Open(database, session);
+        await session.DisposeAsync();
+
+        // Act
+        var refusals = new List<DatabaseException>
+        {
+            await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync()),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN n.name")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (n) RETURN n.name"))),
+            await Should.ThrowAsync<DatabaseException>(async () => await database.CreateNodeAsync(session, ["Late"])),
+            await Should.ThrowAsync<DatabaseException>(async () => await schema.GetLabelsAsync()),
+            Should.Throw<DatabaseException>(() => GraphSchema.Open(database, session)),
+        };
+
+        // Assert
+        refusals.ShouldAllBe(refusal => refusal.Message == "The session is closed.");
+        session.State.ShouldBe(SessionState.Closed);
+    }
+
+    /// <summary>
+    /// A transaction the kernel ended under its caller (its database was dropped while the session
+    /// held it) reports <c>Faulted</c>, and the root bases order its refusal against the database's
+    /// disposal and a canceled token (concrete-types plan §6.4): BEGIN refuses the open transaction
+    /// with <c>COHDBG007</c> before it checks anything of the model, where the model reported the
+    /// disposed database; both execute seams check a canceled token before the model reports the
+    /// disposed database, which they still report for a live token, and so does BEGIN once the
+    /// caller rolled the ended transaction back.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Session: a transaction the kernel ended refuses BEGIN with COHDBG007; the execute seams check a canceled token first")]
+    public async Task BeginTransactionAsync_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT (:Pending)");
+        await engine.DropDatabaseAsync("graph");
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act
+        var state = transaction.State;
+        var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(canceled.Token));
+        var canceledText = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("MATCH (n) RETURN n.name", null, canceled.Token));
+        var text = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync("MATCH (n) RETURN n.name"));
+        var canceledRequest = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (n) RETURN n.name"), canceled.Token));
+        var request = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (n) RETURN n.name")));
+        await transaction.RollbackAsync();
+        var beginAfterRollback = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.BeginTransactionAsync());
+
+        // Assert
+        state.ShouldBe(TransactionState.Faulted);
+        begin.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        canceledText.CancellationToken.ShouldBe(canceled.Token);
+        text.ShouldNotBeNull();
+        canceledRequest.CancellationToken.ShouldBe(canceled.Token);
+        request.ShouldNotBeNull();
+        beginAfterRollback.ShouldNotBeNull();
+        session.CurrentTransaction.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A closed session is refused as closed before its database's disposal is checked, by BEGIN
+    /// and both execute seams, which run the root base's checks first (concrete-types plan §6.4):
+    /// the model checked the disposed database first and reported <see cref="ObjectDisposedException"/>.
+    /// The typed operations and the schema surface, which check the database before the session,
+    /// still report the disposed database.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Session: a closed session of a dropped database is refused as closed by BEGIN and the execute seams")]
+    public async Task ExecuteAsync_ClosedSessionOfDroppedDatabase_ShouldRefuseAsClosedBeforeTheDisposedDatabase()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        var session = await database.CreateSessionAsync();
+        var schema = GraphSchema.Open(database, session);
+        await session.DisposeAsync();
+        await engine.DropDatabaseAsync("graph");
+
+        // Act
+        var refusals = new List<DatabaseException>
+        {
+            await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync()),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN n.name")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (n) RETURN n.name"))),
+        };
+        var typed = await Should.ThrowAsync<ObjectDisposedException>(async () => await database.CreateNodeAsync(session, ["Late"]));
+        var schemaRead = await Should.ThrowAsync<ObjectDisposedException>(async () => await schema.GetLabelsAsync());
+        var schemaOpen = Should.Throw<ObjectDisposedException>(() => GraphSchema.Open(database, session));
+
+        // Assert
+        refusals.ShouldAllBe(refusal => refusal.Message == "The session is closed.");
+        typed.ShouldNotBeNull();
+        schemaRead.ShouldNotBeNull();
+        schemaOpen.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// A statement holds its session from its start to its end, through the root base's operation
+    /// hold (concrete-types plan §6.4), which replaced the model's own reservation: while one waits
+    /// for the writer lock, a second statement on the session, a typed operation and a schema read
+    /// are refused with the model's message, and BEGIN with the base's "already active" message.
+    /// None of the refusals ends the waiting statement, which completes once the lock is free, and
+    /// the session then runs statements again.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Session: a running statement holds the session against another statement and BEGIN")]
+    public async Task ExecuteAsync_WhileAnotherStatementRuns_ShouldBeRefusedAndLeaveItRunning()
+    {
+        // Arrange: another transaction holds the writer lock, so the session's statement waits.
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var blocker = await database.CreateSessionAsync();
+        await using var session = await database.CreateSessionAsync();
+        var schema = GraphSchema.Open(database, session);
+        var blocking = await blocker.BeginTransactionAsync();
+        await blocker.ExecuteAsync("INSERT (:Blocker)");
+        var pending = session.ExecuteAsync("INSERT (:Waiting)").AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+
+        // Act
+        var statement = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN n.name"));
+        var request = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (n) RETURN n.name")));
+        var typed = await Should.ThrowAsync<DatabaseException>(async () => await database.CreateNodeAsync(session, ["X"]));
+        var schemaRead = await Should.ThrowAsync<DatabaseException>(async () => await schema.GetLabelsAsync());
+        var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
+        bool stillWaiting = !pending.IsCompleted;
+        await blocking.CommitAsync();
+        var completed = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        new[] { statement, request, typed, schemaRead }.ShouldAllBe(refusal =>
+            refusal.Message == "Dispose the active graph operation before starting another operation on this session.");
+        begin.Message.ShouldBe("A transaction or operation is already active on this session.");
+        stillWaiting.ShouldBeTrue();
+        completed.AffectedCount.ShouldBe(1);
+        session.CurrentTransaction.ShouldBeNull();
+        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Blocker", "Waiting"]);
+    }
+
+    /// <summary>
     /// A rollback whose abort record cannot be written still ends the transaction and releases the
     /// database writer lock (#1226). Since #1252 the rollback appends the record to the journal's
     /// append buffer, and it reaches the file with the next drain: here the commit of another
@@ -432,7 +779,7 @@ public sealed class GraphTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var other = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
@@ -462,7 +809,7 @@ public sealed class GraphTransactionFailureTests
         await session.DisposeAsync();
         engine.Dispose();
         await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IGraphDatabase)await reopened.OpenDatabaseAsync("graph");
+        var recovered = await reopened.OpenDatabaseAsync("graph");
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert: the rollback wrote nothing and ended the transaction; the drain that carried its
@@ -488,7 +835,7 @@ public sealed class GraphTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
         var transaction = await session.BeginTransactionAsync();
@@ -507,7 +854,7 @@ public sealed class GraphTransactionFailureTests
         await session.DisposeAsync();
         engine.Dispose();
         await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IGraphDatabase)await reopened.OpenDatabaseAsync("graph");
+        var recovered = await reopened.OpenDatabaseAsync("graph");
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
@@ -531,7 +878,7 @@ public sealed class GraphTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:Pending)");
@@ -549,7 +896,7 @@ public sealed class GraphTransactionFailureTests
         await session.DisposeAsync();
         engine.Dispose();
         await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IGraphDatabase)await reopened.OpenDatabaseAsync("graph");
+        var recovered = await reopened.OpenDatabaseAsync("graph");
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
@@ -572,8 +919,7 @@ public sealed class GraphTransactionFailureTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
-        var instance = (GraphDatabaseInstance)database;
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
@@ -582,17 +928,17 @@ public sealed class GraphTransactionFailureTests
 
         // Act: the undo's storage bracket cannot touch the first page it undoes.
         int locked;
-        using (var holder = PageWriteLockHolder.LockEveryPage(instance.DataStorage))
+        using (var holder = PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
             locked = holder.Pages;
         }
-        var deferred = instance.Coordinator.VersionStore.PendingAbortedPurges.Count;
+        var deferred = database.Coordinator.VersionStore.PendingAbortedPurges.Count;
         var waiting = other.ExecuteAsync("INSERT (:Other)").AsTask();
         await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromMilliseconds(250)));
         bool otherProceededBeforeTheUndo = waiting.IsCompleted;
-        instance.Coordinator.Checkpoint();
-        instance.Coordinator.RunVersionPurgePass(CancellationToken.None);
+        database.Coordinator.Checkpoint();
+        database.Coordinator.RunVersionPurgePass(CancellationToken.None);
         await waiting.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Assert
@@ -601,8 +947,8 @@ public sealed class GraphTransactionFailureTests
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
         otherProceededBeforeTheUndo.ShouldBeFalse();
-        instance.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        instance.Coordinator.Checkpoint();
+        database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        database.Coordinator.Checkpoint();
         (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Keep", "Other"]);
         (await Rows(session, "MATCH (n:Keep) RETURN n.name")).Select(row => row.GetString(0)).ShouldBe(["keep"]);
     }
@@ -618,13 +964,12 @@ public sealed class GraphTransactionFailureTests
         // Arrange: a rollback whose undo could not touch the pages another storage bracket held,
         // and a writer waiting for the lock.
         await using var engine = GraphDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph");
-        var instance = (GraphDatabaseInstance)database;
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
-        var transaction = (GraphDatabaseTransaction)await session.BeginTransactionAsync();
+        var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("INSERT (:Rolled {name: 'rolled'})");
-        using (PageWriteLockHolder.LockEveryPage(instance.DataStorage))
+        using (PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
         }
@@ -632,10 +977,10 @@ public sealed class GraphTransactionFailureTests
 
         // Act: the late operation gets the lock its transaction still holds, finds the
         // transaction ended, and cleans up.
-        var late = await Should.ThrowAsync<DatabaseException>(async () => await instance.LockWriterAsync(transaction.Context, CancellationToken.None));
+        var late = await Should.ThrowAsync<DatabaseException>(async () => await database.LockWriterAsync(transaction.Context, CancellationToken.None));
         await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromMilliseconds(250)));
         bool otherProceededBeforeTheUndo = waiting.IsCompleted;
-        instance.Coordinator.RunVersionPurgePass(CancellationToken.None);
+        database.Coordinator.RunVersionPurgePass(CancellationToken.None);
         await waiting.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Assert
@@ -655,7 +1000,7 @@ public sealed class GraphTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = GraphDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (GraphDatabaseInstance)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using (var session = await database.CreateSessionAsync())
         {
             await session.ExecuteAsync("INSERT (:Keep {name: 'keep'})");
@@ -674,7 +1019,7 @@ public sealed class GraphTransactionFailureTests
         // Act: the close retries the undo, which fails the same way.
         var closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
         await using var reopened = GraphDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IGraphDatabase)await reopened.OpenDatabaseAsync("graph");
+        var recovered = await reopened.OpenDatabaseAsync("graph");
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
@@ -691,7 +1036,7 @@ public sealed class GraphTransactionFailureTests
         var kernel = new TransactionCommitUnconfirmedException("Transaction 7 committed, but its commit record could not be made durable.", new IOException("flush"));
 
         // Act
-        var translated = GraphDatabaseInstance.TranslateKernelFailure(kernel);
+        var translated = GraphDatabase.TranslateKernelFailure(kernel);
 
         // Assert: not an abort, so a caller never retries work that committed.
         var unconfirmed = translated.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
@@ -712,7 +1057,7 @@ public sealed class GraphTransactionFailureTests
         DeferredUndoRetryDelay = TimeSpan.FromHours(1),
     };
 
-    private static async Task<List<QueryRow>> Rows(IDatabaseSession session, string gql)
+    private static async Task<List<QueryRow>> Rows(GraphDatabaseSession session, string gql)
     {
         var result = await session.ExecuteAsync(gql);
         var rows = new List<QueryRow>();

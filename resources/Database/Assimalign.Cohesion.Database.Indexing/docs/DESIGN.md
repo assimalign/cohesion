@@ -98,7 +98,7 @@ when no bracket is paired:
 | Sql | `SqlDatabaseInstance.ResolveStatementBracket` | `DatabaseException` "Transaction {seq} has no statement bracket applying on this database." |
 | KeyValuePair | `KeyValueDatabase.ResolveStatementBracket` | the same `DatabaseException` |
 | Documents | `DefaultDocumentCatalog.ResolveStatementBracket` | `InvalidOperationException` "Index mutation requires a shared statement bracket." |
-| Graph | `DefaultGraphStore.ResolveStatementBracket` | `InvalidOperationException` "Graph index mutation requires a shared statement bracket." |
+| Graph | `GraphStore.ResolveStatementBracket` | `InvalidOperationException` "Graph index mutation requires a shared statement bracket." |
 
 A delegate rather than a type keeps each engine's exception: `DatabaseException` lives in the
 area root, which this child root may never reference, and the coordinator is not injected into

@@ -42,13 +42,13 @@ internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphPa
 
 internal sealed class GraphPlanner
 {
-    private readonly GraphDatabaseInstance _database;
+    private readonly GraphDatabase _database;
     private readonly TransactionSnapshot _snapshot;
 
     /// <summary>Initializes a new instance of the <see cref="GraphPlanner"/> class.</summary>
     /// <param name="database">The graph database whose catalog and store resolve labels, relationship types, and indexes.</param>
     /// <param name="snapshot">The transaction snapshot that catalog and index lookups observe.</param>
-    public GraphPlanner(GraphDatabaseInstance database, TransactionSnapshot snapshot)
+    public GraphPlanner(GraphDatabase database, TransactionSnapshot snapshot)
     {
         _database = database;
         _snapshot = snapshot;
@@ -417,7 +417,7 @@ internal sealed class GraphPlanner
     private sealed class AnchorSources
     {
         private static readonly Dictionary<string, FirstValue> _none = new(StringComparer.Ordinal);
-        private readonly GraphDatabaseInstance _database;
+        private readonly GraphDatabase _database;
         private readonly TransactionSnapshot _snapshot;
         private readonly GqlExpression? _predicate;
         private Dictionary<string, List<string>>? _indexedKeys;
@@ -427,7 +427,7 @@ internal sealed class GraphPlanner
         /// <param name="database">The database whose store lists the visible indexes.</param>
         /// <param name="snapshot">The snapshot the index list observes.</param>
         /// <param name="predicate">The statement's <c>WHERE</c> predicate, if any.</param>
-        public AnchorSources(GraphDatabaseInstance database, TransactionSnapshot snapshot, GqlExpression? predicate)
+        public AnchorSources(GraphDatabase database, TransactionSnapshot snapshot, GqlExpression? predicate)
         {
             _database = database;
             _snapshot = snapshot;

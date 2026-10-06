@@ -28,7 +28,7 @@ public sealed class GraphTransactionFailureWireTests
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         (await connection.ExecuteAsync("CREATE (:Keep {name: 'k'})-[:LINK]->(:Keep {name: 'j'})", cancellationToken: harness.Token)).ShouldBe(3);
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(harness.Token);
         (await connection.ExecuteAsync("CREATE (:Pending {name: 'p'})", cancellationToken: harness.Token)).ShouldBe(1);
 
@@ -51,7 +51,7 @@ public sealed class GraphTransactionFailureWireTests
         refusedRead.Message.ShouldContain("COHDBG007", Case.Sensitive);
         faultedState.ShouldBe(TransactionState.Faulted);
         connection.IsOpen.ShouldBeTrue();
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
         (await connection.QueryAsync("MATCH (n:Keep) RETURN n.name", cancellationToken: harness.Token))
             .Select(row => (string?)row[0]).Order().ShouldBe(["j", "k"]);
         (await connection.QueryAsync("MATCH (a:Keep)-[r:LINK]->(b:Keep) RETURN a.name", cancellationToken: harness.Token)).ShouldHaveSingleItem();
@@ -71,7 +71,7 @@ public sealed class GraphTransactionFailureWireTests
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         (await connection.ExecuteAsync("CREATE (:Keep {name: 'k'})-[:LINK]->(:Keep {name: 'j'})", cancellationToken: harness.Token)).ShouldBe(3);
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(harness.Token);
         (await connection.ExecuteAsync("CREATE (:Pending {name: 'p'})", cancellationToken: harness.Token)).ShouldBe(1);
 
@@ -94,7 +94,7 @@ public sealed class GraphTransactionFailureWireTests
         state.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
         connection.IsOpen.ShouldBeTrue();
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
         (await connection.QueryAsync("MATCH (n:Pending) RETURN n.name", cancellationToken: harness.Token))
             .Select(row => (string?)row[0]).ShouldBe(["p"]);
     }
@@ -111,7 +111,7 @@ public sealed class GraphTransactionFailureWireTests
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(harness.Token);
         await connection.ExecuteAsync("CREATE (:Pending {name: 'p'})", cancellationToken: harness.Token);
 
@@ -145,7 +145,7 @@ public sealed class GraphTransactionFailureWireTests
             await harness.Database.CreateNodeAsync(typed, ["Unsigned"], new Dictionary<string, object?> { ["p"] = 7u }, harness.Token);
         }
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(harness.Token);
         await connection.ExecuteAsync("CREATE (:Pending)", cancellationToken: harness.Token);
 
@@ -179,7 +179,7 @@ public sealed class GraphTransactionFailureWireTests
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(harness.Token);
         await connection.ExecuteAsync("CREATE (:Pending {name: 'p'})", cancellationToken: harness.Token);
         await Should.ThrowAsync<GraphClientException>(async () =>

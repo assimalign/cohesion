@@ -20,7 +20,7 @@ public sealed class GraphProtocolTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph", token);
+        var database = await engine.CreateDatabaseAsync("graph", token);
         await using var session = await database.CreateSessionAsync(token);
         var first = await database.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["name"] = "Alice" }, token);
         var last = await database.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["name"] = "Bob" }, token);

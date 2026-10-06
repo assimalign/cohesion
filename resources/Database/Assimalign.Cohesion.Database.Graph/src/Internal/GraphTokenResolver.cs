@@ -34,7 +34,7 @@ internal sealed class GraphTokenResolver
     /// <summary>The warning code for a relationship type the database does not have.</summary>
     internal const string UnknownRelationshipTypeCode = "COHDBG011";
 
-    private readonly IGraphCatalog _catalog;
+    private readonly GraphCatalog _catalog;
     private readonly TransactionSnapshot _snapshot;
     private readonly Dictionary<string, bool> _labels = new(StringComparer.Ordinal);
     private readonly Dictionary<string, bool> _types = new(StringComparer.Ordinal);
@@ -43,7 +43,7 @@ internal sealed class GraphTokenResolver
     /// <summary>Initializes a new instance of the <see cref="GraphTokenResolver"/> class.</summary>
     /// <param name="catalog">The catalog whose definitions the names resolve against.</param>
     /// <param name="snapshot">The statement snapshot, so a transaction sees its own new labels and types.</param>
-    internal GraphTokenResolver(IGraphCatalog catalog, TransactionSnapshot snapshot)
+    internal GraphTokenResolver(GraphCatalog catalog, TransactionSnapshot snapshot)
     {
         _catalog = catalog;
         _snapshot = snapshot;

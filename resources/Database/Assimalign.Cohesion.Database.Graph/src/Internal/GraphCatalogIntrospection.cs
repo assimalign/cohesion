@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphCatalogIntrospection
 {
-    internal static QueryResult Execute(GraphDatabaseInstance database, GraphOperation operation,
+    internal static QueryResult Execute(GraphDatabase database, GraphOperation operation,
         GqlQueryExpression query, GqlCatalogSurface surface, CancellationToken token)
     {
         // A hand-built AST must obey the same read-only rule as a parsed SHOW statement.

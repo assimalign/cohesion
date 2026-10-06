@@ -18,12 +18,18 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// over a single connection and delegates statement execution to the bound
 /// engine session's text-execute seam.
 /// </summary>
-internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
+/// <remarks>
+/// An internal sealed leaf of the root <see cref="DatabaseServerSession"/> (concrete-types plan,
+/// row 11): the base owns the identity, and the negotiated version and authenticated principal,
+/// which the handshake records once each; the engine session is re-exposed typed by a covariant
+/// override.
+/// </remarks>
+internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 {
     private readonly GraphDatabaseServer _server;
     private readonly IConnection _connection;
     private readonly GraphDatabaseServerOptions _options;
-    private readonly IDatabaseEngine _engine;
+    private readonly GraphDatabaseEngine _engine;
     private readonly DatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
 
@@ -37,7 +43,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
         GraphDatabaseServer server,
         IConnection connection,
         GraphDatabaseServerOptions options,
-        IDatabaseEngine engine,
+        GraphDatabaseEngine engine,
         DatabaseAuthenticator authenticator)
     {
         _server = server;
@@ -49,16 +55,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
     }
 
     /// <inheritdoc />
-    public Guid Id { get; } = Guid.NewGuid();
-
-    /// <inheritdoc />
-    public ProtocolVersion ProtocolVersion { get; private set; }
-
-    /// <inheritdoc />
-    public string? Principal { get; private set; }
-
-    /// <inheritdoc />
-    public IDatabaseSession? DatabaseSession => _databaseSession;
+    public override GraphDatabaseSession? DatabaseSession => _databaseSession;
 
     /// <summary>
     /// Gets the task that completes when the session pump has fully wound down.
@@ -89,7 +86,8 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    /// <remarks>Idempotent: aborting a session that already wound down is a no-op.</remarks>
+    protected override async ValueTask DisposeAsyncCore()
     {
         Abort();
         await _completion.ConfigureAwait(false);
@@ -184,9 +182,9 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             return false;
         }
 
-        ProtocolVersion = negotiated;
+        SetNegotiatedVersion(negotiated);
 
-        IDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
+        GraphDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
 
         if (database is null)
         {
@@ -227,11 +225,9 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             return false;
         }
 
-        // The server fronts one GraphDatabaseEngine, whose databases create graph sessions.
-        IDatabaseSession session;
         try
         {
-            session = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
+            _databaseSession = await database.CreateSessionAsync(handshakeSource.Token).ConfigureAwait(false);
         }
         catch (DatabaseOfflineException exception)
         {
@@ -240,13 +236,8 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message).ConfigureAwait(false);
             return false;
         }
-        if (session is not GraphDatabaseSession graphSession)
-        {
-            await session.DisposeAsync().ConfigureAwait(false);
-            throw new InvalidOperationException($"Database '{database.Name}' did not create a graph session.");
-        }
-        _databaseSession = graphSession;
-        Principal = startup.Principal;
+
+        SetAuthenticatedPrincipal(startup.Principal);
 
         await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
         return true;
@@ -474,16 +465,16 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
     /// Resolves the startup-requested database on the server's one engine:
     /// already-open databases first, then an open attempt.
     /// </summary>
-    private async ValueTask<IDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
+    private async ValueTask<GraphDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
             return null;
         }
 
-        if (_engine.TryGetDatabase(name, out IDatabase database))
+        if (_engine.TryGetDatabase(name, out var open))
         {
-            return database;
+            return open;
         }
 
         try

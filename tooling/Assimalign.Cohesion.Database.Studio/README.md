@@ -62,7 +62,7 @@ Documents is **embedded only**: there is no Documents server, and `Documents.Cli
 
 - Wire (external) cannot list/create/drop databases, run KEYSPACES, or manage blob containers.
 - No statement parameters; no cancellation of a statement the engine does not observe.
-- Graph index creation is only `IGraphSchema.CreateIndexAsync`, not exposed here (GQL has no index DDL).
+- Graph index creation is only `GraphSchema.CreateIndexAsync`, not exposed here (GQL has no index DDL).
 - Settings are not persisted between runs.
 
 ## Engine/client gaps found while building it

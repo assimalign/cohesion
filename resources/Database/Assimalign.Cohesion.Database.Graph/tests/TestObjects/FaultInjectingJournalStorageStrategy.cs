@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -25,7 +26,7 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 /// durable flush confirmed, as an operating system that dropped the writes a failed fsync covered
 /// would leave it (#1243).
 /// </remarks>
-internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrategy
+internal sealed class FaultInjectingJournalStorageStrategy : GraphStorageStrategy
 {
     private static readonly AsyncLocal<Budget?> s_failures = new();
     private static readonly AsyncLocal<Budget?> s_flushFailures = new();
@@ -119,7 +120,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
         }
     }
 
-    public GraphStorage CreateStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    public override GraphStorage CreateStorage(DatabaseName databaseName, StorageCommitDurability? durability)
     {
         var files = new Files(new MemoryStream(), new FaultInjectingStream(), new MemoryStream());
         lock (_sync)
@@ -135,7 +136,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
     /// Reopens a database from the bytes its last storage left behind. A memory stream keeps its
     /// bytes after disposal, so this works for a storage the engine closed.
     /// </summary>
-    public GraphStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    public override GraphStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
     {
         Files files;
         lock (_sync)
@@ -160,7 +161,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
             new StorageStream(files.Backup), checkpointOnOpen: false, durability);
     }
 
-    public void DropStorage(DatabaseName databaseName)
+    public override void DropStorage(DatabaseName databaseName)
     {
         lock (_sync)
         {
@@ -168,7 +169,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
         }
     }
 
-    public bool StorageExists(DatabaseName databaseName)
+    public override bool StorageExists(DatabaseName databaseName)
     {
         lock (_sync)
         {
@@ -176,7 +177,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IGraphStorageStrate
         }
     }
 
-    public IEnumerable<DatabaseName> GetDatabaseNames()
+    public override IEnumerable<DatabaseName> GetDatabaseNames()
     {
         string[] names;
         lock (_sync)

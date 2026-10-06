@@ -22,7 +22,7 @@ public sealed class GraphCatalogClientTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("own", timeout.Token);
+        var database = await engine.CreateDatabaseAsync("own", timeout.Token);
         await using var session = await database.CreateSessionAsync(timeout.Token);
         var schema = GraphSchema.Open(database, session);
         var label = new GraphLabelMetadata(Guid.NewGuid(), "Person");
@@ -63,7 +63,7 @@ public sealed class GraphCatalogClientTests
         await using var engine = GraphDatabaseEngine.Create(new());
         foreach (var name in new[] { "own", "other" })
         {
-            var database = (IGraphDatabase)await engine.CreateDatabaseAsync(name, timeout.Token);
+            var database = await engine.CreateDatabaseAsync(name, timeout.Token);
             await using var session = await database.CreateSessionAsync(timeout.Token);
             await GraphSchema.Open(database, session).SaveLabelAsync(new(Guid.NewGuid(), name + "_label"), timeout.Token);
         }
@@ -122,9 +122,9 @@ public sealed class GraphCatalogClientTests
         await using var client = CreateClient(listener, "own");
         await using var connection = await client.RentAsync(timeout.Token);
         (await connection.ExecuteAsync("SHOW LABELS", cancellationToken: timeout.Token)).Rows.ShouldBeEmpty();
-        server.Context.Sessions.ShouldHaveSingleItem();
+        server.Sessions.ShouldHaveSingleItem();
         await server.StopAsync(timeout.Token);
-        server.Context.Sessions.ShouldBeEmpty();
+        server.Sessions.ShouldBeEmpty();
         await server.StopAsync(timeout.Token);
         await Should.ThrowAsync<ObjectDisposedException>(async () => await server.StartAsync(timeout.Token));
         engine.TryGetDatabase("own", out _).ShouldBeTrue();

@@ -134,7 +134,7 @@ public sealed class GraphPathWireTests
         Guid sessionId;
         await using (var connection = await harness.Client.ConnectAsync(harness.Token))
         {
-            sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+            sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
             await connection.ExecuteAsync("CREATE (:Person {name: 'Alice'}), (:Person {name: 'Bob'})", cancellationToken: harness.Token);
 
             // Act / Assert
@@ -146,7 +146,7 @@ public sealed class GraphPathWireTests
         }
         await using var reused = await harness.Client.ConnectAsync(harness.Token);
         (await reused.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldHaveSingleItem()[2].ShouldBe("Person");
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
     /// <summary>Requests with scalar or mutation projections fail explicitly and cannot perform writes through ExecutePaths.</summary>
@@ -161,7 +161,7 @@ public sealed class GraphPathWireTests
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
-        Guid oldId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+        Guid oldId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act / Assert
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
@@ -171,7 +171,7 @@ public sealed class GraphPathWireTests
         // Streaming failures conservatively discard even when the server was able to reject before output.
         await using var fresh = await harness.Client.ConnectAsync(harness.Token);
         (await fresh.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
-        harness.Server.Context.Sessions.ShouldContain(session => session.Id != oldId);
+        harness.Server.Sessions.ShouldContain(session => session.Id != oldId);
     }
 
     /// <summary>Abandoning a response larger than the bounded handoff cancels and discards its session.</summary>
@@ -191,7 +191,7 @@ public sealed class GraphPathWireTests
             await transaction.CommitAsync(harness.Token);
         }
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
-        Guid oldId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+        Guid oldId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act
         await using (var paths = connection.QueryPathsAsync("MATCH (n:Large) RETURN n", cancellationToken: harness.Token).GetAsyncEnumerator())
@@ -206,7 +206,7 @@ public sealed class GraphPathWireTests
         connection.IsOpen.ShouldBeFalse();
         await using var fresh = await harness.Client.ConnectAsync(harness.Token);
         (await fresh.QueryAsync("MATCH (n:Large) RETURN n.index", cancellationToken: harness.Token)).Count.ShouldBe(64);
-        harness.Server.Context.Sessions.ShouldContain(session => session.Id != oldId);
+        harness.Server.Sessions.ShouldContain(session => session.Id != oldId);
     }
 
     private static async Task<List<GraphPath>> CollectAsync(IAsyncEnumerable<GraphPath> paths)

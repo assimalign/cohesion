@@ -19,7 +19,7 @@ public sealed class GraphCatalogIntrospectionTests
     public async Task ShowExposesCatalogDefinitionsWithoutRequiringGraphData()
     {
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("catalog");
+        var database = await engine.CreateDatabaseAsync("catalog");
         await using var session = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, session);
         Guid label = Guid.NewGuid();
@@ -52,7 +52,7 @@ public sealed class GraphCatalogIntrospectionTests
     public async Task OwnershipReportsActualDefinitionAuthorityAndChildEnforcement()
     {
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("ownership");
+        var database = await engine.CreateDatabaseAsync("ownership");
         await using var session = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, session);
         Guid managed = Guid.NewGuid();
@@ -87,7 +87,7 @@ public sealed class GraphCatalogIntrospectionTests
     public async Task CatalogReadsUseSessionVisibilityAndFreshStatementsObserveCommittedChanges(IsolationLevel isolation)
     {
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("visibility");
+        var database = await engine.CreateDatabaseAsync("visibility");
         await using var reader = await database.CreateSessionAsync();
         await using var writer = await database.CreateSessionAsync();
         var schema = GraphSchema.Open(database, writer);
@@ -113,7 +113,7 @@ public sealed class GraphCatalogIntrospectionTests
     public async Task UncommittedDefinitionsStayPrivateAndRollbackLeavesNoMaterializedCatalogRows()
     {
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("rollback");
+        var database = await engine.CreateDatabaseAsync("rollback");
         await using var writer = await database.CreateSessionAsync();
         await using var reader = await database.CreateSessionAsync();
         await using var transaction = await writer.BeginTransactionAsync();
@@ -134,7 +134,7 @@ public sealed class GraphCatalogIntrospectionTests
     public async Task CatalogMutationFailsWithStableDiagnosticAndNoEffects(string subject, string mutation)
     {
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("readonly");
+        var database = await engine.CreateDatabaseAsync("readonly");
         await using var session = await database.CreateSessionAsync();
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"SHOW {subject} {mutation}"));
         error.Message.ShouldContain("GQL0007: Graph catalog introspection is read-only.");
@@ -150,7 +150,7 @@ public sealed class GraphCatalogIntrospectionTests
 
     internal static readonly string[] Subjects = ["LABELS", "RELATIONSHIP TYPES", "PROPERTY KEYS", "INDEXES", "OBJECT OWNERSHIP"];
 
-    internal static async Task<List<object?[]>> Rows(IDatabaseSession session, string command)
+    internal static async Task<List<object?[]>> Rows(GraphDatabaseSession session, string command)
     {
         await using var result = (QueryResultSet)await session.ExecuteAsync(command);
         var rows = new List<object?[]>();

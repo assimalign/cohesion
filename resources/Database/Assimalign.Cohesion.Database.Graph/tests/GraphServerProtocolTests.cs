@@ -118,7 +118,7 @@ public sealed class GraphServerProtocolTests
     {
         await WithServerAsync(async (server, channel, token) =>
         {
-            var transaction = await server.Context.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull()
+            var transaction = await server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull()
                 .BeginTransactionAsync(token);
             await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
                 GraphProtocolExecuteMessage.Create("INSERT (:Pending)").Encode(), token);
@@ -164,7 +164,7 @@ public sealed class GraphServerProtocolTests
     {
         await WithServerAsync(async (server, channel, token) =>
         {
-            var databaseSession = server.Context.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull();
+            var databaseSession = server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull();
             var transaction = await databaseSession.BeginTransactionAsync(token);
             await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
                 GraphProtocolExecuteMessage.Create("INSERT (:Pending {name: 'p'})").Encode(), token);

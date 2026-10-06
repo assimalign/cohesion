@@ -20,7 +20,7 @@ public sealed class GraphPathsQueryTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("paths", token);
+        var database = await engine.CreateDatabaseAsync("paths", token);
         await using var session = await database.CreateSessionAsync(token);
         await session.ExecuteAsync("CREATE (:Vertex {name: 'A'})-[:LINK {weight: 2}]->(:Vertex {name: 'B'})-[:LINK {weight: 3}]->(:Vertex {name: 'C'})", cancellationToken: token);
         await GraphSchema.Open(database, session).CreateIndexAsync("Vertex", "by_name", "name", token);
@@ -50,7 +50,7 @@ public sealed class GraphPathsQueryTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("entities", token);
+        var database = await engine.CreateDatabaseAsync("entities", token);
         await using var session = await database.CreateSessionAsync(token);
         var properties = new Dictionary<string, object?>
         {

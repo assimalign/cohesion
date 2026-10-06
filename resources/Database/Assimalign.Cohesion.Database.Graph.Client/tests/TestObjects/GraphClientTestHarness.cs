@@ -11,7 +11,7 @@ internal sealed class GraphClientTestHarness : IAsyncDisposable
 {
     private readonly CancellationTokenSource _timeout = new(TimeSpan.FromSeconds(30));
 
-    private GraphClientTestHarness(GraphDatabaseEngine engine, IGraphDatabase database,
+    private GraphClientTestHarness(GraphDatabaseEngine engine, GraphDatabase database,
         InMemoryConnectionListener listener, GraphDatabaseServer server, IGraphClient client)
     {
         Engine = engine;
@@ -22,7 +22,7 @@ internal sealed class GraphClientTestHarness : IAsyncDisposable
     }
 
     internal GraphDatabaseEngine Engine { get; }
-    internal IGraphDatabase Database { get; }
+    internal GraphDatabase Database { get; }
     internal InMemoryConnectionListener Listener { get; }
     internal GraphDatabaseServer Server { get; }
     internal IGraphClient Client { get; }
@@ -31,7 +31,7 @@ internal sealed class GraphClientTestHarness : IAsyncDisposable
     internal static async Task<GraphClientTestHarness> StartAsync()
     {
         var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         var listener = new InMemoryConnectionListener();
         var server = GraphDatabaseServer.Create(engine, new() { Listener = listener, ShutdownDrainTimeout = TimeSpan.FromSeconds(2) });
         await server.StartAsync(CancellationToken.None);
