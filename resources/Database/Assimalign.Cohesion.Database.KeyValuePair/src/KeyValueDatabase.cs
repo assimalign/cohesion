@@ -41,7 +41,10 @@ using Assimalign.Cohesion.Database.Transactions;
 /// <see cref="DatabaseInstance"/> with an internal constructor, replacing the former
 /// <c>IKeyValueDatabase</c> interface and its internal implementation; the engine creates and
 /// opens it. The base owns the name, the owning engine (re-exposed typed with <c>new</c>) and the
-/// disposed flag.
+/// disposed flag. Disposing it outside the engine closes it for every session; the engine keeps
+/// it registered (its <c>OpenDatabaseAsync</c> returns the closed instance, which refuses a new
+/// session with <see cref="ObjectDisposedException"/>, until it is dropped or the engine is
+/// recreated), and its workers skip it, so the engine stays <see cref="EngineState.Running"/>.
 /// </para>
 /// </remarks>
 public sealed class KeyValueDatabase : DatabaseInstance
@@ -364,6 +367,13 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// Gets whether a failed durable flush of either file set took the database offline.
     /// </summary>
     internal bool IsOffline => OfflineError is not null;
+
+    /// <summary>
+    /// Gets whether the database has been disposed: by the engine, or by a holder of the
+    /// database (a session's <see cref="KeyValueDatabaseSession.Database"/> is the same instance).
+    /// The engine keeps a database its holder closed registered, and its workers skip it.
+    /// </summary>
+    internal bool IsClosed => IsDisposed;
 
     /// <summary>
     /// Gets the storage error that took the database offline, or null while it is online. Each

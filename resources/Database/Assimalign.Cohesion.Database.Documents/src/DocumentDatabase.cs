@@ -35,7 +35,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// session returned as its database (option B, §6.6: <see cref="DocumentDatabaseSession.Database"/>
 /// is this unbound database, and disposing it closes the database for every session, never a
 /// session itself; the engine then refuses to reopen it with <see cref="ObjectDisposedException"/>
-/// until it is dropped or the engine is recreated). The engine creates and opens it. The base
+/// until it is dropped or the engine is recreated, and its workers skip it, so the engine stays
+/// <see cref="EngineState.Running"/>). The engine creates and opens it. The base
 /// owns the name, the owning engine (re-exposed typed with <c>new</c>) and the disposed flag.
 /// </para>
 /// </remarks>
@@ -121,6 +122,13 @@ public sealed class DocumentDatabase : DatabaseInstance
     /// Gets whether a failed durable flush took the database offline.
     /// </summary>
     internal bool IsOffline => DataStorage.IsOffline;
+
+    /// <summary>
+    /// Gets whether the database has been disposed: by the engine, or by a holder of the
+    /// database, a session's <see cref="DocumentDatabaseSession.Database"/> included. The engine
+    /// keeps a database its holder closed registered, to refuse its reopen, and its workers skip it.
+    /// </summary>
+    internal bool IsClosed => IsDisposed;
 
     /// <summary>
     /// Creates a new lightweight document session scoped to this database.

@@ -25,7 +25,8 @@ using Assimalign.Cohesion.Database.Storage;
 /// flushing the engine's other databases. Any other failure of one file set is reported for its
 /// database and the pass goes on to the next (#1268); the database is flushed again after
 /// <see cref="DatabaseEngineWorker.FailureBackoff"/>, and its committers self-help within their
-/// window meanwhile, as they do whenever the worker is late.
+/// window meanwhile, as they do whenever the worker is late. An offline database is skipped, and
+/// so is a database its holder closed, whose close flushes both file sets.
 /// </para>
 /// </remarks>
 internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
@@ -71,8 +72,10 @@ internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
             }
 
             // An offline database flushes nothing (#1243): its waiting committers were released
-            // when it went offline, and each gets the refusal from its own flush.
-            if (database.IsOffline || !BeginDatabase(database.Name))
+            // when it went offline, and each gets the refusal from its own flush. Nor does a
+            // database its holder closed: its close flushes its file sets, and the engine keeps the
+            // closed instance registered (its reopen returns it).
+            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }

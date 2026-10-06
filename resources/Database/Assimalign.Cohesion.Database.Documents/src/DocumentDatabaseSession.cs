@@ -44,7 +44,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// <see cref="Database"/> is the unbound <see cref="DocumentDatabase"/>, whose own collection
 /// operations run in autocommit outside any session. Disposing the session closes the session;
 /// disposing its database closes the database for every session, and the engine refuses to reopen
-/// it (<see cref="ObjectDisposedException"/>) until it is dropped or the engine is recreated.
+/// it (<see cref="ObjectDisposedException"/>) until it is dropped or the engine is recreated; the
+/// engine's workers skip the closed database, so the engine stays <see cref="EngineState.Running"/>.
 /// Before phase 4 the session's database was a session-bound view whose disposal closed the
 /// session, so <c>Dispose</c> meant two things on one type.
 /// </para>
@@ -75,6 +76,13 @@ public sealed class DocumentDatabaseSession : DatabaseSession
     /// closes the database, not the session (option B, §6.6 of the concrete-types plan).
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Disposing it closes the database for every session of it. The engine keeps the closed
+    /// database registered, so it refuses to reopen it (<see cref="ObjectDisposedException"/>)
+    /// until it is dropped or the engine is recreated, and its workers skip it, so the engine
+    /// stays <see cref="EngineState.Running"/>.
+    /// </para>
+    /// <para>
     /// The database's own collection operations run in autocommit, never in this session's
     /// transaction. A write through it (<see cref="DocumentDatabase.CreateCollectionAsync(string, CancellationToken)"/>,
     /// <see cref="DocumentDatabase.DropCollectionAsync(string, CancellationToken)"/>) while the
@@ -82,6 +90,7 @@ public sealed class DocumentDatabaseSession : DatabaseSession
     /// engine has one writer at a time) until the transaction ends or the call's token is
     /// canceled; inside a transaction, use the session's own collection operations
     /// (<see cref="CreateCollectionAsync"/>, <see cref="DropCollectionAsync"/>).
+    /// </para>
     /// </remarks>
     public new DocumentDatabase Database => _database;
 
