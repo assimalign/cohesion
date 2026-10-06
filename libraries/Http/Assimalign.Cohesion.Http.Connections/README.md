@@ -7,11 +7,9 @@ defined in `Assimalign.Cohesion.Http`.
 
 ## Status
 
-This package is mid-implementation across the HTTP/2 and HTTP/3
-work. See `DESIGN_SUGGESTION.md` for the in-flight architecture
-notes. Per-version completeness lives in the L01.01.11 backlog
-under feature parents `.06`/`.07`/`.08` (HTTP/2) and `.09`/`.10`
-(HTTP/3).
+The design record is [`docs/DESIGN.md`](docs/DESIGN.md). Per-version
+completeness lives in the L01.01.11 backlog under feature parents
+`.06`/`.07`/`.08` (HTTP/2) and `.09`/`.10` (HTTP/3).
 
 ## Surface
 
@@ -19,7 +17,8 @@ under feature parents `.06`/`.07`/`.08` (HTTP/2) and `.09`/`.10`
 |-------|--------|
 | HTTP/1.1 | Substantial: framing, chunked encoding, content-length, connection reuse, upgrade transitions |
 | HTTP/2 | Substantial: HPACK encoder/decoder/tables, frame I/O, stream / connection model |
-| HTTP/3 | Stub: QPACK encoder only, basic QUIC variable-length integer support, no decoder |
+| HTTP/3 | Substantial: QPACK encoder and decoder (static and dynamic tables), control and request streams over QUIC, GOAWAY |
+| TLS | ALPN dispatch serves HTTP/1.1 and HTTP/2 on one endpoint; `IHttpTlsConnectionFeature` exposes the client certificate, protocol, cipher suite and negotiated ALPN protocol |
 
 The transports do **not** parse form bodies; the body stream is
 delivered to the application layer via `IHttpRequest.Body` and

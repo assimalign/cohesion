@@ -19,7 +19,6 @@ public class HttpConnectionInfo : IHttpConnectionInfo
     /// </summary>
     /// <param name="localEndPoint">The local endpoint.</param>
     /// <param name="remoteEndPoint">The remote endpoint.</param>
-    /// <param name="isSecure">Indicates whether the connection is secured.</param>
     public HttpConnectionInfo(EndPoint? localEndPoint = null, EndPoint? remoteEndPoint = null)
     {
         LocalEndPoint = localEndPoint;

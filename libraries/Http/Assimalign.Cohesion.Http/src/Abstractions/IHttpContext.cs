@@ -54,9 +54,9 @@ public interface IHttpContext : IAsyncDisposable
 
     /// <summary>
     /// Gets a bag of items shared for the lifetime of the exchange.
-    /// Loosely-typed, name-keyed state &mdash; per-request bookkeeping that
+    /// Loosely-typed, name-keyed state (per-request bookkeeping that
     /// crosses middleware boundaries but doesn't warrant a full feature
-    /// contract &mdash; attaches here. Strongly-typed, type-keyed state belongs
+    /// contract) attaches here. Strongly-typed, type-keyed state belongs
     /// in <see cref="Features"/> instead.
     /// </summary>
     IDictionary<string, object?> Items { get; }
@@ -80,9 +80,8 @@ public interface IHttpContext : IAsyncDisposable
     /// transport may have no finer-grained option than ending the exchange.
     /// </para>
     /// <para>
-    /// Implemented as a default interface member that does nothing, so existing
-    /// <see cref="IHttpContext"/> implementations are unaffected; transports that
-    /// can cancel a single exchange override it.
+    /// Every <see cref="IHttpContext"/> implementation provides it; how far the cancellation reaches
+    /// depends on the transport, as described above.
     /// </para>
     /// </remarks>
     void Cancel();
@@ -101,9 +100,8 @@ public interface IHttpContext : IAsyncDisposable
     /// transport may have no finer-grained option than ending the exchange.
     /// </para>
     /// <para>
-    /// Implemented as a default interface member that does nothing, so existing
-    /// <see cref="IHttpContext"/> implementations are unaffected; transports that
-    /// can cancel a single exchange override it.
+    /// Every <see cref="IHttpContext"/> implementation provides it; how far the cancellation reaches
+    /// depends on the transport, as described above.
     /// </para>
     /// </remarks>
     Task CancelAsync();

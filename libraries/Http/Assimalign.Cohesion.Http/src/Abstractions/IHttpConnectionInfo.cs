@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Http;
 /// Describes the local and remote endpoints associated with an HTTP request.
 /// </summary>
 /// <remarks>
-/// This representst the transport connection.
+/// This represents the transport connection.
 /// </remarks>
 public interface IHttpConnectionInfo
 {
@@ -48,13 +48,14 @@ public interface IHttpConnectionInfo
     CancellationToken ConnectionAborted { get; }
 
     /// <summary>
-    /// Foreciblly aborts the connection, causing the <see cref="ConnectionAborted"/> token to be triggered.
+    /// Forcibly aborts the connection, causing the <see cref="ConnectionAborted"/> token to be triggered.
     /// </summary>
     void Abort();
 
     /// <summary>
-    /// Foreciblly aborts the connection, causing the <see cref="ConnectionAborted"/> token to be triggered.
+    /// Asynchronously and forcibly aborts the connection, causing the <see cref="ConnectionAborted"/> token
+    /// to be triggered.
     /// </summary>
-    /// <returns></returns>
+    /// <returns>A task that completes when the abort has been carried out.</returns>
     ValueTask AbortAsync();
 }
