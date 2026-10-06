@@ -1057,10 +1057,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             }
 
             // Durability outside the gate: if a checkpoint truncated past the
-            // record it already flushed everything durably, and EnsureDurable on
-            // an already-durable LSN is a no-op. By journal ordering this flush
-            // also covers every statement bracket the transaction committed
-            // non-durably.
+            // record under a durable mode it already flushed everything durably,
+            // and EnsureDurable on an already-durable LSN is a no-op. A storage
+            // under None claims no durability here, and an initialized storage
+            // never enters or leaves None (owner decision 26 of 2026-10-06), so a
+            // durable wait never meets a truncation made without a data fsync.
+            // By journal ordering this flush also covers every statement bracket
+            // the transaction committed non-durably.
             try
             {
                 _coordinator._storage.EnsureCommitDurable(lsn);

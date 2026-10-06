@@ -69,13 +69,18 @@ internal sealed class TornStorage : Storage
     /// True to let only a durable flush make the flush-gated journal durable, as an operating
     /// system's cache does: the flushes <c>CommitDurability.None</c> issues then survive no power loss.
     /// </param>
+    /// <param name="durability">
+    /// The commit durability, set before the storage is initialized: an initialized storage never
+    /// enters or leaves <see cref="StorageCommitDurability.None"/>.
+    /// </param>
     public static TornStorage Create(
         CrashPoint? point = null,
         int poolCapacity = 8,
         bool journalWriteThrough = true,
         bool dataWriteThrough = true,
         bool consistencyChecks = false,
-        bool journalDurableFlushesOnly = false)
+        bool journalDurableFlushesOnly = false,
+        StorageCommitDurability durability = StorageCommitDurability.Synchronous)
     {
         var storage = new TornStorage(
             new CrashSimulationStream(dataWriteThrough, point, "data"),
@@ -86,6 +91,7 @@ internal sealed class TornStorage : Storage
             storage.EnableConsistencyChecks();
         }
 
+        storage.CommitDurability = durability;
         storage.InitializeNew((Name)"torn-harness");
         return storage;
     }

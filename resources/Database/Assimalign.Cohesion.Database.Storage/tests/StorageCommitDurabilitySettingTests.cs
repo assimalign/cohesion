@@ -1,9 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.FileSystem;
 using Shouldly;
 using Xunit;
@@ -13,10 +16,11 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// <summary>
 /// The <see cref="Storage.CommitDurability"/> and <see cref="Storage.GroupCommitWindow"/> setters
 /// (owner decision 26 of 2026-10-06). An undefined mode or an out-of-range window is refused. A
-/// change is allowed while transactions are active and applies from the next commit, as
-/// PostgreSQL's <c>synchronous_commit</c> does; a commit reads one value throughout; a change waits
-/// for a running checkpoint, which reads one value throughout; and an initialized storage never
-/// leaves <see cref="StorageCommitDurability.None"/> for a durable mode.
+/// change between the two durable modes is allowed while transactions are active and applies from
+/// the next commit, as PostgreSQL's <c>synchronous_commit</c> does; a commit reads one value
+/// throughout; a change waits for a running checkpoint, which reads one value throughout; and an
+/// initialized storage never enters or leaves <see cref="StorageCommitDurability.None"/>, which is
+/// PostgreSQL's <c>fsync = off</c>.
 /// </summary>
 public sealed class StorageCommitDurabilitySettingTests
 {
@@ -59,9 +63,10 @@ public sealed class StorageCommitDurabilitySettingTests
     /// <summary>
     /// PostgreSQL: "the behavior for any one transaction is determined by the setting in effect
     /// when it commits" (<c>doc/src/sgml/config.sgml:3458-3460</c>). A transaction begun under one
-    /// mode commits under the mode set before its commit, and the change does not wait for it.
+    /// durable mode commits under the durable mode set before its commit, and the change does not
+    /// wait for it.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Storage] - Durability setting: a change while a transaction is active is allowed and applies at its commit")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Durability setting: a change between the durable modes while a transaction is active is allowed and applies at its commit")]
     public void CommitDurability_ChangedWhileATransactionIsActive_ShouldApplyAtItsCommit()
     {
         // Arrange: a transaction begun under Grouped, whose commit would register with the gate.
@@ -82,20 +87,19 @@ public sealed class StorageCommitDurabilitySettingTests
         pending.ShouldBe(0);
         storage.Wal.DurableLsn.ShouldBeGreaterThanOrEqualTo(grouped.CommitRecordLsn);
 
-        // Arrange: a transaction begun under Synchronous.
+        // Arrange: a transaction begun under Synchronous, and a zero window, so a grouped commit
+        // flushes itself as soon as it registers.
+        storage.GroupCommitWindow = TimeSpan.Zero;
         using var synchronous = storage.BeginTransaction();
         storage.Insert(synchronous, [4, 5, 6]);
-        long durable = storage.Wal.DurableLsn;
-        int durableFlushes = storage.JournalHandle.DurableFlushes;
 
-        // Act: Synchronous to None while the transaction is active, then its commit.
-        storage.CommitDurability = StorageCommitDurability.None;
+        // Act: Synchronous to Grouped while the transaction is active, then its commit.
+        storage.CommitDurability = StorageCommitDurability.Grouped;
         synchronous.Commit();
 
-        // Assert: its record left the process (#1252) without a durable flush.
-        storage.Wal.WrittenLsn.ShouldBeGreaterThanOrEqualTo(synchronous.CommitRecordLsn);
-        storage.Wal.DurableLsn.ShouldBe(durable);
-        storage.JournalHandle.DurableFlushes.ShouldBe(durableFlushes);
+        // Assert: it registered with the gate, and its record is durable.
+        pending.ShouldBe(1);
+        storage.Wal.DurableLsn.ShouldBeGreaterThanOrEqualTo(synchronous.CommitRecordLsn);
     }
 
     /// <summary>
@@ -107,19 +111,24 @@ public sealed class StorageCommitDurabilitySettingTests
     public void CommitDurability_ChangedDuringACommit_ShouldNotChangeThatCommit()
     {
         // Arrange: a small append buffer, so the commit's page record is written to the journal's
-        // handle while the commit runs, and a hook on that write that turns durability off.
+        // handle while the commit runs, and a hook on that write that switches to Grouped. A commit
+        // that read the setting again would register with the gate and wait out its window.
         using var storage = SettingStorage.Create();
+        storage.GroupCommitWindow = TimeSpan.FromSeconds(5);
+        int pending = 0;
+        storage.OnCommitPending = () => Interlocked.Increment(ref pending);
         storage.Wal.MaximumBufferBytes = 4096;
         using var transaction = storage.BeginTransaction();
         storage.Insert(transaction, Enumerable.Repeat((byte)0xAB, 6000).ToArray());
-        storage.JournalHandle.OnNextWrite = () => storage.CommitDurability = StorageCommitDurability.None;
+        storage.JournalHandle.OnNextWrite = () => storage.CommitDurability = StorageCommitDurability.Grouped;
 
         // Act
         transaction.Commit();
 
-        // Assert: the change ran inside the commit, and the commit still waited durably.
+        // Assert: the change ran inside the commit, and the commit still flushed inline.
         storage.JournalHandle.OnNextWrite.ShouldBeNull();
-        storage.CommitDurability.ShouldBe(StorageCommitDurability.None);
+        storage.CommitDurability.ShouldBe(StorageCommitDurability.Grouped);
+        pending.ShouldBe(0);
         storage.Wal.DurableLsn.ShouldBeGreaterThanOrEqualTo(transaction.CommitRecordLsn);
     }
 
@@ -152,7 +161,7 @@ public sealed class StorageCommitDurabilitySettingTests
         flushEntered.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
 
         // Act: the change starts while the checkpoint holds its lock.
-        var change = Task.Run(() => storage.CommitDurability = StorageCommitDurability.None);
+        var change = Task.Run(() => storage.CommitDurability = StorageCommitDurability.Grouped);
         var first = await Task.WhenAny(change, Task.Delay(TimeSpan.FromMilliseconds(500)));
         bool changedDuringCheckpoint = first == change;
         releaseFlush.Set();
@@ -161,34 +170,42 @@ public sealed class StorageCommitDurabilitySettingTests
 
         // Assert: the change waited, and the checkpoint record was flushed durably.
         changedDuringCheckpoint.ShouldBeFalse();
-        storage.CommitDurability.ShouldBe(StorageCommitDurability.None);
+        storage.CommitDurability.ShouldBe(StorageCommitDurability.Grouped);
         storage.Wal.DurableLsn.ShouldBe(storage.Wal.LastLsn);
     }
 
     /// <summary>
-    /// PostgreSQL turns <c>fsync</c> back on only after "all modified buffers in the kernel" reach
-    /// durable storage (<c>doc/src/sgml/config.sgml:3360-3365</c>). Nothing an initialized storage
-    /// wrote under <c>None</c> is durable or ordered on the media, so it refuses a durable mode
-    /// until it is reopened with one.
+    /// <c>None</c> is PostgreSQL's <c>fsync = off</c>, which only the configuration file changes
+    /// (<c>doc/src/sgml/config.sgml:3375-3376</c>) and which is turned back on only after all
+    /// modified buffers reach durable storage (<c>config.sgml:3360-3365</c>). A checkpoint under it
+    /// truncates the journal without flushing the data file durably, so an initialized storage
+    /// refuses a change into it or out of it until it is reopened with the new mode.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Storage] - Durability setting: an initialized storage never leaves None for a durable mode")]
-    public void CommitDurability_LeavingNoneAfterInitialization_ShouldThrowAndKeepNone()
+    [Theory(DisplayName = "Cohesion Test [Storage] - Durability setting: an initialized storage never enters or leaves None")]
+    [InlineData(StorageCommitDurability.None, StorageCommitDurability.Synchronous)]
+    [InlineData(StorageCommitDurability.None, StorageCommitDurability.Grouped)]
+    [InlineData(StorageCommitDurability.Synchronous, StorageCommitDurability.None)]
+    [InlineData(StorageCommitDurability.Grouped, StorageCommitDurability.None)]
+    public void CommitDurability_EnteringOrLeavingNoneAfterInitialization_ShouldThrowAndKeepTheSetting(
+        StorageCommitDurability initial, StorageCommitDurability requested)
     {
-        // Arrange: None chosen before initialization, on handles that could flush durably.
-        using var storage = SettingStorage.Create(StorageCommitDurability.None);
+        // Arrange: the mode chosen before initialization, on handles that can flush durably.
+        using var storage = SettingStorage.Create(initial);
 
         // Act / Assert
-        Should.Throw<InvalidOperationException>(() => storage.CommitDurability = StorageCommitDurability.Synchronous).Message.ShouldContain("Reopen it");
-        Should.Throw<InvalidOperationException>(() => storage.CommitDurability = StorageCommitDurability.Grouped);
-        Should.Throw<InvalidOperationException>(() => storage.ConfigureCommitDurability(StorageCommitDurability.Synchronous, "none-store"));
-        storage.CommitDurability = StorageCommitDurability.None;
-        storage.CommitDurability.ShouldBe(StorageCommitDurability.None);
+        Should.Throw<InvalidOperationException>(() => storage.CommitDurability = requested).Message.ShouldContain("Reopen it");
+        Should.Throw<InvalidOperationException>(() => storage.ConfigureCommitDurability(requested, "fixed-none"));
+        storage.CommitDurability.ShouldBe(initial);
+
+        // The current value may be set again, as the Sql and KeyValuePair engines do.
+        storage.ConfigureCommitDurability(initial, "fixed-none");
+        storage.CommitDurability.ShouldBe(initial);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Durability setting: before initialization any change, and after it any change but leaving None, is allowed")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Durability setting: before initialization any change, and after it any change between the durable modes, is allowed")]
     public void CommitDurability_AllowedChanges_ShouldApply()
     {
-        // Arrange: not initialized yet, as an engine's ConfigureCommitDurability finds it.
+        // Arrange: not initialized yet, as a model storage's Create finds it.
         using var storage = SettingStorage.Create(StorageCommitDurability.None, initialize: false);
 
         // Act / Assert
@@ -196,11 +213,67 @@ public sealed class StorageCommitDurabilitySettingTests
         storage.CommitDurability.ShouldBe(StorageCommitDurability.Synchronous);
         storage.Initialize();
 
-        foreach (var mode in new[] { StorageCommitDurability.Grouped, StorageCommitDurability.Synchronous, StorageCommitDurability.Grouped, StorageCommitDurability.None })
+        foreach (var mode in new[] { StorageCommitDurability.Grouped, StorageCommitDurability.Synchronous, StorageCommitDurability.Grouped })
         {
             storage.CommitDurability = mode;
             storage.CommitDurability.ShouldBe(mode);
         }
+
+        // An unset choice resolves from the handles, as an engine's second configuration does.
+        storage.ConfigureCommitDurability(null, "configured-again");
+        storage.CommitDurability.ShouldBe(StorageCommitDurability.Synchronous);
+    }
+
+    /// <summary>
+    /// The race the refusal closes (kernel review of owner decision 26). A logical commit waits for
+    /// its record in the group-commit gate, as <c>TransactionCoordinator</c> does after its statement
+    /// brackets committed without waiting. Had the mode switched to <c>None</c>, a checkpoint would
+    /// have truncated the journal without flushing the data file durably, and the waiter's own
+    /// fsync would then have made that truncation durable while the pages were not: after a power
+    /// loss both the logical commit and an earlier commit acknowledged under <c>Synchronous</c> were
+    /// gone. Now the switch is refused, the checkpoint stays durable, and both commits survive.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Durability setting: a durable wait across a checkpoint keeps its commit, since the switch to None it would race is refused")]
+    public async Task CommitDurability_SwitchToNoneWhileALogicalCommitWaits_ShouldBeRefusedAndKeepBothCommits()
+    {
+        // Arrange: a durable base on flush-gated media, and a commit acknowledged under Synchronous.
+        using var storage = CrashStorage.CreateNew();
+        storage.Checkpoint();
+        using (var acknowledged = storage.BeginTransaction())
+        {
+            storage.Insert(acknowledged, "acknowledged");
+            acknowledged.Commit();
+        }
+
+        // A statement bracket committed without its wait, then the logical commit's wait under
+        // Grouped, on a thread of its own, with a window too long for the waiter to help itself.
+        storage.CommitDurability = StorageCommitDurability.Grouped;
+        storage.GroupCommitWindow = TimeSpan.FromSeconds(20);
+        using var registered = new ManualResetEventSlim();
+        storage.OnCommitPending = registered.Set;
+        long lsn;
+        using (var bracket = storage.BeginTransaction())
+        {
+            storage.Insert(bracket, "logical");
+            bracket.Commit(awaitDurability: false);
+            lsn = bracket.CommitRecordLsn;
+        }
+
+        var waiter = Task.Factory.StartNew(
+            () => storage.EnsureCommitDurable(lsn), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        registered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue("the logical commit did not register on the gate within 10 s");
+        waiter.IsCompleted.ShouldBeFalse();
+
+        // Act: the switch to None, then a checkpoint, while the commit waits.
+        Should.Throw<InvalidOperationException>(() => storage.CommitDurability = StorageCommitDurability.None);
+        storage.Checkpoint();
+        await waiter.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert: the checkpoint stayed durable and released the waiter, and a power loss now keeps
+        // both commits.
+        storage.CommitDurability.ShouldBe(StorageCommitDurability.Grouped);
+        using var reopened = CrashStorage.Open(storage.CaptureDurable());
+        reopened.ScanText().ShouldBe(new[] { "acknowledged", "logical" }, ignoreOrder: true);
     }
 
     private sealed class SettingStorage : Storage
@@ -237,6 +310,60 @@ public sealed class StorageCommitDurabilitySettingTests
         public void Initialize() => InitializeNew((Name)"durability-setting");
 
         public (PageId PageId, int SlotIndex) Insert(StorageTransaction transaction, byte[] data) => InsertRecord(transaction, data);
+    }
+
+    /// <summary>
+    /// A storage over flush-gated media on which only a durable flush survives a power loss, as an
+    /// operating system's cache behaves: the flushes <c>None</c> issues survive none.
+    /// </summary>
+    private sealed class CrashStorage : Storage
+    {
+        private readonly CrashSimulationStream _data;
+        private readonly CrashSimulationStream _journal;
+
+        private CrashStorage(CrashSimulationStream data, CrashSimulationStream journal)
+            : base(StorageModel.Custom, new StorageStream(data), new StorageStream(journal), new StorageStream(new MemoryStream()))
+        {
+            _data = data;
+            _journal = journal;
+        }
+
+        public static CrashStorage CreateNew()
+        {
+            var storage = new CrashStorage(
+                new CrashSimulationStream(writeThrough: false, name: "data") { DurableFlushesOnly = true },
+                new CrashSimulationStream(writeThrough: false, name: "journal") { DurableFlushesOnly = true });
+            storage.ConfigureCommitDurability(StorageCommitDurability.Synchronous, "crash-storage");
+            storage.InitializeNew((Name)"crash-storage");
+            return storage;
+        }
+
+        public static CrashStorage Open((byte[] Data, byte[] Journal) images)
+        {
+            var storage = new CrashStorage(
+                new CrashSimulationStream(images.Data, writeThrough: true, name: "data"),
+                new CrashSimulationStream(images.Journal, writeThrough: true, name: "journal"));
+            storage.ConfigureCommitDurability(StorageCommitDurability.Synchronous, "crash-storage");
+            storage.OpenExisting(checkpointOnOpen: false);
+            return storage;
+        }
+
+        /// <summary>Gets what a power loss right now would leave on the media.</summary>
+        public (byte[] Data, byte[] Journal) CaptureDurable() => (_data.CaptureDurable(), _journal.CaptureDurable());
+
+        public void Insert(StorageTransaction transaction, string text) => InsertRecord(transaction, Encoding.UTF8.GetBytes(text));
+
+        public List<string> ScanText()
+        {
+            var results = new List<string>();
+            using var iterator = GetUnitIterator(0);
+            while (iterator.MoveNext())
+            {
+                results.Add(Encoding.UTF8.GetString(iterator.Current.Data.Span));
+            }
+
+            return results;
+        }
     }
 
     /// <summary>

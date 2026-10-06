@@ -771,8 +771,7 @@ public class TransactionCoordinatorRollbackTests
     {
         // Arrange: a writer whose statement bracket committed without awaiting durability, so its
         // records wait in the append buffer for the transaction's commit.
-        using var storage = RollbackStorage.Create();
-        storage.CommitDurability = durability;
+        using var storage = RollbackStorage.Create(durability);
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await InsertAsync(coordinator, storage, writer);
@@ -1303,11 +1302,15 @@ public class TransactionCoordinatorRollbackTests
         private readonly MemoryStream _data;
         private readonly FaultingMemoryStream _journal;
 
-        private RollbackStorage(MemoryStream data, FaultingMemoryStream journal, bool reopen)
+        private RollbackStorage(MemoryStream data, FaultingMemoryStream journal, bool reopen, StorageCommitDurability durability = StorageCommitDurability.Synchronous)
             : base(StorageModel.KeyValue, new StorageStream(new SimulatedDurableFileHandle(data)), new StorageStream(new SimulatedDurableFileHandle(journal)), new StorageStream(new MemoryStream()))
         {
             _data = data;
             _journal = journal;
+
+            // Chosen before the storage is initialized: an initialized storage never enters or
+            // leaves None (owner decision 26 of 2026-10-06).
+            CommitDurability = durability;
             if (reopen)
             {
                 OpenExisting(checkpointOnOpen: false);
@@ -1325,7 +1328,8 @@ public class TransactionCoordinatorRollbackTests
 
         internal (PageId PageId, int SlotIndex) LastInserted { get; private set; }
 
-        internal static RollbackStorage Create() => new(new MemoryStream(), new FaultingMemoryStream(), reopen: false);
+        internal static RollbackStorage Create(StorageCommitDurability durability = StorageCommitDurability.Synchronous)
+            => new(new MemoryStream(), new FaultingMemoryStream(), reopen: false, durability);
 
         internal static RollbackStorage Open(byte[] data, byte[] journal) => new(Copy(data), Copy(journal), reopen: true);
 

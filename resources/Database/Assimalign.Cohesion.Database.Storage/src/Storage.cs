@@ -695,33 +695,43 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The setting may change at any time, transactions active or not, as PostgreSQL's
-    /// <c>synchronous_commit</c> may (<c>PGC_USERSET</c>,
-    /// <c>src/backend/utils/misc/guc_parameters.dat:2973</c>): "the behavior for any one
-    /// transaction is determined by the setting in effect when it commits"
+    /// Before the storage is initialized any change is allowed. Each model storage's
+    /// <c>Create</c>/<c>Open</c> resolves the setting through
+    /// <see cref="ConfigureCommitDurability"/> before it initializes the storage; the Sql and
+    /// KeyValuePair engines then apply the same option again to the initialized storage, which never
+    /// changes the value (owner decision 26 of 2026-10-06).
+    /// </para>
+    /// <para>
+    /// Once it is initialized, the two durable modes may replace each other at any time,
+    /// transactions active or not, as PostgreSQL's <c>synchronous_commit</c> may
+    /// (<c>PGC_USERSET</c>, <c>src/backend/utils/misc/guc_parameters.dat:2973</c>): "the behavior
+    /// for any one transaction is determined by the setting in effect when it commits"
     /// (<c>doc/src/sgml/config.sgml:3458-3460</c>; <c>RecordTransactionCommit</c> reads it once,
     /// <c>src/backend/access/transam/xact.c:1540-1542</c>). Here a commit reads it once, when its
     /// storage bracket starts to commit, and uses that one value for its durability check and its
     /// wait; a logical commit's later record reads it once in <see cref="EnsureCommitDurable"/>.
-    /// The setter takes the lock a checkpoint holds throughout, so a change waits for a running
-    /// checkpoint and a checkpoint reads one value from start to end. Engines set it once, through
-    /// <see cref="ConfigureCommitDurability"/>, before the storage is initialized (owner decision
-    /// 26 of 2026-10-06).
+    /// Both durable modes flush the data file and the journal alike and differ only in who issues a
+    /// commit's fsync, so a checkpoint is durable under either. The setter takes the lock a
+    /// checkpoint holds throughout, so a change waits for a running checkpoint and a checkpoint
+    /// reads one value from start to end.
     /// </para>
     /// <para>
-    /// One change is refused: leaving <see cref="StorageCommitDurability.None"/> for a durable mode
-    /// once the storage is initialized. Under <c>None</c> nothing reached stable storage in any
-    /// order: a checkpoint may have truncated the journal ahead of the page writes it stands for,
-    /// and the first durable flush of the journal would make that truncation durable while those
-    /// pages are not. PostgreSQL's <c>None</c> is <c>fsync = off</c>, which only a reload changes
-    /// (<c>PGC_SIGHUP</c>, <c>guc_parameters.dat:1117</c>), and it requires "all modified buffers in
-    /// the kernel" forced to durable storage before it is turned back on
-    /// (<c>config.sgml:3360-3365</c>). The equivalent here is a reopen with the durable mode
-    /// configured before the open: its recovery checkpoint flushes the data file durably before it
-    /// truncates the journal. Turning durability off (to <c>None</c>) and moving between
-    /// <see cref="StorageCommitDurability.Synchronous"/> and
-    /// <see cref="StorageCommitDurability.Grouped"/> are always allowed: both durable modes flush
-    /// the data file and the journal alike and differ only in who issues a commit's fsync.
+    /// <see cref="StorageCommitDurability.None"/> is fixed once the storage is initialized: a change
+    /// into it or out of it is refused, and setting the current value stays allowed.
+    /// <c>None</c> is PostgreSQL's <c>fsync = off</c>, not <c>synchronous_commit = off</c>
+    /// (<c>config.sgml:3412-3418</c> contrasts the two): a checkpoint under it truncates the
+    /// journal without flushing the data file durably, so the truncation can reach the media ahead
+    /// of the pages it stands for. Entering it would expose every commit acknowledged durable before
+    /// the change to that truncation: a logical commit still waiting under the durable mode would
+    /// make the truncation durable with its own fsync while the pages stay volatile, and a power loss
+    /// would then take that commit and the earlier ones with it. Leaving it, the first durable
+    /// journal flush would do the same to a truncation made under <c>None</c>. PostgreSQL changes <c>fsync</c> only through its configuration file
+    /// (<c>PGC_SIGHUP</c>, <c>guc_parameters.dat:1117</c>; <c>config.sgml:3375-3376</c>), warns that
+    /// turning it off risks "unrecoverable data corruption" (<c>config.sgml:3339-3341</c>), and
+    /// forces all modified buffers to durable storage before it is turned back on
+    /// (<c>config.sgml:3360-3365</c>). The equivalent here is a reopen with the new mode configured
+    /// before the open; a durable open's recovery checkpoint flushes the data file durably before it
+    /// truncates the journal.
     /// </para>
     /// <para>
     /// The setter does not check that the backing store can flush durably; a commit asking for a
@@ -730,8 +740,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">The value is not a defined durability mode.</exception>
     /// <exception cref="InvalidOperationException">
-    /// The storage is initialized under <see cref="StorageCommitDurability.None"/>, and the value is
-    /// a durable mode.
+    /// The storage is initialized, and the value enters or leaves
+    /// <see cref="StorageCommitDurability.None"/>.
     /// </exception>
     public StorageCommitDurability CommitDurability
     {
@@ -745,13 +755,14 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             lock (_transactionLock)
             {
+                var current = (StorageCommitDurability)_commitDurability;
                 if (_journal is not null
-                    && (StorageCommitDurability)_commitDurability == StorageCommitDurability.None
-                    && value != StorageCommitDurability.None)
+                    && (current == StorageCommitDurability.None) != (value == StorageCommitDurability.None))
                 {
                     throw new InvalidOperationException(
-                        $"Storage '{_name}' cannot change CommitDurability from 'None' to '{value}' once it is initialized: nothing it wrote " +
-                        "under 'None' is durable, or ordered on the media. Reopen it with the durable mode configured before the open.");
+                        $"Storage '{_name}' cannot change CommitDurability from '{current}' to '{value}' once it is initialized: 'None' " +
+                        "checkpoints truncate the journal without flushing the data file durably, so a change into or out of 'None' " +
+                        "could make a truncation durable ahead of its pages. Reopen it with the new mode configured before the open.");
                 }
 
                 Volatile.Write(ref _commitDurability, (int)value);
@@ -774,8 +785,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <exception cref="NotSupportedException">An explicit durable setting cannot be provided by the backing store.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The setting is not a defined durability mode.</exception>
     /// <exception cref="InvalidOperationException">
-    /// Called after initialization under <see cref="StorageCommitDurability.None"/> with a durable
-    /// mode (see <see cref="CommitDurability"/>).
+    /// Called after initialization with a setting that enters or leaves
+    /// <see cref="StorageCommitDurability.None"/> (see <see cref="CommitDurability"/>).
     /// </exception>
     public void ConfigureCommitDurability(StorageCommitDurability? durability, string storageName)
     {
@@ -1359,7 +1370,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // Read once: a CommitDurability change racing the checkpoint must not make it flush
             // without an fsync and then publish that LSN to the gate as durable. The setter takes
             // this checkpoint's transaction lock too (owner decision 26 of 2026-10-06), so the
-            // header write above, its page write-backs and this flush all saw the same value.
+            // header write above, its page write-backs and this flush all saw the same value. And
+            // an initialized storage never enters or leaves None, so a commit waiting durably in
+            // the gate never meets a truncation this checkpoint made without flushing the data file.
             bool durable = RequiresDurableFlush;
             long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences, forceDurable: durable);
 
