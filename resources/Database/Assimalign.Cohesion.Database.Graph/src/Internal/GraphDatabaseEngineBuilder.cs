@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal sealed class GraphDatabaseEngineBuilder : IGraphDatabaseEngineBuilder
 {
-    private readonly DatabaseEngineBuilderState _state = new();
+    private readonly DatabaseEngineBuilderState<GraphDatabaseEngine, IDatabaseEngineWorker, IDatabaseServer> _state = new();
     private readonly GraphDatabaseEngineOptions _options = new();
 
     public string? EngineName

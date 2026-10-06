@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair;
@@ -114,7 +115,9 @@ public sealed class KeyValueDatabaseEngineOptions
     /// </summary>
     /// <remarks>
     /// When null, the engine selects a default strategy based on <see cref="RootPath"/>:
-    /// file-based if a path is provided, or in-memory otherwise.
+    /// file-based if a path is provided, or in-memory otherwise. Internal (concrete-types plan,
+    /// D9): the strategy base is internal, and this assembly's tests set their durability and
+    /// fault-injecting doubles here through the test-only grant.
     /// </remarks>
-    public IKeyValueStorageStrategy? StorageStrategy { get; set; }
+    internal KeyValueStorageStrategy? StorageStrategy { get; set; }
 }

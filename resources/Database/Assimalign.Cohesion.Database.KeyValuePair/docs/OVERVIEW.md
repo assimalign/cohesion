@@ -7,8 +7,10 @@ kernel, and deliberately the kernel-generality proof (area DESIGN §3.10).
 
 ## Purpose
 
-Implements the area root's `IDatabaseEngine`/`IDatabase`/`IDatabaseSession`
-contracts for the key-value model by composing the shared kernel — storage
+Derives sealed leaves from the area root's `DatabaseEngine`/`DatabaseInstance`/
+`DatabaseSession`/`DatabaseTransaction`/`DatabaseServer` bases for the key-value
+model (the concrete-first rule, `.claude/rules/database-area.md`) by composing the
+shared kernel — storage
 (pages/WAL/recovery), transactions (MVCC snapshots, lock manager), indexing
 (B+Tree) — never re-implementing it. Keys and values are opaque byte sequences;
 keys order by unsigned lexicographic byte comparison.
@@ -17,9 +19,12 @@ keys order by unsigned lexicographic byte comparison.
 
 - `KeyValueDatabaseEngine` + `KeyValueDatabaseEngineOptions` — the data machine:
   create → use → dispose, engine-owned background workers, two file sets per
-  database (`<name>` + `<name>.catalog`).
-- `IKeyValueDatabase` — the typed model surface (get/put/delete/exists/scan with
-  etag-conditional writes).
+  database (`<name>` + `<name>.catalog`). `KeyValueDatabaseEngineBuilder` (from
+  `CreateBuilder()` or the `AddKeyValue` verb) composes typed worker and server
+  factories.
+- `KeyValueDatabase` — the typed model surface (get/put/delete/exists/scan with
+  etag-conditional writes); `KeyValueDatabaseSession` and
+  `KeyValueDatabaseTransaction` are its typed session and explicit transaction.
 - Explicit transactions: a failed command writes nothing and leaves the transaction
   active, so later commands stay inside it until the caller commits or rolls back. A
   rollback can be repeated, and a started rollback always ends the transaction, even when
@@ -73,7 +78,7 @@ await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngin
     RootPath = "/var/lib/app/data", // omit for in-memory
 });
 
-var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("app");
+var database = await engine.CreateDatabaseAsync("app"); // a KeyValueDatabase, no cast
 await using var session = await database.CreateSessionAsync();
 
 var put = await database.PutAsync(session, key, value);

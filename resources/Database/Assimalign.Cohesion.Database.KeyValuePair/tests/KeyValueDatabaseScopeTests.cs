@@ -22,8 +22,8 @@ public sealed class KeyValueDatabaseScopeTests
     public async Task Session_ShouldRemainBoundToOneDatabase()
     {
         await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "scope" });
-        var first = (IKeyValueDatabase)await engine.CreateDatabaseAsync("first");
-        var second = (IKeyValueDatabase)await engine.CreateDatabaseAsync("second");
+        var first = await engine.CreateDatabaseAsync("first");
+        var second = await engine.CreateDatabaseAsync("second");
         await using var session = await first.CreateSessionAsync();
         await using var other = await second.CreateSessionAsync();
         var key = Bytes("marker");

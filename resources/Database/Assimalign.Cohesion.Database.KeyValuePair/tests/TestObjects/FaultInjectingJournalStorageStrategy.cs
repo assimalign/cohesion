@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -25,7 +26,7 @@ using Assimalign.Cohesion.FileSystem;
 /// durable flush confirmed, as an operating system that dropped the writes a failed fsync covered
 /// would leave it (#1243).
 /// </remarks>
-internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStrategy
+internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStrategy
 {
     private static readonly AsyncLocal<Budget?> s_failures = new();
     private static readonly AsyncLocal<Budget?> s_flushFailures = new();
@@ -124,7 +125,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
     }
 
     /// <inheritdoc />
-    public KeyValueStorage CreateStorage(string databaseName)
+    public override KeyValueStorage CreateStorage(string databaseName)
     {
         var files = new Files(new MemoryStream(), new FaultInjectingStream(), new MemoryStream());
         lock (_sync)
@@ -143,7 +144,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
     /// bytes after disposal, so this works for a storage the engine closed.
     /// </summary>
     /// <inheritdoc />
-    public KeyValueStorage OpenStorage(string databaseName)
+    public override KeyValueStorage OpenStorage(string databaseName)
     {
         Files files;
         lock (_sync)
@@ -168,7 +169,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
     }
 
     /// <inheritdoc />
-    public void DropStorage(string databaseName)
+    public override void DropStorage(string databaseName)
     {
         lock (_sync)
         {
@@ -177,7 +178,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IKeyValueStorageStr
     }
 
     /// <inheritdoc />
-    public bool StorageExists(string databaseName)
+    public override bool StorageExists(string databaseName)
     {
         lock (_sync)
         {

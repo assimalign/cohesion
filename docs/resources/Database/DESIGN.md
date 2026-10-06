@@ -114,7 +114,7 @@ Each model root project owns a public engine (`{Model}DatabaseEngine`, static `C
 | Documents | `IDocumentDatabase` | named collections of versioned documents (`IDocumentCollection`) | OQL query and index-DDL contract — `Documents.Language` |
 | Graph | `IGraphDatabase` | property graph: nodes, typed directed relationships, traversal | standard TBD (ISO GQL is the recommended default; decision gates deep language work) — `Graph.Language` |
 | Blob | `IBlobDatabase` | containers of streamed large objects + metadata catalog | none (API-driven) |
-| KeyValuePair | `IKeyValueDatabase` | ordered key space, point/range ops, TTL | none for MVP (commands ride the wire protocol directly) |
+| KeyValuePair | `KeyValueDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | ordered key space, point/range ops, TTL | none for MVP (commands ride the wire protocol directly) |
 
 Per-model satellite projects follow one matrix: `.Language` (where a language exists), `.Storage` (model-specific layouts on the shared substrate), `.Catalog` (schema/metadata, constraint enforcement, migration apply for SQL), `.Client` (typed client over the shared client core), `.Security` (model-specific authorization).
 
@@ -394,7 +394,7 @@ The KeyValuePair engine was built as the deliberate test of R3's premise — tha
 | Types (order-preserving self-describing tuple codec, `DatabaseValueCodec`) | entry records (key/value binary components) and every wire value | raw key bytes double as `IndexKey`s — the model's ordering contract *is* the codec's |
 | Execution (request/result families) | `KeyValueRequest` family + materialized result sets | the typed seam and the wire ride the same shapes |
 | Protocol + the server machinery | the command grammar rides the existing `Execute` message; results ride the generic result framing — **zero protocol changes** | the extraction evidence (preserved below; the owner subsequently chose per-model duplication): even the execute pump proved model-agnostic |
-| The composition surface (`IDatabaseApplicationBuilder`, per-model verbs, root server contracts) | `AddKeyValue` / nested `AddServer(factory)` + `KeyValueDatabaseServer` (the model's own `IDatabaseServer`) | the TCP E2E composes the whole stack builder-first, restart included |
+| The composition surface (`IDatabaseApplicationBuilder`, per-model verbs, root server contracts) | `AddKeyValue` / nested `AddServer(factory)` + `KeyValueDatabaseServer` (the model's sealed `DatabaseServer` leaf) | the TCP E2E composes the whole stack builder-first, restart included |
 | The engine-owned worker discipline (data machines, five-worker inventory) | same inventory, same pump base; the version-purge worker is **live** from the first cut | worker-inventory and purge-pass suites |
 
 **What it exposed (the gaps, each filed rather than hacked around):**

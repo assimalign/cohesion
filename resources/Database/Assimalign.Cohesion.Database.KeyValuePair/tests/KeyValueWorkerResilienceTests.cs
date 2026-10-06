@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
@@ -36,8 +35,8 @@ public sealed class KeyValueWorkerResilienceTests
         // Arrange: the checkpointer looks every 100 ms; nothing else writes pages back.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = KeyValueDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
-        var failing = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-        var healthy = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var workers = engine.Workers.ToArray();
         var faults = strategy.Faults(Failing);
@@ -200,8 +199,8 @@ public sealed class KeyValueWorkerResilienceTests
         var options = Options(strategy);
         options.CheckpointJournalSize = PaceJournalSize;
         await using var engine = KeyValueDatabaseEngine.Create(options);
-        var stalled = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-        var healthy = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+        var stalled = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var stalledFaults = strategy.Faults(Failing);
         var healthyFaults = strategy.Faults(Healthy);
@@ -259,8 +258,8 @@ public sealed class KeyValueWorkerResilienceTests
         // Arrange: the page writer runs every 50 ms; no checkpoint writes pages.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = KeyValueDatabaseEngine.Create(Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
-        var failing = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-        var healthy = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.PageWriteBack);
         var faults = strategy.Faults(Failing);
         var healthyFaults = strategy.Faults(Healthy);
@@ -316,8 +315,8 @@ public sealed class KeyValueWorkerResilienceTests
         options.Durability = StorageCommitDurability.Grouped;
         options.GroupCommitWindow = window;
         await using var engine = KeyValueDatabaseEngine.Create(options);
-        var failing = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-        var healthy = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
         var faults = strategy.Faults(Failing);
         await using var session = await failing.CreateSessionAsync();
@@ -334,7 +333,7 @@ public sealed class KeyValueWorkerResilienceTests
         var latencies = await TimedPutsAsync(healthy, 5);
 
         faults.Clear();
-        var reopened = (KeyValueDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert: a failed drain ends the group flush before its fsync.
         bool drain = fault == DeviceFault.JournalWrite;
@@ -361,8 +360,8 @@ public sealed class KeyValueWorkerResilienceTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = KeyValueDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
-        var failing = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-        var healthy = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
         await PutAsync(failing, 0, 10);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -391,7 +390,7 @@ public sealed class KeyValueWorkerResilienceTests
         var catalogAfter = strategy.Capture(Failing + KeyValueDatabaseEngine.CatalogSuffix);
 
         faults.Clear();
-        var reopened = (KeyValueDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert
         offline.ShouldBeTrue();
@@ -439,7 +438,7 @@ public sealed class KeyValueWorkerResilienceTests
         // an explicit transaction, and another queues behind it.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = KeyValueDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
-        var failing = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
+        var failing = await engine.CreateDatabaseAsync(Failing);
         var faults = strategy.Faults(Failing);
         await using var holder = await failing.CreateSessionAsync();
         await using var queued = await failing.CreateSessionAsync();
@@ -465,7 +464,7 @@ public sealed class KeyValueWorkerResilienceTests
         var holderRefusal = await Record.ExceptionAsync(async () => await failing.PutAsync(holder, Bytes("after"), Bytes("after")));
 
         faults.Clear();
-        var reopened = (KeyValueDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert: both writers got the coded refusal naming what failed, and the reopen kept
         // neither write.
@@ -479,8 +478,12 @@ public sealed class KeyValueWorkerResilienceTests
         (await CountAsync(reopened)).ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a registered worker whose loop throws is run again, and the engine reports Faulted")]
-    public async Task Pump_InterfaceWorkerThrows_ShouldRunItAgainAndReportFaulted()
+    // Since the engine derives from DatabaseEngine (concrete-types plan, phase 4), a registered
+    // worker is a DatabaseEngineWorker, whose loop lets nothing escape: the pass that throws is
+    // recorded and the next one runs after the backoff. The interface-only worker this test drove
+    // until then cannot be registered any more.
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a registered worker whose pass throws is run again, and the engine reports Faulted")]
+    public async Task Pump_RegisteredWorkerPassThrows_ShouldRunItAgainAndReportFaulted()
     {
         // Arrange
         var worker = new EscapingWorker();
@@ -535,8 +538,8 @@ public sealed class KeyValueWorkerResilienceTests
             var options = Options(strategy);
             options.CheckpointJournalSize = PaceJournalSize;
             await using var engine = KeyValueDatabaseEngine.Create(options);
-            var failing = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-            var healthy = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+            var failing = await engine.CreateDatabaseAsync(Failing);
+            var healthy = await engine.CreateDatabaseAsync(Healthy);
             var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
             var failingFaults = strategy.Faults(Failing);
             var healthyFaults = strategy.Faults(Healthy);
@@ -686,7 +689,7 @@ public sealed class KeyValueWorkerResilienceTests
     private static DatabaseEngineWorker WorkerOf(KeyValueDatabaseEngine engine, DatabaseEngineWorkerKind kind)
         => engine.Workers.OfType<DatabaseEngineWorker>().Single(worker => worker.Kind == kind);
 
-    private static async Task PutAsync(KeyValueDatabaseInstance database, int first, int count)
+    private static async Task PutAsync(KeyValueDatabase database, int first, int count)
     {
         await using var session = await database.CreateSessionAsync();
         for (int id = first; id < first + count; id++)
@@ -695,7 +698,7 @@ public sealed class KeyValueWorkerResilienceTests
         }
     }
 
-    private static async Task<List<TimeSpan>> TimedPutsAsync(KeyValueDatabaseInstance database, int count)
+    private static async Task<List<TimeSpan>> TimedPutsAsync(KeyValueDatabase database, int count)
     {
         var latencies = new List<TimeSpan>();
         await using var session = await database.CreateSessionAsync();
@@ -709,7 +712,7 @@ public sealed class KeyValueWorkerResilienceTests
         return latencies;
     }
 
-    private static async Task<int> CountAsync(KeyValueDatabaseInstance database)
+    private static async Task<int> CountAsync(KeyValueDatabase database)
     {
         await using var session = await database.CreateSessionAsync();
         int count = 0;
@@ -751,31 +754,34 @@ public sealed class KeyValueWorkerResilienceTests
         return true;
     }
 
-    /// <summary>A worker without the guided base whose first loop throws; later loops run until cancelled.</summary>
-    private sealed class EscapingWorker : IDatabaseEngineWorker
+    /// <summary>
+    /// A registered worker whose first pass throws; later passes run until cancelled, so the
+    /// failure stays recorded (no pass ran to its end) while the test reads the engine's state.
+    /// </summary>
+    private sealed class EscapingWorker : DatabaseEngineWorker
     {
         private int _runs;
         private int _stopped;
 
-        public string Name => "escaping";
-
-        public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.IndexMaintenance;
-
-        public TimeSpan Interval => TimeSpan.FromSeconds(1);
+        public EscapingWorker()
+            : base("escaping", DatabaseEngineWorkerKind.IndexMaintenance, TimeSpan.FromMilliseconds(10))
+        {
+        }
 
         public int Runs => Volatile.Read(ref _runs);
 
         public bool Stopped => Volatile.Read(ref _stopped) != 0;
 
-        public void Run(CancellationToken cancellationToken)
+        protected override void RunIterationCore(CancellationToken cancellationToken)
         {
             if (Interlocked.Increment(ref _runs) == 1)
             {
-                throw new InvalidOperationException("The worker's loop failed.");
+                throw new InvalidOperationException("The worker's pass failed.");
             }
 
             cancellationToken.WaitHandle.WaitOne();
             Volatile.Write(ref _stopped, 1);
+            cancellationToken.ThrowIfCancellationRequested();
         }
     }
 }

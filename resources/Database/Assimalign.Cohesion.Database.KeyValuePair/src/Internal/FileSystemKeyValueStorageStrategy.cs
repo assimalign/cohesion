@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Database.Storage;
 /// File-based storage strategy that creates subdirectories under a root path
 /// with .dat, .log, and .bak files for each database.
 /// </summary>
-internal sealed class FileSystemKeyValueStorageStrategy : IKeyValueStorageStrategy
+internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrategy
 {
     private readonly string _rootPath;
     private readonly StorageCommitDurability? _durability;
@@ -21,7 +21,7 @@ internal sealed class FileSystemKeyValueStorageStrategy : IKeyValueStorageStrate
     }
 
     /// <inheritdoc />
-    public KeyValueStorage CreateStorage(string databaseName)
+    public override KeyValueStorage CreateStorage(string databaseName)
     {
         var dbDirectory = Path.Combine(_rootPath, databaseName);
 
@@ -62,7 +62,7 @@ internal sealed class FileSystemKeyValueStorageStrategy : IKeyValueStorageStrate
     }
 
     /// <inheritdoc />
-    public KeyValueStorage OpenStorage(string databaseName)
+    public override KeyValueStorage OpenStorage(string databaseName)
     {
         var dbDirectory = Path.Combine(_rootPath, databaseName);
         var dataFilePath = Path.Combine(dbDirectory, $"{databaseName}.dat");
@@ -104,7 +104,7 @@ internal sealed class FileSystemKeyValueStorageStrategy : IKeyValueStorageStrate
     }
 
     /// <inheritdoc />
-    public void DropStorage(string databaseName)
+    public override void DropStorage(string databaseName)
     {
         var dbDirectory = Path.Combine(_rootPath, databaseName);
 
@@ -115,7 +115,7 @@ internal sealed class FileSystemKeyValueStorageStrategy : IKeyValueStorageStrate
     }
 
     /// <inheritdoc />
-    public bool StorageExists(string databaseName)
+    public override bool StorageExists(string databaseName)
     {
         var dbDirectory = Path.Combine(_rootPath, databaseName);
         var dataFilePath = Path.Combine(dbDirectory, $"{databaseName}.dat");

@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
@@ -30,7 +29,7 @@ public sealed class KeyValueTransactionFailureWireTests
         await using var harness = await KeyValueServerHarness.StartAsync();
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(TestTimeout.Token());
         await PutAsync(client, "pending");
 
@@ -45,7 +44,7 @@ public sealed class KeyValueTransactionFailureWireTests
         failure.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
         stateAfterFailure.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
         serverSession.DatabaseSession!.CurrentTransaction.ShouldBeNull();
         await client.SendAsync(ProtocolMessageType.Execute, Command("SCAN").Encode());
         await client.ExpectAsync(ProtocolMessageType.ResultHeader);
@@ -60,7 +59,7 @@ public sealed class KeyValueTransactionFailureWireTests
         await using var harness = await KeyValueServerHarness.StartAsync();
         var client = await harness.DialAsync();
         await client.HandshakeAsync();
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(TestTimeout.Token());
         await PutAsync(client, "pending");
 
@@ -68,13 +67,12 @@ public sealed class KeyValueTransactionFailureWireTests
         await client.SendAsync(ProtocolMessageType.Terminate);
         await client.DisposeAsync();
         await transaction.RollbackAsync(TestTimeout.Token());
-        await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0);
+        await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
         await transaction.RollbackAsync(TestTimeout.Token());
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        harness.Engine.TryGetDatabase(KeyValueServerHarness.DatabaseName, out var opened).ShouldBeTrue();
-        var database = (IKeyValueDatabase)opened;
+        harness.Engine.TryGetDatabase(KeyValueServerHarness.DatabaseName, out var database).ShouldBeTrue();
         await using var observer = await database.CreateSessionAsync();
         (await database.GetAsync(observer, Bytes("pending"), TestTimeout.Token())).ShouldBeNull();
     }
@@ -91,9 +89,8 @@ public sealed class KeyValueTransactionFailureWireTests
         await using var harness = await KeyValueServerHarness.StartAsync();
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
-        harness.Engine.TryGetDatabase(KeyValueServerHarness.DatabaseName, out var opened).ShouldBeTrue();
-        var database = (IKeyValueDatabase)opened;
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
+        harness.Engine.TryGetDatabase(KeyValueServerHarness.DatabaseName, out var database).ShouldBeTrue();
         await using var blockingSession = await database.CreateSessionAsync();
         await using var observer = await database.CreateSessionAsync();
         var blocker = await blockingSession.BeginTransactionAsync(TestTimeout.Token());
@@ -117,7 +114,7 @@ public sealed class KeyValueTransactionFailureWireTests
         transaction.State.ShouldBe(TransactionState.RolledBack);
         fresh.ShouldBeNull();
         later.Applied.ShouldBeTrue();
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
         await PutAsync(client, "after");
     }
 

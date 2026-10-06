@@ -17,12 +17,12 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// <see cref="KeyValueDatabaseEngine"/> on the network — accept loop over the
 /// composed listener, the session state machine and frame pump, the
 /// authentication/idle/session-limit guardrails, and the two-phase graceful
-/// drain — implementing the area root's <see cref="IDatabaseServer"/> contract
-/// directly.
+/// drain — as a sealed leaf of the area root's <see cref="DatabaseServer"/> base.
 /// </summary>
 /// <remarks>
-/// Servers are per-model, and the root contract is the only area-wide requirement:
-/// every model ships its own <see cref="IDatabaseServer"/> implementation against
+/// <para>
+/// Servers are per-model, and the root base is the only area-wide requirement:
+/// every model ships its own <see cref="DatabaseServer"/> leaf against
 /// <c>Connections</c> and the protocol child root, carrying its <b>own copy</b> of
 /// the server machinery (owner decision 2026-07-14, made with this second model's
 /// extraction evidence in hand: model independence outweighs the duplication
@@ -32,18 +32,24 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// (statement text + named tuple-codec parameters) into the root's text-execute
 /// seam, and the model's result sets ride the generic ResultHeader/Row/Complete
 /// framing — zero protocol changes. Model-specific wire surface (binary command
-/// frames, if measurement ever demands them) grows here. The server is created
-/// inert; <see cref="StartAsync"/> binds the configured listener before it
-/// begins accepting, <see cref="StopAsync"/>
-/// drains within <see cref="KeyValueDatabaseServerOptions.ShutdownDrainTimeout"/>
-/// then aborts and releases the listener. Stop is terminal: restarting means
-/// composing a fresh server and listener. The composition root retains ownership
-/// of the engine; the server owns the listener lifecycle once startup is attempted. Compose
-/// one with <see cref="Create"/>, or through the
+/// frames, if measurement ever demands them) grows here.
+/// </para>
+/// <para>
+/// <b>The lifecycle is the base's</b> (concrete-types plan, phase 4, #1260): the server is
+/// created inert; <see cref="DatabaseServer.StartAsync"/> binds the configured listener before
+/// it begins accepting, and a bind that fails disposes the listener and leaves the server stopped
+/// for good; <see cref="DatabaseServer.StopAsync"/> drains within
+/// <see cref="KeyValueDatabaseServerOptions.ShutdownDrainTimeout"/>, then aborts and releases the
+/// listener, and releases it as well for a server that never started. Stop is terminal:
+/// restarting means composing a fresh server and listener. The composition root retains
+/// ownership of the engine; the server owns the listener lifecycle once startup is attempted.
+/// Compose one with <see cref="Create"/>, or through the
 /// <c>engineBuilder.AddServer(factory)</c> builder verb.
+/// </para>
 /// </remarks>
-public sealed class KeyValueDatabaseServer : IDatabaseServer
+public sealed class KeyValueDatabaseServer : DatabaseServer
 {
+    private readonly KeyValueDatabaseEngine _engine;
     private readonly KeyValueDatabaseServerOptions _options;
     private readonly IConnectionListener _listener;
     private readonly DatabaseAuthenticator _authenticator;
@@ -52,16 +58,14 @@ public sealed class KeyValueDatabaseServer : IDatabaseServer
 
     // Soft stop ends the accept loop and cancels idle/handshake reads so sessions
     // close at the next frame boundary; hard abort cancels in-flight executions
-    // and tears connections down. StopAsync escalates from the first to the
+    // and tears connections down. StopCoreAsync escalates from the first to the
     // second when the drain budget lapses.
     private CancellationTokenSource? _softStopSource;
     private CancellationTokenSource? _hardAbortSource;
     private Task? _acceptTask;
-    private bool _isRunning;
-    private bool _isDisposed;
-    private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
 
     private KeyValueDatabaseServer(KeyValueDatabaseEngine engine, KeyValueDatabaseServerOptions options)
+        : base(engine)
     {
         if (options.Listener is null)
         {
@@ -72,7 +76,7 @@ public sealed class KeyValueDatabaseServer : IDatabaseServer
             throw new ArgumentException("The session limit must be positive.", nameof(options));
         }
 
-        Engine = engine;
+        _engine = engine;
         _options = options;
         _listener = options.Listener;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
@@ -80,17 +84,19 @@ public sealed class KeyValueDatabaseServer : IDatabaseServer
     }
 
     /// <summary>
-    /// Gets the key-value engine this server fronts (the typed counterpart of
-    /// <see cref="IDatabaseServerContext.Engine"/>).
+    /// Gets the key-value engine this server fronts.
     /// </summary>
-    public KeyValueDatabaseEngine Engine { get; }
+    public new KeyValueDatabaseEngine Engine => _engine;
 
     /// <inheritdoc />
-    public IDatabaseServerContext Context => _context;
+    public override IReadOnlyCollection<DatabaseServerSession> Sessions => [.. _sessions.Values];
+
+    /// <inheritdoc />
+    public override IDatabaseServerContext Context => _context;
 
     /// <summary>
     /// Creates a key-value database server over the given engine and options. The
-    /// server is inert until <see cref="StartAsync"/> is called.
+    /// server is inert until <see cref="DatabaseServer.StartAsync"/> is called.
     /// </summary>
     /// <param name="engine">The key-value engine the server fronts. The composition root owns and disposes the engine.</param>
     /// <param name="options">The composition options. Requires a configured <see cref="KeyValueDatabaseServerOptions.Listener"/>.</param>
@@ -105,142 +111,103 @@ public sealed class KeyValueDatabaseServer : IDatabaseServer
         return new KeyValueDatabaseServer(engine, options);
     }
 
+    /// <summary>
+    /// A point-in-time snapshot of the sessions currently active on the server,
+    /// for the server context (the phase-6 bridge).
+    /// </summary>
+    internal IReadOnlyCollection<IDatabaseServerSession> GetSessionsSnapshot()
+        => [.. _sessions.Values];
+
     /// <inheritdoc />
-    public async Task StartAsync(CancellationToken cancellationToken = default)
+    protected override async Task StartCoreAsync(CancellationToken cancellationToken)
     {
-        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var softStopSource = new CancellationTokenSource();
+        var hardAbortSource = new CancellationTokenSource();
 
         try
         {
-            ObjectDisposedException.ThrowIf(_isDisposed, this);
-
-            if (_isRunning)
-            {
-                return;
-            }
-
-            var softStopSource = new CancellationTokenSource();
-            var hardAbortSource = new CancellationTokenSource();
-
+            await _listener.BindAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // This is an ownership boundary: every bind failure, including a
+            // catastrophic one after endpoint acquisition, must attempt the
+            // server's terminal listener cleanup before propagating. The base
+            // leaves the server stopped, so a later stop has nothing to release.
+            softStopSource.Dispose();
+            hardAbortSource.Dispose();
             try
             {
-                await _listener.BindAsync(cancellationToken).ConfigureAwait(false);
+                await _listener.DisposeAsync().ConfigureAwait(false);
             }
-            catch (Exception)
+            catch
             {
-                // This is an ownership boundary: every bind failure, including a
-                // catastrophic one after endpoint acquisition, must attempt the
-                // server's terminal listener cleanup before propagating.
-                _isDisposed = true;
-                softStopSource.Dispose();
-                hardAbortSource.Dispose();
-                try
-                {
-                    await _listener.DisposeAsync().ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Preserve the bind failure that made startup fail. Listener cleanup is still
-                    // attempted here and StopAsync remains idempotent after this terminal state.
-                }
-
-                throw;
+                // Preserve the bind failure that made startup fail. Listener cleanup is still
+                // attempted here and StopAsync remains idempotent after this terminal state.
             }
 
-            _softStopSource = softStopSource;
-            _hardAbortSource = hardAbortSource;
-            _isRunning = true;
-            _acceptTask = AcceptLoopAsync(_softStopSource.Token, _hardAbortSource.Token);
+            throw;
         }
-        finally
-        {
-            _lifecycleGate.Release();
-        }
+
+        _softStopSource = softStopSource;
+        _hardAbortSource = hardAbortSource;
+        _acceptTask = AcceptLoopAsync(_softStopSource.Token, _hardAbortSource.Token);
     }
 
     /// <inheritdoc />
-    public async Task StopAsync(CancellationToken cancellationToken = default)
+    protected override async Task StopCoreAsync(CancellationToken cancellationToken)
     {
-        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-
         try
         {
-            if (_isDisposed)
+            if (_acceptTask is not null)
             {
-                return;
-            }
+                _softStopSource!.Cancel();
 
-            _isDisposed = true;
-            _isRunning = false;
+                try
+                {
+                    await _acceptTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // The accept loop observed the stop signal mid-accept.
+                }
+
+                // Graceful drain: session pumps never fault (they own their
+                // errors), so awaiting their completions cannot throw.
+                Task drain = Task.WhenAll(_sessions.Values.Select(session => session.Completion).ToArray());
+                Task lapsed = Task.Delay(_options.ShutdownDrainTimeout, cancellationToken);
+
+                if (await Task.WhenAny(drain, lapsed).ConfigureAwait(false) != drain)
+                {
+                    _hardAbortSource!.Cancel();
+
+                    foreach (KeyValueDatabaseServerSession session in _sessions.Values)
+                    {
+                        session.Abort();
+                    }
+                }
+
+                await drain.ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            // Listener release follows accept-loop and session drain so no
+            // live server work can race the terminal transport disposal.
             try
             {
-                if (_acceptTask is not null)
-                {
-                    _softStopSource!.Cancel();
-
-                    try
-                    {
-                        await _acceptTask.ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // The accept loop observed the stop signal mid-accept.
-                    }
-
-                    // Graceful drain: session pumps never fault (they own their
-                    // errors), so awaiting their completions cannot throw.
-                    Task drain = Task.WhenAll(_sessions.Values.Select(session => session.Completion).ToArray());
-                    Task lapsed = Task.Delay(_options.ShutdownDrainTimeout, cancellationToken);
-
-                    if (await Task.WhenAny(drain, lapsed).ConfigureAwait(false) != drain)
-                    {
-                        _hardAbortSource!.Cancel();
-
-                        foreach (KeyValueDatabaseServerSession session in _sessions.Values)
-                        {
-                            session.Abort();
-                        }
-                    }
-
-                    await drain.ConfigureAwait(false);
-                }
+                await _listener.DisposeAsync().ConfigureAwait(false);
             }
             finally
             {
-                // Listener release follows accept-loop and session drain so no
-                // live server work can race the terminal transport disposal.
-                try
-                {
-                    await _listener.DisposeAsync().ConfigureAwait(false);
-                }
-                finally
-                {
-                    _softStopSource?.Dispose();
-                    _hardAbortSource?.Dispose();
-                    _softStopSource = null;
-                    _hardAbortSource = null;
-                    _acceptTask = null;
-                }
+                _softStopSource?.Dispose();
+                _hardAbortSource?.Dispose();
+                _softStopSource = null;
+                _hardAbortSource = null;
+                _acceptTask = null;
             }
         }
-        finally
-        {
-            _lifecycleGate.Release();
-        }
     }
-
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        await StopAsync().ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// A point-in-time snapshot of the sessions currently active on the server,
-    /// for the server context.
-    /// </summary>
-    internal IReadOnlyCollection<IDatabaseServerSession> GetSessionsSnapshot()
-        => _sessions.Values.ToArray();
 
     private async Task AcceptLoopAsync(CancellationToken softStop, CancellationToken hardAbort)
     {
@@ -268,7 +235,7 @@ public sealed class KeyValueDatabaseServer : IDatabaseServer
                 continue;
             }
 
-            var session = new KeyValueDatabaseServerSession(this, connection, _options, Engine, _authenticator);
+            var session = new KeyValueDatabaseServerSession(this, connection, _options, _engine, _authenticator);
 
             _sessions.TryAdd(session.Id, session);
             session.Start(softStop, hardAbort);

@@ -6,7 +6,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
@@ -58,7 +57,7 @@ public sealed class KeyValueIntrospectionTests
         var previous = await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token());
 
         // A metadata publication after execution cannot alter its returned rows.
-        var catalog = database.ShouldBeOfType<KeyValueDatabaseInstance>().Catalog;
+        var catalog = database.Catalog;
         await catalog.SetEntrySpaceFormatVersionAsync(3, TestTimeout.Token());
         (await MaterializeAsync(previous)).ShouldHaveSingleItem()[2].ShouldBe(2);
         (await MaterializeAsync(await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token())))
@@ -76,7 +75,7 @@ public sealed class KeyValueIntrospectionTests
         var second = await engine.CreateDatabaseAsync("second");
         await using var session = await first.CreateSessionAsync();
         await using var other = await second.CreateSessionAsync();
-        await second.ShouldBeOfType<KeyValueDatabaseInstance>().Catalog.SetEntrySpaceFormatVersionAsync(3, TestTimeout.Token());
+        await second.Catalog.SetEntrySpaceFormatVersionAsync(3, TestTimeout.Token());
 
         (await MaterializeAsync(await session.ExecuteAsync("KEYSPACES", cancellationToken: TestTimeout.Token())))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { "first", 1L, 2, "key", "BTree", true });

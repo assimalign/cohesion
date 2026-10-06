@@ -158,7 +158,10 @@ a different contract from Graph, Documents and Blob, deliberately:
   surfaces as the retryable `DatabaseTransactionAbortedException`; under Snapshot isolation a
   retry inside the same transaction meets the same conflict, so the caller rolls back and retries
   the transaction, as the MVCC tests do.
-- **The transaction's own end follows the #1188 contract**, with the code `COHDBK001`. A
+- **The transaction's own end follows the #1188 contract**, with the code `COHDBK001`, and since
+  the concrete-types plan's phase 4 (#1260) the state machine is the root `DatabaseTransaction`'s
+  (below, "Concrete types"): the model supplies only its kernel calls, its exception translation,
+  its offline refusal and its `COHDBK001` error. A
   transaction that did not commit accepts any number of rollbacks (a catch-block rollback after a
   kernel-aborted commit raises nothing); a committed one refuses a rollback. A commit or rollback
   observes its cancellation token only before it starts, and one that started runs to completion:
@@ -173,7 +176,8 @@ a different contract from Graph, Documents and Blob, deliberately:
   with `COHDBK001` until a later rollback completed, is gone, as it is in Graph. The kernel still
   refuses a rollback before it starts while the database closes (`ObjectDisposedException`: the
   manager's disposal flags itself before it claims any end); the session then refuses commands
-  in the ended transaction ("being committed or rolled back"), another `RollbackAsync` fails the
+  in the ended transaction ("The session's transaction is being committed or rolled back; start
+  the operation after it ends."), another `RollbackAsync` fails the
   same way while the close runs and is accepted once the close's abort ended the context, and a
   `CommitAsync` commits nothing: it fails with `ObjectDisposedException` while the database
   closes, or reports the `Faulted` state once disposal's abort ended the context. A commit whose
@@ -185,7 +189,7 @@ a different contract from Graph, Documents and Blob, deliberately:
   returns the transaction until the caller ends it, and null after a commit, rollback or disposal
   (it used to return the ended transaction). Disposing the session rolls back an open
   transaction, and a commit of that transaction afterwards fails with `COHDBK001` naming the
-  closure.
+  closure ("The session closed before the transaction ended.").
 - **A rollback leaves no write behind, even under a running command.** The transaction can end on
   another thread while one of its commands runs: the caller's rollback, the session closing, or a
   host rolling back a wire session's transaction while a wire command waits for a key lock. Until
@@ -205,11 +209,13 @@ a different contract from Graph, Documents and Blob, deliberately:
   transaction that is still active is kept when the command then fails, because releasing all of
   the transaction's locks would expose the keys its earlier commands wrote.
 - **A commit waits for no command.** A commit that starts while a command of the transaction is
-  still running is refused with a plain `DatabaseException` and leaves the transaction active,
+  still running is refused with a plain `DatabaseException` ("An operation of the transaction is
+  still running; commit after it completes.") and leaves the transaction active,
   as Documents and Blob refuse a commit while an operation or stream is open: the command's
   bracket would otherwise race the commit record. A rollback is never refused this way.
 - **Over the wire** the protocol has no transaction control, so a host opens the transaction on
-  `IDatabaseServerSession.DatabaseSession`. A failed wire command reports `ParseFailure` or
+  the engine session of one of `KeyValueDatabaseServer.Sessions` (`DatabaseServerSession.DatabaseSession`).
+  A failed wire command reports `ParseFailure` or
   `ExecutionFailure`, keeps the session ready and keeps the transaction, exactly as in process
   (`KeyValueTransactionFailureWireTests`, `KeyValueTransactionFailureClientTests`). A connection
   that ends disposes its engine session and so rolls the transaction back; the host's rollback
@@ -261,12 +267,12 @@ transaction: catalog publications are self-committing, separate from entry MVCC.
 An already returned result retains its capture. The executor receives only its
 session's database catalog and name; no selector can address another database.
 
-The catalog snapshot belongs to the catalog package. The executor obtains its
-public `IKeyValueCatalogSnapshot` contract through the `public static`
-`KeyValueCatalog.CaptureSnapshot(IKeyValueCatalog)` bridge - not through
-`IKeyValueCatalog`, which the capture is deliberately not a member of - with the
-capture implementation kept internal. It owns no storage handle and
-requires no disposal. The command executor returns the ordinary wire result shape:
+The catalog snapshot belongs to the catalog package. The executor obtains a
+`KeyValueCatalogSnapshot` from the sealed catalog's instance method
+`KeyValueCatalog.CaptureSnapshot()` (until phase 4 of the concrete-types plan, a
+`public static` bridge over the catalog interface). The snapshot is a sealed class
+with an internal constructor; it owns no storage handle and requires no disposal.
+The command executor returns the ordinary wire result shape:
 
 ```mermaid
 flowchart LR
@@ -288,8 +294,8 @@ unchanged user storage, and client discovery/refusal are covered by
 The model ships its own wire-protocol server — the **second model server**, the
 one whose construction fired the area's recorded server-core extraction trigger
 (2026-07-14) and thereby produced the evidence behind the settled placement.
-`KeyValueDatabaseServer` is a sealed implementation of the area root's
-`IDatabaseServer` contract fronting exactly one `KeyValueDatabaseEngine`
+`KeyValueDatabaseServer` is a sealed leaf of the area root's
+`DatabaseServer` base fronting exactly one `KeyValueDatabaseEngine`
 (`Create(engine, options)`, options in `KeyValueDatabaseServerOptions`), and
 this package carries its **own full copy of the server machinery** — accept
 loop, session state machine and frame pump (`Internal/`), auth/idle/session
@@ -315,7 +321,15 @@ listener's `BindAsync` before starting the accept loop or returning; bind
 failure terminally disposes the listener. `StopAsync` cancels accept, drains
 sessions, then terminally disposes the listener. Stop is terminal, so restart
 symmetry composes a fresh server and listener rather than reusing the disposed
-pair. When this copy diverges, this section records the divergence.
+pair. When this copy diverges, this section records the divergence. Since the
+concrete-types plan's phase 4 (#1260) that lifecycle, the one this server carried
+itself, is the base's state machine: the server supplies the bind-and-accept start
+core and the drain-and-release stop core, and its sessions are internal sealed
+leaves of `DatabaseServerSession`, which owns their identity, negotiated version and
+authenticated principal. `Sessions` and `Engine` are read on the server itself;
+`Context` stays until phase 6 for the hosting layer. A connection's teardown ignores
+the engine session's disposal failure, now one `AggregateException` ("The session
+failed to close."), as it ignored the `DatabaseException` before.
 
 ## Engine-owned background workers
 
@@ -351,11 +365,13 @@ second, PostgreSQL's error sleep, `src/backend/postmaster/checkpointer.c:286-346
 first pass that finishes that database's work clears its record; the engine reports `Faulted`
 exactly while a worker holds a failure. A failure that took a database offline is not the
 worker's: the engine lists the database in `OfflineDatabases`. The engine's pump runs a worker
-again after the backoff if its loop ever ends early (only an `IDatabaseEngineWorker` without the
-guided base can, and the engine then reports `Faulted` until disposal). Before #1268 one
-unexpected exception ended a worker for good. `KeyValueWorkerResilienceTests` covers a
+again after the backoff if its loop ever ends early; since the engine derives from the root
+`DatabaseEngine` (concrete-types plan, phase 4, #1260), whose pump this is, every worker it
+runs is a `DatabaseEngineWorker`, whose loop lets nothing but cancellation escape, so a
+registered worker whose pass throws is recorded and run again after the backoff instead. Before
+#1268 one unexpected exception ended a worker for good. `KeyValueWorkerResilienceTests` covers a
 checkpoint's and a write-back's page-write failures, a group flush's drain (#1252) or fsync
-failure, a header slot write failure, a registered worker whose loop throws, a database whose
+failure, a header slot write failure, a registered worker whose pass throws, a database whose
 checkpoints keep failing (the other database keeps a pace a worker-wide backoff cannot reach: over
 a shared six-second window more than twice the backoff's checkpoints, the floor that fails every
 worker-wide backoff or stall of one backoff a pass, with the median second's share of the
@@ -406,7 +422,7 @@ and that a pass of every worker leaves its files unchanged.
 **Buffer pool and checkpoint options (#1254).** `BufferPoolCapacity` (32 MiB per data file set;
 whole 8 KiB pages, at least 1 MiB), `CheckpointJournalSize` (256 MiB; zero for time only; not
 negative) and `CheckpointInterval` (5 minutes, was 30 seconds); `Create` validates all three and
-`IKeyValueDatabaseEngineBuilder` carries them. The catalog file set keeps a 128-page (1 MiB) pool
+`KeyValueDatabaseEngineBuilder` carries them. The catalog file set keeps a 128-page (1 MiB) pool
 (`KeyValueDatabaseEngine.CatalogBufferPoolPages`), so an open database costs up to about 34 MiB of
 pool memory once it has touched that many pages, plus, in memory, its data and its journal (up to
 the checkpoint size, briefly twice that while the buffer doubles past it). The reasoning is in
@@ -424,8 +440,12 @@ still deferred clears it.
 
 `<name>` (entries + primary index pages — index pages ride the data storage's
 transactional page surface, no separate index file) and `<name>.catalog`
-(registrations + format marker), both via `IKeyValueStorageStrategy` —
-file-backed under `RootPath`, in-memory otherwise, the SQL strategy pattern.
+(registrations + format marker), both via the internal `KeyValueStorageStrategy`
+base — file-backed under `RootPath`, in-memory otherwise, the SQL strategy pattern.
+The strategy is `internal abstract` since the concrete-types plan's phase 4 (D9):
+no shipped code outside this assembly supplied one, so the public interface and the
+public option property went, and this assembly's durability and fault-injecting
+test strategies derive through its test-only grant.
 The primary index bootstraps at database creation inside a durably-committed
 bracket (the self-committing DDL posture), then persists the format marker and
 then its registration as catalog self-commits — in that order, so a registered
@@ -477,8 +497,9 @@ snapshot-based safe prune bound as the extracted copies.
 ## Database scope conformance (A5)
 
 Each session captures one database instance and its operation executor.
-`IKeyValueDatabase` validates that instance identity before all five typed
-operations, including deferred scan enumeration. Typed requests carry no database
+`KeyValueDatabase` validates that instance identity before all five typed
+operations, including deferred scan enumeration; they take a `KeyValueDatabaseSession`,
+so a session of another model cannot be passed at all. Typed requests carry no database
 selector; key bytes are data even when they resemble qualified names. The text
 grammar has no database selector or server administration verb. Database lifecycle
 operations belong to the host-owned engine.
@@ -529,30 +550,112 @@ packet-beta
 
 ## Phase 29 hosting composition
 
-`AddKeyValue(Action<IDatabaseApplicationContext, IKeyValueDatabaseEngineBuilder>)`
+`AddKeyValue(Action<IDatabaseApplicationContext, KeyValueDatabaseEngineBuilder>)`
 replaces eager `AddKeyValueDatabase` and the sibling application `AddKeyValueServer`.
 The verb registers a dependency-free factory and returns the application builder.
 Application Build executes its callback; the model builder exposes all existing
-options, including `FileSystemPath? RootPath` and `IKeyValueStorageStrategy?`, and
-freezes them on its one Build attempt. It constructs the engine before invoking
-nested `AddWorker` and `AddServer` factories. No DI or configuration enters this
-model package. Direct `KeyValueDatabaseEngine.Create(options)` stays available.
+options, including `FileSystemPath? RootPath`, and freezes them on its one Build
+attempt. It constructs the engine before invoking nested `AddWorker` and `AddServer`
+factories. No DI or configuration enters this model package. Direct
+`KeyValueDatabaseEngine.Create(options)` stays available, and its composition is
+complete when it returns: an engine created without its builder takes no worker or
+server.
 
-The root builder interface earns its place through model-agnostic workers:
-`IDatabaseEngineWorker.Run` lets each engine pump factory-supplied implementations
-and quiesce them during disposal. No strongly typed factory overloads are added;
-server callbacks can cast to the model engine once, avoiding ambiguous overloads.
-`IDatabaseEngine.Servers` is read-only observation; application Build flattens it
-for lifecycle, while the engine owns server disposal, followed by worker quiescence
-and database closure. Cleanup attempts independent children after a failure.
-Factory engines are application-owned; instance registrations remain caller-owned.
-Database create/open/drop/lookup now accept `DatabaseName`.
+The engine's worker pumps are the root `DatabaseEngine`'s: every worker, built-in or
+factory-supplied, is a `DatabaseEngineWorker`, which the engine pumps and quiesces
+during disposal. `KeyValueDatabaseEngine.Servers` is read-only observation;
+application Build flattens it for lifecycle, while the engine owns server disposal,
+followed by worker quiescence and database closure. Cleanup attempts independent
+children after a failure. Factory engines are application-owned; instance
+registrations remain caller-owned. Database create/open/drop/lookup accept
+`DatabaseName`.
 
-No production hosting code currently consumes `IDatabaseEngineBuilder` generically.
-Its shared contract is retained for model-independent `AddWorker` composition;
-model-specific options stay on each derived builder interface.
+**The sealed builder (concrete-types plan, D5, phase 4, #1260).**
+`KeyValueDatabaseEngine.CreateBuilder()` returns the `public sealed`
+`KeyValueDatabaseEngineBuilder`, which has an internal constructor, so the verb and
+`CreateBuilder` are the only ways to get one. Its factories are typed over the
+engine, `AddWorker(Func<KeyValueDatabaseEngine, DatabaseEngineWorker>)` and
+`AddServer(Func<KeyValueDatabaseEngine, DatabaseServer>)`, so a server factory needs
+no cast (`KeyValueDatabaseServer.Create(engine, options)`). This reverses the
+phase-29 ruling that kept the factories on the root interfaces and had server
+callbacks cast to the model engine once, to avoid ambiguous overloads: a sealed
+builder has one overload of each, typed. `Build()` returns the engine. The builder runs the shared `DatabaseEngineBuilderState`, which
+hands the products to the engine's internal `Compose` method one factory at a time;
+the engine attaches each through the root base, which refuses a product attached
+twice, a server that fronts another engine, and a worker whose name another worker
+of the engine has (ordinal, ignoring case), and then freezes the composition. The
+state disposes what a failed build leaves unowned and then the engine.
+`KeyValueEngineCompositionTests` pins every path. The storage strategy option is
+internal on the builder as on the options (D9).
 
-`KeyValueDatabaseEngine.CreateBuilder()` returns `IKeyValueDatabaseEngineBuilder`.
-This interface-first entry enables standalone nested composition and lets the concrete
-hosting-aware engine factory configure the same builder from its final configuration
-and services. The model still sees no DI or configuration contract.
+## Concrete types (concrete-types plan, phase 4, #1260)
+
+The model is the first to adopt the root bases
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7). Its public types
+are sealed leaves; it has no public interface left, and no `Abstractions/` folder.
+
+| Type | Base | Was |
+|---|---|---|
+| `KeyValueDatabaseEngine` | `DatabaseEngine` | a sealed `IDatabaseEngine` |
+| `KeyValueDatabase` | `DatabaseInstance` | `IKeyValueDatabase` and the internal `KeyValueDatabaseInstance` |
+| `KeyValueDatabaseSession` | `DatabaseSession` | an internal `IDatabaseSession` |
+| `KeyValueDatabaseTransaction` | `DatabaseTransaction` | an internal `IDatabaseTransaction` |
+| `KeyValueDatabaseServer` | `DatabaseServer` | a sealed `IDatabaseServer` |
+| `KeyValueDatabaseServerSession` (internal) | `DatabaseServerSession` | an internal `IDatabaseServerSession` |
+| `KeyValueDatabaseEngineBuilder` | none | `IKeyValueDatabaseEngineBuilder` and its internal implementation |
+| `KeyValueStorageStrategy` (internal abstract) | none | `IKeyValueStorageStrategy` |
+
+- **Typed surface without casts.** The engine re-exposes `CreateDatabaseAsync`,
+  `OpenDatabaseAsync` and `GetDatabasesAsync` typed (`KeyValueDatabase`) with `new`
+  members over the base's public members; a database re-exposes its `Engine` and
+  `CreateSessionAsync` (`KeyValueDatabaseSession`); a session its `Database`,
+  `CurrentTransaction` and both `BeginTransactionAsync` overloads
+  (`KeyValueDatabaseTransaction`); the server its `Engine`. Each `new` member awaits
+  or reads the base's public member and casts once, so the base's checks always run.
+  `TryGetDatabase(DatabaseName, out KeyValueDatabase)` is a typed overload of the base's
+  lookup, not a `new` member (the parameter types differ): it calls the base's public
+  member and casts once, an `out var` or `out _` call on the engine binds it, and an
+  explicitly typed `out DatabaseInstance` binds the base's. The typed operations
+  (`GetAsync` and its siblings) take a `KeyValueDatabaseSession`.
+- **What the bases own now.** The engine base owns the name, the model, the workers'
+  pumps (the model no longer compiles `shared/DatabaseEngineWorkerPump.cs`), the state
+  fold, composition and the disposal order (servers, the pumps and the workers, then
+  the databases); the database base owns the disposed flag; the session base owns the
+  session state, the session's transaction and the "already active" check; the
+  transaction base owns the whole end state machine; the server base owns the
+  lifecycle. The model supplies its vocabulary: `COHDBK001` and `COHDBK002`, the
+  kernel calls and the translation of the kernel's exceptions. It keeps its
+  per-command rule (the owner's 2026-10-04 decision): a failed command never aborts
+  the transaction, so the session never calls the base's `AbortAsync`, and commands do
+  not take the session's operation hold.
+- **What changed for a caller** (plan §6.4): BEGIN on an active session fails with
+  "A transaction or operation is already active on this session." (was "A transaction
+  is already active on this session."), and fails that way before the Serializable and
+  offline refusals; BEGIN refuses a transaction the kernel ended under its caller
+  (`COHDBK001`) before it checks the token, where a canceled token was reported first; a
+  canceled token is refused by `CreateSessionAsync` and both execute seams before the
+  offline (`COHDBK002`) and refusing-transaction (`COHDBK001`) refusals, which were
+  reported first; a transaction whose session closed while its database was offline
+  reports `Faulted` (was `Active`), and refuses everything either way; a closed session
+  fails with "The session is closed." (was "Session is not open. Current state:
+  Closed."); a rollback after a commit fails with "The
+  transaction is Committed; a committed transaction cannot roll back." and a commit of
+  an ended transaction with "The transaction is {state}." (both were "Cannot … in
+  state …"); a commit while a command runs fails with "An operation of the transaction
+  is still running; commit after it completes."; a command refused while the caller's
+  commit or rollback runs or after it ended says "operation" where it said "command";
+  the teardown cause a later commit names is "The session closed before the
+  transaction ended."; a session that fails to close reports one `AggregateException`
+  ("The session failed to close."), where the transaction's failure escaped
+  unwrapped; and the engine's disposal aggregate is "One or more components of engine
+  '{name}' failed to close." (was "Engine disposal encountered failures."). When two or
+  more databases fail to close, the engine aggregate carries them inside one nested
+  `AggregateException` ("One or more key-value databases failed to close."), where each
+  was an inner exception of the engine's; one failure stays flat. The
+  engine's guards check the name, then disposal, then the token (disposal used to
+  come first, and `TryGetDatabase` did not check the name), `GetDatabasesAsync` checks
+  disposal when it is called, and a blank `EngineName` is refused by `Create` and
+  `Build` (`ArgumentException`, parameter `EngineName`). A worker's blank name is
+  refused by its own constructor inside its factory ("A worker must have a diagnostic
+  name." is gone), and the engine disposes every worker last attached first, factory
+  workers before the built-in ones (it used to dispose the checkpointer first).

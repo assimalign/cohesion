@@ -4,37 +4,60 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
+namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.KeyValuePair.Catalog;
+using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
-/// Internal implementation of a key-value database instance: the data storage,
-/// the dedicated catalog storage, the catalog opened over it, the transaction
-/// coordinator — the per-database MVCC composition (transaction manager, lock
-/// manager, version store) every session binds to — and the <b>primary key
-/// index</b>: the unique B+Tree over the key space that is the model's primary
-/// structure (key → packed entry location; the index-primary composition).
+/// A key-value-model database: an ordered key space with point and range operations and
+/// per-entry etags for conditional writes.
 /// </summary>
-internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
+/// <remarks>
+/// <para>
+/// Keys and values are opaque byte sequences; keys order by unsigned lexicographic byte
+/// comparison, making prefix and range scans meaningful. The typed members are conveniences over
+/// the session's typed-request seam: each executes the corresponding <see cref="KeyValueRequest"/>
+/// on the given session, so visibility and conflict semantics are identical to executing the
+/// request directly. Conditional misses (compare-and-swap) are first-class outcomes; concurrency
+/// conflicts surface as the root's retryable transaction exceptions
+/// (<see cref="DatabaseTransactionAbortedException"/> /
+/// <see cref="DatabaseTransactionDeadlockException"/>).
+/// </para>
+/// <para>
+/// A database composes the data storage, the dedicated catalog storage, the catalog opened over
+/// it, the transaction coordinator (the per-database MVCC composition of transaction manager,
+/// lock manager and version store every session binds to) and the <b>primary key index</b>: the
+/// unique B+Tree over the key space that is the model's primary structure (key → packed entry
+/// location; the index-primary composition).
+/// </para>
+/// <para>
+/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of
+/// <see cref="DatabaseInstance"/> with an internal constructor, replacing the former
+/// <c>IKeyValueDatabase</c> interface and its internal implementation; the engine creates and
+/// opens it. The base owns the name, the owning engine (re-exposed typed with <c>new</c>) and the
+/// disposed flag.
+/// </para>
+/// </remarks>
+public sealed class KeyValueDatabase : DatabaseInstance
 {
+    private readonly KeyValueDatabaseEngine _engine;
     private readonly KeyValueStorage _storage;
     private readonly KeyValueStorage _catalogStorage;
-    private readonly IKeyValueCatalog _catalog;
+    private readonly KeyValueCatalog _catalog;
     private readonly TransactionCoordinator _coordinator;
     private readonly BTreeIndexManager _indexManager;
     private readonly BTreeIndex _primaryIndex;
-    private bool _disposed;
 
-    internal KeyValueDatabaseInstance(string name, IDatabaseEngine engine, KeyValueStorage storage, KeyValueStorage catalogStorage, bool recover = false)
+    internal KeyValueDatabase(DatabaseName name, KeyValueDatabaseEngine engine, KeyValueStorage storage, KeyValueStorage catalogStorage, bool recover = false)
+        : base(name, engine)
     {
-        Name = name;
-        Engine = engine;
+        _engine = engine;
         _storage = storage;
         _catalogStorage = catalogStorage;
 
@@ -66,14 +89,11 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
             _coordinator.AbandonLockWaits(offlineAtOpen);
         }
 
-        if (engine is KeyValueDatabaseEngine owner)
-        {
-            // A deferred undo is retried on its own backoff, from about 100 ms up to the
-            // maintenance interval, and the purge worker wakes for it (#1226).
-            _coordinator.DeferredUndoRetryLimit = owner.EngineOptions.MaintenanceInterval;
-            _coordinator.DeferredUndoRetryDelay = owner.EngineOptions.DeferredUndoRetryDelay;
-            _coordinator.OnUndoDeferred = owner.UndoDeferredSignal.Set;
-        }
+        // A deferred undo is retried on its own backoff, from about 100 ms up to the
+        // maintenance interval, and the purge worker wakes for it (#1226).
+        _coordinator.DeferredUndoRetryLimit = engine.EngineOptions.MaintenanceInterval;
+        _coordinator.DeferredUndoRetryDelay = engine.EngineOptions.DeferredUndoRetryDelay;
+        _coordinator.OnUndoDeferred = engine.UndoDeferredSignal.Set;
 
         // The format gate reads the catalog alone, before the primary index is
         // attached or recovery writes anything.
@@ -208,7 +228,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     /// exactly the current marker: this engine stamps it before it registers the index.
     /// </remarks>
     /// <exception cref="DatabaseException">The database is on another entry-space format.</exception>
-    private static void ThrowIfFormatIsNotCurrent(string name, IKeyValueCatalog catalog)
+    private static void ThrowIfFormatIsNotCurrent(string name, KeyValueCatalog catalog)
     {
         int version = catalog.EntrySpaceFormatVersion;
         int current = KeyValueRecordCodec.EntrySpaceFormatVersion;
@@ -228,11 +248,10 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
             $"Database '{name}' uses entry-space format {version}, but this engine supports only format {current}. {remedy}");
     }
 
-    /// <inheritdoc />
-    public DatabaseName Name { get; }
-
-    /// <inheritdoc />
-    public IDatabaseEngine Engine { get; }
+    /// <summary>
+    /// Gets the key-value engine that owns this database.
+    /// </summary>
+    public new KeyValueDatabaseEngine Engine => _engine;
 
     /// <summary>
     /// Gets the data storage file set, for the engine's background workers.
@@ -247,7 +266,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     /// <summary>
     /// Gets the database's catalog, for the engine's background workers and tests.
     /// </summary>
-    internal IKeyValueCatalog Catalog => _catalog;
+    internal KeyValueCatalog Catalog => _catalog;
 
     /// <summary>
     /// Gets the database's index manager (the live B+Tree directory over the data
@@ -375,11 +394,20 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     /// <exception cref="DatabaseOfflineException">The database is offline.</exception>
     internal void ThrowIfOffline()
     {
-        if (OfflineError is { } error)
+        if (GetOfflineRefusal() is { } refusal)
         {
-            throw DatabaseOfflineException.Create(OfflineCode, Name, error);
+            throw refusal;
         }
     }
+
+    /// <summary>
+    /// Gets the coded refusal (<see cref="OfflineCode"/>) of an operation on the database while it
+    /// is offline, or null while it is online: the vocabulary the root transaction base reads
+    /// before a commit or rollback, and before each kernel rollback, which an offline database skips.
+    /// </summary>
+    /// <returns>The refusal, or null.</returns>
+    internal DatabaseOfflineException? GetOfflineRefusal()
+        => OfflineError is { } error ? DatabaseOfflineException.Create(OfflineCode, Name, error) : null;
 
     /// <summary>
     /// Translates a failure the storage's offline state caused into the coded refusal
@@ -404,23 +432,42 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
             : DatabaseOfflineException.Create(OfflineCode, Name, OfflineError ?? offline);
     }
 
+    /// <summary>
+    /// Creates a new lightweight key-value session scoped to this database.
+    /// </summary>
+    /// <param name="cancellationToken">Observed before the session is created.</param>
+    /// <returns>A new session.</returns>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    public new async ValueTask<KeyValueDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
+        => (KeyValueDatabaseSession)await base.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+
     /// <inheritdoc />
-    public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
+    protected override ValueTask<DatabaseSession> CreateSessionCoreAsync(CancellationToken cancellationToken)
     {
-        ThrowIfDisposed();
         ThrowIfOffline();
-        cancellationToken.ThrowIfCancellationRequested();
 
         var executor = new KeyValueOperationExecutor(Name, _catalog, _storage, _primaryIndex);
         var session = new KeyValueDatabaseSession(this, _coordinator, executor);
 
-        return new ValueTask<IDatabaseSession>(session);
+        return new ValueTask<DatabaseSession>(session);
     }
 
     // ── Typed model surface (conveniences over the typed-request seam) ──
 
-    /// <inheritdoc />
-    public async ValueTask<KeyValueEntry?> GetAsync(IDatabaseSession session, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Reads the entry for a key.
+    /// </summary>
+    /// <param name="session">The session the read executes in.</param>
+    /// <param name="key">The key to read.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The entry, or null when the key has no visible, live entry.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    public async ValueTask<KeyValueEntry?> GetAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueGetRequest(key), cancellationToken).ConfigureAwait(false);
         var set = (QueryResultSet)result;
@@ -436,8 +483,23 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         return null;
     }
 
-    /// <inheritdoc />
-    public async ValueTask<KeyValuePutResult> PutAsync(IDatabaseSession session, ReadOnlyMemory<byte> key, ReadOnlyMemory<byte> value, KeyValuePutOptions? options = null, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Writes the entry for a key, inserting or replacing, optionally conditional.
+    /// </summary>
+    /// <param name="session">The session the write executes in.</param>
+    /// <param name="key">The key to write.</param>
+    /// <param name="value">The value to store.</param>
+    /// <param name="options">Write conditions (insert-only, compare-and-swap), or null for an unconditional upsert.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The write outcome: whether it applied, and the new (or current) etag.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">Thrown when a concurrently committed transaction changed the key (first-updater-wins; retryable).</exception>
+    /// <exception cref="DatabaseTransactionDeadlockException">The command was chosen as a deadlock victim (retryable).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An auto-commit command's commit record could not be confirmed durable.</exception>
+    public async ValueTask<KeyValuePutResult> PutAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, ReadOnlyMemory<byte> value, KeyValuePutOptions? options = null, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValuePutRequest(key, value, options), cancellationToken).ConfigureAwait(false);
         var set = (QueryResultSet)result;
@@ -453,15 +515,39 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         throw new DatabaseException("The put command returned no outcome row.");
     }
 
-    /// <inheritdoc />
-    public async ValueTask<bool> TryDeleteAsync(IDatabaseSession session, ReadOnlyMemory<byte> key, long? expectedETag = null, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Deletes the entry for a key, optionally conditional.
+    /// </summary>
+    /// <param name="session">The session the delete executes in.</param>
+    /// <param name="key">The key to delete.</param>
+    /// <param name="expectedETag">The etag the current entry must carry for the delete to apply, or null for an unconditional delete.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>True when an entry was deleted; false when none was visible or the condition did not hold.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">Thrown when a concurrently committed transaction changed the key (first-updater-wins; retryable).</exception>
+    /// <exception cref="DatabaseTransactionDeadlockException">The command was chosen as a deadlock victim (retryable).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An auto-commit command's commit record could not be confirmed durable.</exception>
+    public async ValueTask<bool> TryDeleteAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, long? expectedETag = null, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueDeleteRequest(key, expectedETag), cancellationToken).ConfigureAwait(false);
         return result.AffectedCount > 0;
     }
 
-    /// <inheritdoc />
-    public async ValueTask<bool> ExistsAsync(IDatabaseSession session, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Probes whether a key has a visible, live entry.
+    /// </summary>
+    /// <param name="session">The session the probe executes in.</param>
+    /// <param name="key">The key to probe.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>True when the key has a visible entry; otherwise false.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    public async ValueTask<bool> ExistsAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueExistsRequest(key), cancellationToken).ConfigureAwait(false);
         var set = (QueryResultSet)result;
@@ -477,8 +563,18 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         return false;
     }
 
-    /// <inheritdoc />
-    public async IAsyncEnumerable<KeyValueEntry> ScanAsync(IDatabaseSession session, KeyValueScanOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Streams entries in ascending key order.
+    /// </summary>
+    /// <param name="session">The session the scan executes in.</param>
+    /// <param name="options">Scan bounds and limits, or null to scan everything.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>An async sequence of visible, live entries in ascending key order.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    public async IAsyncEnumerable<KeyValueEntry> ScanAsync(KeyValueDatabaseSession session, KeyValueScanOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueScanRequest(options), cancellationToken).ConfigureAwait(false);
         var set = (QueryResultSet)result;
@@ -495,28 +591,21 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     private static KeyValueEntry DecodeEntry(QueryRow row)
         => new(row.GetBytes(0), row.GetBytes(1), row.GetInt64(2));
 
-    private KeyValueDatabaseSession RequireOwnSession(IDatabaseSession session)
+    private KeyValueDatabaseSession RequireOwnSession(KeyValueDatabaseSession session)
     {
         ArgumentNullException.ThrowIfNull(session);
 
-        if (session is not KeyValueDatabaseSession owned || !ReferenceEquals(owned.Database, this))
+        if (!ReferenceEquals(session.Database, this))
         {
             throw new DatabaseException("The session does not belong to this key-value database.");
         }
 
-        return owned;
+        return session;
     }
 
     /// <inheritdoc />
-    public void Dispose()
+    protected override void DisposeCore()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-
         // An offline database closes without writing anything (#1243): both file sets are
         // taken offline, so the coordinator's aborts undo nothing, no registration is saved,
         // and neither storage flushes at its close.
@@ -553,16 +642,9 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    protected override async ValueTask DisposeAsyncCore()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-
-        // See Dispose: an offline database closes without writing anything (#1243).
+        // See DisposeCore: an offline database closes without writing anything (#1243).
         bool offline = OfflineError is not null;
         try
         {
@@ -601,10 +683,5 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
 
         throw new DatabaseException(
             $"Transaction {context.Sequence} has no statement bracket applying on this database.");
-    }
-
-    private void ThrowIfDisposed()
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 }

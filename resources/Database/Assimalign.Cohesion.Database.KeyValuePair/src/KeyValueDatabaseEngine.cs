@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,41 +14,44 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
-using Internal;
-
 /// <summary>
 /// Key-value database engine that manages the lifecycle of key-value database
 /// instances.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The engine is a data machine: <see cref="Create"/> returns it fully operational —
 /// the storage strategy is resolved and the engine-owned background workers
 /// (write-ahead-log group-commit flusher, page write-back, checkpointer, version
 /// purge, and the index-maintenance stub) are already pumping on dedicated threads
 /// the engine spawned — and disposal is its one lifecycle transition: quiesce the
 /// workers, flush each database according to its backing's durability policy and
-/// close it. Each database is backed
-/// by a storage strategy managing two file sets (data and <c>.catalog</c>); the
-/// strategy is file-based when <see cref="KeyValueDatabaseEngineOptions.RootPath"/>
-/// is set and in-memory otherwise. The journal is owned per-database through the
-/// storage layer, so there is no engine-level write-ahead log.
+/// close it. Each database is backed by a storage strategy managing two file sets
+/// (data and <c>.catalog</c>); the strategy is file-based when
+/// <see cref="KeyValueDatabaseEngineOptions.RootPath"/> is set and in-memory otherwise.
+/// The journal is owned per-database through the storage layer, so there is no
+/// engine-level write-ahead log.
+/// </para>
+/// <para>
+/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A sealed leaf of the root
+/// <see cref="DatabaseEngine"/>: the base owns the name, the model, the worker pumps, the
+/// state fold, the composition attach and freeze, the argument and disposed checks of every
+/// public member, and the disposal order (servers, the worker pumps and the workers, then
+/// <see cref="DisposeAsyncCore"/>, which closes the databases). The database members are
+/// re-exposed typed with <c>new</c> members over the base's public members, and
+/// <see cref="TryGetDatabase(DatabaseName, out KeyValueDatabase)"/> is a typed overload of the
+/// base's lookup (the parameter types differ, so it hides nothing).
+/// </para>
 /// </remarks>
-public sealed class KeyValueDatabaseEngine : IDatabaseEngine
+// Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+public sealed class KeyValueDatabaseEngine : DatabaseEngine
 {
     private readonly KeyValueDatabaseEngineOptions _options;
-    private readonly Dictionary<string, IDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, KeyValueDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _syncRoot = new();
-    private readonly List<IDatabaseEngineWorker> _workers;
-    private readonly List<IDatabaseServer> _servers = [];
-    private readonly List<IDatabaseEngineWorker> _customWorkers = [];
     private readonly ManualResetEventSlim _commitPendingSignal = new();
     private readonly Action _signalCommitPending;
-
-    // Runs each database's checkpoint on a lane of its own; its lanes stop after the pumps.
-    private readonly KeyValueCheckpointWorker _checkpointWorker;
-    private readonly List<Thread> _workerThreads = new();
-    private readonly CancellationTokenSource _workerStopSource = new();
-    private readonly IKeyValueStorageStrategy _strategy;
+    private readonly KeyValueStorageStrategy _strategy;
 
     // Woken by a storage whose journal reached the checkpoint size, and by a coordinator that
     // deferred an undo, so the checkpoint and version-purge workers act at once (#1254, #1226).
@@ -55,17 +60,7 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     private readonly int _bufferPoolPages;
 
     private KeyValueStorage[] _storageSnapshot = [];
-    private KeyValueDatabaseInstance[] _instanceSnapshot = [];
-
-    // The worker inventory as published to readers (Workers, State): replaced whole whenever a
-    // worker is attached, so a reader never enumerates a list being changed.
-    private IReadOnlyList<IDatabaseEngineWorker> _workerView = [];
-
-    // The last exception that escaped a worker's Run (only a worker that does not derive from
-    // DatabaseEngineWorker can let one escape); its pump restarted it, and the engine reports
-    // Faulted until it is disposed, because it cannot tell when such a worker is healthy again.
-    private Exception? _workerRunFault;
-    private bool _disposed;
+    private KeyValueDatabase[] _instanceSnapshot = [];
 
     /// <summary>
     /// The storage-name suffix of the dedicated catalog file set each database owns.
@@ -79,10 +74,13 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     /// </summary>
     internal const int CatalogBufferPoolPages = 128;
 
+    // The engine name used when the options name none.
+    private const string defaultName = "keyvalue-engine";
+
     private KeyValueDatabaseEngine(KeyValueDatabaseEngineOptions options)
+        : base(options.EngineName ?? defaultName, EngineModel.KeyValueStore)
     {
         _options = options;
-        Name = options.EngineName ?? "keyvalue-engine";
         _signalCommitPending = _commitPendingSignal.Set;
         _bufferPoolPages = Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
 
@@ -98,40 +96,19 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
             Directory.CreateDirectory(root);
         }
 
-        _checkpointWorker = new KeyValueCheckpointWorker(this);
-        _workers =
-        [
-            new KeyValueWriteAheadFlushWorker(this, _commitPendingSignal),
-            new KeyValuePageWriteBackWorker(this),
-            _checkpointWorker,
-            new KeyValueVersionPurgeWorker(this),
-            new KeyValueIndexMaintenanceWorker(this),
-        ];
-        PublishWorkers();
-
-        // Spawn the worker pumps last, after every field they observe is
-        // initialized: one dedicated background thread per worker, alive until
-        // disposal. Embedded and hosted consumers get identical durability
-        // behavior because nothing outside the engine participates (R10).
-        StartWorkerThreads();
+        // Attach the built-in workers last, after every field they observe is initialized: the
+        // base starts each one's pump on a dedicated background thread as it attaches it, alive
+        // until disposal. Embedded and hosted consumers get identical durability behavior because
+        // nothing outside the engine participates (R10).
+        AttachWorker(new KeyValueWriteAheadFlushWorker(this, _commitPendingSignal));
+        AttachWorker(new KeyValuePageWriteBackWorker(this));
+        AttachWorker(new KeyValueCheckpointWorker(this));
+        AttachWorker(new KeyValueVersionPurgeWorker(this));
+        AttachWorker(new KeyValueIndexMaintenanceWorker(this));
     }
 
     /// <inheritdoc />
-    public string Name { get; }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// <see cref="EngineState.Faulted"/> while one of the engine's workers keeps failing: its
-    /// <see cref="DatabaseEngineWorker.Fault"/> is set by a failure until a pass finishes the work it
-    /// left (#1268). An offline database is not a worker failure; <see cref="OfflineDatabases"/>
-    /// lists it.
-    /// </remarks>
-    public EngineState State
-        => DatabaseEngineWorkerPump.Fold(_disposed, Volatile.Read(ref _workerRunFault),
-            Volatile.Read(ref _workerView));
-
-    /// <inheritdoc />
-    public IReadOnlyList<DatabaseName> OfflineDatabases
+    public override IReadOnlyList<DatabaseName> OfflineDatabases
     {
         get
         {
@@ -148,15 +125,6 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
         }
     }
 
-    /// <inheritdoc />
-    public EngineModel Model => EngineModel.KeyValueStore;
-
-    /// <inheritdoc />
-    public IReadOnlyList<IDatabaseEngineWorker> Workers => Volatile.Read(ref _workerView);
-
-    /// <inheritdoc />
-    public IReadOnlyList<IDatabaseServer> Servers => _servers.AsReadOnly();
-
     /// <summary>
     /// Gets the engine options, for the engine's background workers.
     /// </summary>
@@ -171,12 +139,11 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     internal KeyValueStorage[] GetStorageSnapshot() => Volatile.Read(ref _storageSnapshot);
 
     /// <summary>
-    /// Gets a point-in-time snapshot of every open database instance, for
-    /// workers that operate through the per-database transaction coordinator
-    /// (checkpointing, version purge). Same racing-a-drop tolerance as
-    /// <see cref="GetStorageSnapshot"/>.
+    /// Gets a point-in-time snapshot of every open database, for workers that operate
+    /// through the per-database transaction coordinator (checkpointing, version purge).
+    /// Same racing-a-drop tolerance as <see cref="GetStorageSnapshot"/>.
     /// </summary>
-    internal KeyValueDatabaseInstance[] GetInstanceSnapshot() => Volatile.Read(ref _instanceSnapshot);
+    internal KeyValueDatabase[] GetInstanceSnapshot() => Volatile.Read(ref _instanceSnapshot);
 
     /// <summary>
     /// Gets the signal a storage sets when its journal reaches
@@ -197,14 +164,19 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     /// database still open is a failure.
     /// </summary>
     /// <param name="database">The database a worker pass visited.</param>
-    internal bool IsOpen(KeyValueDatabaseInstance database) => Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
+    internal bool IsOpen(KeyValueDatabase database) => Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
 
     /// <summary>
     /// Creates a new key-value database engine from options. The engine is
-    /// operational — background workers running — when this method returns.
+    /// operational — background workers running — when this method returns, and its
+    /// composition is complete: it takes no further worker or server.
     /// </summary>
     /// <param name="options">Engine creation options.</param>
     /// <returns>A new engine instance.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <see cref="KeyValueDatabaseEngineOptions.EngineName"/> is empty or white space.
+    /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <see cref="KeyValueDatabaseEngineOptions.BufferPoolCapacity"/> is not a whole number of 8 KiB
     /// pages of at least 1 MiB; <see cref="KeyValueDatabaseEngineOptions.CheckpointJournalSize"/> is
@@ -213,9 +185,32 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     /// </exception>
     public static KeyValueDatabaseEngine Create(KeyValueDatabaseEngineOptions options)
     {
+        var engine = CreateUncomposed(options);
+        engine.CompleteComposition();
+        return engine;
+    }
+
+    /// <summary>Creates a dependency-free builder for key-value options and nested worker/server factories.</summary>
+    /// <returns>A fresh builder supporting one engine construction attempt.</returns>
+    public static KeyValueDatabaseEngineBuilder CreateBuilder() => new();
+
+    /// <summary>
+    /// Creates an operational engine whose composition is still open, for the builder, which
+    /// attaches the products of its factories through <see cref="Compose"/>.
+    /// </summary>
+    /// <param name="options">Engine creation options.</param>
+    /// <returns>A new engine instance.</returns>
+    internal static KeyValueDatabaseEngine CreateUncomposed(KeyValueDatabaseEngineOptions options)
+    {
         ArgumentNullException.ThrowIfNull(options);
 
-        // Checked before the constructor spawns the worker threads.
+        // Checked before the constructor spawns the worker threads. A blank name is refused here
+        // with the option's name; the base refuses it too, after the leaf's fields were created.
+        if (options.EngineName is { } name)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(name, nameof(options.EngineName));
+        }
+
         Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
         ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.CheckpointInterval, TimeSpan.Zero, nameof(options.CheckpointInterval));
@@ -223,20 +218,98 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
         return new KeyValueDatabaseEngine(options);
     }
 
-    /// <summary>Creates a dependency-free builder for key-value options and nested worker/server factories.</summary>
-    /// <returns>A fresh builder supporting one engine construction attempt.</returns>
-    public static IKeyValueDatabaseEngineBuilder CreateBuilder() => new KeyValueDatabaseEngineBuilder();
-
-    /// <inheritdoc />
-    public ValueTask<IDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Attaches the products of the builder's factories, workers first and then servers, and
+    /// freezes the engine's composition: the builder's compose method
+    /// (<c>DatabaseEngineBuilderState.Complete</c>). The base refuses a product attached twice, a
+    /// server that fronts another engine and a worker whose name another worker of the engine has.
+    /// </summary>
+    /// <param name="workers">The workers, produced one factory at a time as they are requested.</param>
+    /// <param name="servers">The servers, produced one factory at a time as they are requested.</param>
+    internal void Compose(IEnumerable<DatabaseEngineWorker> workers, IEnumerable<DatabaseServer> servers)
     {
-        ThrowIfDisposed();
-
-        if (string.IsNullOrWhiteSpace(name))
+        foreach (var worker in workers)
         {
-            throw new ArgumentException("Database name cannot be null or empty.", nameof(name));
+            AttachWorker(worker);
         }
 
+        foreach (var server in servers)
+        {
+            AttachServer(server);
+        }
+
+        CompleteComposition();
+    }
+
+    /// <summary>
+    /// Creates a new logical key-value database with the specified name.
+    /// </summary>
+    /// <param name="name">The name of the database to create.</param>
+    /// <param name="cancellationToken">Observed before the database is created.</param>
+    /// <returns>The newly created database.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was created.</exception>
+    /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
+    public new async ValueTask<KeyValueDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
+        => (KeyValueDatabase)await base.CreateDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Opens an existing logical key-value database by name. A database that went offline is
+    /// reopened: the returned instance is a new one, opened again from its files.
+    /// </summary>
+    /// <param name="name">The name of the database to open.</param>
+    /// <param name="cancellationToken">Observed before the database is opened.</param>
+    /// <returns>The opened database.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
+    /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
+    /// <exception cref="DatabaseException">A file set or the entry-space format of the database was refused.</exception>
+    public new async ValueTask<KeyValueDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
+        => (KeyValueDatabase)await base.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Enumerates the key-value databases the engine manages. The engine state and the token are
+    /// checked when the call is made, not when the enumeration starts.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the enumeration.</param>
+    /// <returns>An async sequence of the databases.</returns>
+    /// <exception cref="ObjectDisposedException">The engine has been disposed when the call is made.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled when the call is made.</exception>
+    public new IAsyncEnumerable<KeyValueDatabase> GetDatabasesAsync(CancellationToken cancellationToken = default)
+        => (IAsyncEnumerable<KeyValueDatabase>)base.GetDatabasesAsync(cancellationToken);
+
+    /// <summary>
+    /// Attempts to retrieve an open key-value database by name without throwing when it is not open.
+    /// </summary>
+    /// <param name="name">The name of the database.</param>
+    /// <param name="database">When this method returns true, the database.</param>
+    /// <returns>True when the database is open in the engine; otherwise false.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
+    /// <remarks>
+    /// An overload of the base's <see cref="DatabaseEngine.TryGetDatabase"/>, not a <c>new</c>
+    /// member: the parameter types differ, so nothing is hidden. Overload resolution prefers the
+    /// most derived applicable method, so an <c>out var</c> or <c>out _</c> call on the engine binds
+    /// here, and an explicitly typed <c>out DatabaseInstance</c> binds the base's. It reads the
+    /// base's public member and casts once, so the base's name and disposal checks always run.
+    /// </remarks>
+    public bool TryGetDatabase(DatabaseName name, [MaybeNullWhen(false)] out KeyValueDatabase database)
+    {
+        if (base.TryGetDatabase(name, out var found))
+        {
+            database = (KeyValueDatabase)found;
+            return true;
+        }
+
+        database = null;
+        return false;
+    }
+
+    /// <inheritdoc />
+    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
+    {
         lock (_syncRoot)
         {
             if (_databases.ContainsKey(name))
@@ -258,9 +331,9 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
                 catalogStorage = _strategy.CreateStorage(name + CatalogSuffix);
                 ConfigureStorage(catalogStorage, name + CatalogSuffix, catalog: true);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
-                var database = new KeyValueDatabaseInstance(name, this, storage, catalogStorage);
+                var database = new KeyValueDatabase(name, this, storage, catalogStorage);
                 _databases[name] = database;
-                return new ValueTask<IDatabase>(database);
+                return new ValueTask<DatabaseInstance>(database);
             }
             catch
             {
@@ -282,22 +355,15 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     }
 
     /// <inheritdoc />
-    public ValueTask<IDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
+    protected override ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
-        ThrowIfDisposed();
-
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            throw new ArgumentException("Database name cannot be null or empty.", nameof(name));
-        }
-
         lock (_syncRoot)
         {
             if (_databases.TryGetValue(name, out var existing))
             {
-                if (existing is not KeyValueDatabaseInstance { IsOffline: true } offline)
+                if (!existing.IsOffline)
                 {
-                    return new ValueTask<IDatabase>(existing);
+                    return new ValueTask<DatabaseInstance>(existing);
                 }
 
                 // The database went offline after a failed durable flush (#1243): reopening it
@@ -305,7 +371,7 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
                 // recovery, which decides the outcome of every commit that was not confirmed.
                 _databases.Remove(name);
                 RebuildStorageSnapshotLocked();
-                offline.Dispose();
+                existing.Dispose();
             }
 
             if (!_strategy.StorageExists(name))
@@ -325,7 +391,7 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
 
             KeyValueStorage? catalogStorage = null;
 
-            // See CreateDatabaseAsync: instance construction commits (recovery
+            // See CreateDatabaseCoreAsync: instance construction commits (recovery
             // checkpoint, primary-index re-attachment), so the flush worker must
             // see the storages first under grouped durability.
             try
@@ -344,9 +410,9 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
 
                 ConfigureStorage(catalogStorage, name + CatalogSuffix, catalog: true);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
-                var database = new KeyValueDatabaseInstance(name, this, storage, catalogStorage, recover: true);
+                var database = new KeyValueDatabase(name, this, storage, catalogStorage, recover: true);
                 _databases[name] = database;
-                return new ValueTask<IDatabase>(database);
+                return new ValueTask<DatabaseInstance>(database);
             }
             catch
             {
@@ -379,15 +445,8 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
         => new($"Database '{name}' cannot be opened: its {role} file set '{storageName}' was refused. {exception.Message}", exception);
 
     /// <inheritdoc />
-    public ValueTask DropDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
+    protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
-        ThrowIfDisposed();
-
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            throw new ArgumentException("Database name cannot be null or empty.", nameof(name));
-        }
-
         lock (_syncRoot)
         {
             if (_databases.TryGetValue(name, out var database))
@@ -412,149 +471,35 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<IDatabase> GetDatabasesAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        ThrowIfDisposed();
-
-        IDatabase[] snapshot;
-        lock (_syncRoot)
-        {
-            snapshot = [.. _databases.Values];
-        }
-
-        foreach (var database in snapshot)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return database;
-        }
-
-        await Task.CompletedTask.ConfigureAwait(false);
-    }
+    protected override IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken)
+        => EnumerateDatabasesAsync(cancellationToken);
 
     /// <inheritdoc />
-    public bool TryGetDatabase(DatabaseName name, out IDatabase database)
+    protected override bool TryGetDatabaseCore(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database)
     {
-        ThrowIfDisposed();
-
         lock (_syncRoot)
         {
-            return _databases.TryGetValue(name, out database!);
-        }
-    }
-
-    internal void AttachWorker(IDatabaseEngineWorker worker)
-    {
-        ThrowIfDisposed();
-        if (string.IsNullOrWhiteSpace(worker.Name))
-        {
-            throw new ArgumentException("A worker must have a diagnostic name.", nameof(worker));
-        }
-        foreach (var existing in _workers)
-        {
-            if (string.Equals(existing.Name, worker.Name, StringComparison.OrdinalIgnoreCase))
+            if (_databases.TryGetValue(name, out var found))
             {
-                throw new InvalidOperationException($"Worker name '{worker.Name}' is already registered.");
+                database = found;
+                return true;
             }
         }
-        var thread = new Thread(() => DatabaseEngineWorkerPump.Pump(worker, _workerStopSource.Token, ref _workerRunFault))
-        {
-            IsBackground = true,
-            Name = worker.Name,
-        };
-        _workers.Add(worker);
-        _customWorkers.Add(worker);
-        _workerThreads.Add(thread);
-        try
-        {
-            thread.Start();
-        }
-        catch (Exception failure) when (failure is not OutOfMemoryException)
-        {
-            _workers.Remove(worker);
-            _customWorkers.Remove(worker);
-            _workerThreads.Remove(thread);
-            throw;
-        }
 
-        PublishWorkers();
+        database = null;
+        return false;
     }
 
     /// <summary>
-    /// Publishes the worker inventory to readers as a fresh read-only copy.
+    /// Closes every open database once the base disposed the servers, stopped the worker pumps
+    /// and disposed the workers: each database durably flushes according to its storage's
+    /// durability policy, and an offline one closes without writing. Then the engine's worker
+    /// signals are released.
     /// </summary>
-    private void PublishWorkers() => Volatile.Write(ref _workerView, Array.AsReadOnly(_workers.ToArray()));
-
-    internal void AttachServer(IDatabaseServer server)
+    /// <returns>A task that completes once every database is closed.</returns>
+    protected override async ValueTask DisposeAsyncCore()
     {
-        ThrowIfDisposed();
-        _servers.Add(server);
-    }
-    /// <inheritdoc />
-    public void Dispose() => Task.Run(async () => await DisposeAsync().ConfigureAwait(false)).GetAwaiter().GetResult();
-
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-        _disposed = true;
-        List<Exception> failures = [];
-
-        // Servers release listeners and active sessions before engine workers or
-        // database storage disappear. Continue cleanup after independent failures.
-        for (int index = _servers.Count - 1; index >= 0; index--)
-        {
-            try
-            {
-                await _servers[index].DisposeAsync().ConfigureAwait(false);
-            }
-            catch (Exception failure) when (failure is not OutOfMemoryException)
-            {
-                failures.Add(failure);
-            }
-        }
-
-        try
-        {
-            StopWorkerThreads();
-        }
-        catch (Exception failure) when (failure is not OutOfMemoryException)
-        {
-            failures.Add(failure);
-        }
-
-        try
-        {
-            // A checkpoint the worker left running on its lane ends before the storages close.
-            _checkpointWorker.Dispose();
-        }
-        catch (Exception failure) when (failure is not OutOfMemoryException)
-        {
-            failures.Add(failure);
-        }
-
-        for (int index = _customWorkers.Count - 1; index >= 0; index--)
-        {
-            try
-            {
-                if (_customWorkers[index] is IAsyncDisposable asyncDisposable)
-                {
-                    await asyncDisposable.DisposeAsync().ConfigureAwait(false);
-                }
-                else if (_customWorkers[index] is IDisposable disposable)
-                {
-                    disposable.Dispose();
-                }
-            }
-            catch (Exception failure) when (failure is not OutOfMemoryException)
-            {
-                failures.Add(failure);
-            }
-        }
-
-        IDatabase[] snapshot;
+        KeyValueDatabase[] snapshot;
         lock (_syncRoot)
         {
             snapshot = [.. _databases.Values];
@@ -562,6 +507,8 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
             _storageSnapshot = [];
             _instanceSnapshot = [];
         }
+
+        List<Exception>? failures = null;
         foreach (var database in snapshot)
         {
             try
@@ -570,26 +517,35 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
             }
             catch (Exception failure) when (failure is not OutOfMemoryException)
             {
-                failures.Add(failure);
+                (failures ??= []).Add(failure);
             }
         }
-        _workerStopSource.Dispose();
+
         _commitPendingSignal.Dispose();
         _checkpointNeededSignal.Dispose();
         _undoDeferredSignal.Dispose();
-        if (failures.Count != 0)
+
+        // The base reports this step's failure among the engine's components: one database's
+        // failure as itself, several together.
+        if (failures is { Count: 1 })
         {
-            throw new AggregateException("Engine disposal encountered failures.", failures);
+            ExceptionDispatchInfo.Throw(failures[0]);
+        }
+
+        if (failures is not null)
+        {
+            throw new AggregateException("One or more key-value databases failed to close.", failures);
         }
     }
+
     /// <summary>
     /// Configures a freshly created or opened storage file set with the engine's
     /// durability policy, its buffer pool capacity and checkpoint size (#1254), and wires
     /// its commit-pending and checkpoint-needed hooks to the engine's worker signals.
     /// </summary>
     /// <remarks>
-    /// The engine sets the pool on whatever storage its strategy returns, so a custom
-    /// <see cref="IKeyValueStorageStrategy"/> needs no knowledge of the option.
+    /// The engine sets the pool on whatever storage its strategy returns, so a storage
+    /// strategy needs no knowledge of the option.
     /// </remarks>
     private void ConfigureStorage(KeyValueStorage storage, string storageName, bool catalog)
     {
@@ -624,76 +580,37 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     private void RebuildStorageSnapshotLocked()
     {
         var storages = new KeyValueStorage[_databases.Count * 2];
-        var instances = new KeyValueDatabaseInstance[_databases.Count];
+        var instances = new KeyValueDatabase[_databases.Count];
         int index = 0;
         int instanceIndex = 0;
 
         foreach (var database in _databases.Values)
         {
-            var instance = (KeyValueDatabaseInstance)database;
-            storages[index++] = instance.DataStorage;
-            storages[index++] = instance.CatalogStorage;
-            instances[instanceIndex++] = instance;
+            storages[index++] = database.DataStorage;
+            storages[index++] = database.CatalogStorage;
+            instances[instanceIndex++] = database;
         }
 
         Volatile.Write(ref _storageSnapshot, storages);
         Volatile.Write(ref _instanceSnapshot, instances);
     }
 
-    /// <summary>
-    /// Spawns one dedicated background thread per worker at engine creation. The
-    /// engine owns every loop; there is no external scheduler.
-    /// </summary>
-    private void StartWorkerThreads()
+    // The databases as one typed sequence, which GetDatabasesAsync hands out without a per-item
+    // cast: the sequence is covariant, so it is the base's sequence too.
+    private async IAsyncEnumerable<KeyValueDatabase> EnumerateDatabasesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        foreach (var worker in _workers)
+        KeyValueDatabase[] snapshot;
+        lock (_syncRoot)
         {
-            var thread = new Thread(() => DatabaseEngineWorkerPump.Pump(worker, _workerStopSource.Token, ref _workerRunFault))
-            {
-                IsBackground = true,
-                Name = worker.Name,
-            };
+            snapshot = [.. _databases.Values];
+        }
 
-            _workerThreads.Add(thread);
-            thread.Start();
+        foreach (var database in snapshot)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return database;
         }
-    }
 
-    /// <summary>
-    /// Signals and joins the worker pumps (disposal path).
-    /// </summary>
-    private void StopWorkerThreads()
-    {
-        List<Exception> failures = [];
-        try
-        {
-            _workerStopSource.Cancel();
-        }
-        catch (Exception failure) when (failure is not OutOfMemoryException)
-        {
-            // A custom cancellation callback must not skip worker joins.
-            failures.Add(failure);
-        }
-        foreach (var thread in _workerThreads)
-        {
-            try
-            {
-                thread.Join();
-            }
-            catch (Exception failure) when (failure is not OutOfMemoryException)
-            {
-                failures.Add(failure);
-            }
-        }
-        _workerThreads.Clear();
-        if (failures.Count != 0)
-        {
-            throw new AggregateException("Worker shutdown encountered failures.", failures);
-        }
-    }
-
-    private void ThrowIfDisposed()
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        await Task.CompletedTask.ConfigureAwait(false);
     }
 }

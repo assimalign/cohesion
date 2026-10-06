@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// which defers the checkpoint to a statement holding the apply gate, and the catalog set
 /// directly. Before #1268 any failure escaped the pass and ended the worker for good.
 /// </remarks>
-internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyValueDatabaseInstance>
+internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyValueDatabase>
 {
     private readonly KeyValueDatabaseEngine _engine;
 
@@ -34,23 +34,23 @@ internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyVal
     protected override ManualResetEventSlim CheckpointNeededSignal => _engine.CheckpointNeededSignal;
 
     /// <inheritdoc />
-    protected override KeyValueDatabaseInstance[] GetDatabases() => _engine.GetInstanceSnapshot();
+    protected override KeyValueDatabase[] GetDatabases() => _engine.GetInstanceSnapshot();
 
     /// <inheritdoc />
-    protected override string GetName(KeyValueDatabaseInstance database) => database.Name;
+    protected override string GetName(KeyValueDatabase database) => database.Name;
 
     /// <inheritdoc />
-    protected override bool IsOffline(KeyValueDatabaseInstance database) => database.IsOffline;
+    protected override bool IsOffline(KeyValueDatabase database) => database.IsOffline;
 
     /// <inheritdoc />
-    protected override bool IsOpen(KeyValueDatabaseInstance database) => _engine.IsOpen(database);
+    protected override bool IsOpen(KeyValueDatabase database) => _engine.IsOpen(database);
 
     /// <inheritdoc />
-    protected override bool IsCheckpointDue(KeyValueDatabaseInstance database, TimeSpan interval)
+    protected override bool IsCheckpointDue(KeyValueDatabase database, TimeSpan interval)
         => database.DataStorage.IsCheckpointDue(interval) || database.CatalogStorage.IsCheckpointDue(interval);
 
     /// <inheritdoc />
-    protected override bool Checkpoint(KeyValueDatabaseInstance database, TimeSpan interval, CancellationToken cancellationToken)
+    protected override bool Checkpoint(KeyValueDatabase database, TimeSpan interval, CancellationToken cancellationToken)
     {
         bool dataDue = database.DataStorage.IsCheckpointDue(interval);
         bool catalogDue = database.CatalogStorage.IsCheckpointDue(interval);

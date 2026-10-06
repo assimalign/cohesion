@@ -111,7 +111,6 @@ public sealed class KeyValueLifecycleTests
             options.DeferredUndoRetryDelay = TimeSpan.FromHours(1);
         });
         await using var _ = engine;
-        var instance = (Internal.KeyValueDatabaseInstance)database;
         await using var waitingSession = await database.CreateSessionAsync();
         await using var blockingSession = await database.CreateSessionAsync();
         await using var observer = await database.CreateSessionAsync();
@@ -127,18 +126,18 @@ public sealed class KeyValueLifecycleTests
         // defers the undo. (Until #1252 a failed journal write was the fault; a journal write
         // failure now takes the database offline.)
         int locked;
-        using (var holder = PageWriteLockHolder.LockEveryPage(instance.DataStorage))
+        using (var holder = PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await waiting.RollbackAsync(TestTimeout.Token());
             locked = holder.Pages;
         }
         var error = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending.WaitAsync(TestTimeout.Token()));
         var blockerStateWhenTheCommandFailed = blocker.State;
-        int deferred = instance.Coordinator.VersionStore.PendingAbortedPurges.Count;
+        int deferred = database.Coordinator.VersionStore.PendingAbortedPurges.Count;
         var overwrite = database.PutAsync(observer, Bytes("earlier"), Bytes("observer"), cancellationToken: TestTimeout.Token(30)).AsTask();
         await Task.WhenAny(overwrite, Task.Delay(TimeSpan.FromMilliseconds(250)));
         bool overwroteBeforeTheUndo = overwrite.IsCompleted;
-        instance.Coordinator.RunVersionPurgePass(TestTimeout.Token());
+        database.Coordinator.RunVersionPurgePass(TestTimeout.Token());
         (await overwrite.WaitAsync(TestTimeout.Token())).Applied.ShouldBeTrue();
         await blocker.CommitAsync(TestTimeout.Token());
 
@@ -151,7 +150,7 @@ public sealed class KeyValueLifecycleTests
         error.Message.ShouldContain("ended while it waited", Case.Sensitive);
         blockerStateWhenTheCommandFailed.ShouldBe(TransactionState.Active);
         overwroteBeforeTheUndo.ShouldBeFalse();
-        instance.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
         Text((await database.GetAsync(observer, Bytes("earlier"), TestTimeout.Token())).ShouldNotBeNull().Value).ShouldBe("observer");
         Text((await database.GetAsync(observer, Bytes("hot"), TestTimeout.Token())).ShouldNotBeNull().Value).ShouldBe("blocker");
     }
@@ -218,8 +217,9 @@ public sealed class KeyValueLifecycleTests
 
         // Assert
         parked.ShouldBeTrue();
-        refused.Message.ShouldContain("still running", Case.Sensitive);
-        refused.Message.ShouldNotStartWith("COHDBK001", Case.Sensitive);
+        // The root base's message (concrete-types plan §6.4), for the model's former "A command of
+        // the transaction is still running; commit after it completes.".
+        refused.Message.ShouldBe("An operation of the transaction is still running; commit after it completes.");
         stateAfterRefusal.ShouldBe(TransactionState.Active);
         written.Applied.ShouldBeTrue();
         transaction.State.ShouldBe(TransactionState.Committed);

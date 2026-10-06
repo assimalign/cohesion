@@ -538,6 +538,7 @@ public class DatabaseTransactionTests
         disposed.Rollbacks.ShouldBe(0);
         disposed.DisposeCores.ShouldBe(1);
         aborted.State.ShouldBe(TransactionState.Faulted);
+        closed.State.ShouldBe(TransactionState.Faulted);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Transaction: an abort and a teardown require a cause")]

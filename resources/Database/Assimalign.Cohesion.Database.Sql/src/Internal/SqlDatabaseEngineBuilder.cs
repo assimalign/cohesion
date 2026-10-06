@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed class SqlDatabaseEngineBuilder : ISqlDatabaseEngineBuilder
 {
-    private readonly DatabaseEngineBuilderState _state = new();
+    private readonly DatabaseEngineBuilderState<SqlDatabaseEngine, IDatabaseEngineWorker, IDatabaseServer> _state = new();
     private readonly SqlDatabaseEngineOptions _options = new();
 
     public string? EngineName

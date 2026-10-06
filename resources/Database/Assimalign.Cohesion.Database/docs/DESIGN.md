@@ -19,7 +19,7 @@ surface. Child roots never reference the root.
 
 The approved [hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md) supersedes the historical builder/worker descriptions below. `IDatabaseApplicationBuilder` exposes exactly borrowed `AddEngine(instance)`, owned `AddEngine(Func<IDatabaseApplicationContext, IDatabaseEngine>)`, and one-shot `Build()`. There is no builder engine enumeration, application-level AddServer, or Use stage. `IDatabaseApplication` inherits `IAsyncDisposable`; its context observes every engine, nested servers, and ordinal `GetEngine(name)` lookup. All four named engine operations use the existing `DatabaseName` value object; its implicit string conversions preserve straightforward callers while implementations use the typed contract.
 
-`IDatabaseEngineBuilder` earns a shared seam because AddWorker is model-agnostic: the same factory can attach a worker to any model. Shared construction/rollback source is owned in this project's `shared/` and compiled by each model through `CohesionSharedSource`. Every model-specific interface extends the base and carries that model's options. No separate generic application composition algorithm consumes arbitrary model options. Strongly typed worker/server factory overloads are deliberately omitted: the common engine factory contract already works, and explicit casts for SQL/KeyValue servers avoid overload ambiguity and a second factory vocabulary.
+`IDatabaseEngineBuilder` earns a shared seam because AddWorker is model-agnostic: the same factory can attach a worker to any model. Shared construction/rollback source is owned in this project's `shared/` and compiled by each model through `CohesionSharedSource`. Every model-specific interface extends the base and carries that model's options. No separate generic application composition algorithm consumes arbitrary model options. Strongly typed worker/server factory overloads are deliberately omitted: the common engine factory contract already works, and explicit casts for SQL/KeyValue servers avoid overload ambiguity and a second factory vocabulary. That last ruling is superseded on the concrete-types plan's schedule (D5): since step P4.0 the shared build state is typed over each model's engine, and each model's phase-4 PR gives its sealed builder typed `AddWorker` and `AddServer` ("Root bases", below).
 
 Workers remain scheduled and quiesced by their engine. `IDatabaseEngineWorker.Run(CancellationToken)` exposes the existing executable pump so workers returned by the approved deferred factories can run without requiring a particular base implementation. `IDatabaseEngine.Servers` enables hosting to discover nested servers. Engines own factory-produced workers and servers; hosting snapshots servers for lifecycle only. Application-created engines are disposed by the application; instance-registered engines remain caller-owned.
 
@@ -41,8 +41,9 @@ call protected cores (the ADO.NET shape). Phase 3 of
 [the plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) adds the bases **beside**
 the interfaces: each base still implements its old interface (explicitly where the base retypes a
 member), so `Database.Hosting`, `Database.Embedded` and every model keep compiling against the
-interfaces. No model leaf derives from a base yet; each model moves its leaves onto them in its own
-phase-4 PR, and phase 6 deletes the interfaces. Every base carries the deviation marker.
+interfaces. Each model moves its leaves onto them in its own phase-4 PR (#1260), KeyValuePair
+first, and phase 6 deletes the interfaces; until then an adopted model's leaves reach the hosting
+layer through the interfaces the bases implement. Every base carries the deviation marker.
 
 | Base | Bridges | The leaf supplies | The base owns |
 |---|---|---|---|
@@ -74,7 +75,30 @@ phase-4 PR, and phase 6 deletes the interfaces. Every base carries the deviation
   unique within the engine, no product is attached twice, and a server must front its engine.
   The pump frame and the state fold are the ones every model compiled from
   `shared/DatabaseEngineWorkerPump.cs` since #1268's review; that shared copy stays compiled into
-  each model until the model's phase-4 PR derives its engine from the base.
+  each model until the model's phase-4 PR derives its engine from the base. A model that has
+  adopted the base defines `COHESION_DATABASE_ENGINE_PUMP_IN_BASE` in its csproj, and the shared
+  file compiles to nothing there (KeyValuePair since its phase-4 PR); the last model's PR deletes
+  the file and the constant.
+- **The shared build state composes through the leaf** (plan step P4.0, §6.5). Every model's
+  builder compiles `shared/DatabaseEngineBuilderState<TEngine, TWorker, TServer>`, which runs typed
+  factories (`Func<TEngine, TWorker>`, `Func<TEngine, TServer>`) and hands their products to the
+  leaf's internal compose method as lazy sequences, one factory per product requested, so a
+  factory still sees the products attached before it. The leaf attaches each product through
+  `AttachWorker` and `AttachServer` and then calls `CompleteComposition()`. The state makes none of
+  the attach checks: it refuses a null product, and when the compose method fails it disposes the
+  product being attached unless the engine already owns it (the base refuses a repeated product
+  like any other, and the engine disposes what it owns), then disposes the engine. That disposal
+  rests on the compose method's contract (each sequence read once and to the end, workers before
+  servers, each product attached before the next is requested), so the state checks it as the
+  compose method reads and fails the build with `InvalidOperationException`, the unattached
+  product disposed, when a compose method breaks it, instead of leaking products or dropping
+  factories. Until a model's engine derives from the base, its builder composes through a bridge
+  overload that adapts the engine's own two attach members and makes the base's checks (a product
+  attached twice, a server fronting another engine) with the same messages. Each model's phase-4
+  PR moves its builder to the compose method (KeyValuePair's `KeyValueDatabaseEngine.Compose`
+  first, with the state typed `<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`),
+  the last one deletes the bridge, and phase 6 fixes the products to the bases and constrains the
+  engine to `DatabaseEngine`.
 - **Engine disposal has one order:** the servers (last attached first), then every worker pump is
   stopped and joined, then the workers (last attached first, a disposable worker such as the
   checkpointer ending the work it left on its lanes), then the leaf closes its databases
@@ -146,7 +170,11 @@ phase-4 PR, and phase 6 deletes the interfaces. Every base carries the deviation
     terminal, so its start core disposes the listener before it rethrows;
   - the worker-name uniqueness check for the models that did not check it, and the engine disposal
     order for SQL and KeyValuePair (all workers last attached first, instead of the checkpointer
-    first).
+    first);
+  - engine composition through the compose method (plan step P4.0): SQL's and KeyValuePair's
+    attach-time refusal of a blank worker name is gone, because the worker's constructor rejects
+    the name inside the factory, and the pump threads are named for their workers, where Graph,
+    Documents and Blob named them `{engine}/{kind}`.
 
   Each model's PR runs its #1188, #1225 and #1226 suites in process and over the wire.
 
