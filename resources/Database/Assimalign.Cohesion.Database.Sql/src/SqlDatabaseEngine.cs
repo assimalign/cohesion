@@ -7,15 +7,14 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Sql.Internal;
-
-namespace Assimalign.Cohesion.Database.Sql;
-
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
+
+namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
 /// SQL database engine that manages the lifecycle of SQL database instances.
@@ -255,7 +254,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// Attaches the products of the builder's factories, workers first and then servers, and
     /// freezes the engine's composition: the builder's compose method
     /// (<c>DatabaseEngineBuilderState.Complete</c>). The base refuses a product attached twice, a
-    /// server that fronts another engine and a worker whose name another worker of the engine has.
+    /// server that fronts another engine, a worker whose name another worker of the engine has, and
+    /// a worker that is not free (another engine owns it, or it was released).
     /// </summary>
     /// <param name="workers">The workers, produced one factory at a time as they are requested.</param>
     /// <param name="servers">The servers, produced one factory at a time as they are requested.</param>
@@ -273,6 +273,16 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
         CompleteComposition();
     }
+
+    /// <summary>
+    /// Releases a worker the builder refused, or one its failed composition left unattached: the
+    /// engine base's <see cref="DatabaseEngine.ReleaseUnownedWorkerAsync"/>, which the builder's
+    /// rollback (<c>DatabaseEngineBuilderState.Complete</c>) cannot reach itself. It does nothing on a
+    /// worker an engine owns (concrete-types plan, row 7).
+    /// </summary>
+    /// <param name="worker">The refused worker.</param>
+    /// <returns>A task that completes once the worker's resources are released.</returns>
+    internal static ValueTask ReleaseRefusedWorkerAsync(DatabaseEngineWorker worker) => ReleaseUnownedWorkerAsync(worker);
 
     /// <summary>
     /// Creates a new logical SQL database with the specified name and the binary default collation.
@@ -298,12 +308,15 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was created.</exception>
     /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
     /// <remarks>
-    /// The binary collation goes through the base's public member, so its checks run in the base's
-    /// order (the name, disposal, the token); another collation makes the same checks here, with
-    /// the null collation refused after the name.
+    /// The overload without a collation goes through the base's public member, so its checks run in
+    /// the base's order (the name, disposal, the token). The base has no collation parameter, so
+    /// this overload cannot await it: it makes the same checks here, in the same order, with the
+    /// null collation refused after the name.
     /// </remarks>
     public async ValueTask<SqlDatabase> CreateDatabaseAsync(DatabaseName name, Collation defaultCollation, CancellationToken cancellationToken = default)
     {
+        // The check order of DatabaseEngine.CreateDatabaseAsync, which this overload mirrors: a
+        // guard added there is added here too (SqlEngineContractTests pins the order).
         if (name.IsEmpty)
         {
             throw new ArgumentException("A database name is required.", nameof(name));

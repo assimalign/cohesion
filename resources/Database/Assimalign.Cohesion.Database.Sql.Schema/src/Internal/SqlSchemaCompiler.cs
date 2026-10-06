@@ -5,10 +5,9 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Text;
 
-using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Sql.Schema;
+namespace Assimalign.Cohesion.Database.Sql.Schema.Internal;
 
 /// <summary>
 /// Validates and lowers retained C# schema declarations into stable compiled schemas. Internal

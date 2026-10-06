@@ -42,8 +42,8 @@ internal sealed class RecordingWorker : DatabaseEngineWorker
     /// <summary>Gets the number of times the worker was disposed.</summary>
     public int Disposals => Volatile.Read(ref _disposals);
 
-    // The base's release hook, which the owning engine runs once, or DisposeAsync for a worker no
-    // engine owns (one a builder refused).
+    // The base's release hook, which the owning engine runs once, or the builder's rollback, through
+    // the engine base's protected release, for a worker no engine owns (one a builder refused).
     protected override ValueTask DisposeAsyncCore()
     {
         Interlocked.Increment(ref _disposals);

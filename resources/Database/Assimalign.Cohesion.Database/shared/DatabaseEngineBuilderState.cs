@@ -26,12 +26,13 @@ namespace Assimalign.Cohesion.Database;
 /// </para>
 /// <para>
 /// <b>The leaf attaches; the base checks.</b> A builder cannot call the protected attach members
-/// of the engine it built, so <see cref="Complete(TEngine, Action{IEnumerable{TWorker}, IEnumerable{TServer}})"/>
+/// of the engine it built, so <see cref="Complete(TEngine, Action{IEnumerable{TWorker}, IEnumerable{TServer}}, Func{TWorker, ValueTask})"/>
 /// takes the leaf's internal compose method, which attaches each product through
 /// <c>AttachWorker</c> and <c>AttachServer</c> and freezes the engine with
 /// <c>CompleteComposition</c>. The base refuses a product attached twice, a server that fronts
-/// another engine and a duplicate worker name, so this state makes none of those checks: it runs
-/// the factories, refuses a null product, and disposes whatever a failed build leaves unowned.
+/// another engine, a duplicate worker name and a worker that is not free (another engine owns it,
+/// or it was released), so this state makes none of those checks: it runs the factories, refuses
+/// a null product, and disposes whatever a failed build leaves unowned.
 /// </para>
 /// <para>
 /// <b>The compose method's contract, checked here.</b> It reads the workers once, all the way
@@ -44,12 +45,16 @@ namespace Assimalign.Cohesion.Database;
 /// dropping factories.
 /// </para>
 /// <para>
-/// <b>A rejected product is disposed through its own public disposal.</b> A worker no engine owns
-/// runs its release hook from <see cref="DatabaseEngineWorker.DisposeAsync"/>; a worker the engine
-/// already owns (a repeated product, a built-in worker a factory returned) is the engine's to
-/// release, so the state leaves it alone and the worker's disposal would do nothing either. The
-/// bridge overload that composed through an unadopted engine's own attach members was deleted with
-/// the last model's phase-4 PR (Sql, #1260).
+/// <b>A rejected product is released by its owner's rules.</b> A rejected server or engine is
+/// disposed through its public disposal. A worker has none (concrete-types plan, row 7): the
+/// leaf hands <see cref="Complete(TEngine, Action{IEnumerable{TWorker}, IEnumerable{TServer}}, Func{TWorker, ValueTask})"/>
+/// its internal re-exposure of the engine base's protected
+/// <see cref="DatabaseEngine.ReleaseUnownedWorkerAsync"/>, the same way it hands over its compose
+/// method, and a rejected worker no engine owns runs its release hook through it. A worker the
+/// engine already owns (a repeated product, a built-in worker a factory returned) is the engine's
+/// to release, so the state leaves it alone; one another engine owns is left alone by the release
+/// itself. The bridge overload that composed through an unadopted engine's own attach members was
+/// deleted with the last model's phase-4 PR (Sql, #1260).
 /// </para>
 /// </remarks>
 internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
@@ -132,16 +137,20 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
     /// engine. A factory runs when its product is requested, so it observes the products attached
     /// before it, and every server factory runs after every worker is attached.
     /// </param>
+    /// <param name="releaseWorker">
+    /// The leaf's internal re-exposure of <see cref="DatabaseEngine.ReleaseUnownedWorkerAsync"/>:
+    /// releases a rejected worker no engine owns, and does nothing on one an engine owns.
+    /// </param>
     /// <returns><paramref name="engine"/>, composed.</returns>
     /// <exception cref="InvalidOperationException">
     /// A factory returned null; the engine refused a product (the base refuses a product attached
-    /// twice, a server that fronts another engine and a duplicate worker name); or
-    /// <paramref name="compose"/> broke its contract (it read a sequence twice, requested a server
-    /// before it attached every worker, read past a product it did not attach, or returned before
-    /// it read both sequences to the end).
+    /// twice, a server that fronts another engine, a duplicate worker name and a worker another
+    /// engine owns or that was released); or <paramref name="compose"/> broke its contract (it read
+    /// a sequence twice, requested a server before it attached every worker, read past a product it
+    /// did not attach, or returned before it read both sequences to the end).
     /// </exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>
-    public TEngine Complete(TEngine engine, Action<IEnumerable<TWorker>, IEnumerable<TServer>> compose)
+    public TEngine Complete(TEngine engine, Action<IEnumerable<TWorker>, IEnumerable<TServer>> compose, Func<TWorker, ValueTask> releaseWorker)
     {
         try
         {
@@ -163,7 +172,11 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
                 // product it already owns like any other, and that product is the engine's to dispose.
                 var rejected = _pending;
                 _pending = null;
-                if (rejected is not null && !IsAttached(engine, rejected))
+                if (rejected is TWorker worker && !IsAttached(engine, worker))
+                {
+                    ReleaseRejected(worker, releaseWorker, failure);
+                }
+                else if (rejected is not null && !IsAttached(engine, rejected))
                 {
                     DisposeRejected(rejected, failure);
                 }
@@ -261,6 +274,21 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
         }
 
         return false;
+    }
+
+    // A worker has no public disposal (row 7): the leaf's release runs its hook once, unless an
+    // engine owns it.
+    private static void ReleaseRejected(TWorker worker, Func<TWorker, ValueTask> releaseWorker, Exception failure)
+    {
+        try
+        {
+            Task.Run(async () => await releaseWorker(worker).ConfigureAwait(false))
+                .GetAwaiter().GetResult();
+        }
+        catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
+        {
+            throw new AggregateException(failure, cleanup);
+        }
     }
 
     private static void DisposeRejected(object product, Exception failure)

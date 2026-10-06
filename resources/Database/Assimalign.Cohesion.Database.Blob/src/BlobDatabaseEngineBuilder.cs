@@ -169,7 +169,7 @@ public sealed class BlobDatabaseEngineBuilder
     {
         _state.BeginBuild();
         var engine = BlobDatabaseEngine.CreateUncomposed(_options);
-        return _state.Complete(engine, engine.Compose);
+        return _state.Complete(engine, engine.Compose, BlobDatabaseEngine.ReleaseRefusedWorkerAsync);
     }
 
     /// <summary>

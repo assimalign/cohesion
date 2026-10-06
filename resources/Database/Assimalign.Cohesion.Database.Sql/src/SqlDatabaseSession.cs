@@ -5,14 +5,14 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Sql;
-
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Transactions;
+
+namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
 /// A SQL database session, bound to the database's MVCC transaction manager: explicit and

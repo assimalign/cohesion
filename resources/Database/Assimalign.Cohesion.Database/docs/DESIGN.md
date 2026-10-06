@@ -66,7 +66,7 @@ layer through the interfaces the bases implement. Every base carries the deviati
   members are the two cases rule 4 allows here: the optional-capability core
   `DatabaseInstance.ApplySchemaCoreAsync` (throws `NotSupportedException` by default, paired with
   `SupportsSchemaProvisioning`) and lifecycle hooks (the session's and transaction's empty
-  `DisposeAsyncCore`, the worker's `WaitForTrigger`).
+  `DisposeAsyncCore`, the worker's `WaitForTrigger` and its empty `DisposeAsyncCore`).
 - **Engine composition is attached, then frozen** (§6.5 of the plan). A leaf's constructor attaches
   its built-in workers and its build path attaches the composed workers and servers through the
   protected, non-virtual `AttachWorker` and `AttachServer`, then calls `CompleteComposition()`;
@@ -78,7 +78,6 @@ layer through the interfaces the bases implement. Every base carries the deviati
   base since phase 4, so the last model's PR (Sql) deleted that shared copy and the
   `COHESION_DATABASE_ENGINE_PUMP_IN_BASE` constant the adopted models defined to compile it to
   nothing.
-
 - **The shared build state composes through the leaf** (plan step P4.0, §6.5). Every model's
   builder compiles `shared/DatabaseEngineBuilderState<TEngine, TWorker, TServer>`, which runs typed
   factories (`Func<TEngine, TWorker>`, `Func<TEngine, TServer>`) and hands their products to the
@@ -92,34 +91,38 @@ layer through the interfaces the bases implement. Every base carries the deviati
   servers, each product attached before the next is requested), so the state checks it as the
   compose method reads and fails the build with `InvalidOperationException`, the unattached
   product disposed, when a compose method breaks it, instead of leaking products or dropping
-    factories. A rejected product is disposed through its own public disposal: a worker no
-  engine owns runs its release hook, and one an engine owns is left to that engine. Until a
-  model's engine derived from the base, its builder composed through a bridge overload that
-  adapted the engine's own two attach members; each model's phase-4 PR moved its builder to the
-  compose method (KeyValuePair's `KeyValueDatabaseEngine.Compose` first, then Graph's,
-  Documents', Blob's and Sql's, each state typed `<…DatabaseEngine, DatabaseEngineWorker,
-  DatabaseServer>`), and the last one (Sql) deleted the bridge. Phase 6 fixes the products to the
-  bases and constrains the engine to `DatabaseEngine`.
-
+  factories. A rejected server or engine is disposed through its public disposal; a rejected
+  worker, which has none, is released through the release the leaf hands `Complete` beside its
+  compose method (below), and one an engine owns is left to that engine. Until a model's engine
+  derived from the base, its builder composed through a bridge overload that adapted the
+  engine's own two attach members; each model's phase-4 PR moved its builder to the compose
+  method (KeyValuePair's `KeyValueDatabaseEngine.Compose` first, then Graph's, Documents', Blob's
+  and Sql's, each state typed `<…DatabaseEngine, DatabaseEngineWorker, DatabaseServer>`), and the
+  last one (Sql) deleted the bridge. Phase 6 fixes the products to the bases and constrains the
+  engine to `DatabaseEngine`.
 - **Engine disposal has one order:** the servers (last attached first), then every worker pump is
   stopped and joined, then the workers (last attached first, each through its release hook: the
   checkpointer ends the work it left on its lanes), then the leaf closes its databases
   (`DisposeAsyncCore`). Every step runs whatever an earlier one threw, and the failures are
   reported together in one `AggregateException`.
-- **A worker is released once, by its owner** (plan row 7, landed with the last model's
-  phase-4 PR). `DatabaseEngineWorker` has a `protected virtual DisposeAsyncCore` release hook
-  with an empty default, the second lifecycle hook beside `WaitForTrigger`. The engine that
-  attached a worker owns it and runs the hook through the worker's internal entry point once
-  it stopped the pump; the worker's public `DisposeAsync` (the worker is `IAsyncDisposable`)
-  runs the hook for a worker no engine owns, a product a builder refused or one never attached,
-  and does nothing on a worker an engine owns, so outside code holding `DatabaseEngine.Workers`
-  cannot release a worker whose pump still runs. The hook runs once whichever path reaches it.
-  It replaced the engines' `IAsyncDisposable`/`IDisposable` type tests; the shared
-  `DatabaseCheckpointWorker`'s `Dispose` (its lanes) became its override. The plan had proposed
-  an entry point internal to the root alone; the shared builder state, compiled into the model
-  assemblies, must dispose a refused worker, and the root grants no model its internals, so the
-  public entry exists with the ownership guard instead.
-
+- **A worker belongs to one engine and is released once, by its owner** (plan row 7, landed with
+  the last model's phase-4 PR). `DatabaseEngineWorker` has a `protected virtual DisposeAsyncCore`
+  release hook with an empty default, the second lifecycle hook beside `WaitForTrigger`, and no
+  public disposal: it is neither `IAsyncDisposable` nor `IDisposable`. `AttachWorker` claims the
+  worker before it starts the pump and refuses one that is not free (another engine owns it, or
+  it was released), so no worker is pumped by two engines or after its release. The owning
+  engine runs the hook through the worker's internal entry point once it stopped the pump. A
+  worker no engine owns, a product a builder refused, is released through the base's
+  `protected static ReleaseUnownedWorkerAsync`, which does nothing on a worker an engine owns;
+  the shared builder state, compiled into the model assemblies, cannot reach the root's
+  internals, so each model engine re-exposes it as an internal `ReleaseRefusedWorkerAsync` and
+  its builder passes that to `Complete` beside its compose method. Outside code holding
+  `DatabaseEngine.Workers` cannot release a worker at all. The hook runs once whichever path
+  reaches it. It replaced the engines' `IAsyncDisposable`/`IDisposable` type tests; the shared
+  `DatabaseCheckpointWorker`'s `Dispose` (its lanes) became its override. As first landed the
+  worker was `IAsyncDisposable` with a public, ownership-guarded `DisposeAsync`, on the reading
+  that only an internal entry could keep it off the public surface; the review applied the
+  protected-static shape instead, which needs no grant.
 - **The explicit-transaction state machine lives once, in `DatabaseTransaction`** (§6.4 of the
   plan; #1188, #1225, #1226). Graph, Documents, Blob and KeyValuePair each carried a copy. One end
   gate serializes commit, rollback, disposal, an abort for a failed operation (`AbortAsync`) and
@@ -131,7 +134,8 @@ layer through the interfaces the bases implement. Every base carries the deviati
   to keep (PostgreSQL holds interrupts through `AbortTransaction`). A
   transaction that did not commit accepts any number of rollbacks; a commit ends it whatever its
   outcome, and one after an abort completes the rollback and fails with the model's coded error
-  (`COHDBG007`, `COHDBD001`, `COHDBB001`, `COHDBK001` in the models' vocabularies). `State`
+  (`COHDBG007`, `COHDBD001`, `COHDBB001`, `COHDBK001` in the models' vocabularies; SQL, which
+  never aborts, refuses work on a transaction the kernel ended with `COHSQLT005`). `State`
   reports `Faulted` while an operation's failure or the kernel ended the transaction under its
   caller, until the caller ends it. A commit is refused while an operation of the transaction
   runs (`TryBeginOperation`/`EndOperation`). An offline database (#1243) refuses a commit and a
@@ -279,9 +283,9 @@ layer through the interfaces the bases implement. Every base carries the deviati
   running pass. Only cancellation and `OutOfMemoryException` leave the loop. The
   engine's pump (the `DatabaseEngine` base's since phase 3; every model's since phase 4, when
   the last model deleted the shared copy, `shared/DatabaseEngineWorkerPump.cs`) also runs a
-  worker's `Run` again after the backoff if it ever throws or returns early.
- A worker's name, kind and cadence are fixed by its
-  constructor since phase 3 (#1259): they used to be abstract getters, so the cadence of the
+  worker's `Run` again after the backoff if it ever throws or returns early. A worker's name,
+  kind and cadence are fixed by its constructor since phase 3 (#1259): they used to be abstract
+  getters, so the cadence of the
   built-in workers was read from the engine's options object on every trigger wait, and a change
   to that object after the engine was created changed it; now the value the engine was created
   with holds for the worker's life. This is PostgreSQL's recovery for its background

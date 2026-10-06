@@ -135,7 +135,7 @@ public sealed class SqlTransactionContractTests
     /// (<c>TransactionManager.cs</c>, its disposal), which the base reports once the caller ended it.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Transaction: one the kernel ended is Faulted and refuses work with COHSQLT005 until the caller rolls it back")]
-    public async Task Transaction_EndedByTheKernel_ShouldBeFaultedAndRefuseWorkWithCohsqlt005()
+    public async Task ExecuteAsync_TransactionEndedByTheKernel_ShouldBeFaultedAndRefuseWorkWithCohsqlt005()
     {
         // Arrange
         await using var engine = CreateEngine();
@@ -321,7 +321,7 @@ public sealed class SqlTransactionContractTests
     /// <c>COHSQLT004</c> first. The transaction's own commit still gets the coded refusal.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Offline: the base's checks come before COHSQLT004, a canceled token included")]
-    public async Task Operations_OnOfflineDatabase_ShouldRunTheBaseChecksFirst()
+    public async Task ExecuteAsync_OnOfflineDatabase_ShouldRunTheBaseChecksFirst()
     {
         // Arrange: a commit's fsync fails and takes the database offline under an open transaction.
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);

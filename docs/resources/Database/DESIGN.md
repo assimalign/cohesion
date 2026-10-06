@@ -279,8 +279,9 @@ Engines still own their background loops unconditionally and the customer compos
 their disposal, preserving the embedded/hosted equivalence from R10.
 
 SQL compilation lives in `Database.Sql.Schema`: `SqlSchema.Compile` declares and
-compiles the C# schema in one step, while the public `SqlSchema.Create` and
-`SqlSchemaCompiler` pair remains available for separately retained declarations. Its tables,
+compiles the C# schema in one step, while the public `SqlSchema.Create` and its instance
+`Compile()` remain available for separately retained declarations (`SqlSchemaCompiler` is
+internal since phase 4 of the concrete-types plan). Its tables,
 indexes, and constraints carry schema ownership. The SQL catalog durably records
 ownership and the owning compiled schema's name. Session `DROP TABLE`, `ALTER TABLE`,
 and `DROP INDEX` refuse schema-owned targets with `DatabaseObjectLockedException`;

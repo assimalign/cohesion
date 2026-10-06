@@ -66,12 +66,15 @@ namespace Assimalign.Cohesion.Database;
 /// leaves the loop, and the thread with it, which ends the process: nothing ends the loop silently.
 /// </para>
 /// <para>
-/// <b>Disposal belongs to the engine that owns the worker.</b> An engine owns a worker from the
-/// moment it attaches it, and releases it once it stopped the worker's pump: it runs the worker's
-/// <see cref="DisposeAsyncCore"/> (a checkpointer ends the checkpoints it left running on their
-/// lanes before the storages close). <see cref="DisposeAsync"/> is for a worker no engine owns, a
-/// product a builder refused or one that was never attached; on a worker an engine owns it does
-/// nothing, so outside code cannot release a worker whose pump still runs. Either path reaches
+/// <b>Release belongs to the engine that owns the worker.</b> A worker belongs to one engine: the
+/// engine claims it when it attaches it, before the worker's pump starts, and refuses a worker
+/// another engine owns or one already released. It releases the worker once it stopped the
+/// worker's pump: it runs the worker's <see cref="DisposeAsyncCore"/> (a checkpointer ends the
+/// checkpoints it left running on their lanes before the storages close). The worker has no
+/// public disposal: a worker no engine owns, a product a builder refused, is released through
+/// the engine base's protected <see cref="DatabaseEngine.ReleaseUnownedWorkerAsync"/>, which
+/// does nothing on a worker an engine owns, so code holding <see cref="DatabaseEngine.Workers"/>
+/// cannot release a worker whose pump still runs. Either path reaches
 /// <see cref="DisposeAsyncCore"/> once.
 /// </para>
 /// <para>
@@ -83,14 +86,16 @@ namespace Assimalign.Cohesion.Database;
 /// (<see cref="DisposeAsyncCore"/>): the two lifecycle hooks. The leaves live in the model
 /// assemblies, so the constructor is <c>protected</c>. The release hook landed with the last
 /// model's phase-4 PR (#1260, row 7), in place of the engines' <see cref="IDisposable"/> and
-/// <see cref="IAsyncDisposable"/> type tests.
+/// <see cref="IAsyncDisposable"/> type tests; it is internal to the root, reached by the owning
+/// engine's disposal and, for a worker no engine owns, by the engine base's protected release.
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
-public abstract class DatabaseEngineWorker : IDatabaseEngineWorker, IAsyncDisposable
+public abstract class DatabaseEngineWorker : IDatabaseEngineWorker
 {
-    // The worker's lifetime: free until an engine attaches it, then owned by that engine, and
-    // released once, by the engine (ReleaseAsync) or, for a worker no engine owns, by DisposeAsync.
+    // The worker's lifetime: free until an engine claims it at attach, then owned by that engine,
+    // and released once, by the owning engine (ReleaseAsync) or, for a worker no engine owns, by
+    // the engine base's protected release (ReleaseUnownedAsync).
     private const int free = 0;
     private const int owned = 1;
     private const int released = 2;
@@ -411,35 +416,30 @@ public abstract class DatabaseEngineWorker : IDatabaseEngineWorker, IAsyncDispos
         => cancellationToken.WaitHandle.WaitOne(Interval);
 
     /// <summary>
-    /// Releases what a worker no engine owns holds: a product a builder refused, or a worker that
-    /// was never attached. Does nothing on a worker an engine owns, whose engine releases it once
-    /// it stopped the worker's pump, and nothing after the first release.
-    /// </summary>
-    /// <returns>A task that completes once the worker's resources are released.</returns>
-    public ValueTask DisposeAsync()
-    {
-        if (Interlocked.CompareExchange(ref _lifetime, released, free) != free)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        return DisposeAsyncCore();
-    }
-
-    /// <summary>
     /// Releases what the worker holds once its pump has stopped: work it left running on threads of
     /// its own (a checkpoint on its lane), which must end before the engine closes its storages.
-    /// Called once, by the owning engine's disposal or by <see cref="DisposeAsync"/> on a worker no
-    /// engine owns. The default releases nothing.
+    /// Called once: by the owning engine's disposal, or, for a worker no engine owns (a product a
+    /// builder refused), by <see cref="DatabaseEngine.ReleaseUnownedWorkerAsync"/>. The default
+    /// releases nothing.
     /// </summary>
     /// <returns>A task that completes once the worker's resources are released.</returns>
     protected virtual ValueTask DisposeAsyncCore() => ValueTask.CompletedTask;
 
     /// <summary>
-    /// Records that an engine owns the worker from now on, so <see cref="DisposeAsync"/> leaves it
-    /// to that engine. Called by <see cref="DatabaseEngine"/> once the worker's pump started.
+    /// Claims the worker for the engine attaching it, before the engine starts its pump: from now on
+    /// only that engine releases it. Called by <see cref="DatabaseEngine"/> under its attach lock.
     /// </summary>
-    internal void MarkOwned() => Interlocked.CompareExchange(ref _lifetime, owned, free);
+    /// <returns>
+    /// <see langword="true"/> when the worker was free; <see langword="false"/> when another engine
+    /// owns it or it was released.
+    /// </returns>
+    internal bool TryClaim() => Interlocked.CompareExchange(ref _lifetime, owned, free) == free;
+
+    /// <summary>
+    /// Returns a claimed worker to free when its engine's attach failed after the claim (its pump
+    /// thread did not start), so the builder that refused it can still release it.
+    /// </summary>
+    internal void Unclaim() => Interlocked.CompareExchange(ref _lifetime, free, owned);
 
     /// <summary>
     /// Releases the worker for the engine that owns it, once the engine stopped the worker's pump:
@@ -448,6 +448,15 @@ public abstract class DatabaseEngineWorker : IDatabaseEngineWorker, IAsyncDispos
     /// <returns>A task that completes once the worker's resources are released.</returns>
     internal ValueTask ReleaseAsync()
         => Interlocked.Exchange(ref _lifetime, released) == released ? ValueTask.CompletedTask : DisposeAsyncCore();
+
+    /// <summary>
+    /// Releases a worker no engine owns: the worker's <see cref="DisposeAsyncCore"/>, once. Does
+    /// nothing on a worker an engine owns, whose engine releases it after it stopped the worker's
+    /// pump, and nothing after the first release.
+    /// </summary>
+    /// <returns>A task that completes once the worker's resources are released.</returns>
+    internal ValueTask ReleaseUnownedAsync()
+        => Interlocked.CompareExchange(ref _lifetime, released, free) == free ? DisposeAsyncCore() : ValueTask.CompletedTask;
 
     private bool RunPass(CancellationToken cancellationToken, out bool threw)
     {

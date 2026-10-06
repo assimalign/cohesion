@@ -309,7 +309,7 @@ public abstract class DatabaseEngine : IDatabaseEngine
         // A worker may hold work of its own (a checkpoint left running on its lane); it ends
         // before the storages close. The engine owns every worker it attached, so it releases each
         // through the worker's internal entry point, which runs the worker's DisposeAsyncCore once
-        // (concrete-types plan, row 7); the worker's public DisposeAsync leaves an owned worker alone.
+        // (concrete-types plan, row 7); nothing outside the engine can release an owned worker.
         for (int index = workers.Length - 1; index >= 0; index--)
         {
             try
@@ -340,16 +340,17 @@ public abstract class DatabaseEngine : IDatabaseEngine
 
     /// <summary>
     /// Attaches a background worker to the engine and starts its pump on a dedicated background
-    /// thread. The engine owns the worker from then on: it stops the pump and releases the worker
-    /// (its <see cref="DatabaseEngineWorker.DisposeAsyncCore"/> hook) when the engine is disposed, and
-    /// the worker's own <see cref="DatabaseEngineWorker.DisposeAsync"/> leaves it to the engine.
+    /// thread. The engine owns the worker from then on: it claims the worker before the pump
+    /// starts, and stops the pump and releases the worker (its
+    /// <see cref="DatabaseEngineWorker.DisposeAsyncCore"/> hook) when the engine is disposed.
     /// </summary>
     /// <param name="worker">The worker.</param>
     /// <exception cref="ArgumentNullException"><paramref name="worker"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="InvalidOperationException">
     /// Composition was completed (<see cref="CompleteComposition"/>), the worker is already attached,
-    /// or another attached worker has the same name.
+    /// another attached worker has the same name, or the worker is not free: another engine owns
+    /// it, or it was released.
     /// </exception>
     protected void AttachWorker(DatabaseEngineWorker worker)
     {
@@ -371,6 +372,15 @@ public abstract class DatabaseEngine : IDatabaseEngine
                 }
             }
 
+            // The claim comes before the pump starts, so no one can release the worker while its
+            // pump runs, and a worker belongs to one engine: one another engine owns, or one already
+            // released, is refused before it is pumped.
+            if (!worker.TryClaim())
+            {
+                throw new InvalidOperationException(
+                    $"Worker '{worker.Name}' belongs to one engine: another engine owns it, or it was released.");
+            }
+
             var thread = new Thread(() => Pump(worker))
             {
                 IsBackground = true,
@@ -387,13 +397,36 @@ public abstract class DatabaseEngine : IDatabaseEngine
             {
                 _workers.Remove(worker);
                 _threads.Remove(thread);
+
+                // Not attached after all: free again, so the builder that refused it releases it.
+                worker.Unclaim();
                 throw;
             }
 
-            // From here on the worker's public disposal leaves it to this engine.
-            worker.MarkOwned();
             Volatile.Write(ref _workerView, Array.AsReadOnly(_workers.ToArray()));
         }
+    }
+
+    /// <summary>
+    /// Releases a worker no engine owns: a product a model's builder refused, or one a failed
+    /// composition left unattached. It runs the worker's
+    /// <see cref="DatabaseEngineWorker.DisposeAsyncCore"/> once, and does nothing on a worker an
+    /// engine owns (that engine releases it after it stopped the worker's pump) or one already
+    /// released.
+    /// </summary>
+    /// <param name="worker">The worker.</param>
+    /// <returns>A task that completes once the worker's resources are released.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="worker"/> is null.</exception>
+    /// <remarks>
+    /// The worker has no public disposal (concrete-types plan, row 7): <see cref="Workers"/> is
+    /// public, and a public release would let outside code release a worker whose pump still runs.
+    /// A model's builder cannot reach the root's internals, so each model engine re-exposes this
+    /// member internally and hands it to the builder's rollback.
+    /// </remarks>
+    protected static ValueTask ReleaseUnownedWorkerAsync(DatabaseEngineWorker worker)
+    {
+        ArgumentNullException.ThrowIfNull(worker);
+        return worker.ReleaseUnownedAsync();
     }
 
     /// <summary>

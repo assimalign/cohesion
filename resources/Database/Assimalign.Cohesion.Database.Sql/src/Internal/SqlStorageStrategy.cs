@@ -1,6 +1,6 @@
-namespace Assimalign.Cohesion.Database.Sql.Internal;
-
 using Assimalign.Cohesion.Database.Sql.Storage;
+
+namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
 /// Creates, opens and drops the storage file sets of a SQL engine's databases: each database's

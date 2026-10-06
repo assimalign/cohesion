@@ -169,7 +169,7 @@ public sealed class GraphDatabaseEngineBuilder
     {
         _state.BeginBuild();
         var engine = GraphDatabaseEngine.CreateUncomposed(_options);
-        return _state.Complete(engine, engine.Compose);
+        return _state.Complete(engine, engine.Compose, GraphDatabaseEngine.ReleaseRefusedWorkerAsync);
     }
 
     /// <summary>

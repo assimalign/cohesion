@@ -1,10 +1,10 @@
 using System;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Sql;
-
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Transactions;
+
+namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
 /// An explicit ACID transaction of a SQL session, over an MVCC transaction context from the

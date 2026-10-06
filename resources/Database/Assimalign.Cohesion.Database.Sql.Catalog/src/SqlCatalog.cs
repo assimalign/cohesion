@@ -47,7 +47,8 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// <see cref="ReserveTableAsync"/>, <see cref="PublishTableAsync"/> and
 /// <see cref="DropConstraintAsync"/> were statics over the interface, kept off it so other
 /// implementations need not honour them; with one type they are instance methods.
-/// <see cref="Open(SqlStorage)"/> is the one way to create it.
+/// The two <c>Open</c> overloads, <see cref="Open(SqlStorage)"/> and
+/// <see cref="Open(SqlStorage, Collation)"/>, are the only ways to create it.
 /// </para>
 /// </remarks>
 public sealed class SqlCatalog
@@ -264,6 +265,7 @@ public sealed class SqlCatalog
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The created table with its assigned object identity.</returns>
     /// <exception cref="SqlCatalogException">A table with the name already exists, or the definition is invalid.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask<SqlCatalogTable> CreateTableAsync(
         string schema,
         string name,
@@ -322,6 +324,7 @@ public sealed class SqlCatalog
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task that completes once the drop is durable.</returns>
     /// <exception cref="SqlCatalogException">The table does not exist, or another table references it.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask DropTableAsync(string schema, string name, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -412,6 +415,8 @@ public sealed class SqlCatalog
     /// The table does not exist or already has the column, or the definition no longer fits
     /// one catalog record.
     /// </exception>
+    /// <exception cref="ArgumentNullException"><paramref name="column"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask<SqlCatalogTable> AddColumnAsync(string schema, string name, SqlCatalogColumn column, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(column);
@@ -453,6 +458,7 @@ public sealed class SqlCatalog
     /// constraint or an index; it is the table's last column; or the definition, which keeps
     /// every dropped column's physical ordinal, no longer fits one catalog record.
     /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask<SqlCatalogTable> DropColumnAsync(string schema, string name, string columnName, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -586,6 +592,8 @@ public sealed class SqlCatalog
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The created index description.</returns>
     /// <exception cref="SqlCatalogException">The table does not exist, a key column does not exist, or an index with the name already exists on the table.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="index"/> or <paramref name="registrations"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask<SqlCatalogIndex> CreateIndexAsync(SqlCatalogIndex index, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(index);
@@ -635,6 +643,8 @@ public sealed class SqlCatalog
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task that completes once the drop is durable.</returns>
     /// <exception cref="SqlCatalogException">The index does not exist.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="registrations"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask DropIndexAsync(ulong tableObjectId, string name, IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(registrations);
@@ -667,6 +677,8 @@ public sealed class SqlCatalog
     /// <param name="registrations">The registrations to persist (replaces the stored set).</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task that completes once the registrations are durable.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="registrations"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask SaveIndexRegistrationsAsync(IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(registrations);
@@ -731,6 +743,8 @@ public sealed class SqlCatalog
     /// <param name="version">The format version to persist.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task that completes once the marker is durable.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="version"/> is zero or negative.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask SetRecordSpaceFormatVersionAsync(int version, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(version);
@@ -763,6 +777,8 @@ public sealed class SqlCatalog
     /// <param name="state">The applied schema state to persist.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task that completes once the state is durable.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="state"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
     public ValueTask SaveSchemaStateAsync(SqlCatalogSchemaState state, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(state);

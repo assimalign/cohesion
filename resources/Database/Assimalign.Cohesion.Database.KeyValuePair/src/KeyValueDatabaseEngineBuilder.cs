@@ -174,7 +174,7 @@ public sealed class KeyValueDatabaseEngineBuilder
     {
         _state.BeginBuild();
         var engine = KeyValueDatabaseEngine.CreateUncomposed(_options);
-        return _state.Complete(engine, engine.Compose);
+        return _state.Complete(engine, engine.Compose, KeyValueDatabaseEngine.ReleaseRefusedWorkerAsync);
     }
 
     /// <summary>

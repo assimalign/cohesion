@@ -28,7 +28,7 @@ public sealed class SqlEngineContractTests
     /// base's.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Engine: the typed members create, open, enumerate and look up SqlDatabase without a cast")]
-    public async Task DatabaseMembers_Typed_ShouldHandOutTheSqlDatabase()
+    public async Task CreateDatabaseAsync_TypedMembers_ShouldHandOutTheSqlDatabase()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "typed" });
@@ -64,7 +64,9 @@ public sealed class SqlEngineContractTests
     /// checks the name, then disposal, then the token, and the enumeration checks disposal when it
     /// is called. Before the base, the SQL engine checked disposal first and the name after it, did
     /// not check the name in <c>TryGetDatabase</c>, observed no token on open or drop, and checked
-    /// disposal at the enumeration's first <c>MoveNextAsync</c>.
+    /// disposal at the enumeration's first <c>MoveNextAsync</c>. The collation overload of
+    /// <c>CreateDatabaseAsync</c>, which repeats the base's checks rather than awaiting it, keeps
+    /// the same order, with the null collation refused after the name and before disposal.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Engine: the base checks the name, then disposal, then the token, and the enumeration at its call")]
     public async Task Members_InvalidNameDisposedOrCanceled_ShouldCheckNameThenDisposalThenToken()
@@ -78,11 +80,17 @@ public sealed class SqlEngineContractTests
         var canceledDrop = await Should.ThrowAsync<OperationCanceledException>(async () => await engine.DropDatabaseAsync("kept", canceled.Token));
         var unnamedLookup = Should.Throw<ArgumentException>(() => engine.TryGetDatabase(default, out _));
         bool keptAfterTheCanceledDrop = engine.TryGetDatabase("kept", out _);
+        // The collation overload cannot await the base's member, so it repeats the base's checks:
+        // a canceled token on a live engine is refused before anything is created.
+        var canceledCollated = await Should.ThrowAsync<OperationCanceledException>(async () => await engine.CreateDatabaseAsync("collated", Collation.Binary, canceled.Token));
+        bool collatedCreated = engine.TryGetDatabase("collated", out _);
         await engine.DisposeAsync();
 
         // Act
         var unnamedCreate = await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(default, canceled.Token));
         var unnamedOpen = await Should.ThrowAsync<ArgumentException>(async () => await engine.OpenDatabaseAsync(default, canceled.Token));
+        var unnamedCollated = await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(default, Collation.Binary, canceled.Token));
+        var nullCollation = await Should.ThrowAsync<ArgumentNullException>(async () => await engine.CreateDatabaseAsync("other", null!, canceled.Token));
         var disposedCreate = await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.CreateDatabaseAsync("other", canceled.Token));
         var disposedCollated = await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.CreateDatabaseAsync("other", Collation.Binary, canceled.Token));
         var disposedEnumeration = Should.Throw<ObjectDisposedException>(() => engine.GetDatabasesAsync());
@@ -91,9 +99,13 @@ public sealed class SqlEngineContractTests
         canceledOpen.CancellationToken.ShouldBe(canceled.Token);
         canceledDrop.CancellationToken.ShouldBe(canceled.Token);
         keptAfterTheCanceledDrop.ShouldBeTrue();
+        canceledCollated.CancellationToken.ShouldBe(canceled.Token);
+        collatedCreated.ShouldBeFalse();
         unnamedLookup.Message.ShouldStartWith("A database name is required.", Case.Sensitive);
         unnamedCreate.ParamName.ShouldBe("name");
         unnamedOpen.ParamName.ShouldBe("name");
+        unnamedCollated.ParamName.ShouldBe("name");
+        nullCollation.ParamName.ShouldBe("defaultCollation");
         disposedCreate.ShouldNotBeNull();
         disposedCollated.ShouldNotBeNull();
         disposedEnumeration.ShouldNotBeNull();

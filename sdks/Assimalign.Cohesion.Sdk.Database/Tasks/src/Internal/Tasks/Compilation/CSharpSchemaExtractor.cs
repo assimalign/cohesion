@@ -17,10 +17,10 @@ namespace Assimalign.Cohesion.Sdk.Database.Tasks.Internal;
 /// </summary>
 internal sealed class CSharpSchemaExtractor
 {
-    private const string SchemaBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlSchemaBuilder";
-    private const string TableBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlTableBuilder<TRow>";
-    private const string TypeBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlTypeBuilder";
-    private const string PrincipalBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlPrincipalBuilder";
+    private const string schemaBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlSchemaBuilder";
+    private const string tableBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlTableBuilder<TRow>";
+    private const string typeBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlTypeBuilder";
+    private const string principalBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlPrincipalBuilder";
 
     private static readonly SymbolDisplayFormat _typeDisplayFormat = new(
         globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
@@ -153,7 +153,7 @@ internal sealed class CSharpSchemaExtractor
         foreach (InvocationExpressionSyntax invocation in configure.Body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
         {
             IMethodSymbol? method = ResolveMethod(model, invocation);
-            if (method is null || !IsOnNamedType(method, SchemaBuilderType))
+            if (method is null || !IsOnNamedType(method, schemaBuilderType))
             {
                 continue;
             }
@@ -229,7 +229,7 @@ internal sealed class CSharpSchemaExtractor
         foreach (InvocationExpressionSyntax operation in configure.Body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
         {
             IMethodSymbol? operationMethod = ResolveMethod(model, operation);
-            if (operationMethod is null || !IsOnNamedType(operationMethod, TypeBuilderType))
+            if (operationMethod is null || !IsOnNamedType(operationMethod, typeBuilderType))
             {
                 continue;
             }
@@ -288,7 +288,7 @@ internal sealed class CSharpSchemaExtractor
         foreach (InvocationExpressionSyntax operation in configure.Body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
         {
             IMethodSymbol? operationMethod = ResolveMethod(model, operation);
-            if (operationMethod is null || !IsOnOriginalGenericType(operationMethod, TableBuilderType))
+            if (operationMethod is null || !IsOnOriginalGenericType(operationMethod, tableBuilderType))
             {
                 continue;
             }
@@ -423,7 +423,7 @@ internal sealed class CSharpSchemaExtractor
         foreach (InvocationExpressionSyntax operation in configure.Body.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
         {
             IMethodSymbol? operationMethod = ResolveMethod(model, operation);
-            if (operationMethod is null || !IsOnNamedType(operationMethod, PrincipalBuilderType))
+            if (operationMethod is null || !IsOnNamedType(operationMethod, principalBuilderType))
             {
                 continue;
             }
@@ -714,7 +714,7 @@ internal sealed class CSharpSchemaExtractor
         }
         IMethodSymbol? configure = DelegateInvoke(method.Parameters[1].Type);
         return configure?.Parameters.Length == 1 &&
-            string.Equals(DisplayTypeName(configure.Parameters[0].Type), SchemaBuilderType, StringComparison.Ordinal);
+            string.Equals(DisplayTypeName(configure.Parameters[0].Type), schemaBuilderType, StringComparison.Ordinal);
     }
 
     private static bool IsOnNamedType(IMethodSymbol method, string typeName)
@@ -725,7 +725,7 @@ internal sealed class CSharpSchemaExtractor
     private static bool IsOnOriginalGenericType(IMethodSymbol method, string typeName)
     {
         INamedTypeSymbol containingType = method.ContainingType.OriginalDefinition;
-        return string.Equals(typeName, TableBuilderType, StringComparison.Ordinal) &&
+        return string.Equals(typeName, tableBuilderType, StringComparison.Ordinal) &&
             string.Equals(containingType.MetadataName, "SqlTableBuilder`1", StringComparison.Ordinal) &&
             string.Equals(containingType.ContainingNamespace.ToDisplayString(), "Assimalign.Cohesion.Database.Sql.Schema", StringComparison.Ordinal);
     }

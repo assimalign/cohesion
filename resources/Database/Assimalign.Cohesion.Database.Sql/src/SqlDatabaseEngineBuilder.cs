@@ -205,7 +205,7 @@ public sealed class SqlDatabaseEngineBuilder
     {
         _state.BeginBuild();
         var engine = SqlDatabaseEngine.CreateUncomposed(_options);
-        return _state.Complete(engine, engine.Compose);
+        return _state.Complete(engine, engine.Compose, SqlDatabaseEngine.ReleaseRefusedWorkerAsync);
     }
 
     /// <summary>

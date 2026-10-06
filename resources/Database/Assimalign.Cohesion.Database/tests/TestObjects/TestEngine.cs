@@ -44,6 +44,9 @@ internal sealed class TestEngine : DatabaseEngine
 
     public void Complete() => CompleteComposition();
 
+    /// <summary>The base's release of a worker no engine owns, as a model's builder reaches it.</summary>
+    public static ValueTask Release(DatabaseEngineWorker worker) => ReleaseUnownedWorkerAsync(worker);
+
     protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _coreCalls);

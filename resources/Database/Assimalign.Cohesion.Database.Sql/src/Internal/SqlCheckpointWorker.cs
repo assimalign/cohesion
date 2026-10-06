@@ -50,7 +50,11 @@ internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase
     /// <inheritdoc />
     /// <remarks>
     /// A database its holder closed is never due: the engine keeps it registered only to refuse its
-    /// reopen, and its disposed storages have nothing left to checkpoint.
+    /// reopen, and its disposed storages have nothing left to checkpoint. A close that was not idle
+    /// (a writer the close kept in flight, #1226) leaves the data journal untruncated, so without
+    /// this the closed data set would stay due for a checkpoint the storage refuses with
+    /// <c>StorageTransactionException</c>, which <see cref="IsOpen"/> does not cover, and a failure
+    /// recorded for the database would never end.
     /// </remarks>
     protected override bool IsCheckpointDue(SqlDatabase database, TimeSpan interval)
         => !database.IsClosed && (database.DataStorage.IsCheckpointDue(interval) || database.CatalogStorage.IsCheckpointDue(interval));

@@ -178,7 +178,7 @@ public sealed class SqlTransactionControlTests
     /// answered <c>COHSQLT002</c>.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Wire transaction: one the kernel ended refuses work and COMMIT with COHSQLT005")]
-    public async Task WireTransactionEndedByTheKernel_ShouldCarryCohsqlt005AndKeepConnectionUsable()
+    public async Task ExecuteAsync_WireTransactionEndedByTheKernel_ShouldCarryCohsqlt005AndKeepConnectionUsable()
     {
         // Arrange
         await using var harness = await ServerTestHarness.StartAsync();

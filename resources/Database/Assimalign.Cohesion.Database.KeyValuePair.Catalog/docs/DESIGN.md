@@ -19,10 +19,11 @@ that has none.
   self-committing records into a data file whose journal carries logical
   transaction lifecycles would entangle recovery classification with metadata
   writes. Symmetry also keeps the engine's storage strategy identical to SQL's.
-- **The `DefaultSqlCatalog` persistence pattern, reduced.** One tuple-codec record
+- **The `SqlCatalog` persistence pattern, reduced** (the former `DefaultSqlCatalog`,
+  collapsed into `SqlCatalog` at phase 4 of the concrete-types plan). One tuple-codec record
   per concern (kind 1 = registrations, kind 2 = format version), rewritten in
   place when it fits and relocated when it grows. The registration codec matches
-  `DefaultSqlCatalog`'s byte-for-byte so the family stays mutually legible; a
+  `SqlCatalog`'s byte-for-byte so the family stays mutually legible; a
   shared registration-codec helper is deliberately not extracted yet (two
   instances, both trivial — the extraction threshold is the third model).
 - **Format version named `EntrySpaceFormatVersion`, not `RecordSpaceFormatVersion`.**

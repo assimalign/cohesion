@@ -436,16 +436,23 @@ public sealed class SqlDataStorageFormatTests : IDisposable
     /// A storage strategy that breaks the <see cref="SqlStorageStrategy.CreateStorage"/>
     /// contract by reopening storage that already exists instead of refusing it.
     /// </summary>
-    private sealed class ReopeningStorageStrategy(SqlStorageStrategy inner) : SqlStorageStrategy
+    private sealed class ReopeningStorageStrategy : SqlStorageStrategy
     {
+        private readonly SqlStorageStrategy _inner;
+
+        public ReopeningStorageStrategy(SqlStorageStrategy inner)
+        {
+            _inner = inner;
+        }
+
         public override SqlStorage CreateStorage(string databaseName)
-            => inner.StorageExists(databaseName) ? inner.OpenStorage(databaseName) : inner.CreateStorage(databaseName);
+            => _inner.StorageExists(databaseName) ? _inner.OpenStorage(databaseName) : _inner.CreateStorage(databaseName);
 
-        public override SqlStorage OpenStorage(string databaseName) => inner.OpenStorage(databaseName);
+        public override SqlStorage OpenStorage(string databaseName) => _inner.OpenStorage(databaseName);
 
-        public override void DropStorage(string databaseName) => inner.DropStorage(databaseName);
+        public override void DropStorage(string databaseName) => _inner.DropStorage(databaseName);
 
-        public override bool StorageExists(string databaseName) => inner.StorageExists(databaseName);
+        public override bool StorageExists(string databaseName) => _inner.StorageExists(databaseName);
     }
 
     private static async Task<int[]> IdsAsync(SqlDatabaseSession session, string sql, object parameter)

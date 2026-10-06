@@ -1125,7 +1125,13 @@ the checkpointer never finds it due. Before phase 4 the open test read only the 
 the version-purge worker failed on the closed database's disposed transaction manager every pass
 and the checkpointer on its disposed journal once it was due, and the engine stayed `Faulted` for
 good (the closed-database fault the Blob model's phase-4 review found; `SqlEngineContractTests`,
-`SqlDatabaseServerTests`).
+`SqlDatabaseServerTests`). The checkpointer's skip covers a close that is not idle too: when the
+close keeps a writer in flight (a deferred undo it could not finish, #1226), the data journal
+stays untruncated and the closed storage refuses its checkpoint with
+`StorageTransactionException`, which the open test does not cover, so without the skip a
+checkpoint failure recorded for the database before the close would never end
+(`SqlWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`,
+the case the KeyValuePair, Graph and Documents suites carry).
 
 ## Storage operations (#1243, #1254, #1226)
 
@@ -1449,10 +1455,8 @@ level at each call site. Before phase 4 the session kept a `Stack<SqlTransaction
 one root entry; B7 anticipates `SAVEPOINT name`, `ROLLBACK TO [SAVEPOINT] name`,
 `RELEASE [SAVEPOINT] name`, and `SET TRANSACTION ISOLATION LEVEL ...`, and will add named
 scopes and undo markers inside the one transaction, while isolation syntax sets the carried
-value.
- B2 implements none of
-that syntax or savepoint undo machinery. `Serializable` remains rejected by the
-existing C# seam until the coordinator supports serialization detection.
+value. B2 implements none of that syntax or savepoint undo machinery. `Serializable` remains
+rejected by the existing C# seam until the coordinator supports serialization detection.
 
 The session lifecycle below applies equally to SQL requests and C# transactions.
 
