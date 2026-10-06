@@ -109,6 +109,11 @@ public sealed class GraphStorageOperationsTests
         };
         var typedRefusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateNodeAsync(session, ["Item"], cancellationToken: canceled.Token));
 
+        // The execute seams' argument checks are the base's too, ahead of the offline refusal the
+        // model made first.
+        var nullRequest = await Should.ThrowAsync<ArgumentNullException>(async () => await session.ExecuteAsync((QueryRequest)null!, token));
+        var blankStatement = await Should.ThrowAsync<ArgumentException>(async () => await session.ExecuteAsync(" ", null, token));
+
         // Over the wire: a statement on a session opened before the failure, and a new session.
         await WriteAsync(wire, (ProtocolMessageType)GraphProtocolMessageType.Execute,
             GraphProtocolExecuteMessage.Create("MATCH (n) RETURN n.name").Encode(), token);
@@ -144,6 +149,8 @@ public sealed class GraphStorageOperationsTests
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
         typedRefusal.Code.ShouldBe("COHDBG012");
+        nullRequest.ParamName.ShouldBe("request");
+        blankStatement.ParamName.ShouldBe("statement");
         closedState.ShouldBe(TransactionState.Faulted);
         statementError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
         statementError.Message.ShouldStartWith("COHDBG012", Case.Sensitive);

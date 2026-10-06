@@ -899,9 +899,10 @@ their `Open` factories.
   an active transaction or operation, then a canceled token, before the isolation-level and offline
   refusals, which came first; on an offline database BEGIN from the session that holds an open
   transaction fails "already active" (was `COHDBG012`), and a canceled token is refused by
-  `CreateSessionAsync`, both execute seams and BEGIN before `COHDBG012` (the typed operations keep
-  their order); BEGIN refuses a transaction the kernel ended under its caller with `COHDBG007`,
-  where it reported the disposed database; every commit of an aborted transaction reports
+  `CreateSessionAsync`, both execute seams and BEGIN before `COHDBG012`, and so are the seams'
+  argument errors, a null request and a blank statement (the typed operations keep their order);
+  BEGIN refuses a transaction the kernel ended under its caller with `COHDBG007`, where it
+  reported the disposed database; every commit of an aborted transaction reports
   `COHDBG007` with the cause, a second commit and a commit after the session's teardown included
   (both reported "The transaction is RolledBack."), and a commit after the session closed an
   active transaction names "The session closed before the transaction ended."; a commit while a

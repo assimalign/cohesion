@@ -699,9 +699,11 @@ section that reaches Graph is accounted for:
     reported the disposed database (`ObjectDisposedException`; `GraphTransactionFailureTests`).
   - *The token before the core.* `CreateSessionAsync`, both execute seams and BEGIN refuse a
     canceled token before `COHDBG012` (`GraphStorageOperationsTests`), and the execute seams refuse
-    it before the disposed database of a dropped one (`GraphTransactionFailureTests`). The typed
-    node and relationship operations do not pass the session's seams and keep the model's order,
-    the offline refusal first (asserted beside them).
+    it before the disposed database of a dropped one (`GraphTransactionFailureTests`). The seams'
+    argument checks, a null request and a blank statement, come before the offline refusal too,
+    where the model checked the database first (`GraphStorageOperationsTests`). The typed node and
+    relationship operations do not pass the session's seams and keep the model's order, the
+    offline refusal first (asserted beside them).
   - *Messages.* The closed-session message for BEGIN, both execute seams, a typed operation, a
     schema operation and `GraphSchema.Open` (`GraphTransactionFailureTests`, for "The graph session
     is closed."); "An operation of the transaction is still running; commit after it completes."
