@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -11,8 +12,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 /// The key-value engine builder composes through the engine's compose method over the root
 /// <see cref="DatabaseEngine"/> base (concrete-types plan, step P4.0 and phase 4, #1260): the
 /// factories run one at a time as their products are attached, the base makes the attach checks,
-/// and the shared builder state disposes whatever a failed build leaves unowned. These are the
-/// first in-repository runs of that path.
+/// and the shared builder state disposes whatever a failed build leaves unowned and fails a compose
+/// method that breaks its contract. These are the first in-repository runs of that path.
 /// </summary>
 public sealed class KeyValueEngineCompositionTests
 {
@@ -57,6 +58,45 @@ public sealed class KeyValueEngineCompositionTests
         first.Disposals.ShouldBe(1);
         second.Disposals.ShouldBe(1);
         server.Stops.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: each factory sees every product attached before it, and the server factories run after every worker")]
+    public async Task Build_WorkerAndServerFactories_ShouldSeeEveryProductAttachedBeforeThem()
+    {
+        // Arrange
+        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        RecordingWorker? first = null;
+        RecordingWorker? second = null;
+        RecordingServer? server = null;
+        List<string> observations = [];
+        builder.AddWorker(engine => first = new RecordingWorker(engine, engine.Name + "/first"));
+        builder.AddWorker(engine =>
+        {
+            observations.Add($"second worker: first attached={engine.Workers.Contains(first!)}");
+            return second = new RecordingWorker(engine, engine.Name + "/second");
+        });
+        builder.AddServer(engine =>
+        {
+            observations.Add($"first server: workers attached={engine.Workers.Contains(first!) && engine.Workers.Contains(second!)}");
+            return server = new RecordingServer(engine);
+        });
+        builder.AddServer(engine =>
+        {
+            observations.Add($"second server: first attached={engine.Servers.Contains(server!)}");
+            return new RecordingServer(engine);
+        });
+
+        // Act
+        await using var engine = builder.Build();
+
+        // Assert
+        observations.ShouldBe(new[]
+        {
+            "second worker: first attached=True",
+            "first server: workers attached=True",
+            "second server: first attached=True",
+        });
+        engine.Servers.Count.ShouldBe(2);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: an engine created without its builder takes no worker or server")]
@@ -129,6 +169,30 @@ public sealed class KeyValueEngineCompositionTests
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
         other.State.ShouldBe(EngineState.Running);
         other.Servers.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: a refused server that fails to release is reported with the refusal, and the engine is disposed")]
+    public async Task Build_RefusedServerFailsToRelease_ShouldAggregateTheRefusalAndTheCleanup()
+    {
+        // Arrange
+        await using var other = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "other" });
+        var server = new RecordingServer(other) { StopFailure = new InvalidOperationException("The listener would not close.") };
+        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        KeyValueDatabaseEngine? product = null;
+        builder.AddServer(engine => { product = engine; return server; });
+
+        // Act
+        var failure = Should.Throw<AggregateException>(() => builder.Build());
+
+        // Assert: the refusal first, then the cleanup that failed.
+        failure.InnerExceptions.Select(exception => exception.Message).ShouldBe(new[]
+        {
+            "A nested server must front its owning engine.",
+            "The listener would not close.",
+        });
+        server.Stops.ShouldBe(1);
+        product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+        other.State.ShouldBe(EngineState.Running);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: a worker named like a built-in worker is refused, disposed, and the engine disposed")]
@@ -214,6 +278,59 @@ public sealed class KeyValueEngineCompositionTests
         server.ShouldNotBeNull().Stops.ShouldBe(1);
         Should.Throw<InvalidOperationException>(() => builder.Build());
         Should.Throw<InvalidOperationException>(() => builder.RootPath = null);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: a compose method that breaks the builder state's contract fails the build, runs no later factory and releases every product once")]
+    [InlineData("skips-servers", "The compose method returned before it attached every product.", 2, 0)]
+    [InlineData("buffers-workers", "The compose method read past a product it did not attach.", 1, 0)]
+    [InlineData("buffers-servers", "The compose method read past a product it did not attach.", 2, 1)]
+    [InlineData("reads-workers-twice", "The compose method read a product sequence twice.", 2, 0)]
+    [InlineData("servers-before-workers", "The compose method requested a server before it attached every worker.", 1, 0)]
+    public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
+    {
+        // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
+        var state = new DatabaseEngineBuilderState<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer>();
+        var engine = KeyValueDatabaseEngine.CreateUncomposed(new KeyValueDatabaseEngineOptions { EngineName = "contract" });
+        List<RecordingWorker> workers = [];
+        List<RecordingServer> servers = [];
+        state.AddWorker(product => Made(workers, new RecordingWorker(product, product.Name + "/first")));
+        state.AddWorker(product => Made(workers, new RecordingWorker(product, product.Name + "/second")));
+        state.AddServer(product => Made(servers, new RecordingServer(product)));
+        Action<IEnumerable<DatabaseEngineWorker>, IEnumerable<DatabaseServer>> compose = scenario switch
+        {
+            "skips-servers" => (w, _) => engine.Compose(w, []),
+            "buffers-workers" => (w, s) => engine.Compose(w.ToList(), s),
+            "buffers-servers" => (w, s) => engine.Compose(w, Buffered(s)),
+            "reads-workers-twice" => (w, s) => engine.Compose(w.Concat(w), s),
+            "servers-before-workers" => (w, s) => engine.Compose(w.Take(1), s),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => state.Complete(engine, compose));
+
+        // Assert: an attached product is released by the engine, an unattached one by the state.
+        failure.Message.ShouldBe(message);
+        engine.State.ShouldBe(EngineState.Disposed);
+        workers.Count.ShouldBe(workersMade);
+        servers.Count.ShouldBe(serversMade);
+        workers.ShouldAllBe(worker => worker.Disposals == 1);
+        servers.ShouldAllBe(server => server.Stops == 1);
+
+        static T Made<T>(List<T> made, T product)
+        {
+            made.Add(product);
+            return product;
+        }
+
+        // Buffers the sequence when it is first read, not when the compose method is called.
+        static IEnumerable<T> Buffered<T>(IEnumerable<T> sequence)
+        {
+            foreach (var item in sequence.ToList())
+            {
+                yield return item;
+            }
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: a configuration that builds and then fails does not leak its engine")]

@@ -87,14 +87,18 @@ layer through the interfaces the bases implement. Every base carries the deviati
   `AttachWorker` and `AttachServer` and then calls `CompleteComposition()`. The state makes none of
   the attach checks: it refuses a null product, and when the compose method fails it disposes the
   product being attached unless the engine already owns it (the base refuses a repeated product
-  like any other, and the engine disposes what it owns), then disposes the engine. Until a model's
-  engine derives from the base, its builder composes through a bridge overload that adapts the
-  engine's own two attach members and makes the base's checks (a product attached twice, a server
-  fronting another engine) with the same messages. Each model's phase-4 PR moves its builder to
-  the compose method (KeyValuePair's `KeyValueDatabaseEngine.Compose` first, with the state typed
-  `<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`), the last one deletes the
-  bridge, and phase 6 fixes the products to the bases and constrains the engine to
-  `DatabaseEngine`.
+  like any other, and the engine disposes what it owns), then disposes the engine. That disposal
+  rests on the compose method's contract (each sequence read once and to the end, workers before
+  servers, each product attached before the next is requested), so the state checks it as the
+  compose method reads and fails the build with `InvalidOperationException`, the unattached
+  product disposed, when a compose method breaks it, instead of leaking products or dropping
+  factories. Until a model's engine derives from the base, its builder composes through a bridge
+  overload that adapts the engine's own two attach members and makes the base's checks (a product
+  attached twice, a server fronting another engine) with the same messages. Each model's phase-4
+  PR moves its builder to the compose method (KeyValuePair's `KeyValueDatabaseEngine.Compose`
+  first, with the state typed `<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`),
+  the last one deletes the bridge, and phase 6 fixes the products to the bases and constrains the
+  engine to `DatabaseEngine`.
 - **Engine disposal has one order:** the servers (last attached first), then every worker pump is
   stopped and joined, then the workers (last attached first, a disposable worker such as the
   checkpointer ending the work it left on its lanes), then the leaf closes its databases

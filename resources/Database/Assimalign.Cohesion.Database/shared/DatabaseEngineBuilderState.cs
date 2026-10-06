@@ -33,6 +33,18 @@ namespace Assimalign.Cohesion.Database;
 /// <c>CompleteComposition</c>. The base refuses a product attached twice, a server that fronts
 /// another engine and a duplicate worker name, so this state makes none of those checks: it runs
 /// the factories, refuses a null product, and disposes whatever a failed build leaves unowned.
+/// </para>
+/// <para>
+/// <b>The compose method's contract, checked here.</b> It reads the workers once, all the way
+/// through, then the servers once, all the way through, and attaches each product before it
+/// requests the next. The disposal on failure rests on that: only the product last handed out can
+/// be unattached. A compose method that reads a sequence twice, requests a server before it
+/// attached every worker, reads past a product it did not attach, or returns before it read both
+/// sequences to the end fails the build with <see cref="InvalidOperationException"/>, with the
+/// product it left unattached disposed and no later factory run, instead of leaking products or
+/// dropping factories.
+/// </para>
+/// <para>
 /// Until a model's engine derives from the base, its builder composes through
 /// <see cref="Complete(TEngine, Action{TWorker}, Action{TServer})"/>, which makes the base's
 /// product checks (a product attached twice, a server that fronts another engine) over the
@@ -50,8 +62,11 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
     private TEngine? _completedEngine;
 
     // The product the compose method was last handed and has not asked past: the one it was
-    // attaching when it failed. The sequences clear it when the next product is requested.
+    // attaching when it failed. The sequences clear it once they see it attached.
     private object? _pending;
+
+    // How far the compose method has read the two sequences, which it reads once each, in order.
+    private ComposeProgress _progress;
 
     /// <summary>
     /// Throws once a build was attempted: options and factories are frozen from then on.
@@ -107,16 +122,23 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
     /// Runs the registered factories against the built engine and attaches their products through
     /// the leaf's compose method. When anything fails, the product being attached is disposed unless
     /// the engine already owns it, then the engine is disposed with everything it owns, and the
-    /// failure is rethrown.
+    /// failure is rethrown unchanged: whatever a factory, the compose method or an attach threw.
     /// </summary>
     /// <param name="engine">The engine the builder created.</param>
     /// <param name="compose">
-    /// The leaf's internal compose method: it enumerates the workers, then the servers, once each,
-    /// attaching every product before it asks for the next, and then freezes the engine. A factory
-    /// runs when its product is requested, so it observes the products attached before it.
+    /// The leaf's internal compose method: it enumerates the workers, then the servers, once each
+    /// and to the end, attaching every product before it asks for the next, and then freezes the
+    /// engine. A factory runs when its product is requested, so it observes the products attached
+    /// before it, and every server factory runs after every worker is attached.
     /// </param>
     /// <returns><paramref name="engine"/>, composed.</returns>
-    /// <exception cref="InvalidOperationException">A factory returned null, or the engine refused a product.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A factory returned null; the engine refused a product (the base refuses a product attached
+    /// twice, a server that fronts another engine and a duplicate worker name); or
+    /// <paramref name="compose"/> broke its contract (it read a sequence twice, requested a server
+    /// before it attached every worker, read past a product it did not attach, or returned before
+    /// it read both sequences to the end).
+    /// </exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>
     public TEngine Complete(TEngine engine, Action<IEnumerable<TWorker>, IEnumerable<TServer>> compose)
     {
@@ -125,8 +147,14 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
             try
             {
                 compose(
-                    Produce(engine, _workers, "A worker factory returned null."),
-                    Produce(engine, _servers, "A server factory returned null."));
+                    Produce(engine, _workers, servers: false, "A worker factory returned null."),
+                    Produce(engine, _servers, servers: true, "A server factory returned null."));
+
+                // A sequence never read to the end dropped its remaining factories.
+                if (_progress != ComposeProgress.ServersAttached)
+                {
+                    throw new InvalidOperationException("The compose method returned before it attached every product.");
+                }
             }
             catch (Exception failure) when (failure is not OutOfMemoryException)
             {
@@ -163,7 +191,15 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
     /// <param name="attachWorker">The engine's internal worker attach.</param>
     /// <param name="attachServer">The engine's internal server attach.</param>
     /// <returns><paramref name="engine"/>, composed.</returns>
-    /// <exception cref="InvalidOperationException">A factory returned null, or a product was refused.</exception>
+    /// <remarks>
+    /// Whatever a factory or an attach throws is rethrown unchanged after the cleanup
+    /// <see cref="Complete(TEngine, Action{IEnumerable{TWorker}, IEnumerable{TServer}})"/> makes.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// A factory returned null, a product was attached twice, a server fronts another engine, or the
+    /// engine's attach refused the product with this type (SQL: a duplicate worker name).
+    /// </exception>
+    /// <exception cref="ArgumentException">The engine's attach refused an invalid product (SQL: a worker with a blank name).</exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>
     public TEngine Complete(TEngine engine, Action<TWorker> attachWorker, Action<TServer> attachServer)
         => Complete(engine, (workers, servers) =>
@@ -202,20 +238,48 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
         }
     }
 
-    // One factory per requested product, in registration order. Requesting the next product means
-    // the compose method attached the previous one, so the pending product is cleared first.
-    private IEnumerable<TProduct> Produce<TProduct>(TEngine engine, List<Func<TEngine, TProduct>> factories, string nullProduct)
+    // One factory per requested product, in registration order. The checks run when the compose
+    // method reads, so they enforce its contract: each sequence read once, the workers to the end
+    // before the servers, and each product attached before the next is requested. A check that
+    // fails throws while the product left unattached is still pending, so Complete disposes it,
+    // and no later factory runs.
+    private IEnumerable<TProduct> Produce<TProduct>(TEngine engine, List<Func<TEngine, TProduct>> factories, bool servers, string nullProduct)
         where TProduct : class
     {
+        var (reading, required, attached) = servers
+            ? (ComposeProgress.ReadingServers, ComposeProgress.WorkersAttached, ComposeProgress.ServersAttached)
+            : (ComposeProgress.ReadingWorkers, ComposeProgress.None, ComposeProgress.WorkersAttached);
+        if (_progress >= reading)
+        {
+            throw new InvalidOperationException("The compose method read a product sequence twice.");
+        }
+
+        if (_progress != required)
+        {
+            throw new InvalidOperationException("The compose method requested a server before it attached every worker.");
+        }
+
+        _progress = reading;
         foreach (var factory in factories)
         {
+            ThrowIfPendingUnattached(engine);
             _pending = null;
             var product = factory(engine) ?? throw new InvalidOperationException(nullProduct);
             _pending = product;
             yield return product;
         }
 
+        ThrowIfPendingUnattached(engine);
         _pending = null;
+        _progress = attached;
+    }
+
+    private void ThrowIfPendingUnattached(TEngine engine)
+    {
+        if (_pending is { } previous && !IsAttached(engine, previous))
+        {
+            throw new InvalidOperationException("The compose method read past a product it did not attach.");
+        }
     }
 
     private static void ThrowIfAttached(TEngine engine, object product)
@@ -265,5 +329,15 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
         {
             throw new AggregateException(failure, cleanup);
         }
+    }
+
+    // The compose method's reads, in the one order its contract allows.
+    private enum ComposeProgress
+    {
+        None,
+        ReadingWorkers,
+        WorkersAttached,
+        ReadingServers,
+        ServersAttached,
     }
 }

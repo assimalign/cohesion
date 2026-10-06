@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -27,6 +28,42 @@ public sealed class SqlEngineCompositionTests
         await engine.DisposeAsync();
         worker.Stopped.ShouldBeTrue();
         worker.Disposed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Build_Factories_ShouldSeeEveryProductAttachedBeforeThem()
+    {
+        var builder = SqlDatabaseEngine.CreateBuilder();
+        ProbeWorker? first = null;
+        ProbeWorker? second = null;
+        ProbeServer? server = null;
+        List<string> observations = [];
+        builder.AddWorker(_ => first = new ProbeWorker("first"));
+        builder.AddWorker(engine =>
+        {
+            observations.Add($"second worker: first attached={engine.Workers.Contains(first!)}");
+            return second = new ProbeWorker("second");
+        });
+        builder.AddServer(engine =>
+        {
+            observations.Add($"first server: workers attached={engine.Workers.Contains(first!) && engine.Workers.Contains(second!)}");
+            return server = new ProbeServer(engine);
+        });
+        builder.AddServer(engine =>
+        {
+            observations.Add($"second server: first attached={engine.Servers.Contains(server!)}");
+            return new ProbeServer(engine);
+        });
+
+        await using var engine = builder.Build();
+
+        observations.ShouldBe(new[]
+        {
+            "second worker: first attached=True",
+            "first server: workers attached=True",
+            "second server: first attached=True",
+        });
+        engine.Servers.Count.ShouldBe(2);
     }
 
     [Fact]
@@ -61,6 +98,25 @@ public sealed class SqlEngineCompositionTests
         var builder = SqlDatabaseEngine.CreateBuilder();
         builder.AddServer(engine => { created = engine; return server; });
         Should.Throw<InvalidOperationException>(() => builder.Build());
+        server.Disposals.ShouldBe(1);
+        created.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
+        other.State.ShouldBe(EngineState.Running);
+    }
+
+    [Fact]
+    public async Task WrongServerEngineFailingDisposal_ShouldAggregateTheRefusalAndDisposeTheEngine()
+    {
+        await using var other = SqlDatabaseEngine.Create(new());
+        var server = new ProbeServer(other) { FailDisposal = true };
+        IDatabaseEngine? created = null;
+        var builder = SqlDatabaseEngine.CreateBuilder();
+        builder.AddServer(engine => { created = engine; return server; });
+        var failure = Should.Throw<AggregateException>(() => builder.Build());
+        failure.InnerExceptions.Select(exception => exception.Message).ShouldBe(new[]
+        {
+            "A nested server must front its owning engine.",
+            "server disposal",
+        });
         server.Disposals.ShouldBe(1);
         created.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
         other.State.ShouldBe(EngineState.Running);
@@ -156,7 +212,16 @@ public sealed class SqlEngineCompositionTests
 
     private sealed class ProbeWorker : IDatabaseEngineWorker, IDisposable
     {
-        public string Name => "interface-worker";
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ProbeWorker"/> class.
+        /// </summary>
+        /// <param name="name">The worker's diagnostic name, unique within its engine.</param>
+        public ProbeWorker(string name = "interface-worker")
+        {
+            Name = name;
+        }
+
+        public string Name { get; }
         public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.Checkpoint;
         public TimeSpan Interval => TimeSpan.FromMilliseconds(1);
         public ManualResetEventSlim Started { get; } = new();

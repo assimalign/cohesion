@@ -3,7 +3,7 @@
 **Status:** Phase 0 landed with this file; phases 1 (#1257) and 2 (#1258, kernel and wire tracks)
 re-verified and implemented on 2026-10-05 (§7, §6.9); phase 3 (#1259) re-verified, implemented
 and reviewed on 2026-10-05, with two owner questions open at its merge (§7, §6.4, §6.5); step
-P4.0 (#1260) re-verified and implemented on 2026-10-05 (§7, §6.5); the KeyValuePair model PR of
+P4.0 (#1260) re-verified, implemented and reviewed on 2026-10-05 (§7, §6.5); the KeyValuePair model PR of
 P4 (#1260, the first of five) re-verified and implemented on 2026-10-05 (§7, §6.4, §6.5, §6.9) ·
 **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
@@ -701,9 +701,10 @@ the state's ownership test was also what kept it from disposing a product the en
   one the callbacks had (a factory, its attach, the next factory) and a factory still sees the
   products attached before it.
 - **The checks.** `Complete` makes none of the attach checks; it refuses a null product ("A worker
-  factory returned null.", "A server factory returned null.") and disposes what a failed build
-  leaves unowned. The ownership test stays, as the guard on that disposal only: when the compose
-  method fails, the product it was attaching is disposed unless the engine's `Workers` or
+  factory returned null.", "A server factory returned null."), checks the compose method's
+  contract (since the P4.0 review, below) and disposes what a failed build leaves unowned. The
+  ownership test stays, as the guard on that disposal (the contract check reuses it): when the
+  compose method fails, the product it was attaching is disposed unless the engine's `Workers` or
   `Servers` already holds it. The base refuses a product it owns like any other attach failure,
   and that product (a repeated factory result, or a built-in worker a factory returned) is the
   engine's to dispose. The old test's third case, a product that is the engine itself, is
@@ -732,6 +733,40 @@ the state's ownership test was also what kept it from disposing a product the en
   failing factory disposed the engine; and a failure to dispose a refused server was aggregated
   with the refusal. The KeyValuePair PR's builder tests are the first in-repository run of that
   path.
+- **The contract, enforced (P4.0 review).** The disposal on failure rests on the compose method's
+  contract: it reads the workers once and to the end, then the servers once and to the end, and
+  attaches each product before it requests the next, so only the product last handed out can be
+  unattached. As landed the state trusted that, and a compose that broke it failed silently: one
+  that skipped the servers dropped every server factory, one that read a sequence twice ran its
+  factories twice, and one that buffered a sequence leaked every product it had not attached,
+  because the drained iterator had cleared `_pending`. The state now checks the contract as the
+  compose method reads. It tracks one progress value through the only order allowed (workers
+  read, workers attached, servers read, servers attached), and it fails the build with an
+  `InvalidOperationException` when a sequence is read twice ("The compose method read a product
+  sequence twice."), when a server is requested before every worker is attached ("… requested a
+  server before it attached every worker."), when the method reads past a product it did not
+  attach ("… read past a product it did not attach.", checked before each later factory and at
+  the end of each sequence), or when it returns before it read both sequences to the end ("…
+  returned before it attached every product."). Each check throws while the unattached product is
+  still pending, so the usual cleanup disposes it, and no later factory runs. A correct compose
+  method, the bridge's included, never reaches a check; the only new cost on a good build is one
+  ownership scan per product. The state's `<exception>` docs now say a factory's, the compose
+  method's or an attach's own exception is rethrown unchanged, and the bridge lists SQL's
+  `ArgumentException` for a blank worker name.
+- **In-repository evidence (P4.0 review).** The interleaving the lazy sequences exist to keep is
+  pinned on both paths: `SqlEngineCompositionTests.Build_Factories_ShouldSeeEveryProductAttachedBeforeThem`
+  (the bridge) and its KeyValuePair twin (the compose method) record that the second worker
+  factory sees the first worker, the first server factory sees both workers and the second server
+  factory sees the first server; an eager `Produce` fails both. A refused server whose cleanup
+  fails is aggregated after the refusal on both paths
+  (`WrongServerEngineFailingDisposal_ShouldAggregateTheRefusalAndDisposeTheEngine`,
+  `Build_RefusedServerFailsToRelease_ShouldAggregateTheRefusalAndTheCleanup`). KeyValuePair's
+  `Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce` drives the state
+  directly with `KeyValueDatabaseEngine.Compose` misused five ways (servers skipped, workers
+  buffered, servers buffered, workers read twice, servers requested after one worker) and checks
+  the message, that no later factory ran, and that every product made was released once, by the
+  engine when attached and by the state when not; all five cases fail against the state as
+  landed.
 
 **KeyValuePair at P4 (landed).** The engine has `internal void Compose(IEnumerable<DatabaseEngineWorker>, IEnumerable<DatabaseServer>)`
 and `internal static KeyValueDatabaseEngine CreateUncomposed(options)`, which validates the options
@@ -745,7 +780,10 @@ refused), a repeated server and a returned built-in worker refused and released 
 engine, a foreign server and a duplicate worker name refused and released by the state, a blank
 worker name failing inside its factory, null products, a failing factory, the premature-build
 compensation of `AddKeyValue`, and a component's disposal failure reported in the engine's one
-aggregate.
+aggregate. The P4.0 review added the probe path the landing had left out (a refused server whose
+cleanup fails, aggregated after the refusal), the full interleaving (servers after every worker,
+a server factory seeing the server before it) and the compose-contract cases (§6.5, "The
+contract, enforced").
 
 The typed accessors, as landed: `public new` members over the base's public members for the
 engine's `CreateDatabaseAsync`, `OpenDatabaseAsync` and `GetDatabasesAsync` (the leaf's core
@@ -1315,6 +1353,26 @@ the code had moved, the row now says what landed:
     factory, the premature-build compensation); the Studio `--smoke` run gives 83 passed, 0
     failed, 1 skipped, as before; the dependency graph check passes (no reference changed); and the
     Database runtime producer packs. The scratch probe of §6.5 ran the adopted path.
+  - **Review (2026-10-05).** Two reviewers approved with minor findings only, applied on top of
+    the KeyValuePair PR's review commit, the first in-repository user of the compose overload:
+    the state enforces the compose method's contract instead of trusting it (§6.5, "The contract,
+    enforced"); the interleaving and a refused product's failed cleanup are pinned by tests on the
+    bridge (SQL) and the compose method (KeyValuePair), with the contract cases driven through the
+    state directly (§6.5, "In-repository evidence"); and the `<exception>` docs of both `Complete`
+    overloads name what each really throws. The five builders did not change: a correct compose
+    method, the bridge's included, never reaches a check. *Gate, as run:* the five model
+    assemblies rebuild from scratch with no warning, and no Database project warns; every Database
+    suite passes, with only the two that gained tests changing count: Sql 1087 to 1089 and
+    KeyValuePair 179 to 186. The rest: Database.Tests 101, Language 105, Types 93, Storage 293,
+    Transactions 108, Indexing 75, Execution 2, Protocol 21, Security 5, Sql.Language 999,
+    Sql.Catalog 47, Sql.Schema 38, Sql.Storage 14, Sql.Client 314, Documents 152,
+    Documents.Language 288, Documents.Catalog 8, Documents.Storage 29, Graph 360, Graph.Language
+    387, Graph.Catalog 19, Graph.Storage 17, Graph.Client 57, Blob 129, Blob.Catalog 5,
+    Blob.Storage 13, Blob.Client 21, KeyValuePair.Catalog 4, KeyValuePair.Storage 3,
+    KeyValuePair.Client 10, Client 41, Hosting 53, Embedded 4, ApplicationModel 15 and
+    Sdk.Database 18. Studio, the dependency graph and the runtime producer pack were not rerun:
+    the change is internal to the shared state and two test files, so no reference, public member
+    or Studio-visible type changed.
 - **Then KeyValuePair, Graph, Documents, Blob and Sql, one PR each, serialized.**
   - The leaves derive from the bridge bases and become public sealed.
   - The model deletes its own copy of the explicit-transaction state machine and the "already
