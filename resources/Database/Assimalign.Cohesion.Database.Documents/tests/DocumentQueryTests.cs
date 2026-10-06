@@ -20,7 +20,7 @@ public sealed class DocumentQueryTests
     public async Task Nested_paths_arrays_and_missing_fields_keep_document_shapes()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await Put(collection, session, "c", "{\"name\":\"third\",\"profile\":null,\"tags\":[]}");
@@ -45,7 +45,7 @@ public sealed class DocumentQueryTests
     public async Task Query_parsing_accepts_the_same_document_depth_as_storage(int depth)
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         string content = "42";
@@ -66,7 +66,7 @@ public sealed class DocumentQueryTests
     public async Task Mixed_shape_grouping_aggregates_and_having_are_deterministic()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await Put(collection, session, "d", "{\"category\":\"b\",\"amount\":4}");
@@ -90,7 +90,7 @@ public sealed class DocumentQueryTests
     public async Task Arrays_objects_and_mixed_scalar_types_have_structural_group_keys()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await Put(collection, session, "a", "{\"key\":{\"a\":1,\"b\":[2,3]}}");
@@ -109,7 +109,7 @@ public sealed class DocumentQueryTests
     public async Task Grouping_resolves_iteration_aliases_and_preserves_constant_scalar_types()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await Put(collection, session, "a", "{\"category\":\"b\",\"amount\":3,\"key\":1}");
@@ -132,7 +132,7 @@ public sealed class DocumentQueryTests
     public async Task Eligible_equality_and_ranges_use_indexes_and_match_scan_results(string predicate, bool equality)
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await Put(collection, session, "d", "{\"name\":\"four\",\"score\":4}");
@@ -166,7 +166,7 @@ public sealed class DocumentQueryTests
     public async Task Nested_array_indexes_remain_correct_after_replace_delete_and_rollback()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE INDEX by_nested ON items (values[0].number)");
@@ -191,7 +191,7 @@ public sealed class DocumentQueryTests
     public async Task Index_ddl_uses_the_same_quoted_property_path_grammar_as_where()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await Put(collection, session, "a", "{\"name\":\"match\",\"unusual.field\":{\"odd'name\":2}}");
@@ -215,7 +215,7 @@ public sealed class DocumentQueryTests
         {
             await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
             {
-                var seedDatabase = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+                var seedDatabase = await engine.CreateDatabaseAsync("test");
                 var collection = await seedDatabase.CreateCollectionAsync("items");
                 await using var seedSession = await seedDatabase.CreateSessionAsync();
                 await Put(collection, seedSession, "a", "{\"name\":\"match\",\"postal-code\":2}");
@@ -229,7 +229,7 @@ public sealed class DocumentQueryTests
             }
 
             await using var reopened = DocumentDatabaseEngine.Create(new() { RootPath = root });
-            var database = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+            var database = await reopened.OpenDatabaseAsync("test");
             const string query = "SELECT name FROM items WHERE \"postal-code\" = 2";
 
             (await Plan(database, query)).Access.ShouldBeOfType<DocumentIndexPath>()
@@ -247,7 +247,7 @@ public sealed class DocumentQueryTests
     public async Task String_index_order_matches_ordinal_utf16_for_supplementary_characters(string predicate, string minimum)
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await Put(collection, session, "a", "{\"score\":\"a\"}");
@@ -269,7 +269,7 @@ public sealed class DocumentQueryTests
     public async Task Boolean_index_ranges_do_not_match_other_scalar_domains()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await Put(collection, session, "a", "{\"score\":false}");
@@ -289,7 +289,7 @@ public sealed class DocumentQueryTests
     public async Task Null_missing_and_or_predicates_keep_scan_semantics_when_indexes_exist()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await Put(collection, session, "a", "{\"name\":\"null\",\"score\":null}");
@@ -307,7 +307,7 @@ public sealed class DocumentQueryTests
     public async Task Ordering_ties_follow_identity_and_scalar_documents_round_trip()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await Put(collection, session, "c", "[1,{\"a\":true}]");
@@ -327,7 +327,7 @@ public sealed class DocumentQueryTests
     public async Task Invalid_aggregate_contexts_are_rejected_before_execution(string query)
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(DocumentQueryRequest.FromOql(query)));
@@ -337,7 +337,7 @@ public sealed class DocumentQueryTests
     public async Task Direct_requests_cannot_bypass_parse_diagnostics()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         var statement = (OqlQueryStatement)new OqlQueryParser().Parse("SELECT * FROM items LIMIT 1");
@@ -345,10 +345,10 @@ public sealed class DocumentQueryTests
         exception.Message.ShouldContain("COHDBL001");
     }
 
-    private static ValueTask<Document> Put(IDocumentCollection collection, IDatabaseSession session, string id, string json)
+    private static ValueTask<Document> Put(DocumentCollection collection, DocumentDatabaseSession session, string id, string json)
         => collection.PutAsync(session, id, Encoding.UTF8.GetBytes(json));
 
-    private static async Task<List<QueryRow>> Rows(IDatabaseSession session, string query, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<QueryRow>> Rows(DocumentDatabaseSession session, string query, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         var result = (QueryResultSet)await session.ExecuteAsync(DocumentQueryRequest.FromOql(query, parameters));
         await using (result)
@@ -359,11 +359,8 @@ public sealed class DocumentQueryTests
         }
     }
 
-    private static ValueTask<DocumentPlan> Plan(IDocumentDatabase database, string query, IReadOnlyDictionary<string, object?>? parameters = null)
-    {
-        var instance = (DocumentDatabaseInstance)database;
-        return instance.RunAsync(null, operation => new ValueTask<DocumentPlan>(new DocumentPlanner(instance.Catalog,
+    private static ValueTask<DocumentPlan> Plan(DocumentDatabase database, string query, IReadOnlyDictionary<string, object?>? parameters = null)
+        => database.RunAsync(null, operation => new ValueTask<DocumentPlan>(new DocumentPlanner(database.Catalog,
             operation.Context.Snapshot, parameters).Plan(
                 (OqlSelectExpression)DocumentQueryRequest.FromOql(query).Statement.OqlExpression)), CancellationToken.None);
-    }
 }

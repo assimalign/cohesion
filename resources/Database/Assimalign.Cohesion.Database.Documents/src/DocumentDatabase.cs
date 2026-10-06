@@ -4,19 +4,44 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Documents.Internal;
+namespace Assimalign.Cohesion.Database.Documents;
 
-internal sealed class DocumentDatabaseInstance : IDocumentDatabase
+/// <summary>
+/// A document-model database: named collections of versioned documents.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A database composes its document storage, the transaction coordinator every session binds to,
+/// and the catalog of collections, document versions and indexes (<see cref="DocumentCatalog"/>).
+/// Its own collection operations (<see cref="CreateCollectionAsync"/>,
+/// <see cref="GetCollectionAsync"/>, <see cref="DropCollectionAsync"/>,
+/// <see cref="GetCollectionsAsync"/>) run in autocommit, outside any session; a session's own
+/// collection operations run in its transaction (<see cref="DocumentDatabaseSession"/>).
+/// </para>
+/// <para>
+/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of
+/// <see cref="DatabaseInstance"/> with an internal constructor, replacing the former
+/// <c>IDocumentDatabase</c> interface, its internal implementation and the session-bound view a
+/// session returned as its database (option B, §6.6: <see cref="DocumentDatabaseSession.Database"/>
+/// is this unbound database, and disposing it closes the database, never a session). The engine
+/// creates and opens it. The base owns the name, the owning engine (re-exposed typed with
+/// <c>new</c>) and the disposed flag.
+/// </para>
+/// </remarks>
+public sealed class DocumentDatabase : DatabaseInstance
 {
-    private int _disposed;
-    internal DocumentDatabaseInstance(string name, IDatabaseEngine engine, DocumentStorage storage, bool recover)
+    private readonly DocumentDatabaseEngine _engine;
+
+    internal DocumentDatabase(DatabaseName name, DocumentDatabaseEngine engine, DocumentStorage storage, bool recover)
+        : base(name, engine)
     {
-        Name = name;
-        Engine = engine;
+        _engine = engine;
         DataStorage = storage;
         Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
 
@@ -29,14 +54,11 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
             Coordinator.AbandonLockWaits(alreadyOffline);
         }
 
-        if (engine is DocumentDatabaseEngine owner)
-        {
-            // A deferred undo is retried on its own backoff, from about 100 ms up to the
-            // maintenance interval, and the purge worker wakes for it (#1226).
-            Coordinator.DeferredUndoRetryLimit = owner.EngineOptions.MaintenanceInterval;
-            Coordinator.DeferredUndoRetryDelay = owner.EngineOptions.DeferredUndoRetryDelay;
-            Coordinator.OnUndoDeferred = owner.UndoDeferredSignal.Set;
-        }
+        // A deferred undo is retried on its own backoff, from about 100 ms up to the
+        // maintenance interval, and the purge worker wakes for it (#1226).
+        Coordinator.DeferredUndoRetryLimit = engine.EngineOptions.MaintenanceInterval;
+        Coordinator.DeferredUndoRetryDelay = engine.EngineOptions.DeferredUndoRetryDelay;
+        Coordinator.OnUndoDeferred = engine.UndoDeferredSignal.Set;
 
         // Indexing owns the B-tree page format (#1194) and checks each tree's root
         // page as it attaches the tree. That happens inside the catalog's open, after
@@ -63,19 +85,26 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
         else { Catalog = DocumentCatalog.Open(storage, Coordinator); }
     }
 
-    public DatabaseName Name { get; }
-    public IDatabaseEngine Engine { get; }
-    internal DocumentStorage DataStorage { get; }
-    internal TransactionCoordinator Coordinator { get; }
-    internal DocumentCatalog Catalog { get; }
+    /// <summary>
+    /// Gets the document engine that owns this database.
+    /// </summary>
+    public new DocumentDatabaseEngine Engine => _engine;
 
-    public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
-    {
-        ThrowIfDisposed();
-        ThrowIfOffline();
-        cancellationToken.ThrowIfCancellationRequested();
-        return new ValueTask<IDatabaseSession>(new DocumentDatabaseSession(this));
-    }
+    /// <summary>
+    /// Gets the data storage file set, for the engine's background workers.
+    /// </summary>
+    internal DocumentStorage DataStorage { get; }
+
+    /// <summary>
+    /// Gets the database's transaction coordinator (the MVCC composition sessions bind to), for
+    /// the engine's background workers and tests.
+    /// </summary>
+    internal TransactionCoordinator Coordinator { get; }
+
+    /// <summary>
+    /// Gets the database's catalog of collections, document versions and indexes.
+    /// </summary>
+    internal DocumentCatalog Catalog { get; }
 
     /// <summary>
     /// The code that leads the message of every operation refused because the database is
@@ -89,17 +118,108 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
     internal bool IsOffline => DataStorage.IsOffline;
 
     /// <summary>
+    /// Creates a new lightweight document session scoped to this database.
+    /// </summary>
+    /// <param name="cancellationToken">Observed before the session is created.</param>
+    /// <returns>A new session.</returns>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    public new async ValueTask<DocumentDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
+        => (DocumentDatabaseSession)await base.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Creates a new document collection in its own autocommit transaction, outside any session.
+    /// </summary>
+    /// <param name="name">The name of the collection to create.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The created collection, usable from any session of this database.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">
+    /// <paramref name="name"/> names a system collection, or a collection with the same name already exists.
+    /// </exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">The document catalog changed since the transaction's snapshot (retryable).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">The commit record could not be confirmed durable.</exception>
+    public ValueTask<DocumentCollection> CreateCollectionAsync(string name, CancellationToken cancellationToken = default)
+        => CreateCollectionAsync(name, null, cancellationToken);
+
+    /// <summary>
+    /// Opens an existing document collection in its own autocommit snapshot, outside any session.
+    /// </summary>
+    /// <param name="name">The name of the collection to open.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The opened collection, usable from any session of this database.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The collection does not exist.</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">The commit record could not be confirmed durable.</exception>
+    public ValueTask<DocumentCollection> GetCollectionAsync(string name, CancellationToken cancellationToken = default)
+        => GetCollectionAsync(name, null, cancellationToken);
+
+    /// <summary>
+    /// Drops a document collection, its documents and its indexes in its own autocommit
+    /// transaction, outside any session.
+    /// </summary>
+    /// <param name="name">The name of the collection to drop.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task that completes once the collection is dropped.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseObjectLockedException">The collection is owned by a schema.</exception>
+    /// <exception cref="DatabaseException"><paramref name="name"/> names a system collection, or the collection does not exist.</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">The collection, its documents or its indexes changed since the transaction's snapshot (retryable).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">The commit record could not be confirmed durable.</exception>
+    public ValueTask DropCollectionAsync(string name, CancellationToken cancellationToken = default)
+        => DropCollectionAsync(name, null, cancellationToken);
+
+    /// <summary>
+    /// Enumerates the collections of this database in one autocommit snapshot, outside any session,
+    /// taken when the enumeration starts; the collections are then yielded.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>An async sequence of the collections, in ordinal name order.</returns>
+    /// <exception cref="ObjectDisposedException">The database has been disposed (also while the collections are yielded).</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">The commit record could not be confirmed durable.</exception>
+    public IAsyncEnumerable<DocumentCollection> GetCollectionsAsync(CancellationToken cancellationToken = default)
+        => GetCollectionsAsync(null, cancellationToken);
+
+    /// <summary>
     /// Refuses an operation on an offline database with <see cref="DatabaseOfflineException"/>
     /// (<see cref="OfflineCode"/>): every operation until the database is reopened.
     /// </summary>
     /// <exception cref="DatabaseOfflineException">The database is offline.</exception>
     internal void ThrowIfOffline()
     {
-        if (DataStorage.OfflineError is { } error)
+        if (GetOfflineRefusal() is { } refusal)
         {
-            throw DatabaseOfflineException.Create(OfflineCode, Name, error);
+            throw refusal;
         }
     }
+
+    /// <summary>
+    /// Gets the coded refusal (<see cref="OfflineCode"/>) of an operation on the database while it
+    /// is offline, or null while it is online: the vocabulary the root transaction base reads
+    /// before a commit or rollback, and before each kernel rollback, which an offline database skips.
+    /// </summary>
+    /// <returns>The refusal, or null.</returns>
+    internal DatabaseOfflineException? GetOfflineRefusal()
+        => DataStorage.OfflineError is { } error ? DatabaseOfflineException.Create(OfflineCode, Name, error) : null;
+
+    /// <summary>
+    /// Throws <see cref="ObjectDisposedException"/> once the database has been disposed: the base's
+    /// check, for the model's sessions, statements, collections and engine.
+    /// </summary>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    internal void EnsureNotDisposed() => ThrowIfDisposed();
 
     /// <summary>
     /// Translates a failure the storage's offline state caused into the coded refusal
@@ -125,9 +245,7 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
             : DatabaseOfflineException.Create(OfflineCode, Name, DataStorage.OfflineError ?? offline);
     }
 
-    public ValueTask<IDocumentCollection> CreateCollectionAsync(string name, CancellationToken cancellationToken = default)
-        => CreateCollectionAsync(name, null, cancellationToken);
-    internal ValueTask<IDocumentCollection> CreateCollectionAsync(string name, DocumentDatabaseSession? session, CancellationToken token)
+    internal ValueTask<DocumentCollection> CreateCollectionAsync(string name, DocumentDatabaseSession? session, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         DocumentSystemCollections.EnsureReadOnly(name);
@@ -147,21 +265,17 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
 
             var metadata = new DocumentCollectionMetadata(Guid.NewGuid(), name);
             await Catalog.SaveCollectionAsync(metadata, operation.Context, token).ConfigureAwait(false);
-            return (IDocumentCollection)new DocumentCollection(this, metadata, session);
+            return new DocumentCollection(this, metadata, session);
         }, token);
     }
 
-    public ValueTask<IDocumentCollection> GetCollectionAsync(string name, CancellationToken cancellationToken = default)
-        => GetCollectionAsync(name, null, cancellationToken);
-    internal ValueTask<IDocumentCollection> GetCollectionAsync(string name, DocumentDatabaseSession? session, CancellationToken token)
+    internal ValueTask<DocumentCollection> GetCollectionAsync(string name, DocumentDatabaseSession? session, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return RunAsync(session, operation => new ValueTask<IDocumentCollection>(new DocumentCollection(this,
+        return RunAsync(session, operation => new ValueTask<DocumentCollection>(new DocumentCollection(this,
             Catalog.FindCollection(name, operation.Context.Snapshot) ?? throw new DatabaseException($"Collection '{name}' does not exist."), session)), token);
     }
 
-    public ValueTask DropCollectionAsync(string name, CancellationToken cancellationToken = default)
-        => DropCollectionAsync(name, null, cancellationToken);
     internal async ValueTask DropCollectionAsync(string name, DocumentDatabaseSession? session, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -204,9 +318,7 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
         }, token).ConfigureAwait(false);
     }
 
-    public IAsyncEnumerable<IDocumentCollection> GetCollectionsAsync(CancellationToken cancellationToken = default)
-        => GetCollectionsAsync(null, cancellationToken);
-    internal async IAsyncEnumerable<IDocumentCollection> GetCollectionsAsync(DocumentDatabaseSession? session, [EnumeratorCancellation] CancellationToken token)
+    internal async IAsyncEnumerable<DocumentCollection> GetCollectionsAsync(DocumentDatabaseSession? session, [EnumeratorCancellation] CancellationToken token)
     {
         var collections = await RunAsync(session, operation => new ValueTask<IReadOnlyList<DocumentCollectionMetadata>>(
             Catalog.GetCollections(operation.Context.Snapshot)), token).ConfigureAwait(false);
@@ -219,12 +331,20 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
         }
     }
 
+    /// <summary>
+    /// Starts one statement: for a session's statement, holds the session and admits the statement
+    /// into the session's explicit transaction, or begins an autocommit context, and pins a
+    /// read-committed statement snapshot. A failure releases whatever the statement took.
+    /// </summary>
+    /// <param name="session">The session the statement runs on, or null for the database's own autocommit statement.</param>
+    /// <param name="token">Cancellation token for the start.</param>
+    /// <returns>The running statement.</returns>
     internal async ValueTask<DocumentOperation> BeginOperationAsync(DocumentDatabaseSession? session, CancellationToken token)
     {
         ThrowIfDisposed();
         ThrowIfOffline();
         token.ThrowIfCancellationRequested();
-        var explicitTransaction = session?.ReserveOperation();
+        var explicitTransaction = session?.EnterOperation();
         DocumentOperation? operation = null;
         try
         {
@@ -239,15 +359,16 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
             var reported = TranslateOffline(error);
             if (operation is not null)
             {
+                // The operation owns the session hold and the admission, and releases them as it ends.
                 await operation.AbortAsync(reported).ConfigureAwait(false);
+            }
+            else
+            {
+                session?.ReleaseOperation(explicitTransaction);
             }
 
             if (ReferenceEquals(reported, error)) { throw; }
             throw reported;
-        }
-        finally
-        {
-            session?.ReleaseReservation();
         }
     }
 
@@ -334,25 +455,43 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
     internal Document ReadDocument(DocumentCatalogEntry entry)
         => new(new DocumentId(entry.Id), new DocumentVersion(entry.Version), DataStorage.ReadContent(Content(entry)));
 
-    internal void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-
-    public void Dispose()
+    /// <inheritdoc />
+    protected override ValueTask<DatabaseSession> CreateSessionCoreAsync(CancellationToken cancellationToken)
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
+        ThrowIfOffline();
+        return new ValueTask<DatabaseSession>(new DocumentDatabaseSession(this));
+    }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The coordinator first: it aborts every still-active transaction while the storage is open.
+    /// The storage closes even when the coordinator reports a writer whose undo still failed: it
+    /// kept that writer in flight in the storage, so the close does not truncate the journal
+    /// recovery classifies the writer from (#1226).
+    /// </remarks>
+    protected override void DisposeCore()
+    {
         try
         {
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
         finally
         {
-            // Safe after a failed coordinator close: a writer whose undo still failed is kept in
-            // flight in the storage, so its close does not truncate the journal (#1226).
             DataStorage.Dispose();
         }
     }
-    public ValueTask DisposeAsync() { Dispose(); return default; }
+
+    /// <inheritdoc />
+    /// <remarks>See <see cref="DisposeCore"/>: the coordinator first, then the storage.</remarks>
+    protected override async ValueTask DisposeAsyncCore()
+    {
+        try
+        {
+            await Coordinator.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await DataStorage.DisposeAsync().ConfigureAwait(false);
+        }
+    }
 }

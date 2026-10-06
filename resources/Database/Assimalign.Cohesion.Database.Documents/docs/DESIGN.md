@@ -16,8 +16,10 @@ Configurable document collation is deferred; stored text retains its original fo
 Documents combines the Blob engine's lifecycle, session transaction, worker, and
 stamped chunk discipline with SQL's parse, logical planning, physical planning,
 and execution split. Storage, journaling, paging, locks, MVCC, and B+Tree algorithms
-belong to the shared kernel. No kernel contract or existing public interface was
-widened. The model adds internal implementations of the frozen document contracts.
+belong to the shared kernel. No kernel contract was widened. The engine, its database
+(`DocumentDatabase`), session, transaction, collection and builder are public sealed types, the
+first four leaves of the area root's bases ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)),
+while the planner, executor, workers and storage strategy are internal.
 
 Every OQL statement flows through these stages. Catalog metadata informs query access-path
 selection and index-DDL planning; `SELECT`, `CREATE INDEX`, and `DROP INDEX` all reach the same
@@ -49,14 +51,17 @@ There are no Hosting or ApplicationModel references.
 
 ## Sessions and authority
 
-The database's direct collection methods run automatic transactions. Methods called
-through `session.Database` use that session's active transaction. OQL statements execute through
-the session and therefore use its active transaction or an automatic statement transaction.
-Collection CRUD always takes a session; a collection rejects sessions from another database.
-A handle obtained through a session remains bound to that specific session and
+The database's own collection methods run automatic transactions, outside any session. The
+session's collection methods (`DocumentDatabaseSession.CreateCollectionAsync`,
+`GetCollectionAsync`, `DropCollectionAsync`, `GetCollectionsAsync`) use that session's active
+transaction, as OQL statements do; without one, each runs in an automatic statement transaction.
+`session.Database` is the unbound database (option B of the concrete-types plan, §6.6), so its
+methods run automatic transactions too, and disposing it closes the database, never the session.
+Collection CRUD always takes a `DocumentDatabaseSession`; a collection rejects sessions from
+another database. A handle obtained through a session remains bound to that specific session and
 fails once it closes. Collection names are database-local, case-sensitive names;
 OQL has one collection source and no database qualification or server commands.
-The inherited `IDatabase.Engine` lifecycle reference remains the frozen root API;
+The inherited `DatabaseInstance.Engine` lifecycle reference is the root API;
 executing OQL or CRUD never interprets it as session authority over other databases.
 
 Each statement uses one `TransactionContext`. Automatic operations commit on
@@ -101,7 +106,7 @@ with its own code, `COHDBD001`:
    `Database.Transactions` DESIGN.md, "Ending a transaction".)
 2. The transaction stays the session's `CurrentTransaction` and reports `TransactionState.Faulted`.
    Every later statement on the session fails with `COHDBD001`: OQL text or requests, collection
-   `GetAsync`/`PutAsync`/`DeleteAsync`, and the session-bound `IDocumentDatabase` verbs
+   `GetAsync`/`PutAsync`/`DeleteAsync`, and the session's own collection operations
    (`CreateCollectionAsync`, `GetCollectionAsync`, `DropCollectionAsync`,
    `GetCollectionsAsync`). `BeginTransactionAsync` fails with `COHDBD001` too. The error names the
    original failure in its message (`Cause: ...`) and carries it as `InnerException`. A refused
@@ -120,7 +125,11 @@ with its own code, `COHDBD001`:
    It keeps that answer after the transaction has ended some other way (disposed, or rolled back
    by the caller), so a commit never reports anything but `COHDBD001` for a transaction a
    statement aborted. A commit after the session closed fails with `COHDBD001` too, naming the
-   closure when no statement failed first. A commit the kernel aborts throws
+   closure ("The session closed before the transaction ended.") when no statement failed first,
+   or the statement the closure aborted ("The document session closed while the operation was
+   running."). A commit while a statement of the transaction still runs is refused ("An operation
+   of the transaction is still running; commit after it completes.") and leaves the transaction
+   active. A commit the kernel aborts throws
    `DatabaseTransactionAbortedException` and leaves the transaction `Faulted` and ended.
 5. Every failure of a statement that started counts: parse diagnostics of text the session parses
    or of a typed request, planning and execution errors (an unknown collection, a stale expected
@@ -146,7 +155,7 @@ with its own code, `COHDBD001`:
    (`ObjectDisposedException`: the manager's disposal flags itself before it claims any end, so
    every end refused during the close fails this way). The context then stays active only until
    disposal's own abort ends it: the session refuses statements in the ended transaction ("being
-   committed or rolled back"), another `RollbackAsync` fails the same way while the close runs
+   committed or rolled back; start the operation after it ends."), another `RollbackAsync` fails the same way while the close runs
    and is accepted once the close's abort ended the context, and a `CommitAsync` commits nothing:
    it fails with `ObjectDisposedException` while the database closes, or reports the `Faulted`
    state once disposal's abort ended the context.
@@ -157,8 +166,12 @@ and a commit whose record was written but could not be made durable as
 `DatabaseTransactionCommitUnconfirmedException` (the transaction is `Committed`; only its
 durability is unconfirmed, `Database.Transactions` DESIGN.md), never as the kernel's own
 exception types, for statements and for every end of the explicit transaction alike: commit,
-rollback, disposal, the session's closure, and the abort a statement failure starts. One translation (`DocumentDatabaseInstance.TranslateKernelFailure`) serves them
-all. Storage failures still surface as the storage child root's exceptions.
+rollback, disposal, the session's closure, and the abort a statement failure starts. One translation (`DocumentDatabase.TranslateKernelFailure`) serves them
+all. Storage failures still surface as the storage child root's exceptions. Since phase 4 of the
+concrete-types plan the end state machine this section describes is the root
+`DatabaseTransaction` base's, and the session state, the "already active" check and the
+one-statement hold are the root `DatabaseSession` base's; the model supplies `COHDBD001`,
+`COHDBD002`, the kernel calls and this translation ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)).
 
 The explicit-transaction lifecycle, where Faulted is the new state:
 
@@ -252,7 +265,7 @@ and `CreateCollectionAsync` or `DropCollectionAsync` using either reserved name,
 throw `DatabaseException` with `System collection '<canonical source>' is read-only.`
 before ordinary catalog lookup or mutation. OQL document `INSERT`, `UPDATE`, and
 `DELETE` remain unsupported everywhere and return the existing `COHDBL001` parse
-diagnostic. Virtual sources do not provide mutable `IDocumentCollection` handles.
+diagnostic. Virtual sources do not provide mutable `DocumentCollection` handles.
 
 ### Stored document queries
 
@@ -306,9 +319,9 @@ not retain a transaction or borrowed storage memory after execution.
 `CREATE INDEX <index-name> ON <collection> (<path>)` and
 `DROP INDEX <index-name> ON <collection>` are OQL statements. `DocumentPlanner` binds them to
 catalog-operation plans and `DocumentPlanExecutor` executes those plans under the statement's
-`TransactionContext`. This replaces the former extension-member entry point and leaves the
-frozen `IDocumentDatabase` member list unchanged; there is no runtime switch on internal database
-implementations.
+`TransactionContext`. This replaced the former extension-member entry point and gives
+`DocumentDatabase` and `DocumentDatabaseSession` no index-management members; there is no runtime
+switch on internal database implementations.
 
 The create path uses the same segment grammar as a WHERE path, including nested object fields,
 array subscripts, and bracket-string property names. Planning converts those segments to the
@@ -369,10 +382,13 @@ first pass that finishes that database's work clears its record, so the engine i
 keeps failing. A failure that took a database offline (a failed durable flush, a failed drain of
 the journal's append buffer, #1252, or a failed header slot write) is not the worker's: the
 workers skip the database and the engine lists it in
-`OfflineDatabases`. The engine's pump runs a worker again after the backoff if its loop ever ends
-early (only an `IDatabaseEngineWorker` without the guided base can; the engine then reports
-Faulted until disposal). Before #1268 the pump caught outside the worker's loop, so one
-unexpected exception ended that worker for good. `DocumentWorkerResilienceTests` fails a
+`OfflineDatabases`. The root engine base's pump runs a worker again after the backoff if its loop
+ever ends early, and the engine then reports Faulted until disposal; a `DatabaseEngineWorker`, the
+only kind the engine attaches since phase 4 of the concrete-types plan, records a failed pass
+instead and its loop lets nothing escape. Each pump thread is named for its worker
+(`{engine}/wal-flush` and its siblings; it was `{engine}/{kind}` before phase 4). Before #1268
+the pump caught outside the worker's loop, so one unexpected exception ended that worker for
+good. `DocumentWorkerResilienceTests` fails a
 checkpoint's and a write-back's page writes (the worker reports, backs off and recovers while
 the other database's work goes on), a group flush's drain or fsync on the flush worker's own
 thread (only its database goes offline, `StorageOfflineCause.JournalFlush` either way), and a
@@ -440,7 +456,7 @@ its open transaction as a reader: the engine's single database writer lock would
 the failing commit.
 
 **Buffer pool and checkpoint options (#1254).** `DocumentDatabaseEngineOptions` (and
-`IDocumentDatabaseEngineBuilder`) carry `BufferPoolCapacity` (32 MiB; whole 8 KiB pages, at least
+`DocumentDatabaseEngineBuilder`) carry `BufferPoolCapacity` (32 MiB; whole 8 KiB pages, at least
 1 MiB), `CheckpointJournalSize` (256 MiB; zero for time only; not negative) and
 `CheckpointInterval` (5 minutes, was 30 seconds), all validated by `Create`. The checkpoint
 worker checkpoints a database when its journal reaches the size (its storage wakes the worker
@@ -571,21 +587,23 @@ sequenceDiagram
 The owner-approved [Database hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md)
 is implemented as `AddDocuments((context, engine) => ...)` on
 `IDatabaseApplicationBuilder`. This replaces `AddDocumentDatabase`. The model callback
-runs during application Build and receives an `IDocumentDatabaseEngineBuilder`.
+runs during application Build and receives the sealed `DocumentDatabaseEngineBuilder`.
 It configures the complete option set, including `FileSystemPath? RootPath`,
-durability, storage strategy, identity and worker intervals; it neither binds
-configuration nor accesses a service container. Retained builder options and
-factories reject mutation after the first engine Build attempt.
+durability, identity and worker intervals; it neither binds configuration nor
+accesses a service container. Retained builder options and factories reject
+mutation after the first engine Build attempt.
 
-`AddWorker` and `AddServer` take factories whose engine argument exists before
-the factory runs. The engine schedules custom workers through the common
-`IDatabaseEngineWorker.Run` contract; this is the concrete generic consumer
-that earns `IDatabaseEngineBuilder`. There are no additional strongly typed
-factory overloads: a model-specific factory can cast its argument, while ordinary
-workers remain portable across models. The engine owns successful factory
-products and cleans them up on subsequent construction failure. Nested servers
-must front that exact engine. The application snapshots each engine's Servers
-for start/stop; disposing the engine disposes its servers and custom workers.
+`AddWorker` and `AddServer` take factories typed over the engine
+(`Func<DocumentDatabaseEngine, DatabaseEngineWorker>`,
+`Func<DocumentDatabaseEngine, DatabaseServer>`) whose engine argument exists before
+the factory runs, so a model-specific factory needs no cast. A factory runs when
+its product is attached, so it sees the products attached before it; every worker
+is attached before any server. The engine schedules custom workers through the
+root `DatabaseEngineWorker` base, and refuses a worker whose name another worker
+of the engine has. The engine owns successful factory products and cleans them up
+on subsequent construction failure. Nested servers must front that exact engine.
+The application snapshots each engine's Servers for start/stop; disposing the
+engine disposes its servers and custom workers.
 
 `DocumentDatabaseEngine.Create(options)` remains the standalone entry point.
 Application factory registrations are application-owned; instance registrations
@@ -593,18 +611,108 @@ remain caller-owned, including their nested components. All four named database
 operations now take `DatabaseName`, with the existing implicit string conversion
 preserving ordinary literal call sites. Empty/default names are rejected.
 
-The explicit requirement for StorageStrategy supersedes the draft's statement
-that this model lacks a storage injection parameter. `IDocumentStorageStrategy`
-provides create/open/drop, existence and discovery using the existing
-`DocumentStorage` product. It overrides RootPath without allocating default
-files; returned storage is engine-owned and the strategy itself is borrowed.
-Durability is supplied explicitly, and opening must defer checkpointing until
-engine recovery. Default file/memory selection remains unchanged.
+The explicit requirement for StorageStrategy superseded the draft's statement
+that this model lacks a storage injection parameter. The internal
+`DocumentStorageStrategy` provides create/open/drop, existence and discovery using
+the existing `DocumentStorage` product. It overrides RootPath without allocating
+default files; returned storage is engine-owned and the strategy itself is
+borrowed. Durability is supplied explicitly, and opening must defer
+checkpointing until engine recovery. Default file/memory selection remains
+unchanged. Since phase 4 of the concrete-types plan the strategy is
+`internal abstract` (D9): no shipped code implemented the former public
+`IDocumentStorageStrategy`, so the options and builder property are internal and
+only this assembly's test doubles (fault-injecting and recording) supply one.
 
 `DocumentDatabaseEngine.CreateBuilder()` exposes the model builder for the
 concrete hosting builder's `AddEngine(name, build => ...)` overload. The consumer
 assigns resolved configuration/service values, registers nested server/worker
-factories, and returns `Build()`; the model package still never sees DI.
-There is no generic production orchestration over `IDatabaseEngineBuilder`;
-the base contract supports model-agnostic worker composition, demonstrated by
-tests exercising the public factory through that base interface.
+factories, and returns `Build()`; the model package still never sees DI. The
+builder implements no root interface: no Hosting code consumed
+`IDatabaseEngineBuilder`.
+
+## Concrete types (concrete-types plan, phase 4, #1260)
+
+The model is the third to adopt the root bases
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7), after KeyValuePair and
+Graph. Its public types are sealed leaves; it has no public interface left, and no
+`Abstractions/` folder. Its child root collapsed the same way: `DocumentCatalog` is a sealed
+type behind its `Open` factory. Documents has no wire server, so it has no server or server
+session leaf.
+
+| Type | Base | Was |
+|---|---|---|
+| `DocumentDatabaseEngine` | `DatabaseEngine` | a sealed `IDatabaseEngine` |
+| `DocumentDatabase` | `DatabaseInstance` | `IDocumentDatabase`, the internal `DocumentDatabaseInstance`, and the session-bound view `DocumentSessionDatabase` a session returned as its database |
+| `DocumentDatabaseSession` | `DatabaseSession` | an internal `IDatabaseSession` |
+| `DocumentDatabaseTransaction` | `DatabaseTransaction` | an internal `IDatabaseTransaction` |
+| `DocumentCollection` | none | `IDocumentCollection` and its internal implementation |
+| `DocumentDatabaseEngineBuilder` | none | `IDocumentDatabaseEngineBuilder` and its internal implementation |
+| `DocumentStorageStrategy` (internal abstract) | none | `IDocumentStorageStrategy` |
+
+- **Option B for the session's database** (plan §6.6). The session-bound view gave `Dispose` two
+  meanings: disposing a session's database closed the session, disposing the database itself
+  closed the database. The session now runs its collection operations itself
+  (`CreateCollectionAsync`, `GetCollectionAsync`, `DropCollectionAsync`, `GetCollectionsAsync`,
+  in its transaction), and `session.Database` is the unbound `DocumentDatabase`, whose collection
+  operations run in autocommit and whose disposal closes the database. So a collection operation
+  called on `session.Database` no longer joins the session's transaction, `session.Database`
+  creates sessions after the session closed (the view refused with "The document session is
+  closed."), and disposing it closes the database, not the session.
+- **Typed surface without casts.** The engine re-exposes `CreateDatabaseAsync`,
+  `OpenDatabaseAsync` and `GetDatabasesAsync` typed (`DocumentDatabase`) with `new` members over
+  the base's public members; a database re-exposes its `Engine` and `CreateSessionAsync`
+  (`DocumentDatabaseSession`); a session its `Database`, `CurrentTransaction` and both
+  `BeginTransactionAsync` overloads (`DocumentDatabaseTransaction`). Each `new` member awaits or
+  reads the base's public member and casts once, so the base's checks always run.
+  `TryGetDatabase(DatabaseName, out DocumentDatabase)` is a typed overload of the base's lookup,
+  not a `new` member: an `out var` call binds it, and an explicitly typed `out DatabaseInstance`
+  binds the base's. A collection's `GetAsync`, `PutAsync` and `DeleteAsync` take a
+  `DocumentDatabaseSession`.
+- **What the bases own now.** The engine base owns the name, the model, the workers' pumps (the
+  model no longer compiles `shared/DatabaseEngineWorkerPump.cs`), the state fold, composition and
+  the disposal order; the database base owns the disposed flag; the session base owns the session
+  state, the session's transaction, the "already active" check and the statement hold (the
+  model's former reservation flag and operation set, at most one statement at a time); the
+  transaction base owns the whole end state machine, the admission of statements (the model's
+  former operation counter) and the abort. The model supplies its vocabulary: `COHDBD001`,
+  `COHDBD002`, the kernel calls and the translation of the kernel's exceptions. It keeps its
+  per-statement rule (#1225): a failed statement aborts the explicit transaction through the
+  base's `AbortAsync`, and a statement holds the session from its start to its end.
+- **What changed for a caller** (plan §6.4): a closed session fails every operation with "The
+  session is closed." (was "The document session is closed."); BEGIN refuses a closed session,
+  then an active transaction or operation, then a canceled token, before the isolation-level and
+  offline refusals, which came first; on an offline database BEGIN from the session that holds an
+  open transaction fails "already active" (was `COHDBD002`), and a canceled token is refused by
+  `CreateSessionAsync`, both execute seams and BEGIN before `COHDBD002`, and so are the seams'
+  argument errors, a null request and a blank statement (the collection and document operations
+  keep their order, the offline refusal first); BEGIN refuses a transaction the kernel ended under
+  its caller with `COHDBD001`, where it reported the disposed database; BEGIN and both execute
+  seams refuse a closed session as closed before they check its database, so a closed session of a
+  dropped or closed database reports "The session is closed." where it reported
+  `ObjectDisposedException` (the collection and document operations check the database first and
+  still report it); a commit after the session closed an active transaction names "The session
+  closed before the transaction ended." (was "The document session closed before the transaction
+  ended."); a commit while a statement of the transaction runs fails with "An operation of the
+  transaction is still running; commit after it completes." (was "Dispose every document
+  operation before committing its transaction."); a statement refused while the caller's commit
+  or rollback runs says "operation" where it said "statement", and one refused after the caller's
+  own end says the transaction "ended before the operation started" where it reported `COHDBD001`
+  without a cause; a session that fails to close reports "The session failed to close." (was "One
+  or more document operations failed to close."); and the engine's disposal aggregate is "One or
+  more components of engine '{name}' failed to close." (was "One or more document engine
+  components failed to close."), with the databases that fail to close as one component, nested
+  in "One or more document databases failed to close." when there are several. The engine's
+  guards check an empty name, then disposal, then the token, and the model's
+  single-file-name-component rule after them (it checked the whole name, then the token, then
+  disposal); `GetDatabasesAsync` checks disposal when it is called; a blank `EngineName` is
+  refused by `Create` and `Build` (`ArgumentException`, parameter `EngineName`); a worker whose
+  name another worker of the engine has is refused (the model never checked names); and each
+  worker's pump thread is named for the worker (it was `{engine}/{kind}`).
+- **Unchanged for Documents**, though the bases now carry it: the "already active" message (the
+  model's was the base's); a second commit of an aborted transaction and a commit after the
+  teardown reporting `COHDBD001` with the cause (the model's teardown already closed the
+  transaction with a cause); the `Faulted` state of a transaction whose session closed while its
+  database was offline; the one-statement hold's refusal, "Dispose the active document operation
+  before starting another operation on this session."; the worker disposal order (last attached
+  first); and the collection's refusal of a session of another database or of another session
+  than the one it is bound to.

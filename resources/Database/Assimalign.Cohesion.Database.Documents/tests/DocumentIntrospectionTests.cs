@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
@@ -16,7 +15,7 @@ public sealed class DocumentIntrospectionTests
     public async Task Index_definitions_are_queryable_documents_and_follow_catalog_ddl()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("inventory");
+        var database = await engine.CreateDatabaseAsync("inventory");
         await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         (await Rows(session, "SELECT * FROM COHESION_SCHEMA.INDEXES")).ShouldBeEmpty();
@@ -48,7 +47,7 @@ public sealed class DocumentIntrospectionTests
     public async Task Ownership_reports_the_collection_authority_without_inventing_index_ownership()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("inventory");
+        var database = await engine.CreateDatabaseAsync("inventory");
         await database.CreateCollectionAsync("adhoc");
         await database.CreateCollectionAsync("owned");
         await using var session = await database.CreateSessionAsync();
@@ -84,7 +83,7 @@ public sealed class DocumentIntrospectionTests
     public async Task Introspection_uses_the_statement_snapshot_and_sees_own_uncommitted_definitions()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("inventory");
+        var database = await engine.CreateDatabaseAsync("inventory");
         await database.CreateCollectionAsync("items");
         await using var reader = await database.CreateSessionAsync();
         await using var writer = await database.CreateSessionAsync();
@@ -111,7 +110,7 @@ public sealed class DocumentIntrospectionTests
     public async Task System_collections_refuse_every_supported_mutation_with_a_stable_diagnostic(string name)
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("inventory");
+        var database = await engine.CreateDatabaseAsync("inventory");
         await using var session = await database.CreateSessionAsync();
         string expected = $"System collection '{name}' is read-only.";
         foreach (string command in new[] { $"CREATE INDEX injected ON {name.ToLowerInvariant()} (x)", $"DROP INDEX absent ON \"{name}\"" })
@@ -119,9 +118,8 @@ public sealed class DocumentIntrospectionTests
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(command));
             error.Message.ShouldBe(expected);
         }
-        var scoped = (IDocumentDatabase)session.Database;
-        (await Should.ThrowAsync<DatabaseException>(async () => await scoped.CreateCollectionAsync(name))).Message.ShouldBe(expected);
-        (await Should.ThrowAsync<DatabaseException>(async () => await scoped.DropCollectionAsync(name))).Message.ShouldBe(expected);
+        (await Should.ThrowAsync<DatabaseException>(async () => await session.CreateCollectionAsync(name))).Message.ShouldBe(expected);
+        (await Should.ThrowAsync<DatabaseException>(async () => await session.DropCollectionAsync(name))).Message.ShouldBe(expected);
         (await Should.ThrowAsync<DatabaseException>(async () => await database.CreateCollectionAsync(name.ToLowerInvariant()))).Message.ShouldBe(expected);
         (await Should.ThrowAsync<DatabaseException>(async () => await database.DropCollectionAsync(name.ToLowerInvariant()))).Message.ShouldBe(expected);
     }
@@ -133,7 +131,7 @@ public sealed class DocumentIntrospectionTests
     public async Task Unsupported_document_data_mutations_keep_the_language_capability_diagnostic(string query)
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("inventory");
+        var database = await engine.CreateDatabaseAsync("inventory");
         await using var session = await database.CreateSessionAsync();
         (await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(query))).Message.ShouldContain("COHDBL001");
     }
@@ -142,8 +140,8 @@ public sealed class DocumentIntrospectionTests
     public async Task System_collections_are_database_scoped_even_when_collection_and_index_names_match()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var own = (IDocumentDatabase)await engine.CreateDatabaseAsync("own");
-        var other = (IDocumentDatabase)await engine.CreateDatabaseAsync("other");
+        var own = await engine.CreateDatabaseAsync("own");
+        var other = await engine.CreateDatabaseAsync("other");
         await own.CreateCollectionAsync("items");
         await other.CreateCollectionAsync("items");
         await other.CreateCollectionAsync("private");
@@ -159,7 +157,7 @@ public sealed class DocumentIntrospectionTests
         await Should.ThrowAsync<DatabaseParseException>(async () => await ownSession.ExecuteAsync("SELECT * FROM other.COHESION_SCHEMA.INDEXES"));
     }
 
-    private static async Task<List<QueryRow>> Rows(IDatabaseSession session, string query, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<QueryRow>> Rows(DocumentDatabaseSession session, string query, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         await using var result = (QueryResultSet)await session.ExecuteAsync(query, parameters);
         var rows = new List<QueryRow>();

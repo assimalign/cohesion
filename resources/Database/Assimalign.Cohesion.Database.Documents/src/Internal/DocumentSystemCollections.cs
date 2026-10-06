@@ -26,7 +26,7 @@ internal static class DocumentSystemCollections
         }
     }
 
-    internal static IEnumerable<JsonElement> Enumerate(DocumentDatabaseInstance database, TransactionSnapshot snapshot,
+    internal static IEnumerable<JsonElement> Enumerate(DocumentDatabase database, TransactionSnapshot snapshot,
         string name, CancellationToken cancellationToken)
     {
         // Every lookup uses the same statement snapshot, including a transaction's

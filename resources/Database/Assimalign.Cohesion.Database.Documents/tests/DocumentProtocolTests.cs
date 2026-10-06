@@ -22,7 +22,7 @@ public sealed class DocumentProtocolTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("documents", token);
+        var database = await engine.CreateDatabaseAsync("documents", token);
         var collection = await database.CreateCollectionAsync("items", cancellationToken: token);
         await using var session = await database.CreateSessionAsync(token);
         byte[] content = "{\"profile\":{\"city\":\"東京\"},\"items\":[1,null,{\"flags\":[true,false]}]}"u8.ToArray();

@@ -42,7 +42,7 @@ call protected cores (the ADO.NET shape). Phase 3 of
 the interfaces: each base still implements its old interface (explicitly where the base retypes a
 member), so `Database.Hosting`, `Database.Embedded` and every model keep compiling against the
 interfaces. Each model moves its leaves onto them in its own phase-4 PR (#1260), KeyValuePair
-first and Graph second, and phase 6 deletes the interfaces; until then an adopted model's leaves reach the hosting
+first, Graph second and Documents third, and phase 6 deletes the interfaces; until then an adopted model's leaves reach the hosting
 layer through the interfaces the bases implement. Every base carries the deviation marker.
 
 | Base | Bridges | The leaf supplies | The base owns |
@@ -77,7 +77,7 @@ layer through the interfaces the bases implement. Every base carries the deviati
   `shared/DatabaseEngineWorkerPump.cs` since #1268's review; that shared copy stays compiled into
   each model until the model's phase-4 PR derives its engine from the base. A model that has
   adopted the base defines `COHESION_DATABASE_ENGINE_PUMP_IN_BASE` in its csproj, and the shared
-  file compiles to nothing there (KeyValuePair and Graph since their phase-4 PRs); the last
+  file compiles to nothing there (KeyValuePair, Graph and Documents since their phase-4 PRs); the last
   model's PR deletes the file and the constant.
 - **The shared build state composes through the leaf** (plan step P4.0, §6.5). Every model's
   builder compiles `shared/DatabaseEngineBuilderState<TEngine, TWorker, TServer>`, which runs typed
@@ -97,7 +97,7 @@ layer through the interfaces the bases implement. Every base carries the deviati
   attached twice, a server fronting another engine) with the same messages. Each model's phase-4
   PR moves its builder to the compose method (KeyValuePair's `KeyValueDatabaseEngine.Compose`
   first, with the state typed `<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`,
-  then Graph's `GraphDatabaseEngine.Compose`), the last one deletes the bridge, and phase 6 fixes
+  then Graph's `GraphDatabaseEngine.Compose` and Documents' `DocumentDatabaseEngine.Compose`), the last one deletes the bridge, and phase 6 fixes
   the products to the bases and constrains the engine to `DatabaseEngine`.
 - **Engine disposal has one order:** the servers (last attached first), then every worker pump is
   stopped and joined, then the workers (last attached first, a disposable worker such as the

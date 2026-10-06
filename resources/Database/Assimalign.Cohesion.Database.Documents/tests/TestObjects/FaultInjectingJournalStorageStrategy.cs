@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -25,7 +26,7 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 /// durable flush confirmed, as an operating system that dropped the writes a failed fsync covered
 /// would leave it (#1243).
 /// </remarks>
-internal sealed class FaultInjectingJournalStorageStrategy : IDocumentStorageStrategy
+internal sealed class FaultInjectingJournalStorageStrategy : DocumentStorageStrategy
 {
     private static readonly AsyncLocal<Budget?> s_failures = new();
     private static readonly AsyncLocal<Budget?> s_flushFailures = new();
@@ -119,7 +120,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IDocumentStorageStr
         }
     }
 
-    public DocumentStorage CreateStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    public override DocumentStorage CreateStorage(DatabaseName databaseName, StorageCommitDurability? durability)
     {
         var files = new Files(new MemoryStream(), new FaultInjectingStream(), new MemoryStream());
         lock (_sync)
@@ -135,7 +136,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IDocumentStorageStr
     /// Reopens a database from the bytes its last storage left behind. A memory stream keeps its
     /// bytes after disposal, so this works for a storage the engine closed.
     /// </summary>
-    public DocumentStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    public override DocumentStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
     {
         Files files;
         lock (_sync)
@@ -160,7 +161,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IDocumentStorageStr
             new StorageStream(files.Backup), checkpointOnOpen: false, durability);
     }
 
-    public void DropStorage(DatabaseName databaseName)
+    public override void DropStorage(DatabaseName databaseName)
     {
         lock (_sync)
         {
@@ -168,7 +169,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IDocumentStorageStr
         }
     }
 
-    public bool StorageExists(DatabaseName databaseName)
+    public override bool StorageExists(DatabaseName databaseName)
     {
         lock (_sync)
         {
@@ -176,7 +177,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : IDocumentStorageStr
         }
     }
 
-    public IEnumerable<DatabaseName> GetDatabaseNames()
+    public override IEnumerable<DatabaseName> GetDatabaseNames()
     {
         string[] names;
         lock (_sync)

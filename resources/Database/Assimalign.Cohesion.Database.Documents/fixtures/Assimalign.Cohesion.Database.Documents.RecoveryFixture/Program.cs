@@ -19,7 +19,7 @@ await using var engine = DocumentDatabaseEngine.Create(new()
 string original = "{\"rank\":1,\"nested\":{\"array\":[true,null,\"" + new string('x', 40000) + "\"]}}";
 if (args[0] == "seed")
 {
-    var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("crash");
+    var database = await engine.CreateDatabaseAsync("crash");
     var collection = await database.CreateCollectionAsync("items");
     await using var session = await database.CreateSessionAsync();
     await collection.PutAsync(session, "committed", Encoding.UTF8.GetBytes(original));
@@ -42,7 +42,7 @@ if (args[0] == "seed")
 }
 else if (args[0] == "verify")
 {
-    var database = (IDocumentDatabase)await engine.OpenDatabaseAsync("crash");
+    var database = await engine.OpenDatabaseAsync("crash");
     var collection = await database.GetCollectionAsync("items");
     await using var session = await database.CreateSessionAsync();
     var document = await collection.GetAsync(session, "committed");

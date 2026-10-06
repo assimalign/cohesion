@@ -6,7 +6,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -334,14 +333,18 @@ public sealed class DocumentWorkerResilienceTests
         var latencies = await TimedPutsAsync(healthy, 5);
 
         faults.Clear();
-        var reopened = (DocumentDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert: a failed drain ends the group flush before its fsync.
         bool drain = fault == DeviceFault.JournalWrite;
         StorageOfflineException.Find(error.ShouldNotBeNull()).ShouldNotBeNull();
         (failedCommit / window).ShouldBeLessThan(1.0);
         (drain ? faults.JournalWriteFailures : faults.JournalFlushFailures).ShouldBeGreaterThanOrEqualTo(1);
-        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(engine.Name + "/" + DatabaseEngineWorkerKind.WriteAheadFlush);
+
+        // The root engine base names each pump thread for its worker (concrete-types plan §6.4,
+        // engine composition), where the model named it "{engine}/{kind}" ("document-engine/WriteAheadFlush").
+        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name);
+        worker.Name.ShouldBe(engine.Name + "/wal-flush");
         (drain ? faults.JournalFlushFailures : faults.JournalWriteFailures).ShouldBe(0);
         refusal.Code.ShouldBe("COHDBD002");
         StorageOfflineException.Find(refusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
@@ -390,7 +393,7 @@ public sealed class DocumentWorkerResilienceTests
         var after = strategy.Capture(Failing);
 
         faults.Clear();
-        var reopened = (DocumentDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert
         offline.ShouldBeTrue();
@@ -464,7 +467,7 @@ public sealed class DocumentWorkerResilienceTests
         var holderRefusal = await Record.ExceptionAsync(async () => await items.PutAsync(holder, "after", Doc("after")));
 
         faults.Clear();
-        var reopened = (DocumentDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert: both writers got the coded refusal naming what failed, and the reopen kept
         // neither write.
@@ -478,8 +481,12 @@ public sealed class DocumentWorkerResilienceTests
         (await CountAsync(reopened)).ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Workers: a registered worker whose loop throws is run again, and the engine reports Faulted")]
-    public async Task Pump_InterfaceWorkerThrows_ShouldRunItAgainAndReportFaulted()
+    // Since the engine derives from DatabaseEngine (concrete-types plan, phase 4), a registered
+    // worker is a DatabaseEngineWorker, whose loop lets nothing escape: the pass that throws is
+    // recorded and the next one runs after the backoff. The interface-only worker this test drove
+    // until then cannot be registered any more.
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Workers: a registered worker whose pass throws is run again, and the engine reports Faulted")]
+    public async Task Pump_RegisteredWorkerPassThrows_ShouldRunItAgainAndReportFaulted()
     {
         // Arrange
         var worker = new EscapingWorker();
@@ -670,7 +677,7 @@ public sealed class DocumentWorkerResilienceTests
     }
 
     // What a database's two growing files hold together: the bound the pace window keeps under.
-    private static long FileBytes(DocumentDatabaseInstance database)
+    private static long FileBytes(DocumentDatabase database)
         => database.DataStorage.Data.Length + database.DataStorage.JournalLength;
 
     private static DocumentDatabaseEngineOptions Options(FaultInjectingJournalStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
@@ -684,9 +691,9 @@ public sealed class DocumentWorkerResilienceTests
     private static DatabaseEngineWorker WorkerOf(DocumentDatabaseEngine engine, DatabaseEngineWorkerKind kind)
         => engine.Workers.OfType<DatabaseEngineWorker>().Single(worker => worker.Kind == kind);
 
-    private static async Task<DocumentDatabaseInstance> CreateAsync(DocumentDatabaseEngine engine, string name)
+    private static async Task<DocumentDatabase> CreateAsync(DocumentDatabaseEngine engine, string name)
     {
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        var database = await engine.CreateDatabaseAsync(name);
         await database.CreateCollectionAsync("items");
         return database;
     }
@@ -694,7 +701,7 @@ public sealed class DocumentWorkerResilienceTests
     private static ReadOnlyMemory<byte> Doc(string id)
         => Encoding.UTF8.GetBytes($"{{\"id\":\"{id}\",\"payload\":\"{new string('x', 150)}\"}}");
 
-    private static async Task PutAsync(DocumentDatabaseInstance database, int first, int count)
+    private static async Task PutAsync(DocumentDatabase database, int first, int count)
     {
         var items = await database.GetCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
@@ -704,7 +711,7 @@ public sealed class DocumentWorkerResilienceTests
         }
     }
 
-    private static async Task<List<TimeSpan>> TimedPutsAsync(DocumentDatabaseInstance database, int count)
+    private static async Task<List<TimeSpan>> TimedPutsAsync(DocumentDatabase database, int count)
     {
         var latencies = new List<TimeSpan>();
         var items = await database.GetCollectionAsync("items");
@@ -719,7 +726,7 @@ public sealed class DocumentWorkerResilienceTests
         return latencies;
     }
 
-    private static async Task<int> CountAsync(DocumentDatabaseInstance database)
+    private static async Task<int> CountAsync(DocumentDatabase database)
     {
         await using var session = await database.CreateSessionAsync();
         var result = await session.ExecuteAsync("SELECT id FROM items");
@@ -766,31 +773,34 @@ public sealed class DocumentWorkerResilienceTests
         return true;
     }
 
-    /// <summary>A worker without the guided base whose first loop throws; later loops run until cancelled.</summary>
-    private sealed class EscapingWorker : IDatabaseEngineWorker
+    /// <summary>
+    /// A registered worker whose first pass throws; later passes run until cancelled, so the
+    /// failure stays recorded (no pass ran to its end) while the test reads the engine's state.
+    /// </summary>
+    private sealed class EscapingWorker : DatabaseEngineWorker
     {
         private int _runs;
         private int _stopped;
 
-        public string Name => "escaping";
-
-        public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.IndexMaintenance;
-
-        public TimeSpan Interval => TimeSpan.FromSeconds(1);
+        public EscapingWorker()
+            : base("escaping", DatabaseEngineWorkerKind.IndexMaintenance, TimeSpan.FromMilliseconds(10))
+        {
+        }
 
         public int Runs => Volatile.Read(ref _runs);
 
         public bool Stopped => Volatile.Read(ref _stopped) != 0;
 
-        public void Run(CancellationToken cancellationToken)
+        protected override void RunIterationCore(CancellationToken cancellationToken)
         {
             if (Interlocked.Increment(ref _runs) == 1)
             {
-                throw new InvalidOperationException("The worker's loop failed.");
+                throw new InvalidOperationException("The worker's pass failed.");
             }
 
             cancellationToken.WaitHandle.WaitOne();
             Volatile.Write(ref _stopped, 1);
+            cancellationToken.ThrowIfCancellationRequested();
         }
     }
 }

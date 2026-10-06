@@ -4,7 +4,6 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -43,7 +42,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         var keep = await collection.PutAsync(session, "keep", Doc("keep", "\"v\":1"));
@@ -78,11 +77,10 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await collection.PutAsync(session, "keep", Doc("keep"));
-        var scoped = (IDocumentDatabase)session.Database;
         var transaction = await session.BeginTransactionAsync();
         await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM missing"));
 
@@ -96,12 +94,12 @@ public sealed class DocumentTransactionFailureTests
             await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT FROM")),
             await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(DocumentQueryRequest.FromOql("SELECT * FROM items"))),
             await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE INDEX ix ON items (v)")),
-            await Should.ThrowAsync<DatabaseException>(async () => await scoped.CreateCollectionAsync("late")),
-            await Should.ThrowAsync<DatabaseException>(async () => await scoped.GetCollectionAsync("items")),
-            await Should.ThrowAsync<DatabaseException>(async () => await scoped.DropCollectionAsync("items")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.CreateCollectionAsync("late")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.GetCollectionAsync("items")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.DropCollectionAsync("items")),
             await Should.ThrowAsync<DatabaseException>(async () =>
             {
-                await foreach (var _ in scoped.GetCollectionsAsync()) { }
+                await foreach (var _ in session.GetCollectionsAsync()) { }
             }),
             await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync()),
         };
@@ -126,7 +124,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
@@ -135,11 +133,13 @@ public sealed class DocumentTransactionFailureTests
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
 
-        // Assert
-        error.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
-        error.Message.ShouldContain("nothing was committed", Case.Sensitive);
+        // Assert: every commit reports the cause, as the model's own state machine did.
+        error.Message.ShouldStartWith("COHDBD001: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
         error.InnerException.ShouldBeSameAs(failure);
+        repeated.Message.ShouldBe(error.Message);
+        repeated.InnerException.ShouldBeSameAs(failure);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
         // The client's rollback in a catch block after the failed commit is a no-op, not a second error.
@@ -155,7 +155,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -179,7 +179,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange: the indexed value outgrows the index key only after the new content chunks are written.
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE INDEX by_a ON items (a)");
@@ -209,7 +209,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var failed = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -232,7 +232,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await collection.PutAsync(session, "keep", Doc("keep"));
@@ -254,7 +254,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
@@ -276,7 +276,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var blocker = await database.CreateSessionAsync();
         await using var waiting = await database.CreateSessionAsync();
@@ -310,7 +310,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -329,14 +329,17 @@ public sealed class DocumentTransactionFailureTests
 
     /// <summary>
     /// A commit after the session closed under an open transaction fails with COHDBD001 naming the
-    /// closure, whichever is asked first, and commits nothing; a rollback afterwards is a no-op.
+    /// closure, whichever is asked first, and commits nothing; a rollback afterwards is a no-op. The
+    /// closure is the root session base's teardown cause, "The session closed before the
+    /// transaction ended." (concrete-types plan §6.4), for the model's former "The document session
+    /// closed before the transaction ended.".
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT after the session closed fails with COHDBD001")]
     public async Task CommitAsync_AfterSessionClosed_ShouldFailWithCodeNamingTheClosure()
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -351,7 +354,7 @@ public sealed class DocumentTransactionFailureTests
         // Assert
         error.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
         error.Message.ShouldContain("nothing was committed", Case.Sensitive);
-        error.Message.ShouldContain("The document session closed before the transaction ended.", Case.Sensitive);
+        error.Message.ShouldEndWith("Cause: The session closed before the transaction ended.", Case.Sensitive);
         repeated.Message.ShouldBe(error.Message);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         await using var observer = await database.CreateSessionAsync();
@@ -364,12 +367,11 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
-        var otherDatabase = (IDocumentDatabase)await engine.CreateDatabaseAsync("other");
+        var otherDatabase = await engine.CreateDatabaseAsync("other");
         await using var session = await database.CreateSessionAsync();
         await using var foreign = await otherDatabase.CreateSessionAsync();
-        var scoped = (IDocumentDatabase)session.Database;
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "pending", Doc("pending"));
 
@@ -378,9 +380,9 @@ public sealed class DocumentTransactionFailureTests
         {
             await Should.ThrowAsync<ArgumentException>(async () => await collection.PutAsync(session, " ", Doc("blank"))),
             await Should.ThrowAsync<ArgumentException>(async () => await collection.GetAsync(session, "")),
-            await Should.ThrowAsync<ArgumentException>(async () => await scoped.CreateCollectionAsync(" ")),
+            await Should.ThrowAsync<ArgumentException>(async () => await session.CreateCollectionAsync(" ")),
             await Should.ThrowAsync<ArgumentException>(async () => await session.ExecuteAsync(" ")),
-            await Should.ThrowAsync<DatabaseException>(async () => await scoped.CreateCollectionAsync("COHESION_SCHEMA.INDEXES")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.CreateCollectionAsync("COHESION_SCHEMA.INDEXES")),
             await Should.ThrowAsync<DatabaseException>(async () => await collection.PutAsync(foreign, "x", Doc("x"))),
             await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new ForeignRequest())),
         };
@@ -400,7 +402,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         var rolledBack = await session.BeginTransactionAsync();
@@ -415,9 +417,9 @@ public sealed class DocumentTransactionFailureTests
         await rolledBack.RollbackAsync();
         var refusal = await Should.ThrowAsync<DatabaseException>(async () => await committed.RollbackAsync());
 
-        // Assert
+        // Assert: the root base's message (concrete-types plan §6.4), the one the model carried.
         currentAfterCommit.ShouldBeNull();
-        refusal.Message.ShouldContain("Committed", Case.Sensitive);
+        refusal.Message.ShouldBe("The transaction is Committed; a committed transaction cannot roll back.");
         rolledBack.State.ShouldBe(TransactionState.RolledBack);
         committed.State.ShouldBe(TransactionState.Committed);
         (await Ids(session)).ShouldBe(["kept"]);
@@ -429,7 +431,7 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -451,6 +453,335 @@ public sealed class DocumentTransactionFailureTests
     }
 
     /// <summary>
+    /// A commit of a transaction its caller already rolled back is refused by state, with the root
+    /// base's message (concrete-types plan §6.4), the one the model carried.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT after ROLLBACK is refused with the transaction's state")]
+    public async Task CommitAsync_AfterRollback_ShouldBeRefusedWithTheState()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await collection.PutAsync(session, "discarded", Doc("discarded"));
+        await transaction.RollbackAsync();
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+
+        // Assert
+        refusal.Message.ShouldBe("The transaction is RolledBack.");
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await Ids(session)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Closing a session aborts the statement running on it, and the statement's abort is the
+    /// cause a later commit of its transaction reports with <c>COHDBD001</c>: the teardown's own
+    /// cause does not replace it. The model's teardown did the same; since the concrete-types plan's
+    /// phase 4 the session's root base runs it (§6.4), so the order is pinned here.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: closing a session aborts its running statement, whose cause a later COMMIT reports")]
+    public async Task DisposeAsync_SessionWithRunningStatement_ShouldAbortItAndReportItsCause()
+    {
+        // Arrange: another transaction holds the writer lock, so the session's statement waits.
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var blocker = await database.CreateSessionAsync();
+        var session = await database.CreateSessionAsync();
+        var blocking = await blocker.BeginTransactionAsync();
+        await collection.PutAsync(blocker, "blocker", Doc("blocker"));
+        var transaction = await session.BeginTransactionAsync();
+        var pending = collection.PutAsync(session, "waiting", Doc("waiting")).AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+
+        // Act
+        await session.DisposeAsync();
+        var statement = await Should.ThrowAsync<Exception>(async () => await pending.WaitAsync(Timeout));
+        var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        await blocking.CommitAsync();
+
+        // Assert
+        statement.ShouldNotBeOfType<TimeoutException>();
+        commit.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
+        commit.Message.ShouldEndWith("Cause: The document session closed while the operation was running.", Case.Sensitive);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        await using var observer = await database.CreateSessionAsync();
+        (await Ids(observer)).ShouldBe(["blocker"]);
+    }
+
+    /// <summary>
+    /// A commit while a statement of the transaction still runs is refused with the root base's
+    /// message (concrete-types plan §6.4), for the model's former "Dispose every document operation
+    /// before committing its transaction.", and leaves the transaction active: it commits once the
+    /// statement completed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT while a statement of the transaction runs is refused and leaves it active")]
+    public async Task CommitAsync_WhileStatementRuns_ShouldBeRefusedAndLeaveTheTransactionActive()
+    {
+        // Arrange: another transaction holds the writer lock, so the statement waits.
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var blocker = await database.CreateSessionAsync();
+        await using var session = await database.CreateSessionAsync();
+        var blocking = await blocker.BeginTransactionAsync();
+        await collection.PutAsync(blocker, "blocker", Doc("blocker"));
+        var transaction = await session.BeginTransactionAsync();
+        var pending = collection.PutAsync(session, "waiting", Doc("waiting")).AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        var stateAfterRefusal = transaction.State;
+        await blocking.CommitAsync();
+        (await pending.WaitAsync(Timeout)).Id.Value.ShouldBe("waiting");
+        await transaction.CommitAsync();
+
+        // Assert
+        refusal.Message.ShouldBe("An operation of the transaction is still running; commit after it completes.");
+        stateAfterRefusal.ShouldBe(TransactionState.Active);
+        transaction.State.ShouldBe(TransactionState.Committed);
+        (await Ids(session)).ShouldBe(["blocker", "waiting"]);
+    }
+
+    /// <summary>
+    /// BEGIN on a session whose transaction is active is refused with the root base's one message
+    /// before the model's isolation-level refusal, and a closed session before both (concrete-types
+    /// plan §6.4, BEGIN's refusal order): the model refused an unsupported isolation level first.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: BEGIN is refused for a closed session, then an active transaction, before the isolation level")]
+    public async Task BeginTransactionAsync_WhileActiveOrClosed_ShouldRefuseBeforeTheIsolationLevel()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+
+        // Act
+        var again = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
+        var serializable = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable));
+        await transaction.RollbackAsync();
+        var unsupported = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable));
+        await session.DisposeAsync();
+        var closed = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable));
+
+        // Assert
+        again.Message.ShouldBe("A transaction or operation is already active on this session.");
+        serializable.Message.ShouldBe("A transaction or operation is already active on this session.");
+        unsupported.Message.ShouldBe("The document engine supports Snapshot and ReadCommitted isolation.");
+        closed.Message.ShouldBe("The session is closed.");
+    }
+
+    /// <summary>
+    /// A closed session refuses BEGIN, both execute seams, its own collection operations and the
+    /// document operations of a collection with the root base's message (concrete-types plan §6.4),
+    /// for the model's former "The document session is closed.".
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: a closed session refuses every operation with one message")]
+    public async Task ExecuteAsync_OnClosedSession_ShouldRefuseWithOneMessage()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        var session = await database.CreateSessionAsync();
+        var bound = await session.GetCollectionAsync("items");
+        await session.DisposeAsync();
+
+        // Act
+        var refusals = new List<DatabaseException>
+        {
+            await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync()),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT id FROM items")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(DocumentQueryRequest.FromOql("SELECT id FROM items"))),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.CreateCollectionAsync("late")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.GetCollectionAsync("items")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.DropCollectionAsync("items")),
+            await Should.ThrowAsync<DatabaseException>(async () =>
+            {
+                await foreach (var _ in session.GetCollectionsAsync()) { }
+            }),
+            await Should.ThrowAsync<DatabaseException>(async () => await collection.PutAsync(session, "late", Doc("late"))),
+            await Should.ThrowAsync<DatabaseException>(async () => await bound.GetAsync(session, "late")),
+        };
+
+        // Assert
+        refusals.ShouldAllBe(refusal => refusal.Message == "The session is closed.");
+        session.State.ShouldBe(SessionState.Closed);
+    }
+
+    /// <summary>
+    /// A transaction the kernel ended under its caller (its database was dropped while the session
+    /// held it) reports <c>Faulted</c>, and the root bases order its refusal against the database's
+    /// disposal and a canceled token (concrete-types plan §6.4): BEGIN refuses the open transaction
+    /// with <c>COHDBD001</c> before it checks anything of the model, where the model reported the
+    /// disposed database; both execute seams check a canceled token before the model reports the
+    /// disposed database, which they still report for a live token, and so does BEGIN once the
+    /// caller rolled the ended transaction back.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: a transaction the kernel ended refuses BEGIN with COHDBD001; the execute seams check a canceled token first")]
+    public async Task BeginTransactionAsync_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await collection.PutAsync(session, "pending", Doc("pending"));
+        await engine.DropDatabaseAsync("test");
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act
+        var state = transaction.State;
+        var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(canceled.Token));
+        var canceledText = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("SELECT id FROM items", null, canceled.Token));
+        var text = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync("SELECT id FROM items"));
+        var canceledRequest = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(DocumentQueryRequest.FromOql("SELECT id FROM items"), canceled.Token));
+        var request = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync(DocumentQueryRequest.FromOql("SELECT id FROM items")));
+        await transaction.RollbackAsync();
+        var beginAfterRollback = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.BeginTransactionAsync());
+
+        // Assert
+        state.ShouldBe(TransactionState.Faulted);
+        begin.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
+        canceledText.CancellationToken.ShouldBe(canceled.Token);
+        text.ShouldNotBeNull();
+        canceledRequest.CancellationToken.ShouldBe(canceled.Token);
+        request.ShouldNotBeNull();
+        beginAfterRollback.ShouldNotBeNull();
+        session.CurrentTransaction.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A closed session is refused as closed before its database's disposal is checked, by BEGIN
+    /// and both execute seams, which run the root base's checks first (concrete-types plan §6.4):
+    /// the model checked the disposed database first and reported <see cref="ObjectDisposedException"/>.
+    /// The session's collection operations and a collection's document operations, which check the
+    /// database before the session, still report the disposed database.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: a closed session of a dropped database is refused as closed by BEGIN and the execute seams")]
+    public async Task ExecuteAsync_ClosedSessionOfDroppedDatabase_ShouldRefuseAsClosedBeforeTheDisposedDatabase()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        var session = await database.CreateSessionAsync();
+        await session.DisposeAsync();
+        await engine.DropDatabaseAsync("test");
+
+        // Act
+        var refusals = new List<DatabaseException>
+        {
+            await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync()),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT id FROM items")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(DocumentQueryRequest.FromOql("SELECT id FROM items"))),
+        };
+        var sessionCollection = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.CreateCollectionAsync("late"));
+        var document = await Should.ThrowAsync<ObjectDisposedException>(async () => await collection.GetAsync(session, "late"));
+
+        // Assert
+        refusals.ShouldAllBe(refusal => refusal.Message == "The session is closed.");
+        sessionCollection.ShouldNotBeNull();
+        document.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// A statement holds its session from its start to its end, through the root base's operation
+    /// hold (concrete-types plan §6.4), which replaced the model's own reservation and operation
+    /// set: while one waits for the writer lock, a second statement on the session through either
+    /// seam, a collection operation of the session and a document operation are refused with the
+    /// model's message, and BEGIN with the base's "already active" message. None of the refusals
+    /// ends the waiting statement, which completes once the lock is free, and the session then runs
+    /// statements again.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: a running statement holds the session against another statement and BEGIN")]
+    public async Task ExecuteAsync_WhileAnotherStatementRuns_ShouldBeRefusedAndLeaveItRunning()
+    {
+        // Arrange: another transaction holds the writer lock, so the session's statement waits.
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var blocker = await database.CreateSessionAsync();
+        await using var session = await database.CreateSessionAsync();
+        var blocking = await blocker.BeginTransactionAsync();
+        await collection.PutAsync(blocker, "blocker", Doc("blocker"));
+        var pending = collection.PutAsync(session, "waiting", Doc("waiting")).AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+
+        // Act
+        var statement = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT id FROM items"));
+        var request = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(DocumentQueryRequest.FromOql("SELECT id FROM items")));
+        var collectionOperation = await Should.ThrowAsync<DatabaseException>(async () => await session.GetCollectionAsync("items"));
+        var documentOperation = await Should.ThrowAsync<DatabaseException>(async () => await collection.GetAsync(session, "blocker"));
+        var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
+        bool stillWaiting = !pending.IsCompleted;
+        await blocking.CommitAsync();
+        var completed = await pending.WaitAsync(Timeout);
+
+        // Assert
+        new[] { statement, request, collectionOperation, documentOperation }.ShouldAllBe(refusal =>
+            refusal.Message == "Dispose the active document operation before starting another operation on this session.");
+        begin.Message.ShouldBe("A transaction or operation is already active on this session.");
+        stillWaiting.ShouldBeTrue();
+        completed.Id.Value.ShouldBe("waiting");
+        session.CurrentTransaction.ShouldBeNull();
+        (await Ids(session)).ShouldBe(["blocker", "waiting"]);
+    }
+
+    /// <summary>
+    /// A session's database is the unbound <see cref="DocumentDatabase"/> (option B of the
+    /// concrete-types plan, §6.6): its collection operations run in autocommit outside the session,
+    /// whatever transaction the session holds, while the session's own collection operations run in
+    /// that transaction; it creates sessions after the session closed; and disposing it closes the
+    /// database, never the session. Before phase 4 a session returned a session-bound view: its
+    /// collection operations ran in the session's transaction, it refused a closed session with
+    /// "The document session is closed.", and disposing it closed the session.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: the session's database is the unbound database, and the session runs its own collection operations")]
+    public async Task Database_OfASession_ShouldBeTheUnboundDatabase()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+
+        // Act: one collection outside the transaction, through the session's database, and one
+        // inside it, through the session; then the transaction rolls back.
+        var outside = await session.Database.CreateCollectionAsync("outside");
+        var inside = await session.CreateCollectionAsync("inside");
+        var visibleToOther = new List<string>();
+        await foreach (var visible in other.GetCollectionsAsync()) { visibleToOther.Add(visible.Name); }
+        await transaction.RollbackAsync();
+        var afterRollback = new List<string>();
+        await foreach (var kept in database.GetCollectionsAsync()) { afterRollback.Add(kept.Name); }
+        await session.DisposeAsync();
+        await using var afterClose = await session.Database.CreateSessionAsync();
+        await other.Database.DisposeAsync();
+
+        // Assert
+        session.Database.ShouldBeSameAs(database);
+        database.Engine.ShouldBeSameAs(engine);
+        outside.Name.ShouldBe("outside");
+        inside.Name.ShouldBe("inside");
+        visibleToOther.ShouldBe(["outside"]);
+        afterRollback.ShouldBe(["outside"]);
+        afterClose.State.ShouldBe(SessionState.Open);
+        other.State.ShouldBe(SessionState.Open);
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await database.CreateSessionAsync());
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await other.ExecuteAsync("SELECT id FROM outside"));
+    }
+
+    /// <summary>
     /// A rollback whose abort record cannot be written still ends the transaction and releases the
     /// database writer lock (#1226). Since #1252 the rollback appends the record to the journal's
     /// append buffer, and it reaches the file with the next drain: here the commit of another
@@ -465,7 +796,7 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
         var other = await database.CreateSessionAsync();
@@ -496,7 +827,7 @@ public sealed class DocumentTransactionFailureTests
         await session.DisposeAsync();
         engine.Dispose();
         await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+        var recovered = await reopened.OpenDatabaseAsync("test");
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert: the rollback wrote nothing and ended the transaction; the drain that carried its
@@ -522,7 +853,7 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
         await collection.PutAsync(session, "keep", Doc("keep"));
@@ -542,7 +873,7 @@ public sealed class DocumentTransactionFailureTests
         await session.DisposeAsync();
         engine.Dispose();
         await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+        var recovered = await reopened.OpenDatabaseAsync("test");
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
@@ -566,7 +897,7 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -585,7 +916,7 @@ public sealed class DocumentTransactionFailureTests
         await session.DisposeAsync();
         engine.Dispose();
         await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+        var recovered = await reopened.OpenDatabaseAsync("test");
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
@@ -602,11 +933,11 @@ public sealed class DocumentTransactionFailureTests
         // Arrange: a rollback whose undo cannot touch the pages another storage bracket holds,
         // and a waiting writer.
         await using var engine = DocumentDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
-        var transaction = (DocumentDatabaseTransaction)await session.BeginTransactionAsync();
+        var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "rolled", "1"u8.ToArray());
         int locked;
         using (var holder = PageWriteLockHolder.LockEveryPage(database.DataStorage))
@@ -643,7 +974,7 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using (var session = await database.CreateSessionAsync())
         {
@@ -665,7 +996,7 @@ public sealed class DocumentTransactionFailureTests
         var closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
 
         await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+        var recovered = await reopened.OpenDatabaseAsync("test");
         var items = await recovered.GetCollectionAsync("items");
         await using var observer = await recovered.CreateSessionAsync();
 
@@ -691,7 +1022,7 @@ public sealed class DocumentTransactionFailureTests
         // bracket held, so it is deferred.
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using (var session = await database.CreateSessionAsync())
         {
@@ -721,7 +1052,7 @@ public sealed class DocumentTransactionFailureTests
         engine.Dispose();
 
         await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+        var recovered = await reopened.OpenDatabaseAsync("test");
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert: only the committed document is there.
@@ -737,7 +1068,7 @@ public sealed class DocumentTransactionFailureTests
         var kernel = new TransactionCommitUnconfirmedException("Transaction 7 committed, but its commit record could not be made durable.", new IOException("flush"));
 
         // Act
-        var translated = DocumentDatabaseInstance.TranslateKernelFailure(kernel);
+        var translated = DocumentDatabase.TranslateKernelFailure(kernel);
 
         // Assert: not an abort, so a caller never retries work that committed.
         var unconfirmed = translated.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
@@ -758,11 +1089,11 @@ public sealed class DocumentTransactionFailureTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
-        var transaction = (DocumentDatabaseTransaction)await session.BeginTransactionAsync();
+        var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "first", Doc("first"));
 
         // A statement of the transaction is inside the apply gate when the rollback starts.
@@ -816,7 +1147,7 @@ public sealed class DocumentTransactionFailureTests
         DeferredUndoRetryDelay = TimeSpan.FromHours(1),
     };
 
-    private static async ValueTask FailAsync(string failure, IDocumentCollection collection, IDatabaseSession session, Document keep)
+    private static async ValueTask FailAsync(string failure, DocumentCollection collection, DocumentDatabaseSession session, Document keep)
     {
         switch (failure)
         {
@@ -845,7 +1176,7 @@ public sealed class DocumentTransactionFailureTests
     private static ReadOnlyMemory<byte> Doc(string id, string? members = null)
         => Encoding.UTF8.GetBytes(members is null ? $"{{\"id\":\"{id}\"}}" : $"{{\"id\":\"{id}\",{members}}}");
 
-    private static async Task<List<string>> Ids(IDatabaseSession session, string? where = null)
+    private static async Task<List<string>> Ids(DocumentDatabaseSession session, string? where = null)
     {
         var ids = new List<string>();
         var result = await session.ExecuteAsync("SELECT id FROM items " + where);

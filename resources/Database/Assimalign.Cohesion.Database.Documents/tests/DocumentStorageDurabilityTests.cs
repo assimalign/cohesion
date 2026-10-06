@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
 using Shouldly;
@@ -25,7 +24,7 @@ public sealed class DocumentStorageDurabilityTests
         {
             await using (var engine = DocumentDatabaseEngine.Create(options))
             {
-                var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("db");
+                var database = await engine.CreateDatabaseAsync("db");
                 database.DataStorage.SupportsDurableFlush.ShouldBe(physical);
                 database.DataStorage.CommitDurability.ShouldBe(expected);
                 using var transaction = database.DataStorage.BeginTransaction();
@@ -42,7 +41,7 @@ public sealed class DocumentStorageDurabilityTests
             if (physical)
             {
                 await using var reopened = DocumentDatabaseEngine.Create(options);
-                var database = (DocumentDatabaseInstance)await reopened.OpenDatabaseAsync("db");
+                var database = await reopened.OpenDatabaseAsync("db");
                 database.DataStorage.CommitDurability.ShouldBe(expected);
             }
         }
