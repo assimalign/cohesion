@@ -303,21 +303,21 @@ interface is deleted in P6.
 | 84 | `ISqlStorageStrategy` | Sql `:13` | model | abstract *(internal)* | `internal abstract class SqlStorageStrategy`, with an internal option property. The crash doubles derive through the existing grant. `CrashCaptureSqlStorageStrategy` is `public sealed` today (`tests/TestObjects/CrashCaptureSqlStorageStrategy.cs:20`) and becomes `internal sealed`, because a public class cannot derive from an internal one (CS0060); only Sql.Tests uses it. | P4 |
 | 85 | `ISqlCatalog` | Sql.Catalog `:23` | model child | sealed | `public sealed class SqlCatalog`. It absorbs the static class (`SqlCatalog.cs:25`, `Open` at `:33` and `:53`), and `CaptureSnapshot` (`:72`) becomes an instance method. **At P4 (re-verified, then landed):** the static class had three more public statics over the interface that the row did not name, `ReserveTableAsync`, `PublishTableAsync` and `DropConstraintAsync` (`:106`, `:146`, `:169`), kept off the interface so a second implementation would not owe them; with one type they are instance members too, with the statics' documentation less their `InvalidCastException`. The internal `DefaultSqlCatalog` was folded in as `SqlCatalog.cs`, with the interface's documentation on its public members; the constructor is private behind the two `Open` overloads, and the static class's internal test helpers (`CreateSchemaTableAsync`, `CreateTableAsync` with constraints, `AddConstraintAsync`) are the instance's internal members, which the catalog's tests reach through the existing Sql.Catalog → Sql.Catalog.Tests grant. The project's `Abstractions/` folder is gone. No behavior changed: every member kept its checks. | P4 |
 | 86 | `ISqlCatalogSnapshot` | Sql.Catalog `:14` | model child | sealed | `public sealed class SqlCatalogSnapshot`, with an internal constructor. **At P4:** landed, promoted from `Internal/SqlCatalogSnapshot.cs` to the `RootNamespace` with the interface's documentation. | P4 |
-| 87 | `ISqlSchemaBuilder` | Sql.Schema `:9` | model child | sealed | `public sealed class SqlSchemaBuilder`, with an internal constructor. `Table<T>` is a non-virtual generic method. The SDK constant (`CSharpSchemaExtractor.cs:20`) changes in the same commit. | P4 |
-| 88 | `ISqlTableBuilder<TRow>` | Sql.Schema `:8` | model child | sealed | `public sealed class SqlTableBuilder<TRow>`. The SDK constants (`CSharpSchemaExtractor.cs:21`, `:729-730`) change in lockstep. | P4 |
-| 89 | `ISqlTypeBuilder` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlTypeBuilder`, with the SDK constant at `:22`. | P4 |
-| 90 | `ISqlPrincipalBuilder` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlPrincipalBuilder`, with the SDK constant at `:23`. | P4 |
-| 91 | `ISqlTriggerContext` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlTriggerContext`, with a private constructor. It is a phantom that appears only inside trigger expression trees. The canonicalizer string (`CSharpExpressionCanonicalizer.cs:480`) changes in lockstep. | P4 |
-| 92 | `ISqlSchema` | Sql.Schema `:9` | model child | sealed | An opaque `public sealed class SqlSchema` that exposes `Name` and `Compile()` (§6.7). | P4 |
-| 93 | `ISqlSchemaTable` | Sql.Schema `:7` | model child | delete | The internal record (`Internal/SqlSchemaBuilder.cs:228`) stays internal behind `SqlSchema`. | P4 |
-| 94 | `ISqlSchemaType` | Sql.Schema `:6` | model child | delete | The internal record (`:148`) stays internal. | P4 |
-| 95 | `ISqlSchemaColumn` | Sql.Schema `:6` | model child | delete | The internal record (`:239`) stays internal. | P4 |
-| 96 | `ISqlSchemaExtension` | Sql.Schema `:4` | model child | delete | The internal record (`:241`) stays internal. | P4 |
-| 97 | `ISqlSchemaFunction` | Sql.Schema `:6` | model child | delete | The internal record (`:243`) stays internal. | P4 |
-| 98 | `ISqlSchemaGrant` | Sql.Schema `:6` | model child | delete | The internal record (`:289`) stays internal. | P4 |
-| 99 | `ISqlSchemaPrincipal` | Sql.Schema `:6` | model child | delete | The internal record (`:285`) stays internal. | P4 |
-| 100 | `ISqlSchemaReference` | Sql.Schema `:6` | model child | delete | The internal record (`:237`) stays internal. | P4 |
-| 101 | `ISqlSchemaTrigger` | Sql.Schema `:7` | model child | delete | The internal record (`:245`) stays internal. | P4 |
+| 87 | `ISqlSchemaBuilder` | Sql.Schema `:9` | model child | sealed | `public sealed class SqlSchemaBuilder`, with an internal constructor. `Table<T>` is a non-virtual generic method. The SDK constant (`CSharpSchemaExtractor.cs:20`) changes in the same commit. **At P4 (landed):** promoted from the internal implementation to `src/SqlSchemaBuilder.cs` in the `RootNamespace`, with the interface's documentation; `Table<T>` and the other generic members are non-virtual, and the former implementation's public `AllowsDestructiveChanges` getter, which the interface did not have, is a private field. The extractor's constant (`CSharpSchemaExtractor.cs:20`) changed in the same commit. | P4 |
+| 88 | `ISqlTableBuilder<TRow>` | Sql.Schema `:8` | model child | sealed | `public sealed class SqlTableBuilder<TRow>`. The SDK constants (`CSharpSchemaExtractor.cs:21`, `:729-730`) change in lockstep. **At P4 (landed):** `src/SqlTableBuilder.cs`; the constant is `SqlTableBuilder<TRow>` and the metadata name ``SqlTableBuilder`1`` (`:21`, `:729`). `PrimaryKey` and `References<TTarget>` were explicit interface implementations (the class had a private `PrimaryKey` property); they are public members over a private field. | P4 |
+| 89 | `ISqlTypeBuilder` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlTypeBuilder`, with the SDK constant at `:22`. **At P4 (landed):** `src/SqlTypeBuilder.cs`. | P4 |
+| 90 | `ISqlPrincipalBuilder` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlPrincipalBuilder`, with the SDK constant at `:23`. **At P4 (landed):** `src/SqlPrincipalBuilder.cs`. | P4 |
+| 91 | `ISqlTriggerContext` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlTriggerContext`, with a private constructor. It is a phantom that appears only inside trigger expression trees. The canonicalizer string (`CSharpExpressionCanonicalizer.cs:480`) changes in lockstep. **At P4 (landed):** `src/SqlTriggerContext.cs`; its `Audit<TValue>` throws `NotSupportedException`, never reached, because no instance exists. The runtime canonicalizer's allow-list (`SqlSchemaCompiler.cs`) and the SDK's (`CSharpExpressionCanonicalizer.cs:480`) moved together. The type identity is in a trigger's canonical text, so the hash of a schema that declares a trigger changed (§6.7). | P4 |
+| 92 | `ISqlSchema` | Sql.Schema `:9` | model child | sealed | An opaque `public sealed class SqlSchema` that exposes `Name` and `Compile()` (§6.7). **At P4 (landed):** as planned (§6.7). | P4 |
+| 93 | `ISqlSchemaTable` | Sql.Schema `:7` | model child | delete | The internal record (`Internal/SqlSchemaBuilder.cs:228`) stays internal behind `SqlSchema`. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 94 | `ISqlSchemaType` | Sql.Schema `:6` | model child | delete | The internal record (`:148`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 95 | `ISqlSchemaColumn` | Sql.Schema `:6` | model child | delete | The internal record (`:239`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 96 | `ISqlSchemaExtension` | Sql.Schema `:4` | model child | delete | The internal record (`:241`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 97 | `ISqlSchemaFunction` | Sql.Schema `:6` | model child | delete | The internal record (`:243`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 98 | `ISqlSchemaGrant` | Sql.Schema `:6` | model child | delete | The internal record (`:289`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 99 | `ISqlSchemaPrincipal` | Sql.Schema `:6` | model child | delete | The internal record (`:285`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 100 | `ISqlSchemaReference` | Sql.Schema `:6` | model child | delete | The internal record (`:237`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 101 | `ISqlSchemaTrigger` | Sql.Schema `:7` | model child | delete | The internal record (`:245`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
 | 102 | `ISqlClient` | Sql.Client `:19` | client | sealed | `public sealed class SqlClient`. It absorbs the static class (`SqlClient.cs:11`). | P5 |
 | 103 | `ISqlClientObserver` | Sql.Client `:16` | client | abstract | `public abstract class SqlClientObserver`, with a protected constructor and `protected internal virtual` hooks with empty bodies. | P5 |
 | 104 | `ISqlConnection` | Sql.Client `:18` | client | sealed | `public sealed class SqlConnection`, with an internal constructor. | P5 |
@@ -344,7 +344,7 @@ decision.
 | `TransactionManager` (`TransactionManager.cs:12`, `Create` at `:40`) | `public static class`, `Create(ITransactionLog, ILockManager, IVersionStore, Func<TransactionSequence>?)` | The name passes to the public sealed `TransactionManager`. A public `Create(LockManager, VersionStore, Func<TransactionSequence>? = null)` builds a standalone, non-durable manager over an in-memory log. The durable manager is the one `TransactionCoordinator` builds. An internal overload takes a `TransactionLog`, for the coordinator and Transactions.Tests. In P1 the parameters are still the interfaces; P2 retypes them. **At P2:** retyped to `LockManager` and `VersionStore`, both overloads. | P1/P2 |
 | `TransactionLog` (`TransactionLog.cs:12`, `CreateInMemory` at `:19`, `CreateJournalBound(IStorageJournal)` at `:28`) | `public static class` | The public class is deleted. The name passes to `internal abstract class TransactionLog`, and its factories become internal statics on it. [Certain] Only tests called them: Transactions.Tests, and Indexing.Tests through the harness, which the new `Create` no longer needs. | P1 |
 | `VersionStore` (`VersionStore.cs:8`, `CreateInMemory` at `:16`) | `public static class`, returns `IVersionStore` | The name passes to `public abstract class VersionStore` (row 45), and `CreateInMemory()` stays as a static on the base. **At P2:** landed as planned. | P2 |
-| `SqlSchemaCompiler` (`Sql.Schema/src/SqlSchemaCompiler.cs:13`, `Compile(ISqlSchema, EngineModel)` at `:20`) | `public static class` | Becomes `internal static`. The public compile entry points are `SqlSchema.Compile(name, configure)` (static, unchanged) and the instance `SqlSchema.Compile()`. [Certain] Outside Sql.Schema, only Sql.Schema's own tests call it. | P4 |
+| `SqlSchemaCompiler` (`Sql.Schema/src/SqlSchemaCompiler.cs:13`, `Compile(ISqlSchema, EngineModel)` at `:20`) | `public static class` | Becomes `internal static`. The public compile entry points are `SqlSchema.Compile(name, configure)` (static, unchanged) and the instance `SqlSchema.Compile()`. [Certain] Outside Sql.Schema, only Sql.Schema's own tests call it. **At P4 (landed):** `internal static`, with `Compile(SqlSchema, EngineModel)` reading the declaration behind the opaque type; the tests reach it through the new grant (§6.9), among them the four model-mismatch cases, which no public path can reach any more (the public entry points compile for `EngineModel.Sql` only). | P4 |
 | `ProtocolFraming` (`Protocol/src/ProtocolFraming.cs:11`, `CreateReader` at `:19`, `CreateWriter` at `:31`) | `public static class`, returns the frame interfaces | Deleted. The factories move onto the abstract bases (`ProtocolFrameReader.Create`, `ProtocolFrameWriter.Create`), the `Aes.Create()` shape. The callers are the four model servers, `ProtocolChannel`, two test clients and the Protocol tests. **Landed at P2:** the caller list held (the servers' at-capacity rejection writer, the Sql and KeyValuePair test protocol clients, `ProtocolFramingTests` and `ProtocolFamilyTests`). | P2 |
 | `TransactionRecovery` (`TransactionRecovery.cs:18`, `Analyze` at `:25` and `:40`) | `public static class` taking `IStorageJournal` | Kept as a public static class: it is a stateless analysis with no interface twin. The parameter is retyped to `StorageJournal`. | P1 |
 | `Sql.Sum<TSource>` (`Sql/src/Sql.cs:23`) | returns `ISqlAggregateExpression` | Returns `SqlAggregateExpression` (row 81). | P4 |
@@ -1332,6 +1332,35 @@ which phase 7's retype removes) where it cast the session's database to `IBlobDa
 - **Gate.** The SDK tests run against refreshed canonical packs, because a stale pack hides a real
   failure.
 
+**At P4 (re-verified, then landed).** The section held against the code, with three readings:
+
+- *The builders' file.* The four builders, their records and `SqlSchemaModel` shared
+  `Internal/SqlSchemaBuilder.cs`. The builders moved to their own files in the `RootNamespace`
+  (`SqlSchemaBuilder.cs`, `SqlTableBuilder.cs`, `SqlTypeBuilder.cs`, `SqlPrincipalBuilder.cs`,
+  `SqlTriggerContext.cs`); the records stayed, in the renamed `Internal/SqlSchemaDeclaration.cs`,
+  with `SqlSchemaModel` renamed `SqlSchemaDeclaration` so "model" means only `EngineModel`. The
+  builder classes had been the internal implementations: `SqlSchemaTableBuilder<TRow>` became
+  `SqlTableBuilder<TRow>`, `SqlSchemaTypeBuilder` `SqlTypeBuilder` and
+  `SqlSchemaPrincipalBuilder` `SqlPrincipalBuilder`, each with an internal constructor and the
+  interface's documentation.
+- *The opaque type.* `SqlSchema` exposes `Name`, the instance `Compile()` and the two statics;
+  `Compile(name, configure)` is `Create(name, configure).Compile()`, so both paths validate and
+  hash alike (`SqlSchemaTests.Compile_FromDeclaration_ShouldMatchOneStepCompilation`). The
+  declaration is an internal `Declaration` property the compiler and the tests read.
+- *What a caller can observe.* The trigger context's assembly-qualified identity is part of a
+  trigger's canonical expression (`lambda<…>(p0:…SqlTriggerContext,…)` and the `Audit` call's
+  method id), so the hash of a schema that declares a trigger changed with the rename; nothing has
+  shipped (§1). The builder's `Table<T>(name, …)` and `Extension(name, …)` report a blank name
+  with `ParamName` `name`, the documented parameter, where the former implementation reported
+  `tableName` and `extensionName` (`SqlSchemaTests.Create_WithInvalidArguments_ShouldRejectDeclaration`).
+  Nothing else changed: the extractor matches the new names (`SchemaBuilderType`,
+  `TableBuilderType`, `TypeBuilderType`, `PrincipalBuilderType` and the ``SqlTableBuilder`1``
+  metadata name in `CSharpSchemaExtractor.cs`, `SqlTriggerContext` in
+  `CSharpExpressionCanonicalizer.cs`), and the SDK's parity test
+  (`CompileDatabaseSchemaTaskTests`), which declares a custom type, tables with a reference, a
+  function, a trigger and a principal, compiles the same canonical document through the runtime and
+  through the SDK.
+
 ### 6.8 One Diagnostics convention: never null (D12)
 
 `QueryResult.Diagnostics` is nullable (`Execution/src/QueryResult.cs:33`), and its ten overrides
@@ -1363,7 +1392,7 @@ statement (#1228).
 | Grant | Phase | Needed by |
 |---|---|---|
 | Transactions → `Assimalign.Cohesion.Database.Transactions.Tests` (**already present** at P1: `src/Properties/AssemblyInfo.cs` landed with the deferred-undo backoff's internal clock, so P1 adds no grant) | P1 | `FailingCommitLog` (`TransactionManagerTests.cs`); `ControlledLog` (`TransactionManagerRollbackTests.cs`); `ControlledVersionStore` (from P2); tests that call the now-internal log factories and the internal `TransactionManager.Create` overload; the coordinator's three internal test hooks (below) |
-| Sql.Schema → `Assimalign.Cohesion.Database.Sql.Schema.Tests` (new `src/Properties/AssemblyInfo.cs`) | P4 (Sql) | `SqlSchemaTests.cs` and `CompiledSchemaTests.cs`, which read the internal declaration model |
+| Sql.Schema → `Assimalign.Cohesion.Database.Sql.Schema.Tests` (new `src/Properties/AssemblyInfo.cs`) | P4 (Sql) | `SqlSchemaTests.cs` and `CompiledSchemaTests.cs`, which read the internal declaration model. **Landed at P4**, the package's first grant; the tests also call the internal `SqlSchemaCompiler` |
 
 Every other derivation goes through a protected constructor, or through a grant that already
 exists. [Certain] The existing grants cover Storage, Sql, Sql.Catalog, Sql.Storage, Sql.Language,

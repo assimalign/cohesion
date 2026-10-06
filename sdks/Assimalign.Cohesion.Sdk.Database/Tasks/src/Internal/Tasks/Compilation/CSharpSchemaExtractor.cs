@@ -17,10 +17,10 @@ namespace Assimalign.Cohesion.Sdk.Database.Tasks.Internal;
 /// </summary>
 internal sealed class CSharpSchemaExtractor
 {
-    private const string SchemaBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.ISqlSchemaBuilder";
-    private const string TableBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.ISqlTableBuilder<T>";
-    private const string TypeBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.ISqlTypeBuilder";
-    private const string PrincipalBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.ISqlPrincipalBuilder";
+    private const string SchemaBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlSchemaBuilder";
+    private const string TableBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlTableBuilder<TRow>";
+    private const string TypeBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlTypeBuilder";
+    private const string PrincipalBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.SqlPrincipalBuilder";
 
     private static readonly SymbolDisplayFormat _typeDisplayFormat = new(
         globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
@@ -726,7 +726,7 @@ internal sealed class CSharpSchemaExtractor
     {
         INamedTypeSymbol containingType = method.ContainingType.OriginalDefinition;
         return string.Equals(typeName, TableBuilderType, StringComparison.Ordinal) &&
-            string.Equals(containingType.MetadataName, "ISqlTableBuilder`1", StringComparison.Ordinal) &&
+            string.Equals(containingType.MetadataName, "SqlTableBuilder`1", StringComparison.Ordinal) &&
             string.Equals(containingType.ContainingNamespace.ToDisplayString(), "Assimalign.Cohesion.Database.Sql.Schema", StringComparison.Ordinal);
     }
 

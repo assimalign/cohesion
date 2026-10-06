@@ -5,6 +5,8 @@ using System.Linq.Expressions;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Sql.Schema.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
 
 public class SqlSchemaTests
@@ -12,7 +14,7 @@ public class SqlSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: one-step compilation matches the explicit compiler")]
     public void Compile_WithValidDeclaration_ShouldMatchTwoStepCompilation()
     {
-        static void Configure(ISqlSchemaBuilder database)
+        static void Configure(SqlSchemaBuilder database)
         {
             database.Type<Money>(type => type.Decimal(18, 2));
             database.Table<Order>("orders", table =>
@@ -35,7 +37,7 @@ public class SqlSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: one-step compilation preserves compiler validation errors")]
     public void Compile_WithInvalidDeclaration_ShouldMatchTwoStepValidationErrors()
     {
-        static void Configure(ISqlSchemaBuilder database)
+        static void Configure(SqlSchemaBuilder database)
         {
             database.Table<Order>("orders", table => table.Key(order => order.Id));
             database.Table<Order>("orders", table => table.Key(order => order.Id));
@@ -69,7 +71,7 @@ public class SqlSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: declarations retain the complete compile-time model")]
     public void Create_WithSchemaDeclarations_ShouldRetainCompileTimeModel()
     {
-        ISqlSchema schema = SqlSchema.Create("orders", database =>
+        SqlSchema schema = SqlSchema.Create("orders", database =>
         {
             database.Type<Money>(type => type.Decimal(18, 2));
             database.Table<Order>(table =>
@@ -93,40 +95,40 @@ public class SqlSchemaTests
 
         schema.Name.ShouldBe("orders");
 
-        ISqlSchemaType type = schema.Types.ShouldHaveSingleItem();
+        SqlSchemaType type = schema.Declaration.Types.ShouldHaveSingleItem();
         type.ClrType.ShouldBe(typeof(Money));
         type.Precision.ShouldBe(18);
         type.Scale.ShouldBe(2);
 
-        schema.Tables.Count.ShouldBe(2);
-        ISqlSchemaTable order = schema.Tables[0];
+        schema.Declaration.Tables.Count.ShouldBe(2);
+        SqlSchemaTable order = schema.Declaration.Tables[0];
         order.RowType.ShouldBe(typeof(Order));
         order.PrimaryKey.ShouldBe(nameof(Order.Id));
         order.Indexes.ShouldBe([nameof(Order.CustomerId)]);
         order.Columns.ShouldBe([nameof(Order.Id), nameof(Order.CustomerId)]);
 
-        ISqlSchemaTable line = schema.Tables[1];
+        SqlSchemaTable line = schema.Declaration.Tables[1];
         line.RowType.ShouldBe(typeof(OrderLine));
         line.PrimaryKey.ShouldBe(nameof(OrderLine.Id));
-        ISqlSchemaReference reference = line.References.ShouldHaveSingleItem();
+        SqlSchemaReference reference = line.References.ShouldHaveSingleItem();
         reference.Member.ShouldBe(nameof(OrderLine.OrderId));
         reference.TargetType.ShouldBe(typeof(Order));
 
-        ISqlSchemaFunction function = schema.Functions.ShouldHaveSingleItem();
+        SqlSchemaFunction function = schema.Declaration.Functions.ShouldHaveSingleItem();
         function.Name.ShouldBe("order_identity");
         function.Body.ShouldBeAssignableTo<Expression<Func<long, long>>>();
         function.Body.Parameters.ShouldHaveSingleItem().Type.ShouldBe(typeof(long));
 
-        ISqlSchemaTrigger trigger = schema.Triggers.ShouldHaveSingleItem();
+        SqlSchemaTrigger trigger = schema.Declaration.Triggers.ShouldHaveSingleItem();
         trigger.RowType.ShouldBe(typeof(Order));
         trigger.Event.ShouldBe(SqlTriggerEvent.AfterInsert);
         trigger.Body.Parameters.Count.ShouldBe(2);
-        trigger.Body.Parameters[0].Type.ShouldBe(typeof(ISqlTriggerContext));
+        trigger.Body.Parameters[0].Type.ShouldBe(typeof(SqlTriggerContext));
         trigger.Body.Parameters[1].Type.ShouldBe(typeof(Order));
 
-        ISqlSchemaPrincipal principal = schema.Principals.ShouldHaveSingleItem();
+        SqlSchemaPrincipal principal = schema.Declaration.Principals.ShouldHaveSingleItem();
         principal.Name.ShouldBe("appa-api");
-        ISqlSchemaGrant grant = principal.Grants.ShouldHaveSingleItem();
+        SqlSchemaGrant grant = principal.Grants.ShouldHaveSingleItem();
         grant.Permission.ShouldBe(SqlPermission.ReadWrite);
         grant.Objects.ShouldBe(["Orders", "OrderLines"]);
     }
@@ -134,9 +136,9 @@ public class SqlSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: completed declarations are immutable snapshots")]
     public void Create_WhenRetainedBuildersChange_ShouldKeepCompletedSnapshot()
     {
-        ISqlTableBuilder<Order>? retainedTable = null;
-        ISqlPrincipalBuilder? retainedPrincipal = null;
-        ISqlSchema schema = SqlSchema.Create("orders", database =>
+        SqlTableBuilder<Order>? retainedTable = null;
+        SqlPrincipalBuilder? retainedPrincipal = null;
+        SqlSchema schema = SqlSchema.Create("orders", database =>
         {
             database.Table<Order>(table =>
             {
@@ -153,8 +155,8 @@ public class SqlSchemaTests
         retainedTable!.Index(order => order.CustomerId);
         retainedPrincipal!.Grant(SqlPermission.Write, "Orders");
 
-        schema.Tables.ShouldHaveSingleItem().Indexes.ShouldBeEmpty();
-        schema.Principals.ShouldHaveSingleItem().Grants.ShouldHaveSingleItem();
+        schema.Declaration.Tables.ShouldHaveSingleItem().Indexes.ShouldBeEmpty();
+        schema.Declaration.Principals.ShouldHaveSingleItem().Grants.ShouldHaveSingleItem();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: table selectors require a direct row member")]
@@ -181,6 +183,44 @@ public class SqlSchemaTests
         Should.Throw<ArgumentException>(() => SqlSchema.Create(
             "orders",
             database => database.Principal("reader", principal => principal.Grant(SqlPermission.Read))));
+
+        // The sealed builder's parameters carry the names its documentation gives; the former
+        // implementation behind the interface reported "tableName" and "extensionName".
+        Should.Throw<ArgumentException>(() => SqlSchema.Create(
+            "orders",
+            database => database.Table<Order>(" ", _ => { }))).ParamName.ShouldBe("name");
+        Should.Throw<ArgumentException>(() => SqlSchema.Create(
+            "orders",
+            database => database.Extension(" ", "value"))).ParamName.ShouldBe("name");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: a declaration compiles itself as the one-step form does")]
+    public void Compile_FromDeclaration_ShouldMatchOneStepCompilation()
+    {
+        static void Configure(SqlSchemaBuilder database)
+        {
+            database.Table<Order>("orders", table =>
+            {
+                table.PrimaryKey(order => order.Id);
+                table.Index(order => order.CustomerId);
+            });
+            database.Trigger<Order>(
+                SqlTriggerEvent.AfterInsert,
+                (transaction, row) => transaction.Audit("order.placed", row.Id));
+        }
+
+        SqlSchema declaration = SqlSchema.Create("orders", Configure);
+        SqlCompiledSchema compiled = declaration.Compile();
+
+        declaration.Name.ShouldBe("orders");
+        compiled.Name.ShouldBe("orders");
+        compiled.Model.ShouldBe(EngineModel.Sql);
+        compiled.Hash.ShouldBe(SqlSchema.Compile("orders", Configure).Hash);
+
+        // The trigger context is a phantom that only expression trees name: its canonical text
+        // carries the sealed type's identity, which the Sdk.Database canonicalizer matches.
+        compiled.Triggers.ShouldHaveSingleItem().Body.CanonicalText
+            .ShouldContain("Assimalign.Cohesion.Database.Sql.Schema:Assimalign.Cohesion.Database.Sql.Schema.SqlTriggerContext.Audit");
     }
 
     private static long StaticId => 42;

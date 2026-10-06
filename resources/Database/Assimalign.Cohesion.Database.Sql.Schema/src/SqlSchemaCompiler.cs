@@ -5,21 +5,29 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Text;
 
+using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Schema;
 
-/// <summary>Validates and lowers retained C# schema declarations into stable compiled schemas.</summary>
-public static class SqlSchemaCompiler
+/// <summary>
+/// Validates and lowers retained C# schema declarations into stable compiled schemas. Internal
+/// since phase 4 of the concrete-types plan (§6.7): the public entry points are
+/// <see cref="SqlSchema.Compile()"/> and <see cref="SqlSchema.Compile(string, Action{SqlSchemaBuilder})"/>,
+/// and only the project's tests compile for another engine model.
+/// </summary>
+internal static class SqlSchemaCompiler
 {
     /// <summary>Compiles a schema declaration for an engine model.</summary>
-    /// <param name="schema">The retained C# declaration.</param>
+    /// <param name="declaration">The retained C# declaration.</param>
     /// <param name="model">The declared engine model.</param>
     /// <returns>An immutable compiled schema with a deterministic content hash.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="declaration"/> is null.</exception>
     /// <exception cref="SqlSchemaValidationException">The declaration cannot be represented by the model.</exception>
-    public static SqlCompiledSchema Compile(ISqlSchema schema, EngineModel model = EngineModel.Sql)
+    internal static SqlCompiledSchema Compile(SqlSchema declaration, EngineModel model = EngineModel.Sql)
     {
-        ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(declaration);
+        SqlSchemaDeclaration schema = declaration.Declaration;
         var errors = new List<SqlSchemaValidationError>();
 
         if (model != EngineModel.Sql)
@@ -56,12 +64,12 @@ public static class SqlSchemaCompiler
     }
 
     private static Dictionary<Type, CompiledSchemaType> CompileTypes(
-        ISqlSchema schema,
+        SqlSchemaDeclaration schema,
         List<SqlSchemaValidationError> errors)
     {
         var result = new Dictionary<Type, CompiledSchemaType>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (ISqlSchemaType declaration in schema.Types)
+        foreach (SqlSchemaType declaration in schema.Types)
         {
             string name = TypeId(declaration.ClrType);
             if (!names.Add(name) || result.ContainsKey(declaration.ClrType))
@@ -87,16 +95,16 @@ public static class SqlSchemaCompiler
     }
 
     private static List<CompiledSchemaTable> CompileTables(
-        ISqlSchema schema,
+        SqlSchemaDeclaration schema,
         EngineModel model,
         IReadOnlyDictionary<Type, CompiledSchemaType> customTypes,
         List<SqlSchemaValidationError> errors)
     {
         var result = new List<CompiledSchemaTable>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var rows = new Dictionary<Type, ISqlSchemaTable>();
+        var rows = new Dictionary<Type, SqlSchemaTable>();
 
-        foreach (ISqlSchemaTable table in schema.Tables)
+        foreach (SqlSchemaTable table in schema.Tables)
         {
             if (!names.Add(table.Name))
             {
@@ -110,7 +118,7 @@ public static class SqlSchemaCompiler
             }
         }
 
-        foreach (ISqlSchemaTable table in schema.Tables)
+        foreach (SqlSchemaTable table in schema.Tables)
         {
             if (!names.Contains(table.Name) || result.Any(item => string.Equals(item.Name, table.Name, StringComparison.OrdinalIgnoreCase)))
             {
@@ -152,9 +160,9 @@ public static class SqlSchemaCompiler
 
             var constraints = new List<CompiledSchemaConstraint>();
             var constraintNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (ISqlSchemaReference reference in table.References.OrderBy(value => value.Member, StringComparer.Ordinal))
+            foreach (SqlSchemaReference reference in table.References.OrderBy(value => value.Member, StringComparer.Ordinal))
             {
-                if (!rows.TryGetValue(reference.TargetType, out ISqlSchemaTable? target))
+                if (!rows.TryGetValue(reference.TargetType, out SqlSchemaTable? target))
                 {
                     errors.Add(Error(SqlSchemaValidationErrorCode.UnknownReference, $"{table.Name}.{reference.Member}", $"Referenced row type '{TypeId(reference.TargetType)}' is not declared."));
                     continue;
@@ -247,13 +255,13 @@ public static class SqlSchemaCompiler
 
     private static IReadOnlyList<CompiledSchemaColumn> CompileColumns(
         string owner,
-        IReadOnlyList<ISqlSchemaColumn> declarations,
+        IReadOnlyList<SqlSchemaColumn> declarations,
         IReadOnlyDictionary<Type, CompiledSchemaType> customTypes,
         List<SqlSchemaValidationError> errors)
     {
         var result = new List<CompiledSchemaColumn>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (ISqlSchemaColumn column in declarations)
+        foreach (SqlSchemaColumn column in declarations)
         {
             if (!names.Add(column.Name))
             {
@@ -279,13 +287,13 @@ public static class SqlSchemaCompiler
     }
 
     private static List<CompiledSchemaFunction> CompileFunctions(
-        ISqlSchema schema,
+        SqlSchemaDeclaration schema,
         IReadOnlyDictionary<Type, CompiledSchemaType> customTypes,
         List<SqlSchemaValidationError> errors)
     {
         var result = new List<CompiledSchemaFunction>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (ISqlSchemaFunction function in schema.Functions)
+        foreach (SqlSchemaFunction function in schema.Functions)
         {
             if (!names.Add(function.Name))
             {
@@ -325,18 +333,18 @@ public static class SqlSchemaCompiler
     }
 
     private static List<CompiledSchemaTrigger> CompileTriggers(
-        ISqlSchema schema,
+        SqlSchemaDeclaration schema,
         IReadOnlyList<CompiledSchemaTable> tables,
         List<SqlSchemaValidationError> errors)
     {
         var result = new List<CompiledSchemaTrigger>();
         var rawTables = new Dictionary<Type, string>();
-        foreach (ISqlSchemaTable table in schema.Tables)
+        foreach (SqlSchemaTable table in schema.Tables)
         {
             rawTables.TryAdd(table.RowType, table.Name);
         }
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (ISqlSchemaTrigger trigger in schema.Triggers)
+        foreach (SqlSchemaTrigger trigger in schema.Triggers)
         {
             if (!rawTables.TryGetValue(trigger.RowType, out string? tableName) || !tables.Any(table => string.Equals(table.Name, tableName, StringComparison.OrdinalIgnoreCase)))
             {
@@ -362,7 +370,7 @@ public static class SqlSchemaCompiler
     }
 
     private static List<CompiledSchemaPrincipal> CompilePrincipals(
-        ISqlSchema schema,
+        SqlSchemaDeclaration schema,
         IReadOnlyList<CompiledSchemaTable> tables,
         IReadOnlyList<CompiledSchemaFunction> functions,
         List<SqlSchemaValidationError> errors)
@@ -372,7 +380,7 @@ public static class SqlSchemaCompiler
         var objects = new HashSet<string>(tables.Select(table => table.Name), StringComparer.OrdinalIgnoreCase);
         objects.UnionWith(functions.Select(function => function.Name));
 
-        foreach (ISqlSchemaPrincipal principal in schema.Principals)
+        foreach (SqlSchemaPrincipal principal in schema.Principals)
         {
             if (!names.Add(principal.Name))
             {
@@ -381,7 +389,7 @@ public static class SqlSchemaCompiler
             }
 
             var grants = new List<CompiledSchemaGrant>();
-            foreach (IGrouping<SqlPermission, ISqlSchemaGrant> permissionGroup in principal.Grants
+            foreach (IGrouping<SqlPermission, SqlSchemaGrant> permissionGroup in principal.Grants
                 .GroupBy(value => value.Permission)
                 .OrderBy(value => value.Key))
             {
@@ -408,12 +416,12 @@ public static class SqlSchemaCompiler
     }
 
     private static List<CompiledSchemaExtension> CompileExtensions(
-        ISqlSchema schema,
+        SqlSchemaDeclaration schema,
         List<SqlSchemaValidationError> errors)
     {
         var result = new List<CompiledSchemaExtension>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (ISqlSchemaExtension extension in schema.Extensions)
+        foreach (SqlSchemaExtension extension in schema.Extensions)
         {
             if (!names.Add(extension.Name))
             {
@@ -747,7 +755,7 @@ public static class SqlSchemaCompiler
 
         private static bool IsAllowedMethod(Type? declaringType)
         {
-            return declaringType == typeof(ISqlTriggerContext)
+            return declaringType == typeof(SqlTriggerContext)
                 || declaringType == typeof(string)
                 || declaringType == typeof(Math)
                 || declaringType == typeof(MathF)

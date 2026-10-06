@@ -1,8 +1,8 @@
 # Assimalign.Cohesion.Database.Sql.Schema — Overview
 
-SQL's thin schema package provides one-step `SqlSchema.Compile`, lower-level
-`SqlSchema.Create` and `SqlSchemaCompiler`, the `ISqlSchema*` declaration contracts,
-`SqlCompiledSchema`, its canonical
+SQL's thin schema package provides one-step `SqlSchema.Compile`, the lower-level
+`SqlSchema.Create` with the opaque declaration it returns and its own `Compile()`, the
+sealed declaration builders, `SqlCompiledSchema`, its canonical
 serializer, and SQL migration planning. Both SDK build tooling and the SQL engine
 consume it without moving relational vocabulary into the Database area root.
 
