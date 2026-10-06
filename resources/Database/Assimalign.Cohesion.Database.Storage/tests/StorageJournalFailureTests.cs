@@ -123,7 +123,7 @@ public sealed class StorageJournalFailureTests
     {
         // Arrange: a written record, then two buffered ones whose drain tears half-way.
         var stream = new FaultingMemoryStream();
-        var journal = new StorageJournal(stream, leaveOpen: true);
+        var journal = StorageJournal.Create(stream, leaveOpen: true);
         journal.AppendBegin(1);
         journal.Flush();
         long lengthBefore = stream.Length;
@@ -145,7 +145,7 @@ public sealed class StorageJournalFailureTests
         var readOffline = journal.ReadAll();
         journal.Dispose();
         long lengthAfterClose = stream.Length;
-        using var reopened = new StorageJournal(new MemoryStream(stream.ToArray()));
+        using var reopened = StorageJournal.Create(new MemoryStream(stream.ToArray()));
         var recovered = reopened.ReadAll();
         reopened.AppendBegin(3);
         reopened.Flush();
@@ -172,7 +172,7 @@ public sealed class StorageJournalFailureTests
     {
         // Arrange
         var stream = new FaultingMemoryStream();
-        using var journal = new StorageJournal(new StorageStream(new SimulatedDurableFileHandle(stream)));
+        using var journal = StorageJournal.Create(new StorageStream(new SimulatedDurableFileHandle(stream)));
         long durable = journal.AppendCommit(1);
         journal.EnsureDurable(durable);
         long written = journal.AppendCommit(2);

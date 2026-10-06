@@ -113,14 +113,14 @@ public sealed class NonDurableStorageTests
     public void ReopenedNonDurableJournalDoesNotClaimExistingBytesAreDurable()
     {
         using var memory = new MemoryStream();
-        using (var journal = new StorageJournal(memory, leaveOpen: true))
+        using (var journal = StorageJournal.Create(memory, leaveOpen: true))
         {
             journal.AppendBegin(1);
             journal.AppendCommit(1);
             journal.Flush();
         }
 
-        using var reopened = new StorageJournal(memory, leaveOpen: true);
+        using var reopened = StorageJournal.Create(memory, leaveOpen: true);
         reopened.LastLsn.ShouldBe(2L);
         reopened.DurableLsn.ShouldBe(0L);
         Should.Throw<NotSupportedException>(() => reopened.EnsureDurable(reopened.LastLsn));

@@ -791,7 +791,7 @@ public class TransactionCoordinatorRollbackTests
 
         // Assert: the statement's records were still buffered before the commit; after it the
         // reopen's recovery reads the writer as committed, and a new snapshot sees its version.
-        new StorageJournal(new MemoryStream(beforeTheCommit.Journal)).ReadAll()
+        StorageJournal.Create(new MemoryStream(beforeTheCommit.Journal)).ReadAll()
             .ShouldNotContain(record => record.TransactionSequence == (long)writer.Sequence.Value);
         plan.Committed.ShouldContain(writer.Sequence);
         plan.Aborted.ShouldNotContain(writer.Sequence);

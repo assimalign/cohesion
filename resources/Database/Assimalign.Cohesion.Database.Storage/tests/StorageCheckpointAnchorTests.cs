@@ -138,7 +138,7 @@ public sealed class StorageCheckpointAnchorTests
         // Assert: the freed page's Free image was still in the journal recovery replayed, yet the
         // chain page holding the new anchor survived it — on disk and in the allocator.
         pages.ShouldContain(chainPage);
-        new StorageJournal(new MemoryStream(images.Journal)).ReadAll()
+        StorageJournal.Create(new MemoryStream(images.Journal)).ReadAll()
             .Count(record => record.Type is JournalRecordType.PageDelta or JournalRecordType.CommittedPageImage && (long)record.PageId == chainPage)
             .ShouldBeGreaterThan(0);
         reopened.CheckpointActiveTransactions.ShouldBe(anchor);
@@ -172,7 +172,7 @@ public sealed class StorageCheckpointAnchorTests
         SimulatedPowerLossException.ShouldBeThrownBy(() => storage.Checkpoint(anchor));
         var images = storage.CaptureDurable();
         using var reopened = TornStorage.Open(images);
-        bool freeIsDurable = new StorageJournal(new MemoryStream(images.Journal)).ReadAll()
+        bool freeIsDurable = StorageJournal.Create(new MemoryStream(images.Journal)).ReadAll()
             .Any(record => record.Type == JournalRecordType.CommitTransaction && record.TransactionSequence == freer);
 
         // Assert: the row is gone only if the bracket that freed it survived, and it did — the
@@ -206,7 +206,7 @@ public sealed class StorageCheckpointAnchorTests
         SimulatedPowerLossException.ShouldBeThrownBy(() => storage.FlushHeader());
         var images = storage.CaptureDurable();
         using var reopened = TornStorage.Open(images);
-        bool freeIsDurable = new StorageJournal(new MemoryStream(images.Journal)).ReadAll()
+        bool freeIsDurable = StorageJournal.Create(new MemoryStream(images.Journal)).ReadAll()
             .Any(record => record.Type == JournalRecordType.CommitTransaction && record.TransactionSequence == freer);
         var chainPage = images.Data.AsSpan((int)(pages[0] * Units.Page.Size), Units.Page.Size);
 

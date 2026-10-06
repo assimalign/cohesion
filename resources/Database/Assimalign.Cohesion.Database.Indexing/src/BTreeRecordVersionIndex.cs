@@ -20,14 +20,23 @@ public sealed class BTreeRecordVersionIndex : RecordVersionIndex
 {
     private readonly BTreeIndex _index;
 
+    // Private: the static factory is the one way in (database-area.md, rule 1; owner decision 27
+    // of 2026-10-06).
+    private BTreeRecordVersionIndex(BTreeIndex index)
+    {
+        _index = index;
+    }
+
     /// <summary>
-    /// Initializes a binding to the index whose versions the ledger tracks.
+    /// Creates a binding to the index whose versions the ledger tracks.
     /// </summary>
     /// <param name="index">The index to undo through.</param>
-    public BTreeRecordVersionIndex(BTreeIndex index)
+    /// <returns>The binding.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="index"/> is null.</exception>
+    public static BTreeRecordVersionIndex Create(BTreeIndex index)
     {
         ArgumentNullException.ThrowIfNull(index);
-        _index = index;
+        return new BTreeRecordVersionIndex(index);
     }
 
     /// <inheritdoc />

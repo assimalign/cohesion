@@ -24,14 +24,8 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
     /// <inheritdoc />
     protected override async ValueTask WriteFrameCoreAsync(ProtocolFrame frame, CancellationToken cancellationToken)
     {
-        // The payload bound belongs to the one writer that encodes the envelope; the
-        // decorating writers forward here, so every frame that reaches the wire is checked.
-        if ((uint)frame.Payload.Length > ProtocolFrameHeader.MaxPayloadLength)
-        {
-            throw new ProtocolException(
-                $"Frame payload of {frame.Payload.Length} bytes exceeds the {ProtocolFrameHeader.MaxPayloadLength}-byte maximum.");
-        }
-
+        // The payload bound is checked by the base's public WriteFrameAsync before this core runs
+        // (owner decision 29 of 2026-10-06), so every frame that reaches here is within it.
         frame.Header.WriteTo(_header);
         await _stream.WriteAsync(_header, cancellationToken).ConfigureAwait(false);
 

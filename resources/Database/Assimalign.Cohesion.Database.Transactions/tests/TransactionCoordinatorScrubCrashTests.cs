@@ -30,7 +30,7 @@ public sealed class TransactionCoordinatorScrubCrashTests
     {
         // Arrange
         var crashed = await CrashedAsync();
-        var originalRecords = new StorageJournal(new MemoryStream(crashed.Journal)).ReadAll();
+        var originalRecords = StorageJournal.Create(new MemoryStream(crashed.Journal)).ReadAll();
         long originalEnd = originalRecords[^1].Lsn;
         var lastRecordOfPage = originalRecords
             .Where(record => record.Type is JournalRecordType.FullPageImage or JournalRecordType.PageDelta or JournalRecordType.CommittedPageImage)

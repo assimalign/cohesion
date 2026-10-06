@@ -131,7 +131,7 @@ public sealed class FileSystemDurabilityTests
         WithPhysicalFileSystem(fileSystem =>
         {
             using var stream = StorageStream.FromFile("wrapped.log", fileSystem);
-            using var journal = new StorageJournal((Stream)stream, leaveOpen: true);
+            using var journal = StorageJournal.Create((Stream)stream, leaveOpen: true);
             var handle = fileSystem.Opened.Single().Handle;
             long lsn = journal.AppendBegin(1);
 

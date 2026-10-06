@@ -56,7 +56,7 @@ internal static class JournalImage
     /// The records a journal holds, decoded.
     /// </summary>
     internal static IReadOnlyList<JournalRecord> Records(byte[] journal)
-        => new StorageJournal(new MemoryStream(journal)).ReadAll();
+        => StorageJournal.Create(new MemoryStream(journal)).ReadAll();
 
     /// <summary>
     /// The page records of a journal for one page, in order.
