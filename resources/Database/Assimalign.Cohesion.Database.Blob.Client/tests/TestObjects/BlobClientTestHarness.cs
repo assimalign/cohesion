@@ -2,6 +2,7 @@ using System;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Client;
@@ -10,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
 
 internal sealed class BlobClientTestHarness : IAsyncDisposable
 {
-    private BlobClientTestHarness(BlobDatabaseEngine engine, IBlobDatabase database, IBlobContainer container,
+    private BlobClientTestHarness(BlobDatabaseEngine engine, BlobDatabase database, BlobContainer container,
         InMemoryConnectionListener listener, BlobDatabaseServer server, RecordingConnectionFactory factory, IBlobClient client)
     {
         Engine = engine;
@@ -23,8 +24,8 @@ internal sealed class BlobClientTestHarness : IAsyncDisposable
     }
 
     internal BlobDatabaseEngine Engine { get; }
-    internal IBlobDatabase Database { get; }
-    internal IBlobContainer Container { get; }
+    internal BlobDatabase Database { get; }
+    internal BlobContainer Container { get; }
     internal InMemoryConnectionListener Listener { get; }
     internal BlobDatabaseServer Server { get; }
     internal RecordingConnectionFactory Factory { get; }
@@ -33,7 +34,7 @@ internal sealed class BlobClientTestHarness : IAsyncDisposable
     internal static async Task<BlobClientTestHarness> StartAsync(CancellationToken token)
     {
         var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("app", token);
+        var database = await engine.CreateDatabaseAsync("app", token);
         var container = await database.CreateContainerAsync("files", token);
         var listener = new InMemoryConnectionListener();
         var server = BlobDatabaseServer.Create(engine, new()

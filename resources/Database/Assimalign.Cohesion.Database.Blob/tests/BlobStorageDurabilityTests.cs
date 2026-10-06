@@ -2,11 +2,10 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Blob.Internal;
-using Assimalign.Cohesion.Database.Storage;
-
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -25,7 +24,7 @@ public sealed class BlobStorageDurabilityTests
         {
             await using (var engine = BlobDatabaseEngine.Create(options))
             {
-                var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("db");
+                var database = await engine.CreateDatabaseAsync("db");
                 database.DataStorage.SupportsDurableFlush.ShouldBe(physical);
                 database.DataStorage.CommitDurability.ShouldBe(expected);
                 using var transaction = database.DataStorage.BeginTransaction();
@@ -42,7 +41,7 @@ public sealed class BlobStorageDurabilityTests
             if (physical)
             {
                 await using var reopened = BlobDatabaseEngine.Create(options);
-                var database = (BlobDatabaseInstance)await reopened.OpenDatabaseAsync("db");
+                var database = await reopened.OpenDatabaseAsync("db");
                 database.DataStorage.CommitDurability.ShouldBe(expected);
             }
         }

@@ -4,11 +4,13 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
-using Shouldly;
-using Xunit;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -24,6 +26,8 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 /// </summary>
 public sealed class BlobTransactionFailureTests
 {
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+
     /// <summary>The issue's reproduction: a failure, then a write, then ROLLBACK leaves the blobs unchanged.</summary>
     /// <param name="failure">The kind of operation that fails inside the transaction.</param>
     /// <param name="isolation">The isolation level the explicit transaction runs under.</param>
@@ -39,23 +43,22 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "keep", "original");
+        await WriteAsync(container, "keep", "original");
         await using var session = await database.CreateSessionAsync();
-        var scoped = (IBlobDatabase)session.Database;
-        var files = await scoped.GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync(isolation);
         if (failure == "conflict")
         {
             // Another session replaces the blob after this snapshot began, before the transaction
             // takes the database writer lock with its first write.
-            await Write(container, "keep", "changed");
+            await WriteAsync(container, "keep", "changed");
         }
-        await Write(files, "pending", "pending");
+        await WriteAsync(files, "pending", "pending");
 
         // Act
-        var error = await Should.ThrowAsync<Exception>(async () => await FailAsync(failure, scoped, files));
+        var error = await Should.ThrowAsync<Exception>(async () => await FailAsync(failure, session, files));
         var refused = await Should.ThrowAsync<DatabaseException>(async () => await files.DeleteAsync("keep"));
         var faultedState = transaction.State;
         var currentWhileFaulted = session.CurrentTransaction;
@@ -78,7 +81,7 @@ public sealed class BlobTransactionFailureTests
         currentWhileFaulted.ShouldBeSameAs(transaction);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        (await Read(container, "keep")).ShouldBe(failure == "conflict" ? "changed" : "original");
+        (await ReadAsync(container, "keep")).ShouldBe(failure == "conflict" ? "changed" : "original");
         (await container.GetPropertiesAsync("pending")).ShouldBeNull();
         (await container.GetPropertiesAsync("upload")).ShouldBeNull();
     }
@@ -89,14 +92,13 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "keep", "original");
+        await WriteAsync(container, "keep", "original");
         await using var session = await database.CreateSessionAsync();
-        var scoped = (IBlobDatabase)session.Database;
-        var files = await scoped.GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Should.ThrowAsync<DatabaseException>(async () => await scoped.GetContainerAsync("missing"));
+        await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("missing"));
 
         // Act
         var refusals = new List<Exception>
@@ -109,12 +111,12 @@ public sealed class BlobTransactionFailureTests
             {
                 await foreach (var _ in files.GetBlobsAsync()) { }
             }),
-            await Should.ThrowAsync<DatabaseException>(async () => await scoped.CreateContainerAsync("late")),
-            await Should.ThrowAsync<DatabaseException>(async () => await scoped.GetContainerAsync("files")),
-            await Should.ThrowAsync<DatabaseException>(async () => await scoped.DropContainerAsync("files")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.CreateContainerAsync("late")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("files")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.DropContainerAsync("files")),
             await Should.ThrowAsync<DatabaseException>(async () =>
             {
-                await foreach (var _ in scoped.GetContainersAsync()) { }
+                await foreach (var _ in session.GetContainersAsync()) { }
             }),
             await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync()),
         };
@@ -123,14 +125,14 @@ public sealed class BlobTransactionFailureTests
 
         // Assert
         refusals.ShouldAllBe(error => error.Message.StartsWith("COHDBB001", StringComparison.Ordinal));
-        (await Read(files, "keep")).ShouldBe("original");
+        (await ReadAsync(files, "keep")).ShouldBe("original");
         await using (var next = await session.BeginTransactionAsync())
         {
-            await Write(files, "next", "next");
+            await WriteAsync(files, "next", "next");
             await next.CommitAsync();
         }
         session.CurrentTransaction.ShouldBeNull();
-        (await Names(container)).ShouldBe(["keep", "next"]);
+        (await NamesAsync(container)).ShouldBe(["keep", "next"]);
     }
 
     /// <summary>COMMIT on a faulted transaction fails with COHDBB001, commits nothing, and ends the transaction.</summary>
@@ -139,32 +141,33 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         await using var session = await database.CreateSessionAsync();
-        var scoped = (IBlobDatabase)session.Database;
-        var files = await scoped.GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         await using var transaction = await session.BeginTransactionAsync();
-        await Write(files, "pending", "pending");
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await scoped.GetContainerAsync("missing"));
+        await WriteAsync(files, "pending", "pending");
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("missing"));
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
 
         // Assert
-        error.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
-        error.Message.ShouldContain("nothing was committed", Case.Sensitive);
+        error.Message.ShouldStartWith("COHDBB001: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        error.Message.ShouldEndWith("Cause: " + failure.Message, Case.Sensitive);
         error.InnerException.ShouldBeSameAs(failure);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
         // The client's rollback in a catch block after the failed commit is a no-op, not a second error.
         await transaction.RollbackAsync();
-        // A second commit keeps reporting why nothing committed.
-        (await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync()))
-            .Message.ShouldStartWith("COHDBB001", Case.Sensitive);
-        (await Names(container)).ShouldBeEmpty();
-        await Write(files, "after", "after");
-        (await Names(container)).ShouldBe(["after"]);
+        // A second commit keeps reporting why nothing committed, with the cause, as the model's own
+        // state machine did; the root base carries it since phase 4 of the concrete-types plan.
+        var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        repeated.Message.ShouldBe(error.Message);
+        repeated.InnerException.ShouldBeSameAs(failure);
+        (await NamesAsync(container)).ShouldBeEmpty();
+        await WriteAsync(files, "after", "after");
+        (await NamesAsync(container)).ShouldBe(["after"]);
     }
 
     /// <summary>Disposing a faulted transaction ends it without throwing, and the session is idle again.</summary>
@@ -173,23 +176,22 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         await using var session = await database.CreateSessionAsync();
-        var scoped = (IBlobDatabase)session.Database;
-        var files = await scoped.GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Write(files, "pending", "pending");
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await scoped.GetContainerAsync("missing"));
+        await WriteAsync(files, "pending", "pending");
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("missing"));
 
         // Act
         await transaction.DisposeAsync();
-        await Write(files, "after", "after");
+        await WriteAsync(files, "after", "after");
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        (await Names(container)).ShouldBe(["after"]);
+        (await NamesAsync(container)).ShouldBe(["after"]);
         // COMMIT keeps its coded error after the transaction ended, so its outcome never depends on
         // whether the caller's commit or the session's teardown ran first.
         var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
@@ -203,13 +205,13 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "keep", "original");
+        await WriteAsync(container, "keep", "original");
         await using var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Write(files, "earlier", "earlier");
+        await WriteAsync(files, "earlier", "earlier");
         using var cancellation = new CancellationTokenSource();
         var upload = await files.OpenWriteAsync("keep", cancellationToken: cancellation.Token);
         await upload.WriteAsync(new byte[100_000]);
@@ -223,8 +225,8 @@ public sealed class BlobTransactionFailureTests
 
         // Assert
         faultedState.ShouldBe(TransactionState.Faulted);
-        (await Read(container, "keep")).ShouldBe("original");
-        (await Names(container)).ShouldBe(["keep"]);
+        (await ReadAsync(container, "keep")).ShouldBe("original");
+        (await NamesAsync(container)).ShouldBe(["keep"]);
     }
 
     /// <summary>A faulted transaction holds no writer lock: another session writes while it awaits rollback.</summary>
@@ -233,22 +235,21 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         await using var failed = await database.CreateSessionAsync();
-        var scoped = (IBlobDatabase)failed.Database;
-        var files = await scoped.GetContainerAsync("files");
+        var files = await failed.GetContainerAsync("files");
         await using var transaction = await failed.BeginTransactionAsync();
-        await Write(files, "pending", "pending");
-        await Should.ThrowAsync<DatabaseException>(async () => await scoped.GetContainerAsync("missing"));
+        await WriteAsync(files, "pending", "pending");
+        await Should.ThrowAsync<DatabaseException>(async () => await failed.GetContainerAsync("missing"));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         // Act
-        await Write(container, "other", "other", timeout.Token);
+        await WriteAsync(container, "other", "other", timeout.Token);
 
         // Assert
         transaction.State.ShouldBe(TransactionState.Faulted);
-        (await Names(container)).ShouldBe(["other"]);
+        (await NamesAsync(container)).ShouldBe(["other"]);
     }
 
     /// <summary>An autocommit failure ends only its own operation: the session stays idle and usable.</summary>
@@ -257,19 +258,18 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         await using var session = await database.CreateSessionAsync();
-        var scoped = (IBlobDatabase)session.Database;
-        var files = await scoped.GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
 
         // Act
-        await Should.ThrowAsync<DatabaseException>(async () => await scoped.GetContainerAsync("missing"));
-        await Write(files, "after", "after");
+        await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("missing"));
+        await WriteAsync(files, "after", "after");
 
         // Assert
         session.CurrentTransaction.ShouldBeNull();
-        (await Names(container)).ShouldBe(["after"]);
+        (await NamesAsync(container)).ShouldBe(["after"]);
         await using var transaction = await session.BeginTransactionAsync();
         transaction.State.ShouldBe(TransactionState.Active);
     }
@@ -280,14 +280,14 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         await using var blocker = await database.CreateSessionAsync();
         await using var waiting = await database.CreateSessionAsync();
-        var blockerFiles = await ((IBlobDatabase)blocker.Database).GetContainerAsync("files");
-        var waitingFiles = await ((IBlobDatabase)waiting.Database).GetContainerAsync("files");
+        var blockerFiles = await blocker.GetContainerAsync("files");
+        var waitingFiles = await waiting.GetContainerAsync("files");
         var blocking = await blocker.BeginTransactionAsync();
-        await Write(blockerFiles, "blocker", "blocker");
+        await WriteAsync(blockerFiles, "blocker", "blocker");
         var transaction = await waiting.BeginTransactionAsync();
         using var cancellation = new CancellationTokenSource();
         var pending = waitingFiles.DeleteAsync("blocker", cancellation.Token).AsTask();
@@ -306,7 +306,7 @@ public sealed class BlobTransactionFailureTests
         refused.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
         refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
         faultedState.ShouldBe(TransactionState.Faulted);
-        (await Names(container)).ShouldBe(["blocker"]);
+        (await NamesAsync(container)).ShouldBe(["blocker"]);
     }
 
     /// <summary>Closing a session with a faulted transaction ends the transaction without an error.</summary>
@@ -315,14 +315,13 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         var session = await database.CreateSessionAsync();
-        var scoped = (IBlobDatabase)session.Database;
-        var files = await scoped.GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Write(files, "pending", "pending");
-        await Should.ThrowAsync<DatabaseException>(async () => await scoped.GetContainerAsync("missing"));
+        await WriteAsync(files, "pending", "pending");
+        await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("missing"));
 
         // Act
         await session.DisposeAsync();
@@ -330,7 +329,7 @@ public sealed class BlobTransactionFailureTests
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.State.ShouldBe(SessionState.Closed);
-        (await Names(container)).ShouldBeEmpty();
+        (await NamesAsync(container)).ShouldBeEmpty();
     }
 
     /// <summary>
@@ -343,13 +342,13 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "keep", new string('k', 100_000));
+        await WriteAsync(container, "keep", new string('k', 100_000));
         await using var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Write(files, "pending", "pending");
+        await WriteAsync(files, "pending", "pending");
         var stream = await files.OpenReadAsync("keep");
         var buffer = new byte[1_000];
         (await stream.ReadAsync(buffer)).ShouldBe(buffer.Length);
@@ -361,7 +360,7 @@ public sealed class BlobTransactionFailureTests
         var faultedState = transaction.State;
         var refusedRead = await Should.ThrowAsync<DatabaseException>(async () => await stream.ReadExactlyAsync(buffer));
         await stream.DisposeAsync();
-        var refused = await Should.ThrowAsync<DatabaseException>(async () => await Write(files, "late", "late"));
+        var refused = await Should.ThrowAsync<DatabaseException>(async () => await WriteAsync(files, "late", "late"));
         await transaction.RollbackAsync();
 
         // Assert
@@ -371,7 +370,7 @@ public sealed class BlobTransactionFailureTests
         // A canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
         refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        (await Names(container)).ShouldBe(["keep"]);
+        (await NamesAsync(container)).ShouldBe(["keep"]);
     }
 
     /// <summary>An autocommit read that fails ends only its own read, and the session stays usable.</summary>
@@ -380,11 +379,11 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "keep", "original");
+        await WriteAsync(container, "keep", "original");
         await using var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var stream = await files.OpenReadAsync("keep");
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
@@ -392,29 +391,40 @@ public sealed class BlobTransactionFailureTests
         // Act
         await Should.ThrowAsync<OperationCanceledException>(async () => await stream.ReadExactlyAsync(new byte[4], canceled.Token));
         await stream.DisposeAsync();
-        await Write(files, "after", "after");
+        await WriteAsync(files, "after", "after");
 
         // Assert
         session.CurrentTransaction.ShouldBeNull();
-        (await Read(files, "keep")).ShouldBe("original");
-        (await Names(container)).ShouldBe(["after", "keep"]);
+        (await ReadAsync(files, "keep")).ShouldBe("original");
+        (await NamesAsync(container)).ShouldBe(["after", "keep"]);
     }
 
     /// <summary>
-    /// A commit after the session closed under an open transaction fails with COHDBB001 naming the
-    /// closure, whichever is asked first, and commits nothing; a rollback afterwards is a no-op.
+    /// A commit after the session closed under an open transaction fails with COHDBB001 naming why
+    /// nothing committed, whichever is asked first, and commits nothing; a rollback afterwards is a
+    /// no-op. For an active transaction the cause is the root session base's teardown cause, "The
+    /// session closed before the transaction ended." (concrete-types plan §6.4), for the model's
+    /// former "The blob session closed before the transaction ended."; for one an operation
+    /// aborted before the session closed it is the operation's failure, which the base's teardown
+    /// keeps (the model's own close did the same before phase 4).
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: COMMIT after the session closed fails with COHDBB001")]
-    public async Task CommitAsync_AfterSessionClosed_ShouldFailWithCodeNamingTheClosure()
+    /// <param name="aborted">True when an operation aborted the transaction before the session closed.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Transaction: COMMIT after the session closed reports COHDBB001 naming why nothing committed")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CommitAsync_AfterSessionClosed_ShouldReportWhyNothingCommitted(bool aborted)
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Write(files, "pending", "pending");
+        await WriteAsync(files, "pending", "pending");
+        DatabaseException? failure = aborted
+            ? await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("missing"))
+            : null;
 
         // Act
         await session.DisposeAsync();
@@ -423,12 +433,20 @@ public sealed class BlobTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        error.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
-        error.Message.ShouldContain("nothing was committed", Case.Sensitive);
-        error.Message.ShouldContain("The blob session closed before the transaction ended.", Case.Sensitive);
+        error.Message.ShouldStartWith("COHDBB001: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        if (failure is null)
+        {
+            error.Message.ShouldEndWith("Cause: The session closed before the transaction ended.", Case.Sensitive);
+        }
+        else
+        {
+            error.InnerException.ShouldBeSameAs(failure);
+            error.Message.ShouldEndWith("Cause: " + failure.Message, Case.Sensitive);
+        }
+
         repeated.Message.ShouldBe(error.Message);
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        (await Names(container)).ShouldBeEmpty();
+        (await NamesAsync(container)).ShouldBeEmpty();
     }
 
     /// <summary>Failures that come before an operation starts leave the transaction active.</summary>
@@ -437,13 +455,12 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         await using var session = await database.CreateSessionAsync();
-        var scoped = (IBlobDatabase)session.Database;
-        var files = await scoped.GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Write(files, "pending", "pending");
+        await WriteAsync(files, "pending", "pending");
 
         // Act
         var rejections = new List<Exception>
@@ -451,18 +468,23 @@ public sealed class BlobTransactionFailureTests
             await Should.ThrowAsync<ArgumentException>(async () => await files.OpenWriteAsync(" ")),
             await Should.ThrowAsync<ArgumentException>(async () => await files.OpenReadAsync("")),
             await Should.ThrowAsync<ArgumentException>(async () => await files.DeleteAsync(" ")),
-            await Should.ThrowAsync<ArgumentException>(async () => await scoped.GetContainerAsync(" ")),
+            await Should.ThrowAsync<ArgumentException>(async () => await session.GetContainerAsync(" ")),
             await Should.ThrowAsync<ArgumentException>(async () => await session.ExecuteAsync(" ")),
             await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("LIST files")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new BlobRequest())),
         };
         var state = transaction.State;
         await transaction.CommitAsync();
 
-        // Assert
+        // Assert: a blob session has no query or statement language. Option B (concrete-types plan
+        // §6.6) names the session's own container operations, where the request seam named the
+        // former IBlobDatabase of session.Database.
+        rejections[5].Message.ShouldBe("Blob sessions have no statement language or server-scoped commands.");
+        rejections[6].Message.ShouldBe("Blob sessions have no query language. Use the session's container operations.");
         rejections.ShouldAllBe(error => !error.Message.StartsWith("COHDBB001", StringComparison.Ordinal));
         state.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
-        (await Names(container)).ShouldBe(["pending"]);
+        (await NamesAsync(container)).ShouldBe(["pending"]);
     }
 
     /// <summary>A rollback is idempotent for a transaction that did not commit, and refused for one that did.</summary>
@@ -471,15 +493,15 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         await using var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var rolledBack = await session.BeginTransactionAsync();
-        await Write(files, "discarded", "discarded");
+        await WriteAsync(files, "discarded", "discarded");
         await rolledBack.RollbackAsync();
         var committed = await session.BeginTransactionAsync();
-        await Write(files, "kept", "kept");
+        await WriteAsync(files, "kept", "kept");
         await committed.CommitAsync();
         var currentAfterCommit = session.CurrentTransaction;
 
@@ -487,12 +509,12 @@ public sealed class BlobTransactionFailureTests
         await rolledBack.RollbackAsync();
         var refusal = await Should.ThrowAsync<DatabaseException>(async () => await committed.RollbackAsync());
 
-        // Assert
+        // Assert: the root base's message (concrete-types plan §6.4), the one the model carried.
         currentAfterCommit.ShouldBeNull();
-        refusal.Message.ShouldContain("Committed", Case.Sensitive);
+        refusal.Message.ShouldBe("The transaction is Committed; a committed transaction cannot roll back.");
         rolledBack.State.ShouldBe(TransactionState.RolledBack);
         committed.State.ShouldBe(TransactionState.Committed);
-        (await Names(container)).ShouldBe(["kept"]);
+        (await NamesAsync(container)).ShouldBe(["kept"]);
     }
 
     /// <summary>A token canceled before a commit or rollback starts leaves the transaction exactly as it was.</summary>
@@ -501,12 +523,12 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         await using var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Write(files, "first", "first");
+        await WriteAsync(files, "first", "first");
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
 
@@ -514,13 +536,411 @@ public sealed class BlobTransactionFailureTests
         await Should.ThrowAsync<OperationCanceledException>(async () => await transaction.RollbackAsync(canceled.Token));
         await Should.ThrowAsync<OperationCanceledException>(async () => await transaction.CommitAsync(canceled.Token));
         var state = transaction.State;
-        await Write(files, "second", "second");
+        await WriteAsync(files, "second", "second");
         await transaction.CommitAsync();
 
         // Assert
         state.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
-        (await Names(container)).ShouldBe(["first", "second"]);
+        (await NamesAsync(container)).ShouldBe(["first", "second"]);
+    }
+
+    /// <summary>
+    /// A commit of a transaction its caller already rolled back is refused by state, with the root
+    /// base's message (concrete-types plan §6.4).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: COMMIT after ROLLBACK is refused with the transaction's state")]
+    public async Task CommitAsync_AfterRollback_ShouldBeRefusedWithTheState()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var container = await database.CreateContainerAsync("files");
+        await using var session = await database.CreateSessionAsync();
+        var files = await session.GetContainerAsync("files");
+        var transaction = await session.BeginTransactionAsync();
+        await WriteAsync(files, "discarded", "discarded");
+        await transaction.RollbackAsync();
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+
+        // Assert
+        refusal.Message.ShouldBe("The transaction is RolledBack.");
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await NamesAsync(container)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Closing a session aborts the operation running on it, here an upload stream still open, and
+    /// the operation's abort is the cause a later commit of its transaction reports with
+    /// <c>COHDBB001</c>: the teardown's own cause does not replace it. The model's teardown did the
+    /// same; since the concrete-types plan's phase 4 the session's root base runs it (§6.4), so the
+    /// order is pinned here. The open stream refuses a write once the session closed, with the
+    /// base's closed-session message.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: closing a session aborts its open stream, whose cause a later COMMIT reports")]
+    public async Task DisposeAsync_SessionWithOpenStream_ShouldAbortItAndReportItsCause()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var container = await database.CreateContainerAsync("files");
+        await WriteAsync(container, "keep", "original");
+        var session = await database.CreateSessionAsync();
+        var files = await session.GetContainerAsync("files");
+        var transaction = await session.BeginTransactionAsync();
+        var upload = await files.OpenWriteAsync("keep");
+        await upload.WriteAsync(new byte[20_000]);
+
+        // Act
+        await session.DisposeAsync();
+        var write = await Should.ThrowAsync<DatabaseException>(async () => await upload.WriteAsync(new byte[100]));
+        await Record.ExceptionAsync(async () => await upload.DisposeAsync());
+        var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+
+        // Assert
+        write.Message.ShouldBe("The session is closed.");
+        commit.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        commit.Message.ShouldEndWith("Cause: The blob session closed while the operation was running.", Case.Sensitive);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await ReadAsync(container, "keep")).ShouldBe("original");
+        (await NamesAsync(container)).ShouldBe(["keep"]);
+    }
+
+    /// <summary>
+    /// A commit while an operation of the transaction still runs (here a delete waiting for the
+    /// writer lock) is refused with the root base's message (concrete-types plan §6.4), for the
+    /// model's former "Dispose every blob stream before committing its transaction.", and leaves
+    /// the transaction active: it commits once the operation completed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: COMMIT while an operation of the transaction runs is refused and leaves it active")]
+    public async Task CommitAsync_WhileOperationRuns_ShouldBeRefusedAndLeaveTheTransactionActive()
+    {
+        // Arrange: another transaction holds the writer lock, so the operation waits.
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var container = await database.CreateContainerAsync("files");
+        await WriteAsync(container, "doomed", "doomed");
+        await using var blocker = await database.CreateSessionAsync();
+        await using var session = await database.CreateSessionAsync();
+        var blockerFiles = await blocker.GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
+        var blocking = await blocker.BeginTransactionAsync();
+        await WriteAsync(blockerFiles, "blocker", "blocker");
+        var transaction = await session.BeginTransactionAsync();
+        var pending = files.DeleteAsync("doomed").AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
+        var stateAfterRefusal = transaction.State;
+        await blocking.CommitAsync();
+        (await pending.WaitAsync(Timeout)).ShouldBeTrue();
+        await transaction.CommitAsync();
+
+        // Assert
+        refusal.Message.ShouldBe("An operation of the transaction is still running; commit after it completes.");
+        stateAfterRefusal.ShouldBe(TransactionState.Active);
+        transaction.State.ShouldBe(TransactionState.Committed);
+        (await NamesAsync(container)).ShouldBe(["blocker"]);
+    }
+
+    /// <summary>
+    /// BEGIN on a session whose transaction is active is refused with the root base's one message
+    /// before the model's isolation-level refusal, and a closed session before both (concrete-types
+    /// plan §6.4, BEGIN's refusal order): the model refused an unsupported isolation level first,
+    /// and its "already active" message was "A transaction or stream is already active on this
+    /// session.".
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: BEGIN is refused for a closed session, then an active transaction, before the isolation level")]
+    public async Task BeginTransactionAsync_WhileActiveOrClosed_ShouldRefuseBeforeTheIsolationLevel()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+
+        // Act
+        var again = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
+        var serializable = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable));
+        await transaction.RollbackAsync();
+        var unsupported = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable));
+        await session.DisposeAsync();
+        var closed = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable));
+
+        // Assert
+        again.Message.ShouldBe("A transaction or operation is already active on this session.");
+        serializable.Message.ShouldBe("A transaction or operation is already active on this session.");
+        unsupported.Message.ShouldBe("The blob engine supports Snapshot and ReadCommitted isolation.");
+        closed.Message.ShouldBe("The session is closed.");
+    }
+
+    /// <summary>
+    /// A closed session refuses BEGIN, both execute seams, its own container operations and the
+    /// operations of a container bound to it with the root base's message (concrete-types plan
+    /// §6.4), for the model's former "The blob session is closed.".
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: a closed session refuses every operation with one message")]
+    public async Task Operations_OnClosedSession_ShouldRefuseWithOneMessage()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var container = await database.CreateContainerAsync("files");
+        await WriteAsync(container, "keep", "original");
+        var session = await database.CreateSessionAsync();
+        var bound = await session.GetContainerAsync("files");
+        await session.DisposeAsync();
+
+        // Act
+        var refusals = new List<DatabaseException>
+        {
+            await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync()),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("LIST files")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new BlobRequest())),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.CreateContainerAsync("late")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("files")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.DropContainerAsync("files")),
+            await Should.ThrowAsync<DatabaseException>(async () =>
+            {
+                await foreach (var _ in session.GetContainersAsync()) { }
+            }),
+            await Should.ThrowAsync<DatabaseException>(async () => await bound.OpenWriteAsync("late")),
+            await Should.ThrowAsync<DatabaseException>(async () => await bound.OpenReadAsync("keep")),
+            await Should.ThrowAsync<DatabaseException>(async () => await bound.GetPropertiesAsync("keep")),
+            await Should.ThrowAsync<DatabaseException>(async () => await bound.DeleteAsync("keep")),
+            await Should.ThrowAsync<DatabaseException>(async () =>
+            {
+                await foreach (var _ in bound.GetBlobsAsync()) { }
+            }),
+            await Should.ThrowAsync<DatabaseException>(async () => await bound.GetOwnershipAsync()),
+        };
+
+        // Assert
+        refusals.ShouldAllBe(refusal => refusal.Message == "The session is closed.");
+        session.State.ShouldBe(SessionState.Closed);
+        (await ReadAsync(container, "keep")).ShouldBe("original");
+    }
+
+    /// <summary>
+    /// A transaction the kernel ended under its caller (its database was dropped while the session
+    /// held it) reports <c>Faulted</c>, and the root bases order its refusal against the database's
+    /// disposal and a canceled token (concrete-types plan §6.4): BEGIN refuses the open transaction
+    /// with <c>COHDBB001</c> before it checks anything of the model, where the model reported the
+    /// disposed database; both execute seams check a canceled token before the model reports the
+    /// disposed database, which they still report for a live token, and so does BEGIN once the
+    /// caller rolled the ended transaction back.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: a transaction the kernel ended refuses BEGIN with COHDBB001; the execute seams check a canceled token first")]
+    public async Task BeginTransactionAsync_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        await database.CreateContainerAsync("files");
+        await using var session = await database.CreateSessionAsync();
+        var files = await session.GetContainerAsync("files");
+        var transaction = await session.BeginTransactionAsync();
+        await WriteAsync(files, "pending", "pending");
+        await engine.DropDatabaseAsync("test");
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act
+        var state = transaction.State;
+        var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(canceled.Token));
+        var canceledText = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("LIST files", null, canceled.Token));
+        var text = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync("LIST files"));
+        var canceledRequest = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(new BlobRequest(), canceled.Token));
+        var request = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync(new BlobRequest()));
+        await transaction.RollbackAsync();
+        var beginAfterRollback = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.BeginTransactionAsync());
+
+        // Assert
+        state.ShouldBe(TransactionState.Faulted);
+        begin.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        canceledText.CancellationToken.ShouldBe(canceled.Token);
+        text.ShouldNotBeNull();
+        canceledRequest.CancellationToken.ShouldBe(canceled.Token);
+        request.ShouldNotBeNull();
+        beginAfterRollback.ShouldNotBeNull();
+        session.CurrentTransaction.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A closed session is refused as closed before its database's disposal is checked, by BEGIN
+    /// and both execute seams, which run the root base's checks first (concrete-types plan §6.4):
+    /// the model checked the disposed database first and reported <see cref="ObjectDisposedException"/>.
+    /// The session's container operations and the operations of a container bound to it, which
+    /// check the database before the session, still report the disposed database.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: a closed session of a dropped database is refused as closed by BEGIN and the execute seams")]
+    public async Task ExecuteAsync_ClosedSessionOfDroppedDatabase_ShouldRefuseAsClosedBeforeTheDisposedDatabase()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        await database.CreateContainerAsync("files");
+        var session = await database.CreateSessionAsync();
+        var bound = await session.GetContainerAsync("files");
+        await session.DisposeAsync();
+        await engine.DropDatabaseAsync("test");
+
+        // Act
+        var refusals = new List<DatabaseException>
+        {
+            await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync()),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("LIST files")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new BlobRequest())),
+        };
+        var sessionContainer = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.CreateContainerAsync("late"));
+        var blob = await Should.ThrowAsync<ObjectDisposedException>(async () => await bound.GetPropertiesAsync("late"));
+
+        // Assert
+        refusals.ShouldAllBe(refusal => refusal.Message == "The session is closed.");
+        sessionContainer.ShouldNotBeNull();
+        blob.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// An operation holds its session from its start to its end, through the root base's operation
+    /// hold (concrete-types plan §6.4), which replaced the model's own reservation and operation
+    /// set; a blob stream's operation ends when the stream is disposed. While an upload stream is
+    /// open, another operation of a container bound to the session and a container operation of the
+    /// session are refused with the model's message, and BEGIN with the base's "already active"
+    /// message, for the model's former "A transaction or stream is already active on this
+    /// session.". None of the refusals ends the upload, which publishes once it is disposed, and
+    /// the session then runs operations and BEGIN again.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: an open stream holds the session against another operation and BEGIN")]
+    public async Task Operations_WhileAStreamIsOpen_ShouldBeRefusedAndLeaveItRunning()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var container = await database.CreateContainerAsync("files");
+        await WriteAsync(container, "keep", "original");
+        await using var session = await database.CreateSessionAsync();
+        var files = await session.GetContainerAsync("files");
+        var upload = await files.OpenWriteAsync("upload");
+        await upload.WriteAsync(Encoding.UTF8.GetBytes("up"));
+
+        // Act
+        var blobOperation = await Should.ThrowAsync<DatabaseException>(async () => await files.OpenReadAsync("keep"));
+        var containerOperation = await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("files"));
+        var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
+        await upload.WriteAsync(Encoding.UTF8.GetBytes("load"));
+        await upload.DisposeAsync();
+        await using var transaction = await session.BeginTransactionAsync();
+        var uploaded = await ReadAsync(files, "upload");
+        await transaction.CommitAsync();
+
+        // Assert
+        new[] { blobOperation, containerOperation }.ShouldAllBe(refusal =>
+            refusal.Message == "Dispose the active blob stream before starting another operation on this session.");
+        begin.Message.ShouldBe("A transaction or operation is already active on this session.");
+        uploaded.ShouldBe("upload");
+        session.CurrentTransaction.ShouldBeNull();
+        (await NamesAsync(container)).ShouldBe(["keep", "upload"]);
+    }
+
+    /// <summary>
+    /// A session's database is the unbound <see cref="BlobDatabase"/> (option B of the
+    /// concrete-types plan, §6.6): its container operations run in autocommit outside the session,
+    /// whatever transaction the session holds, while the session's own container operations run in
+    /// that transaction; it creates sessions after the session closed; and disposing it closes the
+    /// database for every session, never the session itself, and the engine refuses to reopen it
+    /// (<see cref="ObjectDisposedException"/>) until it is dropped or the engine is recreated, as a
+    /// directly disposed database always was. Before phase 4 a session returned a session-bound
+    /// view: its container operations ran in the session's transaction, it refused a closed session
+    /// with "The blob session is closed.", and disposing it closed the session.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: the session's database is the unbound database, and the session runs its own container operations")]
+    public async Task Database_OfASession_ShouldBeTheUnboundDatabase()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var session = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+
+        // Act: one container outside the transaction, through the session's database, and one
+        // inside it, through the session; then the transaction rolls back.
+        var outside = await session.Database.CreateContainerAsync("outside");
+        var inside = await session.CreateContainerAsync("inside");
+        var visibleToOther = new List<string>();
+        await foreach (var visible in other.GetContainersAsync()) { visibleToOther.Add(visible.Name); }
+        await transaction.RollbackAsync();
+        var afterRollback = new List<string>();
+        await foreach (var kept in database.GetContainersAsync()) { afterRollback.Add(kept.Name); }
+        await session.DisposeAsync();
+        await using var afterClose = await session.Database.CreateSessionAsync();
+        await other.Database.DisposeAsync();
+
+        // Assert
+        session.Database.ShouldBeSameAs(database);
+        database.Engine.ShouldBeSameAs(engine);
+        outside.Name.ShouldBe("outside");
+        inside.Name.ShouldBe("inside");
+        visibleToOther.ShouldBe(["outside"]);
+        afterRollback.ShouldBe(["outside"]);
+        afterClose.State.ShouldBe(SessionState.Open);
+        other.State.ShouldBe(SessionState.Open);
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await database.CreateSessionAsync());
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await other.GetContainerAsync("outside"));
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.OpenDatabaseAsync("test"));
+    }
+
+    /// <summary>
+    /// A write through a session's database, or through a container that database returned, runs
+    /// in autocommit, outside the session's explicit transaction (option B of the concrete-types
+    /// plan, §6.6), so once that transaction has written, the write waits for the transaction's
+    /// writer lock (the engine has one writer at a time): a caller that awaits it before ending the
+    /// transaction waits until the call's token is canceled. The canceled wait writes nothing and
+    /// leaves the transaction active and committable, and the write succeeds once the transaction
+    /// has ended. Before phase 4 the session-bound view ran the write in the session's transaction.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: a write through the session's database waits for the session transaction's writer lock")]
+    public async Task CreateContainerAsync_ThroughSessionDatabaseAfterTransactionWrote_ShouldWaitForItsWriterLock()
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var container = await database.CreateContainerAsync("files");
+        await WriteAsync(container, "doomed", "doomed");
+        await using var session = await database.CreateSessionAsync();
+        var files = await session.GetContainerAsync("files");
+        var transaction = await session.BeginTransactionAsync();
+        await WriteAsync(files, "pending", "pending");
+        var unbound = await session.Database.GetContainerAsync("files");
+
+        // Act: only the token ends each wait.
+        using (var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250)))
+        {
+            await Should.ThrowAsync<OperationCanceledException>(async () =>
+                await session.Database.CreateContainerAsync("outside", cancellation.Token));
+        }
+
+        using (var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250)))
+        {
+            await Should.ThrowAsync<OperationCanceledException>(async () =>
+                await unbound.DeleteAsync("doomed", cancellation.Token));
+        }
+
+        var stateAfterWait = transaction.State;
+        var missing = await Should.ThrowAsync<DatabaseException>(async () => await database.GetContainerAsync("outside"));
+        await transaction.CommitAsync();
+        var created = await session.Database.CreateContainerAsync("outside");
+
+        // Assert
+        stateAfterWait.ShouldBe(TransactionState.Active);
+        missing.Message.ShouldBe("Container 'outside' does not exist.");
+        created.Name.ShouldBe("outside");
+        transaction.State.ShouldBe(TransactionState.Committed);
+        (await NamesAsync(container)).ShouldBe(["doomed", "pending"]);
     }
 
     /// <summary>
@@ -538,13 +958,13 @@ public sealed class BlobTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = BlobDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "keep", "original");
+        await WriteAsync(container, "keep", "original");
         var session = await database.CreateSessionAsync();
         var other = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
-        var otherFiles = await ((IBlobDatabase)other.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
+        var otherFiles = await other.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
 
         // A delete that matches nothing takes the database writer lock and writes no version, so
@@ -561,16 +981,16 @@ public sealed class BlobTransactionFailureTests
             await transaction.RollbackAsync();
             unspentAfterTheRollback = failures.Remaining;
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            lost = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await Write(otherFiles, "other", "other", timeout.Token));
+            lost = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await WriteAsync(otherFiles, "other", "other", timeout.Token));
             unspent = failures.Remaining;
         }
 
-        var refused = await Should.ThrowAsync<DatabaseOfflineException>(async () => await Write(otherFiles, "after", "after"));
+        var refused = await Should.ThrowAsync<DatabaseOfflineException>(async () => await WriteAsync(otherFiles, "after", "after"));
         await other.DisposeAsync();
         await session.DisposeAsync();
         engine.Dispose();
         await using var reopened = BlobDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IBlobDatabase)await reopened.OpenDatabaseAsync("test");
+        var recovered = await reopened.OpenDatabaseAsync("test");
 
         // Assert: the rollback wrote nothing and ended the transaction; the drain that carried its
         // record failed.
@@ -580,7 +1000,7 @@ public sealed class BlobTransactionFailureTests
         session.CurrentTransaction.ShouldBeNull();
         StorageOfflineException.Find(lost).ShouldNotBeNull();
         refused.InnerException.ShouldNotBeNull();
-        (await Names(await recovered.GetContainerAsync("files"))).ShouldBe(["keep"]);
+        (await NamesAsync(await recovered.GetContainerAsync("files"))).ShouldBe(["keep"]);
     }
 
     /// <summary>
@@ -595,18 +1015,18 @@ public sealed class BlobTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = BlobDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "keep", "original");
+        await WriteAsync(container, "keep", "original");
         var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
         (await files.DeleteAsync("missing")).ShouldBeFalse();
         int unspent;
         using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWritesContaining(JournalRecordType.RollbackTransaction))
         {
             await transaction.RollbackAsync();
-            await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await Write(files, "next", "next"));
+            await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await WriteAsync(files, "next", "next"));
             unspent = failures.Remaining;
         }
 
@@ -616,13 +1036,13 @@ public sealed class BlobTransactionFailureTests
         await session.DisposeAsync();
         engine.Dispose();
         await using var reopened = BlobDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IBlobDatabase)await reopened.OpenDatabaseAsync("test");
+        var recovered = await reopened.OpenDatabaseAsync("test");
 
         // Assert
         unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        (await Names(await recovered.GetContainerAsync("files"))).ShouldBe(["keep"]);
+        (await NamesAsync(await recovered.GetContainerAsync("files"))).ShouldBe(["keep"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Rollback: an undo that still fails at close is scrubbed at the next open")]
@@ -631,15 +1051,15 @@ public sealed class BlobTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = BlobDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (Internal.BlobDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         await database.CreateContainerAsync("files");
         await using (var session = await database.CreateSessionAsync())
         {
-            var scoped = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
-            await BlobEngineTests.Write(scoped, "kept", "kept"u8.ToArray());
+            var scoped = await session.GetContainerAsync("files");
+            await BlobEngineTests.WriteAsync(scoped, "kept", "kept"u8.ToArray());
             var transaction = await session.BeginTransactionAsync();
-            await BlobEngineTests.Write(scoped, "rolled", "rolled"u8.ToArray());
-            await BlobEngineTests.Write(scoped, "kept", "overwritten"u8.ToArray());
+            await BlobEngineTests.WriteAsync(scoped, "rolled", "rolled"u8.ToArray());
+            await BlobEngineTests.WriteAsync(scoped, "kept", "overwritten"u8.ToArray());
 
             // Another storage bracket holds every page, through the close: the undo's bracket
             // cannot touch the first page it undoes, so it rolls itself back and the undo is
@@ -654,13 +1074,13 @@ public sealed class BlobTransactionFailureTests
         var closeFailure = Should.Throw<AggregateException>(() => engine.Dispose());
 
         await using var reopened = BlobDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IBlobDatabase)await reopened.OpenDatabaseAsync("test");
+        var recovered = await reopened.OpenDatabaseAsync("test");
         var files = await recovered.GetContainerAsync("files");
 
         // Assert: the new blob is gone and the overwrite is undone.
         closeFailure.Flatten().InnerExceptions.ShouldContain(error => error is StorageTransactionException);
         (await files.GetPropertiesAsync("rolled")).ShouldBeNull();
-        (await BlobEngineTests.Read(files, "kept")).ShouldBe("kept"u8.ToArray());
+        (await BlobEngineTests.ReadAsync(files, "kept")).ShouldBe("kept"u8.ToArray());
     }
 
     /// <summary>
@@ -674,16 +1094,16 @@ public sealed class BlobTransactionFailureTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
-        var database = (Internal.BlobDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "keep", "original");
+        await WriteAsync(container, "keep", "original");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
-        var otherFiles = await ((IBlobDatabase)other.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
+        var otherFiles = await other.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Write(files, "rolled", "rolled");
-        await Write(files, "keep", "overwritten");
+        await WriteAsync(files, "rolled", "rolled");
+        await WriteAsync(files, "keep", "overwritten");
 
         // Act: another storage bracket holds every page while the rollback runs, so the undo's
         // bracket cannot touch the first page it undoes and the undo is deferred.
@@ -694,7 +1114,7 @@ public sealed class BlobTransactionFailureTests
             locked = holder.Pages;
         }
         int deferred = database.Coordinator.VersionStore.PendingAbortedPurges.Count;
-        var waiting = Write(otherFiles, "other", "other");
+        var waiting = WriteAsync(otherFiles, "other", "other");
         await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromMilliseconds(250)));
         bool otherProceededBeforeTheUndo = waiting.IsCompleted;
         database.Coordinator.RunVersionPurgePass(CancellationToken.None);
@@ -707,8 +1127,8 @@ public sealed class BlobTransactionFailureTests
         session.CurrentTransaction.ShouldBeNull();
         otherProceededBeforeTheUndo.ShouldBeFalse();
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        (await Names(container)).ShouldBe(["keep", "other"]);
-        (await Read(container, "keep")).ShouldBe("original");
+        (await NamesAsync(container)).ShouldBe(["keep", "other"]);
+        (await ReadAsync(container, "keep")).ShouldBe("original");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed")]
@@ -718,7 +1138,7 @@ public sealed class BlobTransactionFailureTests
         var kernel = new TransactionCommitUnconfirmedException("Transaction 7 committed, but its commit record could not be made durable.", new IOException("flush"));
 
         // Act
-        var translated = Internal.BlobDatabaseInstance.TranslateKernelFailure(kernel);
+        var translated = BlobDatabase.TranslateKernelFailure(kernel);
 
         // Assert: not an abort, so a caller never retries work that committed.
         var unconfirmed = translated.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
@@ -753,12 +1173,12 @@ public sealed class BlobTransactionFailureTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = BlobDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         await database.CreateContainerAsync("files");
         var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Write(files, "pending", "pending");
+        await WriteAsync(files, "pending", "pending");
 
         // Act: the commit's drain carries its commit record, and that write fails.
         DatabaseTransactionCommitUnconfirmedException error;
@@ -773,23 +1193,23 @@ public sealed class BlobTransactionFailureTests
         await session.DisposeAsync();
         engine.Dispose();
         await using var reopened = BlobDatabaseEngine.Create(QuietOptions(strategy));
-        var recovered = (IBlobDatabase)await reopened.OpenDatabaseAsync("test");
+        var recovered = await reopened.OpenDatabaseAsync("test");
 
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
         stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
-        (await Names(await recovered.GetContainerAsync("files"))).ShouldBeEmpty();
+        (await NamesAsync(await recovered.GetContainerAsync("files"))).ShouldBeEmpty();
     }
 
-    private static async Task FailAsync(string failure, IBlobDatabase scoped, IBlobContainer files)
+    private static async Task FailAsync(string failure, BlobDatabaseSession session, BlobContainer files)
     {
         switch (failure)
         {
             case "container":
                 // The catalog has no such container: the operation fails inside its transaction.
-                await scoped.GetContainerAsync("missing");
+                await session.GetContainerAsync("missing");
                 break;
             case "exists":
                 // An upload that may not replace an existing blob is refused once its operation started.
@@ -842,13 +1262,13 @@ public sealed class BlobTransactionFailureTests
         }
     }
 
-    private static async Task Write(IBlobContainer container, string name, string content, CancellationToken cancellationToken = default)
+    private static async Task WriteAsync(BlobContainer container, string name, string content, CancellationToken cancellationToken = default)
     {
         await using var stream = await container.OpenWriteAsync(name, cancellationToken: cancellationToken);
         await stream.WriteAsync(Encoding.UTF8.GetBytes(content), cancellationToken);
     }
 
-    private static async Task<string> Read(IBlobContainer container, string name)
+    private static async Task<string> ReadAsync(BlobContainer container, string name)
     {
         await using var stream = await container.OpenReadAsync(name);
         using var buffer = new MemoryStream();
@@ -856,7 +1276,7 @@ public sealed class BlobTransactionFailureTests
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
 
-    private static async Task<List<string>> Names(IBlobContainer container)
+    private static async Task<List<string>> NamesAsync(BlobContainer container)
     {
         var names = new List<string>();
         await foreach (var blob in container.GetBlobsAsync()) { names.Add(blob.Name); }

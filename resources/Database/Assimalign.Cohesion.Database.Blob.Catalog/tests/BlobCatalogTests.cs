@@ -3,11 +3,11 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Blob.Storage;
-using Assimalign.Cohesion.Database.Transactions;
-
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Blob.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Catalog.Tests;
 
@@ -167,7 +167,7 @@ public sealed class BlobCatalogTests
         internal MemoryStream Journal { get; } = new();
         internal BlobStorage Storage { get; }
         internal TransactionCoordinator Coordinator { get; }
-        internal IBlobCatalog Catalog { get; }
+        internal BlobCatalog Catalog { get; }
 
         internal TestDatabase()
         {

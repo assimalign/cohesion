@@ -2,9 +2,9 @@ using System;
 using System.Diagnostics;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Database.Blob.Internal;
-
 using Assimalign.Cohesion.Database.Storage;
+
+namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 /// <summary>
 /// The engine-owned MVCC version-purge worker: per pass, per open database, it
@@ -38,7 +38,9 @@ using Assimalign.Cohesion.Database.Storage;
 /// failure of one database delays no other's retry. A database whose undo is still deferred, or
 /// whose storage was busy, keeps a failure recorded for it until a pass leaves nothing over; a
 /// failure of another database does not keep it, so a transient fault does not leave the engine
-/// Faulted for good. An offline database (#1243) is skipped.
+/// Faulted for good. An offline database (#1243) is skipped, and so is a database its holder
+/// disposed while the engine keeps it registered (a session's database, option B of the
+/// concrete-types plan).
 /// </para>
 /// </remarks>
 internal sealed class BlobVersionPurgeWorker : DatabaseEngineWorker
@@ -60,9 +62,9 @@ internal sealed class BlobVersionPurgeWorker : DatabaseEngineWorker
     {
         // Until the next full pass, or the next deferred-undo retry when one is sooner.
         var wait = Interval - Stopwatch.GetElapsedTime(Volatile.Read(ref _lastFullPass));
-        foreach (BlobDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (BlobDatabase database in _engine.GetInstanceSnapshot())
         {
-            if (!database.IsOffline && database.Coordinator.NextDeferredUndoRetry is { } retry && retry < wait)
+            if (!database.IsClosed && !database.IsOffline && database.Coordinator.NextDeferredUndoRetry is { } retry && retry < wait)
             {
                 wait = retry;
             }
@@ -98,7 +100,7 @@ internal sealed class BlobVersionPurgeWorker : DatabaseEngineWorker
             Volatile.Write(ref _lastFullPass, Stopwatch.GetTimestamp());
         }
 
-        foreach (BlobDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (BlobDatabase database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -106,8 +108,10 @@ internal sealed class BlobVersionPurgeWorker : DatabaseEngineWorker
             }
 
             // An offline database is not begun: the engine reports it (#1243), and a failure the
-            // worker recorded for it ends.
-            if (database.IsOffline || !BeginDatabase(database.Name))
+            // worker recorded for it ends. Nor is a database its holder closed (a session's
+            // Database included): the engine keeps it registered only to refuse its reopen, and
+            // its disposed coordinator has nothing left to purge.
+            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }

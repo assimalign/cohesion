@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Client;
 
@@ -38,7 +39,7 @@ internal static class Program
                 MaintenanceInterval = TimeSpan.FromHours(1),
                 PageWriteBackBatchSize = 4096
             });
-            var database = (IBlobDatabase)await engine.CreateDatabaseAsync("large", token);
+            var database = await engine.CreateDatabaseAsync("large", token);
             await database.CreateContainerAsync("objects", token);
             await using var listener = new InMemoryConnectionListener();
             await using var server = BlobDatabaseServer.Create(engine, new BlobDatabaseServerOptions { Listener = listener });

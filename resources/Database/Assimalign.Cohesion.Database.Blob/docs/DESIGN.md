@@ -62,9 +62,12 @@ failed durable flush (#1243) or drain of the journal's append buffer (#1252), or
 write that failed (#1268), after which no checkpoint could truncate its journal — is not the
 worker's: every later operation is refused
 with `COHDBB002`, the workers skip the database, and the engine lists it in `OfflineDatabases`.
-The engine's pump runs a worker again after the backoff if its loop ever ends early (only an
-`IDatabaseEngineWorker` without the guided base can; the engine then reports Faulted until
-disposal). Before #1268 one unexpected exception ended a worker for good.
+The root engine base's pump runs a worker again after the backoff if its loop ever ends early,
+and the engine then reports Faulted until disposal; a `DatabaseEngineWorker`, the only kind the
+engine attaches since phase 4 of the concrete-types plan, records a failed pass instead and its
+loop lets nothing escape. Each pump thread is named for its worker (`{engine}/wal-flush` and its
+siblings; it was `{engine}/{kind}` before phase 4). Before #1268 one unexpected exception ended a
+worker for good.
 `BlobWorkerResilienceTests` covers each case, a group flush's drain and its fsync both. It also
 checks that a database whose checkpoints keep failing leaves the other database a pace a
 worker-wide backoff cannot reach: over a shared six-second window more than twice the backoff's
@@ -152,11 +155,22 @@ itself stays on disk. File-backed storage is required when content exceeds avail
 
 ## Sessions, concurrency and ownership
 
-The existing `IDatabaseSession.Database` seam returns a session-bound `IBlobDatabase` facade.
-It does not add a session parameter to the settled Blob interfaces. Containers from that view
-use the same coordinator and explicit transaction. Direct engine database instances and their
-containers instead use automatic transactions. Session disposal invalidates bound containers
-and streams. Snapshot and ReadCommitted isolation are supported; unsupported isolation is
+The session runs the container operations itself (`BlobDatabaseSession.CreateContainerAsync`,
+`GetContainerAsync`, `DropContainerAsync`, `GetContainersAsync`), in its active transaction
+when one is open; containers it returns are bound to it and use the same coordinator and
+explicit transaction, without a session parameter on their operations. The database's own
+container operations, and the containers they return, use automatic transactions outside any
+session. `session.Database` is that unbound database (option B of the concrete-types plan,
+§6.6), so its operations run automatic transactions too, and disposing it closes the database
+for every session, never the session itself (the engine then refuses to reopen it with
+`ObjectDisposedException` until it is dropped or the engine is recreated, and its workers skip
+it, so the engine stays `Running`). The engine has one
+writer at a time, so a write through `session.Database` or a container it returned
+(`CreateContainerAsync`, `DropContainerAsync`, an upload or delete) while the session's explicit
+transaction has written waits for that transaction's writer lock: the caller that awaits it before
+ending the transaction waits until the call's token is canceled. Inside a transaction, use the
+session's own container operations. Session disposal invalidates bound containers and streams.
+Snapshot and ReadCommitted isolation are supported; unsupported isolation is
 rejected rather than weakened. Read operations pin the selected snapshot until stream disposal.
 An explicit ReadCommitted operation also retains a fixed snapshot pin so an earlier writer
 committing during download cannot advance the purge horizon past its selected content.
@@ -199,8 +213,10 @@ records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines 
    `Database.Transactions` DESIGN.md, "Ending a transaction".)
 2. The transaction stays the session's `CurrentTransaction` and reports `TransactionState.Faulted`.
    Every later operation on the session fails with `COHDBB001`: `OpenWriteAsync`,
-   `OpenReadAsync`, `GetPropertiesAsync`, `DeleteAsync` and `GetBlobsAsync` on session-bound
-   containers, and the session-bound `IBlobDatabase` verbs. `BeginTransactionAsync` fails with
+   `OpenReadAsync`, `GetPropertiesAsync`, `DeleteAsync`, `GetBlobsAsync` and `GetOwnershipAsync`
+   on session-bound containers, and the session's own container operations
+   (`CreateContainerAsync`, `GetContainerAsync`, `DropContainerAsync`, `GetContainersAsync`).
+   `BeginTransactionAsync` fails with
    `COHDBB001` too. The error names the original failure in its message (`Cause: ...`) and carries
    it as `InnerException`. A refused operation does not change the transaction.
 3. `RollbackAsync` succeeds, leaves none of the transaction's writes, and returns the session to
@@ -220,10 +236,14 @@ records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines 
    It keeps that answer after the transaction has ended some other way, so a host's commit gets
    `COHDBB001` whether it runs before or after the server session's teardown disposed the
    transaction. A commit after the session closed fails with `COHDBB001` too, naming the closure
-   when no operation failed first. A
+   ("The session closed before the transaction ended.") when no operation failed first, or the
+   operation the closure aborted ("The blob session closed while the operation was running.",
+   an open stream included). A
    commit the kernel aborts throws `DatabaseTransactionAbortedException` and leaves the
-   transaction `Faulted` and ended. A commit while a stream is still open is refused before it
-   starts and leaves the transaction active.
+   transaction `Faulted` and ended. A commit while an operation of the transaction still runs (a
+   stream still open, or an operation waiting for the writer lock) is refused before it starts
+   ("An operation of the transaction is still running; commit after it completes.") and leaves
+   the transaction active.
 5. Every failure of an operation that started counts: an unknown container, an upload refused
    because the blob exists and `Overwrite` is false, a snapshot conflict, an upload stream whose
    chunk write, publication or cancellation fails after it persisted chunks, a canceled wait for
@@ -243,7 +263,8 @@ records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines 
    refuses a rollback before it starts while the database closes (`ObjectDisposedException`: the
    manager's disposal flags itself before it claims any end, so every end refused during the
    close fails this way); the context then stays active only until disposal's own abort ends it,
-   the session refuses operations in the ended transaction ("being committed or rolled back"),
+   the session refuses operations in the ended transaction ("being committed or rolled back;
+   start the operation after it ends."),
    another `RollbackAsync` fails the same way while the close runs and is accepted once the
    close's abort ended the context, and a `CommitAsync` commits nothing.
 
@@ -252,8 +273,12 @@ Transaction-kernel failures cross the engine boundary translated (`DatabaseTrans
 commit whose record was written but could not be made durable, which leaves the transaction
 `Committed`), never as the kernel's own exception types, for operations
 and for every end of the explicit transaction: commit, rollback, disposal, the session's closure,
-and the abort an operation failure starts. One translation (`BlobDatabaseInstance.TranslateKernelFailure`)
+and the abort an operation failure starts. One translation (`BlobDatabase.TranslateKernelFailure`)
 serves them all. The lifecycle is the Documents state diagram with operations in place of statements.
+Since phase 4 of the concrete-types plan the end state machine this section describes is the root
+`DatabaseTransaction` base's, and the session state, the "already active" check and the
+one-operation hold are the root `DatabaseSession` base's; the model supplies `COHDBB001`,
+`COHDBB002`, the kernel calls and this translation ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)).
 
 Over the wire a failure is terminal (see "Server lifecycle and failure semantics"): the server
 writes `ExecutionFailure` and closes the connection, and the session's teardown disposes the
@@ -263,13 +288,16 @@ pre-start refusals included, ends a host-opened transaction, because the connect
 So that the outcome never depends on timing, the server aborts a still-usable host transaction
 with the failure before it writes `ExecutionFailure`. No later request can reach that transaction
 over the same connection, and a request on a new connection runs in a new session. A host that
-opened the transaction on `IDatabaseServerSession.DatabaseSession` sees the contract's ROLLBACK
+opened the transaction on `DatabaseServerSession.DatabaseSession` sees the contract's ROLLBACK
 and COMMIT answers whichever of its call and the teardown runs first: ROLLBACK raises nothing,
 and COMMIT fails with `COHDBB001` naming the failure. A teardown without a failure (the client
 disconnects, a protocol violation, a server stop) ends the transaction too, and a later COMMIT
 fails with `COHDBB001` naming the session's closure (`BlobTransactionFailureWireTests` in
 `Blob.Client`). An upload always begins its own transaction on the server session, so an upload on
-a connection whose engine session already has a host transaction is refused at BEGIN.
+a connection whose engine session already has a host transaction is refused at BEGIN ("A
+transaction or operation is already active on this session.", the root session base's message).
+The exchanges run the bound session's own container operations (option B), so they join that
+session's transaction.
 
 Containers carry stable identities distinct from their names, so a dropped and recreated
 container cannot be addressed through an obsolete handle. Runtime creation marks them Adhoc.
@@ -281,15 +309,18 @@ schema provisioner; tests directly save a Schema marker through the catalog.
 
 ### Container ownership discovery (C2)
 
-`IBlobDatabase.GetContainersAsync`, `IBlobContainer.GetBlobsAsync`, and
-`IBlobContainer.GetPropertiesAsync` already provide object discovery. Ownership is the only
-additional surface: the `IBlobContainer.GetOwnershipAsync()` extension reads a read-only property
+`GetContainersAsync` (on the session or the database), `BlobContainer.GetBlobsAsync`, and
+`BlobContainer.GetPropertiesAsync` already provide object discovery. Ownership is the only
+additional surface: `BlobContainer.GetOwnershipAsync()` reads a read-only property
 bag containing `OWNER` (`DatabaseObjectOwner.Adhoc` or `DatabaseObjectOwner.Schema`) and
 `OWNING_SCHEMA` (the compiled schema name, or null). These names and meanings match SQL's
 `COHESION_SCHEMA.OBJECT_OWNERSHIP`; the existing container handle supplies the object identity.
-No public interface changes, replacement listing API, or Blob statement language are introduced.
+No replacement listing API or Blob statement language is introduced. Until phase 4 of the
+concrete-types plan the member was an extension over the former `IBlobContainer` interface that
+cast to the internal implementation, so the interface did not widen; the sealed `BlobContainer`
+carries it as an instance member (plan §5.2).
 
-The extension reads the container's current catalog version through the same operation snapshot
+The member reads the container's current catalog version through the same operation snapshot
 as blob reads. Explicit Snapshot transactions retain their visibility; ReadCommitted operations
 read fresh metadata. Automatic operations read current committed metadata. Results are detached
 read-only dictionaries, never stored metadata copies that require synchronization. Mutation
@@ -299,9 +330,10 @@ ownership write operation.
 
 Ownership remains scoped to the handle's database and session. The stable container id is
 checked before reading, so a dropped and recreated container cannot be inspected through a
-stale handle; disposed sessions and canceled operations retain their ordinary diagnostics.
-An external `IBlobContainer` implementation that does not support this engine extension receives
-`DatabaseException` with "This blob container does not support ownership discovery."
+stale handle; disposed sessions and canceled operations retain their ordinary diagnostics. The
+extension's two refusals are gone with it: a null container and a foreign implementation of the
+interface ("This blob container does not support ownership discovery.") cannot reach an instance
+member of the sealed type.
 
 The Shouldly suites cover chunk boundaries, empty objects, replacements, metadata/prefix
 listing, page and content CRC, snapshots, rollback, stale writers, cancellation, ownership,
@@ -450,24 +482,32 @@ an acknowledgement. Existing Blob test source files are unchanged.
 Names and metadata must fit one kernel record. Streams are sequential and not thread-safe.
 Applications must dispose them; no finalizer commits a forgotten upload. Blob has no query
 language, built-in authorization policy, replication, or compiled schema provisioning here.
-Public interfaces remain unchanged, and the builder verb references only the area root seam.
+The wire family widened no engine type, and the builder verb references only the area root seam.
 
 
 ## Server lifecycle and failure semantics
 
 `BlobDatabaseServer` owns one generic `IConnectionListener` and a concurrent session table.
 It follows the SQL/Graph per-model server placement rather than depending on a shared server
-implementation. The engine stays owned by the composition root. Start binds the listener;
+implementation, and since phase 4 of the concrete-types plan its lifecycle is the root
+`DatabaseServer` base's state machine, the one the SQL, KeyValuePair and Graph servers carried.
+The engine stays owned by the composition root. Start binds the listener;
 a bind failure attempts listener cleanup and is terminal. Stop and disposal are idempotent;
-restart requires a fresh server and listener. The server context exposes the engine and a
-point-in-time active-session snapshot. Non-running EngineState rejects startup, handshakes,
-newly accepted connections, and new object operations with an unavailable response where possible.
+restart requires a fresh server and listener. The server's `Sessions` (and, until phase 6, its
+`Context`) expose a point-in-time active-session snapshot. Non-running EngineState rejects
+startup, handshakes, newly accepted connections, and new object operations with an unavailable
+response where possible. A start refused because the engine is not `Running` ("The Blob engine is
+{State} and cannot accept sessions.") is terminal like any failed start of the base: the start
+core disposes the listener before the refusal propagates, and a later start throws
+`ObjectDisposedException`. Before phase 4 that refusal left the server inert, so a later start
+could retry and a later stop disposed the listener; keeping the retry would need a non-terminal
+refusal path in the base (pending owner confirmation, plan §7).
 
 A connection must finish startup and authentication within AuthenticationTimeout. The configured
 authenticator receives the selected database, claimed principal and opaque evidence. Only after
-successful authentication does the server create an engine session. All request handlers access
-`(IBlobDatabase)session.Database`; request payloads cannot switch databases, create/drop them,
-or address another engine. MaxSessions includes connections awaiting authentication. Over-limit
+successful authentication does the server create an engine session. All request handlers run
+that `BlobDatabaseSession`'s own container operations; request payloads cannot switch databases,
+create/drop them, or address another engine. MaxSessions includes connections awaiting authentication. Over-limit
 connections receive Unavailable without becoming sessions. Rejection work is tracked and drained;
 a blocked rejection write is bounded to five seconds and aborts on hard shutdown.
 
@@ -502,7 +542,8 @@ abort work. Already delivered download bytes are provisional until successful EO
 
 The Blob server tests cover all five operations against another database and another server with
 matching names, authenticator evidence, session limits, idle/authentication timeouts, terminal
-lifecycle, engine-state rejection, both drain phases, and a blocked over-limit rejection. The
+lifecycle, engine-state rejection (a start refused for a `Faulted` engine disposes the listener
+once and stays stopped), both drain phases, and a blocked over-limit rejection. The
 client suite supplies in-memory end-to-end failure cases and the constrained-heap wire round trip.
 
 ## Storage operations (#1243, #1254, #1226)
@@ -542,7 +583,7 @@ bytes; the open transaction and the download are readers, because the engine's s
 writer lock would otherwise block the failing upload.
 
 **Buffer pool and checkpoint options (#1254).** `BlobDatabaseEngineOptions` (and
-`IBlobDatabaseEngineBuilder`) carry `BufferPoolCapacity` (32 MiB; whole 8 KiB pages, at least
+`BlobDatabaseEngineBuilder`) carry `BufferPoolCapacity` (32 MiB; whole 8 KiB pages, at least
 1 MiB), `CheckpointJournalSize` (256 MiB; zero for time only; not negative) and
 `CheckpointInterval` (5 minutes, was 30 seconds), all validated by `Create`. The checkpoint worker
 checkpoints a database when its journal reaches the size (its storage wakes the worker at once)
@@ -573,21 +614,23 @@ second (`Database.Transactions` DESIGN.md). A retry that fails makes the engine 
 The owner-approved [Database hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md)
 is implemented as `AddBlob((context, engine) => ...)` on
 `IDatabaseApplicationBuilder`. This replaces `AddBlobDatabase`. The model callback
-runs during application Build and receives an `IBlobDatabaseEngineBuilder`.
+runs during application Build and receives the sealed `BlobDatabaseEngineBuilder`.
 It configures the complete option set, including `FileSystemPath? RootPath`,
-durability, storage strategy, identity and worker intervals; it neither binds
-configuration nor accesses a service container. Retained builder options and
-factories reject mutation after the first engine Build attempt.
+durability, identity and worker intervals; it neither binds configuration nor
+accesses a service container. Retained builder options and factories reject
+mutation after the first engine Build attempt.
 
-`AddWorker` and `AddServer` take factories whose engine argument exists before
-the factory runs. The engine schedules custom workers through the common
-`IDatabaseEngineWorker.Run` contract; this is the concrete generic consumer
-that earns `IDatabaseEngineBuilder`. There are no additional strongly typed
-factory overloads: a model-specific factory can cast its argument, while ordinary
-workers remain portable across models. The engine owns successful factory
-products and cleans them up on subsequent construction failure. Nested servers
-must front that exact engine. The application snapshots each engine's Servers
-for start/stop; disposing the engine disposes its servers and custom workers.
+`AddWorker` and `AddServer` take factories typed over the engine
+(`Func<BlobDatabaseEngine, DatabaseEngineWorker>`,
+`Func<BlobDatabaseEngine, DatabaseServer>`) whose engine argument exists before
+the factory runs, so a model-specific factory needs no cast. A factory runs when
+its product is attached, so it sees the products attached before it; every worker
+is attached before any server. The engine schedules custom workers through the
+root `DatabaseEngineWorker` base, and refuses a worker whose name another worker
+of the engine has. The engine owns successful factory products and cleans them up
+on subsequent construction failure. Nested servers must front that exact engine.
+The application snapshots each engine's Servers for start/stop; disposing the
+engine disposes its servers and custom workers.
 
 `BlobDatabaseEngine.Create(options)` remains the standalone entry point.
 Application factory registrations are application-owned; instance registrations
@@ -595,18 +638,126 @@ remain caller-owned, including their nested components. All four named database
 operations now take `DatabaseName`, with the existing implicit string conversion
 preserving ordinary literal call sites. Empty/default names are rejected.
 
-The explicit requirement for StorageStrategy supersedes the draft's statement
-that this model lacks a storage injection parameter. `IBlobStorageStrategy`
-provides create/open/drop, existence and discovery using the existing
-`BlobStorage` product. It overrides RootPath without allocating default
-files; returned storage is engine-owned and the strategy itself is borrowed.
-Durability is supplied explicitly, and opening must defer checkpointing until
-engine recovery. Default file/memory selection remains unchanged.
+The explicit requirement for StorageStrategy superseded the draft's statement
+that this model lacks a storage injection parameter. The internal
+`BlobStorageStrategy` provides create/open/drop, existence and discovery using
+the existing `BlobStorage` product. It overrides RootPath without allocating
+default files; returned storage is engine-owned and the strategy itself is
+borrowed. Durability is supplied explicitly, and opening must defer
+checkpointing until engine recovery. Default file/memory selection remains
+unchanged. Since phase 4 of the concrete-types plan the strategy is
+`internal abstract` (D9): no shipped code implemented the former public
+`IBlobStorageStrategy`, so the options and builder property are internal and
+only this assembly's test doubles (fault-injecting and recording) supply one.
 
 `BlobDatabaseEngine.CreateBuilder()` exposes the model builder for the
 concrete hosting builder's `AddEngine(name, build => ...)` overload. The consumer
 assigns resolved configuration/service values, registers nested server/worker
-factories, and returns `Build()`; the model package still never sees DI.
-There is no generic production orchestration over `IDatabaseEngineBuilder`;
-the base contract supports model-agnostic worker composition, demonstrated by
-tests exercising the public factory through that base interface.
+factories, and returns `Build()`; the model package still never sees DI. The
+builder implements no root interface: no Hosting code consumed
+`IDatabaseEngineBuilder`.
+
+## Concrete types (concrete-types plan, phase 4, #1260)
+
+The model is the fourth to adopt the root bases
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7), after KeyValuePair,
+Graph and Documents. Its public types are sealed leaves; it has no public interface left, and no
+`Abstractions/` folder. Its child root collapsed the same way: `BlobCatalog` is a sealed type
+behind its `Open` factory.
+
+| Type | Base | Was |
+|---|---|---|
+| `BlobDatabaseEngine` | `DatabaseEngine` | a sealed `IDatabaseEngine` |
+| `BlobDatabase` | `DatabaseInstance` | `IBlobDatabase`, the internal `BlobDatabaseInstance`, and the session-bound view `BlobSessionDatabase` a session returned as its database |
+| `BlobDatabaseSession` | `DatabaseSession` | an internal `IDatabaseSession` |
+| `BlobDatabaseTransaction` | `DatabaseTransaction` | an internal `IDatabaseTransaction` |
+| `BlobDatabaseServer` | `DatabaseServer` | a sealed `IDatabaseServer` |
+| `BlobDatabaseServerSession` (internal) | `DatabaseServerSession` | an internal `IDatabaseServerSession` |
+| `BlobContainer` | none | `IBlobContainer`, its internal implementation, and the `GetOwnershipAsync` extension |
+| `BlobDatabaseEngineBuilder` | none | `IBlobDatabaseEngineBuilder` and its internal implementation |
+| `BlobStorageStrategy` (internal abstract) | none | `IBlobStorageStrategy` |
+
+- **Option B for the session's database** (plan §6.6). The session-bound view gave `Dispose` two
+  meanings: disposing a session's database closed the session, disposing the database itself
+  closed the database. The session now runs its container operations itself
+  (`CreateContainerAsync`, `GetContainerAsync`, `DropContainerAsync`, `GetContainersAsync`,
+  in its transaction), and `session.Database` is the unbound `BlobDatabase`, whose container
+  operations run in autocommit and whose disposal closes the database. So a container operation
+  called on `session.Database`, or on a container it returned, no longer joins the session's
+  transaction (a write through it while that transaction has written waits for the transaction's
+  writer lock, "Sessions, concurrency and ownership"), `session.Database` creates sessions after
+  the session closed (the view refused with "The blob session is closed."), and disposing it
+  closes the database for every session, not the session: the engine refuses to reopen it
+  (`ObjectDisposedException`) until it is dropped or the engine is recreated, as a directly
+  disposed database always was. Its workers skip a closed database (`BlobDatabase.IsClosed`, and
+  `BlobDatabaseEngine.IsOpen` is false for it), so the engine stays `Running` and its server keeps
+  serving the other databases. Without the skip, the version-purge worker failed on the closed
+  database's disposed coordinator every pass, which left the engine `Faulted` for good and its
+  server refusing every start, connection and handshake; option B made that reachable from a
+  session's own property. The wire server and Studio run the session's operations.
+- **Typed surface without casts.** The engine re-exposes `CreateDatabaseAsync`,
+  `OpenDatabaseAsync` and `GetDatabasesAsync` typed (`BlobDatabase`) with `new` members over the
+  base's public members; a database re-exposes its `Engine` and `CreateSessionAsync`
+  (`BlobDatabaseSession`); a session its `Database`, `CurrentTransaction` and both
+  `BeginTransactionAsync` overloads (`BlobDatabaseTransaction`); the server its `Engine`; the
+  internal server session its `DatabaseSession`, covariantly. Each `new` member awaits or reads the
+  base's public member and casts once, so the base's checks always run.
+  `TryGetDatabase(DatabaseName, out BlobDatabase)` is a typed overload of the base's lookup, not a
+  `new` member: an `out var` call binds it, and an explicitly typed `out DatabaseInstance` binds
+  the base's.
+- **What the bases own now.** The engine base owns the name, the model, the workers' pumps (the
+  model no longer compiles `shared/DatabaseEngineWorkerPump.cs`), the state fold, composition and
+  the disposal order; the database base owns the disposed flag; the session base owns the session
+  state, the session's transaction, the "already active" check and the operation hold (the
+  model's former reservation flag and operation set, at most one operation at a time, a stream's
+  until its disposal); the transaction base owns the whole end state machine, the admission of
+  operations (the model's former operation counter) and the abort; the server base owns the
+  lifecycle; the server session base owns the identity, the negotiated version and the
+  authenticated principal (pending owner confirmation of rule 6, plan §7). The model supplies its
+  vocabulary: `COHDBB001`, `COHDBB002`, the kernel calls and the translation of the kernel's
+  exceptions. It keeps its per-operation rule (#1225): a failed operation aborts the explicit
+  transaction through the base's `AbortAsync`, and an operation holds the session from its start
+  to its end.
+- **What changed for a caller** (plan §6.4): a closed session fails every operation with "The
+  session is closed." (was "The blob session is closed."); BEGIN refuses a closed session, then
+  an active transaction or operation ("A transaction or operation is already active on this
+  session.", was "A transaction or stream is already active on this session."), then a canceled
+  token, before the isolation-level and offline refusals, which came first; on an offline database
+  BEGIN from the session that holds an open transaction fails "already active" (was `COHDBB002`),
+  and a canceled token is refused by `CreateSessionAsync`, both execute seams and BEGIN before
+  `COHDBB002`, and so are the seams' argument errors, a null request and a blank statement (the
+  container and blob operations keep their order, the offline refusal first); BEGIN refuses a
+  transaction the kernel ended under its caller with `COHDBB001`, where it reported the disposed
+  database; BEGIN and both execute seams refuse a closed session as closed before they check its
+  database, so a closed session of a dropped or closed database reports "The session is closed."
+  where it reported `ObjectDisposedException` (the container and blob operations check the
+  database first and still report it); the request seam's refusal names the session's container
+  operations ("Blob sessions have no query language. Use the session's container operations.",
+  was "… Use the IBlobDatabase exposed by session.Database."); a commit after the session closed an
+  active transaction names "The session closed before the transaction ended." (was "The blob
+  session closed before the transaction ended."); a commit while an operation of the transaction
+  runs fails with "An operation of the transaction is still running; commit after it completes."
+  (was "Dispose every blob stream before committing its transaction."); an operation refused after
+  the caller's own end says the transaction "ended before the operation started" where it
+  reported `COHDBB001` without a cause; a session that fails to close reports "The session failed
+  to close." (was "One or more blob operations failed to close."); and the engine's disposal
+  aggregate is "One or more components of engine '{name}' failed to close." (was "One or more blob
+  engine components failed to close."), with the databases that fail to close as one component,
+  nested in "One or more blob databases failed to close." when there are several. The engine's
+  guards check an empty name, then disposal, then the token, and the model's
+  single-file-name-component rule after them (it checked the whole name, then the token, then
+  disposal); `GetDatabasesAsync` checks disposal when it is called; a blank `EngineName` is
+  refused by `Create` and `Build` (`ArgumentException`, parameter `EngineName`); a worker whose
+  name another worker of the engine has is refused (the model never checked names); each worker's
+  pump thread is named for the worker (it was `{engine}/{kind}`); and a server start refused for
+  the engine's state is terminal ("Server lifecycle and failure semantics").
+- **Unchanged for Blob**, though the bases now carry it: every commit of an aborted transaction,
+  a second one and one after the teardown included, reporting `COHDBB001` with the cause (the
+  model's teardown already closed the transaction with a cause); the `Faulted` state of a
+  transaction whose session closed while its database was offline; the one-operation hold's
+  refusal, "Dispose the active blob stream before starting another operation on this session.";
+  the refusal of an operation while the caller's commit or rollback runs ("… start the operation
+  after it ends.", which the model already worded for operations);
+  the worker disposal order (last attached first); the server's accept-loop failure rethrown by
+  stop after the drain; and the database's disposal steps (the coordinator, then the storage),
+  which a disposal through the engine now awaits asynchronously.

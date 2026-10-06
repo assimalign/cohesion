@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
@@ -321,7 +320,7 @@ public sealed class BlobWorkerResilienceTests
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
         var faults = strategy.Faults(Failing);
         await using var session = await failing.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
 
         // Act: the failing database's journal drain, or its fsync, fails under the worker's group
         // flush.
@@ -335,14 +334,18 @@ public sealed class BlobWorkerResilienceTests
         var latencies = await TimedUploadsAsync(healthy, 5);
 
         faults.Clear();
-        var reopened = (BlobDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert: a failed drain ends the group flush before its fsync.
         bool drain = fault == DeviceFault.JournalWrite;
         StorageOfflineException.Find(error.ShouldNotBeNull()).ShouldNotBeNull();
         (failedCommit / window).ShouldBeLessThan(1.0);
         (drain ? faults.JournalWriteFailures : faults.JournalFlushFailures).ShouldBeGreaterThanOrEqualTo(1);
-        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(engine.Name + "/" + DatabaseEngineWorkerKind.WriteAheadFlush);
+
+        // The root engine base names each pump thread for its worker (concrete-types plan §6.4,
+        // engine composition), where the model named it "{engine}/{kind}" ("blob-engine/WriteAheadFlush").
+        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name);
+        worker.Name.ShouldBe(engine.Name + "/wal-flush");
         (drain ? faults.JournalFlushFailures : faults.JournalWriteFailures).ShouldBe(0);
         refusal.Code.ShouldBe("COHDBB002");
         StorageOfflineException.Find(refusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
@@ -368,7 +371,7 @@ public sealed class BlobWorkerResilienceTests
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
         await using var session = await failing.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
 
         // Act: the next checkpoint's header slot write fails.
         faults.FailHeaderWrites = true;
@@ -391,7 +394,7 @@ public sealed class BlobWorkerResilienceTests
         var after = strategy.Capture(Failing);
 
         faults.Clear();
-        var reopened = (BlobDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert
         offline.ShouldBeTrue();
@@ -429,7 +432,7 @@ public sealed class BlobWorkerResilienceTests
     /// the first to fail, and the queued session got
     /// <see cref="DatabaseTransactionCommitUnconfirmedException"/>, which is right for a commit whose
     /// record was appended before its flush failed (#1243), while its write never reached the lock.
-    /// <see cref="IBlobContainer.OpenWriteAsync"/> returns only once its request waits for the lock:
+    /// <see cref="BlobContainer.OpenWriteAsync"/> returns only once its request waits for the lock:
     /// the operation's begin and every step before the wait complete synchronously and append only
     /// its begin record, so the writer is queued, and nothing of its own drains, before the fault
     /// switches on.
@@ -448,9 +451,9 @@ public sealed class BlobWorkerResilienceTests
         var faults = strategy.Faults(Failing);
         await using var holder = await failing.CreateSessionAsync();
         await using var queued = await failing.CreateSessionAsync();
-        var queuedFiles = await ((IBlobDatabase)queued.Database).GetContainerAsync("files");
+        var queuedFiles = await queued.GetContainerAsync("files");
         _ = await holder.BeginTransactionAsync();
-        await WriteAsync(await ((IBlobDatabase)holder.Database).GetContainerAsync("files"), "held", "held");
+        await WriteAsync(await holder.GetContainerAsync("files"), "held", "held");
         var waiting = WriteAsync(queuedFiles, "queued", "queued");
         bool queuedWhileOnline = !waiting.IsCompleted && failing.Coordinator.GetOpenContexts().Count == 2;
         string queuedState = $"queued {waiting.Status}, {failing.Coordinator.GetOpenContexts().Count} open contexts, offline {failing.IsOffline}";
@@ -460,14 +463,14 @@ public sealed class BlobWorkerResilienceTests
         faults.SwitchOn(fault);
 
         // The holder writes again, so the next checkpoint is due (it may already be refused).
-        await Record.ExceptionAsync(async () => await WriteAsync(await ((IBlobDatabase)holder.Database).GetContainerAsync("files"), "held-2", "held-2"));
+        await Record.ExceptionAsync(async () => await WriteAsync(await holder.GetContainerAsync("files"), "held-2", "held-2"));
         bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
         bool ended = await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromSeconds(5))) == waiting;
         var queuedRefusal = ended ? await Record.ExceptionAsync(() => waiting) : null;
-        var holderRefusal = await Record.ExceptionAsync(async () => await WriteAsync(await ((IBlobDatabase)holder.Database).GetContainerAsync("files"), "after", "after"));
+        var holderRefusal = await Record.ExceptionAsync(async () => await WriteAsync(await holder.GetContainerAsync("files"), "after", "after"));
 
         faults.Clear();
-        var reopened = (BlobDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert: both writers got the coded refusal naming what failed, and the reopen kept
         // neither write.
@@ -510,11 +513,11 @@ public sealed class BlobWorkerResilienceTests
         var faults = strategy.Faults(Failing);
         await using var holder = await failing.CreateSessionAsync();
         await using var queued = await failing.CreateSessionAsync();
-        var queuedFiles = await ((IBlobDatabase)queued.Database).GetContainerAsync("files");
+        var queuedFiles = await queued.GetContainerAsync("files");
         var transaction = await holder.BeginTransactionAsync();
-        var holderFiles = await ((IBlobDatabase)holder.Database).GetContainerAsync("files");
+        var holderFiles = await holder.GetContainerAsync("files");
         await WriteAsync(holderFiles, "held", "held");
-        var holderContext = ((BlobDatabaseTransaction)transaction).Context;
+        var holderContext = transaction.Context;
         faults.SwitchOn(DeviceFault.JournalWrite);
 
         var waiting = WriteAsync(queuedFiles, "queued", "queued");
@@ -550,7 +553,7 @@ public sealed class BlobWorkerResilienceTests
         var deferredUndos = failing.Coordinator.VersionStore.PendingAbortedPurges;
 
         faults.Clear();
-        var reopened = (BlobDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert
         queuedWithoutADrain.ShouldBeTrue(queuedState);
@@ -570,8 +573,12 @@ public sealed class BlobWorkerResilienceTests
         (await CountAsync(reopened)).ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a registered worker whose loop throws is run again, and the engine reports Faulted")]
-    public async Task Pump_InterfaceWorkerThrows_ShouldRunItAgainAndReportFaulted()
+    // Since the engine derives from DatabaseEngine (concrete-types plan, phase 4), a registered
+    // worker is a DatabaseEngineWorker, whose loop lets nothing escape: the pass that throws is
+    // recorded and the next one runs after the backoff. The interface-only worker this test drove
+    // until then cannot be registered any more.
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a registered worker whose pass throws is run again, and the engine reports Faulted")]
+    public async Task Pump_RegisteredWorkerPassThrows_ShouldRunItAgainAndReportFaulted()
     {
         // Arrange
         var worker = new EscapingWorker();
@@ -771,7 +778,7 @@ public sealed class BlobWorkerResilienceTests
     }
 
     // What a database's two growing files hold together: the bound the pace window keeps under.
-    private static long FileBytes(BlobDatabaseInstance database)
+    private static long FileBytes(BlobDatabase database)
         => database.DataStorage.Data.Length + database.DataStorage.JournalLength;
 
     private static BlobDatabaseEngineOptions Options(FaultInjectingJournalStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
@@ -785,34 +792,34 @@ public sealed class BlobWorkerResilienceTests
     private static DatabaseEngineWorker WorkerOf(BlobDatabaseEngine engine, DatabaseEngineWorkerKind kind)
         => engine.Workers.OfType<DatabaseEngineWorker>().Single(worker => worker.Kind == kind);
 
-    private static async Task<BlobDatabaseInstance> CreateAsync(BlobDatabaseEngine engine, string name)
+    private static async Task<BlobDatabase> CreateAsync(BlobDatabaseEngine engine, string name)
     {
-        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        var database = await engine.CreateDatabaseAsync(name);
         await database.CreateContainerAsync("files");
         return database;
     }
 
-    private static async Task WriteAsync(IBlobContainer container, string name, string content)
+    private static async Task WriteAsync(BlobContainer container, string name, string content)
     {
         await using var stream = await container.OpenWriteAsync(name);
         await stream.WriteAsync(Encoding.UTF8.GetBytes(content));
     }
 
-    private static async Task UploadAsync(BlobDatabaseInstance database, int first, int count)
+    private static async Task UploadAsync(BlobDatabase database, int first, int count)
     {
         await using var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         for (int id = first; id < first + count; id++)
         {
             await WriteAsync(files, $"k{id}", new string('x', UploadSize));
         }
     }
 
-    private static async Task<List<TimeSpan>> TimedUploadsAsync(BlobDatabaseInstance database, int count)
+    private static async Task<List<TimeSpan>> TimedUploadsAsync(BlobDatabase database, int count)
     {
         var latencies = new List<TimeSpan>();
         await using var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         for (int id = 0; id < count; id++)
         {
             var watch = Stopwatch.StartNew();
@@ -823,10 +830,10 @@ public sealed class BlobWorkerResilienceTests
         return latencies;
     }
 
-    private static async Task<int> CountAsync(BlobDatabaseInstance database)
+    private static async Task<int> CountAsync(BlobDatabase database)
     {
         await using var session = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
         int count = 0;
         await foreach (var _ in files.GetBlobsAsync())
         {
@@ -866,31 +873,34 @@ public sealed class BlobWorkerResilienceTests
         return true;
     }
 
-    /// <summary>A worker without the guided base whose first loop throws; later loops run until cancelled.</summary>
-    private sealed class EscapingWorker : IDatabaseEngineWorker
+    /// <summary>
+    /// A registered worker whose first pass throws; later passes run until cancelled, so the
+    /// failure stays recorded (no pass ran to its end) while the test reads the engine's state.
+    /// </summary>
+    private sealed class EscapingWorker : DatabaseEngineWorker
     {
         private int _runs;
         private int _stopped;
 
-        public string Name => "escaping";
-
-        public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.IndexMaintenance;
-
-        public TimeSpan Interval => TimeSpan.FromSeconds(1);
+        public EscapingWorker()
+            : base("escaping", DatabaseEngineWorkerKind.IndexMaintenance, TimeSpan.FromMilliseconds(10))
+        {
+        }
 
         public int Runs => Volatile.Read(ref _runs);
 
         public bool Stopped => Volatile.Read(ref _stopped) != 0;
 
-        public void Run(CancellationToken cancellationToken)
+        protected override void RunIterationCore(CancellationToken cancellationToken)
         {
             if (Interlocked.Increment(ref _runs) == 1)
             {
-                throw new InvalidOperationException("The worker's loop failed.");
+                throw new InvalidOperationException("The worker's pass failed.");
             }
 
             cancellationToken.WaitHandle.WaitOne();
             Volatile.Write(ref _stopped, 1);
+            cancellationToken.ThrowIfCancellationRequested();
         }
     }
 }

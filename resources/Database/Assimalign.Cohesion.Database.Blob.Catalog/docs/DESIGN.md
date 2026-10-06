@@ -23,6 +23,12 @@ flowchart LR
 | `Assimalign.Cohesion.Database.Storage` | Pages, page CRC, storage brackets and journal |
 | `Assimalign.Cohesion.Database` | Shared object ownership vocabulary |
 
+`BlobCatalog.Open` returns the sealed `BlobCatalog`, which has a private constructor; its record
+and codec are internal. The former `IBlobCatalog` interface, `BlobCatalog` static factory and
+internal `DefaultBlobCatalog` collapsed into it (concrete-types plan, phase 4, #1260); the members
+and their argument checks are the implementation's, unchanged. Public metadata records are
+immutable values.
+
 ## Directory and visibility
 
 At open, the catalog scans only owner-zero metadata pages into a directory from ordinal
@@ -43,8 +49,9 @@ deleters. Rollback clears old tombstones and removes newly created records; dire
 observe those physical changes directly. Snapshot-safe purge later reclaims obsolete records.
 
 Open-time recovery scrubs uncommitted stamps before loading the directory. Metadata that
-references an unfinished chain is therefore absent after restart. The factory retains neither
-storage nor coordinator ownership; the engine controls their lifecycle. This assembly contains
+references an unfinished chain is therefore absent after restart. The catalog keeps references
+to the storage and the coordinator but does not own them; the engine that opens it disposes them.
+This assembly contains
 no local pager, journal, transaction manager, or model-lock implementation.
 
 ## Metadata disk format, version 1

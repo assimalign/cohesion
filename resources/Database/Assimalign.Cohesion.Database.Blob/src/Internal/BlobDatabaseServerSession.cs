@@ -15,26 +15,33 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// (connected → startup → authenticating → ready ⇄ executing → terminated)
 /// over a single connection and routes all requests through the bound Blob session.
 /// </summary>
-internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
+/// <remarks>
+/// An internal sealed leaf of the root <see cref="DatabaseServerSession"/> (concrete-types plan,
+/// row 11): the base owns the identity, and the negotiated version and authenticated principal,
+/// which the handshake records once each; the engine session is re-exposed typed by a covariant
+/// override. Option B (concrete-types plan, section 6.6): the exchanges run the container
+/// operations of the bound session itself, so they join a transaction the session holds.
+/// </remarks>
+internal sealed class BlobDatabaseServerSession : DatabaseServerSession
 {
     private readonly BlobDatabaseServer _server;
     private readonly IConnection _connection;
     private readonly BlobDatabaseServerOptions _options;
-    private readonly IDatabaseEngine _engine;
+    private readonly BlobDatabaseEngine _engine;
     private readonly DatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
 
     private ProtocolChannel? _channel;
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
-    private IDatabaseSession? _databaseSession;
+    private BlobDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
 
     internal BlobDatabaseServerSession(
         BlobDatabaseServer server,
         IConnection connection,
         BlobDatabaseServerOptions options,
-        IDatabaseEngine engine,
+        BlobDatabaseEngine engine,
         DatabaseAuthenticator authenticator)
     {
         _server = server;
@@ -46,16 +53,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
     }
 
     /// <inheritdoc />
-    public Guid Id { get; } = Guid.NewGuid();
-
-    /// <inheritdoc />
-    public ProtocolVersion ProtocolVersion { get; private set; }
-
-    /// <inheritdoc />
-    public string? Principal { get; private set; }
-
-    /// <inheritdoc />
-    public IDatabaseSession? DatabaseSession => _databaseSession;
+    public override BlobDatabaseSession? DatabaseSession => _databaseSession;
 
     /// <summary>
     /// Gets the task that completes when the session pump has fully wound down.
@@ -86,7 +84,8 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    /// <remarks>Idempotent: aborting a session that already wound down is a no-op.</remarks>
+    protected override async ValueTask DisposeAsyncCore()
     {
         Abort();
         await _completion.ConfigureAwait(false);
@@ -181,7 +180,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
             return false;
         }
 
-        ProtocolVersion = negotiated;
+        SetNegotiatedVersion(negotiated);
 
         if (_engine.State != EngineState.Running)
         {
@@ -189,7 +188,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
             return false;
         }
 
-        IDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
+        BlobDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
 
         if (database is null)
         {
@@ -242,7 +241,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
             return false;
         }
 
-        Principal = startup.Principal;
+        SetAuthenticatedPrincipal(startup.Principal);
 
         await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
         return true;
@@ -319,19 +318,19 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         }
         try
         {
-            var database = (IBlobDatabase)_databaseSession!.Database;
+            var session = _databaseSession!;
             switch ((BlobProtocolMessageType)frame.Type)
             {
                 case BlobProtocolMessageType.Write:
-                    await UploadAsync(database, BlobWriteMessage.Decode(frame.Payload.Span), cancellationToken).ConfigureAwait(false);
+                    await UploadAsync(session, BlobWriteMessage.Decode(frame.Payload.Span), cancellationToken).ConfigureAwait(false);
                     break;
                 case BlobProtocolMessageType.Read:
-                    await DownloadAsync(database, BlobReadMessage.Decode(frame.Payload.Span), cancellationToken).ConfigureAwait(false);
+                    await DownloadAsync(session, BlobReadMessage.Decode(frame.Payload.Span), cancellationToken).ConfigureAwait(false);
                     break;
                 case BlobProtocolMessageType.Delete:
                 {
                     BlobDeleteMessage request = BlobDeleteMessage.Decode(frame.Payload.Span);
-                    IBlobContainer container = await database.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
+                    BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
                     bool deleted = await container.DeleteAsync(request.Name, cancellationToken).ConfigureAwait(false);
                     await CompleteAsync(deleted ? 1 : 0, cancellationToken).ConfigureAwait(false);
                     break;
@@ -339,7 +338,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
                 case BlobProtocolMessageType.GetProperties:
                 {
                     BlobGetPropertiesMessage request = BlobGetPropertiesMessage.Decode(frame.Payload.Span);
-                    IBlobContainer container = await database.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
+                    BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
                     BlobProperties? properties = await container.GetPropertiesAsync(request.Name, cancellationToken).ConfigureAwait(false);
                     if (properties is { } found)
                     {
@@ -351,7 +350,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
                 case BlobProtocolMessageType.List:
                 {
                     BlobListMessage request = BlobListMessage.Decode(frame.Payload.Span);
-                    IBlobContainer container = await database.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
+                    BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
                     long count = 0;
                     await foreach (BlobProperties properties in container.GetBlobsAsync(request.Prefix, cancellationToken).ConfigureAwait(false))
                     {
@@ -370,7 +369,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
             // boundary or partially consumed content is returned to the connection pool. The
             // teardown ends the session's transaction; a host-opened one is aborted first, so the
             // host's commit names this failure whenever it runs (#1225).
-            if (_databaseSession is BlobDatabaseSession session)
+            if (_databaseSession is { } session)
             {
                 try
                 {
@@ -389,7 +388,7 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         }
     }
 
-    private async Task UploadAsync(IBlobDatabase database, BlobWriteMessage request, CancellationToken cancellationToken)
+    private async Task UploadAsync(BlobDatabaseSession session, BlobWriteMessage request, CancellationToken cancellationToken)
     {
         ProtocolFrame? start = await _reader!.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
         if (start is null || start.Value.Type != (ProtocolMessageType)BlobProtocolMessageType.TransferStart)
@@ -397,11 +396,11 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
             throw new ProtocolException("A Blob upload must begin with TransferStart.");
         }
         BlobTransferStartMessage metadata = BlobTransferStartMessage.Decode(start.Value.Payload.Span);
-        await using IDatabaseTransaction transaction = await _databaseSession!.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using BlobDatabaseTransaction transaction = await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         Stream? destination = null;
         try
         {
-            IBlobContainer container = await database.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
+            BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
             destination = await container.OpenWriteAsync(request.Name, new BlobWriteOptions
             {
                 ContentType = metadata.ContentType.Length == 0 ? null : metadata.ContentType,
@@ -437,12 +436,12 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
         }
     }
 
-    private async Task DownloadAsync(IBlobDatabase database, BlobReadMessage request, CancellationToken cancellationToken)
+    private async Task DownloadAsync(BlobDatabaseSession session, BlobReadMessage request, CancellationToken cancellationToken)
     {
         // Metadata and content must refer to the same immutable version even when replaced
         // concurrently. The read-only transaction keeps its snapshot until stream disposal.
-        await using IDatabaseTransaction transaction = await _databaseSession!.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        IBlobContainer container = await database.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
+        await using BlobDatabaseTransaction transaction = await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
         BlobProperties properties = await container.GetPropertiesAsync(request.Name, cancellationToken).ConfigureAwait(false)
             ?? throw new DatabaseException($"Blob '{request.Name}' does not exist.");
         await using Stream source = await container.OpenReadAsync(request.Name, cancellationToken).ConfigureAwait(false);
@@ -462,16 +461,16 @@ internal sealed class BlobDatabaseServerSession : IDatabaseServerSession
     /// Resolves the startup-requested database on the server's one engine:
     /// already-open databases first, then an open attempt.
     /// </summary>
-    private async ValueTask<IDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
+    private async ValueTask<BlobDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
             return null;
         }
 
-        if (_engine.TryGetDatabase(name, out IDatabase database))
+        if (_engine.TryGetDatabase(name, out var open))
         {
-            return database;
+            return open;
         }
 
         try

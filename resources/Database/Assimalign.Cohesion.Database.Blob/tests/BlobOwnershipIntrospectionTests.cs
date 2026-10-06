@@ -7,7 +7,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Blob.Catalog;
-using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
@@ -18,7 +17,7 @@ public sealed class BlobOwnershipIntrospectionTests
     public async Task GetOwnership_WithBothAuthorities_ShouldReadCatalog()
     {
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         await database.CreateContainerAsync("adhoc");
         await SaveManagedAsync(database, "managed", "MediaSchema");
 
@@ -38,7 +37,7 @@ public sealed class BlobOwnershipIntrospectionTests
     public async Task GetOwnership_WhenMutationAttempted_ShouldRefuseAndPreserveCatalog()
     {
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         var ownership = (IDictionary<string, object?>)await container.GetOwnershipAsync();
 
@@ -55,15 +54,14 @@ public sealed class BlobOwnershipIntrospectionTests
     public async Task GetOwnership_WithSameContainerNames_ShouldRemainDatabaseScoped()
     {
         await using var engine = BlobDatabaseEngine.Create(new());
-        var own = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("own");
-        var other = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("other");
+        var own = await engine.CreateDatabaseAsync("own");
+        var other = await engine.CreateDatabaseAsync("other");
         await SaveManagedAsync(own, "files", "OwnSchema");
         await SaveManagedAsync(other, "files", "OtherSchema");
         await using var session = await own.CreateSessionAsync();
-        var scoped = (IBlobDatabase)session.Database;
 
-        (await (await scoped.GetContainerAsync("files")).GetOwnershipAsync())["OWNING_SCHEMA"].ShouldBe("OwnSchema");
-        await Should.ThrowAsync<DatabaseException>(async () => await scoped.GetContainerAsync("other/files"));
+        (await (await session.GetContainerAsync("files")).GetOwnershipAsync())["OWNING_SCHEMA"].ShouldBe("OwnSchema");
+        await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("other/files"));
         (await (await other.GetContainerAsync("files")).GetOwnershipAsync())["OWNING_SCHEMA"].ShouldBe("OtherSchema");
     }
 
@@ -73,11 +71,11 @@ public sealed class BlobOwnershipIntrospectionTests
     public async Task GetOwnership_AfterCatalogChange_ShouldUseOperationSnapshot(IsolationLevel isolationLevel, string expected)
     {
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         await SaveManagedAsync(database, "files", "Original");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync(isolationLevel);
-        var container = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var container = await session.GetContainerAsync("files");
         var first = await container.GetOwnershipAsync();
 
         await SaveManagedAsync(database, "files", "Updated");
@@ -92,7 +90,7 @@ public sealed class BlobOwnershipIntrospectionTests
     public async Task GetOwnership_WhenHandleUnavailable_ShouldReject()
     {
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
@@ -102,12 +100,12 @@ public sealed class BlobOwnershipIntrospectionTests
         await Should.ThrowAsync<DatabaseException>(async () => await container.GetOwnershipAsync());
 
         await using var session = await database.CreateSessionAsync();
-        var scoped = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var scoped = await session.GetContainerAsync("files");
         await session.DisposeAsync();
         await Should.ThrowAsync<DatabaseException>(async () => await scoped.GetOwnershipAsync());
     }
 
-    private static async Task SaveManagedAsync(BlobDatabaseInstance database, string name, string schema)
+    private static async Task SaveManagedAsync(BlobDatabase database, string name, string schema)
     {
         var context = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
         var previous = database.Catalog.FindContainer(name, context.Snapshot);

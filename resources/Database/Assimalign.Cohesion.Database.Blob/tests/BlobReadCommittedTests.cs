@@ -2,11 +2,10 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Blob.Internal;
-using Assimalign.Cohesion.Database.Transactions;
-
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -16,26 +15,26 @@ public sealed class BlobReadCommittedTests
     public async Task ReadCommittedStream_ShouldPinItsStatementSnapshot()
     {
         await using var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions());
-        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("statement-pin");
+        var database = await engine.CreateDatabaseAsync("statement-pin");
         var container = await database.CreateContainerAsync("files");
         byte[] original = new byte[40_000];
         for (int i = 0; i < original.Length; i++)
         {
             original[i] = (byte)(i * 19);
         }
-        await Write(container, original);
+        await WriteAsync(container, original);
 
         await using var writerSession = await database.CreateSessionAsync();
         await using var writer = await writerSession.BeginTransactionAsync();
-        var writerContainer = await ((IBlobDatabase)writerSession.Database).GetContainerAsync("files");
+        var writerContainer = await writerSession.GetContainerAsync("files");
         byte[] replacement = new byte[50_000];
-        await Write(writerContainer, replacement);
+        await WriteAsync(writerContainer, replacement);
 
         // Writer W predates reader R. R must see the original while W is active.
         // After W commits, a refreshed R snapshot would let purge pass W's deleter.
         await using var readerSession = await database.CreateSessionAsync();
         await using var reader = await readerSession.BeginTransactionAsync(IsolationLevel.ReadCommitted);
-        var readerContainer = await ((IBlobDatabase)readerSession.Database).GetContainerAsync("files");
+        var readerContainer = await readerSession.GetContainerAsync("files");
         var stream = await readerContainer.OpenReadAsync("item");
         using var downloaded = new MemoryStream();
         byte[] first = new byte[1];
@@ -57,11 +56,11 @@ public sealed class BlobReadCommittedTests
     public async Task Session_ShouldRejectOverlappingStreamsAndPermitSequentialUploads()
     {
         await using var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("stream-guard");
+        var database = await engine.CreateDatabaseAsync("stream-guard");
         await database.CreateContainerAsync("files");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
-        var container = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+        var container = await session.GetContainerAsync("files");
         var first = await container.OpenWriteAsync("item");
         await first.WriteAsync("first"u8.ToArray());
         await Should.ThrowAsync<DatabaseException>(async () => await container.OpenWriteAsync("item"));
@@ -70,7 +69,7 @@ public sealed class BlobReadCommittedTests
         transaction.State.ShouldBe(TransactionState.Active);
         await first.DisposeAsync();
 
-        await Write(container, "second"u8.ToArray());
+        await WriteAsync(container, "second"u8.ToArray());
         await transaction.CommitAsync();
         var committedContainer = await database.GetContainerAsync("files");
         await using var content = await committedContainer.OpenReadAsync("item");
@@ -79,7 +78,7 @@ public sealed class BlobReadCommittedTests
         copied.ToArray().ShouldBe("second"u8.ToArray());
     }
 
-    private static async Task Write(IBlobContainer container, byte[] content)
+    private static async Task WriteAsync(BlobContainer container, byte[] content)
     {
         await using var stream = await container.OpenWriteAsync("item");
         await stream.WriteAsync(content);

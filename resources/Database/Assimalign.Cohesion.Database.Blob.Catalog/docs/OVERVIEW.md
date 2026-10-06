@@ -1,8 +1,8 @@
 # Blob catalog
 
 `Assimalign.Cohesion.Database.Blob.Catalog` persists the containers and blob metadata of
-one logical database. Its public factory returns `IBlobCatalog`; the implementation
-is internal. It depends on the Database root for the ownership vocabulary, Blob.Storage
+one logical database through the sealed `BlobCatalog`, which `BlobCatalog.Open` returns; its
+record and codec are internal. It depends on the Database root for the ownership vocabulary, Blob.Storage
 for record access, and the shared Storage and Transactions kernels for durability and MVCC.
 
 Open `BlobCatalog` after the database coordinator has scrubbed recovered records. Container
