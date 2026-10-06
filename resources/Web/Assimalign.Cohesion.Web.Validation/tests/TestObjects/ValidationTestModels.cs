@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json.Serialization;
 
 using Assimalign.Cohesion.ObjectValidation;
@@ -60,6 +61,19 @@ internal sealed class CustomerProfile : ValidationProfile<Customer>
         descriptor.RuleFor(customer => customer.Name!).NotEmpty();
         descriptor.RuleFor(customer => customer.Age).GreaterThanOrEqualTo(18);
         descriptor.RuleFor(customer => customer.Address!).ChildRules(address => address.RuleFor(a => a.City!).NotEmpty());
+    }
+}
+
+/// <summary>
+/// Rules for <see cref="Customer"/> whose nested address rule throws: a fault in the validator, not a
+/// validation failure of the body.
+/// </summary>
+internal sealed class FaultingCustomerProfile : ValidationProfile<Customer>
+{
+    public override void Configure(IValidationRuleDescriptor<Customer> descriptor)
+    {
+        descriptor.RuleFor(customer => customer.Address!).ChildRules(address =>
+            address.RuleFor(a => a.City!).Custom((city, context) => throw new InvalidOperationException("nested rule fault")));
     }
 }
 

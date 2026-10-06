@@ -90,51 +90,46 @@ internal sealed class ChildValidationRule<TValue> : ValidationRuleBase<TValue>
         }
     }
 
+    // An exception from the nested profile's rules propagates: validation fails closed. Caught and reported as
+    // "not invoked", it let the nested object pass with no error (#1292). A null nested object never gets
+    // here: the object overload above skips it explicitly.
     public override bool TryValidate(TValue value, out IValidationContext context)
     {
-        try
+        context = new ValidationContext<TValue>(value)
         {
-            context = new ValidationContext<TValue>(value)
+            ValidationMode = ParentContext.ValidationMode,
+            ContinueThroughValidationChain = ParentContext.ContinueThroughValidationChain,
+            ThrowExceptionOnFailure = ParentContext.ThrowExceptionOnFailure
+        };
+
+        foreach (var item in Profile.ValidationItems)
+        {
+            if (ParentContext.ValidationMode == ValidationMode.Stop && context.Errors.Any())
+            {
+                break;
+            }
+
+            var childContext = new ValidationContext<TValue>(value)
             {
                 ValidationMode = ParentContext.ValidationMode,
                 ContinueThroughValidationChain = ParentContext.ContinueThroughValidationChain,
                 ThrowExceptionOnFailure = ParentContext.ThrowExceptionOnFailure
             };
 
-            foreach (var item in Profile.ValidationItems)
+            item.Evaluate(childContext);
+
+            foreach (var error in childContext.Errors)
             {
-                if (ParentContext.ValidationMode == ValidationMode.Stop && context.Errors.Any())
+                context.AddFailure(new ValidationError()
                 {
-                    break;
-                }
-
-                var childContext = new ValidationContext<TValue>(value)
-                {
-                    ValidationMode = ParentContext.ValidationMode,
-                    ContinueThroughValidationChain = ParentContext.ContinueThroughValidationChain,
-                    ThrowExceptionOnFailure = ParentContext.ThrowExceptionOnFailure
-                };
-
-                item.Evaluate(childContext);
-
-                foreach (var error in childContext.Errors)
-                {
-                    context.AddFailure(new ValidationError()
-                    {
-                        Code = error.Code,
-                        Message = error.Message,
-                        Source = ComposeSource(ParentSource, error.Source)!
-                    });
-                }
+                    Code = error.Code,
+                    Message = error.Message,
+                    Source = ComposeSource(ParentSource, error.Source)!
+                });
             }
+        }
 
-            return true;
-        }
-        catch
-        {
-            context = null;
-            return false;
-        }
+        return true;
     }
 }
 

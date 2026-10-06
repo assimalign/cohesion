@@ -159,6 +159,11 @@ A validator built with `ThrowExceptionOnFailure` throws `ValidationFailureExcept
 errors. The request is still invalid, so it is answered `400` with an empty `errors` map rather than
 escaping to the exception boundary as a `500`.
 
+Any other exception from a validator is a fault in the application, not a verdict on the request: a nested
+profile's rule or a custom rule that throws (ObjectValidation's DESIGN, "A Rule That Throws"). It propagates
+to the pipeline's exception boundary, and the handler does not run. Until ObjectValidation #1292 such a rule
+was recorded as not invoked, so the body passed validation and reached the handler.
+
 ## AOT posture
 
 `IsAotCompatible` holds with no reflection: validators are keyed by `typeof(T)` values the generated

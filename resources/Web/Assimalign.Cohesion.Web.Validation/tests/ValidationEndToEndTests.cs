@@ -412,4 +412,51 @@ public class ValidationEndToEndTests
         errors.ValueKind.ShouldBe(JsonValueKind.Object);
         errors.EnumerateObject().ShouldBeEmpty();
     }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Validation] - Handlers: a validator whose rule throws faults the request instead of running the handler")]
+    public async Task MapPost_ValidatorRuleThrows_ShouldFaultWithoutRunningHandler()
+    {
+        // Arrange — a nested rule that throws was recorded as not invoked, which let the body through to the
+        // handler (#1292). The fault now reaches the exception boundary.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        IValidator faulting = Validator.Create(builder => builder.AddProfile(new FaultingCustomerProfile()));
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+        factory.Builder.AddJsonSerialization(ValidationTestJsonContext.Default);
+        factory.Builder.AddValidation(options => options.AddValidator(faulting));
+
+        InvalidOperationException? fault = null;
+        factory.Application.Use(async (context, next) =>
+        {
+            try
+            {
+                await next.Invoke(context);
+            }
+            catch (InvalidOperationException exception)
+            {
+                fault = exception;
+                context.Response.StatusCode = HttpStatusCode.InternalServerError;
+            }
+        });
+        factory.Application.UseRouting();
+
+        bool handlerRan = false;
+        factory.Application.MapPost("/customers", (Customer customer) =>
+        {
+            handlerRan = true;
+            return "accepted";
+        });
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.PostAsync("/customers", Json(validCustomer), cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        fault.ShouldNotBeNull();
+        fault.Message.ShouldBe("nested rule fault");
+        handlerRan.ShouldBeFalse();
+    }
 }

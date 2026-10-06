@@ -82,6 +82,21 @@ its last failing rule: `RuleFor(x => x.Name).NotEmpty().MinLength(3)` on `""` re
 not `NotEmpty`'s. `Stop` reported the last-declared failing member, and Web.Validation's `errors` map listed
 members in reverse declaration order.
 
+## A Rule That Throws
+
+A rule reports a failure by adding errors to its context; an exception is a fault, not a failure. A nested
+profile's rules (`ChildRules`, `UseProfile`) and a custom rule's delegate (`Custom`) run arbitrary code, and
+an exception from either propagates out of `Validate` and `ValidateAsync`: validation fails closed.
+
+Until #1292 both rules caught every exception and returned `false`, which an item records as "rule not
+invoked". A throwing nested profile or custom delegate therefore reported no error and the value passed;
+Web.Validation let such a body through to the handler. A null nested object is still skipped, explicitly: the
+nested rule's `object` overload returns an empty, successful context for `null`.
+
+The built-in rules (`NotEmpty`, `GreaterThan`, the length and pattern rules, and so on) still catch their own
+exceptions and report "not invoked", which may be an intended skip for a null or incomparable value but is
+not stated; #1293 decides each rule's behavior explicitly.
+
 ## Concurrency
 
 A validator, its profiles, their items and their rules are built once and shared by every validation that
