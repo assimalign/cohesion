@@ -50,7 +50,7 @@ internal sealed class BlobDatabaseInstance : IBlobDatabase
     public IDatabaseEngine Engine { get; }
     internal BlobStorage DataStorage { get; }
     internal TransactionCoordinator Coordinator { get; }
-    internal IBlobCatalog Catalog { get; }
+    internal BlobCatalog Catalog { get; }
 
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
     {

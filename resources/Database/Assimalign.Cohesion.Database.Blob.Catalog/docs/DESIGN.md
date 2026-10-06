@@ -23,6 +23,12 @@ flowchart LR
 | `Assimalign.Cohesion.Database.Storage` | Pages, page CRC, storage brackets and journal |
 | `Assimalign.Cohesion.Database` | Shared object ownership vocabulary |
 
+`BlobCatalog.Open` returns the sealed `BlobCatalog`, which has a private constructor; its record
+and codec are internal. The former `IBlobCatalog` interface, `BlobCatalog` static factory and
+internal `DefaultBlobCatalog` collapsed into it (concrete-types plan, phase 4, #1260); the members
+and their argument checks are the implementation's, unchanged. Public metadata records are
+immutable values.
+
 ## Directory and visibility
 
 At open, the catalog scans only owner-zero metadata pages into a directory from ordinal

@@ -167,7 +167,7 @@ public sealed class BlobCatalogTests
         internal MemoryStream Journal { get; } = new();
         internal BlobStorage Storage { get; }
         internal TransactionCoordinator Coordinator { get; }
-        internal IBlobCatalog Catalog { get; }
+        internal BlobCatalog Catalog { get; }
 
         internal TestDatabase()
         {
