@@ -600,6 +600,41 @@ instead of waiting for the reopen: an offline database undoes nothing, so the wr
 lock keeps it, and the coordinator ends every lock wait instead
 (`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook).
 
+**A database closed outside the engine is skipped, not failed.** A database its holder disposed
+(directly; `session.Database` is the same instance) stays registered, so `OpenDatabaseAsync`
+refuses it with `ObjectDisposedException` until it is dropped or the engine is recreated. The
+workers skip it: `GraphDatabase.IsClosed` reads the base's disposed flag,
+`GraphDatabaseEngine.IsOpen` is false for the closed database and for its storage, the
+version-purge worker skips it in its pass and in its trigger wait, and the checkpointer skips it
+through the model's `IsCheckpointDue`, which is false for a closed database (the pass is the
+engines' shared one, and its `IsOpen` check covers only a checkpoint that raced the close). A
+close that was not idle leaves the journal untruncated: when its retry of a deferred undo still
+fails, the close keeps that writer in flight (#1226), so the closed storage stays due for a
+checkpoint it refuses. The flush and write-back workers visit storages, not databases, so they
+still visit the closed database's storage, whose close flushed it: write-back writes nothing for a
+disposed storage, and an `ObjectDisposedException` from it is tolerated through
+`IsOpen(GraphStorage)` rather than recorded. Before the skips, the version-purge worker failed on
+the closed database's disposed coordinator every pass (21 failed passes in half a second at 20 ms
+intervals); and when the checkpointer had a failure recorded for a database whose close was not
+idle, every poll handed a lane the refused checkpoint, which kept the failure recorded. Either way
+the engine reported `Faulted` for good and `Database.Hosting` reported it degraded until the
+engine was recreated; the Graph server does not read the engine's state, so it kept serving. The
+workers do what PostgreSQL's background workers do with an object dropped under
+them: check that it still exists and skip it quietly (autovacuum,
+`src/backend/postmaster/autovacuum.c:998-1000`, `:1859-1868`, `:2510-2513`; the checkpointer's
+canceled fsync requests, `src/backend/storage/sync/sync.c:400-411`, `:492-503`). A close here
+happens outside the engine, which is never told, so the workers read the database's own flag where
+PostgreSQL reads the cancellation.
+`GraphWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing`
+closes a database under 20 ms worker intervals and asserts that every pass succeeds, no worker
+records a failure, the engine is `Running`, a server over the engine starts and serves a handshake
+and a write to the other database, and the reopen is still refused.
+`GraphWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
+records a checkpoint failure for a database whose page writes fail, closes it with a rolled-back
+transaction's undo deferred behind a bracket that holds every page, and asserts that the
+checkpointer's failure ends and the engine runs again (before the checkpointer's skip it stayed
+`Faulted` for the test's 30 seconds).
+
 Names are single path components, directory lookup is case insensitive, and enumeration includes
 persisted databases not yet open in memory. Root-builder `AddGraph` captures a deferred
 engine factory without Hosting dependencies. Engine packages ship in the App.Database framework;

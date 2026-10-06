@@ -19,7 +19,8 @@ using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 /// failed dirty for a later write (<c>AbortBufferIO</c>,
 /// <c>src/backend/storage/buffer/bufmgr.c:7469-7502</c>), and its background writer sleeps a
 /// second after the error before it writes again (<c>src/backend/postmaster/bgwriter.c:154-205</c>).
-/// An offline database is skipped.
+/// An offline database is skipped, and so is a database its holder closed, whose close flushes
+/// both file sets.
 /// </remarks>
 internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
 {
@@ -44,8 +45,10 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
             }
 
             // Nothing of an offline database is written (#1243): neither file set, whichever
-            // went offline. Each storage also refuses on its own.
-            if (database.IsOffline || !BeginDatabase(database.Name))
+            // went offline. Each storage also refuses on its own. Nor is anything of a database
+            // its holder closed: its close flushes its file sets, and the engine keeps the closed
+            // instance registered (its reopen returns it).
+            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }
