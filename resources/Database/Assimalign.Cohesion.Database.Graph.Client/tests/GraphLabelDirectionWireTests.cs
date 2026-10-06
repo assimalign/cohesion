@@ -90,7 +90,7 @@ public sealed class GraphLabelDirectionWireTests
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.ExecuteAsync("CREATE (:Person {name: 'Alice'})-[:KNOWS]->(:Person {name: 'Bob'})",
             cancellationToken: harness.Token);
-        Guid sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
@@ -102,7 +102,7 @@ public sealed class GraphLabelDirectionWireTests
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (a:Person)->(b) RETURN b.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("Bob");
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
     /// <summary>
@@ -117,7 +117,7 @@ public sealed class GraphLabelDirectionWireTests
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.ExecuteAsync("CREATE (:Person {name: 'Alice'})", cancellationToken: harness.Token);
-        Guid sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
@@ -129,7 +129,7 @@ public sealed class GraphLabelDirectionWireTests
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (n:Person) RETURN n.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("Alice");
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
     /// <summary>

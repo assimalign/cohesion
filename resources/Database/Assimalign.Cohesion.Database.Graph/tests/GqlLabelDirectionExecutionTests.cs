@@ -96,7 +96,7 @@ public sealed class GqlLabelDirectionExecutionTests
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
         await using var session = await SeedAsync(engine, "INSERT (:A {name: 'A'})-[:T]->(:B {name: 'B'})");
-        var loopDatabase = (IGraphDatabase)await engine.CreateDatabaseAsync("loop", CancellationToken.None);
+        var loopDatabase = await engine.CreateDatabaseAsync("loop", CancellationToken.None);
         await using var loop = await loopDatabase.CreateSessionAsync(CancellationToken.None);
         await loop.ExecuteAsync("INSERT (s:S {name: 'S'})-[:L]->(s)", cancellationToken: CancellationToken.None);
 
@@ -138,7 +138,7 @@ public sealed class GqlLabelDirectionExecutionTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("anchors", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("anchors", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync(
             "INSERT (:A {k: 1, name: 'a1'}), (:B {k: 1, name: 'b1'}), (:A:B {k: 1, name: 'ab1'}), (:C {k: 1, name: 'c1'}), " +
@@ -414,15 +414,15 @@ public sealed class GqlLabelDirectionExecutionTests
         (await ColumnAsync(session, "MATCH (n:Person) RETURN n.name")).ShouldBe(["Alice", "Bob"]);
     }
 
-    private static async Task<IDatabaseSession> SeedAsync(GraphDatabaseEngine engine, string seed)
+    private static async Task<GraphDatabaseSession> SeedAsync(GraphDatabaseEngine engine, string seed)
     {
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("labels", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("labels", CancellationToken.None);
         var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
         return session;
     }
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string gql)
+    private static async Task<List<object?[]>> RowsAsync(GraphDatabaseSession session, string gql)
     {
         await using var result = (QueryResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
         var rows = new List<object?[]>();
@@ -433,14 +433,13 @@ public sealed class GqlLabelDirectionExecutionTests
         return rows;
     }
 
-    private static async Task<List<string?>> ColumnAsync(IDatabaseSession session, string gql)
+    private static async Task<List<string?>> ColumnAsync(GraphDatabaseSession session, string gql)
         => (await RowsAsync(session, gql)).Select(row => (string?)row[0]).ToList();
 
-    private static ValueTask<GraphPlan> PlanAsync(IGraphDatabase database, IDatabaseSession session, string query)
+    private static ValueTask<GraphPlan> PlanAsync(GraphDatabase database, GraphDatabaseSession session, string query)
     {
-        var instance = (GraphDatabaseInstance)database;
-        return instance.RunAsync((GraphDatabaseSession)session, operation => new ValueTask<GraphPlan>(
-            new GraphPlanner(instance, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql(query).Statement.GqlExpression)), CancellationToken.None);
+        return database.RunAsync(session, operation => new ValueTask<GraphPlan>(
+            new GraphPlanner(database, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql(query).Statement.GqlExpression)), CancellationToken.None);
     }
 
     /// <summary>The line terminators by name, so no invisible character sits in the test source.</summary>

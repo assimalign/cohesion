@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
 using Shouldly;
@@ -25,7 +24,7 @@ public sealed class GraphStorageDurabilityTests
         {
             await using (var engine = GraphDatabaseEngine.Create(options))
             {
-                var database = (GraphDatabaseInstance)await engine.CreateDatabaseAsync("db");
+                var database = await engine.CreateDatabaseAsync("db");
                 database.DataStorage.SupportsDurableFlush.ShouldBe(physical);
                 database.DataStorage.CommitDurability.ShouldBe(expected);
                 using var transaction = database.DataStorage.BeginTransaction();
@@ -42,7 +41,7 @@ public sealed class GraphStorageDurabilityTests
             if (physical)
             {
                 await using var reopened = GraphDatabaseEngine.Create(options);
-                var database = (GraphDatabaseInstance)await reopened.OpenDatabaseAsync("db");
+                var database = await reopened.OpenDatabaseAsync("db");
                 database.DataStorage.CommitDurability.ShouldBe(expected);
             }
         }

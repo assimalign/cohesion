@@ -15,7 +15,7 @@ internal static class GraphPlanExecutor
 {
     // Finite syntax guarantees termination; this cap also bounds materialization.
     private const int MaximumMatches = 100_000;
-    internal static async ValueTask<QueryResult> ExecuteAsync(GraphDatabaseInstance database, GraphOperation operation,
+    internal static async ValueTask<QueryResult> ExecuteAsync(GraphDatabase database, GraphOperation operation,
         GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, bool paths = false)
     {
         operation.EnsureActive();
@@ -106,7 +106,7 @@ internal static class GraphPlanExecutor
         return new GraphQueryResult(columns, rows, plan.Warnings);
     }
 
-    private static async ValueTask MatchAsync(GraphDatabaseInstance database, GraphOperation operation, GraphPathPlan plan,
+    private static async ValueTask MatchAsync(GraphDatabase database, GraphOperation operation, GraphPathPlan plan,
         Dictionary<string, object> input, List<Dictionary<string, object>> output, ExpansionBudget budget, CancellationToken token)
     {
         var path = plan.Pattern;
@@ -128,7 +128,7 @@ internal static class GraphPlanExecutor
             token.ThrowIfCancellationRequested();
             budget.Consume();
             var bindings = new Dictionary<string, object>(input, StringComparer.Ordinal);
-            var node = GraphDatabaseInstance.Materialize(candidate);
+            var node = GraphDatabase.Materialize(candidate);
             if (!AcceptNode(path.Nodes[anchor.NodeIndex], node, bindings)) { continue; }
             var positions = new GraphNode[path.Nodes.Count];
             positions[anchor.NodeIndex] = node;
@@ -164,9 +164,9 @@ internal static class GraphPlanExecutor
                 ulong next = edge.SourceId == from ? edge.TargetId : edge.SourceId;
                 if (database.Store.FindNode(next, operation.Context.Snapshot) is not { } target) { continue; }
                 var copy = new Dictionary<string, object>(bindings, StringComparer.Ordinal);
-                var relationship = GraphDatabaseInstance.Materialize(edge);
+                var relationship = GraphDatabase.Materialize(edge);
                 if (!Accept(pattern.Variable, relationship, copy) || !PropertiesMatch(pattern.Properties, relationship.Properties)) { continue; }
-                var node = GraphDatabaseInstance.Materialize(target);
+                var node = GraphDatabase.Materialize(target);
                 if (!AcceptNode(path.Nodes[current.To], node, copy)) { continue; }
                 var nextPositions = (GraphNode[])positions.Clone();
                 nextPositions[current.To] = node;
@@ -178,7 +178,7 @@ internal static class GraphPlanExecutor
         }
     }
 
-    private static GraphPath ProjectRelationship(GraphDatabaseInstance database, GraphOperation operation, GraphRelationship relationship)
+    private static GraphPath ProjectRelationship(GraphDatabase database, GraphOperation operation, GraphRelationship relationship)
     {
         // Resolve the bound relationship's endpoints in the same statement snapshot, including anonymous nodes.
         // This projects an engine entity binding directly; scalar projection rows are never involved.
@@ -186,7 +186,7 @@ internal static class GraphPlanExecutor
         if (database.Store.FindNode(relationship.From.Value, snapshot) is not { } from ||
             database.Store.FindNode(relationship.To.Value, snapshot) is not { } to)
         { throw new DatabaseException("COHDBG003: A matched relationship has a missing endpoint."); }
-        return new GraphPath([GraphDatabaseInstance.Materialize(from), GraphDatabaseInstance.Materialize(to)], [relationship]);
+        return new GraphPath([GraphDatabase.Materialize(from), GraphDatabase.Materialize(to)], [relationship]);
     }
 
     private static bool AcceptNode(GqlNodePattern pattern, GraphNode node, Dictionary<string, object> bindings)
@@ -205,7 +205,7 @@ internal static class GraphPlanExecutor
     private static bool PropertiesMatch(IReadOnlyDictionary<string, object?> expected, IReadOnlyDictionary<string, object?> actual)
         => expected.All(item => actual.TryGetValue(item.Key, out var value) && GraphExpressionEvaluator.Equal(item.Value, value));
 
-    private static async ValueTask<long> CreateAsync(GraphDatabaseInstance database, GraphOperation operation, GqlPathPattern path,
+    private static async ValueTask<long> CreateAsync(GraphDatabase database, GraphOperation operation, GqlPathPattern path,
         Dictionary<string, object> bindings, CancellationToken token)
     {
         long affected = 0;

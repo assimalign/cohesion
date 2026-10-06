@@ -13,7 +13,7 @@ await using var engine = GraphDatabaseEngine.Create(new()
 });
 if (args[0] == "seed")
 {
-    var db = (IGraphDatabase)await engine.CreateDatabaseAsync("crash");
+    var db = await engine.CreateDatabaseAsync("crash");
     await using var session = await db.CreateSessionAsync();
     await session.ExecuteAsync("CREATE (a:Person {name:'a'})-[r:LINK]->(b:Person {name:'b'})");
     await GraphSchema.Open(db, session).CreateIndexAsync("Person", "by_name", "name");
@@ -32,7 +32,7 @@ if (args[0] == "seed")
 }
 else if (args[0] == "verify")
 {
-    var db = (IGraphDatabase)await engine.OpenDatabaseAsync("crash");
+    var db = await engine.OpenDatabaseAsync("crash");
     await using var session = await db.CreateSessionAsync();
     await using var result = (QueryResultSet)await session.ExecuteAsync("MATCH (a:Person {name:'a'})-[r:LINK]->(b) RETURN a,r,b");
     int count = 0;

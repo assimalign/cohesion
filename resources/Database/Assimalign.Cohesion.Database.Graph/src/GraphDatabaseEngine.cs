@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,11 +15,34 @@ using Assimalign.Cohesion.Database.Storage;
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>Manages logical graph databases and their four maintenance workers.</summary>
-/// <remarks>Creation starts the workers; disposal stops them and closes every database according to its storage durability.</remarks>
-public sealed class GraphDatabaseEngine : IDatabaseEngine
+/// <remarks>
+/// <para>
+/// The engine is a data machine: <see cref="Create"/> returns it operational, its four built-in
+/// workers (write-ahead-log group-commit flusher, page write-back, checkpointer and version purge)
+/// already pumping, and disposal is its one lifecycle transition, which closes every database
+/// according to its storage durability. Each database's files live in a directory of its own under
+/// <see cref="GraphDatabaseEngineOptions.RootPath"/>, or in memory when no root is set.
+/// </para>
+/// <para>
+/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A sealed leaf of the root
+/// <see cref="DatabaseEngine"/>: the base owns the name, the model, the worker pumps, the state
+/// fold, the composition attach and freeze, the argument and disposed checks of every public
+/// member, and the disposal order (servers, the worker pumps and the workers, then
+/// <see cref="DisposeAsyncCore"/>, which closes the databases). The database members are
+/// re-exposed typed with <c>new</c> members over the base's public members, and
+/// <see cref="TryGetDatabase(DatabaseName, out GraphDatabase)"/> is a typed overload of the base's
+/// lookup (the parameter types differ, so it hides nothing). The model's own name check, that a
+/// database name is a single file-name component, runs in the cores, after the base's checks.
+/// </para>
+/// </remarks>
+// Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+public sealed class GraphDatabaseEngine : DatabaseEngine
 {
+    // The engine name used when the options name none.
+    private const string defaultName = "graph-engine";
+
     private readonly GraphDatabaseEngineOptions _options;
-    private readonly Dictionary<string, GraphDatabaseInstance> _databases = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, GraphDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
     private readonly ManualResetEventSlim _commitPending = new();
 
@@ -25,34 +50,23 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
     // deferred an undo, so the checkpoint and version-purge workers act at once (#1254, #1226).
     private readonly ManualResetEventSlim _checkpointNeeded = new();
     private readonly ManualResetEventSlim _undoDeferred = new();
-    private readonly CancellationTokenSource _stop = new();
-    private readonly List<IDatabaseEngineWorker> _workers = [];
-    private readonly List<IDatabaseServer> _servers = [];
-    private readonly List<Thread> _threads = [];
     private readonly string? _rootPath;
-    private GraphDatabaseInstance[] _instances = [];
+    private GraphDatabase[] _instances = [];
     private GraphStorage[] _storages = [];
 
-    // The worker inventory as published to readers (Workers, State): replaced whole whenever a
-    // worker is attached, so a reader never enumerates a list being changed.
-    private IReadOnlyList<IDatabaseEngineWorker> _workerView = [];
-
-    // The last exception that escaped a worker's Run (only a worker that does not derive from
-    // DatabaseEngineWorker can let one escape); its pump restarted it, and the engine reports
-    // Faulted until it is disposed, because it cannot tell when such a worker is healthy again.
-    private Exception? _workerRunFault;
-    private int _disposed;
-
     private GraphDatabaseEngine(GraphDatabaseEngineOptions options)
+        : base(options.EngineName ?? defaultName, EngineModel.Graph)
     {
         _options = options;
-        Name = options.EngineName ?? "graph-engine";
         _rootPath = options.StorageStrategy is null && options.RootPath is { IsEmpty: false } root ? Path.GetFullPath(root) : null;
         if (_rootPath is not null)
         {
             Directory.CreateDirectory(_rootPath);
         }
 
+        // Attach the built-in workers last, after every field they observe is initialized: the
+        // base starts each one's pump on a dedicated background thread, named for the worker, as
+        // it attaches it.
         AttachWorker(new GraphWriteAheadFlushWorker(this, _commitPending));
         AttachWorker(new GraphPageWriteBackWorker(this));
         AttachWorker(new GraphCheckpointWorker(this));
@@ -60,27 +74,26 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
     }
 
     /// <inheritdoc />
-    public string Name { get; }
-    /// <inheritdoc />
-    /// <remarks>
-    /// <see cref="EngineState.Faulted"/> while one of the engine's workers keeps failing: its
-    /// <see cref="DatabaseEngineWorker.Fault"/> is set by a failure until a pass finishes the work it
-    /// left (#1268). An offline database is not a worker failure; <see cref="OfflineDatabases"/>
-    /// lists it.
-    /// </remarks>
-    public EngineState State
-        => DatabaseEngineWorkerPump.Fold(Volatile.Read(ref _disposed) != 0, Volatile.Read(ref _workerRunFault),
-            Volatile.Read(ref _workerView));
+    public override IReadOnlyList<DatabaseName> OfflineDatabases
+    {
+        get
+        {
+            List<DatabaseName>? offline = null;
+            foreach (var database in GetInstanceSnapshot())
+            {
+                if (database.IsOffline)
+                {
+                    (offline ??= []).Add(database.Name);
+                }
+            }
 
-    /// <inheritdoc />
-    public EngineModel Model => EngineModel.Graph;
-    /// <inheritdoc />
-    public IReadOnlyList<IDatabaseEngineWorker> Workers => Volatile.Read(ref _workerView);
-    /// <inheritdoc />
-    public IReadOnlyList<IDatabaseServer> Servers => _servers.AsReadOnly();
+            return offline is null ? [] : offline.AsReadOnly();
+        }
+    }
+
     internal GraphDatabaseEngineOptions EngineOptions => _options;
     internal GraphStorage[] GetStorageSnapshot() => Volatile.Read(ref _storages);
-    internal GraphDatabaseInstance[] GetInstanceSnapshot() => Volatile.Read(ref _instances);
+    internal GraphDatabase[] GetInstanceSnapshot() => Volatile.Read(ref _instances);
 
     /// <summary>
     /// Gets the signal a storage sets when its journal reaches
@@ -101,49 +114,59 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
     /// database still open is a failure.
     /// </summary>
     /// <param name="database">The database a worker pass visited.</param>
-    internal bool IsOpen(GraphDatabaseInstance database) => Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
+    internal bool IsOpen(GraphDatabase database) => Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
 
     /// <summary>
     /// Reports whether <paramref name="storage"/> still belongs to one of the engine's open
-    /// databases (see <see cref="IsOpen(GraphDatabaseInstance)"/>).
+    /// databases (see <see cref="IsOpen(GraphDatabase)"/>).
     /// </summary>
     /// <param name="storage">The storage a worker pass visited.</param>
     internal bool IsOpen(GraphStorage storage) => Array.IndexOf(GetStorageSnapshot(), storage) >= 0;
 
-    /// <inheritdoc />
-    public IReadOnlyList<DatabaseName> OfflineDatabases
-    {
-        get
-        {
-            List<DatabaseName>? offline = null;
-            foreach (var database in GetInstanceSnapshot())
-            {
-                if (database.IsOffline)
-                {
-                    (offline ??= []).Add(database.Name);
-                }
-            }
-
-            return offline is null ? [] : offline.AsReadOnly();
-        }
-    }
-
     /// <summary>Creates a dependency-free builder for an engine and its deferred workers and servers.</summary>
     /// <returns>A one-shot model builder; constructing the builder starts no components.</returns>
     /// <remarks>Use this entry point inside hosting-aware factories to assign already resolved values before Build.</remarks>
-    public static IGraphDatabaseEngineBuilder CreateBuilder() => new GraphDatabaseEngineBuilder();
+    public static GraphDatabaseEngineBuilder CreateBuilder() => new();
 
-    /// <summary>Creates an operational engine using memory or files under the configured root.</summary>
+    /// <summary>
+    /// Creates an operational engine using memory or files under the configured root. Its workers
+    /// are running when this method returns, and its composition is complete: it takes no further
+    /// worker or server.
+    /// </summary>
     /// <param name="options">The engine configuration.</param>
     /// <returns>The running engine.</returns>
     /// <exception cref="ArgumentNullException">The options are null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <see cref="GraphDatabaseEngineOptions.EngineName"/> is empty or white space.
+    /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// A worker interval or batch size is not positive, the buffer pool capacity is not a whole
     /// number of 8 KiB pages of at least 1 MiB, or the checkpoint journal size is negative.
     /// </exception>
     public static GraphDatabaseEngine Create(GraphDatabaseEngineOptions options)
     {
+        var engine = CreateUncomposed(options);
+        engine.CompleteComposition();
+        return engine;
+    }
+
+    /// <summary>
+    /// Creates an operational engine whose composition is still open, for the builder, which
+    /// attaches the products of its factories through <see cref="Compose"/>.
+    /// </summary>
+    /// <param name="options">The engine configuration.</param>
+    /// <returns>The running engine.</returns>
+    internal static GraphDatabaseEngine CreateUncomposed(GraphDatabaseEngineOptions options)
+    {
         ArgumentNullException.ThrowIfNull(options);
+
+        // Checked before the constructor spawns the worker threads. A blank name is refused here
+        // with the option's name; the base refuses it too, after the leaf's fields were created.
+        if (options.EngineName is { } name)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(name, nameof(options.EngineName));
+        }
+
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.CheckpointInterval, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.PageWriteBackInterval, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaintenanceInterval, TimeSpan.Zero);
@@ -154,20 +177,208 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
         return new GraphDatabaseEngine(options);
     }
 
-    /// <inheritdoc />
-    public ValueTask<IDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
-        => GetDatabase(name, create: true, cancellationToken);
+    /// <summary>
+    /// Attaches the products of the builder's factories, workers first and then servers, and
+    /// freezes the engine's composition: the builder's compose method
+    /// (<c>DatabaseEngineBuilderState.Complete</c>). The base refuses a product attached twice, a
+    /// server that fronts another engine and a worker whose name another worker of the engine has.
+    /// </summary>
+    /// <param name="workers">The workers, produced one factory at a time as they are requested.</param>
+    /// <param name="servers">The servers, produced one factory at a time as they are requested.</param>
+    internal void Compose(IEnumerable<DatabaseEngineWorker> workers, IEnumerable<DatabaseServer> servers)
+    {
+        foreach (var worker in workers)
+        {
+            AttachWorker(worker);
+        }
+
+        foreach (var server in servers)
+        {
+            AttachServer(server);
+        }
+
+        CompleteComposition();
+    }
+
+    /// <summary>
+    /// Creates a new logical graph database with the specified name.
+    /// </summary>
+    /// <param name="name">The name of the database to create: a single file-name component.</param>
+    /// <param name="cancellationToken">Observed before the database is created.</param>
+    /// <returns>The newly created database.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
+    /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was created.</exception>
+    /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
+    public new async ValueTask<GraphDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
+        => (GraphDatabase)await base.CreateDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Opens an existing logical graph database by name. A database that went offline is reopened:
+    /// the returned instance is a new one, opened again from its files.
+    /// </summary>
+    /// <param name="name">The name of the database to open: a single file-name component.</param>
+    /// <param name="cancellationToken">Observed before the database is opened.</param>
+    /// <returns>The opened database.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
+    /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
+    /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
+    /// <exception cref="DatabaseException">The database's file set or index format was refused.</exception>
+    public new async ValueTask<GraphDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
+        => (GraphDatabase)await base.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Enumerates the graph databases the engine manages, opening each one found in storage. The
+    /// engine state and the token are checked when the call is made, not when the enumeration
+    /// starts.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the enumeration.</param>
+    /// <returns>An async sequence of the databases, in ordinal name order, ignoring case.</returns>
+    /// <exception cref="ObjectDisposedException">The engine has been disposed when the call is made.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled when the call is made.</exception>
+    public new IAsyncEnumerable<GraphDatabase> GetDatabasesAsync(CancellationToken cancellationToken = default)
+        => (IAsyncEnumerable<GraphDatabase>)base.GetDatabasesAsync(cancellationToken);
+
+    /// <summary>
+    /// Attempts to retrieve an open graph database by name without throwing when it is not open.
+    /// </summary>
+    /// <param name="name">The name of the database.</param>
+    /// <param name="database">When this method returns true, the database.</param>
+    /// <returns>True when the database is open in the engine; otherwise false.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
+    /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
+    /// <remarks>
+    /// An overload of the base's <see cref="DatabaseEngine.TryGetDatabase"/>, not a <c>new</c>
+    /// member: the parameter types differ, so nothing is hidden. Overload resolution prefers the
+    /// most derived applicable method, so an <c>out var</c> or <c>out _</c> call on the engine binds
+    /// here, and an explicitly typed <c>out DatabaseInstance</c> binds the base's. It reads the
+    /// base's public member and casts once, so the base's name and disposal checks always run.
+    /// </remarks>
+    public bool TryGetDatabase(DatabaseName name, [MaybeNullWhen(false)] out GraphDatabase database)
+    {
+        if (base.TryGetDatabase(name, out var found))
+        {
+            database = (GraphDatabase)found;
+            return true;
+        }
+
+        database = null;
+        return false;
+    }
 
     /// <inheritdoc />
-    public ValueTask<IDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
-        => GetDatabase(name, create: false, cancellationToken);
+    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
+        => GetDatabase(name, create: true);
 
-    private ValueTask<IDatabase> GetDatabase(string name, bool create, CancellationToken cancellationToken)
+    /// <inheritdoc />
+    protected override ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
+        => GetDatabase(name, create: false);
+
+    /// <inheritdoc />
+    protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
         ValidateName(name);
-        cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            ThrowIfDisposed();
+            var directory = FindDirectory(name);
+            bool open = _databases.Remove(name, out var database);
+            if (!open && !(_options.StorageStrategy?.StorageExists(name) ?? directory is not null))
+            {
+                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
+            }
+
+            RebuildSnapshot();
+            database?.Dispose();
+            if (_options.StorageStrategy is { } strategy)
+            {
+                strategy.DropStorage(name);
+            }
+            else if (directory is not null)
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+        return default;
+    }
+
+    /// <inheritdoc />
+    protected override IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken)
+        => EnumerateDatabasesAsync(cancellationToken);
+
+    /// <inheritdoc />
+    protected override bool TryGetDatabaseCore(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database)
+    {
+        ValidateName(name);
+        lock (_sync)
+        {
+            ThrowIfDisposed();
+            if (_databases.TryGetValue(name, out var found))
+            {
+                database = found;
+                return true;
+            }
+        }
+
+        database = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Closes every open database once the base disposed the servers, stopped the worker pumps
+    /// and disposed the workers: each database durably flushes according to its storage's
+    /// durability policy, and an offline one closes without writing. Then the engine's worker
+    /// signals are released.
+    /// </summary>
+    /// <returns>A task that completes once every database is closed.</returns>
+    protected override async ValueTask DisposeAsyncCore()
+    {
+        GraphDatabase[] snapshot;
+        lock (_sync)
+        {
+            snapshot = [.. _databases.Values];
+            _databases.Clear();
+            RebuildSnapshot();
+        }
+
+        List<Exception>? failures = null;
+        foreach (var database in snapshot)
+        {
+            try
+            {
+                await database.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception failure) when (failure is not OutOfMemoryException)
+            {
+                (failures ??= []).Add(failure);
+            }
+        }
+
+        _commitPending.Dispose();
+        _checkpointNeeded.Dispose();
+        _undoDeferred.Dispose();
+
+        // The base reports this step's failure among the engine's components: one database's
+        // failure as itself, several together.
+        if (failures is { Count: 1 })
+        {
+            ExceptionDispatchInfo.Throw(failures[0]);
+        }
+
+        if (failures is not null)
+        {
+            throw new AggregateException("One or more graph databases failed to close.", failures);
+        }
+    }
+
+    private ValueTask<DatabaseInstance> GetDatabase(DatabaseName name, bool create)
+    {
+        ValidateName(name);
+        lock (_sync)
+        {
+            // Under the engine's lock: a create or open that passed the base's check while
+            // disposal began must not add a database after the disposal closed them all.
             ThrowIfDisposed();
             if (_databases.TryGetValue(name, out var existing))
             {
@@ -176,10 +387,10 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
                     throw new DatabaseException($"Database '{name}' already exists.");
                 }
 
-                existing.ThrowIfDisposed();
+                existing.EnsureNotDisposed();
                 if (!existing.IsOffline)
                 {
-                    return new ValueTask<IDatabase>(existing);
+                    return new ValueTask<DatabaseInstance>(existing);
                 }
 
                 // The database went offline after a failed durable flush (#1243): reopening it
@@ -225,9 +436,9 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
                 storage.CheckpointJournalSize = _options.CheckpointJournalSize;
                 storage.OnCheckpointNeeded = _checkpointNeeded.Set;
                 Volatile.Write(ref _storages, [.. _storages, storage]);
-                var database = new GraphDatabaseInstance(name, this, storage, recover: !create);
+                var database = new GraphDatabase(name, this, storage, recover: !create);
                 _databases.Add(name, database);
-                return new ValueTask<IDatabase>(database);
+                return new ValueTask<DatabaseInstance>(database);
             }
             catch (StorageFormatException exception)
             {
@@ -259,37 +470,10 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
         catch { data?.Dispose(); journal?.Dispose(); backup?.Dispose(); throw; }
     }
 
-    /// <inheritdoc />
-    public ValueTask DropDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
-    {
-        ValidateName(name);
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_sync)
-        {
-            ThrowIfDisposed();
-            var directory = FindDirectory(name);
-            bool open = _databases.Remove(name, out var database);
-            if (!open && !(_options.StorageStrategy?.StorageExists(name) ?? directory is not null))
-            {
-                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
-            }
-
-            RebuildSnapshot();
-            database?.Dispose();
-            if (_options.StorageStrategy is { } strategy)
-            {
-                strategy.DropStorage(name);
-            }
-            else if (directory is not null)
-            {
-                Directory.Delete(directory, recursive: true);
-            }
-        }
-        return default;
-    }
-
-    /// <inheritdoc />
-    public async IAsyncEnumerable<IDatabase> GetDatabasesAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    // The databases as one typed sequence, which GetDatabasesAsync hands out without a per-item
+    // cast: the sequence is covariant, so it is the base's sequence too. Each name found in
+    // storage is opened through the engine's public member, so its checks run per database.
+    private async IAsyncEnumerable<GraphDatabase> EnumerateDatabasesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
         string[] names;
         lock (_sync)
@@ -305,22 +489,11 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
         }
     }
 
-    /// <inheritdoc />
-    public bool TryGetDatabase(DatabaseName name, out IDatabase database)
-    {
-        ValidateName(name);
-        lock (_sync)
-        {
-            ThrowIfDisposed();
-            bool found = _databases.TryGetValue(name, out var instance);
-            database = instance!;
-            return found;
-        }
-    }
-
     private string? FindDirectory(string name) => _rootPath is null ? null : Directory.EnumerateDirectories(_rootPath)
         .FirstOrDefault(path => string.Equals(Path.GetFileName(path), name, StringComparison.OrdinalIgnoreCase));
 
+    // The model's own name rule, in the cores, after the base's checks of an empty name, disposal
+    // and the token: a database's files live in a directory named for it.
     private static void ValidateName(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -335,90 +508,4 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
         Volatile.Write(ref _instances, [.. _databases.Values]);
         Volatile.Write(ref _storages, _databases.Values.Select(database => database.DataStorage).ToArray());
     }
-
-    internal void AttachWorker(IDatabaseEngineWorker worker)
-    {
-        ThrowIfDisposed();
-        var thread = new Thread(() => DatabaseEngineWorkerPump.Pump(worker, _stop.Token, ref _workerRunFault)) { IsBackground = true, Name = Name + "/" + worker.Kind };
-        _workers.Add(worker);
-        _threads.Add(thread);
-        try { thread.Start(); }
-        catch
-        {
-            _threads.Remove(thread);
-            _workers.Remove(worker);
-            throw;
-        }
-
-        // Published as a fresh read-only copy, so a reader never enumerates a list being changed.
-        Volatile.Write(ref _workerView, Array.AsReadOnly(_workers.ToArray()));
-    }
-
-    internal void AttachServer(IDatabaseServer server)
-    {
-        ThrowIfDisposed();
-        _servers.Add(server);
-    }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
-
-        List<Exception>? errors = null;
-        for (int index = _servers.Count - 1; index >= 0; index--)
-        {
-            try { Task.Run(async () => await _servers[index].DisposeAsync().ConfigureAwait(false)).GetAwaiter().GetResult(); }
-            catch (Exception error) { (errors ??= []).Add(error); }
-        }
-
-        try { _stop.Cancel(); }
-        catch (Exception error) { (errors ??= []).Add(error); }
-        foreach (var thread in _threads)
-        {
-            thread.Join();
-        }
-
-        for (int index = _workers.Count - 1; index >= 0; index--)
-        {
-            try
-            {
-                if (_workers[index] is IAsyncDisposable asynchronous)
-                {
-                    Task.Run(async () => await asynchronous.DisposeAsync().ConfigureAwait(false)).GetAwaiter().GetResult();
-                }
-                else if (_workers[index] is IDisposable disposable)
-                {
-                    disposable.Dispose();
-                }
-            }
-            catch (Exception error) { (errors ??= []).Add(error); }
-        }
-
-        lock (_sync)
-        {
-            foreach (var database in _databases.Values)
-            {
-                try { database.Dispose(); }
-                catch (Exception error) { (errors ??= []).Add(error); }
-            }
-            _databases.Clear();
-            RebuildSnapshot();
-        }
-        _commitPending.Dispose();
-        _checkpointNeeded.Dispose();
-        _undoDeferred.Dispose();
-        _stop.Dispose();
-        if (errors is not null)
-        {
-            throw new AggregateException("One or more graph engine components failed to close.", errors);
-        }
-    }
-
-    /// <inheritdoc />
-    public ValueTask DisposeAsync() { Dispose(); return default; }
-    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 }

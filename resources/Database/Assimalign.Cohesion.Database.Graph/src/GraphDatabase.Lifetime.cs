@@ -2,25 +2,37 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
-namespace Assimalign.Cohesion.Database.Graph.Internal;
-internal sealed partial class GraphDatabaseInstance
+
+namespace Assimalign.Cohesion.Database.Graph;
+
+public sealed partial class GraphDatabase
 {
-    internal async ValueTask<GraphOperation> BeginOperationAsync(GraphDatabaseSession? session, CancellationToken token)
+    /// <summary>
+    /// Starts one statement on a session: holds the session, admits the statement into the
+    /// session's explicit transaction or begins an autocommit context, and pins a read-committed
+    /// statement snapshot. A failure releases whatever the statement took.
+    /// </summary>
+    /// <param name="session">The session the statement runs on.</param>
+    /// <param name="token">Cancellation token for the start.</param>
+    /// <returns>The running statement.</returns>
+    internal async ValueTask<GraphOperation> BeginOperationAsync(GraphDatabaseSession session, CancellationToken token)
     {
         ThrowIfDisposed();
         ThrowIfOffline();
         token.ThrowIfCancellationRequested();
-        var explicitTransaction = session?.ReserveOperation();
+        var explicitTransaction = session.EnterOperation();
         GraphOperation? operation = null;
         try
         {
             var context = explicitTransaction?.Context ?? await Coordinator.BeginAsync(IsolationLevel.Snapshot, token).ConfigureAwait(false);
             operation = new GraphOperation(this, session, context, explicitTransaction);
             await operation.InitializeAsync(token).ConfigureAwait(false);
-            session?.Track(operation);
+            session.Track(operation);
             return operation;
         }
         catch (Exception error)
@@ -28,19 +40,20 @@ internal sealed partial class GraphDatabaseInstance
             var reported = TranslateOffline(error);
             if (operation is not null)
             {
+                // The operation owns the session hold and the admission, and releases them as it ends.
                 await operation.AbortAsync(reported).ConfigureAwait(false);
+            }
+            else
+            {
+                session.ReleaseOperation(explicitTransaction);
             }
 
             if (ReferenceEquals(reported, error)) { throw; }
             throw reported;
         }
-        finally
-        {
-            session?.ReleaseReservation();
-        }
     }
 
-    internal async ValueTask<T> RunAsync<T>(GraphDatabaseSession? session, Func<GraphOperation, ValueTask<T>> action, CancellationToken token)
+    internal async ValueTask<T> RunAsync<T>(GraphDatabaseSession session, Func<GraphOperation, ValueTask<T>> action, CancellationToken token)
     {
         var operation = await BeginOperationAsync(session, token).ConfigureAwait(false);
         try
@@ -136,25 +149,37 @@ internal sealed partial class GraphDatabaseInstance
         TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Select(item => item.Sequence));
 
     internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException("The graph catalog changed since this transaction's snapshot. Retry the transaction.");
-    internal void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 
-    public void Dispose()
+    /// <inheritdoc />
+    /// <remarks>
+    /// The coordinator first: it aborts every still-active transaction while the storage is open.
+    /// The storage closes even when the coordinator reports a writer whose undo still failed: it
+    /// kept that writer in flight in the storage, so the close does not truncate the journal
+    /// recovery classifies the writer from (#1226).
+    /// </remarks>
+    protected override void DisposeCore()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
-
         try
         {
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
         finally
         {
-            // Safe after a failed coordinator close: a writer whose undo still failed is kept in
-            // flight in the storage, so its close does not truncate the journal (#1226).
             DataStorage.Dispose();
         }
     }
-    public ValueTask DisposeAsync() { Dispose(); return default; }
+
+    /// <inheritdoc />
+    /// <remarks>See <see cref="DisposeCore"/>: the coordinator first, then the storage.</remarks>
+    protected override async ValueTask DisposeAsyncCore()
+    {
+        try
+        {
+            await Coordinator.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await DataStorage.DisposeAsync().ConfigureAwait(false);
+        }
+    }
 }

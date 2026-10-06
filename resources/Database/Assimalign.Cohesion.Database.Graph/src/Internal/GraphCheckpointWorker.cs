@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// data storage through its transaction coordinator, which defers the checkpoint to a statement
 /// holding the apply gate. Before #1268 any failure escaped the pass and ended the worker for good.
 /// </remarks>
-internal sealed class GraphCheckpointWorker : DatabaseCheckpointWorker<GraphDatabaseInstance>
+internal sealed class GraphCheckpointWorker : DatabaseCheckpointWorker<GraphDatabase>
 {
     private readonly GraphDatabaseEngine _engine;
 
@@ -36,19 +36,19 @@ internal sealed class GraphCheckpointWorker : DatabaseCheckpointWorker<GraphData
     protected override ManualResetEventSlim CheckpointNeededSignal => _engine.CheckpointNeededSignal;
 
     /// <inheritdoc />
-    protected override GraphDatabaseInstance[] GetDatabases() => _engine.GetInstanceSnapshot();
+    protected override GraphDatabase[] GetDatabases() => _engine.GetInstanceSnapshot();
 
     /// <inheritdoc />
-    protected override string GetName(GraphDatabaseInstance database) => database.Name;
+    protected override string GetName(GraphDatabase database) => database.Name;
 
     /// <inheritdoc />
-    protected override bool IsOffline(GraphDatabaseInstance database) => database.IsOffline;
+    protected override bool IsOffline(GraphDatabase database) => database.IsOffline;
 
     /// <inheritdoc />
-    protected override bool IsOpen(GraphDatabaseInstance database) => _engine.IsOpen(database);
+    protected override bool IsOpen(GraphDatabase database) => _engine.IsOpen(database);
 
     /// <inheritdoc />
-    protected override bool IsCheckpointDue(GraphDatabaseInstance database, TimeSpan interval)
+    protected override bool IsCheckpointDue(GraphDatabase database, TimeSpan interval)
         => database.DataStorage.IsCheckpointDue(interval);
 
     /// <inheritdoc />
@@ -56,6 +56,6 @@ internal sealed class GraphCheckpointWorker : DatabaseCheckpointWorker<GraphData
     /// A statement holding the apply gate takes the checkpoint over and runs it as it ends, so the
     /// checkpoint never waits on the database's own statements either.
     /// </remarks>
-    protected override bool Checkpoint(GraphDatabaseInstance database, TimeSpan interval, CancellationToken cancellationToken)
+    protected override bool Checkpoint(GraphDatabase database, TimeSpan interval, CancellationToken cancellationToken)
         => database.Coordinator.TryCheckpoint(TimeSpan.Zero, cancellationToken);
 }

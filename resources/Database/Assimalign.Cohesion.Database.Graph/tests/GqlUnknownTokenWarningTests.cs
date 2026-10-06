@@ -42,7 +42,7 @@ public sealed class GqlUnknownTokenWarningTests
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
         await using var session = await SeedAsync(engine);
-        var database = (IGraphDatabase)session.Database;
+        var database = session.Database;
         var transaction = await session.BeginTransactionAsync(isolation, CancellationToken.None);
         await session.ExecuteAsync("INSERT (:Pending {name: 'p'})", cancellationToken: CancellationToken.None);
 
@@ -132,7 +132,7 @@ public sealed class GqlUnknownTokenWarningTests
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
         await using var session = await SeedAsync(engine);
-        var database = (IGraphDatabase)session.Database;
+        var database = session.Database;
         await using var other = await database.CreateSessionAsync(CancellationToken.None);
         var transaction = await session.BeginTransactionAsync(CancellationToken.None);
 
@@ -166,7 +166,7 @@ public sealed class GqlUnknownTokenWarningTests
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
         await using var session = await SeedAsync(engine);
-        var database = (IGraphDatabase)session.Database;
+        var database = session.Database;
         var transaction = await session.BeginTransactionAsync(CancellationToken.None);
 
         // Act
@@ -262,7 +262,7 @@ public sealed class GqlUnknownTokenWarningTests
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
         await using var session = await SeedAsync(engine);
-        var database = (IGraphDatabase)session.Database;
+        var database = session.Database;
         var schema = GraphSchema.Open(database, session);
         await schema.CreateIndexAsync("Keep", "by_name", "name", CancellationToken.None);
         var transaction = await session.BeginTransactionAsync(CancellationToken.None);
@@ -325,7 +325,7 @@ public sealed class GqlUnknownTokenWarningTests
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
         await using var session = await SeedAsync(engine);
-        var database = (IGraphDatabase)session.Database;
+        var database = session.Database;
 
         // Act
         var plan = await PlanAsync(database, session, gql);
@@ -360,15 +360,15 @@ public sealed class GqlUnknownTokenWarningTests
         return message[start..message.IndexOf('\'', start)];
     }
 
-    private static async Task<IDatabaseSession> SeedAsync(GraphDatabaseEngine engine)
+    private static async Task<GraphDatabaseSession> SeedAsync(GraphDatabaseEngine engine)
     {
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
         return session;
     }
 
-    private static async Task<(List<object?[]> Rows, IReadOnlyList<Diagnostic>? Diagnostics)> ReadAsync(IDatabaseSession session, string gql)
+    private static async Task<(List<object?[]> Rows, IReadOnlyList<Diagnostic>? Diagnostics)> ReadAsync(GraphDatabaseSession session, string gql)
     {
         await using var result = (QueryResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
         var rows = new List<object?[]>();
@@ -379,16 +379,15 @@ public sealed class GqlUnknownTokenWarningTests
         return (rows, result.Diagnostics);
     }
 
-    private static async Task<List<string?>> ColumnAsync(IDatabaseSession session, string gql, int ordinal = 0)
+    private static async Task<List<string?>> ColumnAsync(GraphDatabaseSession session, string gql, int ordinal = 0)
         => (await ReadAsync(session, gql)).Rows.Select(row => (string?)row[ordinal]).ToList();
 
-    private static ValueTask<GraphPlan> PlanAsync(IGraphDatabase database, IDatabaseSession session, string gql)
+    private static ValueTask<GraphPlan> PlanAsync(GraphDatabase database, GraphDatabaseSession session, string gql)
     {
-        var instance = (GraphDatabaseInstance)database;
         var statement = GraphQueryRequest.FromGql(gql).Statement;
         // The planner never sees a statement the parser rejected, so neither does this helper.
         statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
-        return instance.RunAsync((GraphDatabaseSession)session, operation => new ValueTask<GraphPlan>(
-            new GraphPlanner(instance, operation.Context.Snapshot).Plan(statement.GqlExpression)), CancellationToken.None);
+        return database.RunAsync(session, operation => new ValueTask<GraphPlan>(
+            new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression)), CancellationToken.None);
     }
 }

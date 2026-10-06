@@ -11,7 +11,6 @@ using Xunit;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -32,9 +31,12 @@ public sealed class GraphStorageOperationsTests
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, a statement, BEGIN, COMMIT and ROLLBACK of an open
     /// transaction, over the wire too — is refused with COHDBG012, and nothing reaches the file
-    /// set, through the workers' passes and the sessions' close included. Reopening the database
-    /// runs recovery, which keeps the commit when its record's bytes survived and drops it when
-    /// they were lost with the failed fsync.
+    /// set, through the workers' passes and the sessions' close included. The root bases' checks
+    /// come first (concrete-types plan §6.4): BEGIN on the session holding the open transaction is
+    /// refused as already active, a canceled token is refused before the offline refusal of a new
+    /// session, both execute seams and BEGIN, and the transaction whose session closed reports
+    /// Faulted. Reopening the database runs recovery, which keeps the commit when its record's
+    /// bytes survived and drops it when they were lost with the failed fsync.
     /// </summary>
     /// <param name="recordSurvives">False to reopen with only the journal bytes a durable flush confirmed.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Offline: a failed journal fsync refuses every operation until the reopen, whose recovery decides")]
@@ -54,7 +56,7 @@ public sealed class GraphStorageOperationsTests
             PageWriteBackInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
-        var database = (GraphDatabaseInstance)await engine.CreateDatabaseAsync("graph", token);
+        var database = await engine.CreateDatabaseAsync("graph", token);
         var listener = new InMemoryConnectionListener();
         await using var server = GraphDatabaseServer.Create(engine, new() { Listener = listener });
         await server.StartAsync(token);
@@ -90,6 +92,23 @@ public sealed class GraphStorageOperationsTests
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.RollbackAsync(token)),
         };
 
+        // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
+        // open transaction is refused as already active before the offline refusal, and a canceled
+        // token is refused before the offline refusal of a new session, both execute seams and
+        // BEGIN. Before the bases, each of these was refused with COHDBG012. The typed node and
+        // relationship operations do not pass the session's execute seams, so their order holds.
+        var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync());
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        var canceledCalls = new List<OperationCanceledException>
+        {
+            await Should.ThrowAsync<OperationCanceledException>(async () => await database.CreateSessionAsync(canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (n) RETURN n.name"), canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("MATCH (n) RETURN n.name", null, canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.BeginTransactionAsync(canceled.Token)),
+        };
+        var typedRefusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateNodeAsync(session, ["Item"], cancellationToken: canceled.Token));
+
         // Over the wire: a statement on a session opened before the failure, and a new session.
         await WriteAsync(wire, (ProtocolMessageType)GraphProtocolMessageType.Execute,
             GraphProtocolExecuteMessage.Create("MATCH (n) RETURN n.name").Encode(), token);
@@ -107,11 +126,14 @@ public sealed class GraphStorageOperationsTests
             worker.RunIteration(CancellationToken.None).ShouldBeTrue(worker.Fault?.ToString());
         }
 
+        // The open transaction's teardown rolls nothing back on the offline database, and the
+        // transaction reports Faulted (it reported Active before the bases).
         await other.DisposeAsync();
+        var closedState = open.State;
         await session.DisposeAsync();
         var beforeTheReopen = strategy.Capture("graph");
 
-        var reopened = (GraphDatabaseInstance)await engine.OpenDatabaseAsync("graph", token);
+        var reopened = await engine.OpenDatabaseAsync("graph", token);
         await using var observer = await reopened.CreateSessionAsync(token);
         var names = await Names(observer);
 
@@ -119,6 +141,10 @@ public sealed class GraphStorageOperationsTests
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
         refusals.ShouldAllBe(refusal => refusal.Code == "COHDBG012" && refusal.Message.StartsWith("COHDBG012", StringComparison.Ordinal));
+        activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
+        canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
+        typedRefusal.Code.ShouldBe("COHDBG012");
+        closedState.ShouldBe(TransactionState.Faulted);
         statementError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
         statementError.Message.ShouldStartWith("COHDBG012", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
@@ -136,7 +162,7 @@ public sealed class GraphStorageOperationsTests
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
-        var database = (GraphDatabaseInstance)await engine.CreateDatabaseAsync("pool");
+        var database = await engine.CreateDatabaseAsync("pool");
 
         // Act & Assert
         database.DataStorage.BufferPoolCapacity.ShouldBe(4096);
@@ -149,7 +175,7 @@ public sealed class GraphStorageOperationsTests
         Should.Throw<ArgumentOutOfRangeException>(() => GraphDatabaseEngine.Create(new() { CheckpointJournalSize = -1 }))
             .ParamName.ShouldBe(nameof(GraphDatabaseEngineOptions.CheckpointJournalSize));
         await using var sized = GraphDatabaseEngine.Create(new() { BufferPoolCapacity = 2 * 1024 * 1024 });
-        ((GraphDatabaseInstance)await sized.CreateDatabaseAsync("sized")).DataStorage.BufferPoolCapacity.ShouldBe(256);
+        (await sized.CreateDatabaseAsync("sized")).DataStorage.BufferPoolCapacity.ShouldBe(256);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Builder: the engine builder carries the buffer pool and checkpoint size to the engine it builds")]
@@ -164,7 +190,7 @@ public sealed class GraphStorageOperationsTests
 
         // Act
         await using var engine = (GraphDatabaseEngine)builder.Build();
-        var database = (GraphDatabaseInstance)await engine.CreateDatabaseAsync("built");
+        var database = await engine.CreateDatabaseAsync("built");
 
         // Assert
         defaultPool.ShouldBe(32L * 1024 * 1024);
@@ -201,7 +227,7 @@ public sealed class GraphStorageOperationsTests
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
-        var database = (GraphDatabaseInstance)await engine.CreateDatabaseAsync("bounded");
+        var database = await engine.CreateDatabaseAsync("bounded");
         using var stop = new CancellationTokenSource();
         string payload = new('x', 3000);
         await using (var setup = await database.CreateSessionAsync())
@@ -251,7 +277,7 @@ public sealed class GraphStorageOperationsTests
             MaintenanceInterval = maintenance,
         };
         await using var engine = GraphDatabaseEngine.Create(options);
-        var database = (GraphDatabaseInstance)await engine.CreateDatabaseAsync("graph");
+        var database = await engine.CreateDatabaseAsync("graph");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -286,7 +312,7 @@ public sealed class GraphStorageOperationsTests
         engine.State.ShouldBe(EngineState.Running);
     }
 
-    private static async Task<List<string>> Names(IDatabaseSession session)
+    private static async Task<List<string>> Names(GraphDatabaseSession session)
     {
         var names = new List<string>();
         var result = await session.ExecuteAsync("MATCH (n:Item) RETURN n.name");

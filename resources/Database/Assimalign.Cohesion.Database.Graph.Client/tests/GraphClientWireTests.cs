@@ -79,7 +79,7 @@ public sealed class GraphClientWireTests
         await connection.ExecuteAsync(
             "CREATE (:Vertex {name: 'Isolated'}), (a:Vertex {name: 'A'})-[:LINK]->(b:Vertex {name: 'B'})-[:LINK]->(a), (b)-[:LINK]->(b)",
             cancellationToken: harness.Token);
-        Guid sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act / Assert
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
@@ -94,7 +94,7 @@ public sealed class GraphClientWireTests
         (await connection.QueryAsync("MATCH (a)-[r:LINK]->(b) RETURN a.name", cancellationToken: harness.Token)).ShouldBeEmpty();
         (await connection.QueryAsync("MATCH (n:Vertex) RETURN n.name", cancellationToken: harness.Token))
             .Select(row => (string)row[0]!).Order(StringComparer.Ordinal).ShouldBe(["A", "Isolated"]);
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
     /// <summary>Schema-owned definitions keep required-property validation and remain unchanged after data writes.</summary>
@@ -145,7 +145,7 @@ public sealed class GraphClientWireTests
             await schema.SavePropertyKeyAsync(new(labelId, "name", DatabaseType.String, true), harness.Token);
             await schema.CreateIndexAsync("Person", "by_name", "name", harness.Token);
         }
-        var other = (IGraphDatabase)await harness.Engine.CreateDatabaseAsync("other", harness.Token);
+        var other = await harness.Engine.CreateDatabaseAsync("other", harness.Token);
         await using (var session = await other.CreateSessionAsync(harness.Token))
         {
             await GraphSchema.Open(other, session).SaveLabelAsync(new(Guid.NewGuid(), "Hidden"), harness.Token);
@@ -218,7 +218,7 @@ public sealed class GraphClientWireTests
         Guid sessionId;
         await using (var connection = await harness.Client.ConnectAsync(harness.Token))
         {
-            sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+            sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
             // Act
             var error = await Should.ThrowAsync<GraphClientException>(async () =>
@@ -230,7 +230,7 @@ public sealed class GraphClientWireTests
         }
         await using var reused = await harness.Client.ConnectAsync(harness.Token);
         (await reused.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
     /// <summary>A mutation with a non-scalar result is rejected before its writes can be applied.</summary>
@@ -256,7 +256,7 @@ public sealed class GraphClientWireTests
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
         var returned = await harness.Client.ConnectAsync(harness.Token);
-        Guid sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         await returned.DisposeAsync();
         await using var current = await harness.Client.ConnectAsync(harness.Token);
 
@@ -268,6 +268,6 @@ public sealed class GraphClientWireTests
         returned.IsOpen.ShouldBeFalse();
         current.IsOpen.ShouldBeTrue();
         (await current.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).ShouldBeEmpty();
-        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 }

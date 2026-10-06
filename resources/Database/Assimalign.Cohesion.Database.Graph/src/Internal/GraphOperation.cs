@@ -5,28 +5,37 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
+/// <summary>
+/// One statement of a session: its transaction context (the explicit transaction's, or an
+/// autocommit context of its own), and the hold it keeps on the session and its admission into
+/// the explicit transaction until it completes or is aborted.
+/// </summary>
 internal sealed class GraphOperation
 {
-    private readonly GraphDatabaseInstance _database;
-    private readonly GraphDatabaseSession? _session;
+    private readonly GraphDatabase _database;
+    private readonly GraphDatabaseSession _session;
     private readonly GraphDatabaseTransaction? _transaction;
     private readonly TransactionContext _context;
     private readonly SemaphoreSlim _completionGate = new(1, 1);
     private TransactionContext? _snapshotPin;
     private int _finished;
-    internal GraphOperation(GraphDatabaseInstance database, GraphDatabaseSession? session, TransactionContext context, GraphDatabaseTransaction? transaction)
+
+    /// <summary>Initializes a new instance of the <see cref="GraphOperation"/> class.</summary>
+    /// <param name="database">The database the statement runs on.</param>
+    /// <param name="session">The session the statement holds; the operation releases the hold when it finishes.</param>
+    /// <param name="context">The transaction context the statement runs under.</param>
+    /// <param name="transaction">The explicit transaction that admitted the statement, or null for autocommit.</param>
+    internal GraphOperation(GraphDatabase database, GraphDatabaseSession session, TransactionContext context, GraphDatabaseTransaction? transaction)
     {
         _database = database;
         _session = session;
         Context = context;
         _context = context;
         _transaction = transaction;
-        if (transaction is not null)
-        {
-            transaction.Operations++;
-        }
     }
+
     internal TransactionContext Context { get; private set; }
+
     internal async ValueTask InitializeAsync(CancellationToken cancellationToken)
     {
         if (_transaction?.IsolationLevel == IsolationLevel.ReadCommitted)
@@ -38,16 +47,18 @@ internal sealed class GraphOperation
             Context = _context.PinStatementSnapshot();
         }
     }
+
     internal void EnsureActive()
     {
-        _database.ThrowIfDisposed();
+        _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
-        _session?.ThrowIfNotOpen();
+        _session.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
             throw new DatabaseException("The graph operation's transaction is no longer active.");
         }
     }
+
     internal async ValueTask CompleteAsync()
     {
         await _completionGate.WaitAsync().ConfigureAwait(false);
@@ -68,6 +79,7 @@ internal sealed class GraphOperation
         }
         finally { _completionGate.Release(); }
     }
+
     /// <summary>Ends a failed or abandoned operation, rolling back the transaction it ran in.</summary>
     /// <param name="cause">The failure the caller observed, or why the operation was abandoned.</param>
     internal async ValueTask AbortAsync(Exception cause)
@@ -85,7 +97,7 @@ internal sealed class GraphOperation
                     // Graph storage cannot undo one statement of a transaction, so a failed
                     // statement aborts its whole explicit transaction, which records the cause
                     // and refuses later statements until the caller rolls back (#1188).
-                    await _transaction.AbortAsync(cause).ConfigureAwait(false);
+                    await _transaction.AbortForFailedStatementAsync(cause).ConfigureAwait(false);
                 }
                 else if (Context.State == TransactionState.Active && !_database.IsOffline)
                 {
@@ -101,11 +113,13 @@ internal sealed class GraphOperation
         }
         finally { _completionGate.Release(); }
     }
+
     private async ValueTask FinishAsync()
     {
         try { await ReleaseSnapshotPinAsync().ConfigureAwait(false); }
         finally { Finish(); }
     }
+
     private void Finish()
     {
         if (Interlocked.Exchange(ref _finished, 1) != 0)
@@ -113,12 +127,8 @@ internal sealed class GraphOperation
             return;
         }
 
-        if (_transaction is not null)
-        {
-            _transaction.Operations--;
-        }
-
-        _session?.Untrack(this);
+        // The statement ends its admission into the explicit transaction and its hold on the session.
+        _session.ReleaseOperation(_transaction);
     }
 
     private async ValueTask ReleaseSnapshotPinAsync()

@@ -9,7 +9,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
@@ -35,8 +34,8 @@ public sealed class GraphWorkerResilienceTests
         // Arrange: the checkpointer looks every 100 ms; nothing else writes pages back.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = GraphDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
-        var failing = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-        var healthy = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var workers = engine.Workers.ToArray();
         var faults = strategy.Faults(Failing);
@@ -199,8 +198,8 @@ public sealed class GraphWorkerResilienceTests
         var options = Options(strategy);
         options.CheckpointJournalSize = PaceJournalSize;
         await using var engine = GraphDatabaseEngine.Create(options);
-        var stalled = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-        var healthy = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+        var stalled = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var stalledFaults = strategy.Faults(Failing);
         var healthyFaults = strategy.Faults(Healthy);
@@ -258,8 +257,8 @@ public sealed class GraphWorkerResilienceTests
         // Arrange: the page writer runs every 50 ms; no checkpoint writes pages.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = GraphDatabaseEngine.Create(Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
-        var failing = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-        var healthy = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.PageWriteBack);
         var faults = strategy.Faults(Failing);
         var healthyFaults = strategy.Faults(Healthy);
@@ -315,8 +314,8 @@ public sealed class GraphWorkerResilienceTests
         options.Durability = StorageCommitDurability.Grouped;
         options.GroupCommitWindow = window;
         await using var engine = GraphDatabaseEngine.Create(options);
-        var failing = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-        var healthy = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
         var faults = strategy.Faults(Failing);
         await using var session = await failing.CreateSessionAsync();
@@ -333,14 +332,18 @@ public sealed class GraphWorkerResilienceTests
         var latencies = await TimedInsertsAsync(healthy, 5);
 
         faults.Clear();
-        var reopened = (GraphDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert: a failed drain ends the group flush before its fsync.
         bool drain = fault == DeviceFault.JournalWrite;
         StorageOfflineException.Find(error.ShouldNotBeNull()).ShouldNotBeNull();
         (failedCommit / window).ShouldBeLessThan(1.0);
         (drain ? faults.JournalWriteFailures : faults.JournalFlushFailures).ShouldBeGreaterThanOrEqualTo(1);
-        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(engine.Name + "/" + DatabaseEngineWorkerKind.WriteAheadFlush);
+
+        // The root engine base names each pump thread for its worker (concrete-types plan §6.4,
+        // engine composition), where the model named it "{engine}/{kind}" ("graph-engine/WriteAheadFlush").
+        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name);
+        worker.Name.ShouldBe(engine.Name + "/wal-flush");
         (drain ? faults.JournalFlushFailures : faults.JournalWriteFailures).ShouldBe(0);
         refusal.Code.ShouldBe("COHDBG012");
         StorageOfflineException.Find(refusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
@@ -360,8 +363,8 @@ public sealed class GraphWorkerResilienceTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = GraphDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
-        var failing = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-        var healthy = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
         await InsertAsync(failing, 0, 10);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
@@ -388,7 +391,7 @@ public sealed class GraphWorkerResilienceTests
         var after = strategy.Capture(Failing);
 
         faults.Clear();
-        var reopened = (GraphDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert
         offline.ShouldBeTrue();
@@ -436,7 +439,7 @@ public sealed class GraphWorkerResilienceTests
         // an explicit transaction, and another queues behind it.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = GraphDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
-        var failing = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
+        var failing = await engine.CreateDatabaseAsync(Failing);
         var faults = strategy.Faults(Failing);
         await using var holder = await failing.CreateSessionAsync();
         await using var queued = await failing.CreateSessionAsync();
@@ -462,7 +465,7 @@ public sealed class GraphWorkerResilienceTests
         var holderRefusal = await Record.ExceptionAsync(async () => await holder.ExecuteAsync("INSERT (:Item {name: 'after'})"));
 
         faults.Clear();
-        var reopened = (GraphDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert: both writers got the coded refusal naming what failed, and the reopen kept
         // neither write.
@@ -476,8 +479,12 @@ public sealed class GraphWorkerResilienceTests
         (await CountAsync(reopened)).ShouldBe(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Workers: a registered worker whose loop throws is run again, and the engine reports Faulted")]
-    public async Task Pump_InterfaceWorkerThrows_ShouldRunItAgainAndReportFaulted()
+    // Since the engine derives from DatabaseEngine (concrete-types plan, phase 4), a registered
+    // worker is a DatabaseEngineWorker, whose loop lets nothing escape: the pass that throws is
+    // recorded and the next one runs after the backoff. The interface-only worker this test drove
+    // until then cannot be registered any more.
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Workers: a registered worker whose pass throws is run again, and the engine reports Faulted")]
+    public async Task Pump_RegisteredWorkerPassThrows_ShouldRunItAgainAndReportFaulted()
     {
         // Arrange
         var worker = new EscapingWorker();
@@ -532,8 +539,8 @@ public sealed class GraphWorkerResilienceTests
             var options = Options(strategy);
             options.CheckpointJournalSize = PaceJournalSize;
             await using var engine = GraphDatabaseEngine.Create(options);
-            var failing = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Failing);
-            var healthy = (GraphDatabaseInstance)await engine.CreateDatabaseAsync(Healthy);
+            var failing = await engine.CreateDatabaseAsync(Failing);
+            var healthy = await engine.CreateDatabaseAsync(Healthy);
             var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
             var failingFaults = strategy.Faults(Failing);
             var healthyFaults = strategy.Faults(Healthy);
@@ -669,7 +676,7 @@ public sealed class GraphWorkerResilienceTests
     }
 
     // What a database's two growing files hold together: the bound the pace window keeps under.
-    private static long FileBytes(GraphDatabaseInstance database)
+    private static long FileBytes(GraphDatabase database)
         => database.DataStorage.Data.Length + database.DataStorage.JournalLength;
 
     private static GraphDatabaseEngineOptions Options(FaultInjectingJournalStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
@@ -683,7 +690,7 @@ public sealed class GraphWorkerResilienceTests
     private static DatabaseEngineWorker WorkerOf(GraphDatabaseEngine engine, DatabaseEngineWorkerKind kind)
         => engine.Workers.OfType<DatabaseEngineWorker>().Single(worker => worker.Kind == kind);
 
-    private static async Task InsertAsync(GraphDatabaseInstance database, int first, int count)
+    private static async Task InsertAsync(GraphDatabase database, int first, int count)
     {
         await using var session = await database.CreateSessionAsync();
         for (int id = first; id < first + count; id++)
@@ -692,7 +699,7 @@ public sealed class GraphWorkerResilienceTests
         }
     }
 
-    private static async Task<List<TimeSpan>> TimedInsertsAsync(GraphDatabaseInstance database, int count)
+    private static async Task<List<TimeSpan>> TimedInsertsAsync(GraphDatabase database, int count)
     {
         var latencies = new List<TimeSpan>();
         await using var session = await database.CreateSessionAsync();
@@ -706,7 +713,7 @@ public sealed class GraphWorkerResilienceTests
         return latencies;
     }
 
-    private static async Task<int> CountAsync(GraphDatabaseInstance database)
+    private static async Task<int> CountAsync(GraphDatabase database)
     {
         await using var session = await database.CreateSessionAsync();
         var result = await session.ExecuteAsync("MATCH (n:Item) RETURN n.name");
@@ -753,31 +760,34 @@ public sealed class GraphWorkerResilienceTests
         return true;
     }
 
-    /// <summary>A worker without the guided base whose first loop throws; later loops run until cancelled.</summary>
-    private sealed class EscapingWorker : IDatabaseEngineWorker
+    /// <summary>
+    /// A registered worker whose first pass throws; later passes run until cancelled, so the
+    /// failure stays recorded (no pass ran to its end) while the test reads the engine's state.
+    /// </summary>
+    private sealed class EscapingWorker : DatabaseEngineWorker
     {
         private int _runs;
         private int _stopped;
 
-        public string Name => "escaping";
-
-        public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.IndexMaintenance;
-
-        public TimeSpan Interval => TimeSpan.FromSeconds(1);
+        public EscapingWorker()
+            : base("escaping", DatabaseEngineWorkerKind.IndexMaintenance, TimeSpan.FromMilliseconds(10))
+        {
+        }
 
         public int Runs => Volatile.Read(ref _runs);
 
         public bool Stopped => Volatile.Read(ref _stopped) != 0;
 
-        public void Run(CancellationToken cancellationToken)
+        protected override void RunIterationCore(CancellationToken cancellationToken)
         {
             if (Interlocked.Increment(ref _runs) == 1)
             {
-                throw new InvalidOperationException("The worker's loop failed.");
+                throw new InvalidOperationException("The worker's pass failed.");
             }
 
             cancellationToken.WaitHandle.WaitOne();
             Volatile.Write(ref _stopped, 1);
+            cancellationToken.ThrowIfCancellationRequested();
         }
     }
 }

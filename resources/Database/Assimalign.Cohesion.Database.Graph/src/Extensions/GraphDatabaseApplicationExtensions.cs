@@ -1,7 +1,5 @@
 using System;
 
-using Assimalign.Cohesion.Database.Graph.Internal;
-
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>Registers deferred graph engines through the dependency-free Database application seam.</summary>
@@ -10,11 +8,15 @@ public static class GraphDatabaseApplicationExtensions
     extension(IDatabaseApplicationBuilder builder)
     {
         /// <summary>Registers a graph engine to construct when the application builds.</summary>
-        /// <param name="configure">Receives the build context and engine options; invoked once during Build.</param>
+        /// <param name="configure">Receives the build context and the engine builder; invoked once during Build.</param>
         /// <returns>The application builder for further registration.</returns>
         /// <exception cref="ArgumentNullException">The builder or callback is null.</exception>
-        /// <remarks>The application owns the created engine. Registration neither binds configuration nor resolves services.</remarks>
-        public IDatabaseApplicationBuilder AddGraph(Action<IDatabaseApplicationContext, IGraphDatabaseEngineBuilder> configure)
+        /// <remarks>
+        /// The application owns the created engine. Registration neither binds configuration nor
+        /// resolves services. A server factory registered on the builder receives the typed
+        /// <see cref="GraphDatabaseEngine"/>, so it needs no cast.
+        /// </remarks>
+        public IDatabaseApplicationBuilder AddGraph(Action<IDatabaseApplicationContext, GraphDatabaseEngineBuilder> configure)
         {
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentNullException.ThrowIfNull(configure);

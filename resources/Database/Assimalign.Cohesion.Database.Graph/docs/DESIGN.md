@@ -13,8 +13,10 @@ accent folding is applied to stored labels or property values.
 ## Composition and frozen contracts
 
 The fifth database engine follows Documents' parser/planner/executor composition and Blob's
-engine-owned lifecycle. `GraphDatabaseEngine` is the public factory and engine implementation;
-database, session, transaction, planner and executor implementations are internal. Its dependencies
+engine-owned lifecycle. `GraphDatabaseEngine` is the public factory and engine; the engine, its
+database (`GraphDatabase`), session, transaction, server and builder are public sealed types, the
+first five leaves of the area root's bases ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)),
+while the planner, executor, server session and storage strategy are internal. Its dependencies
 are the area root, Connections and the Graph.Language, Graph.Catalog and Graph.Storage packages. Storage uses
 shared Storage, Transactions and Indexing rather than another pager, journal or lock manager.
 
@@ -40,14 +42,13 @@ flowchart LR
     Client --> SharedClient["Database.Client"]
 ```
 
-The session-binding change altered no public interface that existed before it. `IGraphDatabase`
-accepts an explicit `IDatabaseSession` for each data operation. Every entry point checks the
-concrete session's database identity; sharing an engine or database name is insufficient.
-`GraphSchema.Open(database, session)` returns the new `IGraphSchema` interface, also bound to that
-exact database and session. Its operations join the session transaction. #1228 later changed
-`IGraphSchema.GetIndexesAsync` (a breaking change) to return `GraphSchemaResult<GraphIndexMetadata>`,
-a read-only list that also carries the read's warnings. Administrative database lifecycle remains
-on `IDatabaseEngine`; no GQL AST can select a server, another database, or another graph.
+`GraphDatabase` takes an explicit `GraphDatabaseSession` for each data operation. Every entry point
+checks the session's database identity; sharing an engine or database name is insufficient.
+`GraphSchema.Open(database, session)` returns a `GraphSchema` bound to that exact database and
+session. Its operations join the session transaction. #1228 changed `GraphSchema.GetIndexesAsync`
+(a breaking change) to return `GraphSchemaResult<GraphIndexMetadata>`, a read-only list that also
+carries the read's warnings. Administrative database lifecycle remains on the engine; no GQL AST
+can select a server, another database, or another graph.
 
 ## Physical records and adjacency
 
@@ -152,7 +153,7 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    `Database.Transactions` DESIGN.md, "Ending a transaction".)
 2. The transaction stays the session's `CurrentTransaction` and reports `TransactionState.Faulted`.
    Every later statement on the session fails with `COHDBG007`: GQL text or requests, typed
-   `IGraphDatabase` operations, traversals and `GraphSchema` calls. `BeginTransactionAsync` fails
+   `GraphDatabase` operations, traversals and `GraphSchema` calls. `BeginTransactionAsync` fails
    with `COHDBG007` too. The error names the original failure in its message (`Cause: ...`) and
    carries it as `InnerException`. A refused statement does not change the transaction, and an
    aborted transaction refuses text before parsing it.
@@ -163,7 +164,11 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    could not be written). So a catch-block rollback after a failed commit never hides the
    commit's error. A rollback of a committed transaction is refused, because it cannot do what it
    says.
-4. `CommitAsync` fails with `COHDBG007`, commits nothing, and ends the transaction (`RolledBack`).
+4. `CommitAsync` fails with `COHDBG007`, commits nothing, and ends the transaction (`RolledBack`);
+   every later commit fails the same way, with the same cause, and so does a commit after the
+   session's teardown ended the transaction (since phase 4 of the concrete-types plan, when the
+   root transaction base took over the state machine; before it a later commit reported "The
+   transaction is RolledBack.").
    A commit the kernel aborts throws `DatabaseTransactionAbortedException`, as a statement's kernel
    abort does, and leaves the transaction `Faulted` and ended. A commit whose record was written
    but could not be made durable is not an abort: it throws
@@ -174,7 +179,7 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    the statement runs, and (on the wire) a result the server cannot encode or deliver. Failures
    that come before a statement starts leave the transaction unchanged: argument validation (null
    or whitespace text; a null label list, or a null, empty or whitespace label or relationship
-   type, on the typed `IGraphDatabase` writes; an invalid traversal specification, reported as
+   type, on the typed `GraphDatabase` writes; an invalid traversal specification, reported as
    `COHDBG001` before the traversal starts), a session of another database (`COHDBG005`), a token
    canceled before the statement starts, a non-GQL request, and the refusal of a second
    concurrent operation on the session. A definition `GraphSchema` saves is validated by the
@@ -244,7 +249,8 @@ describes.
 
 The graph protocol has no transaction control, so a wire session runs inside an explicit
 transaction only when its host opens one on the server session's engine session
-(`IDatabaseServerSession.DatabaseSession`). The server hands parsing and request validation to
+(`DatabaseServerSession.DatabaseSession`, through `GraphDatabaseServer.Sessions`). The server hands
+parsing and request validation to
 that engine session, so a parse failure or an entity projection on `Execute` aborts the
 transaction exactly as the same failure does in process. A statement whose result the server
 then cannot encode or deliver (for example a property value the wire codec has no encoding for)
@@ -350,7 +356,7 @@ through `QueryRow.GetValue`. Property projections return scalars. This does not 
 to the frozen traversal contract.
 
 `GraphPathsQueryRequest.FromGql` selects real path execution through the existing
-`IDatabaseSession.ExecuteAsync(QueryRequest)` boundary. Its `GraphPathsQueryResult.Paths` contains
+`DatabaseSession.ExecuteAsync(QueryRequest)` boundary. Its `GraphPathsQueryResult.Paths` contains
 materialized `GraphPath` objects from the matcher's bound entities and traversal sequence, under
 the same pinned snapshot as scalar execution. Exactly one projection is required: a node variable
 produces a singleton path, a relationship variable produces its stored source and target nodes,
@@ -421,7 +427,7 @@ yet keeps the caller's transaction and its earlier writes.
   empties the whole statement, which holds only because every `MATCH` in the subset is mandatory:
   when `gql-optional-match` lands, an optional pattern that requires an unknown name binds nulls
   instead and must not set it.
-- **Schema reads.** `IGraphSchema.GetIndexesAsync(label)` returns `GraphSchemaResult<GraphIndexMetadata>`,
+- **Schema reads.** `GraphSchema.GetIndexesAsync(label)` returns `GraphSchemaResult<GraphIndexMetadata>`,
   a read-only list with a `Diagnostics` list: for an unknown label, no indexes and the same
   `COHDBG010` warning. Neo4j's schema API returns an empty list for a label token that does not exist
   (`kernel/.../coreapi/schema/SchemaImpl.java:142-154`); its core API has no notification channel.
@@ -453,8 +459,8 @@ yet keeps the caller's transaction and its earlier writes.
 ## Catalog introspection (C2)
 
 `GraphSchema.Open(database, session)` already supplies in-process discovery of labels, relationship
-types, property keys and indexes. C2 preserves that interface and makes the same catalog reachable
-through textual requests on the existing `IDatabaseSession.ExecuteAsync` query boundary. Dedicated
+types, property keys and indexes. C2 preserves that API and makes the same catalog reachable
+through textual requests on the existing `DatabaseSession.ExecuteAsync` query boundary. Dedicated
 `SHOW` statements are Cohesion GQL extensions, not ISO conformance claims. A catalog definition is
 not a graph node: exposing it through `MATCH` would invent graph identities and relationships and
 would reserve labels in the user graph. `SHOW` instead returns a typed result set with no fabricated
@@ -556,9 +562,12 @@ Ownership uses the shared dedicated exception rather than an invented graph owne
 ## Lifecycle and delivery
 
 Engine construction starts WAL-flush, page-writeback, checkpoint and version-purge workers, exposed
-through `Workers`. State is Running, Faulted while a worker keeps failing, and Disposed once
-disposal begins. Disposal is idempotent: stop and join workers, abort outstanding transactions,
-durably flush and close each database. The coordinator's logical commit goes through the
+through `Workers` and named `{engine}/wal-flush`, `{engine}/page-writeback`, `{engine}/checkpoint`
+and `{engine}/version-purge`; the root engine base pumps each on a dedicated thread named for the
+worker. State is Running, Faulted while a worker keeps failing, and Disposed once disposal begins.
+Disposal is idempotent and in the root base's order: dispose the servers, stop and join the worker
+pumps, dispose the workers (last attached first), then abort outstanding transactions, durably
+flush and close each database. The coordinator's logical commit goes through the
 storage's commit gate (`Storage.EnsureCommitDurable`), so under grouped durability a commit
 waits for the flush worker's group flush; `GraphWorkerResilienceTests` shows the failing fsync of
 a grouped commit running on the flush worker's thread.
@@ -574,9 +583,10 @@ failed durable flush (#1243) or drain of the journal's append buffer (#1252), or
 write that failed (#1268), after which no checkpoint could truncate its journal — is not the
 worker's: every later operation is refused
 with `COHDBG012`, the workers skip the database, and the engine lists it in `OfflineDatabases`.
-The engine's pump runs a worker again after the backoff if its loop ever ends early (only an
-`IDatabaseEngineWorker` without the guided base can; the engine then reports Faulted until
-disposal). Before #1268 one unexpected exception ended a worker for good.
+The root engine base's pump runs a worker again after the backoff if its loop ever ends early, and
+the engine then reports Faulted until disposal; a `DatabaseEngineWorker`, the only kind the engine
+attaches since phase 4 of the concrete-types plan, records a failed pass instead and its loop lets
+nothing escape. Before #1268 one unexpected exception ended a worker for good.
 `GraphWorkerResilienceTests` covers each case, a group flush's drain and its fsync both. It also
 checks that a database whose checkpoints keep failing leaves the other database a pace a
 worker-wide backoff cannot reach: over a shared six-second window more than twice the backoff's
@@ -609,7 +619,7 @@ the file set, closing included — PostgreSQL's `PANIC` on a failed WAL fsync (`
 `RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`; and `data_sync_retry`
 off, `src/backend/storage/file/fd.c:3966-3987`), scoped to the database. The statement whose
 commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`. Every later operation —
-a new session, a GQL statement, a typed `IGraphDatabase` call, BEGIN, and the COMMIT or ROLLBACK
+a new session, a GQL statement, a typed `GraphDatabase` call, BEGIN, and the COMMIT or ROLLBACK
 of a transaction open at the failure — is refused with `DatabaseOfflineException`, code
 `COHDBG012`, carrying the storage's `StorageOfflineException`; the offline check runs before the
 generic storage translation, so it is never reported as `COHDBG006`. `GraphDatabaseServer`
@@ -627,7 +637,7 @@ strategy over durable in-memory handles, reopening with and without the unconfir
 bytes.
 
 **Buffer pool and checkpoint options (#1254).** `GraphDatabaseEngineOptions` (and
-`IGraphDatabaseEngineBuilder`) carry `BufferPoolCapacity` (32 MiB; whole 8 KiB pages, at least
+`GraphDatabaseEngineBuilder`) carry `BufferPoolCapacity` (32 MiB; whole 8 KiB pages, at least
 1 MiB), `CheckpointJournalSize` (256 MiB; zero for time only; not negative) and
 `CheckpointInterval` (5 minutes, was 30 seconds), all validated by `Create`. The checkpoint worker
 checkpoints a database when its journal reaches the size (its storage wakes the worker at once)
@@ -801,21 +811,23 @@ sequenceDiagram
 The owner-approved [Database hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md)
 is implemented as `AddGraph((context, engine) => ...)` on
 `IDatabaseApplicationBuilder`. This replaces `AddGraphDatabase`. The model callback
-runs during application Build and receives an `IGraphDatabaseEngineBuilder`.
+runs during application Build and receives the sealed `GraphDatabaseEngineBuilder`.
 It configures the complete option set, including `FileSystemPath? RootPath`,
-durability, storage strategy, identity and worker intervals; it neither binds
-configuration nor accesses a service container. Retained builder options and
-factories reject mutation after the first engine Build attempt.
+durability, identity and worker intervals; it neither binds configuration nor
+accesses a service container. Retained builder options and factories reject
+mutation after the first engine Build attempt.
 
-`AddWorker` and `AddServer` take factories whose engine argument exists before
-the factory runs. The engine schedules custom workers through the common
-`IDatabaseEngineWorker.Run` contract; this is the concrete generic consumer
-that earns `IDatabaseEngineBuilder`. There are no additional strongly typed
-factory overloads: a model-specific factory can cast its argument, while ordinary
-workers remain portable across models. The engine owns successful factory
-products and cleans them up on subsequent construction failure. Nested servers
-must front that exact engine. The application snapshots each engine's Servers
-for start/stop; disposing the engine disposes its servers and custom workers.
+`AddWorker` and `AddServer` take factories typed over the engine
+(`Func<GraphDatabaseEngine, DatabaseEngineWorker>`,
+`Func<GraphDatabaseEngine, DatabaseServer>`) whose engine argument exists before
+the factory runs, so a model-specific factory needs no cast. A factory runs when
+its product is attached, so it sees the products attached before it; every worker
+is attached before any server. The engine schedules custom workers through the
+root `DatabaseEngineWorker` base, and refuses a worker whose name another worker
+of the engine has. The engine owns successful factory products and cleans them up
+on subsequent construction failure. Nested servers must front that exact engine.
+The application snapshots each engine's Servers for start/stop; disposing the
+engine disposes its servers and custom workers.
 
 `GraphDatabaseEngine.Create(options)` remains the standalone entry point.
 Application factory registrations are application-owned; instance registrations
@@ -823,18 +835,91 @@ remain caller-owned, including their nested components. All four named database
 operations now take `DatabaseName`, with the existing implicit string conversion
 preserving ordinary literal call sites. Empty/default names are rejected.
 
-The explicit requirement for StorageStrategy supersedes the draft's statement
-that this model lacks a storage injection parameter. `IGraphStorageStrategy`
-provides create/open/drop, existence and discovery using the existing
-`GraphStorage` product. It overrides RootPath without allocating default
-files; returned storage is engine-owned and the strategy itself is borrowed.
-Durability is supplied explicitly, and opening must defer checkpointing until
-engine recovery. Default file/memory selection remains unchanged.
+The explicit requirement for StorageStrategy superseded the draft's statement
+that this model lacks a storage injection parameter. The internal
+`GraphStorageStrategy` provides create/open/drop, existence and discovery using
+the existing `GraphStorage` product. It overrides RootPath without allocating
+default files; returned storage is engine-owned and the strategy itself is
+borrowed. Durability is supplied explicitly, and opening must defer
+checkpointing until engine recovery. Default file/memory selection remains
+unchanged. Since phase 4 of the concrete-types plan the strategy is
+`internal abstract` (D9): no shipped code implemented the former public
+`IGraphStorageStrategy`, so the options and builder property are internal and
+only this assembly's test doubles (fault-injecting and recording) supply one.
 
 `GraphDatabaseEngine.CreateBuilder()` exposes the model builder for the
 concrete hosting builder's `AddEngine(name, build => ...)` overload. The consumer
 assigns resolved configuration/service values, registers nested server/worker
-factories, and returns `Build()`; the model package still never sees DI.
-There is no generic production orchestration over `IDatabaseEngineBuilder`;
-the base contract supports model-agnostic worker composition, demonstrated by
-tests exercising the public factory through that base interface.
+factories, and returns `Build()`; the model package still never sees DI. The
+builder implements no root interface: no Hosting code consumed
+`IDatabaseEngineBuilder`.
+
+## Concrete types (concrete-types plan, phase 4, #1260)
+
+The model is the second to adopt the root bases
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7). Its public types
+are sealed leaves; it has no public interface left, and no `Abstractions/` folder. Its
+child roots collapsed the same way: `GraphCatalog` and `GraphStore` are sealed types behind
+their `Open` factories.
+
+| Type | Base | Was |
+|---|---|---|
+| `GraphDatabaseEngine` | `DatabaseEngine` | a sealed `IDatabaseEngine` |
+| `GraphDatabase` | `DatabaseInstance` | `IGraphDatabase` and the internal `GraphDatabaseInstance` |
+| `GraphDatabaseSession` | `DatabaseSession` | an internal `IDatabaseSession` |
+| `GraphDatabaseTransaction` | `DatabaseTransaction` | an internal `IDatabaseTransaction` |
+| `GraphDatabaseServer` | `DatabaseServer` | a sealed `IDatabaseServer` |
+| `GraphDatabaseServerSession` (internal) | `DatabaseServerSession` | an internal `IDatabaseServerSession` |
+| `GraphDatabaseEngineBuilder` | none | `IGraphDatabaseEngineBuilder` and its internal implementation |
+| `GraphSchema` | none | `IGraphSchema`, the static `GraphSchema` and the internal `GraphSchemaSession` |
+| `GraphStorageStrategy` (internal abstract) | none | `IGraphStorageStrategy` |
+
+- **Typed surface without casts.** The engine re-exposes `CreateDatabaseAsync`,
+  `OpenDatabaseAsync` and `GetDatabasesAsync` typed (`GraphDatabase`) with `new` members over
+  the base's public members; a database re-exposes its `Engine` and `CreateSessionAsync`
+  (`GraphDatabaseSession`); a session its `Database`, `CurrentTransaction` and both
+  `BeginTransactionAsync` overloads (`GraphDatabaseTransaction`); the server its `Engine`. Each
+  `new` member awaits or reads the base's public member and casts once, so the base's checks
+  always run. `TryGetDatabase(DatabaseName, out GraphDatabase)` is a typed overload of the base's
+  lookup, not a `new` member: an `out var` call binds it, and an explicitly typed
+  `out DatabaseInstance` binds the base's. The typed operations (`CreateNodeAsync` and its
+  siblings) and `GraphSchema.Open` take a `GraphDatabaseSession` and a `GraphDatabase`.
+- **What the bases own now.** The engine base owns the name, the model, the workers' pumps (the
+  model no longer compiles `shared/DatabaseEngineWorkerPump.cs`), the state fold, composition and
+  the disposal order; the database base owns the disposed flag; the session base owns the session
+  state, the session's transaction, the "already active" check and the statement hold (the model's
+  former reservation flag and operation set, at most one statement at a time); the transaction base
+  owns the whole end state machine, the admission of statements (the model's former operation
+  counter) and the abort; the server base owns the lifecycle. The model supplies its vocabulary:
+  `COHDBG007`, `COHDBG012`, the kernel calls and the translation of the kernel's exceptions. It
+  keeps its per-statement rule (#1188): a failed statement aborts the explicit transaction through
+  the base's `AbortAsync`, and a statement holds the session from its start to its end.
+- **What changed for a caller** (plan §6.4): a closed session fails every operation with "The
+  session is closed." (was "The graph session is closed."); BEGIN refuses a closed session, then
+  an active transaction or operation, then a canceled token, before the isolation-level and offline
+  refusals, which came first; on an offline database BEGIN from the session that holds an open
+  transaction fails "already active" (was `COHDBG012`), and a canceled token is refused by
+  `CreateSessionAsync`, both execute seams and BEGIN before `COHDBG012` (the typed operations keep
+  their order); BEGIN refuses a transaction the kernel ended under its caller with `COHDBG007`,
+  where it reported the disposed database; every commit of an aborted transaction reports
+  `COHDBG007` with the cause, a second commit and a commit after the session's teardown included
+  (both reported "The transaction is RolledBack."), and a commit after the session closed an
+  active transaction names "The session closed before the transaction ended."; a commit while a
+  statement of the transaction runs fails with "An operation of the transaction is still running;
+  commit after it completes." (was "Dispose every graph operation before committing its
+  transaction."); a statement refused while the caller's commit or rollback runs says
+  "operation" where it said "statement", and one refused after the caller's own end says the
+  transaction "ended before the operation started" where it reported `COHDBG007` without a
+  cause; a transaction whose session closed while its database was offline reports `Faulted`
+  (was `Active`); a session that fails to close reports "The session failed to close." (was "One
+  or more graph operations failed to close."); and the engine's disposal aggregate is "One or
+  more components of engine '{name}' failed to close." (was "One or more graph engine components
+  failed to close."), with the databases that fail to close as one component, nested in "One or
+  more graph databases failed to close." when there are several. The engine's guards check an
+  empty name, then disposal, then the token, and the model's single-file-name-component rule after
+  them (it checked the whole name, then the token, then disposal); `GetDatabasesAsync` checks
+  disposal when it is called; a blank `EngineName` is refused by `Create` and `Build`
+  (`ArgumentException`, parameter `EngineName`); a worker whose name another worker of the engine
+  has is refused (the model never checked names); each worker's pump thread is named for the
+  worker (it was `{engine}/{kind}`); and a null session or database given to a typed operation or
+  `GraphSchema.Open` is an `ArgumentNullException` (it was `COHDBG005`).
