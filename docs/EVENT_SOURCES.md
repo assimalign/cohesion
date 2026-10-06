@@ -73,8 +73,11 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 | `Assimalign.Cohesion.DependencyInjection` | Provider built; call site built, service resolved, scope disposed, provider descriptors, resolver compiled (Verbose); resolver compilation failed | none | [DependencyInjection DESIGN.md](../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/docs/DESIGN.md#diagnostics) |
 
 Deliberately not instrumented: `Assimalign.Cohesion.Connections` (contracts; it performs no network
-operations of its own), `Connections.InMemory` (a test driver), and `Connections.Security` (TLS
-handshakes are already reported by the runtime's `System.Net.Security` source).
+operations of its own), `Connections.InMemory` (a test driver), `Connections.Security` (TLS
+handshakes are already reported by the runtime's `System.Net.Security` source), and
+`Http.Connections` (requests are traced and measured by the Web server below, and connections are
+counted by the drivers above; its empty placeholder source was deleted, see its
+[DESIGN.md](../libraries/Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md#diagnostics)).
 
 ## Traces and metrics
 
@@ -99,4 +102,3 @@ not build tooling against them.
 | `Assimalign.Cohesion.Resilience` | `AssimalignCohesionResilience` | Concatenated name; public constructor; no events. | #1038 |
 | `Assimalign.Cohesion.Resilience.Retry` | *(empty)* | Empty name; an event method that writes nothing. | #1038 |
 | `Assimalign.Cohesion.Resilience.Timeout` | `Assimalign.Cohesion.Resilience.TimeoutResilienceEventSource` | Type name in the source name; no events. | #1038 |
-| `Assimalign.Cohesion.Http.Connections` | `Assimalign.Cohesion.Http.Connections` | Correct name, but an empty placeholder with no events. | #1039 |

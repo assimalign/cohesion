@@ -552,7 +552,8 @@ response. This is the isolation boundary the server keeps around application cod
 - `server.address` and `server.port` on the metrics. They are opt-in there because they come from
   request headers, which makes them a cardinality attack vector.
 - Requests the transport rejects before dispatch (400, 408, 413, 414 and 431 answered by
-  `Http.Connections`). They never reach the server, so they have no span or measurement.
+  `Http.Connections`). They never reach the server, so they have no span or measurement, and the
+  transport does not report them yet either (Http.Connections DESIGN, "Diagnostics").
 - W3C `baggage`.
 
 **AOT.** `ActivitySource`, `Meter`, `TagList`, `ActivityContext.TryParse` and `FrozenSet`: no

@@ -142,6 +142,7 @@ Event sources and their counters are process-wide, so these tests run in a
 ## Not yet conforming
 
 Pre-convention sources in `Resilience` (three sources: a concatenated name, an empty name, a name ending
-in `EventSource`) and `Http.Connections` (an empty placeholder) are tracked for migration in
-`docs/EVENT_SOURCES.md`. Do not copy their patterns; bring one into line when you next touch it.
-`DependencyInjection` was the first brought into line this way; its `DESIGN.md` records what changed.
+in `EventSource`) are tracked for migration in `docs/EVENT_SOURCES.md`. Do not copy their patterns;
+bring one into line when you next touch it. `DependencyInjection` was the first brought into line this
+way; its `DESIGN.md` records what changed. `Http.Connections`' empty placeholder was deleted instead
+(#1039): an assembly that raises nothing has none, and its `DESIGN.md` records why.

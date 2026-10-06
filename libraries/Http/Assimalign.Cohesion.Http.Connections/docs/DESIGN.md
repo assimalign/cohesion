@@ -935,6 +935,28 @@ exception so accepts that begin after cancellation rethrow it too. The
 host therefore sees the transport's root-cause exception from
 `AcceptOrListenAsync`, never a bare `ObjectDisposedException`.
 
+## Diagnostics
+
+This package raises no events and has no event source. Until #1039 it carried an empty
+placeholder, `HttpTransportEventSource`: the right name, but no singleton and no events. It was
+deleted rather than filled, because what an HTTP-level source could report is either reported
+elsewhere already or needs a design of its own:
+
+| What an operator wants | Where it comes from |
+| --- | --- |
+| Per-request latency, status, route, errors and trace context | The Web server's `ActivitySource` and `Meter`, `Assimalign.Cohesion.Web.Hosting` (#1064). The host sees the whole exchange and how its pipeline ended; the transport sees neither. |
+| Connection lifetimes and counts | Each connection driver's event source (`Assimalign.Cohesion.Connections.Tcp`, `.Quic`, `.NamedPipes`). An HTTP/1.1 or HTTP/2 connection is one driver connection and an HTTP/3 connection is one QUIC connection, so an HTTP-level `Opened`/`Closed` pair and a second `current-connections` counter would count the same connections twice under two names. |
+| TLS handshakes | The runtime's `System.Net.Security` source. |
+| Requests this package answers itself before dispatch (400, 408, 413, 414, 431), and protocol errors (HTTP/2 `GOAWAY` and `RST_STREAM` codes, the flood guards' `ENHANCE_YOUR_CALM`, HTTP/3 error codes) | Not reported yet. |
+
+The last row is the remaining gap, and filling a placeholder would not close it. It needs an
+error vocabulary per protocol, a choice between events and metric instruments (Kestrel reports the
+same conditions as an `error.type` on its connection-duration metric), and hooks in all three
+transports. If that work lands as events, it adds a source that follows
+`.claude/rules/event-source.md`, named `Assimalign.Cohesion.Http.Connections`. Until then the rule
+applies as written: an assembly that raises nothing has no event source, so no empty provider
+advertises a name that tools can enable and that never reports anything.
+
 ## HTTP/1.1 server limits and timeouts
 
 ### Why this lives in the transport
