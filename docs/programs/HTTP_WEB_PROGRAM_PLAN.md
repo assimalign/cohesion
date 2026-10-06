@@ -230,7 +230,7 @@ The audit behind these stages is §7. Within each stage, rows are in the recomme
 
 ### Stage 8 — API surface
 
-**Status:** delivered 2026-10-02 on the Phase 2 branch and in owner review, together with the defects found along the way (#1169, #1172–#1176, #1180, #1187, #1205, #1206). Commits, behavior changes, questions for the review and follow-ups are in §5.
+**Status:** delivered 2026-10-02 on the Phase 2 branch, together with the defects found along the way (#1169, #1172–#1176, #1180, #1187, #1205, #1206), and approved 2026-10-06 with every recommendation adopted (§7.4, decisions 8–13). Commits, behavior changes and follow-ups are in §5.
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
@@ -249,6 +249,7 @@ The audit behind these stages is §7. Within each stage, rows are in the recomme
 | #146 | D | Lame-duck drain | #1049 |
 | #1064 | D/A | Server telemetry (`ActivitySource`, `Meter`, trace context); settles #1039 | — (`http.route` is exact only after #1054) |
 | #1065 | A/C | TLS client certificates and connection TLS metadata (mTLS) | — |
+| #1221 | F | ObjectValidation evaluates rules and members in declaration order (§7.4, decision 11) | — |
 
 ### Stage 10 — Gated
 
@@ -378,7 +379,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - #1154: a `101` upgrade response sends each `Set-Cookie` twice.
   - #1155: an unknown key id reloads the whole key ring, with no throttle.
   - #1156: a response-starting hook for the Web pipeline, which would remove the CORS trade-off.
-- **Stage 8 delivered (2026-10-01 to 2026-10-02), awaiting owner review.** Agent sessions built the items in their own worktrees. Each was reviewed, integrated on the Phase 2 branch, verified and pushed to PR #1094 item by item. The integrator's own commits are the guard coverage, the OpenAPI upload mapping, the #1180 thrower move and the doc corrections:
+- **Stage 8 delivered (2026-10-01 to 2026-10-02) and approved (2026-10-06); every recommendation in "Questions for the review" was adopted (§7.4, decisions 8–13).** Agent sessions built the items in their own worktrees. Each was reviewed, integrated on the Phase 2 branch, verified and pushed to PR #1094 item by item. The integrator's own commits are the guard coverage, the OpenAPI upload mapping, the #1180 thrower move and the doc corrections:
   - #1062 `4e0fb6da`, `509681a6`: the five remaining OpenApi packages are built, tested and released, and the OpenApi source generator ships inside `OpenApi.Attributes`. Shipping it made a generated-code collision reachable; #1169 `e03cd9f9` composes generated metadata across assemblies through `IOpenApiMetadataProvider`.
   - #1059 `079e3ef0`, `b62485e8`: typed handlers return `T`, `Task<T>` or `ValueTask<T>`, written with content negotiation (`string` as `text/plain`, `null` as 204, 406 when nothing is acceptable, a 500 fault when no contract covers `T`), and unsupported handler shapes fail the build with `COHWEB0001`–`COHWEB0007`. Every typed endpoint carries `EndpointParameterMetadata` and `EndpointResponseMetadata`.
   - #1172–#1176 `d0952645`, `439e5197`, `c05248a0`, `1a563bb4`, `dfc81374`: generator defects found during #1059 (escaped binding names, a body with no contract is a fault rather than a 415, generic receivers, conditional-access and static-form calls, injected `IHttpRequest`/`IHttpResponse`).
@@ -540,7 +541,7 @@ What works end to end:
 
 ### 7.4 Owner decisions
 
-Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decision 5 is open.
+Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01, and decisions 8–13 in the Stage 8 review on 2026-10-06, where the owner adopted every recommendation. Decision 5 is open.
 
 1. **Which claim model authorization runs on.**
    - Web: authenticates onto BCL `ClaimsPrincipal` by a recorded decision (`Web.Authentication/docs/DESIGN.md:157-167`).
@@ -554,6 +555,14 @@ Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved t
 7. **How authorization combines `AllowAnonymous` with requirements (raised by Stage 7, adopted 2026-10-01).**
    - Stage 7 first shipped ASP.NET Core's rule: `AllowAnonymous` anywhere on an endpoint wins. A route that required authorization inside an anonymous group therefore ran anonymously, while routing's last-wins dispatch check still treated it as protected and demanded `UseAuthorization`.
    - Adopted: the most specific item wins, so `AllowAnonymous` clears only the requirements declared before it. That fails closed for the inner requirement and matches the dispatch check (`e451032b`).
+8. **A security advisory for #1180 (raised by Stage 8, adopted 2026-10-06).** `PhysicalFileSystem` let paths escape its root in the released 10.0.0-preview.1. Adopted: an advisory names `Assimalign.Cohesion.FileSystem.Physical` and `.InMemory` at 10.0.0-preview.1 and earlier as affected. It is drafted privately as [GHSA-5jrr-79fc-fc98](https://github.com/assimalign/cohesion/security/advisories/GHSA-5jrr-79fc-fc98) and published with the first preview that ships the fix, so it never discloses an unpatched hole.
+9. **Where request validation lives (raised by Stage 8, adopted 2026-10-06).** Adopted: `Web.Validation` stays its own package and `Web.Api` takes no ObjectValidation dependency, which keeps the 2026-07-20 descoping. App.Web ships both.
+10. **An unregistered policy name in the OpenAPI document (raised by Stage 8, adopted 2026-10-06).** Adopted: the document fails, naming the endpoint, as every request to that endpoint does. A document that describes a broken endpoint as open would be worse.
+11. **ObjectValidation's evaluation order (#1221, raised by Stage 8, adopted 2026-10-06).** Adopted: rules and members run in declaration order, as the queue contract says, fixed in Stage 9. The behavior change is accepted: a chain reports its first failing rule's message, `Stop` stops at the first failing member in declaration order, and the `errors` map follows declaration order.
+12. **Two OpenApi seams for contributing operations (raised by Stage 8, adopted 2026-10-06).** Adopted: keep `IOpenApiMetadataProvider` (generated metadata composed at compile time) and `IOpenApiEndpointSource` (sources consulted when a document is built) until OpenApi v1, and revisit them then.
+13. **Two program-level items (raised by Stage 8, adopted 2026-10-06).**
+    - Every Cohesion assembly carries `RequiresPreviewFeatures`, so a consumer on the plain .NET SDK gets CA2252 until it enables preview features. Adopted: accept it through the previews and decide before GA.
+    - The release is about 389 packages, above nuget.org's 350-per-hour push ceiling. Adopted: promote in hourly batches (#1290).
 
 ### 7.5 Lineup
 
