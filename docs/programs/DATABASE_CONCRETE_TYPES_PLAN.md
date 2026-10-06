@@ -762,6 +762,23 @@ section that reaches Graph is accounted for:
   the coordinator's and the storage's `DisposeAsync` where the model's ran the synchronous
   `Dispose`, and the engine closes its databases after clearing them under its lock where it
   disposed them inside it (recorded with the Documents landing, which made the same move).
+- *A database closed outside the engine* (found by the Blob review, §7 "Blob, as landed"; fixed
+  for this model by the follow-up of 2026-10-06, §7 "The closed-database follow-up"). The engine
+  keeps a database its holder disposed (directly; `session.Database` is the same instance)
+  registered, to refuse its reopen, and `IsOpen` read only that registration, so the
+  version-purge worker failed on its disposed coordinator every pass and the engine stayed
+  `Faulted` for good (21 failed passes in half a second at 20 ms intervals, reproduced at
+  `e092cada`); the Graph server does not read the engine's state, so it kept serving, and
+  `Database.Hosting` reported the engine degraded. `GraphDatabase.IsClosed`,
+  `GraphDatabaseEngine.IsOpen` false for a closed database and its storage, and the version-purge
+  worker skips a closed database in its pass and its trigger wait (the checkpointer inherits the
+  fix through `IsOpen`, and the flush and write-back workers, which visit storages, through
+  `IsOpen(GraphStorage)`, as Blob's do). The refused reopen is unchanged. Asserted:
+  `GraphWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing`
+  (20 ms worker intervals, half a second of passes over the closed database, then one more pass
+  of each worker: every pass succeeds, no worker records a failure, the engine is `Running`, a
+  server starts and serves a handshake and an insert to another database, and the closed one's
+  reopen is still refused).
 
 **Documents at P4 (re-verified, then landed).** The model's copy was as listed
 (`DocumentDatabaseTransaction.cs` with its own `_endGate`, its `Operations` counter, `CloseAsync`

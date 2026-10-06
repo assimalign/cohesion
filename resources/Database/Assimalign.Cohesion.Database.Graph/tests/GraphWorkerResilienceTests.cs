@@ -8,7 +8,10 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
@@ -503,6 +506,61 @@ public sealed class GraphWorkerResilienceTests
         worker.Stopped.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// A database its holder closed outside the engine (disposed directly; a session's
+    /// <see cref="GraphDatabaseSession.Database"/> is the same instance) stays registered, so the
+    /// engine refuses to reopen it until it is dropped; but the engine's workers skip it, so every
+    /// pass succeeds, no worker records a failure, the engine stays
+    /// <see cref="EngineState.Running"/>, and a server over the engine still starts and serves the
+    /// engine's other database. Before the workers skipped a closed database, the version-purge
+    /// worker failed on its disposed coordinator every pass, and the engine reported
+    /// <see cref="EngineState.Faulted"/> for good.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Workers: a database closed outside the engine is skipped, the engine stays running and its server serves")]
+    public async Task DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing()
+    {
+        // Arrange: workers that pass every 20 ms, and a closed database with written nodes.
+        using var deadline = new CancellationTokenSource(Timeout);
+        CancellationToken token = deadline.Token;
+        var interval = TimeSpan.FromMilliseconds(20);
+        await using var engine = GraphDatabaseEngine.Create(new()
+        {
+            CheckpointInterval = interval, PageWriteBackInterval = interval, MaintenanceInterval = interval
+        });
+        var closed = await engine.CreateDatabaseAsync(Failing, token);
+        await InsertAsync(closed, 0, 20);
+        var open = await engine.CreateDatabaseAsync(Healthy, token);
+
+        // Act: close the database, let the workers pass over it many times, run one more pass of
+        // each, then start a server and write over it to the other database.
+        await closed.DisposeAsync();
+        await Task.Delay(TimeSpan.FromMilliseconds(500), token);
+        var passes = engine.Workers.Select(worker => worker.RunIteration(token)).ToArray();
+        var listener = new InMemoryConnectionListener();
+        await using var server = GraphDatabaseServer.Create(engine, new() { Listener = listener });
+        await server.StartAsync(token);
+        await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(connection.AsStream(), GraphProtocol.Family, leaveOpen: true);
+        await WriteFrameAsync(channel, ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, Healthy, "test").Encode(), token);
+        (await ReadFrameAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Authenticate);
+        await WriteFrameAsync(channel, ProtocolMessageType.AuthenticateResponse, [], token);
+        (await ReadFrameAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Ready);
+        await WriteFrameAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+            GraphProtocolExecuteMessage.Create("INSERT (:Item {name: 'wire'})").Encode(), token);
+        var written = await ReadFrameAsync(channel, token);
+
+        // Assert
+        passes.ShouldAllBe(passed => passed);
+        engine.Workers.Where(worker => worker.FailureCount != 0 || worker.Fault is not null)
+            .Select(worker => $"{worker.Name}: {worker.FailureCount} failed passes, {worker.Fault}").ShouldBeEmpty();
+        engine.State.ShouldBe(EngineState.Running);
+        engine.OfflineDatabases.ShouldBeEmpty();
+        server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull().Database.Name.ShouldBe(open.Name);
+        written.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
+        (await CountAsync(open)).ShouldBe(1);
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.OpenDatabaseAsync(Failing, token));
+    }
+
     // The checkpoint trigger, the load window of the pace test, compared second by second, and the
     // share of the no-fault checkpoints the median counted second must keep (the test's remarks).
     // The writer outpaces the checkpointer in memory, so even with no fault the journal peaks at
@@ -729,6 +787,15 @@ public sealed class GraphWorkerResilienceTests
 
         return count;
     }
+
+    private static async Task WriteFrameAsync(ProtocolChannel channel, ProtocolMessageType type, byte[] payload, CancellationToken token)
+    {
+        await channel.Writer.WriteFrameAsync(new(type, payload), token);
+        await channel.Writer.FlushAsync(token);
+    }
+
+    private static async Task<ProtocolFrame> ReadFrameAsync(ProtocolChannel channel, CancellationToken token)
+        => await channel.Reader.ReadFrameAsync(token) ?? throw new ProtocolException("Unexpected end of graph exchange.");
 
     private static bool Mentions(Exception? error, string text)
     {

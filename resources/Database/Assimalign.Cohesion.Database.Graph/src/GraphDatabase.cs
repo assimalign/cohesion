@@ -31,7 +31,10 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <see cref="DatabaseInstance"/> with an internal constructor, replacing the former
 /// <c>IGraphDatabase</c> interface and its internal implementation; the engine creates and opens
 /// it. The base owns the name, the owning engine (re-exposed typed with <c>new</c>) and the
-/// disposed flag.
+/// disposed flag. Disposing it outside the engine closes it for every session; the engine keeps
+/// it registered, so it refuses to reopen it with <see cref="ObjectDisposedException"/> until it
+/// is dropped or the engine is recreated, and its workers skip it, so the engine stays
+/// <see cref="EngineState.Running"/>.
 /// </para>
 /// </remarks>
 public sealed partial class GraphDatabase : DatabaseInstance
@@ -121,6 +124,14 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// Gets whether a failed durable flush took the database offline.
     /// </summary>
     internal bool IsOffline => DataStorage.IsOffline;
+
+    /// <summary>
+    /// Gets whether the database has been disposed: by the engine, or by a holder of the
+    /// database (a session's <see cref="GraphDatabaseSession.Database"/> is the same instance).
+    /// The engine keeps a database its holder closed registered, to refuse its reopen, and its
+    /// workers skip it.
+    /// </summary>
+    internal bool IsClosed => IsDisposed;
 
     /// <summary>
     /// Creates a new lightweight graph session scoped to this database.
