@@ -21,8 +21,9 @@ namespace Assimalign.Cohesion.Web;
 /// present, and fall back to its unhandled-request behavior otherwise.
 /// </para>
 /// <para>
-/// This feature carries only what the terminal runs. The endpoint's model (its route, values and
-/// metadata) stays in the package that selected it.
+/// This feature carries what the terminal runs and the template telemetry names the endpoint by
+/// (<see cref="RouteTemplate"/>). The endpoint's model (its route, values and metadata) stays in the
+/// package that selected it.
 /// </para>
 /// </remarks>
 public interface IWebEndpointFeature : IHttpFeature
@@ -31,4 +32,23 @@ public interface IWebEndpointFeature : IHttpFeature
     /// Gets the delegate the pipeline's terminal runs for the selected endpoint.
     /// </summary>
     WebApplicationMiddleware Endpoint { get; }
+
+    /// <summary>
+    /// Gets the route template the endpoint was selected by, as telemetry reports it, or
+    /// <see langword="null"/> when the endpoint has none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The template is the low-cardinality name of the endpoint, for example <c>/orders/{id}</c>: the
+    /// default server reports it as the OpenTelemetry <c>http.route</c> attribute of the request's span
+    /// and duration metric, and names the span <c>GET /orders/{id}</c>. It must never be the request
+    /// path, whose cardinality is unbounded. <c>UseRouting</c> publishes the matched route's template with
+    /// a single leading <c>/</c>; its <c>405</c> endpoint, which no single route selected, has none.
+    /// </para>
+    /// <para>
+    /// Implemented as a default interface member that returns <see langword="null"/>, so an endpoint
+    /// selector that has no template needs no change.
+    /// </para>
+    /// </remarks>
+    string? RouteTemplate => null;
 }

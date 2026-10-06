@@ -247,6 +247,7 @@ The server therefore owns **only** the concerns above that layer:
 | Exchange + connection + context disposal | **this server** |
 | In-flight tracking + graceful drain, per connection and per stream | **this server** |
 | Optional connection concurrency cap | **this server** |
+| Request spans, HTTP server metrics and the request id (#1064) | **this server** |
 
 The server never inspects a frame or a stream id. It sees `IHttpConnection` →
 `IHttpConnectionContext` → `IHttpContext` and reads exactly two protocol facts off an
@@ -412,6 +413,154 @@ stream limit is the transport's.
 The gate is chosen for AOT-safety: a semaphore, stored `Task`s, and a
 `ConcurrentDictionary` — no reflection, no dynamic code.
 
+## Server telemetry (#1064)
+
+The default server emits one span per request and the OpenTelemetry HTTP server metrics through
+the BCL's `System.Diagnostics.ActivitySource` and `System.Diagnostics.Metrics.Meter`. It only emits.
+Exporting stays with `Hosting.Telemetry` and the OpenTelemetry foundation (#317), whose OTLP
+exporter is logs-only and does not subscribe to either yet. Any `ActivityListener` or
+`MeterListener` subscribes by name: an exporter, `dotnet-counters`, or a test.
+
+| Signal | Name | Emits |
+| --- | --- | --- |
+| Traces | `ActivitySource` `Assimalign.Cohesion.Web.Hosting` | one `Server` span per request |
+| Metrics | `Meter` `Assimalign.Cohesion.Web.Hosting` | `http.server.request.duration` (histogram, `s`, the convention's bucket boundaries as advice) and `http.server.active_requests` (up-down counter, `{request}`) |
+
+**Why that name.** An event source is named for the assembly that raises it
+(`.claude/rules/event-source.md`), and the same rule names this source and this meter. Operators
+enable one name, the `Assimalign.Cohesion.` prefix still covers every Cohesion signal, and the name
+says which module emits. Rejected:
+
+- `Assimalign.Cohesion.Web`, the area root, the way ASP.NET Core names its source
+  `Microsoft.AspNetCore`. The root emits nothing, and the name would claim signals for every Web
+  package.
+- `Assimalign.Cohesion.Http.Connections`. The transport sees connections and frames, not the
+  pipeline, the route, or how the exchange was finalized.
+- Separate names for the source and the meter, as ASP.NET Core's `Microsoft.AspNetCore` and
+  `Microsoft.AspNetCore.Hosting` are. That is two names to learn for one emitter.
+
+### Placement: the span covers the whole exchange
+
+`ServeExchangeAsync` starts the exchange's telemetry (`Internal/WebExchangeTelemetry`) before the
+pipeline runs. It records how the exchange was finalized, and stops the telemetry in its `finally`.
+That happens after the response, the replacement `500` or the reset was sent and the completion
+callbacks ran, and before the exchange is disposed. So the span and `http.server.request.duration`
+include writing the response. The two report the same value, because the span's end time is set from
+the duration measurement. While the pipeline runs the span is `Activity.Current`, so a handler's own
+activities and its outgoing `HttpClient` calls become its children. The server file gains only those
+three calls; everything else lives in the two telemetry types.
+
+The flow of one exchange's telemetry:
+
+```mermaid
+flowchart TD
+    Start["Start: install the request-id feature"] --> Check{"A listener on the source or an instrument?"}
+    Check -->|"no"| Pipeline["Pipeline runs; UseRouting publishes RouteTemplate"]
+    Check -->|"yes"| Begin["+1 active request, start timestamp, span parented to traceparent"]
+    Begin --> Pipeline
+    Pipeline --> Finalize["Response, replacement 500, or reset; outcome recorded"]
+    Finalize --> Callbacks["Completion callbacks"]
+    Callbacks --> Stop["Stop: duration and -1 recorded; span tagged and ended"]
+    Stop --> Dispose["Exchange disposed"]
+```
+
+**The parent is the caller.** The server parses `traceparent` and `tracestate` with
+`ActivityContext.TryParse` (W3C Trace Context). A missing, repeated or malformed `traceparent`, or an
+all-zero id, gives no parent, and the request starts a new trace. Repeated `tracestate` fields are
+joined into one list. Before it starts the span, the server clears an ambient `Activity.Current`. The
+accept loop inherits whatever activity was current when `StartAsync` ran, and that activity is never
+a request's parent; without the clear, every request of a host started inside an activity would
+nest under it.
+
+**Attributes** follow the stable OpenTelemetry HTTP server conventions:
+
+| Attribute | Span | Duration | Active requests | Value |
+| --- | --- | --- | --- | --- |
+| `http.request.method` | yes | yes | yes | the method when known, else `_OTHER` |
+| `http.request.method_original` | when `_OTHER` | no | no | the method token |
+| `url.scheme` | yes | yes | yes | `http` or `https`, as the transport saw the request |
+| `url.path` | yes | no | no | the request path |
+| `server.address`, `server.port` | yes | no | no | the `Host` or `:authority` host, and its port when the value carries one |
+| `network.protocol.version` | yes | yes | no | `1.1`, `2` or `3` |
+| `http.route` | when routed | when routed | no | `IWebEndpointFeature.RouteTemplate` |
+| `http.response.status_code` | when sent | when sent | no | the status sent |
+| `error.type` | on failure | on failure | no | see the outcome table |
+
+The span is named `{method}` when it starts (`HTTP` for `_OTHER`) and `{method} {route}` once the
+route is known. The attributes known at the start are passed at creation, so samplers can read them.
+A failure sets the span status to `Error`; a `4xx` leaves it unset, as the server-span rule requires.
+
+**Known methods.** The default list is the convention's: RFC 9110's eight methods, `PATCH` and
+`QUERY`, which are exactly the methods `HttpMethod` canonicalizes. The convention requires a way to
+replace it, because a valid extension method would otherwise always report `_OTHER`.
+`OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS` (comma-separated, case-sensitive, a full replacement) is
+read once per process, as the source and meter are process-wide. The HTTP stack upper-cases method
+tokens when it parses a request, so entries should be upper case. For the same reason the original
+casing of a known method is not available, and `http.request.method_original` is set only for
+`_OTHER`.
+
+**Outcomes and `error.type`.** The server reports how it finalized the exchange; the exception
+itself stays with the error boundary, which does not keep it, and with the hosting logs (#147).
+
+| How the exchange ended | `http.response.status_code` | `error.type` |
+| --- | --- | --- |
+| A response was sent with a status below 500 | the status | none |
+| A response was sent with a 5xx status, including the server's replacement `500` after a fault | the status | the status, for example `500` |
+| The exchange was cancelled (a peer reset or closed connection, the server stopping, `IHttpContext.Cancel`) and reset | only when a streamed response had started | `request_canceled` |
+| The pipeline threw after its response started, or its response could not be replaced, and the exchange was reset | only when the response had started | `unhandled_exception` |
+| The response could not be put on the wire (a body or lifecycle hook threw, the write was cut off) | none: the transport marks the head committed before it writes it, so whether it went out is unknown | `response_send_failed` |
+
+**How `http.route` reaches the span.** `Web.Hosting` may not reference `Web.Routing` (COHRES002),
+so the template travels through the root's `IWebEndpointFeature`, which already carries the
+selected endpoint to the pipeline terminal. Its default member `RouteTemplate` is `null`; routing's
+matched route returns its template with a leading `/` (Web.Routing DESIGN, "The route template the
+server's telemetry reports"). The server reads it once, when it stops the exchange's telemetry, and
+only when a span or the duration is being recorded. Rejected:
+
+- **Routing tags `Activity.Current` through BCL types only.** It needs no root member. But the
+  duration metric must carry `http.route` when no span exists (a metrics-only listener), the current
+  activity may be a child a middleware started, and the span's naming would move into routing.
+- **A root telemetry feature that the server installs and routing writes into.** That is a second
+  public type and a write path for one string the endpoint seam can already carry.
+
+**The request id is the trace id.** The per-exchange telemetry object is also the exchange's
+`IWebRequestIdFeature`, installed before the pipeline runs. Its `RequestId` is the span's trace id
+when there is a span. Without one, it is the trace id of a valid `traceparent`, which is the id a span
+would have had, or else a random trace id resolved on the first read and stable for the exchange.
+
+**No listener, no cost.** `Start` reads `ActivitySource.HasListeners()` and the two instruments'
+`Enabled`. With all three off it creates no activity, reads no request state, records nothing, and
+`Stop` returns at once. What is left on every exchange is the request id: one small object set on the
+exchange's features, whose id is computed only when something reads it.
+
+**A listener cannot cost the exchange.** Listener callbacks run inline, inside `Start` and `Stop`.
+Both contain an exception a callback throws, so the exchange loses its telemetry, never its
+response. This is the isolation boundary the server keeps around application code.
+
+**Deliberately not emitted.**
+
+- `url.query`, although the convention makes it conditionally required. Query strings carry tokens
+  and signatures that the server cannot recognize generically. An application can tag
+  `Activity.Current` itself.
+- Proxy-resolved host and scheme. The convention prefers `Forwarded`/`X-Forwarded-*` values for
+  `server.address` and `url.scheme`; the server reports what the transport saw. Those headers are
+  believable only after `Web.ForwardedHeaders`' trust evaluation, and reading its result
+  (`Http.Forwarded`) would add a reference that the seventeen area frameworks carrying this module
+  privately would each have to carry.
+- `client.address`, `network.peer.address` and `user_agent.original` (recommended). A client address
+  is personal data, and it depends on the same forwarded-headers question.
+- `server.address` and `server.port` on the metrics. They are opt-in there because they come from
+  request headers, which makes them a cardinality attack vector.
+- Requests the transport rejects before dispatch (400, 408, 413, 414 and 431 answered by
+  `Http.Connections`). They never reach the server, so they have no span or measurement.
+- W3C `baggage`.
+
+**AOT.** `ActivitySource`, `Meter`, `TagList`, `ActivityContext.TryParse` and `FrozenSet`: no
+reflection and no runtime code. The Web AOT guard's smoke run subscribes with an `ActivityListener`
+and a `MeterListener` and checks a routed request's span and duration. In-process listeners need no
+`EventSourceSupport` in a NativeAOT application; tools that read meters out of process through
+EventPipe (`dotnet-counters`) do, as they do for event sources.
+
 ## AOT posture
 
 `IsAotCompatible=true` holds with no special handling. The dispatch machinery is
@@ -532,6 +681,16 @@ properties over prior-knowledge HTTP/2 with a real client and asserts every requ
 shared one connection, and adds the case the doubles cannot reach: a stream that
 faults after streaming part of its body is reset, not completed. `WebHttp3HostingIntegrationTests`
 pins concurrency over a real QUIC connection where the platform supports it.
+
+Server telemetry (#1064) is pinned end to end by `WebServerTelemetryTests`, over the in-memory
+transport with a real client and an `ActivityListener` and `MeterListener` subscribed by name
+(`TestObjects/TelemetryRecorder`): one server span per request, parented to the caller's
+`traceparent` and current while the pipeline runs; the attributes and the span name, a routed
+request's `http.route` (through real `Web.Routing`, a test-only reference); every outcome in the
+`error.type` table; `_OTHER`; one span per HTTP/2 stream; an ambient activity at server start that
+must not parent requests; the duration and the active-request count; the request id with and
+without a span; and no activity at all without a listener. Listeners are process-wide, so the class
+runs in the non-parallel `TelemetryCollection`.
 
 ## Non-goals
 
@@ -969,6 +1128,8 @@ The enabled resource's `http` listener consumes the shared Hosting.Resources end
 ## Optional telemetry (31b)
 
 The registered resource constructor calls ResourceTelemetry.Configure using the invocation snapshot. With no gateway or telemetry endpoint, existing providers and hosted services are unchanged. When enabled, the shared Hosting.Telemetry sibling adds OTLP/HTTP JSON logging and a service registered before producers; reverse StopAsync drains producers before a flush bounded by five seconds and the host shutdown token. Logging remains composed only in Hosting. See libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md for ordering and protocol limits.
+
+That export is logs. The server's spans and HTTP metrics are emitted on their own `ActivitySource` and `Meter` (see "Server telemetry"); Hosting.Telemetry does not export them yet (#317).
 
 ## Hosting family (O34)
 

@@ -426,6 +426,8 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         bool multiplexed,
         CancellationToken cancellationToken)
     {
+        WebExchangeTelemetry telemetry = WebExchangeTelemetry.Start(exchange);
+
         try
         {
             ResponseCompletionFeature responseCompletion = new();
@@ -448,6 +450,8 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 return false;
             }
 
+            telemetry.SetOutcome(responded, canceled: outcome == ExchangeOutcome.Cancelled);
+
             // Completion callbacks are "after this response is on the wire" work, so they run only
             // for the application's own response — never after a replacement 500 or a reset.
             if (outcome == ExchangeOutcome.Completed)
@@ -459,6 +463,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         }
         finally
         {
+            telemetry.Stop();
             await DisposeExchangeAsync(exchange).ConfigureAwait(false);
         }
     }

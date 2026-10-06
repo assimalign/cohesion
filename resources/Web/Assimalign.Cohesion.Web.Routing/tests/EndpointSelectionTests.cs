@@ -308,6 +308,59 @@ public class EndpointSelectionTests
         handler.WasInvoked.ShouldBeFalse();
     }
 
+    // ------------------------------------------------------------------ route template (telemetry)
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - Endpoint: A grouped route publishes its composed template with a leading '/'")]
+    public async Task UseRouting_OnGroupedRoute_ShouldPublishTheComposedTemplate()
+    {
+        // Arrange — the group composes 'api/orders/{id:int}'; telemetry reads it as a path.
+        TestHttpContext context = TestHttpContext.Create(HttpMethod.Get, "/api/orders/42");
+        TestWebApplication app = new();
+        app.AddRouting();
+        app.UseRouting().MapGroup("/api").Map(HttpMethod.Get, "orders/{id:int}", new RecordingRouterRouteHandler());
+
+        // Act
+        await app.ExecuteAsync(context);
+
+        // Assert
+        context.Features.Get<IWebEndpointFeature>()!.RouteTemplate.ShouldBe("/api/orders/{id:int}");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - Endpoint: The 405 endpoint publishes no route template")]
+    public async Task UseRouting_OnMethodNotAllowed_ShouldPublishNoTemplate()
+    {
+        // Arrange
+        TestHttpContext context = TestHttpContext.Create(HttpMethod.Post, "/items");
+        TestWebApplication app = new();
+        app.AddRouting();
+        app.UseRouting().Map(new Route(HttpMethod.Get, "/items"));
+
+        // Act
+        await app.ExecuteAsync(context);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
+        IWebEndpointFeature endpoint = context.Features.Get<IWebEndpointFeature>().ShouldNotBeNull();
+        endpoint.RouteTemplate.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - Endpoint: A CORS preflight publishes its candidate's route template")]
+    public async Task UseRouting_OnPreflight_ShouldPublishTheCandidateTemplate()
+    {
+        // Arrange
+        TestHttpContext context = CreatePreflight("/items/7", requestedMethod: "DELETE");
+        TestWebApplication app = new();
+        app.AddRouting();
+        app.UseRouting().Map(new Route(HttpMethod.Delete, "/items/{id:int}", new RecordingRouterRouteHandler()));
+
+        // Act
+        await app.ExecuteAsync(context);
+
+        // Assert
+        context.GetRouteMatch()!.IsPreflight.ShouldBeTrue();
+        context.Features.Get<IWebEndpointFeature>()!.RouteTemplate.ShouldBe("/items/{id:int}");
+    }
+
     private static TestHttpContext CreatePreflight(string path, string requestedMethod)
     {
         TestHttpContext context = TestHttpContext.Create(HttpMethod.Options, path);

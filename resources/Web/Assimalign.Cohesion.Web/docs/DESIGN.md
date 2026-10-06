@@ -59,9 +59,13 @@ runs `IWebEndpointFeature.Endpoint` when the feature is present, and otherwise a
 builder's unhandled-request behavior (`WebApplication`'s bodyless 404).
 
 The feature is a root seam because the terminal belongs to the pipeline builder, which lives in
-`Web.Hosting`, and COHRES002 forbids that module from referencing `Web.Routing`. It carries only
-the delegate to run. The endpoint's model (its route, values and metadata) stays in the package
-that selected it, so the root does not absorb routing. Every `IWebApplicationPipelineBuilder`
+`Web.Hosting`, and COHRES002 forbids that module from referencing `Web.Routing`. It carries the
+delegate to run and one string, `RouteTemplate`: the low-cardinality template the default server's
+telemetry names the endpoint by (`http.route`, #1064). The server reads both at the same seam for
+the same reason. `RouteTemplate` is a default interface member returning `null`, so a selector
+without a template, such as routing's `405` endpoint, needs no change. The endpoint's model (its
+route object, values and metadata) stays in the package that selected it, so the root does not
+absorb routing. Every `IWebApplicationPipelineBuilder`
 implementation must honor the contract at its terminal. That includes test doubles, which is
 why the Routing tests' application double runs the published endpoint too.
 
@@ -121,6 +125,14 @@ in registration order after writing the response to the transport. Registration 
 throws `InvalidOperationException`. Custom servers may omit it; middleware must handle a missing
 feature. This lets a terminal defer lifecycle signals until its acknowledgement has been sent.
 
+`IWebRequestIdFeature` is the request-id seam (#1064). Its `RequestId` is a BCL `ActivityTraceId`:
+the request id *is* the W3C trace id, so one value finds the request in the server's span, in logs
+and in anything returned to the caller. The default server installs it on every exchange before
+the pipeline runs. With a server span the id is the span's trace id; without one it is the trace id
+of a valid `traceparent`, or else a random id generated on first read, stable for the exchange.
+It lives here, not in `Assimalign.Cohesion.Http`, because a request id is a server concern and the
+protocol core models only the wire. Like the completion seam, custom servers may omit it.
+
 `IWebApplicationServer.StartAsync` is the endpoint-acquisition boundary: it does not
 complete until every listener is bound and ready to accept. Binding failures propagate
 through startup instead of surfacing later from an accept loop. `StopAsync` is the
@@ -151,7 +163,8 @@ reference order.
 ## AOT posture
 
 Contracts and delegate plumbing only — no reflection, no runtime codegen
-(`IsAotCompatible=true`).
+(`IsAotCompatible=true`). `IWebRequestIdFeature` exposes the BCL `ActivityTraceId` from
+`System.Diagnostics.DiagnosticSource`, which the shared framework carries; no package is added.
 
 ## Non-goals
 

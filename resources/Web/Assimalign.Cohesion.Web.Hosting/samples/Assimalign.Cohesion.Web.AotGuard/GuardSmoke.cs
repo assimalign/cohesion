@@ -1,5 +1,8 @@
 using System;
 using System.Buffers.Text;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -39,6 +42,68 @@ internal static class GuardSmoke
             using HttpResponseMessage response = await client.GetAsync("/", cancellationToken);
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
             return response.StatusCode == HttpStatusCode.OK && body.Contains("cohesion-web-aot-guard", StringComparison.Ordinal);
+        });
+
+        failures += await CheckAsync("server telemetry traces and times a routed request in the caller's trace", async () =>
+        {
+            // The server's ActivitySource and Meter (#1064): one server span named by the route template
+            // and parented to the caller's traceparent, and a duration measurement carrying the route.
+            ActivityTraceId traceId = ActivityTraceId.CreateRandom();
+            TaskCompletionSource<Activity> spanStopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<double> durationRecorded = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            using ActivityListener activities = new()
+            {
+                ShouldListenTo = source => source.Name == "Assimalign.Cohesion.Web.Hosting",
+                Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+                ActivityStopped = activity =>
+                {
+                    if (activity.TraceId == traceId)
+                    {
+                        spanStopped.TrySetResult(activity);
+                    }
+                },
+            };
+            ActivitySource.AddActivityListener(activities);
+
+            using MeterListener meters = new()
+            {
+                InstrumentPublished = static (instrument, listener) =>
+                {
+                    if (instrument.Meter.Name == "Assimalign.Cohesion.Web.Hosting" && instrument.Name == "http.server.request.duration")
+                    {
+                        listener.EnableMeasurementEvents(instrument);
+                    }
+                },
+            };
+            meters.SetMeasurementEventCallback<double>((_, value, tags, _) =>
+            {
+                foreach (KeyValuePair<string, object?> tag in tags)
+                {
+                    if (tag.Key == "http.route" && Equals(tag.Value, "/items/{id:int}"))
+                    {
+                        durationRecorded.TrySetResult(value);
+                    }
+                }
+            });
+            meters.Start();
+
+            using HttpRequestMessage request = new(HttpMethod.Get, "items/11");
+            request.Headers.TryAddWithoutValidation("traceparent", $"00-{traceId.ToHexString()}-{ActivitySpanId.CreateRandom().ToHexString()}-01");
+            using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
+
+            Task observed = Task.WhenAll(spanStopped.Task, durationRecorded.Task);
+            if (await Task.WhenAny(observed, Task.Delay(TimeSpan.FromSeconds(10), cancellationToken)) != observed)
+            {
+                return false;
+            }
+
+            Activity span = await spanStopped.Task;
+            return response.StatusCode == HttpStatusCode.OK
+                && span.Kind == ActivityKind.Server
+                && span.DisplayName == "GET /items/{id:int}"
+                && Equals(span.GetTagItem("http.response.status_code"), 200)
+                && await durationRecorded.Task > 0;
         });
 
         failures += await CheckAsync("typed route binding writes source-generated JSON", async () =>

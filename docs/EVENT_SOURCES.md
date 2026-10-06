@@ -76,6 +76,19 @@ Deliberately not instrumented: `Assimalign.Cohesion.Connections` (contracts; it 
 operations of its own), `Connections.InMemory` (a test driver), and `Connections.Security` (TLS
 handshakes are already reported by the runtime's `System.Net.Security` source).
 
+## Traces and metrics
+
+Where a library emits OpenTelemetry traces and metrics, it does so through the BCL's
+`System.Diagnostics.ActivitySource` and `System.Diagnostics.Metrics.Meter`, and the naming rule is
+the same: both are named for the assembly that emits them, so one name enables both. Subscribe in
+process with an `ActivityListener` and a `MeterListener` (an OpenTelemetry SDK registers the same
+names); out of process, `dotnet-counters` reads a meter by name. The forwarder above handles event
+sources only.
+
+| Assembly (= `ActivitySource` and `Meter`) | Traces | Metrics | Reference |
+| --- | --- | --- | --- |
+| `Assimalign.Cohesion.Web.Hosting` | One `Server` span per HTTP request, parented to the caller's `traceparent` | `http.server.request.duration`, `http.server.active_requests` | [Web.Hosting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#server-telemetry-1064) |
+
 ## Not yet conforming
 
 These sources predate the convention. Their names will change when they are brought into line, so do

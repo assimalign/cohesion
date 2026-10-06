@@ -16,6 +16,22 @@ once; services start in registration order before servers and stop in reverse or
 every server drains. Disposing the application disposes the service provider and every
 factory-created service.
 
+## Telemetry
+
+The default server traces and measures every request (#1064). Subscribe by name:
+
+- **Traces:** the `ActivitySource` `Assimalign.Cohesion.Web.Hosting` emits one `Server` span per
+  request, parented to the caller's W3C `traceparent`, named `GET /orders/{id}` once routing has
+  selected the endpoint, and tagged per the OpenTelemetry HTTP server conventions.
+- **Metrics:** the `Meter` `Assimalign.Cohesion.Web.Hosting` emits `http.server.request.duration`
+  (seconds) and `http.server.active_requests`.
+- **Request id:** `context.Features.Get<IWebRequestIdFeature>()?.RequestId` is the request's trace id,
+  with or without a listener.
+
+With no listener the server creates no activity and records nothing. Exporting these signals is not
+this module's job; see [Design](DESIGN.md), "Server telemetry", for the attributes, the outcomes and
+what is deliberately not emitted.
+
 ## Dependencies and hosting family
 
 The module references the Web root and its own hosting family within its area (COHRES002), together with

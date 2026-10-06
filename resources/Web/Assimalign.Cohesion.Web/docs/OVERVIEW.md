@@ -11,6 +11,10 @@ against. It is contracts-first and feature-free by design.
 - **Response completion** — `IWebResponseCompletionFeature` registers callbacks that run in
   order after the response is written to the transport. The default server installs it per
   exchange; custom servers may omit it. Registration after completion throws.
+- **Request id** — `IWebRequestIdFeature.RequestId` is the request's W3C trace id: the server
+  span's trace id when the server traces the request, otherwise the trace id of a valid
+  `traceparent`, otherwise a random id generated on first read. The default server installs it
+  per exchange (#1064); custom servers may omit it.
 - **The middleware-first pipeline** — `IWebApplicationPipeline`,
   `IWebApplicationPipelineBuilder`, `IWebApplicationMiddleware`, the
   `WebApplicationMiddleware` delegate, and the inline `Use(...)` adapter sugar in
@@ -18,7 +22,8 @@ against. It is contracts-first and feature-free by design.
 - **Endpoint selection** — `IWebEndpointFeature` is the endpoint a selecting middleware
   (`UseRouting`) published for the exchange. The pipeline's terminal
   (`WebApplicationTerminal`) runs it after every middleware registered behind the selector,
-  or answers a bodyless 404 (#1054).
+  or answers a bodyless 404 (#1054). Its `RouteTemplate` is the low-cardinality name the
+  server's telemetry reports as `http.route` (#1064).
 - **Branching** — `Map(path, branch)`, `MapWhen`, `UseWhen` and `Run` over
   `IWebApplicationPipelineBuilder` (#1056). A path branch publishes `IWebPathBaseFeature`
   (`context.GetPathBase()`, `context.GetEffectivePath()`) instead of rewriting the request.

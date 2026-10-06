@@ -127,6 +127,42 @@ public class RouteMatchFeatureTests
         resolved.ShouldBeSameAs(auth);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Web.Routing] - RouteMatch: The endpoint's route template is the matched template with a leading '/'")]
+    [InlineData("/users/{id:int}", "/users/{id:int}")]
+    [InlineData("users/{id:int}", "/users/{id:int}")]
+    [InlineData("~/users/{id:int}", "/users/{id:int}")]
+    [InlineData("", "/")]
+    public void RouteTemplate_AfterMatch_ShouldBeTheTemplateWithALeadingSlash(string template, string expected)
+    {
+        // Arrange
+        TestHttpContext context = TestHttpContext.Create(HttpMethod.Get, "/users/42");
+        Route route = new(HttpMethod.Get, template, new RecordingRouterRouteHandler());
+
+        // Act
+        context.SetRouteMatch(route, new RouteValueDictionary());
+
+        // Assert
+        context.Features.Get<IWebEndpointFeature>()!.RouteTemplate.ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - RouteMatch: The route template is computed once per route, not per request")]
+    public void RouteTemplate_RepeatedMatches_ShouldReuseOneTemplate()
+    {
+        // Arrange
+        Route route = new(HttpMethod.Get, "users/{id:int}", new RecordingRouterRouteHandler());
+        TestHttpContext first = TestHttpContext.Create(HttpMethod.Get, "/users/1");
+        TestHttpContext second = TestHttpContext.Create(HttpMethod.Get, "/users/2");
+
+        // Act
+        first.SetRouteMatch(route, new RouteValueDictionary());
+        second.SetRouteMatch(route, new RouteValueDictionary());
+
+        // Assert
+        string? template = first.Features.Get<IWebEndpointFeature>()!.RouteTemplate;
+        template.ShouldBe("/users/{id:int}");
+        second.Features.Get<IWebEndpointFeature>()!.RouteTemplate.ShouldBeSameAs(template);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Routing] - RouteMatch: GetEndpointMetadata returns empty without a match")]
     public void GetEndpointMetadata_WithoutMatch_ShouldReturnEmpty()
     {

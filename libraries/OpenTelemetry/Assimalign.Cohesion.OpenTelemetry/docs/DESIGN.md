@@ -2,7 +2,7 @@
 
 ## Intent and boundaries
 
-This implements design item 31b ruling R-1: OTLP/HTTP JSON export of logs, using BCL HttpClient and System.Text.Json. Core is the only direct project dependency. Hosting.Telemetry owns the Logging adapter; this package is transport-only, with internal implementation types. There is no receiver or instrumentation SDK here, no gRPC and no protobuf binary encoder. Protobuf is deferred. Traces and metrics are reserved in OtlpSignal but deferred: libraries/Logging has no span or instrument primitive; ILoggerEntry (Abstractions/ILoggerEntry.cs) is its only structured diagnostics record.
+This implements design item 31b ruling R-1: OTLP/HTTP JSON export of logs, using BCL HttpClient and System.Text.Json. Core is the only direct project dependency. Hosting.Telemetry owns the Logging adapter; this package is transport-only, with internal implementation types. There is no receiver or instrumentation SDK here, no gRPC and no protobuf binary encoder. Protobuf is deferred. Traces and metrics are reserved in OtlpSignal but deferred. libraries/Logging has no span or instrument primitive; ILoggerEntry (Abstractions/ILoggerEntry.cs) is its only structured diagnostics record. Emitters use the BCL ActivitySource and Meter instead (the Web server's `Assimalign.Cohesion.Web.Hosting`, #1064), so a trace or metric exporter would subscribe through ActivityListener and MeterListener (#317).
 
 ## JSON mapping and AOT
 

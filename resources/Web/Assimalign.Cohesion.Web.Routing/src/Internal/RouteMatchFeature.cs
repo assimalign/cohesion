@@ -71,6 +71,13 @@ internal sealed class RouteMatchFeature : IRouteMatchFeature, IWebEndpointFeatur
     public WebApplicationMiddleware Endpoint => _endpoint;
 
     /// <summary>
+    /// Gets the matched route's template as telemetry reports it (<c>http.route</c>), with a leading
+    /// <c>/</c>; for a CORS preflight, the candidate's. <see langword="null"/> for a route without a
+    /// pattern.
+    /// </summary>
+    public string? RouteTemplate => Route?.Pattern?.TelemetryTemplate;
+
+    /// <summary>
     /// Records that <paramref name="middleware"/> processed this endpoint for the current request.
     /// </summary>
     /// <param name="middleware">The pipeline verb of the middleware, for example <c>UseRateLimiting</c>.</param>

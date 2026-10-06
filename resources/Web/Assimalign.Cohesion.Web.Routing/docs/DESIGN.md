@@ -485,8 +485,8 @@ flowchart TD
 The middleware calls `router.Match(context)` once and publishes the result:
 
 - `Matched` → `SetRouteMatch` publishes the route as an `IRouteMatchFeature`, which is also the
-  exchange's `IWebEndpointFeature`. The terminal invokes the handler with the request's
-  `RequestCancelled` token.
+  exchange's `IWebEndpointFeature`, with the route's template for telemetry (below). The terminal
+  invokes the handler with the request's `RequestCancelled` token.
 - `MethodNotAllowed` → a 405 endpoint is published. It is an `IWebEndpointFeature` only, not a route
   match, so metadata consumers see no endpoint. The terminal sets `405` and the `Allow` header.
 - A **CORS preflight** to a path that no route accepts `OPTIONS` on → routing matches again with the
@@ -533,8 +533,27 @@ middleware would silently turn every existing application into a 404 server: its
 and publish, and nothing would run them. The terminal belongs to the pipeline builder
 (`WebApplication` in Web.Hosting), and COHRES002 forbids Web.Hosting from referencing Web.Routing.
 So the selected endpoint reaches the terminal through a root seam, `IWebEndpointFeature`, which
-carries only the delegate to run. The route, its values and its metadata stay in Web.Routing's
-`IRouteMatchFeature`. `RouteMatchFeature` implements both contracts.
+carries the delegate to run and the route template telemetry names it by. The route, its values and
+its metadata stay in Web.Routing's `IRouteMatchFeature`. `RouteMatchFeature` implements both
+contracts.
+
+### The route template the server's telemetry reports (#1064)
+
+The default server names each request's span `GET /orders/{id}` and tags it, and its
+`http.server.request.duration` measurement, with `http.route`. It reads the template from
+`IWebEndpointFeature.RouteTemplate` once the exchange is finalized, the same seam the terminal
+runs, so routing needs no telemetry code and no reference to the hosting module:
+
+- A matched route (and a preflight's candidate) publishes its pattern's raw text with a leading `/`.
+  `/users/{id}`, `users/{id}` and `~/users/{id}` report alike, and a group's composed template,
+  which group composition stores without one (`api/orders/{id:int}`), reads as a path. The template
+  is computed once per `RoutePattern` (`TelemetryTemplate`), not per request.
+- The 405 endpoint publishes none: no single route was selected.
+- A route without a `RoutePattern` (a custom `IRouterRoute`) publishes none.
+
+Rejected: routing tagging `Activity.Current` itself. It needs no root member, but the duration
+metric must carry `http.route` when no span exists (a metrics-only listener), the current activity
+can be a child that a middleware started, and the span's naming would move into routing.
 
 ### Endpoint metadata consumers and ordering
 
