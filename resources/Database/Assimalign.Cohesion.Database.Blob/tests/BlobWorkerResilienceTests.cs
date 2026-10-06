@@ -597,6 +597,57 @@ public sealed class BlobWorkerResilienceTests
         worker.Stopped.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// The checkpointer skips a database its holder closed, rather than only tolerating its
+    /// disposed storage (#1289). A close that is not idle leaves the journal untruncated: here
+    /// another storage bracket holds every page through the close, so the rolled-back
+    /// transaction's deferred undo still fails when the close retries it, and the close keeps its
+    /// writer in flight (#1226). The closed storage then stays due for a checkpoint that can never
+    /// run, and the storage refuses it with <see cref="StorageTransactionException"/>, not
+    /// <see cref="ObjectDisposedException"/>, so <c>BlobDatabaseEngine.IsOpen</c> does not cover
+    /// it. Without the skip, the failure the checkpointer had recorded for the database never ended
+    /// and the engine reported <see cref="EngineState.Faulted"/> for good;
+    /// <c>BlobCheckpointWorker.IsCheckpointDue</c> is false for a closed database, so the first
+    /// pass after the failure's backoff ends the record. The KeyValuePair, Graph, Documents and Sql
+    /// suites carry the same test.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a failing database closed with a writer in flight ends its checkpoint failure, and the engine runs again")]
+    public async Task CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning()
+    {
+        // Arrange: the checkpointer looks every 100 ms and records a failure for a database whose
+        // page writes fail.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = BlobDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
+        var failing = await CreateAsync(engine, Failing);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+        faults.FailPageWrites = true;
+        await UploadAsync(failing, 0, 20);
+        bool failed = await Eventually(() => worker.ConsecutiveFailures >= 1);
+
+        // A rolled-back transaction whose undo is deferred: another bracket holds every page
+        // through the close, so no checkpoint of the storage can run from here on either.
+        await using (var session = await failing.CreateSessionAsync())
+        {
+            var files = await session.GetContainerAsync("files");
+            var transaction = await session.BeginTransactionAsync();
+            await WriteAsync(files, "rolled", "rolled back");
+            faults.FailPageWrites = false;
+            _ = PageWriteLockHolder.LockEveryPage(failing.DataStorage); // abandoned with the storage
+            await transaction.RollbackAsync();
+        }
+
+        // Act: the close retries the undo, which fails the same way, and keeps the writer in flight.
+        await Should.ThrowAsync<StorageTransactionException>(async () => await failing.DisposeAsync());
+        bool recovered = await Eventually(() => engine.State == EngineState.Running && worker.Fault is null);
+
+        // Assert
+        failed.ShouldBeTrue();
+        recovered.ShouldBeTrue($"{engine.State}: {worker.Name} {worker.ConsecutiveFailures} consecutive failed passes, {worker.Fault}");
+        worker.ConsecutiveFailures.ShouldBe(0);
+        engine.OfflineDatabases.ShouldBeEmpty();
+    }
+
     // The checkpoint trigger, the load window of the pace test, compared second by second, and the
     // share of the no-fault checkpoints the median counted second must keep (the test's remarks).
     // The writer outpaces the checkpointer in memory, so even with no fault the journal peaks at
