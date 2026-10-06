@@ -235,8 +235,13 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// </summary>
     /// <param name="cancellationToken">Cancels the enumeration.</param>
     /// <returns>An async sequence of the databases, in ordinal name order, ignoring case.</returns>
-    /// <exception cref="ObjectDisposedException">The engine has been disposed when the call is made.</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled when the call is made.</exception>
+    /// <exception cref="ObjectDisposedException">
+    /// The engine has been disposed when the call is made, when the enumeration starts, or while it
+    /// opens a database.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled when the call is made, or while the enumeration opens a database.</exception>
+    /// <exception cref="DatabaseNotFoundException">Raised while the enumeration opens a database another caller dropped meanwhile.</exception>
+    /// <exception cref="DatabaseException">Raised while the enumeration opens a database whose file set or index format is refused.</exception>
     public new IAsyncEnumerable<GraphDatabase> GetDatabasesAsync(CancellationToken cancellationToken = default)
         => (IAsyncEnumerable<GraphDatabase>)base.GetDatabasesAsync(cancellationToken);
 

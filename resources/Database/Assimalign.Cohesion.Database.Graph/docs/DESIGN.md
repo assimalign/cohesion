@@ -902,7 +902,10 @@ their `Open` factories.
   `CreateSessionAsync`, both execute seams and BEGIN before `COHDBG012`, and so are the seams'
   argument errors, a null request and a blank statement (the typed operations keep their order);
   BEGIN refuses a transaction the kernel ended under its caller with `COHDBG007`, where it
-  reported the disposed database; every commit of an aborted transaction reports
+  reported the disposed database; BEGIN and both execute seams refuse a closed session as closed
+  before they check its database, so a closed session of a dropped or closed database reports "The
+  session is closed." where it reported `ObjectDisposedException` (the typed operations and the
+  schema surface check the database first and still report it); every commit of an aborted transaction reports
   `COHDBG007` with the cause, a second commit and a commit after the session's teardown included
   (both reported "The transaction is RolledBack."), and a commit after the session closed an
   active transaction names "The session closed before the transaction ended."; a commit while a

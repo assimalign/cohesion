@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database.Graph.Storage.Internal;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Storage;
@@ -76,7 +77,10 @@ public sealed partial class GraphStore
 
     /// <summary>Creates a node and maintains its property indexes.</summary>
     /// <param name="labels">Node labels.</param><param name="properties">Scalar properties.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created node.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="labels"/>, <paramref name="properties"/> or <paramref name="context"/> is null.</exception>
     /// <exception cref="ArgumentException">A label or property key is null or whitespace, or a property value is not a supported scalar.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="GraphElementTooLargeException">The labels and properties exceed one graph record, or an indexed property value exceeds the index key.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended while waiting for its writer lock.</exception>
     public async ValueTask<StoredGraphNode> CreateNodeAsync(IReadOnlyList<string> labels,
@@ -111,14 +115,17 @@ public sealed partial class GraphStore
 
     /// <summary>Finds a node visible to a snapshot.</summary>
     /// <param name="id">Node identity.</param><param name="snapshot">Visibility snapshot.</param><returns>The visible node or null.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
     public StoredGraphNode? FindNode(ulong id, TransactionSnapshot snapshot) => Find(1, id, snapshot)?.Record.Node;
 
     /// <summary>Finds a visible relationship.</summary>
     /// <param name="id">Relationship identity.</param><param name="snapshot">Visibility snapshot.</param><returns>The visible relationship or null.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
     public StoredGraphRelationship? FindRelationship(ulong id, TransactionSnapshot snapshot) => Find(2, id, snapshot)?.Record.Relationship;
 
     /// <summary>Enumerates visible nodes, optionally restricted by label.</summary>
     /// <param name="label">Optional label.</param><param name="snapshot">Visibility snapshot.</param><returns>The visible nodes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
     public IReadOnlyList<StoredGraphNode> GetNodes(string? label, TransactionSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -128,9 +135,11 @@ public sealed partial class GraphStore
 
     /// <summary>Atomically creates a relationship and both endpoint adjacency entries.</summary>
     /// <param name="sourceId">Source node.</param><param name="targetId">Target node.</param><param name="type">Relationship type.</param><param name="properties">Scalar properties.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created relationship.</returns>
-    /// <exception cref="InvalidOperationException">An endpoint does not exist in the caller's snapshot.</exception>
-    /// <exception cref="TransactionAbortedException">An endpoint changed after the transaction snapshot.</exception>
+    /// <exception cref="InvalidOperationException">An endpoint does not exist in the caller's snapshot, or <paramref name="context"/> is not active.</exception>
+    /// <exception cref="TransactionAbortedException">An endpoint changed after the transaction snapshot, or the transaction ended while waiting for its writer lock.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="properties"/> or <paramref name="context"/> is null.</exception>
     /// <exception cref="ArgumentException">The type or a property key is null or whitespace, or a property value is not a supported scalar.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="GraphElementTooLargeException">The type and properties exceed one graph record.</exception>
     public async ValueTask<StoredGraphRelationship> CreateRelationshipAsync(ulong sourceId, ulong targetId, string type,
         IReadOnlyDictionary<string, object?> properties, TransactionContext context, CancellationToken cancellationToken = default)
@@ -152,10 +161,10 @@ public sealed partial class GraphStore
         {
             await EnsureAdjacencyAsync(context, cancellationToken).ConfigureAwait(false);
             var location = Insert(bracket, bytes, context);
-            await InsertIndexAsync(AdjacencyId, Composite(IndexKey.FromUInt64(sourceId), id), location, context, cancellationToken).ConfigureAwait(false);
+            await InsertIndexAsync(adjacencyId, Composite(IndexKey.FromUInt64(sourceId), id), location, context, cancellationToken).ConfigureAwait(false);
             if (targetId != sourceId)
             {
-                await InsertIndexAsync(AdjacencyId, Composite(IndexKey.FromUInt64(targetId), id), location, context, cancellationToken).ConfigureAwait(false);
+                await InsertIndexAsync(adjacencyId, Composite(IndexKey.FromUInt64(targetId), id), location, context, cancellationToken).ConfigureAwait(false);
             }
             SaveRegistrations(bracket);
             return location;
@@ -166,11 +175,13 @@ public sealed partial class GraphStore
 
     /// <summary>Seeks the shared B+Tree for a node's incident relationships; self-loops appear once.</summary>
     /// <param name="nodeId">Node identity.</param><param name="snapshot">Visibility snapshot.</param><param name="cancellationToken">Cancellation token.</param><returns>Visible incident relationships ordered by identity.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async ValueTask<IReadOnlyList<StoredGraphRelationship>> GetIncidentAsync(ulong nodeId, TransactionSnapshot snapshot,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        if (!_indexes.TryGetIndex(AdjacencyId, TreeName, out var index)) { return []; }
+        if (!_indexes.TryGetIndex(adjacencyId, treeName, out var index)) { return []; }
         var key = IndexKey.FromUInt64(nodeId);
         var result = new List<StoredGraphRelationship>();
         await using var cursor = index.OpenCursor(snapshot, new IndexKeyRange(Composite(key, 0), Composite(key, ulong.MaxValue), true, true));
@@ -188,8 +199,10 @@ public sealed partial class GraphStore
 
     /// <summary>Deletes a node, atomically cascading incident relationships when requested.</summary>
     /// <param name="id">Node identity.</param><param name="detach">Whether to cascade relationships.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing deletion.</returns>
-    /// <exception cref="InvalidOperationException">A connected node is deleted without detach.</exception>
-    /// <exception cref="TransactionAbortedException">The node or its incident relationships changed after the snapshot.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">A connected node is deleted without detach, or <paramref name="context"/> is not active.</exception>
+    /// <exception cref="TransactionAbortedException">The node or its incident relationships changed after the snapshot, or the transaction ended while waiting for its writer lock.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async ValueTask DeleteNodeAsync(ulong id, bool detach, TransactionContext context, CancellationToken cancellationToken = default)
     {
         await LockAsync(context, cancellationToken).ConfigureAwait(false);
@@ -222,7 +235,10 @@ public sealed partial class GraphStore
 
     /// <summary>Deletes a relationship and its adjacency entries atomically.</summary>
     /// <param name="id">Relationship identity.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing deletion.</returns>
-    /// <exception cref="TransactionAbortedException">The relationship changed after the transaction snapshot.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is null.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
+    /// <exception cref="TransactionAbortedException">The relationship changed after the transaction snapshot, or the transaction ended while waiting for its writer lock.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async ValueTask DeleteRelationshipAsync(ulong id, TransactionContext context, CancellationToken cancellationToken = default)
     {
         await LockAsync(context, cancellationToken).ConfigureAwait(false);
@@ -240,10 +256,10 @@ public sealed partial class GraphStore
         TransactionContext context, CancellationToken cancellationToken)
     {
         var relationship = found.Record.Relationship!.Value;
-        await DeleteIndexEntryAsync(AdjacencyId, Composite(IndexKey.FromUInt64(relationship.SourceId), relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
+        await DeleteIndexEntryAsync(adjacencyId, Composite(IndexKey.FromUInt64(relationship.SourceId), relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
         if (relationship.SourceId != relationship.TargetId)
         {
-            await DeleteIndexEntryAsync(AdjacencyId, Composite(IndexKey.FromUInt64(relationship.TargetId), relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
+            await DeleteIndexEntryAsync(adjacencyId, Composite(IndexKey.FromUInt64(relationship.TargetId), relationship.Id), found.Reference.Location, context, cancellationToken).ConfigureAwait(false);
         }
         Tombstone(bracket, found.Reference, context);
     }

@@ -47,7 +47,7 @@ public sealed class GraphDatabaseScopeTests
     /// another database is still <c>COHDBG005</c>.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Scope: a null session or database is an argument error, another database's session is COHDBG005")]
-    public async Task TypedOperations_NullOrForeignSession_ShouldRefuseByArgumentOrCode()
+    public async Task CreateNodeAsync_NullOrForeignSession_ShouldRefuseByArgumentOrCode()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());

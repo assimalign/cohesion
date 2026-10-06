@@ -5,8 +5,8 @@ re-verified and implemented on 2026-10-05 (§7, §6.9); phase 3 (#1259) re-verif
 and reviewed on 2026-10-05, with two owner questions open at its merge (§7, §6.4, §6.5); step
 P4.0 (#1260) re-verified, implemented and reviewed on 2026-10-05 (§7, §6.5); the KeyValuePair model PR of
 P4 (#1260, the first of five) re-verified and implemented on 2026-10-05 (§7, §6.4, §6.5, §6.9); the
-Graph model PR of P4 (#1260, the second) re-verified and implemented on 2026-10-05 (§7, §6.4, §6.5,
-§6.9) ·
+Graph model PR of P4 (#1260, the second) re-verified and implemented on 2026-10-05 and reviewed on
+2026-10-06 (§7, §6.4, §6.5, §6.9) ·
 **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
 · **Owner decision:** O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md` · **Supersedes:** #1232
@@ -696,13 +696,26 @@ section that reaches Graph is accounted for:
     from the session that holds an open transaction is refused "already active" where it got
     `COHDBG012` (`GraphStorageOperationsTests`). BEGIN on a session whose transaction the kernel
     ended under its caller (the database was dropped) is refused with `COHDBG007`, where the model
-    reported the disposed database (`ObjectDisposedException`; `GraphTransactionFailureTests`).
+    reported the disposed database (`ObjectDisposedException`; `GraphTransactionFailureTests`);
+    once the caller rolled that transaction back, BEGIN reports the disposed database again (same
+    suite). Found by the PR's review: BEGIN and both execute seams refuse a closed session as
+    closed before they check its database, so a closed session of a dropped database gets "The
+    session is closed." where the model, which checked the database first, reported
+    `ObjectDisposedException`; the typed operations, `GraphSchema.Open` and the schema operations
+    check the database first and still report it (`GraphTransactionFailureTests`).
+  - *The one-statement hold.* A statement holds its session through the base's operation hold
+    from its start to its end: while one waits for the writer lock, a second statement through
+    either seam, a typed operation and a schema read are refused with the model's "Dispose the
+    active graph operation before starting another operation on this session.", BEGIN with the
+    base's "already active" message, and the waiting statement still completes
+    (`GraphTransactionFailureTests`). The hold replaced the model's `_reserved` flag; the messages
+    are the ones the model reported.
   - *The token before the core.* `CreateSessionAsync`, both execute seams and BEGIN refuse a
-    canceled token before `COHDBG012` (`GraphStorageOperationsTests`), and the execute seams refuse
-    it before the disposed database of a dropped one (`GraphTransactionFailureTests`). The seams'
-    argument checks, a null request and a blank statement, come before the offline refusal too,
-    where the model checked the database first (`GraphStorageOperationsTests`). The typed node and
-    relationship operations do not pass the session's seams and keep the model's order, the
+    canceled token before `COHDBG012` (`GraphStorageOperationsTests`), and both execute seams
+    refuse it before the disposed database of a dropped one (`GraphTransactionFailureTests`). The
+    seams' argument checks, a null request and a blank statement, come before the offline refusal
+    too, where the model checked the database first (`GraphStorageOperationsTests`). The typed node
+    and relationship operations do not pass the session's seams and keep the model's order, the
     offline refusal first (asserted beside them).
   - *Messages.* The closed-session message for BEGIN, both execute seams, a typed operation, a
     schema operation and `GraphSchema.Open` (`GraphTransactionFailureTests`, for "The graph session
@@ -851,9 +864,12 @@ the state's ownership test was also what kept it from disposing a product the en
 blank `EngineName` included, and leaves composition open) and `Create` over both; the constructor
 attaches the four built-in workers last, after the root path is created, through the base's
 `AttachWorker`; the internal attach members, the worker, server and thread lists, the stop token
-and the model's pump are gone. `GraphEngineCompositionTests` runs every path
-`KeyValueEngineCompositionTests` runs, the compose-contract cases against
-`GraphDatabaseEngine.Compose` included, and adds the pump thread names. The typed accessors are
+and the model's pump are gone. `GraphEngineCompositionTests` and `GraphApplicationBuilderTests`
+together run every path `KeyValueEngineCompositionTests` runs: the former the compose-contract
+cases against `GraphDatabaseEngine.Compose` and the rest, plus the pump thread names; the latter
+the failing factory (`FailedServerFactory_ShouldDisposeEarlierComponentsAndFreezeBuilder`) and
+`AddGraph`'s premature-build compensation
+(`ConfigurationThatBuildsPrematurely_ShouldNotLeakItsEngine`). The typed accessors are
 KeyValuePair's set (the engine's three database members as `new` members and `TryGetDatabase` as
 a typed overload, the database's `Engine` and `CreateSessionAsync`, the session's `Database`,
 `CurrentTransaction` and both `BeginTransactionAsync` overloads, the server's `Engine`, and the
@@ -1545,9 +1561,10 @@ the code had moved, the row now says what landed:
   KeyValuePair.Client 10 keep theirs; Sdk.Database 18; Studio builds clean and its `--smoke` run
   gives 83 passed, 0 failed, 1 skipped; the dependency graph check passes (no reference changed);
   and the Database runtime producer packs.
-- **Graph, as landed (re-verified 2026-10-05 against the code after the KeyValuePair PR).** Three
-  commits on `refactor/L03.02.01.56.05-concrete-types-p4-graph`: the child roots, a fix of the
-  integration branch (below), then the model.
+- **Graph, as landed (re-verified 2026-10-05 against the code after the KeyValuePair PR).** Four
+  commits on `refactor/L03.02.01.56.05-concrete-types-p4-graph`, based on the integration branch's
+  `45c9fc49` (below): the child roots, the model, a test pin of the session's argument checks
+  before the offline refusal, then the review's fixes (below).
   Rows 65 to 70 held against the code, with the readings their entries record, and the leaves
   landed as the P4 bullets say:
   - *Leaves.* The engine, database, session, transaction and server are public sealed leaves of
@@ -1571,11 +1588,24 @@ the code had moved, the row now says what landed:
     `OVERVIEW.md` and the API page, Graph.Catalog's and Graph.Storage's `DESIGN.md`, `OVERVIEW.md`
     and API pages, the root `DESIGN.md` ("Root bases"), the area record's model table, Indexing's
     resolver table and Studio's README.
-  - *An integration-branch fix, in a commit of its own.* The merge that landed KeyValuePair
-    (`0c61c710`) joined `e3e6787d`, which added a `FileBytes` helper over the internal
-    `KeyValueDatabaseInstance` to `KeyValueWorkerResilienceTests`, and `a8227b0d`, which renamed
-    that type to `KeyValueDatabase`; the merged test project did not compile (CS0246). The helper
-    takes `KeyValueDatabase` now; nothing else changed.
+  - *The base.* The merge that landed KeyValuePair (`0c61c710`) left the KeyValuePair test
+    project uncompilable (CS0246: `e3e6787d`'s `FileBytes` helper took the internal
+    `KeyValueDatabaseInstance` that `a8227b0d` renamed); the integration branch fixed it itself in
+    `45c9fc49`, and this PR is based on that commit, so the gate ran on top of the fix.
+  - *The review's fixes.* The `<exception>` documentation of the newly public surface is complete:
+    `OperationCanceledException` and the retryable kernel outcomes on the six typed operations,
+    every reachable exception on the `GraphSchema` operations (among them `GraphCatalogException`
+    and the catalog's `ArgumentException`, which cross the model boundary untranslated, as before),
+    `ObjectDisposedException` on both `BeginTransactionAsync` overloads, the argument and
+    cancellation exceptions of `GraphStore`'s members, and the exceptions `GetDatabasesAsync`
+    raises while it opens a database. `GraphStore.HasIndex` and `SearchIndexAsync` check a null
+    snapshot themselves, which they did only once an index definition existed. A guard order the
+    accounting had missed (a closed session of a dropped database) is accounted for in §6.4 and
+    asserted, as are the one-statement hold and the `QueryRequest` seam's token check. Also
+    corrected: `GraphStore`'s two private constants (camelCase), `GraphSchema`'s private
+    `WriteAsync`, three test names, a leftover engine cast in `GraphStorageOperationsTests` and the
+    §6.5 suite attribution. `Members_…` and `Pump_…` keep the names of the KeyValuePair tests they
+    mirror.
 
   *Gate, as run:* a no-incremental build of every Database project but Database.Testing's tests,
   the SampleHost fixture (they need a local SDK pack) and the stray `Cache/src` test csproj the area
@@ -1588,12 +1618,12 @@ the code had moved, the row now says what landed:
   Graph.Catalog 19, Graph.Storage 17, Graph.Client 57, Blob 130, Blob.Catalog 5, Blob.Storage 14,
   Blob.Client 21, KeyValuePair 186, KeyValuePair.Catalog 4, KeyValuePair.Storage 3,
   KeyValuePair.Client 10, Client 41, Hosting 53, Embedded 4, ApplicationModel 15, Sdk.Database 18)
-  apart from Graph.Tests, which grows from 360 to 394 (21 composition tests, nine session and
-  transaction contract tests, three engine tests and one scope test), among them the #1188, #1225
-  and #1226 suites in process (`GraphTransactionFailureTests`, `GraphConcurrencyTests`,
-  `GraphStorageOperationsTests`, `GraphWorkerResilienceTests`) and over the wire
-  (`GraphServerProtocolTests`, Graph.Client's `GraphTransactionFailureWireTests`), and the #1139
-  and #1228 suites in process (`GqlLabelChainExecutionTests`, `GqlLabelDirectionExecutionTests`,
+  apart from Graph.Tests, which grows from 360 to 396 (21 composition tests, eleven session and
+  transaction contract tests, two of them added by the review, three engine tests and one scope
+  test), among them the #1188, #1225 and #1226 suites in process (`GraphTransactionFailureTests`,
+  `GraphConcurrencyTests`, `GraphStorageOperationsTests`, `GraphWorkerResilienceTests`) and over
+  the wire (`GraphServerProtocolTests`, Graph.Client's `GraphTransactionFailureWireTests`), and
+  the #1139 and #1228 suites in process (`GqlLabelChainExecutionTests`, `GqlLabelDirectionExecutionTests`,
   `GqlParseStrictnessExecutionTests`, `GqlProfileExecutionTests`, `GqlUnknownTokenWarningTests`)
   and over the wire (`GraphLabelChainWireTests`, `GraphLabelDirectionWireTests`,
   `GraphServerProtocolTests`); Studio builds clean and its `--smoke` run gives 83 passed, 0

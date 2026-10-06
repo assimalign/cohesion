@@ -74,6 +74,10 @@ public sealed class GraphDatabaseSession : DatabaseSession
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The new transaction, now the session's transaction.</returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the transaction began.</exception>
+    /// <exception cref="ObjectDisposedException">
+    /// The database has been disposed (dropped, closed, or its engine disposed) and the session is
+    /// still open; a closed session is refused as closed first.
+    /// </exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; or the session's
     /// transaction refuses work (<c>COHDBG007</c>).
@@ -92,6 +96,10 @@ public sealed class GraphDatabaseSession : DatabaseSession
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The new transaction, now the session's transaction.</returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the transaction began.</exception>
+    /// <exception cref="ObjectDisposedException">
+    /// The database has been disposed (dropped, closed, or its engine disposed) and the session is
+    /// still open; a closed session is refused as closed first.
+    /// </exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; the session's
     /// transaction refuses work (<c>COHDBG007</c>); or the graph engine does not support
@@ -100,7 +108,7 @@ public sealed class GraphDatabaseSession : DatabaseSession
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
     /// <remarks>
     /// The base refuses a closed session and an active transaction or operation before the
-    /// isolation level and the offline database are checked.
+    /// isolation level, the disposed database and the offline database are checked.
     /// </remarks>
     public new async ValueTask<GraphDatabaseTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
         => (GraphDatabaseTransaction)await base.BeginTransactionAsync(isolationLevel, cancellationToken).ConfigureAwait(false);

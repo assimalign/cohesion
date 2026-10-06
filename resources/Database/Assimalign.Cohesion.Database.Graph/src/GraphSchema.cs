@@ -51,12 +51,20 @@ public sealed class GraphSchema
     /// <summary>Lists visible labels.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The visible label definitions.</returns>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session is closed, another statement holds it, or its transaction refuses statements (<c>COHDBG007</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
     public ValueTask<IReadOnlyList<GraphLabelMetadata>> GetLabelsAsync(CancellationToken cancellationToken = default)
         => _database.RunAsync(_session, op => new ValueTask<IReadOnlyList<GraphLabelMetadata>>(_database.Catalog.GetLabels(op.Context.Snapshot)), cancellationToken);
 
     /// <summary>Lists visible relationship types.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The visible relationship type definitions.</returns>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session is closed, another statement holds it, or its transaction refuses statements (<c>COHDBG007</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
     public ValueTask<IReadOnlyList<GraphRelationshipTypeMetadata>> GetRelationshipTypesAsync(CancellationToken cancellationToken = default)
         => _database.RunAsync(_session, op => new ValueTask<IReadOnlyList<GraphRelationshipTypeMetadata>>(_database.Catalog.GetRelationshipTypes(op.Context.Snapshot)), cancellationToken);
 
@@ -64,6 +72,10 @@ public sealed class GraphSchema
     /// <param name="definitionId">The label or relationship type identity.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The visible property definitions.</returns>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session is closed, another statement holds it, or its transaction refuses statements (<c>COHDBG007</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
     public ValueTask<IReadOnlyList<GraphPropertyKeyMetadata>> GetPropertyKeysAsync(Guid definitionId, CancellationToken cancellationToken = default)
         => _database.RunAsync(_session, op => new ValueTask<IReadOnlyList<GraphPropertyKeyMetadata>>(_database.Catalog.GetPropertyKeys(definitionId, op.Context.Snapshot)), cancellationToken);
 
@@ -76,6 +88,10 @@ public sealed class GraphSchema
     /// not fail, so it leaves an explicit transaction active.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="label"/> is null; checked before the read starts.</exception>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session is closed, another statement holds it, or its transaction refuses statements (<c>COHDBG007</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
     public ValueTask<GraphSchemaResult<GraphIndexMetadata>> GetIndexesAsync(string label, CancellationToken cancellationToken = default)
     {
         // Argument validation runs before the read starts, so it never aborts an explicit transaction.
@@ -94,24 +110,62 @@ public sealed class GraphSchema
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Completion of the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The existing label is schema owned.</exception>
+    /// <exception cref="ArgumentException">The definition is invalid, such as a blank name.</exception>
+    /// <exception cref="GraphCatalogException">
+    /// The identity or name conflicts with an existing definition, or the definition changed since
+    /// the transaction's snapshot.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">
+    /// The session is closed, another statement holds it, or its transaction refuses statements
+    /// (<c>COHDBG007</c>); or the transaction ended while the statement waited for the writer lock.
+    /// </exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask SaveLabelAsync(GraphLabelMetadata definition, CancellationToken cancellationToken = default)
-        => Write(op => _database.Catalog.SaveLabelAsync(definition, op.Context, cancellationToken), cancellationToken);
+        => WriteAsync(op => _database.Catalog.SaveLabelAsync(definition, op.Context, cancellationToken), cancellationToken);
 
     /// <summary>Creates or alters a relationship type definition.</summary>
     /// <param name="definition">The definition.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Completion of the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The existing type is schema owned.</exception>
+    /// <exception cref="ArgumentException">The definition is invalid, such as a blank name.</exception>
+    /// <exception cref="GraphCatalogException">
+    /// The identity or name conflicts with an existing definition, or the definition changed since
+    /// the transaction's snapshot.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">
+    /// The session is closed, another statement holds it, or its transaction refuses statements
+    /// (<c>COHDBG007</c>); or the transaction ended while the statement waited for the writer lock.
+    /// </exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask SaveRelationshipTypeAsync(GraphRelationshipTypeMetadata definition, CancellationToken cancellationToken = default)
-        => Write(op => _database.Catalog.SaveRelationshipTypeAsync(definition, op.Context, cancellationToken), cancellationToken);
+        => WriteAsync(op => _database.Catalog.SaveRelationshipTypeAsync(definition, op.Context, cancellationToken), cancellationToken);
 
     /// <summary>Creates or alters property-key metadata.</summary>
     /// <param name="definition">The property definition.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Completion of the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema owned.</exception>
+    /// <exception cref="ArgumentException">The property metadata is invalid, such as a blank name.</exception>
+    /// <exception cref="GraphCatalogException">The owning definition is absent, or it changed since the transaction's snapshot.</exception>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">
+    /// The property type is not supported by graph storage, or existing graph data violates the
+    /// property (both <c>COHDBG003</c>); the session is closed, another statement holds it, or its
+    /// transaction refuses statements (<c>COHDBG007</c>); or the transaction ended while the
+    /// statement waited for the writer lock.
+    /// </exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata definition, CancellationToken cancellationToken = default)
-        => Write(async op =>
+        => WriteAsync(async op =>
         {
             var latest = _database.LatestSnapshot(op.Context);
             var label = _database.Catalog.GetLabels(latest).FirstOrDefault(item => item.Id == definition.DefinitionId);
@@ -145,8 +199,21 @@ public sealed class GraphSchema
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Completion of index creation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The label is schema owned.</exception>
+    /// <exception cref="ArgumentException"><paramref name="label"/> is null, or the index name or the property name is null, empty or whitespace.</exception>
+    /// <exception cref="GraphCatalogException">The index name already identifies another property, or the label or index changed since the transaction's snapshot.</exception>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">
+    /// The label is unknown (<c>COHDBG002</c>); the index already exists (<c>COHDBG003</c>); the
+    /// names exceed one graph record, or an existing node's value exceeds the index key
+    /// (<c>COHDBG009</c>); the session is closed,
+    /// another statement holds it, or its transaction refuses statements (<c>COHDBG007</c>); or the
+    /// transaction ended while the statement waited for the writer lock.
+    /// </exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask CreateIndexAsync(string label, string name, string propertyKey, CancellationToken cancellationToken = default)
-        => Write(async op =>
+        => WriteAsync(async op =>
         {
             var metadata = Label(label, op);
             await _database.Catalog.SaveIndexAsync(new GraphIndexMetadata(metadata.Id, name, propertyKey), op.Context, cancellationToken).ConfigureAwait(false);
@@ -158,9 +225,19 @@ public sealed class GraphSchema
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Completion of the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The label is schema owned.</exception>
-    /// <exception cref="DatabaseException">The label is missing or in use.</exception>
+    /// <exception cref="GraphCatalogException">The label or its property or index metadata changed since the transaction's snapshot.</exception>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">
+    /// The label is unknown (<c>COHDBG002</c>) or in use (<c>COHDBG003</c>); the session is closed,
+    /// another statement holds it, or its transaction refuses statements (<c>COHDBG007</c>); or the
+    /// transaction ended while the statement waited for the writer lock.
+    /// </exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">One of the label's indexes changed since the transaction's snapshot (retryable).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask DropLabelAsync(string name, CancellationToken cancellationToken = default)
-        => Write(async op =>
+        => WriteAsync(async op =>
         {
             var label = Label(name, op);
             EnsureMutable(label.Name, label.Owner, label.OwningSchema, "DROP LABEL");
@@ -177,9 +254,18 @@ public sealed class GraphSchema
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Completion of the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The type is schema owned.</exception>
-    /// <exception cref="DatabaseException">The type is missing or in use.</exception>
+    /// <exception cref="GraphCatalogException">The type or its property metadata changed since the transaction's snapshot.</exception>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">
+    /// The type is unknown (<c>COHDBG002</c>) or in use (<c>COHDBG003</c>); the session is closed,
+    /// another statement holds it, or its transaction refuses statements (<c>COHDBG007</c>); or the
+    /// transaction ended while the statement waited for the writer lock.
+    /// </exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask DropRelationshipTypeAsync(string name, CancellationToken cancellationToken = default)
-        => Write(async op =>
+        => WriteAsync(async op =>
         {
             var type = _database.Catalog.FindRelationshipType(name, op.Context.Snapshot) ?? throw new DatabaseException("COHDBG002: Unknown relationship type.");
             EnsureMutable(type.Name, type.Owner, type.OwningSchema, "DROP RELATIONSHIP TYPE");
@@ -195,7 +281,7 @@ public sealed class GraphSchema
     private GraphLabelMetadata Label(string name, GraphOperation operation)
         => _database.Catalog.FindLabel(name, operation.Context.Snapshot) ?? throw new DatabaseException($"COHDBG002: Unknown label '{name}'.");
 
-    private async ValueTask Write(Func<GraphOperation, ValueTask> action, CancellationToken token)
+    private async ValueTask WriteAsync(Func<GraphOperation, ValueTask> action, CancellationToken token)
     {
         await _database.RunAsync(_session, async op =>
         {

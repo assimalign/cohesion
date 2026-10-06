@@ -618,7 +618,7 @@ public sealed class GraphTransactionFailureTests
     /// "The graph session is closed.".
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Session: a closed session refuses every operation with one message")]
-    public async Task Operations_OnClosedSession_ShouldRefuseWithOneMessage()
+    public async Task ExecuteAsync_OnClosedSession_ShouldRefuseWithOneMessage()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
@@ -648,11 +648,12 @@ public sealed class GraphTransactionFailureTests
     /// held it) reports <c>Faulted</c>, and the root bases order its refusal against the database's
     /// disposal and a canceled token (concrete-types plan §6.4): BEGIN refuses the open transaction
     /// with <c>COHDBG007</c> before it checks anything of the model, where the model reported the
-    /// disposed database; the execute seams check a canceled token before the model reports the
-    /// disposed database, which it still reports for a live token.
+    /// disposed database; both execute seams check a canceled token before the model reports the
+    /// disposed database, which they still report for a live token, and so does BEGIN once the
+    /// caller rolled the ended transaction back.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Session: a transaction the kernel ended refuses BEGIN with COHDBG007; the execute seams check a canceled token first")]
-    public async Task BeginAndExecute_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
+    public async Task BeginTransactionAsync_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create(new());
@@ -669,14 +670,98 @@ public sealed class GraphTransactionFailureTests
         var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(canceled.Token));
         var canceledText = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("MATCH (n) RETURN n.name", null, canceled.Token));
         var text = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync("MATCH (n) RETURN n.name"));
+        var canceledRequest = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (n) RETURN n.name"), canceled.Token));
+        var request = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (n) RETURN n.name")));
         await transaction.RollbackAsync();
+        var beginAfterRollback = await Should.ThrowAsync<ObjectDisposedException>(async () => await session.BeginTransactionAsync());
 
         // Assert
         state.ShouldBe(TransactionState.Faulted);
         begin.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
         canceledText.CancellationToken.ShouldBe(canceled.Token);
         text.ShouldNotBeNull();
+        canceledRequest.CancellationToken.ShouldBe(canceled.Token);
+        request.ShouldNotBeNull();
+        beginAfterRollback.ShouldNotBeNull();
         session.CurrentTransaction.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A closed session is refused as closed before its database's disposal is checked, by BEGIN
+    /// and both execute seams, which run the root base's checks first (concrete-types plan §6.4):
+    /// the model checked the disposed database first and reported <see cref="ObjectDisposedException"/>.
+    /// The typed operations and the schema surface, which check the database before the session,
+    /// still report the disposed database.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Session: a closed session of a dropped database is refused as closed by BEGIN and the execute seams")]
+    public async Task ExecuteAsync_ClosedSessionOfDroppedDatabase_ShouldRefuseAsClosedBeforeTheDisposedDatabase()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        var session = await database.CreateSessionAsync();
+        var schema = GraphSchema.Open(database, session);
+        await session.DisposeAsync();
+        await engine.DropDatabaseAsync("graph");
+
+        // Act
+        var refusals = new List<DatabaseException>
+        {
+            await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync()),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN n.name")),
+            await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (n) RETURN n.name"))),
+        };
+        var typed = await Should.ThrowAsync<ObjectDisposedException>(async () => await database.CreateNodeAsync(session, ["Late"]));
+        var schemaRead = await Should.ThrowAsync<ObjectDisposedException>(async () => await schema.GetLabelsAsync());
+        var schemaOpen = Should.Throw<ObjectDisposedException>(() => GraphSchema.Open(database, session));
+
+        // Assert
+        refusals.ShouldAllBe(refusal => refusal.Message == "The session is closed.");
+        typed.ShouldNotBeNull();
+        schemaRead.ShouldNotBeNull();
+        schemaOpen.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// A statement holds its session from its start to its end, through the root base's operation
+    /// hold (concrete-types plan §6.4), which replaced the model's own reservation: while one waits
+    /// for the writer lock, a second statement on the session, a typed operation and a schema read
+    /// are refused with the model's message, and BEGIN with the base's "already active" message.
+    /// None of the refusals ends the waiting statement, which completes once the lock is free, and
+    /// the session then runs statements again.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Session: a running statement holds the session against another statement and BEGIN")]
+    public async Task ExecuteAsync_WhileAnotherStatementRuns_ShouldBeRefusedAndLeaveItRunning()
+    {
+        // Arrange: another transaction holds the writer lock, so the session's statement waits.
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("graph");
+        await using var blocker = await database.CreateSessionAsync();
+        await using var session = await database.CreateSessionAsync();
+        var schema = GraphSchema.Open(database, session);
+        var blocking = await blocker.BeginTransactionAsync();
+        await blocker.ExecuteAsync("INSERT (:Blocker)");
+        var pending = session.ExecuteAsync("INSERT (:Waiting)").AsTask();
+        pending.IsCompleted.ShouldBeFalse();
+
+        // Act
+        var statement = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (n) RETURN n.name"));
+        var request = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (n) RETURN n.name")));
+        var typed = await Should.ThrowAsync<DatabaseException>(async () => await database.CreateNodeAsync(session, ["X"]));
+        var schemaRead = await Should.ThrowAsync<DatabaseException>(async () => await schema.GetLabelsAsync());
+        var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
+        bool stillWaiting = !pending.IsCompleted;
+        await blocking.CommitAsync();
+        var completed = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        new[] { statement, request, typed, schemaRead }.ShouldAllBe(refusal =>
+            refusal.Message == "Dispose the active graph operation before starting another operation on this session.");
+        begin.Message.ShouldBe("A transaction or operation is already active on this session.");
+        stillWaiting.ShouldBeTrue();
+        completed.AffectedCount.ShouldBe(1);
+        session.CurrentTransaction.ShouldBeNull();
+        (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Blocker", "Waiting"]);
     }
 
     /// <summary>

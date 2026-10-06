@@ -196,7 +196,7 @@ public sealed class GraphStorageOperationsTests
         builder.CheckpointJournalSize = 8 * 1024 * 1024;
 
         // Act
-        await using var engine = (GraphDatabaseEngine)builder.Build();
+        await using var engine = builder.Build();
         var database = await engine.CreateDatabaseAsync("built");
 
         // Assert

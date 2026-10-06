@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database.Graph.Storage.Internal;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Storage;
@@ -15,20 +16,27 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 
 public sealed partial class GraphStore
 {
-    private const ulong AdjacencyId = ulong.MaxValue;
-    private const string TreeName = "graph";
+    private const ulong adjacencyId = ulong.MaxValue;
+    private const string treeName = "graph";
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
     private BTreeIndexManager _indexes = null!;
 
     /// <summary>Tests whether an exact property index is visible.</summary>
     /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="snapshot">Visibility snapshot.</param><returns>True when an index is visible.</returns>
-    public bool HasIndex(string label, string propertyKey, TransactionSnapshot snapshot) => Definition(label, propertyKey, snapshot) is not null;
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    public bool HasIndex(string label, string propertyKey, TransactionSnapshot snapshot)
+    {
+        // Checked here, not only per definition: a store without index definitions never reads one.
+        ArgumentNullException.ThrowIfNull(snapshot);
+        return Definition(label, propertyKey, snapshot) is not null;
+    }
 
     /// <summary>
     /// Lists every exact property index visible to a snapshot in one pass over the index
     /// definitions, so a planner can match many labels and property keys without a lookup per pair.
     /// </summary>
     /// <param name="snapshot">Visibility snapshot.</param><returns>The visible indexes, each label/property pair once.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
     public IReadOnlyList<StoredGraphIndex> GetIndexes(TransactionSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -40,8 +48,11 @@ public sealed partial class GraphStore
 
     /// <summary>Builds a transactional B+Tree for a node label and property.</summary>
     /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing index creation.</returns>
-    /// <exception cref="InvalidOperationException">An index already exists for this label/property pair.</exception>
+    /// <exception cref="InvalidOperationException">An index already exists for this label/property pair, or <paramref name="context"/> is not active.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is null.</exception>
     /// <exception cref="ArgumentException">The label or property name is null or whitespace.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="TransactionAbortedException">The transaction ended while waiting for its writer lock.</exception>
     /// <exception cref="GraphElementTooLargeException">The names exceed one graph record, or an existing node's value exceeds the index key.</exception>
     public async ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
     {
@@ -57,7 +68,7 @@ public sealed partial class GraphStore
             .Select(node => (Found: Find(1, node.Id, latest)!.Value, Key: Composite(GraphRecordCodec.Key(node.Properties[propertyKey]), node.Id))).ToArray();
         var inserted = await ApplyAsync(context, async bracket =>
         {
-            var index = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(TreeName), cancellationToken).ConfigureAwait(false);
+            var index = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
             foreach (var entry in entries)
             {
                 await index.InsertVersionAsync(bracket, entry.Key, entry.Found.Reference.Location,
@@ -72,8 +83,10 @@ public sealed partial class GraphStore
 
     /// <summary>Drops a node-property index definition; older snapshots retain its tree.</summary>
     /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing index deletion.</returns>
-    /// <exception cref="InvalidOperationException">No visible index exists for this label/property pair.</exception>
-    /// <exception cref="TransactionAbortedException">The index changed after the transaction snapshot.</exception>
+    /// <exception cref="InvalidOperationException">No visible index exists for this label/property pair, or <paramref name="context"/> is not active.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="TransactionAbortedException">The index changed after the transaction snapshot, or the transaction ended while waiting for its writer lock.</exception>
     public async ValueTask DropIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
     {
         await LockAsync(context, cancellationToken).ConfigureAwait(false);
@@ -93,12 +106,16 @@ public sealed partial class GraphStore
 
     /// <summary>Seeks an exact scalar property value through its B+Tree.</summary>
     /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="value">Scalar value.</param><param name="snapshot">Visibility snapshot.</param><param name="cancellationToken">Cancellation token.</param><returns>The matching visible nodes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
     /// <exception cref="InvalidOperationException">No visible index exists for this label/property pair.</exception>
     /// <exception cref="ArgumentException">The scalar bound is not a supported scalar.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <remarks>A value too long for the index key matches nothing: no write can store one.</remarks>
     public async ValueTask<IReadOnlyList<StoredGraphNode>> SearchIndexAsync(string label, string propertyKey, object? value,
         TransactionSnapshot snapshot, CancellationToken cancellationToken = default)
     {
+        // Checked here, not only per definition: a store without index definitions never reads one.
+        ArgumentNullException.ThrowIfNull(snapshot);
         var definition = Definition(label, propertyKey, snapshot)
             ?? throw new InvalidOperationException($"No visible node-property index exists for '{label}.{propertyKey}'.");
         // Every write and backfill refuses a value whose key does not fit, so no entry, and no
@@ -122,6 +139,7 @@ public sealed partial class GraphStore
     /// <summary>Scrubs unproven index writers after coordinator record recovery and before checkpoint.</summary>
     /// <param name="writers">Aborted or uncommitted writers.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing recovery.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="writers"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     public async ValueTask RecoverIndexesAsync(IReadOnlySet<TransactionSequence> writers, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(writers);
@@ -145,13 +163,13 @@ public sealed partial class GraphStore
 
     private async ValueTask EnsureAdjacencyAsync(TransactionContext context, CancellationToken cancellationToken)
     {
-        if (!_indexes.TryGetIndex(AdjacencyId, TreeName, out _))
+        if (!_indexes.TryGetIndex(adjacencyId, treeName, out _))
         {
-            await _indexes.CreateIndexAsync(context, AdjacencyId, new IndexDefinition(TreeName), cancellationToken).ConfigureAwait(false);
+            await _indexes.CreateIndexAsync(context, adjacencyId, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private BTreeIndex ResolveIndex(ulong id) => _indexes.TryGetIndex(id, TreeName, out var index)
+    private BTreeIndex ResolveIndex(ulong id) => _indexes.TryGetIndex(id, treeName, out var index)
         ? index : throw new StorageCorruptionException($"Missing graph B+Tree registration '{id}'.");
 
     private static IndexKey Composite(IndexKey prefix, ulong id)
@@ -209,7 +227,7 @@ public sealed partial class GraphStore
             ulong id = reader.ReadUInt64();
             long root = reader.ReadInt64();
             if (id == 0 || root <= 0 || !ids.Add(id)) { throw new StorageCorruptionException("Invalid graph B+Tree registration identity."); }
-            registrations.Add((new BTreeIndexRegistration(id, new IndexDefinition(TreeName), root), unit.PageId, unit.SlotIndex));
+            registrations.Add((new BTreeIndexRegistration(id, new IndexDefinition(treeName), root), unit.PageId, unit.SlotIndex));
         }
         return registrations;
     }
@@ -257,11 +275,11 @@ public sealed partial class GraphStore
 
         protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken)
-            => _store._indexes.TryGetIndex(_id, TreeName, out var index)
+            => _store._indexes.TryGetIndex(_id, treeName, out var index)
                 ? index.EraseAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken) : default;
         protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken)
-            => _store._indexes.TryGetIndex(_id, TreeName, out var index)
+            => _store._indexes.TryGetIndex(_id, treeName, out var index)
                 ? index.ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken) : default;
     }
 }
