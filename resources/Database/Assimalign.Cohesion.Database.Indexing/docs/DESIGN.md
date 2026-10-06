@@ -95,7 +95,7 @@ when no bracket is paired:
 
 | Engine | Resolver | Throws when no bracket exists |
 |---|---|---|
-| Sql | `SqlDatabaseInstance.ResolveStatementBracket` | `DatabaseException` "Transaction {seq} has no statement bracket applying on this database." |
+| Sql | `SqlDatabase.ResolveStatementBracket` | `DatabaseException` "Transaction {seq} has no statement bracket applying on this database." |
 | KeyValuePair | `KeyValueDatabase.ResolveStatementBracket` | the same `DatabaseException` |
 | Documents | `DocumentCatalog.ResolveStatementBracket` | `InvalidOperationException` "Index mutation requires a shared statement bracket." |
 | Graph | `GraphStore.ResolveStatementBracket` | `InvalidOperationException` "Graph index mutation requires a shared statement bracket." |

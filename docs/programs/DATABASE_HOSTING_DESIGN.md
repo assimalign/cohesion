@@ -59,7 +59,8 @@ Each currently carries `EngineName`, `RootPath` (`FileSystemPath?` in the review
 `PageWriteBackBatchSize`, and `MaintenanceInterval`. SQL and KeyValue additionally accept
 model-specific storage strategies. All five `*DatabaseEngine.Create(options)` factories create
 live engines with workers; no engine Start/Stop stage is missing. The SQL forwarding
-`SqlDatabaseEngineFactory.Create` does not add deferred behavior.
+`SqlDatabaseEngineFactory.Create` did not add deferred behavior (phase 4 of the concrete-types
+plan deleted it).
 
 ### 2.2 Package ownership and rules
 

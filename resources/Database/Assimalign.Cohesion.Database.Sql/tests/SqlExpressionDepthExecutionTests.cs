@@ -423,12 +423,12 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>
-    /// A limit outside 32..4096 is refused by the engine and fails every builder in
-    /// <see cref="IDatabaseEngineBuilder.Build"/>, not in the setter: the engine's own builder and
-    /// one written outside the repository, which reports the engine's range check because it
-    /// builds through <see cref="SqlDatabaseEngine.Create"/>.
+    /// A limit outside 32..4096 is refused by the engine and fails the builder in
+    /// <see cref="SqlDatabaseEngineBuilder.Build"/>, not in the setter, with the engine's own
+    /// range check: the sealed builder creates its engine through the same validation as
+    /// <see cref="SqlDatabaseEngine.Create"/>. A failed build freezes the builder.
     /// </summary>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: an engine, and every builder's Build, refuses a limit outside 32..4096")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: an engine, and the builder's Build, refuses a limit outside 32..4096")]
     [InlineData(int.MinValue)]
     [InlineData(0)]
     [InlineData(SqlQueryParserOptions.MinimumExpressionNestingLimit - 1)]
@@ -437,26 +437,55 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     public void Create_LimitOutOfRange_ShouldThrow(int limit)
     {
         // Arrange
-        ISqlDatabaseEngineBuilder own = SqlDatabaseEngine.CreateBuilder();
-        ISqlDatabaseEngineBuilder external = new ExternalEngineBuilder();
-        own.ExpressionNestingLimit = limit;
-        external.ExpressionNestingLimit = limit;
+        var builder = SqlDatabaseEngine.CreateBuilder();
+        builder.ExpressionNestingLimit = limit;
 
         // Act
         var direct = Should.Throw<ArgumentOutOfRangeException>(() =>
             SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { ExpressionNestingLimit = limit }));
-        var built = Should.Throw<ArgumentOutOfRangeException>(() => own.Build());
-        var externallyBuilt = Should.Throw<ArgumentOutOfRangeException>(() => external.Build());
+        var built = Should.Throw<ArgumentOutOfRangeException>(() => builder.Build());
+        var frozen = Should.Throw<InvalidOperationException>(() => builder.ExpressionNestingLimit = Limit);
 
         // Assert
-        own.ExpressionNestingLimit.ShouldBe(limit);
-        external.ExpressionNestingLimit.ShouldBe(limit);
-        foreach (var failure in new[] { direct, built, externallyBuilt })
+        builder.ExpressionNestingLimit.ShouldBe(limit);
+        foreach (var failure in new[] { direct, built })
         {
             failure.ParamName.ShouldBe("options");
             failure.ActualValue.ShouldBe(limit);
             failure.Message.ShouldStartWith("ExpressionNestingLimit must be between 32 and 4096 levels.", Case.Sensitive);
         }
+
+        frozen.Message.ShouldBe("Engine composition is frozen after a build attempt.");
+    }
+
+    /// <summary>
+    /// The range is inclusive at both ends: the builder builds an engine at 32 and at 4096, and the
+    /// engine it builds parses with that limit. The retest of the builder-validation cases the
+    /// deleted <c>ExternalEngineBuilder</c> carried (concrete-types plan, row 83).
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: the builder builds an engine at either end of 32..4096")]
+    [InlineData(SqlQueryParserOptions.MinimumExpressionNestingLimit)]
+    [InlineData(SqlQueryParserOptions.MaximumExpressionNestingLimit)]
+    public async Task Build_LimitAtTheRangeEnds_ShouldBuildAnEngineThatParsesWithIt(int limit)
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder();
+        builder.ExpressionNestingLimit = limit;
+        builder.CheckpointInterval = TimeSpan.FromHours(1);
+        builder.PageWriteBackInterval = TimeSpan.FromHours(1);
+        builder.MaintenanceInterval = TimeSpan.FromHours(1);
+
+        // Act: a chain parses in a loop, so even the longest one needs no large stack to be refused.
+        await using var engine = builder.Build();
+        await using var session = await SeedAsync(engine);
+        var withinLimit = await ScalarAsync(session, $"SELECT {Chain("1", " + ", SqlQueryParserOptions.MinimumExpressionNestingLimit)} FROM t");
+        var pastLimit = await Should.ThrowAsync<DatabaseParseException>(() =>
+            session.ExecuteAsync($"SELECT {Chain("1", " + ", limit + 1)} FROM t").AsTask());
+
+        // Assert
+        builder.ExpressionNestingLimit.ShouldBe(limit);
+        withinLimit.ShouldBe((long)SqlQueryParserOptions.MinimumExpressionNestingLimit);
+        pastLimit.Message.ShouldBe($"SQL parse error SQL0006: Expression nesting exceeds the supported limit of {Number(limit)} levels.");
     }
 
     /// <summary>
@@ -469,7 +498,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         // Arrange
         var builder = SqlDatabaseEngine.CreateBuilder();
         builder.ExpressionNestingLimit = 40;
-        await using var built = (SqlDatabaseEngine)builder.Build();
+        await using var built = builder.Build();
         var options = new SqlDatabaseEngineOptions { ExpressionNestingLimit = 40 };
         await using var created = SqlDatabaseEngine.Create(options);
         options.ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit;
@@ -492,37 +521,27 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>
-    /// The builder's limit is an ordinary member of an interface meant to be implemented outside
-    /// the repository (owner decision of 2026-10-02). The interface gives it no body to fall back
-    /// on, so a builder that leaves it out does not compile and none can drop the value it is given.
+    /// The sealed builder reports the engine's default limit until it is set, and carries the value
+    /// it is given through <see cref="SqlDatabaseEngineBuilder.Build"/> to the engine, which parses
+    /// text with it and refuses a typed request nested deeper. Before phase 4 of the concrete-types
+    /// plan this was proved for a builder written outside the repository against the
+    /// <c>ISqlDatabaseEngineBuilder</c> interface (the 2026-10-02 ruling, reversed by D5); the
+    /// interface is gone, and the sealed builder is the only one (row 83).
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: the builder interface requires every implementer to supply the limit")]
-    public void BuilderInterface_Limit_ShouldBeRequiredOfEveryImplementer()
-    {
-        // Act
-        var property = typeof(ISqlDatabaseEngineBuilder).GetProperty(nameof(ISqlDatabaseEngineBuilder.ExpressionNestingLimit)).ShouldNotBeNull();
-
-        // Assert
-        property.PropertyType.ShouldBe(typeof(int));
-        property.GetMethod.ShouldNotBeNull().IsAbstract.ShouldBeTrue();
-        property.SetMethod.ShouldNotBeNull().IsAbstract.ShouldBeTrue();
-    }
-
-    /// <summary>
-    /// A builder written outside the repository supplies the limit itself, reports the engine's
-    /// default until it is set, and carries the value it is given through
-    /// <see cref="IDatabaseEngineBuilder.Build"/> to the engine, which parses with it.
-    /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a custom builder's limit reaches the engine through Build")]
-    public async Task ExternalBuilder_Limit_ShouldReachTheEngineThroughBuild()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: the builder's limit defaults to the engine's and reaches the engine through Build")]
+    public async Task Builder_Limit_ShouldDefaultToTheEnginesAndReachTheEngineThroughBuild()
     {
         // Arrange
-        ISqlDatabaseEngineBuilder builder = new ExternalEngineBuilder();
+        var builder = SqlDatabaseEngine.CreateBuilder();
+        builder.EngineName = "builder-limit";
+        builder.CheckpointInterval = TimeSpan.FromHours(1);
+        builder.PageWriteBackInterval = TimeSpan.FromHours(1);
+        builder.MaintenanceInterval = TimeSpan.FromHours(1);
         int unset = builder.ExpressionNestingLimit;
         builder.ExpressionNestingLimit = 40;
 
         // Act
-        await using var engine = builder.Build().ShouldBeOfType<SqlDatabaseEngine>();
+        await using var engine = builder.Build();
         await using var session = await SeedAsync(engine);
         var atLimit = await ScalarAsync(session, $"SELECT {Chain("1", " + ", 40)} FROM t");
         var pastLimit = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync($"SELECT {Chain("1", " + ", 41)} FROM t").AsTask());
@@ -605,7 +624,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     {
         // Arrange: 126 signs over a column, compared: 128 levels.
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var create = Request($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({Repeat("- ", WalkDepth - 2)}qty > 0))");
 
@@ -730,7 +749,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             string canonical;
             await using (var engine = CreateEngine(_rootPath))
             {
-                var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+                var database = await engine.CreateDatabaseAsync("db");
                 await using var session = await database.CreateSessionAsync(CancellationToken.None);
                 await session.ExecuteAsync($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({predicate}))");
                 refused = await Should.ThrowAsync<DatabaseParseException>(() =>
@@ -740,7 +759,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             }
 
             await using var reopenedEngine = CreateEngine(_rootPath);
-            var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("db");
+            var reopened = await reopenedEngine.OpenDatabaseAsync("db");
             await using var reopenedSession = await reopened.CreateSessionAsync(CancellationToken.None);
             (await reopenedSession.ExecuteAsync("INSERT INTO c VALUES (1)")).AffectedCount.ShouldBe(1);
             await Should.ThrowAsync<SqlConstraintViolationException>(() => reopenedSession.ExecuteAsync("INSERT INTO c VALUES (-1)").AsTask());
@@ -824,7 +843,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     {
         // Arrange: a stored CHECK of 128 levels.
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        var database = await engine.CreateDatabaseAsync("db");
         await using (var session = await database.CreateSessionAsync(CancellationToken.None))
         {
             await session.ExecuteAsync($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({Repeat("- ", WalkDepth - 2)}qty > 0))");
@@ -882,13 +901,13 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
             error.Message.ShouldStartWith(StatementTooComplex + ":", Case.Sensitive);
         }
-        harness.Server.Context.Sessions.Count.ShouldBe(1);
+        harness.Server.Sessions.Count.ShouldBe(1);
         (await ScalarAsync(client, "SELECT 1 FROM users WHERE id = 1")).ShouldBe(1L);
 
         await using var other = await harness.DialAsync();
         await other.HandshakeAsync();
         (await ScalarAsync(other, "SELECT COUNT(*) FROM users")).ShouldBe(2L);
-        harness.Server.Context.Sessions.Count.ShouldBe(2);
+        harness.Server.Sessions.Count.ShouldBe(2);
     }
 
     /// <summary>A 10,000-term predicate executes over the wire, where the server parses it with the engine's limit.</summary>
@@ -962,7 +981,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         error.Message.ShouldStartWith(StatementTooComplex + ":", Case.Sensitive);
-        harness.Server.Context.Sessions.Count.ShouldBe(1);
+        harness.Server.Sessions.Count.ShouldBe(1);
         (await ScalarAsync(client, "SELECT COUNT(*) FROM users")).ShouldBe(2L);
     }
 
@@ -1037,10 +1056,10 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         failure.InnerException.ShouldBeOfType<InsufficientExecutionStackException>();
     }
 
-    private static SqlStatementMetrics Metrics(IDatabaseSession session)
-        => ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+    private static SqlStatementMetrics Metrics(SqlDatabaseSession session)
+        => session.LastStatementMetrics.ShouldNotBeNull();
 
-    private static SqlCatalogTable Table(SqlDatabaseInstance database, string name, bool exists = true)
+    private static SqlCatalogTable Table(SqlDatabase database, string name, bool exists = true)
     {
         bool found = database.Catalog.TryGetTable(SqlPlanner.DefaultSchema, name, out var table);
         found.ShouldBe(exists);
@@ -1070,7 +1089,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         return SqlDatabaseEngine.Create(options);
     }
 
-    private static async Task<IDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
+    private static async Task<SqlDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
     {
         var database = await engine.CreateDatabaseAsync("depth");
         var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -1079,13 +1098,13 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         return session;
     }
 
-    private static async Task<object?> ScalarAsync(IDatabaseSession session, string sql)
+    private static async Task<object?> ScalarAsync(SqlDatabaseSession session, string sql)
         => await ReadScalarAsync(await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
 
-    private static async Task<object?[]> RowAsync(IDatabaseSession session, string sql)
+    private static async Task<object?[]> RowAsync(SqlDatabaseSession session, string sql)
         => (await RowsAsync(session, sql)).ShouldHaveSingleItem();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var rows = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>()!;
         var result = new List<object?[]>();
@@ -1216,68 +1235,6 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
             // Read after the call, so the frame stays allocated across it.
             return depth + frame[^1] - 1;
-        }
-    }
-
-    /// <summary>
-    /// An <see cref="ISqlDatabaseEngineBuilder"/> written outside the repository, as the interface
-    /// intends: it supplies every member itself, the expression nesting limit included, keeps them
-    /// on a <see cref="SqlDatabaseEngineOptions"/> (so each reports the engine's default until it is
-    /// set), and builds through the public <see cref="SqlDatabaseEngine.Create"/>, whose range check
-    /// is the one its <see cref="Build"/> reports. Only the engine's own builder can hand worker and
-    /// server products to a <see cref="SqlDatabaseEngine"/>, so this one refuses to compose them.
-    /// </summary>
-    private sealed class ExternalEngineBuilder : ISqlDatabaseEngineBuilder
-    {
-        // Quiet background workers, as CreateEngine keeps them.
-        private readonly SqlDatabaseEngineOptions _options = new()
-        {
-            EngineName = "external-builder",
-            CheckpointInterval = TimeSpan.FromHours(1),
-            PageWriteBackInterval = TimeSpan.FromHours(1),
-            MaintenanceInterval = TimeSpan.FromHours(1),
-        };
-        private bool _buildAttempted;
-
-        public string? EngineName { get => _options.EngineName; set => _options.EngineName = value; }
-
-        public FileSystemPath? RootPath { get => _options.RootPath; set => _options.RootPath = value; }
-
-        public StorageCommitDurability? Durability { get => _options.Durability; set => _options.Durability = value; }
-
-        public ISqlStorageStrategy? StorageStrategy { get => _options.StorageStrategy; set => _options.StorageStrategy = value; }
-
-        public TimeSpan GroupCommitWindow { get => _options.GroupCommitWindow; set => _options.GroupCommitWindow = value; }
-
-        public TimeSpan CheckpointInterval { get => _options.CheckpointInterval; set => _options.CheckpointInterval = value; }
-
-        public long CheckpointJournalSize { get => _options.CheckpointJournalSize; set => _options.CheckpointJournalSize = value; }
-
-        public long BufferPoolCapacity { get => _options.BufferPoolCapacity; set => _options.BufferPoolCapacity = value; }
-
-        public TimeSpan PageWriteBackInterval { get => _options.PageWriteBackInterval; set => _options.PageWriteBackInterval = value; }
-
-        public int PageWriteBackBatchSize { get => _options.PageWriteBackBatchSize; set => _options.PageWriteBackBatchSize = value; }
-
-        public TimeSpan MaintenanceInterval { get => _options.MaintenanceInterval; set => _options.MaintenanceInterval = value; }
-
-        public int ExpressionNestingLimit { get => _options.ExpressionNestingLimit; set => _options.ExpressionNestingLimit = value; }
-
-        public IDatabaseEngineBuilder AddWorker(Func<IDatabaseEngine, IDatabaseEngineWorker> configure)
-            => throw new NotSupportedException("Only the engine's own builder can attach a worker to a SqlDatabaseEngine.");
-
-        public IDatabaseEngineBuilder AddServer(Func<IDatabaseEngine, IDatabaseServer> configure)
-            => throw new NotSupportedException("Only the engine's own builder can attach a server to a SqlDatabaseEngine.");
-
-        public IDatabaseEngine Build()
-        {
-            if (_buildAttempted)
-            {
-                throw new InvalidOperationException("A build was already attempted.");
-            }
-
-            _buildAttempted = true;
-            return SqlDatabaseEngine.Create(_options);
         }
     }
 }

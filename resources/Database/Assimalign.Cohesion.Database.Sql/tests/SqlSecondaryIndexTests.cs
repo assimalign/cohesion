@@ -48,7 +48,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         }
     }
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
@@ -67,9 +67,9 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         return rows;
     }
 
-    private static ulong ObjectIdOf(IDatabase database, string table)
+    private static ulong ObjectIdOf(SqlDatabase database, string table)
     {
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.Catalog.TryGetTable("dbo", table, out var catalogTable).ShouldBeTrue();
         return catalogTable.ObjectId;
     }
@@ -77,14 +77,14 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     /// <summary>
     /// Materializes the entries a fresh snapshot sees in the named index.
     /// </summary>
-    private static async Task<List<(byte[] Key, ulong EntryReference)>> VisibleEntriesAsync(IDatabase database, string table, string indexName)
+    private static async Task<List<(byte[] Key, ulong EntryReference)>> VisibleEntriesAsync(SqlDatabase database, string table, string indexName)
     {
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         ulong objectId = ObjectIdOf(database, table);
         instance.IndexManager.TryGetIndex(objectId, indexName, out var index).ShouldBeTrue($"index '{indexName}' should be attached");
 
         await using var session = await database.CreateSessionAsync();
-        var transaction = (SqlDatabaseTransaction)await session.BeginTransactionAsync();
+        var transaction = await session.BeginTransactionAsync();
 
         try
         {
@@ -107,8 +107,8 @@ public sealed class SqlSecondaryIndexTests : IDisposable
     /// <summary>
     /// The root page the index manager currently registers for the named index.
     /// </summary>
-    private static long RootPageOf(IDatabase database, string indexName)
-        => ((SqlDatabaseInstance)database).IndexManager.ExportRegistrations()
+    private static long RootPageOf(SqlDatabase database, string indexName)
+        => database.IndexManager.ExportRegistrations()
             .Single(registration => registration.Definition.Name == indexName).RootPageId;
 
     private static byte[] Int32Key(int value)
@@ -135,7 +135,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         }
 
         // Assert: catalog metadata + a live tree with one entry per row.
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.Catalog.TryGetIndex(ObjectIdOf(database, "t"), "ix_t_id", out var metadata).ShouldBeTrue();
         metadata.ColumnNames.ShouldBe(new[] { "id" });
         (await VisibleEntriesAsync(database, "t", "ix_t_id")).Count.ShouldBe(3);
@@ -171,7 +171,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         // Assert: precise error; neither the catalog nor the live directory keeps
         // any trace, and a non-unique index over the same data still works.
         exception.Message.ShouldContain("duplicate");
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.Catalog.TryGetIndex(ObjectIdOf(database, "t"), "ix_t_id", out _).ShouldBeFalse();
         instance.IndexManager.TryGetIndex(ObjectIdOf(database, "t"), "ix_t_id", out _).ShouldBeFalse();
 
@@ -200,7 +200,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
             await session.ExecuteAsync("DROP INDEX ix_t_id ON t");
 
             // Assert: gone from both surfaces; maintenance no longer runs.
-            var instance = (SqlDatabaseInstance)database;
+            var instance = database;
             instance.Catalog.GetIndexes(ObjectIdOf(database, "t")).ShouldBeEmpty();
             instance.IndexManager.TryGetIndex(ObjectIdOf(database, "t"), "ix_t_id", out _).ShouldBeFalse();
             await session.ExecuteAsync("INSERT INTO t (id, label) VALUES (1, 'a')");
@@ -215,7 +215,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         // Restart: still gone.
         await using var reopenedEngine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "ix-drop", RootPath = _rootPath });
         var reopened = await reopenedEngine.OpenDatabaseAsync("drop-db");
-        ((SqlDatabaseInstance)reopened).Catalog.GetIndexes(ObjectIdOf(reopened, "t")).ShouldBeEmpty();
+        reopened.Catalog.GetIndexes(ObjectIdOf(reopened, "t")).ShouldBeEmpty();
     }
 
     // ── Write-path maintenance ─────────────────────────────────────────
@@ -254,10 +254,10 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await writerSession.ExecuteAsync("CREATE INDEX ix_t_id ON t (id)");
         await writerSession.ExecuteAsync("INSERT INTO t (id) VALUES (1)");
 
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.IndexManager.TryGetIndex(ObjectIdOf(database, "t"), "ix_t_id", out var index).ShouldBeTrue();
 
-        var pinned = (SqlDatabaseTransaction)await readerSession.BeginTransactionAsync(IsolationLevel.Snapshot);
+        var pinned = await readerSession.BeginTransactionAsync(IsolationLevel.Snapshot);
         var pinnedSnapshot = pinned.Context.Snapshot;
 
         // Act
@@ -532,7 +532,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         RootPageOf(reopened, "ix_t_id").ShouldBe(registeredRoot);
         await using var verifySession = await reopened.CreateSessionAsync();
         ((int)(await Rows(verifySession, "SELECT v FROM t WHERE id = 1150")).Single()[0]!).ShouldBe(1150 % 7);
-        ((SqlDatabaseSession)verifySession).LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_t_id");
+        verifySession.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_t_id");
         (await Rows(verifySession, "SELECT id FROM t WHERE id >= 600 AND id < 610")).Select(row => (int)row[0]!).Order()
             .ShouldBe(Enumerable.Range(600, 10));
 
@@ -562,7 +562,7 @@ public sealed class SqlSecondaryIndexTests : IDisposable
         await session.ExecuteAsync("DROP TABLE t");
 
         // Assert
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.Catalog.GetIndexes(objectId).ShouldBeEmpty();
         instance.IndexManager.TryGetIndex(objectId, "ix_t_id", out _).ShouldBeFalse();
         instance.Catalog.GetIndexRegistrations().ShouldBeEmpty();

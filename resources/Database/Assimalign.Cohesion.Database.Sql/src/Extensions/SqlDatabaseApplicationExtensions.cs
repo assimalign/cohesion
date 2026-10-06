@@ -1,7 +1,5 @@
 using System;
 
-using Assimalign.Cohesion.Database.Sql.Internal;
-
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>Registers deferred SQL composition through the dependency-free Database root contract.</summary>
@@ -13,7 +11,7 @@ public static class SqlDatabaseApplicationExtensions
         /// <param name="configure">Configures model options and nested factories against the build-time context.</param>
         /// <returns>The application builder.</returns>
         /// <exception cref="ArgumentNullException">The builder or callback is null.</exception>
-        public IDatabaseApplicationBuilder AddSql(Action<IDatabaseApplicationContext, ISqlDatabaseEngineBuilder> configure)
+        public IDatabaseApplicationBuilder AddSql(Action<IDatabaseApplicationContext, SqlDatabaseEngineBuilder> configure)
         {
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentNullException.ThrowIfNull(configure);

@@ -337,7 +337,7 @@ public sealed class SqlWorkerResilienceTests
         var latencies = await TimedInsertsAsync(healthy, 5);
 
         faults.Clear();
-        var reopened = (SqlDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert: the commit failed fast (the worker's flush failed and released it), only its
         // database went offline, and the worker reported no failure of its own. A failed drain
@@ -396,7 +396,7 @@ public sealed class SqlWorkerResilienceTests
         var catalogAfter = strategy.Capture(Failing + SqlDatabaseEngine.CatalogSuffix);
 
         faults.Clear();
-        var reopened = (SqlDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert: offline with the coded refusal naming the header write, nothing written after
         // the failure, and no retry storm: the slot write was tried once.
@@ -473,7 +473,7 @@ public sealed class SqlWorkerResilienceTests
         var holderRefusal = await Record.ExceptionAsync(async () => await holder.ExecuteAsync("INSERT INTO t (id, payload) VALUES (3, 'after')"));
 
         faults.Clear();
-        var reopened = (SqlDatabaseInstance)await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(Failing);
 
         // Assert: both writers got the coded refusal naming what failed, and the reopen kept
         // neither write.
@@ -487,14 +487,12 @@ public sealed class SqlWorkerResilienceTests
         (await CountAsync(reopened)).ShouldBe(1);
     }
 
-    /// <summary>
-    /// A worker registered through the builder that implements the interface without the guided
-    /// base, and lets an exception escape its loop: the engine's pump runs it again after the
-    /// backoff instead of letting the thread end, and reports the engine Faulted until disposal,
-    /// since nothing tells it when such a worker is healthy again.
-    /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Workers: a registered worker whose loop throws is run again, and the engine reports Faulted")]
-    public async Task Pump_InterfaceWorkerThrows_ShouldRunItAgainAndReportFaulted()
+    // Since the engine derives from DatabaseEngine (concrete-types plan, phase 4), a registered
+    // worker is a DatabaseEngineWorker, whose loop lets nothing escape: the pass that throws is
+    // recorded and the next one runs after the backoff. The interface-only worker this test drove
+    // until then cannot be registered any more.
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Workers: a registered worker whose pass throws is run again, and the engine reports Faulted")]
+    public async Task Pump_RegisteredWorkerPassThrows_ShouldRunItAgainAndReportFaulted()
     {
         // Arrange
         var worker = new EscapingWorker();
@@ -686,7 +684,7 @@ public sealed class SqlWorkerResilienceTests
     }
 
     // What a database's two growing files hold together: the bound the pace window keeps under.
-    private static long FileBytes(SqlDatabaseInstance database)
+    private static long FileBytes(SqlDatabase database)
         => database.DataStorage.Data.Length + database.DataStorage.JournalLength;
 
     private static SqlDatabaseEngineOptions Options(FaultInjectingJournalSqlStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
@@ -700,15 +698,15 @@ public sealed class SqlWorkerResilienceTests
     private static DatabaseEngineWorker WorkerOf(SqlDatabaseEngine engine, DatabaseEngineWorkerKind kind)
         => engine.Workers.OfType<DatabaseEngineWorker>().Single(worker => worker.Kind == kind);
 
-    private static async Task<SqlDatabaseInstance> CreateAsync(SqlDatabaseEngine engine, string name)
+    private static async Task<SqlDatabase> CreateAsync(SqlDatabaseEngine engine, string name)
     {
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        var database = await engine.CreateDatabaseAsync(name);
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, payload VARCHAR(200))");
         return database;
     }
 
-    private static async Task InsertAsync(SqlDatabaseInstance database, int first, int count)
+    private static async Task InsertAsync(SqlDatabase database, int first, int count)
     {
         await using var session = await database.CreateSessionAsync();
         for (int id = first; id < first + count; id++)
@@ -717,7 +715,7 @@ public sealed class SqlWorkerResilienceTests
         }
     }
 
-    private static async Task<List<TimeSpan>> TimedInsertsAsync(SqlDatabaseInstance database, int count)
+    private static async Task<List<TimeSpan>> TimedInsertsAsync(SqlDatabase database, int count)
     {
         var latencies = new List<TimeSpan>();
         await using var session = await database.CreateSessionAsync();
@@ -731,7 +729,7 @@ public sealed class SqlWorkerResilienceTests
         return latencies;
     }
 
-    private static async Task<long> CountAsync(SqlDatabaseInstance database)
+    private static async Task<long> CountAsync(SqlDatabase database)
     {
         await using var session = await database.CreateSessionAsync();
         var result = await session.ExecuteAsync("SELECT COUNT(*) FROM t");
@@ -777,31 +775,34 @@ public sealed class SqlWorkerResilienceTests
         return true;
     }
 
-    /// <summary>A worker without the guided base whose first loop throws; later loops run until cancelled.</summary>
-    private sealed class EscapingWorker : IDatabaseEngineWorker
+    /// <summary>
+    /// A registered worker whose first pass throws; later passes run until cancelled, so the
+    /// failure stays recorded (no pass ran to its end) while the test reads the engine's state.
+    /// </summary>
+    private sealed class EscapingWorker : DatabaseEngineWorker
     {
         private int _runs;
         private int _stopped;
 
-        public string Name => "escaping";
-
-        public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.IndexMaintenance;
-
-        public TimeSpan Interval => TimeSpan.FromSeconds(1);
+        public EscapingWorker()
+            : base("escaping", DatabaseEngineWorkerKind.IndexMaintenance, TimeSpan.FromMilliseconds(10))
+        {
+        }
 
         public int Runs => Volatile.Read(ref _runs);
 
         public bool Stopped => Volatile.Read(ref _stopped) != 0;
 
-        public void Run(CancellationToken cancellationToken)
+        protected override void RunIterationCore(CancellationToken cancellationToken)
         {
             if (Interlocked.Increment(ref _runs) == 1)
             {
-                throw new InvalidOperationException("The worker's loop failed.");
+                throw new InvalidOperationException("The worker's pass failed.");
             }
 
             cancellationToken.WaitHandle.WaitOne();
             Volatile.Write(ref _stopped, 1);
+            cancellationToken.ThrowIfCancellationRequested();
         }
     }
 }

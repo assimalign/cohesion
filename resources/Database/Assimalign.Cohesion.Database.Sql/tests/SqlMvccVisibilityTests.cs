@@ -19,14 +19,14 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </summary>
 public sealed class SqlMvccVisibilityTests
 {
-    private static async Task<(IDatabase Database, IDatabaseSession Session)> CreateDatabaseAsync(SqlDatabaseEngine engine, string name)
+    private static async Task<(SqlDatabase Database, SqlDatabaseSession Session)> CreateDatabaseAsync(SqlDatabaseEngine engine, string name)
     {
         var database = await engine.CreateDatabaseAsync(name);
         var session = await database.CreateSessionAsync();
         return (database, session);
     }
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();

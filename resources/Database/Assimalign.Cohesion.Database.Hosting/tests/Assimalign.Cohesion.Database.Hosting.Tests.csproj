@@ -23,13 +23,4 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 	</ItemGroup>
-	<ItemGroup>
-		<!-- The SQL engine's fault-injecting storage strategy: health must report a database a
-		     failed journal fsync took offline (#1243). -->
-		<Compile Include="..\..\Assimalign.Cohesion.Database.Sql\tests\TestObjects\FaultInjectingJournalSqlStorageStrategy.cs" Link="TestObjects\FaultInjectingJournalSqlStorageStrategy.cs" />
-		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalFrames.cs" Link="TestObjects\JournalFrames.cs" />
-		<!-- Its device faults, which fire on the engine's worker threads: health must report a
-		     failing worker and a database a failed header write took offline (#1268). -->
-		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DeviceFaults.cs" Link="TestObjects\DeviceFaults.cs" />
-	</ItemGroup>
 </Project>

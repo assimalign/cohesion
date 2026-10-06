@@ -1399,5 +1399,5 @@ defines when each of `COHSQLE001`–`COHSQLE003` is raised, the expression
 nesting limit when `COHSQLE004` is, the column-scope rule for VALUES and
 counts when `COHSQLE005` is, and the function-argument rule under Statement
 completeness when `COHSQLE006` is. The engine's transaction-state codes,
-`COHSQLT001`–`COHSQLT003`, and its offline-database code, `COHSQLT004`, are documented in
-the SQL engine design.
+`COHSQLT001`–`COHSQLT003`, its offline-database code, `COHSQLT004`, and its aborted-transaction
+code, `COHSQLT005`, are documented in the SQL engine design.

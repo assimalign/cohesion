@@ -2,10 +2,10 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Documents.Tests;
+namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
-/// A worker a builder factory composes into a document engine: it records its passes, the name of
+/// A worker a builder factory composes into a SQL engine: it records its passes, the name of
 /// the thread its pump runs it on, and its disposal, and derives from the root base, as every
 /// worker the engine can attach does.
 /// </summary>
@@ -21,14 +21,14 @@ internal sealed class RecordingWorker : DatabaseEngineWorker
     /// </summary>
     /// <param name="engine">The engine the worker was created for.</param>
     /// <param name="name">The worker's name; <c>{engine}/recording</c> when null.</param>
-    public RecordingWorker(DocumentDatabaseEngine engine, string? name = null)
+    public RecordingWorker(SqlDatabaseEngine engine, string? name = null)
         : base(name ?? engine.Name + "/recording", DatabaseEngineWorkerKind.IndexMaintenance, TimeSpan.FromMilliseconds(10))
     {
         Engine = engine;
     }
 
     /// <summary>Gets the engine the worker was created for.</summary>
-    public DocumentDatabaseEngine Engine { get; }
+    public SqlDatabaseEngine Engine { get; }
 
     /// <summary>Gets whether a pass ran.</summary>
     public ManualResetEventSlim Started => _started;

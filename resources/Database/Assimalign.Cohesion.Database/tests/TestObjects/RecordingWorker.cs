@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Tests;
 
@@ -7,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Tests;
 /// A guided worker that records when its pump stops and when it is disposed, so a test can assert
 /// that an engine stops every pump before it disposes any worker.
 /// </summary>
-internal sealed class RecordingWorker : DatabaseEngineWorker, IDisposable
+internal sealed class RecordingWorker : DatabaseEngineWorker
 {
     private readonly TestLog _log;
     private int _waits;
@@ -28,7 +29,8 @@ internal sealed class RecordingWorker : DatabaseEngineWorker, IDisposable
     /// <summary>Gets how many times the worker was disposed.</summary>
     public int Disposes => Volatile.Read(ref _disposes);
 
-    public void Dispose()
+    // The base's release hook, which the owning engine runs once its pump stopped.
+    protected override ValueTask DisposeAsyncCore()
     {
         Interlocked.Increment(ref _disposes);
         _log.Add($"{Name}:dispose");
@@ -36,6 +38,8 @@ internal sealed class RecordingWorker : DatabaseEngineWorker, IDisposable
         {
             throw failure;
         }
+
+        return ValueTask.CompletedTask;
     }
 
     protected override void RunIterationCore(CancellationToken cancellationToken)

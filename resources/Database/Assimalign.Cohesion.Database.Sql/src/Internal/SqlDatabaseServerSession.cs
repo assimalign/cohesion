@@ -18,25 +18,31 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// over a single connection and delegates statement execution to the bound
 /// engine session's text-execute seam.
 /// </summary>
-internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
+/// <remarks>
+/// An internal sealed leaf of the root <see cref="DatabaseServerSession"/> (concrete-types plan,
+/// row 11): the base owns the identity, and the negotiated version and authenticated principal,
+/// which the handshake records once each through the base's one-shot setters; the engine session
+/// is re-exposed typed by a covariant override.
+/// </remarks>
+internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 {
     private readonly SqlDatabaseServer _server;
     private readonly IConnection _connection;
     private readonly SqlDatabaseServerOptions _options;
-    private readonly IDatabaseEngine _engine;
+    private readonly SqlDatabaseEngine _engine;
     private readonly DatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
 
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
-    private IDatabaseSession? _databaseSession;
+    private SqlDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
 
     internal SqlDatabaseServerSession(
         SqlDatabaseServer server,
         IConnection connection,
         SqlDatabaseServerOptions options,
-        IDatabaseEngine engine,
+        SqlDatabaseEngine engine,
         DatabaseAuthenticator authenticator)
     {
         _server = server;
@@ -48,16 +54,7 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
     }
 
     /// <inheritdoc />
-    public Guid Id { get; } = Guid.NewGuid();
-
-    /// <inheritdoc />
-    public ProtocolVersion ProtocolVersion { get; private set; }
-
-    /// <inheritdoc />
-    public string? Principal { get; private set; }
-
-    /// <inheritdoc />
-    public IDatabaseSession? DatabaseSession => _databaseSession;
+    public override SqlDatabaseSession? DatabaseSession => _databaseSession;
 
     /// <summary>
     /// Gets the task that completes when the session pump has fully wound down.
@@ -88,7 +85,8 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    /// <remarks>Idempotent: aborting a session that already wound down is a no-op.</remarks>
+    protected override async ValueTask DisposeAsyncCore()
     {
         Abort();
         await _completion.ConfigureAwait(false);
@@ -183,9 +181,9 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
             return false;
         }
 
-        ProtocolVersion = negotiatedVersion;
+        SetNegotiatedVersion(negotiatedVersion);
 
-        IDatabase? database;
+        SqlDatabase? database;
 
         try
         {
@@ -252,7 +250,7 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
             return false;
         }
 
-        Principal = startup.Principal;
+        SetAuthenticatedPrincipal(startup.Principal);
 
         await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
         return true;
@@ -418,16 +416,16 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
     /// </summary>
     /// <returns>The database, or <see langword="null"/> when the engine has none by that name.</returns>
     /// <exception cref="SqlDataStorageFormatException">The database is on a data-storage format the engine refuses.</exception>
-    private async ValueTask<IDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
+    private async ValueTask<SqlDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
             return null;
         }
 
-        if (_engine.TryGetDatabase(name, out IDatabase database))
+        if (_engine.TryGetDatabase(name, out var open))
         {
-            return database;
+            return open;
         }
 
         try
@@ -473,9 +471,10 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
             {
                 await _databaseSession.DisposeAsync().ConfigureAwait(false);
             }
-            catch (DatabaseException)
+            catch (AggregateException)
             {
-                // Session teardown must not mask the pump outcome.
+                // Session teardown must not mask the pump outcome. The root session reports every
+                // teardown failure in one aggregate ("The session failed to close.").
             }
         }
 

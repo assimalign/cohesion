@@ -55,7 +55,7 @@ public sealed class SqlStorageSemanticsParityTests
             RootPath = directory is null ? (FileSystemPath?)null : FileSystemPath.Parse(directory),
         });
         var database = await engine.CreateDatabaseAsync("db");
-        var instance = database.ShouldBeOfType<SqlDatabaseInstance>();
+        var instance = database.ShouldBeOfType<SqlDatabase>();
         instance.DataStorage.CommitDurability.ShouldBe(expectedDurability);
         instance.CatalogStorage.CommitDurability.ShouldBe(expectedDurability);
         await using var session = await database.CreateSessionAsync();
@@ -90,7 +90,7 @@ public sealed class SqlStorageSemanticsParityTests
         return new(rows, filteredRows, violations);
     }
 
-    private static async Task<List<ChildRow>> ReadRowsAsync(IDatabaseSession session, bool filtered = false)
+    private static async Task<List<ChildRow>> ReadRowsAsync(SqlDatabaseSession session, bool filtered = false)
     {
         string query = filtered
             ? "SELECT id, parent_id, qty, email FROM child WHERE qty >= 3 ORDER BY id"

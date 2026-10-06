@@ -22,15 +22,15 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </summary>
 public sealed class SqlMvccConflictTests
 {
-    private static async Task<(SqlDatabaseInstance Database, IDatabaseSession Session)> CreateSessionAsync(
+    private static async Task<(SqlDatabase Database, SqlDatabaseSession Session)> CreateSessionAsync(
         SqlDatabaseEngine engine, string name)
     {
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        var database = await engine.CreateDatabaseAsync(name);
         var session = await database.CreateSessionAsync();
         return (database, session);
     }
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();

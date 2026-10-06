@@ -39,6 +39,10 @@ internal sealed class RecordingEngine : IDatabaseEngine
     /// <summary>Gets or sets the databases the engine reports offline.</summary>
     internal IReadOnlyList<DatabaseName> Offline { get; set; } = [];
 
+    /// <summary>Sets the state the engine reports, as a real engine folds it from its workers.</summary>
+    /// <param name="state">The state to report.</param>
+    internal void Report(EngineState state) => _state = state;
+
     public IReadOnlyList<IDatabaseServer> Servers => _servers;
 
     internal int DisposeCount { get; private set; }

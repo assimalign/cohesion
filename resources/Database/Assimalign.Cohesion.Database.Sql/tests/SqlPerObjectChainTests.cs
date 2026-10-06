@@ -42,7 +42,7 @@ public sealed class SqlPerObjectChainTests : IDisposable
         }
     }
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
@@ -61,7 +61,7 @@ public sealed class SqlPerObjectChainTests : IDisposable
         return rows;
     }
 
-    private static async Task BulkInsertAsync(IDatabaseSession session, string table, int count)
+    private static async Task BulkInsertAsync(SqlDatabaseSession session, string table, int count)
     {
         // Multi-row VALUES in batches keeps the test fast while spanning many pages.
         const int batchSize = 50;
@@ -75,9 +75,9 @@ public sealed class SqlPerObjectChainTests : IDisposable
         }
     }
 
-    private static ulong ObjectIdOf(IDatabase database, string table)
+    private static ulong ObjectIdOf(SqlDatabase database, string table)
     {
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.Catalog.TryGetTable("dbo", table, out var catalogTable).ShouldBeTrue();
         return catalogTable.ObjectId;
     }
@@ -96,7 +96,7 @@ public sealed class SqlPerObjectChainTests : IDisposable
         await BulkInsertAsync(session, "big", 500);
         await session.ExecuteAsync("INSERT INTO small (id, payload) VALUES (1, 'tiny')");
 
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         var bigPages = instance.DataStorage.GetOwnerPages(ObjectIdOf(database, "big")).Select(p => (long)p).ToHashSet();
         var smallPages = instance.DataStorage.GetOwnerPages(ObjectIdOf(database, "small")).Select(p => (long)p).ToHashSet();
 
@@ -122,7 +122,7 @@ public sealed class SqlPerObjectChainTests : IDisposable
         await session.ExecuteAsync("CREATE TABLE victim (id INT NOT NULL, payload VARCHAR(200))");
         await BulkInsertAsync(session, "victim", 300);
 
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         ulong victimId = ObjectIdOf(database, "victim");
         instance.DataStorage.GetOwnerPages(victimId).Count.ShouldBeGreaterThan(5);
         long totalPagesBefore = instance.DataStorage.PageManager.PageCount;
@@ -166,7 +166,7 @@ public sealed class SqlPerObjectChainTests : IDisposable
 
         // Assert: the directory is rebuilt (disjoint, correctly sized chains) and
         // scans return the recovered rows.
-        var instance = (SqlDatabaseInstance)reopened;
+        var instance = reopened;
         var pagesOfA = instance.DataStorage.GetOwnerPages(ObjectIdOf(reopened, "a")).Select(p => (long)p).ToHashSet();
         var pagesOfB = instance.DataStorage.GetOwnerPages(ObjectIdOf(reopened, "b")).Select(p => (long)p).ToHashSet();
 

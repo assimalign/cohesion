@@ -13,13 +13,16 @@ shared storage, with DDL flowing through the relational catalog
   dedicated catalog file set.
 - **Sessions and transactions** — explicit transactions map to storage
   transactions (durable commit, page-image rollback); statements outside a
-  transaction auto-commit.
+  transaction auto-commit. The session and transaction are sealed leaves of the root
+  bases, which own the end state machine: a failed statement leaves the transaction
+  active, and a transaction the kernel ended under its caller refuses work with
+  `COHSQLT005` until it is rolled back.
 - **Database scope (A5)** — every session stays bound to the database that
   created it. Qualified table references resolve only within that database's
   catalog; SQL cannot switch databases or manage the server. Conformance tests
   keep identically named tables in two databases isolated and reject attempts
   to select another database or create/drop databases through a session.
-- **Compiled-schema provisioning** — `ISqlDatabase` diffs a validated
+- **Compiled-schema provisioning** — `SqlDatabase.ApplySchemaAsync` diffs a validated
   `CompiledSchema`, renders deterministic table/column/index DDL into parsed
   `SqlQueryRequest`s, compensates completed reversible steps on failure, and
   records the canonical document/hash only after live-catalog convergence.
@@ -86,11 +89,11 @@ builder.AddSql((context, engine) =>
     {
         var options = new SqlDatabaseServerOptions();
         options.Listen(new Uri("tcp://127.0.0.1:5439"));
-        return SqlDatabaseServer.Create((SqlDatabaseEngine)databaseEngine, options);
+        return SqlDatabaseServer.Create(databaseEngine, options);
     });
 });
 await using var application = builder.Build();
-IDatabaseEngine orders = application.Context.GetEngine("orders");
+var orders = (SqlDatabaseEngine)application.Context.GetEngine("orders"); // typed lookup arrives in phase 6
 ```
 
 The `Listen` helper ships in `Database.Sql.Tcp`. Omit `AddServer` for embedded

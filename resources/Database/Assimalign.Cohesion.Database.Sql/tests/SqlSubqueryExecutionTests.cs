@@ -254,7 +254,7 @@ public sealed class SqlSubqueryExecutionTests
     {
         // Arrange
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("subquery");
+        var database = await engine.CreateDatabaseAsync("subquery");
         await using var writer = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(writer, "CREATE TABLE candidates (id INT);");
         await ExecuteAsync(writer, "CREATE TABLE choices (id INT);");
@@ -488,7 +488,7 @@ public sealed class SqlSubqueryExecutionTests
     {
         // Arrange
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("subquery");
+        var database = await engine.CreateDatabaseAsync("subquery");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
 
         // Act / Assert
@@ -501,7 +501,7 @@ public sealed class SqlSubqueryExecutionTests
     private static SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "subquery-tests" });
 
-    private static async Task SeedMembershipAsync(IDatabaseSession session)
+    private static async Task SeedMembershipAsync(SqlDatabaseSession session)
     {
         await ExecuteAsync(session, "CREATE TABLE candidates (id INT);");
         await ExecuteAsync(session, "CREATE TABLE choices (id INT);");
@@ -509,10 +509,10 @@ public sealed class SqlSubqueryExecutionTests
         await ExecuteAsync(session, "INSERT INTO choices VALUES (2), (NULL);");
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string sql)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql)
         => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
         return await ReadRowsAsync(result);

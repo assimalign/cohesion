@@ -17,13 +17,12 @@ namespace Assimalign.Cohesion.Database;
 /// <remarks>
 /// <para>
 /// <b>Typed over the engine (concrete-types plan, step P4.0, #1260).</b> A factory receives the
-/// model's own engine, so a model's sealed builder can offer typed <c>AddWorker</c> and
-/// <c>AddServer</c> once its engine derives from <see cref="DatabaseEngine"/>. The product types
-/// are parameters only for the bridge: a model that has not adopted the root bases composes the
-/// root interfaces (<see cref="IDatabaseEngineWorker"/>, <see cref="IDatabaseServer"/>), and one
-/// that has composes <see cref="DatabaseEngineWorker"/> and <see cref="DatabaseServer"/>, which
-/// implement those interfaces until phase 6. Phase 6 deletes the interfaces, fixes the products to
-/// the bases and constrains <typeparamref name="TEngine"/> to <see cref="DatabaseEngine"/>.
+/// model's own engine, so each model's sealed builder offers typed <c>AddWorker</c> and
+/// <c>AddServer</c>. Every model's engine derives from <see cref="DatabaseEngine"/> since phase 4,
+/// and every builder composes <see cref="DatabaseEngineWorker"/> and <see cref="DatabaseServer"/>;
+/// the product types stay parameters, constrained to the root interfaces the bases implement,
+/// until phase 6 deletes the interfaces, fixes the products to the bases and constrains
+/// <typeparamref name="TEngine"/> to <see cref="DatabaseEngine"/>.
 /// </para>
 /// <para>
 /// <b>The leaf attaches; the base checks.</b> A builder cannot call the protected attach members
@@ -45,10 +44,12 @@ namespace Assimalign.Cohesion.Database;
 /// dropping factories.
 /// </para>
 /// <para>
-/// Until a model's engine derives from the base, its builder composes through
-/// <see cref="Complete(TEngine, Action{TWorker}, Action{TServer})"/>, which makes the base's
-/// product checks (a product attached twice, a server that fronts another engine) over the
-/// engine's own attach members; the worker-name check stays the engine's, as before.
+/// <b>A rejected product is disposed through its own public disposal.</b> A worker no engine owns
+/// runs its release hook from <see cref="DatabaseEngineWorker.DisposeAsync"/>; a worker the engine
+/// already owns (a repeated product, a built-in worker a factory returned) is the engine's to
+/// release, so the state leaves it alone and the worker's disposal would do nothing either. The
+/// bridge overload that composed through an unadopted engine's own attach members was deleted with
+/// the last model's phase-4 PR (Sql, #1260).
 /// </para>
 /// </remarks>
 internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
@@ -182,47 +183,6 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
     }
 
     /// <summary>
-    /// The bridge for a model whose engine does not derive from <see cref="DatabaseEngine"/> yet:
-    /// composes through the engine's own attach members, making the checks the base's attach makes
-    /// (a product attached twice, a server that fronts another engine). Each model's phase-4 PR moves
-    /// its builder to the compose-method overload, and the last one deletes this bridge.
-    /// </summary>
-    /// <param name="engine">The engine the builder created.</param>
-    /// <param name="attachWorker">The engine's internal worker attach.</param>
-    /// <param name="attachServer">The engine's internal server attach.</param>
-    /// <returns><paramref name="engine"/>, composed.</returns>
-    /// <remarks>
-    /// Whatever a factory or an attach throws is rethrown unchanged after the cleanup
-    /// <see cref="Complete(TEngine, Action{IEnumerable{TWorker}, IEnumerable{TServer}})"/> makes.
-    /// </remarks>
-    /// <exception cref="InvalidOperationException">
-    /// A factory returned null, a product was attached twice, a server fronts another engine, or the
-    /// engine's attach refused the product with this type (SQL: a duplicate worker name).
-    /// </exception>
-    /// <exception cref="ArgumentException">The engine's attach refused an invalid product (SQL: a worker with a blank name).</exception>
-    /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>
-    public TEngine Complete(TEngine engine, Action<TWorker> attachWorker, Action<TServer> attachServer)
-        => Complete(engine, (workers, servers) =>
-        {
-            foreach (var worker in workers)
-            {
-                ThrowIfAttached(engine, worker);
-                attachWorker(worker);
-            }
-
-            foreach (var server in servers)
-            {
-                ThrowIfAttached(engine, server);
-                if (!ReferenceEquals(server.Context.Engine, engine))
-                {
-                    throw new InvalidOperationException("A nested server must front its owning engine.");
-                }
-
-                attachServer(server);
-            }
-        });
-
-    /// <summary>
     /// Disposes the engine a completed build returned, when the composition that consumed it
     /// failed afterwards.
     /// </summary>
@@ -279,14 +239,6 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
         if (_pending is { } previous && !IsAttached(engine, previous))
         {
             throw new InvalidOperationException("The compose method read past a product it did not attach.");
-        }
-    }
-
-    private static void ThrowIfAttached(TEngine engine, object product)
-    {
-        if (IsAttached(engine, product))
-        {
-            throw new InvalidOperationException("A composition product cannot be registered twice.");
         }
     }
 

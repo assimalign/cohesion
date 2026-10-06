@@ -106,11 +106,11 @@ Dependency direction is strictly downward. Model engines depend on kernel projec
 
 ### 3.3 Model engines
 
-Each model root project owns a public engine (`{Model}DatabaseEngine`, static `Create(options)` factory, `IDatabaseEngine` implementation) and the model's public database interface:
+Each model root project owns a public engine (`{Model}DatabaseEngine`, static `Create(options)` factory, a sealed leaf of the root `DatabaseEngine` since the concrete-types plan, phase 4) and the model's public database type:
 
-| Model | Interface | Shape | Language |
+| Model | Database type | Shape | Language |
 |---|---|---|---|
-| SQL | `ISqlDatabase` | tables/schemas/views over row-oriented slotted pages | SQL dialect (declared matrix, conformance corpus) — `Sql.Language` |
+| SQL | `SqlDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | tables/schemas/views over row-oriented slotted pages | SQL dialect (declared matrix, conformance corpus) — `Sql.Language` |
 | Documents | `DocumentDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | named collections of versioned documents (`DocumentCollection`) | OQL query and index-DDL contract — `Documents.Language` |
 | Graph | `GraphDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | property graph: nodes, typed directed relationships, traversal | standard TBD (ISO GQL is the recommended default; decision gates deep language work) — `Graph.Language` |
 | Blob | `BlobDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | containers of streamed large objects (`BlobContainer`) + metadata catalog | none (API-driven) |

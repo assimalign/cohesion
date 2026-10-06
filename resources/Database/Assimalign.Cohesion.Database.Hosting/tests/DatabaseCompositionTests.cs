@@ -11,6 +11,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Configuration;
+using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Documents;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.DependencyInjection;
@@ -290,7 +291,7 @@ public sealed class DatabaseCompositionTests
                 context.Services.GetRequiredService<Marker>().Value.ShouldBe("custom");
                 var engine = SqlDatabaseEngine.CreateBuilder();
                 engine.EngineName = context.Services.GetRequiredService<Marker>().Value;
-                engine.AddServer(owner => new RecordingServer([], engine: owner));
+                engine.AddServer(owner => SqlDatabaseServer.Create(owner, new SqlDatabaseServerOptions { Listener = new InMemoryConnectionListener() }));
                 return engine.Build();
             });
             provider.LoadCount.ShouldBe(0);

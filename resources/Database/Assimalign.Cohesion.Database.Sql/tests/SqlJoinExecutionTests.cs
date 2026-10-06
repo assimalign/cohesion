@@ -182,7 +182,7 @@ public sealed class SqlJoinExecutionTests
         // Arrange
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("join");
-        await using (var schema = ((SqlDatabaseInstance)database).CreateSchemaSession("people", CancellationToken.None))
+        await using (var schema = database.CreateSchemaSession("people", CancellationToken.None))
         {
             await ExecuteAsync(schema, "CREATE TABLE parents (id INT PRIMARY KEY, name TEXT);");
             await ExecuteAsync(schema, "CREATE TABLE children (id INT PRIMARY KEY, parent_id INT REFERENCES parents(id));");
@@ -240,7 +240,7 @@ public sealed class SqlJoinExecutionTests
     {
         // Arrange: freeze the statement deterministically before a concurrent commit.
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("join");
+        var database = await engine.CreateDatabaseAsync("join");
         await using var writer = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(writer, "CREATE TABLE a (id INT, value TEXT);");
         await ExecuteAsync(writer, "CREATE TABLE b (id INT, value TEXT);");
@@ -371,7 +371,7 @@ public sealed class SqlJoinExecutionTests
     private static SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "join-tests" });
 
-    private static async Task SeedUsersAsync(IDatabaseSession session)
+    private static async Task SeedUsersAsync(SqlDatabaseSession session)
     {
         await ExecuteAsync(session, "CREATE TABLE usr.Users (Id INT PRIMARY KEY, FirstName TEXT, LastName TEXT);");
         await ExecuteAsync(session, "CREATE TABLE usr.UsersProfile (Id INT PRIMARY KEY, UserId INT, Email TEXT);");
@@ -379,13 +379,13 @@ public sealed class SqlJoinExecutionTests
         await ExecuteAsync(session, "INSERT INTO usr.UsersProfile VALUES (10, 1, 'ada@example.test'), (11, 1, 'ada-alt@example.test'), (20, 2, 'grace@example.test'), (99, 99, 'orphan@example.test');");
     }
 
-    private static SqlStatementMetrics MetricsOf(IDatabaseSession session)
-        => ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+    private static SqlStatementMetrics MetricsOf(SqlDatabaseSession session)
+        => session.LastStatementMetrics.ShouldNotBeNull();
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(sql, parameters, CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         await using var result = (await ExecuteAsync(session, sql, parameters)).ShouldBeAssignableTo<QueryResultSet>();
         return await ReadRowsAsync(result);

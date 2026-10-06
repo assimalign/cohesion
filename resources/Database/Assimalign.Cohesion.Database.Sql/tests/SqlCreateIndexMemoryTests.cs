@@ -71,7 +71,7 @@ public sealed class SqlCreateIndexMemoryTests : IDisposable
             CheckpointInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync($"CREATE TABLE t (id INT PRIMARY KEY, k VARCHAR({KeyLength}))", cancellationToken: TestTimeout.Token(60));
         var sql = new StringBuilder();

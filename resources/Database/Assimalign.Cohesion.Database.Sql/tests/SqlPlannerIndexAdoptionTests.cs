@@ -21,7 +21,7 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </summary>
 public sealed class SqlPlannerIndexAdoptionTests
 {
-    private static async Task<(SqlDatabaseEngine Engine, IDatabase Database, IDatabaseSession Session)> CreateAsync(string name)
+    private static async Task<(SqlDatabaseEngine Engine, SqlDatabase Database, SqlDatabaseSession Session)> CreateAsync(string name)
     {
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = name });
         var database = await engine.CreateDatabaseAsync(name + "-db");
@@ -29,14 +29,14 @@ public sealed class SqlPlannerIndexAdoptionTests
         return (engine, database, session);
     }
 
-    private static SqlPlan PlanOf(IDatabase database, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static SqlPlan PlanOf(SqlDatabase database, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         var request = parameters is null ? SqlQueryRequest.FromSql(sql) : SqlQueryRequest.FromSql(sql, parameters);
         return new SqlPlanner(instance.Catalog, request.Parameters).Plan(request.Statement.SqlExpression);
     }
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
@@ -55,8 +55,8 @@ public sealed class SqlPlannerIndexAdoptionTests
         return rows;
     }
 
-    private static SqlStatementMetrics MetricsOf(IDatabaseSession session)
-        => ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+    private static SqlStatementMetrics MetricsOf(SqlDatabaseSession session)
+        => session.LastStatementMetrics.ShouldNotBeNull();
 
     // ── Plan shape ─────────────────────────────────────────────────────
 

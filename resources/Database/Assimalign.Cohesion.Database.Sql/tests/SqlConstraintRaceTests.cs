@@ -17,7 +17,7 @@ public sealed class SqlConstraintRaceTests
     public async Task CreateUniqueIndex_DuplicateBackfill_ShouldReportTheSameConstraintViolation()
     {
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-unique-backfill" });
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT)");
         await session.ExecuteAsync("INSERT INTO t VALUES (7), (7)");
@@ -55,7 +55,7 @@ public sealed class SqlConstraintRaceTests
     public async Task DdlPublishingWhileDmlWaits_ShouldNeverBypassNewConstraint(string ddl, string write)
     {
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-ddl-race" });
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT, val INT)");
         await session.ExecuteAsync("INSERT INTO t VALUES (1, 1), (2, 2)");
@@ -235,7 +235,7 @@ public sealed class SqlConstraintRaceTests
         (await Rows(session, "SELECT id FROM b")).Count.ShouldBe(1);
     }
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

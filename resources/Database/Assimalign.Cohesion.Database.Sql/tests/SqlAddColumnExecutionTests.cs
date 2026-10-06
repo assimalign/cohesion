@@ -106,7 +106,7 @@ public sealed class SqlAddColumnExecutionTests
         rows[2].ShouldBe(new object?[] { 3, "omitted", 7, "CAFÉ" });
         rows[3].ShouldBe(new object?[] { 4, "explicit null", null, "CAFÉ" });
         rows[4].ShouldBe(new object?[] { 5, "after reopen", 7, "CAFÉ" });
-        var catalog = restored.ShouldBeOfType<SqlDatabaseInstance>().Catalog;
+        var catalog = restored.ShouldBeOfType<SqlDatabase>().Catalog;
         catalog.TryGetTable("dbo", "additions", out var table).ShouldBeTrue();
         table.FindColumn("extra").ShouldNotBeNull().DefaultLiteral.ShouldBe("7");
         table.FindColumn("category").ShouldNotBeNull().Collation.ShouldBe(Collation.CaseAccentInsensitive);
@@ -135,7 +135,7 @@ public sealed class SqlAddColumnExecutionTests
         // Assert
         error.Operation.ShouldBe("ALTER TABLE ADD COLUMN");
         error.OwningSchema.ShouldBe("additions");
-        var catalog = database.ShouldBeOfType<SqlDatabaseInstance>().Catalog;
+        var catalog = database.ShouldBeOfType<SqlDatabase>().Catalog;
         catalog.TryGetTable("dbo", "additions", out var table).ShouldBeTrue();
         table.Owner.ShouldBe(DatabaseObjectOwner.Schema);
         table.FindColumn("extra").ShouldBeNull();
@@ -145,10 +145,10 @@ public sealed class SqlAddColumnExecutionTests
         rows[1].ShouldBe(new object?[] { 2, null });
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string sql)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql)
         => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

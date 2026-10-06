@@ -110,7 +110,7 @@ public sealed class SqlLineCommentExecutionTests
         (await SnapshotAsync(session)).ShouldBe(["1,10", "2,20", "3,30"]);
     }
 
-    private static async Task<IDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
+    private static async Task<SqlDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
     {
         var database = await engine.CreateDatabaseAsync("comments");
         var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
@@ -120,12 +120,12 @@ public sealed class SqlLineCommentExecutionTests
     }
 
     /// <summary>Runs <paramref name="sql"/> through the text seam, or parsed through the typed-request seam.</summary>
-    private static Task<QueryResult> RunAsync(IDatabaseSession session, string sql, bool typed)
+    private static Task<QueryResult> RunAsync(SqlDatabaseSession session, string sql, bool typed)
         => typed
             ? session.ExecuteAsync(new SqlQueryRequest((SqlQueryStatement)new SqlQueryParser().Parse(sql)), CancellationToken.None).AsTask()
             : session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<string[]> SnapshotAsync(IDatabaseSession session)
+    private static async Task<string[]> SnapshotAsync(SqlDatabaseSession session)
     {
         await using var result = (await RunAsync(session, "SELECT id, a FROM t ORDER BY id;", typed: false)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<string>();

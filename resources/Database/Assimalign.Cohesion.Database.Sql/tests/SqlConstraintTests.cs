@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlConstraintTests
 {
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();
@@ -181,7 +181,7 @@ public sealed class SqlConstraintTests
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
         await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"CREATE TABLE t (qty INT CHECK ({predicate}))"));
-        ((SqlDatabaseInstance)database).Catalog.TryGetTable("dbo", "t", out _).ShouldBeFalse();
+        database.Catalog.TryGetTable("dbo", "t", out _).ShouldBeFalse();
     }
 
     [Fact]
@@ -220,11 +220,11 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("CREATE INDEX child_parent ON c(pid)");
         await session.ExecuteAsync("INSERT INTO p VALUES " + string.Join(',', Enumerable.Range(1, 100).Select(id => $"({id})")));
         await session.ExecuteAsync("INSERT INTO c VALUES (1, 50)");
-        var metrics = ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+        var metrics = session.LastStatementMetrics.ShouldNotBeNull();
         metrics.AccessPath.ShouldStartWith("constraint-seek:");
         metrics.RecordsExamined.ShouldBe(1);
         await session.ExecuteAsync("DELETE FROM p WHERE id = 50");
-        metrics = ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+        metrics = session.LastStatementMetrics.ShouldNotBeNull();
         metrics.AccessPath.ShouldBe("constraint-seek:child_parent");
         metrics.RecordsExamined.ShouldBe(101);
         (await Rows(session, "SELECT id FROM c")).ShouldBeEmpty();
@@ -242,7 +242,7 @@ public sealed class SqlConstraintTests
         await session.ExecuteAsync("INSERT INTO p VALUES (1, 7), (2, 7), (3, 8)");
         await session.ExecuteAsync("INSERT INTO c VALUES (1, 7), (2, 7), (3, 8)");
         await session.ExecuteAsync("DELETE FROM p WHERE a = 1");
-        var metrics = ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+        var metrics = session.LastStatementMetrics.ShouldNotBeNull();
         metrics.AccessPath.ShouldBe("constraint-seek:child_b");
         metrics.RecordsExamined.ShouldBe(5);
         (await Rows(session, "SELECT a FROM c ORDER BY a")).Select(row => row[0]).ShouldBe(new object?[] { 2, 3 });

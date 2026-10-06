@@ -175,6 +175,42 @@ public class DatabaseEngineTests
         engine.State.ShouldBe(EngineState.Disposed);
     }
 
+    /// <summary>
+    /// The worker base's release (concrete-types plan, row 7): an engine releases every worker it
+    /// owns once, through the worker's release hook, after the worker's pump stopped; a worker's own
+    /// disposal leaves a worker an engine owns to the engine, and releases a worker no engine owns,
+    /// once. The engine no longer type-tests its workers for disposal interfaces.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: a worker the engine owns is released by the engine only; one no engine owns releases itself once")]
+    public async Task DisposeAsync_Worker_ShouldBeReleasedOnceByItsOwner()
+    {
+        // Arrange
+        var log = new TestLog();
+        var engine = new TestEngine(log: log);
+        var owned = new RecordingWorker(log, "test-engine/owned");
+        var unowned = new RecordingWorker(log, "test-engine/unowned");
+        engine.Attach(owned);
+        engine.Complete();
+        owned.Waiting.Wait(_timeout).ShouldBeTrue();
+
+        // Act
+        await owned.DisposeAsync();
+        int ownedBeforeEngine = owned.Disposes;
+        await engine.DisposeAsync();
+        await owned.DisposeAsync();
+        await unowned.DisposeAsync();
+        await unowned.DisposeAsync();
+
+        // Assert
+        ownedBeforeEngine.ShouldBe(0);
+        owned.Disposes.ShouldBe(1);
+        unowned.Disposes.ShouldBe(1);
+        var entries = log.Entries;
+        Array.IndexOf(entries, "test-engine/owned:stopped").ShouldBeGreaterThanOrEqualTo(0);
+        Array.IndexOf(entries, "test-engine/owned:stopped").ShouldBeLessThan(Array.IndexOf(entries, "test-engine/owned:dispose"));
+        engine.Workers.ShouldNotContain(unowned);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - Engine: the state is Faulted exactly while a worker holds a failure")]
     public async Task State_WorkerFailure_ShouldBeFaultedUntilTheWorkerRecovers()
     {

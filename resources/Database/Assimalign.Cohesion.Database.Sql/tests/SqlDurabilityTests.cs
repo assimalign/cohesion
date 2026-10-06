@@ -46,7 +46,7 @@ public sealed class SqlDurabilityTests : IDisposable
 
     private static SqlQueryRequest CreateTableRequest() => SqlQueryRequest.FromSql("CREATE TABLE t (label VARCHAR(100));");
 
-    private static async Task<int> CountRowsAsync(IDatabaseSession session)
+    private static async Task<int> CountRowsAsync(SqlDatabaseSession session)
     {
         var result = await session.ExecuteAsync(SelectRequest());
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();

@@ -18,10 +18,10 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </summary>
 public sealed class SqlMvccBindingTests
 {
-    private static async Task<(SqlDatabaseInstance Database, IDatabaseSession Session)> CreateSessionAsync(
+    private static async Task<(SqlDatabase Database, SqlDatabaseSession Session)> CreateSessionAsync(
         SqlDatabaseEngine engine, string name)
     {
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        var database = await engine.CreateDatabaseAsync(name);
         var session = await database.CreateSessionAsync();
         return (database, session);
     }
@@ -36,7 +36,7 @@ public sealed class SqlMvccBindingTests
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
 
         // Act
-        var transaction = (SqlDatabaseTransaction)await session.BeginTransactionAsync();
+        var transaction = await session.BeginTransactionAsync();
 
         // Assert: the transaction is a live manager context, and physical
         // brackets are per statement — none is held between statements (page
@@ -112,7 +112,7 @@ public sealed class SqlMvccBindingTests
         await using var __ = sessionB;
 
         var foreignContext = await databaseB.Coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var crossBound = new SqlDatabaseTransaction(databaseA.Coordinator, foreignContext);
+        var crossBound = new SqlDatabaseTransaction(databaseA.Coordinator, foreignContext, databaseA, catalogSnapshot: null);
 
         // Act + Assert
         var exception = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () =>

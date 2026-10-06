@@ -22,7 +22,7 @@ public sealed class SqlSystemViewLegacyCatalogTests
     public async Task LegacyPrimaryKey_ShouldReportConstraintAndReferenceWithoutInventingAnIndex()
     {
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "system-legacy" });
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("app", cancellationToken: CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("app", cancellationToken: CancellationToken.None);
         await database.Catalog.CreateTableAsync("dbo", "legacy",
         [
             new SqlCatalogColumn("tenant_id", new DatabaseTypeInfo(DatabaseType.Int32), false),
@@ -96,7 +96,7 @@ public sealed class SqlSystemViewLegacyCatalogTests
         usages[3].ShouldBe(new object?[] { "PrimaryKey_legacy_2", "id", 2L });
     }
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

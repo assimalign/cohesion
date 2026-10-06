@@ -107,7 +107,7 @@ public sealed class SqlParseStrictnessExecutionTests
         }
     }
 
-    private static async Task<string[]> SnapshotAsync(IDatabaseSession session)
+    private static async Task<string[]> SnapshotAsync(SqlDatabaseSession session)
     {
         await using var result = (await ExecuteAsync(session, "SELECT id, a, b FROM t ORDER BY id;")).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<string>();
@@ -118,6 +118,6 @@ public sealed class SqlParseStrictnessExecutionTests
         return [.. rows];
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string statement)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement)
         => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask();
 }

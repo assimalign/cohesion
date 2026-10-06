@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.ExceptionServices;
 using System.Threading;
+using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Storage;
 
@@ -58,7 +59,7 @@ namespace Assimalign.Cohesion.Database;
 /// offline.
 /// </para>
 /// </remarks>
-internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWorker, IDisposable
+internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWorker
     where TDatabase : class
 {
     /// <summary>
@@ -88,9 +89,16 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
 
     /// <summary>
     /// Stops the worker's lanes once the engine stopped its pump: waits for every checkpoint still
-    /// running, so none outlives the engine's storages.
+    /// running, so none outlives the engine's storages. The worker base's release hook, which the
+    /// owning engine runs once (concrete-types plan, row 7); it was the worker's
+    /// <see cref="IDisposable.Dispose"/> until the engines' disposable type tests went.
     /// </summary>
-    public void Dispose() => _lanes.Dispose();
+    /// <returns>A completed task, once every lane ended.</returns>
+    protected override ValueTask DisposeAsyncCore()
+    {
+        _lanes.Dispose();
+        return ValueTask.CompletedTask;
+    }
 
     /// <summary>Gets the engine's open databases.</summary>
     /// <returns>The snapshot of the engine's open databases.</returns>

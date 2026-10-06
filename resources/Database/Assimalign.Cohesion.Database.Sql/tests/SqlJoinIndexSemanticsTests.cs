@@ -194,20 +194,20 @@ public sealed class SqlJoinIndexSemanticsTests
         MetricsOf(session).AccessPath.ShouldBe("join-seek:ix_key");
     }
 
-    private static SqlJoinPlan PlanOf(IDatabase database, string sql)
+    private static SqlJoinPlan PlanOf(SqlDatabase database, string sql)
     {
         var request = SqlQueryRequest.FromSql(sql);
-        return new SqlPlanner(((SqlDatabaseInstance)database).Catalog, request.Parameters)
+        return new SqlPlanner(database.Catalog, request.Parameters)
             .Plan(request.Statement.SqlExpression).ShouldBeOfType<SqlJoinPlan>();
     }
 
-    private static SqlStatementMetrics MetricsOf(IDatabaseSession session)
-        => ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+    private static SqlStatementMetrics MetricsOf(SqlDatabaseSession session)
+        => session.LastStatementMetrics.ShouldNotBeNull();
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(sql, parameters, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<(int Left, int Right)[]> ReadPairsAsync(IDatabaseSession session, string sql)
+    private static async Task<(int Left, int Right)[]> ReadPairsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
         var pairs = new List<(int Left, int Right)>();

@@ -94,7 +94,7 @@ public sealed class SqlCollationIndexTests
             await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { RootPath = root }))
             {
                 var database = await engine.OpenDatabaseAsync("restart", CancellationToken.None);
-                var catalog = ((SqlDatabaseInstance)database).Catalog;
+                var catalog = database.Catalog;
                 catalog.DefaultCollation.ShouldBeSameAs(Collation.CaseInsensitive);
                 catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
                 table.Columns[0].Collation.ShouldBeNull();
@@ -153,18 +153,18 @@ public sealed class SqlCollationIndexTests
         (await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE INDEX ix ON t(name)"))).Message.ShouldContain("not index-backed");
         (await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE TABLE bad (name TEXT COLLATE invariant UNIQUE)"))).Message.ShouldContain("not index-backed");
         await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE TABLE bad_number (id INT COLLATE binary)"));
-        ((SqlDatabaseInstance)database).Catalog.TryGetTable("dbo", "bad", out _).ShouldBeFalse();
+        database.Catalog.TryGetTable("dbo", "bad", out _).ShouldBeFalse();
         await Execute(session, "INSERT INTO t VALUES ('Alice')");
         (await Names(session, "SELECT name FROM t WHERE name = 'Alice'")).ShouldBe(new[] { "Alice" });
     }
 
-    private static async Task Execute(IDatabaseSession session, string sql)
+    private static async Task Execute(SqlDatabaseSession session, string sql)
         => await session.ExecuteAsync(SqlQueryRequest.FromSql(sql), CancellationToken.None);
 
-    private static SqlStatementMetrics Metrics(IDatabaseSession session)
-        => ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+    private static SqlStatementMetrics Metrics(SqlDatabaseSession session)
+        => session.LastStatementMetrics.ShouldNotBeNull();
 
-    private static async Task<string[]> Names(IDatabaseSession session, string sql)
+    private static async Task<string[]> Names(SqlDatabaseSession session, string sql)
     {
         await using var result = (QueryResultSet)await session.ExecuteAsync(SqlQueryRequest.FromSql(sql), CancellationToken.None);
         var values = new List<string>();

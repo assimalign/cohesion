@@ -15,11 +15,11 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal sealed class SqlSchemaProvisioner
 {
-    private readonly SqlDatabaseInstance _database;
+    private readonly SqlDatabase _database;
     private readonly SqlCatalog _catalog;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
 
-    internal SqlSchemaProvisioner(SqlDatabaseInstance database, SqlCatalog catalog)
+    internal SqlSchemaProvisioner(SqlDatabase database, SqlCatalog catalog)
     {
         _database = database;
         _catalog = catalog;
@@ -58,7 +58,7 @@ internal sealed class SqlSchemaProvisioner
             SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(plan, current);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
 
-            await using IDatabaseSession session = _database.CreateSchemaSession(schema.Name, cancellationToken);
+            await using SqlDatabaseSession session = _database.CreateSchemaSession(schema.Name, cancellationToken);
             try
             {
                 foreach (SqlMigrationScriptStep step in script.Steps)
@@ -442,7 +442,7 @@ internal sealed class SqlSchemaProvisioner
     }
 
     private static async ValueTask<CompensationResult> CompensateAsync(
-        IDatabaseSession session,
+        SqlDatabaseSession session,
         IReadOnlyList<SqlMigrationScriptStep> applied)
     {
         bool complete = true;

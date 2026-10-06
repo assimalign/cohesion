@@ -5,33 +5,67 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Sql.Internal;
+namespace Assimalign.Cohesion.Database.Sql;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
-/// Internal implementation of a SQL database session, bound to the database's
-/// MVCC transaction manager: explicit and auto-commit statements alike run under
-/// a <see cref="TransactionContext"/> paired with a storage bracket, so
-/// visibility semantics never fork between the two paths.
+/// A SQL database session, bound to the database's MVCC transaction manager: explicit and
+/// auto-commit statements alike run under a <see cref="TransactionContext"/> paired with a storage
+/// bracket, so visibility semantics never fork between the two paths.
 /// </summary>
-internal sealed class SqlDatabaseSession : IDatabaseSession
+/// <remarks>
+/// <para>
+/// <b>The session's state, its explicit transaction and the "already active" check are the root
+/// base's</b> (<see cref="DatabaseSession"/>, §6.4 of the concrete-types plan): a typed BEGIN is
+/// refused with "A transaction or operation is already active on this session." while the
+/// session's transaction is usable, a closed session refuses everything with "The session is
+/// closed.", and disposal ends the open transaction as the session's teardown (a later commit of it
+/// reports <c>COHSQLT005</c> naming the closure). This type supplies the model's work: the
+/// isolation-level and offline refusals of BEGIN, the statements, the SQL transaction-control
+/// statements (<c>BEGIN</c>, <c>COMMIT</c>, <c>ROLLBACK</c>) and the translation of the kernel's
+/// exceptions at the model boundary.
+/// </para>
+/// <para>
+/// <b>A statement is statement-atomic.</b> Inside an explicit transaction, a statement that fails
+/// writes nothing and leaves the transaction active; the session never aborts its transaction for
+/// a failed statement (the owner's 2026-10-04 per-statement decision). A statement is admitted
+/// into the transaction through the base's operation admission, so a commit cannot start while it
+/// runs, and a transaction that refuses work (its commit or rollback is running, or the kernel
+/// ended it under its caller) refuses the statement. Statements do not hold the session (the
+/// base's operation hold): sessions are single-threaded by contract, as before the bases.
+/// </para>
+/// <para>
+/// <b>Transaction control through statement text.</b> <c>BEGIN</c> on a session with a usable
+/// transaction and <c>COMMIT</c> or <c>ROLLBACK</c> without one are state misuse, reported as
+/// diagnostics (<c>COHSQLT001</c>, <c>COHSQLT002</c>) without throwing or changing the transaction.
+/// <c>BEGIN</c> on a session whose transaction refuses work throws that transaction's refusal, as
+/// the typed BEGIN does; <c>COMMIT</c> and <c>ROLLBACK</c> end the transaction through the base, so
+/// a <c>COMMIT</c> of a transaction the kernel ended rolls it back and throws <c>COHSQLT005</c>.
+/// </para>
+/// <para>
+/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root base with
+/// an internal constructor; <see cref="SqlDatabase.CreateSessionAsync"/> creates it. The database
+/// and the transaction are re-exposed typed with <c>new</c> members over the base's public members.
+/// </para>
+/// </remarks>
+public sealed class SqlDatabaseSession : DatabaseSession
 {
+    private readonly SqlDatabase _database;
     private readonly TransactionCoordinator _coordinator;
     private readonly SqlQueryExecutor _executor;
     private readonly SqlQueryParserOptions _parserOptions;
     private readonly string? _provisioningSchema;
 
-    // B7 can push named scopes onto the same root transaction and attach undo
-    // markers. B2 only ever pushes the root scope; nested BEGIN is an error.
-    private readonly Stack<SqlTransactionScope> _transactionScopes = new();
-    private IsolationLevel _isolationLevel = IsolationLevel.Snapshot;
+    // The isolation level of an auto-commit statement and of a BEGIN statement. The SQL
+    // isolation syntax (SET TRANSACTION ISOLATION LEVEL) that would change it is not implemented.
+    private readonly IsolationLevel _isolationLevel = IsolationLevel.Snapshot;
     private SqlStatementMetrics? _lastStatementMetrics;
-    private SessionState _state;
 
     /// <summary>Opens a session over a database.</summary>
     /// <param name="database">The database.</param>
@@ -43,52 +77,31 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     /// </param>
     /// <param name="provisioningSchema">The schema the provisioner's session owns, if any.</param>
     internal SqlDatabaseSession(
-        ISqlDatabase database,
+        SqlDatabase database,
         TransactionCoordinator coordinator,
         SqlQueryExecutor executor,
         SqlQueryParserOptions parserOptions,
         string? provisioningSchema = null)
+        : base(database)
     {
-        Database = database;
+        _database = database;
         _coordinator = coordinator;
         _executor = executor;
         _parserOptions = parserOptions;
         _provisioningSchema = provisioningSchema;
-        _state = SessionState.Open;
     }
-
-    /// <inheritdoc />
-    public IDatabase Database { get; }
 
     /// <summary>
-    /// Gets the engine's database instance behind <see cref="Database"/>, whose offline state the
-    /// session checks before every operation (#1243).
+    /// Gets the SQL database this session is scoped to.
     /// </summary>
-    private SqlDatabaseInstance? Instance => Database as SqlDatabaseInstance;
+    public new SqlDatabase Database => _database;
 
-    /// <inheritdoc />
-    public SessionState State => _state;
-
-    /// <inheritdoc />
-    public IDatabaseTransaction? CurrentTransaction => ActiveScope?.Transaction;
-
-    private SqlTransactionScope? ActiveScope
-    {
-        get
-        {
-            while (_transactionScopes.TryPeek(out var scope))
-            {
-                if (scope.Transaction.State == TransactionState.Active)
-                {
-                    return scope;
-                }
-
-                _transactionScopes.Pop();
-            }
-
-            return null;
-        }
-    }
+    /// <summary>
+    /// Gets the session's explicit transaction until the caller ends it, including one the kernel
+    /// ended under its caller (<see cref="TransactionState.Faulted"/>), which waits for the caller's
+    /// rollback; null when none is open. A failed statement never ends it.
+    /// </summary>
+    public new SqlDatabaseTransaction? CurrentTransaction => (SqlDatabaseTransaction?)base.CurrentTransaction;
 
     /// <summary>
     /// Gets the previous statement's execution observability (access path,
@@ -96,26 +109,52 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     /// </summary>
     internal SqlStatementMetrics? LastStatementMetrics => _lastStatementMetrics;
 
-    /// <inheritdoc />
-    public ValueTask<IDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
-        => BeginTransactionAsync(_isolationLevel, cancellationToken);
+    /// <summary>
+    /// Begins an explicit transaction at the default isolation level, <see cref="IsolationLevel.Snapshot"/>.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The new transaction, now the session's transaction.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the transaction began.</exception>
+    /// <exception cref="ObjectDisposedException">The session's database has been disposed.</exception>
+    /// <exception cref="DatabaseException">
+    /// The session is closed; a transaction or operation is already active on it; or the session's
+    /// transaction refuses work (<c>COHSQLT005</c>).
+    /// </exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHSQLT004</c>, #1243).</exception>
+    public new async ValueTask<SqlDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+        => (SqlDatabaseTransaction)await base.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Begins an explicit transaction at the requested isolation level.
+    /// </summary>
+    /// <param name="isolationLevel">The isolation level the transaction executes under.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The new transaction, now the session's transaction.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the transaction began.</exception>
+    /// <exception cref="ObjectDisposedException">The session's database has been disposed.</exception>
+    /// <exception cref="DatabaseException">
+    /// The session is closed; a transaction or operation is already active on it; the session's
+    /// transaction refuses work (<c>COHSQLT005</c>); or <paramref name="isolationLevel"/> is
+    /// <see cref="IsolationLevel.Serializable"/>.
+    /// </exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHSQLT004</c>, #1243).</exception>
     /// <remarks>
-    /// The session begins an MVCC transaction context on the database's
-    /// transaction manager alongside the physical storage bracket (paired under
-    /// one sequence): <see cref="IsolationLevel.Snapshot"/> fixes the visibility
-    /// snapshot at begin, <see cref="IsolationLevel.ReadCommitted"/> refreshes
-    /// it per statement. <see cref="IsolationLevel.Serializable"/> is rejected —
-    /// the engine has no serialization-conflict detection yet, and the root
-    /// contract forbids running a transaction weaker than requested.
+    /// The session begins an MVCC transaction context on the database's transaction manager
+    /// alongside the physical storage bracket (paired under one sequence):
+    /// <see cref="IsolationLevel.Snapshot"/> fixes the visibility snapshot (and the catalog capture
+    /// system views read) at begin, <see cref="IsolationLevel.ReadCommitted"/> refreshes both per
+    /// statement. <see cref="IsolationLevel.Serializable"/> is rejected: the engine has no
+    /// serialization-conflict detection yet, and the root contract forbids running a transaction
+    /// weaker than requested. The base refuses a closed session and an active transaction, and
+    /// observes the token, before the isolation level and the offline database are checked.
     /// </remarks>
-    public async ValueTask<IDatabaseTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
-    {
-        ThrowIfNotOpen();
-        Instance?.ThrowIfOffline();
-        cancellationToken.ThrowIfCancellationRequested();
+    public new async ValueTask<SqlDatabaseTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
+        => (SqlDatabaseTransaction)await base.BeginTransactionAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
 
+    /// <inheritdoc />
+    protected override async ValueTask<DatabaseTransaction> BeginTransactionCoreAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken)
+    {
+        _database.ThrowIfOffline();
         if (isolationLevel == IsolationLevel.Serializable)
         {
             throw new DatabaseException(
@@ -124,41 +163,44 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
                 "Use IsolationLevel.Snapshot or IsolationLevel.ReadCommitted.");
         }
 
-        if (ActiveScope is not null)
-        {
-            throw new DatabaseException("A transaction is already active on this session.");
-        }
-
         TransactionContext context;
         try
         {
             context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (Instance is { } instance && instance.TranslateOffline(exception) is DatabaseOfflineException offline)
+        catch (Exception exception) when (_database.TranslateOffline(exception) is DatabaseOfflineException offline)
         {
             throw offline;
         }
 
-        var transaction = new SqlDatabaseTransaction(_coordinator, context, Instance);
-        _transactionScopes.Push(new SqlTransactionScope(transaction, isolationLevel,
-            isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null));
-        return transaction;
+        return new SqlDatabaseTransaction(_coordinator, context, _database,
+            isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null);
     }
 
     /// <inheritdoc />
-    public async ValueTask<QueryResult> ExecuteAsync(QueryRequest request, CancellationToken cancellationToken = default)
+    protected override ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
+        => ExecuteRequestAsync(request, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The model-agnostic text-execute seam: SQL sessions parse the statement with
+    /// the SQL dialect, under the engine's expression nesting limit — this is what lets
+    /// the wire-protocol server execute statement text without knowing any model
+    /// language. A parse that runs out of stack fails with <c>COHSQLE004</c>, as any
+    /// other walk over the statement does.
+    /// </remarks>
+    protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+        => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions), cancellationToken);
+
+    private async ValueTask<QueryResult> ExecuteRequestAsync(QueryRequest request, CancellationToken cancellationToken)
     {
-        ThrowIfNotOpen();
-        ArgumentNullException.ThrowIfNull(request);
-        Instance?.ThrowIfOffline();
-        cancellationToken.ThrowIfCancellationRequested();
+        _database.ThrowIfOffline();
 
         try
         {
-            return await ExecuteCoreAsync(request, cancellationToken).ConfigureAwait(false);
+            return await ExecuteStatementAsync(request, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (Instance is { } instance
-            && instance.TranslateOffline(exception, selfCommitting: IsSelfCommitting(request)) is var translated
+        catch (Exception exception) when (_database.TranslateOffline(exception, selfCommitting: IsSelfCommitting(request)) is var translated
             && !ReferenceEquals(translated, exception))
         {
             // A statement that met the offline storage (#1243) gets the coded refusal, unless its
@@ -194,7 +236,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         => request is SqlQueryRequest { Statement.SqlExpression.CommandType:
             SqlQueryCommandType.Create or SqlQueryCommandType.Alter or SqlQueryCommandType.Drop };
 
-    private async ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
+    private async ValueTask<QueryResult> ExecuteStatementAsync(QueryRequest request, CancellationToken cancellationToken)
     {
         // Typed requests may be constructed directly from a parser result rather
         // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
@@ -232,34 +274,52 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             return await ExecuteTransactionControlAsync(control, cancellationToken).ConfigureAwait(false);
         }
 
-        // Inside an explicit transaction, the statement rides its context.
-        if (ActiveScope is { } transactionScope)
+        // Inside an explicit transaction, the statement rides its context. A statement is
+        // statement-atomic: its writes share one physical bracket that a failure rolls back, so a
+        // failed statement writes nothing and the transaction stays active. Only a transaction that
+        // is ending, or that the kernel ended under its caller, refuses statements, so a statement
+        // never runs in a half-rolled-back transaction or silently autocommits (#1225).
+        if (CurrentTransaction is { } transaction)
         {
-            if (request is SqlQueryRequest { Statement.SqlExpression.CommandType:
-                SqlQueryCommandType.Create or SqlQueryCommandType.Alter or SqlQueryCommandType.Drop })
+            // The admission also keeps a commit from starting while the statement runs. A rollback
+            // may still end the transaction underneath it (a host's rollback of a wire session's
+            // transaction): the statement then fails, and the kernel applies nothing for it.
+            if (!transaction.TryBeginStatement())
             {
-                return TransactionDiagnostic("COHSQLT003",
-                    "DDL requires auto-commit mode because the catalog does not enlist in session transactions.");
+                throw transaction.CreateStatementRefusal();
             }
-
-            var scope = new SqlStatementContext(transactionScope.Transaction.Context, _coordinator, _provisioningSchema,
-                Database.Name.ToString(), transactionScope.CatalogSnapshot ?? CaptureSystemViewSnapshot(request));
-            _lastStatementMetrics = scope.Metrics;
 
             try
             {
-                return await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+                if (IsSelfCommitting(request))
+                {
+                    return TransactionDiagnostic("COHSQLT003",
+                        "DDL requires auto-commit mode because the catalog does not enlist in session transactions.");
+                }
+
+                var scope = new SqlStatementContext(transaction.Context, _coordinator, _provisioningSchema,
+                    _database.Name.ToString(), transaction.CatalogSnapshot ?? CaptureSystemViewSnapshot(request));
+                _lastStatementMetrics = scope.Metrics;
+
+                try
+                {
+                    return await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+                }
+                catch (TransactionDeadlockException exception)
+                {
+                    // The requester-closes-cycle victim: the statement failed and is
+                    // retryable by construction — roll the transaction back and
+                    // re-attempt. The session stays usable.
+                    throw new DatabaseTransactionDeadlockException(exception.Message, exception);
+                }
+                catch (TransactionAbortedException exception)
+                {
+                    throw new DatabaseTransactionAbortedException(exception.Message, exception);
+                }
             }
-            catch (TransactionDeadlockException exception)
+            finally
             {
-                // The requester-closes-cycle victim: the statement failed and is
-                // retryable by construction — roll the transaction back and
-                // re-attempt. The session stays usable.
-                throw new DatabaseTransactionDeadlockException(exception.Message, exception);
-            }
-            catch (TransactionAbortedException exception)
-            {
-                throw new DatabaseTransactionAbortedException(exception.Message, exception);
+                transaction.EndStatement();
             }
         }
 
@@ -270,7 +330,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         {
             context = await _coordinator.BeginAsync(_isolationLevel, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (Instance is { } instance && instance.TranslateOffline(exception) is DatabaseOfflineException offline)
+        catch (Exception exception) when (_database.TranslateOffline(exception) is DatabaseOfflineException offline)
         {
             // Refused before the statement wrote anything, a self-committing one included.
             throw offline;
@@ -279,7 +339,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                Database.Name.ToString(), CaptureSystemViewSnapshot(request));
+                _database.Name.ToString(), CaptureSystemViewSnapshot(request));
             _lastStatementMetrics = scope.Metrics;
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
@@ -315,26 +375,10 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     /// </summary>
     private async ValueTask RollbackAutoCommitAsync(TransactionContext context)
     {
-        if (context.State == TransactionState.Active && Instance?.IsOffline != true)
+        if (context.State == TransactionState.Active && !_database.IsOffline)
         {
             await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false);
         }
-    }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// The model-agnostic text-execute seam: SQL sessions parse the statement with
-    /// the SQL dialect, under the engine's expression nesting limit — this is what lets
-    /// the wire-protocol server execute statement text without knowing any model
-    /// language. A parse that runs out of stack fails with <c>COHSQLE004</c>, as any
-    /// other walk over the statement does.
-    /// </remarks>
-    public ValueTask<QueryResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
-    {
-        ThrowIfNotOpen();
-        ArgumentException.ThrowIfNullOrWhiteSpace(statement);
-
-        return ExecuteAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions), cancellationToken);
     }
 
     /// <summary>
@@ -350,33 +394,17 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         Location = DiagnosticLocation.Absolute,
     };
 
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        if (_state == SessionState.Closed)
-        {
-            return;
-        }
-
-        // Dispose the root once, even after B7 adds nested scopes sharing it. On an offline
-        // database the transaction's disposal touches nothing (the reopen's recovery aborts it).
-        if (ActiveScope is { } scope)
-        {
-            await scope.Transaction.DisposeAsync().ConfigureAwait(false);
-        }
-
-        _transactionScopes.Clear();
-        _state = SessionState.Closed;
-    }
-
     private async ValueTask<QueryResult> ExecuteTransactionControlAsync(
         SqlTransactionExpression control, CancellationToken cancellationToken)
     {
-        var scope = ActiveScope;
+        var transaction = CurrentTransaction;
         if (control.CommandType == SqlQueryCommandType.Begin)
         {
-            if (scope is not null)
+            if (transaction is not null)
             {
+                // A transaction that refuses work refuses BEGIN with its own refusal, as the typed
+                // BEGIN does; a usable one makes BEGIN state misuse, reported, not thrown.
+                ThrowIfTransactionRefuses();
                 return TransactionDiagnostic("COHSQLT001", "BEGIN requires a session with no open transaction.");
             }
 
@@ -384,21 +412,21 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         }
         else
         {
-            if (scope is null)
+            if (transaction is null)
             {
                 return TransactionDiagnostic("COHSQLT002", $"{control.CommandType.ToString().ToUpperInvariant()} requires an open transaction.");
             }
 
+            // The base ends the transaction whatever the outcome; a COMMIT of a transaction the
+            // kernel ended under its caller rolls it back and throws COHSQLT005.
             if (control.CommandType == SqlQueryCommandType.Commit)
             {
-                await scope.Transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                await scope.Transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
             }
-
-            _transactionScopes.Clear();
         }
 
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
@@ -445,16 +473,5 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             SqlInExpression { Subquery: not null } member => UsesSystemView(member.Subquery) || UsesSystemViewExpression(member.Operand),
             _ => SqlPlanner.Children(expression).Any(UsesSystemViewExpression),
         };
-    }
-
-    private sealed record SqlTransactionScope(
-        SqlDatabaseTransaction Transaction, IsolationLevel IsolationLevel, SqlCatalogSnapshot? CatalogSnapshot);
-
-    private void ThrowIfNotOpen()
-    {
-        if (_state != SessionState.Open)
-        {
-            throw new DatabaseException($"Session is not open. Current state: {_state}.");
-        }
     }
 }

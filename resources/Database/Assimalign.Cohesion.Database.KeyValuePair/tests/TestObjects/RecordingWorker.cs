@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
@@ -7,7 +8,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 /// A worker a builder factory composes into a key-value engine: it records its passes and its
 /// disposal, and derives from the root base, as every worker the engine can attach does.
 /// </summary>
-internal sealed class RecordingWorker : DatabaseEngineWorker, IDisposable
+internal sealed class RecordingWorker : DatabaseEngineWorker
 {
     private readonly ManualResetEventSlim _started = new();
     private int _passes;
@@ -36,7 +37,13 @@ internal sealed class RecordingWorker : DatabaseEngineWorker, IDisposable
     /// <summary>Gets the number of times the worker was disposed.</summary>
     public int Disposals => Volatile.Read(ref _disposals);
 
-    public void Dispose() => Interlocked.Increment(ref _disposals);
+    // The base's release hook, which the owning engine runs once, or DisposeAsync for a worker no
+    // engine owns (one a builder refused).
+    protected override ValueTask DisposeAsyncCore()
+    {
+        Interlocked.Increment(ref _disposals);
+        return ValueTask.CompletedTask;
+    }
 
     protected override void RunIterationCore(CancellationToken cancellationToken)
     {

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Storage;
 
@@ -140,7 +141,9 @@ public sealed class SqlDatabaseEngineOptions
     /// </summary>
     /// <remarks>
     /// When null, the engine selects a default strategy based on <see cref="RootPath"/>:
-    /// file-based if a path is provided, or in-memory otherwise.
+    /// file-based if a path is provided, or in-memory otherwise. Internal (concrete-types plan,
+    /// D9): the strategy base is internal, and this assembly's tests set their crash-capture and
+    /// fault-injecting doubles here through the test-only grant.
     /// </remarks>
-    public ISqlStorageStrategy? StorageStrategy { get; set; }
+    internal SqlStorageStrategy? StorageStrategy { get; set; }
 }

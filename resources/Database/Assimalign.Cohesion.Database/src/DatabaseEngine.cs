@@ -307,21 +307,14 @@ public abstract class DatabaseEngine : IDatabaseEngine
         }
 
         // A worker may hold work of its own (a checkpoint left running on its lane); it ends
-        // before the storages close. The type tests are a bridge: the model engines that still
-        // compile the shared pump dispose the same workers by them, so the worker base gains its
-        // disposal hook in the P4 PR that deletes the shared pump (concrete-types plan, row 7).
+        // before the storages close. The engine owns every worker it attached, so it releases each
+        // through the worker's internal entry point, which runs the worker's DisposeAsyncCore once
+        // (concrete-types plan, row 7); the worker's public DisposeAsync leaves an owned worker alone.
         for (int index = workers.Length - 1; index >= 0; index--)
         {
             try
             {
-                if (workers[index] is IAsyncDisposable asynchronous)
-                {
-                    await asynchronous.DisposeAsync().ConfigureAwait(false);
-                }
-                else if (workers[index] is IDisposable disposable)
-                {
-                    disposable.Dispose();
-                }
+                await workers[index].ReleaseAsync().ConfigureAwait(false);
             }
             catch (Exception failure) when (failure is not OutOfMemoryException)
             {
@@ -347,8 +340,9 @@ public abstract class DatabaseEngine : IDatabaseEngine
 
     /// <summary>
     /// Attaches a background worker to the engine and starts its pump on a dedicated background
-    /// thread. The engine owns the worker from then on: it stops the pump and disposes the worker
-    /// (when it is disposable) when the engine is disposed.
+    /// thread. The engine owns the worker from then on: it stops the pump and releases the worker
+    /// (its <see cref="DatabaseEngineWorker.DisposeAsyncCore"/> hook) when the engine is disposed, and
+    /// the worker's own <see cref="DatabaseEngineWorker.DisposeAsync"/> leaves it to the engine.
     /// </summary>
     /// <param name="worker">The worker.</param>
     /// <exception cref="ArgumentNullException"><paramref name="worker"/> is null.</exception>
@@ -396,6 +390,8 @@ public abstract class DatabaseEngine : IDatabaseEngine
                 throw;
             }
 
+            // From here on the worker's public disposal leaves it to this engine.
+            worker.MarkOwned();
             Volatile.Write(ref _workerView, Array.AsReadOnly(_workers.ToArray()));
         }
     }

@@ -351,8 +351,8 @@ public sealed class SqlCascadeDeleteDepthTests
     {
         // Arrange: the chain is seeded in process, into the database the server fronts.
         await using var harness = await ServerTestHarness.StartAsync();
-        harness.Engine.TryGetDatabase(ServerTestHarness.DatabaseName, out IDatabase database).ShouldBeTrue();
-        await using (var seeding = await database.CreateSessionAsync())
+        harness.Engine.TryGetDatabase(ServerTestHarness.DatabaseName, out SqlDatabase? database).ShouldBeTrue();
+        await using (var seeding = await database!.CreateSessionAsync())
         {
             await SeedChainAsync(seeding, acceptanceDepth);
         }
@@ -368,14 +368,14 @@ public sealed class SqlCascadeDeleteDepthTests
         frame.ShouldNotBeNull();
         frame.Value.Type.ShouldBe(ProtocolMessageType.ResultComplete);
         ProtocolResultCompleteMessage.Decode(frame.Value.Payload.Span).AffectedCount.ShouldBe(1);
-        harness.Server.Context.Sessions.Count.ShouldBe(1);
+        harness.Server.Sessions.Count.ShouldBe(1);
         (await ScalarAsync(client, "SELECT COUNT(*) FROM chain")).ShouldBe(0L);
         (await ScalarAsync(client, "SELECT COUNT(*) FROM users")).ShouldBe(2L);
 
         await using var other = await harness.DialAsync();
         await other.HandshakeAsync();
         (await ScalarAsync(other, "SELECT COUNT(*) FROM chain")).ShouldBe(0L);
-        harness.Server.Context.Sessions.Count.ShouldBe(2);
+        harness.Server.Sessions.Count.ShouldBe(2);
     }
 
     private static CancellationToken Timeout() => TestTimeout.Token(timeoutSeconds);
@@ -407,7 +407,7 @@ public sealed class SqlCascadeDeleteDepthTests
     /// Creates <c>chain</c>, in which row <c>n</c> references row <c>n - 1</c> and row 1 references
     /// nothing, with an index on the referencing column.
     /// </summary>
-    private static async Task SeedChainAsync(IDatabaseSession session, int length, string action = "CASCADE")
+    private static async Task SeedChainAsync(SqlDatabaseSession session, int length, string action = "CASCADE")
     {
         await session.ExecuteAsync("CREATE TABLE chain (id INT PRIMARY KEY, parent_id INT, " +
             $"CONSTRAINT fk_chain FOREIGN KEY(parent_id) REFERENCES chain(id) ON DELETE {action})");
@@ -430,10 +430,10 @@ public sealed class SqlCascadeDeleteDepthTests
         (await CountAsync(session)).ShouldBe(length);
     }
 
-    private static async Task<long> CountAsync(IDatabaseSession session)
+    private static async Task<long> CountAsync(SqlDatabaseSession session)
         => (long)(await ScalarAsync(session, "SELECT COUNT(*) FROM chain"))!;
 
-    private static async Task<object?> ScalarAsync(IDatabaseSession session, string sql)
+    private static async Task<object?> ScalarAsync(SqlDatabaseSession session, string sql)
     {
         await using var rows = (await session.ExecuteAsync(sql, cancellationToken: Timeout())).ShouldBeAssignableTo<QueryResultSet>();
         object? value = null;

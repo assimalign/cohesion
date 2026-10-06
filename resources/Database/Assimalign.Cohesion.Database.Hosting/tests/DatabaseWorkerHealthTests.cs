@@ -1,12 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Sql;
-using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Hosting.Health;
 
 using Shouldly;
@@ -16,65 +14,57 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 /// <summary>
-/// The application's health while a real engine's workers meet device faults (#1268): a worker
-/// that keeps failing makes it degraded and is named with its failure, a worker that completes a
-/// pass again makes it healthy, and a database a failed header write took offline makes it
-/// unhealthy until the database is reopened.
+/// The application's health while an engine's workers fail and its databases go offline (#1268):
+/// a worker that keeps failing makes it degraded and is named with its failure, a worker that
+/// completes a pass again makes it healthy, and an offline database makes it unhealthy until the
+/// database is reopened.
 /// </summary>
+/// <remarks>
+/// Until phase 4 of the concrete-types plan these tests drove a real SQL engine through the SQL
+/// model's fault-injecting storage strategy. The strategies are internal since then (D9), and a
+/// registered worker derives from <see cref="DatabaseEngineWorker"/>, whose loop lets nothing
+/// escape, so the tests drive the health mapping through the engine double instead: a guided
+/// worker whose pass the test runs and fails, and an engine that reports the state and the
+/// offline databases the test sets. The real engines' fault paths are their models' own suites'
+/// (the SQL model's <c>SqlWorkerResilienceTests</c> and <c>SqlStorageOperationsTests</c>).
+/// </remarks>
 public sealed class DatabaseWorkerHealthTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
-
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a failing worker is degraded and named, healthy once it recovers, and a failed header write is unhealthy until the reopen")]
-    public async Task CheckAsync_WorkerFaultsOnARealEngine_ShouldFollowTheWorkerAndTheDatabase()
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a failing worker is degraded and named, healthy once it recovers, and an offline database is unhealthy until the reopen")]
+    public async Task CheckAsync_WorkerFaultsAndAnOfflineDatabase_ShouldFollowTheWorkerAndTheDatabase()
     {
-        // Arrange: a SQL engine whose checkpointer looks every 100 ms, over device faults.
-        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
-        {
-            EngineName = "sql",
-            StorageStrategy = strategy,
-            CheckpointInterval = TimeSpan.FromMilliseconds(100),
-            PageWriteBackInterval = TimeSpan.FromHours(1),
-            MaintenanceInterval = TimeSpan.FromHours(1),
-        });
-        IDatabase database = await engine.CreateDatabaseAsync("app");
-        await using (IDatabaseSession setup = await database.CreateSessionAsync())
-        {
-            await setup.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, payload VARCHAR(200))");
-        }
-
+        // Arrange: an engine whose checkpointer the test drives pass by pass.
+        var worker = new ReportingWorker("sql/checkpoint", DatabaseEngineWorkerKind.Checkpoint);
+        var engine = new RecordingEngine("sql", workers: [worker]);
         var options = new DatabaseApplicationOptions();
         options.Engines.Add(engine);
         await using var application = new DatabaseApplication(options);
-        var faults = strategy.Faults("app");
         HealthContribution before = await application.Context.CheckAsync(CancellationToken.None);
 
-        // Act: the checkpointer's page writes fail.
-        faults.FailPageWrites = true;
-        await InsertAsync(database, 0, 10);
-        bool faulted = await Eventually(() => engine.State == EngineState.Faulted);
+        // Act: the checkpointer's pass fails for the database, and the engine folds it as Faulted.
+        worker.Failure = new IOException("Injected page write failure");
+        bool failed = !worker.RunIteration(CancellationToken.None);
+        engine.Report(EngineState.Faulted);
         HealthContribution degraded = await application.Context.CheckAsync(CancellationToken.None);
 
-        faults.FailPageWrites = false;
-        bool recovered = await Eventually(() => engine.State == EngineState.Running);
+        worker.Failure = null;
+        Thread.Sleep(DatabaseEngineWorker.FailureBackoff);
+        bool recovered = worker.RunIteration(CancellationToken.None) && worker.Fault is null;
+        engine.Report(EngineState.Running);
         HealthContribution healthy = await application.Context.CheckAsync(CancellationToken.None);
 
-        // Then the next checkpoint's header slot write fails.
-        faults.FailHeaderWrites = true;
-        await InsertAsync(database, 10, 1);
-        bool offline = await Eventually(() => engine.OfflineDatabases.Count == 1);
+        // Then a file header write takes the database offline, which the engine lists.
+        engine.Offline = ["app"];
         HealthContribution unhealthy = await application.Context.CheckAsync(CancellationToken.None);
 
-        faults.Clear();
-        await engine.OpenDatabaseAsync("app");
+        engine.Offline = [];
         HealthContribution reopened = await application.Context.CheckAsync(CancellationToken.None);
 
         // Assert: degraded names the worker and the type of its failure, and the data carries it;
         // the failure's message, which can carry file paths, stays out of the unauthenticated
         // health output.
         before.Status.ShouldBe(HealthStatus.Healthy);
-        faulted.ShouldBeTrue();
+        failed.ShouldBeTrue();
         degraded.Status.ShouldBe(HealthStatus.Degraded);
         degraded.Description.ShouldNotBeNull().ShouldContain("sql/checkpoint");
         degraded.Description.ShouldContain("IOException");
@@ -91,7 +81,6 @@ public sealed class DatabaseWorkerHealthTests
         healthy.Status.ShouldBe(HealthStatus.Healthy);
         healthy.Data.ShouldNotBeNull().ContainsKey($"{prefix}.fault").ShouldBeFalse();
 
-        offline.ShouldBeTrue();
         unhealthy.Status.ShouldBe(HealthStatus.Unhealthy);
         unhealthy.Description.ShouldNotBeNull().ShouldContain("sql/app");
         unhealthy.Description.ShouldContain("file header write");
@@ -103,21 +92,22 @@ public sealed class DatabaseWorkerHealthTests
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a registered worker whose loop failed is degraded until disposal, and says so")]
     public async Task CheckAsync_RegisteredWorkerLoopFailed_ShouldSayTheEngineStaysFaultedUntilDisposed()
     {
-        // Arrange: a worker without the guided base whose loop throws once.
-        var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.AddWorker(_ => new EscapingWorker());
-        await using var engine = builder.Build();
+        // Arrange: a Faulted engine none of whose workers is a guided worker holding a failure, as
+        // an engine reports after a registered worker's loop escaped (since phase 4 of the
+        // concrete-types plan only an engine of the root interface can register such a worker).
+        var engine = new RecordingEngine(
+            "escaping-engine",
+            EngineState.Faulted,
+            [new RecordingEngineWorker("escaping", DatabaseEngineWorkerKind.IndexMaintenance, TimeSpan.FromSeconds(1))]);
         var options = new DatabaseApplicationOptions();
         options.Engines.Add(engine);
         await using var application = new DatabaseApplication(options);
 
         // Act
-        bool faulted = await Eventually(() => engine.State == EngineState.Faulted);
         HealthContribution degraded = await application.Context.CheckAsync(CancellationToken.None);
 
         // Assert: no guided worker holds a failure, so the description does not promise a return
         // to Running; it says the engine stays Faulted until it is disposed.
-        faulted.ShouldBeTrue();
         degraded.Status.ShouldBe(HealthStatus.Degraded);
         degraded.Description.ShouldNotBeNull().ShouldContain("A registered worker's loop failed on");
         degraded.Description.ShouldContain("until it is disposed");
@@ -125,50 +115,30 @@ public sealed class DatabaseWorkerHealthTests
         degraded.Description.ShouldNotContain("Failing workers");
     }
 
-    private static async Task InsertAsync(IDatabase database, int first, int count)
+    /// <summary>
+    /// A guided worker whose pass the test runs: each pass reports <see cref="Failure"/> for the
+    /// database <c>app</c> while it is set, and finishes that database's work otherwise.
+    /// </summary>
+    private sealed class ReportingWorker : DatabaseEngineWorker
     {
-        await using IDatabaseSession session = await database.CreateSessionAsync();
-        for (int id = first; id < first + count; id++)
+        public ReportingWorker(string name, DatabaseEngineWorkerKind kind)
+            : base(name, kind, TimeSpan.FromHours(1))
         {
-            await session.ExecuteAsync($"INSERT INTO t (id, payload) VALUES ({id}, '{new string('x', 150)}')");
-        }
-    }
-
-    private static async Task<bool> Eventually(Func<bool> condition)
-    {
-        var watch = Stopwatch.StartNew();
-        while (!condition())
-        {
-            if (watch.Elapsed > Timeout)
-            {
-                return false;
-            }
-
-            await Task.Delay(10);
         }
 
-        return true;
-    }
+        public Exception? Failure { get; set; }
 
-    /// <summary>A worker without the guided base whose first loop throws; later loops run until cancelled.</summary>
-    private sealed class EscapingWorker : IDatabaseEngineWorker
-    {
-        private int _runs;
-
-        public string Name => "escaping";
-
-        public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.IndexMaintenance;
-
-        public TimeSpan Interval => TimeSpan.FromSeconds(1);
-
-        public void Run(CancellationToken cancellationToken)
+        protected override void RunIterationCore(CancellationToken cancellationToken)
         {
-            if (Interlocked.Increment(ref _runs) == 1)
+            if (!BeginDatabase("app"))
             {
-                throw new InvalidOperationException("The worker's loop failed.");
+                return;
             }
 
-            cancellationToken.WaitHandle.WaitOne();
+            if (Failure is { } failure)
+            {
+                ReportFailure("app", failure);
+            }
         }
     }
 }

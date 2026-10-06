@@ -36,7 +36,7 @@ internal sealed class SqlPageWriteBackWorker : DatabaseEngineWorker
     {
         int batchSize = _engine.EngineOptions.PageWriteBackBatchSize;
 
-        foreach (SqlDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (SqlDatabase database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -44,8 +44,9 @@ internal sealed class SqlPageWriteBackWorker : DatabaseEngineWorker
             }
 
             // Nothing of an offline database is written (#1243): neither file set, whichever
-            // went offline. Each storage also refuses on its own.
-            if (database.IsOffline || !BeginDatabase(database.Name))
+            // went offline. Each storage also refuses on its own. Nothing of a database its holder
+            // closed either: the engine keeps it registered only to refuse its reopen.
+            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }
@@ -55,7 +56,7 @@ internal sealed class SqlPageWriteBackWorker : DatabaseEngineWorker
         }
     }
 
-    private void WriteBack(SqlDatabaseInstance database, SqlStorage storage, int batchSize)
+    private void WriteBack(SqlDatabase database, SqlStorage storage, int batchSize)
     {
         try
         {
