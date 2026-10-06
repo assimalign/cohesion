@@ -18,7 +18,9 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// and a failed checkpoint is that database's failure (#1268). A key-value database's checkpoint
 /// covers both of its file sets on its lane: the data set through the transaction coordinator,
 /// which defers the checkpoint to a statement holding the apply gate, and the catalog set
-/// directly. Before #1268 any failure escaped the pass and ended the worker for good.
+/// directly. Before #1268 any failure escaped the pass and ended the worker for good. A database
+/// its holder closed is never due (<see cref="IsCheckpointDue"/>), so a failure recorded for it
+/// ends with the first pass after its backoff.
 /// </remarks>
 internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyValueDatabase>
 {
@@ -46,8 +48,15 @@ internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyVal
     protected override bool IsOpen(KeyValueDatabase database) => _engine.IsOpen(database);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// False for a database its holder closed (directly; a session's
+    /// <see cref="KeyValueDatabaseSession.Database"/> is the same instance), which the engine keeps
+    /// registered. A close that was not idle (a writer the close kept in flight, #1226) leaves the
+    /// data journal untruncated, so the closed data set would stay due for a checkpoint it refuses,
+    /// and a failure recorded for the database would never end.
+    /// </remarks>
     protected override bool IsCheckpointDue(KeyValueDatabase database, TimeSpan interval)
-        => database.DataStorage.IsCheckpointDue(interval) || database.CatalogStorage.IsCheckpointDue(interval);
+        => !database.IsClosed && (database.DataStorage.IsCheckpointDue(interval) || database.CatalogStorage.IsCheckpointDue(interval));
 
     /// <inheritdoc />
     protected override bool Checkpoint(KeyValueDatabase database, TimeSpan interval, CancellationToken cancellationToken)

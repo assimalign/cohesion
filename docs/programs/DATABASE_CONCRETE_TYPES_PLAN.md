@@ -682,14 +682,23 @@ accounted for:
   the engine's state, so it kept serving, and `Database.Hosting` reported the engine degraded.
   `KeyValueDatabase.IsClosed`, `KeyValueDatabaseEngine.IsOpen` false for a closed database, and
   the version-purge worker (pass and trigger wait), the flush worker and the write-back worker,
-  which visit databases here, skip a closed one; the checkpointer inherits the skip through
-  `IsOpen`. The reopen is unchanged: `OpenDatabaseAsync` returns the closed instance, which refuses
-  a session with `ObjectDisposedException` (the other engines refuse the reopen itself). Asserted:
+  which visit databases here, skip a closed one; so does the checkpointer, through
+  `KeyValueCheckpointWorker.IsCheckpointDue` (false for a closed database; the shared pass's
+  `IsOpen` check covers only a checkpoint that raced the close). The fix's review found the
+  checkpointer's path: a close that is not idle (a deferred undo still failing, whose writer the
+  close keeps in flight, #1226) leaves the data journal untruncated, and when the checkpointer had a
+  failure recorded for the database, every poll's refused checkpoint kept it recorded and the
+  engine `Faulted`. The reopen is unchanged: `OpenDatabaseAsync` returns the closed instance, which
+  refuses a session with `ObjectDisposedException` (the other engines refuse the reopen itself).
+  Asserted:
   `KeyValueWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing`
   (20 ms worker intervals, half a second of passes over the closed database, then one more pass
   of each worker: every pass succeeds, no worker records a failure, the engine is `Running`, a
   server starts and serves a handshake and a `PUT` to another database, and the reopen returns
-  the closed instance).
+  the closed instance) and
+  `KeyValueWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
+  (a checkpoint failure recorded, then a close with a deferred undo's writer in flight: the
+  failure ends and the engine runs again).
 
 **Graph at P4 (re-verified, then landed).** The model's copy was as listed
 (`GraphDatabaseTransaction.cs` with its own `_endGate`, its `Operations` counter and its
@@ -787,15 +796,25 @@ section that reaches Graph is accounted for:
   `Faulted` for good (21 failed passes in half a second at 20 ms intervals, reproduced at
   `e092cada`); the Graph server does not read the engine's state, so it kept serving, and
   `Database.Hosting` reported the engine degraded. `GraphDatabase.IsClosed`,
-  `GraphDatabaseEngine.IsOpen` false for a closed database and its storage, and the version-purge
-  worker skips a closed database in its pass and its trigger wait (the checkpointer inherits the
-  fix through `IsOpen`, and the flush and write-back workers, which visit storages, through
-  `IsOpen(GraphStorage)`, as Blob's do). The refused reopen is unchanged. Asserted:
+  `GraphDatabaseEngine.IsOpen` false for a closed database and its storage, the version-purge
+  worker skips a closed database in its pass and its trigger wait, and the checkpointer skips it
+  through `GraphCheckpointWorker.IsCheckpointDue` (false for a closed database; the shared pass's
+  `IsOpen` check covers only a checkpoint that raced the close). The fix's review found the
+  checkpointer's path: a close that is not idle (a deferred undo still failing, whose writer the
+  close keeps in flight, #1226) leaves the journal untruncated, and when the checkpointer had a
+  failure recorded for the database, every poll's refused checkpoint kept it recorded and the
+  engine `Faulted`. The flush and write-back workers visit storages, so they still visit the
+  closed database's storage and tolerate its `ObjectDisposedException` through
+  `IsOpen(GraphStorage)`, as Blob's do; write-back writes nothing for a disposed storage. The
+  refused reopen is unchanged. Asserted:
   `GraphWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing`
   (20 ms worker intervals, half a second of passes over the closed database, then one more pass
   of each worker: every pass succeeds, no worker records a failure, the engine is `Running`, a
   server starts and serves a handshake and an insert to another database, and the closed one's
-  reopen is still refused).
+  reopen is still refused) and
+  `GraphWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
+  (a checkpoint failure recorded, then a close with a deferred undo's writer in flight: the
+  failure ends and the engine runs again).
 
 **Documents at P4 (re-verified, then landed).** The model's copy was as listed
 (`DocumentDatabaseTransaction.cs` with its own `_endGate`, its `Operations` counter, `CloseAsync`
@@ -913,15 +932,26 @@ Documents is accounted for:
   reproduced at `e092cada` both ways); `Database.Hosting` reported the engine degraded. A directly
   disposed database did this before P4 too; option B made it reachable from the session's own
   property, where disposing the view only closed the session. `DocumentDatabase.IsClosed`,
-  `DocumentDatabaseEngine.IsOpen` false for a closed database and its storage, and the
-  version-purge worker skips a closed database in its pass and its trigger wait (the checkpointer
-  inherits the fix through `IsOpen`, and the flush and write-back workers, which visit storages,
-  through `IsOpen(DocumentStorage)`, as Blob's do). The refused reopen is unchanged. Asserted:
+  `DocumentDatabaseEngine.IsOpen` false for a closed database and its storage, the version-purge
+  worker skips a closed database in its pass and its trigger wait, and the checkpointer skips it
+  through `DocumentCheckpointWorker.IsCheckpointDue` (false for a closed database; the shared
+  pass's `IsOpen` check covers only a checkpoint that raced the close). The fix's review found the
+  checkpointer's path: a close that is not idle (a deferred undo still failing, whose writer the
+  close keeps in flight, #1226) leaves the journal untruncated, and when the checkpointer had a
+  failure recorded for the database, every poll's refused checkpoint kept it recorded and the
+  engine `Faulted`. The flush and write-back workers visit storages, so they still visit the
+  closed database's storage and tolerate its `ObjectDisposedException` through
+  `IsOpen(DocumentStorage)`, as Blob's do; write-back writes nothing for a disposed storage. The
+  refused reopen is unchanged, and the session's remarks (class and `Database`) now say the
+  workers skip the closed database, as Blob's do. Asserted:
   `DocumentWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunning`,
   a theory that closes the database directly and through `session.Database` (20 ms worker
   intervals, half a second of passes over the closed database, then one more pass of each worker:
   every pass succeeds, no worker records a failure, the engine is `Running`, the other database
-  takes writes, and the reopen is still refused). Documents has no server.
+  takes writes, and the reopen is still refused), and
+  `DocumentWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
+  (a checkpoint failure recorded, then a close with a deferred undo's writer in flight: the
+  failure ends and the engine runs again). Documents has no server.
 
 **Blob at P4 (re-verified, then landed).** The model's copy was as listed
 (`BlobDatabaseTransaction.cs` with its own `_endGate`, its `Operations` counter, `CloseAsync`,
@@ -2273,10 +2303,13 @@ the code had moved, the row now says what landed:
     each engine's `IsOpen` overloads false for a closed database (and, for Graph and Documents, its
     storage); and every worker that visits databases skips a closed one: the version-purge worker
     in its pass and its trigger wait, and KeyValuePair's flush and write-back workers, which visit
-    databases (both file sets each) where Graph's, Documents' and Blob's visit storages and inherit
-    the fix through `IsOpen(storage)`. The checkpointer's pass is the engines' shared one
-    (`Database/shared/DatabaseCheckpointWorker.cs`, outside this change), so it inherits the fix
-    through `IsOpen`, as Blob's does. The reopen is unchanged: Documents and Graph refuse it with
+    databases (both file sets each) where Graph's, Documents' and Blob's visit storages: those
+    still visit a closed database's storage and tolerate its `ObjectDisposedException` through
+    `IsOpen(storage)` (write-back writes nothing for a disposed storage). The checkpointer's pass is
+    the engines' shared one (`Database/shared/DatabaseCheckpointWorker.cs`, unchanged); as first
+    landed it only tolerated a closed database's `ObjectDisposedException` through `IsOpen`, as
+    Blob's does, and the review made each model's checkpointer skip a closed database ("Review, as
+    applied", below). The reopen is unchanged: Documents and Graph refuse it with
     `ObjectDisposedException` until the database is dropped, and KeyValuePair returns the closed
     instance, which refuses a session. PostgreSQL's background workers treat a dropped object the
     same way, skipping it quietly rather than failing on it (autovacuum,
@@ -2291,8 +2324,48 @@ the code had moved, the row now says what landed:
     Each also pins the reopen. They pass with the fix, eight runs in a row each.
   - *Docs.* Each model's `DESIGN.md` (Documents' and Graph's "Lifecycle" section, KeyValuePair's
     "Engine-owned background workers"), the three databases' and engines' remarks, §6.4's
-    accounting of each model, §6.6 and §12. The sessions' remarks are unchanged (outside this
-    change's files); they still say the reopen is refused, which holds.
+    accounting of each model, §6.6 and §12; the review added `DocumentDatabaseSession`'s remarks.
+  - *Review, as applied (2026-10-06),* on `fix/database-closed-outside-engine-review`, on top of
+    the three model commits. One review approved with three minor findings; the other required a
+    change for one major finding.
+    - *The checkpointer still visited a closed database (major).* The shared pass checks only
+      `IsOffline` before it begins a database and asks the model's `IsCheckpointDue`. A close that
+      is not idle leaves the journal untruncated: when its retry of a deferred undo still fails,
+      `TransactionCoordinator.DisposeAsync` keeps that writer in flight (#1226), and the closed
+      storage stays due. When the checkpointer already had a failure recorded for the database,
+      every poll then handed a lane a checkpoint the storage refused
+      (`StorageTransactionException`), which the pass reports as unfinished, so the record never
+      ended and the engine stayed `Faulted`; without a record, every poll still ran that doomed
+      checkpoint. `IsOpen` covers only `ObjectDisposedException`, so it missed this path.
+      Reproduced in all three models with a test that failed at the implementer's head `d197a647`:
+      the engine `Faulted` for the test's 30 seconds, the checkpointer still holding the injected
+      page-write failure from before the close. Fixed model-locally, so the shared pass, and with
+      it Sql and Blob, is unchanged: `DocumentCheckpointWorker`, `GraphCheckpointWorker` and
+      `KeyValueCheckpointWorker.IsCheckpointDue` are false for a closed database, so the pass begins
+      it, finds nothing due, and a record ends with the first pass after its backoff. PostgreSQL's
+      checkpointer likewise checks a request's cancellation before it syncs the file: a canceled
+      request is never synced and is dropped from the table (`src/backend/storage/sync/sync.c:400-411`,
+      `:464-466`). Tests: each model's
+      `CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
+      (a checkpoint failure recorded for a database whose page writes fail, then a close with a
+      rolled-back transaction's undo deferred behind a bracket that holds every page; the failure
+      ends, the engine runs again, nothing is offline), five runs in a row each.
+    - *Docs (minor, both applied).* The models' `DESIGN.md`, §6.4's three accountings and this block
+      said the checkpointer "inherits the skip through `IsOpen`"; they now say it skips through
+      `IsCheckpointDue`, and that Documents' and Graph's flush and write-back workers still visit a
+      closed database's storage and tolerate its `ObjectDisposedException`.
+      `DocumentDatabaseSession`'s class and `Database` remarks now say the workers skip the closed
+      database and the engine stays `Running`, as `BlobDatabaseSession`'s do.
+    - *KeyValuePair's skip comments (minor, applied).* The flush and write-back workers' new
+      comments said the engine keeps a closed database "only as a name", wrong for a model whose
+      reopen returns the closed instance; they now say so, and both workers' class remarks name the
+      skip.
+    - *Gate, as rerun after the review:* a rebuild of the same projects has no Database warning but
+      CS2008 on Database.Refs (the other 101 are DependencyInjection's 99 and Configuration's 2);
+      every Database suite passes with the counts above, apart from the three models', which each
+      grow by the review's test: Documents 192, Graph 398, KeyValuePair 188. Studio builds clean and
+      its `--smoke` run gives 83 passed, 0 failed, 1 skipped; the dependency graph check passes; and
+      the Database runtime producer packs.
   - *Gate, as run:* a clean build of every Database project but Database.Testing's tests, the
     SampleHost fixture and the stray `Cache/src` test csproj, plus Sdk.Database, has no Database
     warning but CS2008 on Database.Refs (the only other warnings are the DependencyInjection and
@@ -2561,6 +2634,18 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   reproduced at `e092cada` with a test that failed (the version-purge worker, 21 to 24 failed
   passes in half a second) and fixed with Blob's pattern. Sql's, reached through a directly
   disposed database, is the Sql PR's.
+- The checkpointer of Blob and of Sql still visits a database its holder closed: the shared pass
+  (`Database/shared/DatabaseCheckpointWorker.cs`) asks the model's `IsCheckpointDue`, and Blob's
+  and Sql's read only the storage. After a close that is not idle (a deferred undo's writer the
+  close keeps in flight, #1226) the closed storage stays due, every poll runs a checkpoint it
+  refuses, and a checkpoint failure recorded for the database before the close never ends, so the
+  engine stays `Faulted` (found by the closed-database follow-up's review, reproduced for
+  Documents, Graph and KeyValuePair; §7, "The closed-database follow-up", "Review, as applied").
+  The fix is the one those three landed: `BlobCheckpointWorker.IsCheckpointDue` and
+  `SqlCheckpointWorker.IsCheckpointDue` return false for a closed database
+  (`!database.IsClosed && …`; Sql's database gets `IsClosed` with the Sql PR's closed-database
+  fix), with the test the three models carry. Blob's is a Blob follow-up; Sql's belongs with the
+  Sql PR's closed-database fix.
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never

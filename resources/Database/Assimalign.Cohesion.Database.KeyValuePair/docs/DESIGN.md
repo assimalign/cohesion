@@ -392,12 +392,17 @@ Documents, Graph and Blob engines refuse the reopen itself). The workers skip it
 `KeyValueDatabase.IsClosed` reads the base's disposed flag, `KeyValueDatabaseEngine.IsOpen` is
 false for it, and the version-purge worker skips it in its pass and in its trigger wait, as do
 the flush and write-back workers, which visit databases here (both file sets each). The
-checkpointer inherits the skip through `IsOpen` (its pass is the engines' shared one): a
-disposed file set's `ObjectDisposedException` is a race with a close, never its failure. Before
-the skip, the version-purge worker failed on the closed database's disposed coordinator every
-pass (24 failed passes in half a second at 20 ms intervals), so the engine reported `Faulted` for
-good and `Database.Hosting` reported it degraded until the engine was recreated; the key-value
-server does not read the engine's state, so it kept serving. The workers do what PostgreSQL's
+checkpointer skips it through the model's `IsCheckpointDue`, which is false for a closed
+database (the pass is the engines' shared one, and its `IsOpen` check covers only a checkpoint
+that raced the close). A close that was not idle leaves the data journal untruncated: when its
+retry of a deferred undo still fails, the close keeps that writer in flight (#1226), so the closed
+data set stays due for a checkpoint it refuses. Before the skips, the version-purge worker failed
+on the closed database's disposed coordinator every pass (24 failed passes in half a second at
+20 ms intervals); and when the checkpointer had a failure recorded for a database whose close was
+not idle, every poll handed a lane the refused checkpoint, which kept the failure recorded.
+Either way the engine reported `Faulted` for good and `Database.Hosting` reported it degraded
+until the engine was recreated; the key-value server does not read the engine's state, so it
+kept serving. The workers do what PostgreSQL's
 background workers do with an object dropped under them: check that it still exists and skip it
 quietly (autovacuum, `src/backend/postmaster/autovacuum.c:998-1000`, `:1859-1868`,
 `:2510-2513`; the checkpointer's canceled fsync requests,
@@ -409,6 +414,11 @@ closes a database under 20 ms worker intervals and asserts that every pass succe
 records a failure, the engine is `Running`, a server over the engine starts and serves a
 handshake and a `PUT` to the other database, and the reopen still returns the closed instance,
 which refuses a session.
+`KeyValueWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
+records a checkpoint failure for a database whose page writes fail, closes it with a rolled-back
+transaction's undo deferred behind a bracket that holds every data page, and asserts that the
+checkpointer's failure ends and the engine runs again (before the checkpointer's skip it stayed
+`Faulted` for the test's 30 seconds).
 
 ## Storage operations (#1243, #1254, #1226)
 

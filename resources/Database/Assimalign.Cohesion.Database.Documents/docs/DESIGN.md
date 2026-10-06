@@ -420,14 +420,20 @@ are aggregated after attempting every database.
 directly or through `session.Database` (option B, "Sessions and authority"), stays registered,
 so `OpenDatabaseAsync` refuses it with `ObjectDisposedException` until it is dropped or the
 engine is recreated. The workers skip it: `DocumentDatabase.IsClosed` reads the base's disposed
-flag, `DocumentDatabaseEngine.IsOpen` is false for the closed database and for its storage, and
-the version-purge worker skips it in its pass and in its trigger wait. The checkpointer inherits
-the skip through `IsOpen` (its pass is the engines' shared one), and the flush and write-back
-workers, which visit storages, through `IsOpen(DocumentStorage)`: a disposed storage's
-`ObjectDisposedException` is a race with a close, never their failure, and write-back writes
-nothing for a disposed storage. Before the skip, the version-purge worker failed on the closed
-database's disposed coordinator every pass (21 failed passes in half a second at 20 ms
-intervals), so the engine reported `Faulted` for good and `Database.Hosting` reported it degraded
+flag, `DocumentDatabaseEngine.IsOpen` is false for the closed database and for its storage, the
+version-purge worker skips it in its pass and in its trigger wait, and the checkpointer skips it
+through the model's `IsCheckpointDue`, which is false for a closed database (the pass is the
+engines' shared one, and its `IsOpen` check covers only a checkpoint that raced the close). A
+close that was not idle leaves the journal untruncated: when its retry of a deferred undo still
+fails, the close keeps that writer in flight (#1226), so the closed storage stays due for a
+checkpoint it refuses. The flush and write-back workers visit storages, not databases, so they
+still visit the closed database's storage, whose close flushed it: write-back writes nothing for a
+disposed storage, and an `ObjectDisposedException` from it is tolerated through
+`IsOpen(DocumentStorage)` rather than recorded. Before the skips, the version-purge worker failed
+on the closed database's disposed coordinator every pass (21 failed passes in half a second at
+20 ms intervals); and when the checkpointer had a failure recorded for a database whose close was
+not idle, every poll handed a lane the refused checkpoint, which kept the failure recorded.
+Either way the engine reported `Faulted` for good and `Database.Hosting` reported it degraded
 until the engine was recreated. The workers do what PostgreSQL's background workers do with an
 object dropped under them: check that it still exists and skip it quietly. Autovacuum leaves out
 a dropped or partially dropped database (`src/backend/postmaster/autovacuum.c:998-1000`,
@@ -439,6 +445,11 @@ cancellation. `DocumentWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideT
 closes a database both ways under 20 ms worker intervals and asserts that every pass succeeds,
 no worker records a failure, the engine is `Running`, the other database takes writes, and the
 reopen is still refused.
+`DocumentWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
+records a checkpoint failure for a database whose page writes fail, closes it with a rolled-back
+transaction's undo deferred behind a bracket that holds every page, and asserts that the
+checkpointer's failure ends and the engine runs again (before the checkpointer's skip it stayed
+`Faulted` for the test's 30 seconds).
 
 File-backed databases have `document.dat`, `document.log`, and `document.bak` under
 one validated database-name directory. Open performs kernel WAL replay with its
