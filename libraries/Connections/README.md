@@ -85,8 +85,10 @@ Each driver reports its own lifecycle through an internal event source named for
 (`current-connections` and friends). None of it is public API. Enable a driver by name in
 `dotnet-trace` or `dotnet-counters`, or forward every driver into an application's logging with
 `Assimalign.Cohesion.Logging.EventSource`, under the category prefix `Assimalign.Cohesion.Connections`.
-The contracts library, `Security`, and `InMemory` raise no events of their own. The convention is
-`.claude/rules/event-source.md`; the consumer reference is [docs/EVENT_SOURCES.md](../../docs/EVENT_SOURCES.md).
+The contracts library raises one event of its own, under its assembly name: a layered listener (for
+example a TLS listener) reporting a connection it closed because the connection's upgrade failed.
+`Security` and `InMemory` raise none. The convention is `.claude/rules/event-source.md`; the consumer
+reference is [docs/EVENT_SOURCES.md](../../docs/EVENT_SOURCES.md).
 
 ## Further Reading
 

@@ -252,7 +252,10 @@ HTTP derives its per-connection `isSecure` flag from exactly that:
 per accept loop. There is no registration-time `isSecure` parameter, no
 `Items`-backed handshake probe, and no OR-promotion rule — the
 capability is the single source of truth, and the scheme
-(`http`/`https`) flows from it.
+(`http`/`https`) flows from it. The handshake itself runs per connection
+inside the layered listener, never in an accept loop here, and a failed
+one never reaches this package (see "Accept-side isolation: where the
+handshake runs").
 
 What the handshake *negotiated* is a per-connection fact the capability
 cannot carry. HTTP reads it through the contracts library's
@@ -1078,15 +1081,51 @@ The design intent is *failure isolation*: a single malformed peer must
 never bring down the listener. Cancellation propagates normally so
 cooperative shutdown is unaffected.
 
-Accept-loop failures sit outside this isolation model. If a transport
-listener's `AcceptAsync` itself faults, the failure is fatal to the
-`HttpConnectionListener`: the accept loop completes the backlog channel
-with the listener's exception *before* cancelling the internal dispose
-token (the ordering is load-bearing — a pending `AcceptOrListenAsync`
-must observe the faulted channel, not the cancellation) and records the
-exception so accepts that begin after cancellation rethrow it too. The
-host therefore sees the transport's root-cause exception from
-`AcceptOrListenAsync`, never a bare `ObjectDisposedException`.
+### Accept-side isolation: where the handshake runs (#1304)
+
+The same rule holds before a connection reaches this package, and the
+transport listener is what enforces it. A TLS handshake never runs in an
+accept loop here: the TLS-layered listener (`UseTls`, the contracts
+library's layered listener) runs each connection's handshake on its own
+task, at most `TlsServerOptions.MaxConcurrentHandshakes` at a time, and
+`AcceptAsync` returns only connections whose handshake completed. A
+handshake that fails or times out (garbage bytes, a client the
+certificate policy refuses, a silent client) closes that connection,
+is reported by the `Assimalign.Cohesion.Connections` event source, and
+never reaches the accept loop. The QUIC driver does the same for the
+handshakes `System.Net.Quic` runs, reporting them from its own event
+source. So a slow client never delays another client's accept, and one
+client never stops an endpoint.
+
+That is the contract of `AcceptAsync` on both listener shapes: a
+listener contains each connection's failure, so whatever escapes it is
+the listener's own. The accept loops rely on it:
+
+- **An exception from `AcceptAsync` is fatal to the `HttpConnectionListener`.**
+  The accept loop completes the backlog channel with the listener's
+  exception *before* cancelling the internal dispose token (the ordering
+  is load-bearing: a pending `AcceptOrListenAsync` must observe the
+  faulted channel, not the cancellation) and records the exception so
+  accepts that begin after cancellation rethrow it too. The host
+  therefore sees the transport's root-cause exception from
+  `AcceptOrListenAsync`, never a bare `ObjectDisposedException`. (The
+  accept that observes the fault directly can see the channel's own
+  cancellation instead when the root cause is itself a cancellation; the
+  accepts after it see the recorded exception.)
+- **Only this listener's own cancellation ends a loop quietly.** Before
+  #1304 any `OperationCanceledException` did, so a TLS handshake that
+  timed out inside the transport's `AcceptAsync` silently ended that
+  endpoint's accepts while the host kept running. A cancellation this
+  listener did not request is now the transport's failure, handled as
+  above.
+
+Rejected: classifying exceptions in the accept loop and continuing on
+the ones that look like a connection's. The loop cannot tell them
+apart: a handshake timeout throws `OperationCanceledException`, the
+type the in-memory listener throws once it is disposed, and garbage
+bytes throw `IOException`, the family of transport I/O failures.
+Guessing wrong either stops the server or spins on a dead listener. The
+component that ran the handshake knows which it was, so it decides.
 
 ## Diagnostics
 
@@ -1099,7 +1138,7 @@ elsewhere already or needs a design of its own:
 | --- | --- |
 | Per-request latency, status, route, errors and trace context | The Web server's `ActivitySource` and `Meter`, `Assimalign.Cohesion.Web.Hosting` (#1064). The host sees the whole exchange and how its pipeline ended; the transport sees neither. |
 | Connection lifetimes and counts | Each connection driver's event source (`Assimalign.Cohesion.Connections.Tcp`, `.Quic`, `.NamedPipes`). An HTTP/1.1 or HTTP/2 connection is one driver connection and an HTTP/3 connection is one QUIC connection, so an HTTP-level `Opened`/`Closed` pair and a second `current-connections` counter would count the same connections twice under two names. |
-| TLS handshakes | The runtime's `System.Net.Security` source. |
+| TLS handshakes | The runtime's `System.Net.Security` source. A handshake that failed or timed out, and the connection closed for it: `Assimalign.Cohesion.Connections` (`UpgradeFailed`) for TCP endpoints, `Assimalign.Cohesion.Connections.Quic` (`HandshakeFailed`) for HTTP/3. |
 | Requests this package answers itself before dispatch (400, 408, 413, 414, 431), and protocol errors (HTTP/2 `GOAWAY` and `RST_STREAM` codes, the flood guards' `ENHANCE_YOUR_CALM`, HTTP/3 error codes) | Not reported yet. |
 
 The last row is the remaining gap, and filling a placeholder would not close it. It needs an

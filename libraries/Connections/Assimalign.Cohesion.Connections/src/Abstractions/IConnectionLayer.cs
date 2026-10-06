@@ -38,10 +38,18 @@ public interface IConnectionLayer
     /// Applies the layer to an established connection.
     /// </summary>
     /// <param name="connection">The connection to upgrade.</param>
-    /// <param name="cancellationToken">A token to cancel the upgrade (for example, a handshake).</param>
+    /// <param name="cancellationToken">
+    /// A token to cancel the upgrade (for example, a handshake). A layered listener cancels it when the
+    /// listener is disposed, so an implementation must honor it.
+    /// </param>
     /// <returns>
     /// The upgraded <see cref="IConnection"/>, or <paramref name="connection"/> itself for
     /// pass-through layers.
     /// </returns>
+    /// <remarks>
+    /// When the upgrade fails, the exception propagates and <paramref name="connection"/> still belongs
+    /// to the caller, which disposes it. A layered listener calls this once per accepted connection, each
+    /// call on its own task, so an implementation must allow concurrent calls for different connections.
+    /// </remarks>
     ValueTask<IConnection> UpgradeAsync(IConnection connection, CancellationToken cancellationToken = default);
 }

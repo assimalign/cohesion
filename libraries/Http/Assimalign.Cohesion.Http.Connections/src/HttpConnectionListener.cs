@@ -520,8 +520,13 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                 await QueueAcceptedConnectionAsync(httpConnection).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (_disposeCancellationTokenSource.IsCancellationRequested)
         {
+            // Only this listener's own cancellation ends the loop quietly. A transport listener contains
+            // each connection's failure (a TLS-layered listener runs every handshake on its own task;
+            // see IConnectionListener.AcceptAsync), so whatever else escapes AcceptAsync, a stray
+            // cancellation included, is the transport listener's failure and is surfaced below instead of
+            // silently ending this endpoint's accepts (#1304).
         }
         catch (ChannelClosedException)
         {
@@ -570,8 +575,10 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                 await QueueAcceptedConnectionAsync(httpConnection).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (_disposeCancellationTokenSource.IsCancellationRequested)
         {
+            // As in the stream loop: only this listener's cancellation ends the loop quietly. The QUIC
+            // driver contains a connection's failed handshake itself (#1304).
         }
         catch (ChannelClosedException)
         {

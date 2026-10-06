@@ -258,6 +258,13 @@ to it. The interface remains the canonical surface consumers depend on.
   acquisition signal.
 - A connection is **live when produced** — there is no separate open step and no
   connection-versus-context duality. Read and write immediately.
+- **A listener contains each connection's failure.** `AcceptAsync` (on both listener shapes)
+  returns a connection that is ready to use, with any handshake already complete. A failure that
+  belongs to one inbound connection, such as a handshake that fails or times out, is the listener's
+  to handle: it releases that connection and accepts the next. An exception from `AcceptAsync`
+  therefore means the listener itself can produce no more connections (it was disposed, or its
+  endpoint failed), or the caller canceled, and a consumer may treat it as fatal. The layered
+  listener below and the QUIC driver both honor this (#1304).
 - Three teardown paths: complete `Output` for a graceful half-close; `DisposeAsync()` to close;
   `Abort(Exception?)` to tear down immediately, discarding in-flight data. `ConnectionClosed` is
   signaled on closure. `ConnectionState` tracks `Idle → Opening → Open → Closing → Closed`, or
@@ -267,12 +274,109 @@ to it. The interface remains the canonical surface consumers depend on.
   `ConnectionAbortedException` and `ConnectionResetException` for the common failures. Transports
   surface reset/abort conditions through this family so consumers catch one hierarchy.
 
+## Layered Listeners: Where an Upgrade Runs and How a Failure Is Contained
+
+`listener.Use(layer)` returns an internal `LayeredConnectionListener`. Its upgrade is usually a
+handshake (TLS through `UseTls`), and a handshake takes as long as the peer chooses: a client can
+send garbage, stall, or be refused by a certificate policy. Until #1304 the layered listener ran
+the upgrade inside `AcceptAsync`, which made all three a denial of service. Handshakes ran one at
+a time on the accept loop, so one silent client held every other client's handshake until the
+timeout. A failed handshake's exception left `AcceptAsync`, so a consumer that treats that as the
+listener's failure (the HTTP listener does) stopped serving. And the failed connection was never
+disposed.
+
+### Where the upgrade runs
+
+The first `AcceptAsync` starts an accept pump. The pump takes a slot, accepts a connection from
+the inner listener, hands it to the thread pool to upgrade, and goes straight back to accepting.
+`AcceptAsync` reads from a queue of upgraded connections, so it returns connections in the order
+their upgrades complete, not the order they arrived.
+
+```mermaid
+flowchart TD
+    Pump["accept pump, started by the first AcceptAsync"] -->|"takes one of maxConcurrentUpgrades slots"| Inner["inner listener AcceptAsync"]
+    Inner -->|"a connection"| Upgrade["layer UpgradeAsync, on its own thread-pool task"]
+    Inner -->|"an exception: the listener's own failure"| Fault["let upgrades in flight finish, then fault AcceptAsync"]
+    Upgrade -->|"upgraded"| Ready["ready queue"]
+    Ready -->|"returned, slot freed"| Consumer["AcceptAsync caller, e.g. HttpConnectionListener"]
+    Upgrade -->|"throws or times out"| Drop["dispose the connection, report UpgradeFailed, free the slot"]
+```
+
+- **Each upgrade runs on its own task.** Even the synchronous part of an upgrade stays off the
+  accept loop: a TLS handshake that finds the client's first flight already buffered signs its
+  reply before it first yields, and that work must not serialize every handshake.
+- **The pump does not capture the caller's execution context.** It outlives the `AcceptAsync`
+  call that starts it, and an ambient activity would otherwise parent every later upgrade.
+
+### How a failure is contained
+
+- **An upgrade that throws fails only its connection.** That covers a handshake that fails, one its
+  layer cancels because the handshake timeout elapsed (TLS reports `OperationCanceledException`),
+  and a peer that disconnects mid-handshake. The layered listener disposes the connection (a layer
+  leaves it to its caller on failure, see `IConnectionLayer.UpgradeAsync`), reports `UpgradeFailed`
+  through the event source below with the exception's type and message (never the peer's bytes, a
+  certificate, or key material), frees the slot, and keeps accepting.
+- **The inner listener's failure is the listener's own.** Any exception from the inner
+  `AcceptAsync` means it can produce no more connections. The pump stops, lets the upgrades already
+  in flight finish and queue, and then completes the queue with the exception, so a consumer receives
+  every connection accepted before the fault and then the fault itself. After disposal,
+  `AcceptAsync` throws `ObjectDisposedException`.
+- **Canceling `AcceptAsync` abandons that wait and nothing else.** The upgrades keep running and a
+  later call returns their connections. Before #1304 the caller's token also canceled the upgrade
+  of the connection being accepted, and that connection leaked.
+- **Disposal releases everything the listener holds.** It cancels the token every upgrade received
+  (a layer must honor it), disposes the inner listener, waits for every upgrade to finish, and
+  disposes every upgraded connection `AcceptAsync` has not returned. A cancellation caused by
+  disposal is not reported as a failure.
+
+### The bound
+
+At most `maxConcurrentUpgrades` connections are held at once. A connection counts from the moment
+the pump accepts it until `AcceptAsync` returns it or its upgrade fails. With every slot taken, the
+pump stops accepting, and further peers wait in the inner listener's own backlog (for TCP, the
+operating system's listen queue, `TcpConnectionListenerOptions.Backlog`). A flood of stalled
+handshakes therefore holds at most that many connections' handshake state instead of growing
+memory without bound.
+
+- `listener.Use(layer)` uses 512 and `listener.Use(layer, maxConcurrentUpgrades)` sets it; TLS sets
+  it from `TlsServerOptions.MaxConcurrentHandshakes`, which also defaults to 512. 512 matches the TCP
+  listener's default backlog and the QUIC listener's default backlog, which bounds the same thing for
+  QUIC (handshakes in progress plus connections not yet accepted).
+- The bound trades memory for availability. While it is reached, a new client waits until a slot
+  frees, which a stalled client does at the latest when its handshake times out. An endpoint that
+  expects many slow handshakes at once raises the bound or shortens the timeout. Neither knob can
+  make one peer stop the listener.
+- Counting connections that are upgraded but not yet returned is deliberate: a consumer that stops
+  accepting stops new handshakes too, instead of letting finished ones pile up.
+
+### Alternatives rejected
+
+- **Upgrading inside `AcceptAsync` (the shape before #1304).** It serializes handshakes on the
+  accept loop and turns one peer's failure into the listener's.
+- **Returning the raw connection and deferring the upgrade to a step the consumer awaits.** The
+  handshake would leave the accept loop, but the contract that `AcceptAsync` returns a ready
+  connection would break for every consumer, and each consumer would have to rebuild the
+  concurrency, the bound, the timeout handling, and the disposal of failed connections. The layered
+  listener is the one place that knows which failures belong to a connection.
+- **Containing the failure in the consumer.** A consumer such as `HttpConnectionListener` cannot
+  tell a connection's failure from its listener's by exception type: a handshake that times out
+  throws `OperationCanceledException`, the type the in-memory listener throws once it is disposed,
+  and bytes that are not a handshake throw `IOException`, the family of transport I/O failures. A
+  wrong guess either stops the server or spins on a dead listener. Only the component that ran the
+  upgrade knows which it was.
+- **No bound.** Every stalled handshake costs a socket, its buffers, and the TLS state, so an
+  unbounded listener is a memory-exhaustion target.
+- **Separate bounds for handshakes and for upgraded connections waiting to be accepted.** Two knobs
+  for one resource, and the second queue would still need a bound of its own.
+
 ## AOT Posture
 
-Contracts, small value types, and two allocation-light utilities (`DuplexPipeStream`, the layered
-listener/factory decorators). No reflection, no runtime code generation, no serialization.
+Contracts, small value types, two allocation-light utilities (`DuplexPipeStream` and the layered
+factory decorator), and the layered listener, whose pump uses only `System.Threading.Channels`, a
+`SemaphoreSlim`, and the thread pool. No reflection, no runtime code generation, no serialization.
 `ConnectionId` and `ConnectionProtocol` are produced by the repository's `CohesionValueType`
-source generator. Fully NativeAOT compatible.
+source generator. The layered listener's event source writes only string payloads. Fully NativeAOT
+compatible.
 
 ## Non-Goals
 
@@ -337,11 +441,12 @@ topology and the pool-ownership shape as public API.
 
 Each driver owns an internal event source named for its assembly — `Assimalign.Cohesion.Connections.Tcp`,
 `.Quic`, `.NamedPipes`, `.Udp` — and reports its listener, connection, and (QUIC) stream lifecycle
-through it, with its own counters. This library has no event source and no diagnostics API: it performs
-no network operations of its own. The repository-wide rule is `.claude/rules/event-source.md`; the
-event tables live in each driver's `docs/DESIGN.md`; applications observe the drivers with
-`dotnet-trace`/`dotnet-counters` by name, or forward them into their logging with
-`Assimalign.Cohesion.Logging.EventSource`.
+through it, with its own counters. This library performs no network operations of its own and has no
+diagnostics API; its one internal event source reports the one decision it makes at run time, a layered
+listener closing a connection whose upgrade failed (see "The layered listener's event source", below).
+The repository-wide rule is `.claude/rules/event-source.md`; the event tables live in each driver's
+`docs/DESIGN.md`; applications observe the drivers with `dotnet-trace`/`dotnet-counters` by name, or
+forward them into their logging with `Assimalign.Cohesion.Logging.EventSource`.
 
 This replaced a single `ConnectionEventSource` (`Assimalign.Cohesion.Connections`) that every driver
 reached through a public, stateless `ConnectionDiagnostics` forwarder. Why the shape changed:
@@ -363,3 +468,27 @@ reached through a public, stateless `ConnectionDiagnostics` forwarder. Why the s
 `ListenerId` stays public: it is the correlation id every stream driver stamps on the connections its
 listeners produce, and a connection's `listenerId` payload is how a forwarded log line ties back to its
 listener.
+
+### The layered listener's event source
+
+`Assimalign.Cohesion.Connections` (`Internal/EventSource/ConnectionLayerEventSource.cs`) is internal,
+follows the same convention, and reports only what a layered listener decides (see "Layered Listeners",
+above); the connection itself is still reported by the driver that carries it, under the same
+`connectionId`. It reuses the name of the retired shared source because the name is the assembly's, but
+nothing about it is public and no driver writes to it.
+
+| Id | Event | Level | Payload |
+|---|---|---|---|
+| 1 | `UpgradeFailed` | Warning | `connectionId`, `remoteEndPoint`, `exceptionType`, `exceptionMessage` |
+
+Counters: `current-upgrades` (upgrades in flight) and `failed-upgrades` (upgrades that failed since the
+process started).
+
+- `UpgradeFailed` is a warning: the connection is lost but the listener recovered, and a refused or
+  broken client is routine on a public endpoint. Its payload is the exception's type and message, never
+  the bytes the peer sent, a certificate, or key material. A handshake timeout reports
+  `System.OperationCanceledException` (or `System.Threading.Tasks.TaskCanceledException`). The TLS
+  details of a failed handshake are the runtime's `System.Net.Security` source's to report.
+- An upgrade canceled because its listener is being disposed is not a failure and is not reported.
+- Every upgrade the pump starts reports its start and its end exactly once, which keeps
+  `current-upgrades` exact.

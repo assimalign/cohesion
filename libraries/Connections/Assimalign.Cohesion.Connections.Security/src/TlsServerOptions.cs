@@ -12,6 +12,7 @@ public sealed class TlsServerOptions
     // The validation callback RequireClientCertificate/AllowClientCertificate installed, so a later
     // call can replace its own callback but never silently overwrite one the application set.
     private RemoteCertificateValidationCallback? _clientCertificateValidator;
+    private int _maxConcurrentHandshakes = 512;
 
     /// <summary>
     /// Gets or sets the underlying TLS server authentication options (server certificate, enabled
@@ -23,9 +24,45 @@ public sealed class TlsServerOptions
     /// Gets or sets the maximum time allowed for the TLS handshake to complete.
     /// </summary>
     /// <remarks>
-    /// Defaults to 10 seconds. A non-positive value disables the timeout.
+    /// Defaults to 10 seconds. A non-positive value disables the timeout. The timeout applies to each
+    /// connection's handshake on its own: a handshake that exceeds it fails, and on a TLS-layered listener
+    /// that closes only that connection. With the timeout disabled, a client that never finishes its
+    /// handshake holds one of the listener's <see cref="MaxConcurrentHandshakes"/> until it disconnects.
     /// </remarks>
     public TimeSpan HandshakeTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Gets or sets the most connections a TLS-layered listener holds at once while their handshakes run.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Defaults to 512. A listener composed with <c>UseTls</c> runs each accepted connection's handshake
+    /// on its own task, so a slow or silent client delays only itself. A connection counts against this
+    /// limit from the moment the listener accepts it from the transport until <c>AcceptAsync</c> returns
+    /// it secured, or its handshake fails or exceeds <see cref="HandshakeTimeout"/>. At the limit the
+    /// listener stops accepting from the transport and further clients wait in the transport's own
+    /// backlog (for TCP, the operating system's listen queue), so a flood of stalled handshakes holds at
+    /// most this many connections instead of growing without bound.
+    /// </para>
+    /// <para>
+    /// The limit trades memory for availability: while it is reached, a new client waits until a slot
+    /// frees, which a stalled client does at the latest after <see cref="HandshakeTimeout"/>. Raise it for
+    /// an endpoint that expects many slow handshakes at once, or shorten the timeout. The value is read
+    /// when the listener is composed. It does not apply to a QUIC listener given these
+    /// <see cref="AuthenticationOptions"/>: a QUIC listener bounds its pending handshakes with its own
+    /// backlog.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is less than 1.</exception>
+    public int MaxConcurrentHandshakes
+    {
+        get => _maxConcurrentHandshakes;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value);
+            _maxConcurrentHandshakes = value;
+        }
+    }
 
     /// <summary>
     /// Requests a client certificate in the handshake and refuses a client that presents none or one

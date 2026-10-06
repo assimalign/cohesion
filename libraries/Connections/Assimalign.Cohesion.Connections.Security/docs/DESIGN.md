@@ -31,7 +31,9 @@ Two composition styles, both backed by the same decorator:
 
 `TlsServerOptions` / `TlsClientOptions` wrap the BCL `SslServerAuthenticationOptions` /
 `SslClientAuthenticationOptions` (exposed as `AuthenticationOptions`) plus a `HandshakeTimeout`.
-`TlsServerOptions` also carries the client-certificate policy (see "Client certificates").
+`TlsServerOptions` also carries the client-certificate policy (see "Client certificates") and
+`MaxConcurrentHandshakes`, the bound of a TLS-layered listener (see "Handshakes on a TLS-layered
+listener").
 
 ## How It Works
 
@@ -64,8 +66,37 @@ Two composition styles, both backed by the same decorator:
   disposal, so layering does not change endpoint acquisition or release timing.
 - The handshake honors a configurable `HandshakeTimeout` (linked with the caller's cancellation
   token). On failure the `SslStream` is disposed and the exception (typically
-  `AuthenticationException` from the platform TLS stack) propagates; the caller still owns the inner
-  connection and is responsible for disposing it.
+  `AuthenticationException` from the platform TLS stack, `IOException` for bytes that are not a TLS
+  handshake, `OperationCanceledException` when the timeout elapses) propagates; the caller still owns
+  the inner connection and is responsible for disposing it. Through a TLS-layered listener that
+  caller is the layered listener, which disposes it (next section).
+
+## Handshakes on a TLS-layered listener
+
+`UseTls` composes this layer through the contracts library's layered listener, which runs the
+handshake as described in that library's design ("Layered Listeners: Where an Upgrade Runs and How a
+Failure Is Contained"). For a TLS endpoint that means (#1304):
+
+- **Each handshake runs on its own task.** A client that sends nothing holds only its own handshake;
+  every other client is accepted and handshaken alongside it. `AcceptAsync` returns secured
+  connections in the order their handshakes complete.
+- **A failed handshake fails only its connection.** Bytes that are not a ClientHello, a client the
+  certificate policy refuses, a handshake that exceeds `HandshakeTimeout`, and a client that hangs up
+  mid-handshake each close that connection, are reported as `UpgradeFailed` by the
+  `Assimalign.Cohesion.Connections` event source (the exception's type and message, never a
+  certificate or key material), and leave the listener accepting.
+- **`HandshakeTimeout` applies per connection.** Short of the client hanging up or the listener
+  being disposed, it is what ends a silent client's handshake. Disabling it (a non-positive value)
+  lets such a client hold its slot until it disconnects.
+- **`MaxConcurrentHandshakes` bounds the connections held at once** (default 512): a connection
+  counts from accept until `AcceptAsync` returns it secured or its handshake fails. At the bound the
+  listener stops accepting from the transport, and new clients wait in the transport's backlog, so a
+  flood of stalled handshakes cannot grow memory without bound. The value is read when `UseTls`
+  composes the listener. A QUIC listener given the same `AuthenticationOptions` does not use it:
+  QUIC bounds its pending handshakes with its own listener backlog.
+
+The option lives on `TlsServerOptions` rather than on the TCP listener because only a listener that
+handshakes has handshakes to bound, and an endpoint's TLS settings are configured in one place.
 
 ## Client certificates
 
@@ -100,8 +131,10 @@ How it is applied, and why:
   install, so code that configured the raw options keeps its callback; calling either method again
   replaces the earlier policy. Assigning a new `AuthenticationOptions` after calling them drops the
   policy, so they are called last.
-- **A refused client is a failed handshake**, surfaced like any other: `UpgradeAsync` throws, and
-  through a TLS-layered listener the failure comes out of `AcceptAsync` for that connection.
+- **A refused client is a failed handshake**, handled like any other: `UpgradeAsync` throws, and a
+  TLS-layered listener closes that connection, reports it, and keeps accepting (see "Handshakes on a
+  TLS-layered listener"). Before #1304 the failure came out of `AcceptAsync`, so `RequireClientCertificate`
+  made every client without a certificate stop the listener.
 
 Reading the certificate after the handshake is the application's job (`ITlsConnectionInfo`, and the
 HTTP transport's TLS connection feature); authenticating a user from it is out of scope here.

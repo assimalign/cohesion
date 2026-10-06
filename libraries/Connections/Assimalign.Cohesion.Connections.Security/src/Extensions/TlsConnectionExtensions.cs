@@ -55,12 +55,20 @@ public static class TlsConnectionExtensions
         /// <param name="options">The server TLS options.</param>
         /// <returns>The TLS-layered <see cref="IConnectionListener"/>.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
+        /// <remarks>
+        /// Each accepted connection's handshake runs on its own task, at most
+        /// <see cref="TlsServerOptions.MaxConcurrentHandshakes"/> at a time, and <c>AcceptAsync</c> returns
+        /// connections whose handshake has completed. A handshake that fails or exceeds
+        /// <see cref="TlsServerOptions.HandshakeTimeout"/>, including one refused by the client-certificate
+        /// policy, closes only that connection and is reported through the
+        /// <c>Assimalign.Cohesion.Connections</c> event source; the listener keeps accepting.
+        /// </remarks>
         public IConnectionListener UseTls(TlsServerOptions options)
         {
             ArgumentNullException.ThrowIfNull(listener);
             ArgumentNullException.ThrowIfNull(options);
 
-            return listener.Use(new TlsConnectionLayer(options));
+            return listener.Use(new TlsConnectionLayer(options), options.MaxConcurrentHandshakes);
         }
     }
 

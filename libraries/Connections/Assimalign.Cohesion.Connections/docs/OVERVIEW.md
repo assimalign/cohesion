@@ -23,7 +23,9 @@ transformations (such as TLS) compose over it.
 - `IMultiplexedConnectionListener` / `IMultiplexedConnectionFactory` (+ bases).
 - `IDatagramConnection` / `DatagramConnection` — message-oriented send/receive (e.g., UDP).
 - `IConnectionLayer` — connection-to-connection transformation; composed via
-  `listener.Use(layer)` / `factory.Use(layer)`.
+  `listener.Use(layer)` / `factory.Use(layer)`. A layered listener upgrades each accepted connection
+  on its own task, at most 512 at a time (`listener.Use(layer, maxConcurrentUpgrades)`), and a failed
+  or timed-out upgrade closes only that connection.
 - `ITlsConnectionInfo` — what a TLS handshake negotiated (ALPN application protocol, TLS version,
   cipher suite, the peer's certificate), implemented by connections that terminate TLS and found
   with a type test.
@@ -37,6 +39,7 @@ transformations (such as TLS) compose over it.
 - `src/Abstractions` — interfaces (connection shapes, listeners/factories, the layer arrow).
 - `src/` — guided abstract base classes and `DuplexPipeStream`.
 - `src/Extensions` — layer composition (`Use`) and connection conveniences (`AsStream`).
-- `src/Internal` — layered listener/factory decorators.
+- `src/Internal` — layered listener/factory decorators, and the layered listener's internal event
+  source (`Assimalign.Cohesion.Connections`).
 - `src/ValueObjects` — value types and enums.
 - `src/Exceptions` — area exception root and specific exceptions.

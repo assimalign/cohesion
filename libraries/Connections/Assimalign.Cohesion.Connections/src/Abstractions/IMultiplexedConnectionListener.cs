@@ -36,6 +36,14 @@ public interface IMultiplexedConnectionListener : IAsyncDisposable
     /// <summary>
     /// Accepts the next inbound multiplexed connection.
     /// </summary>
+    /// <remarks>
+    /// The returned connection has completed its handshake and is ready to use. A failure that belongs
+    /// to one inbound connection, such as a handshake that fails or times out, is the listener's to
+    /// contain: it releases that connection and goes on to the next, so one peer can never stop the
+    /// listener. An exception from this method therefore means the listener itself can produce no more
+    /// connections (it was disposed or its endpoint failed), or <paramref name="cancellationToken"/> was
+    /// canceled.
+    /// </remarks>
     /// <param name="cancellationToken">A token to cancel the accept operation.</param>
     /// <returns>The accepted <see cref="IMultiplexedConnection"/>.</returns>
     ValueTask<IMultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default);

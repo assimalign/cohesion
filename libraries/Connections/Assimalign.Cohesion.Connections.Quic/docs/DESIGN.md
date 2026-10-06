@@ -111,6 +111,23 @@ is routine for streams released after their owning connection closed.
 
 ## Error model
 
+- **A failed inbound handshake never ends the accept (#1304).** `System.Net.Quic` runs each inbound
+  connection's handshake in the background and reports one that fails from the next
+  `QuicListener.AcceptConnectionAsync`, as an `AuthenticationException` or a `QuicException` (a client
+  certificate the policy refuses, a handshake that exceeds its timeout, an error from the
+  connection-options callback), while the listener stays usable and the failed connection is already
+  disposed. `QuicConnectionListener.AcceptAsync` treats every such exception as that one connection's:
+  it reports `HandshakeFailed` (see "Diagnostics") and accepts the next connection, as the contracts'
+  `AcceptAsync` requires. Only `ObjectDisposedException` (the listener's disposal, which every later
+  accept would report again) and the caller's own cancellation leave `AcceptAsync`. Before #1304 the
+  exception left `AcceptAsync`, so a single client without a required certificate stopped the HTTP/3
+  endpoint and, through the HTTP listener's fatal accept handling, every other endpoint of the server.
+  Kestrel's QUIC transport makes the same call.
+- **Pending handshakes are bounded by `Backlog`.** It becomes `QuicListenerOptions.ListenBacklog`,
+  which counts connections whose handshake is in progress plus those waiting to be accepted;
+  `System.Net.Quic` refuses new connections beyond it. The handshake timeout is
+  `System.Net.Quic`'s default (10 seconds). `TlsServerOptions.HandshakeTimeout` and
+  `MaxConcurrentHandshakes` belong to the TCP TLS layer and do not apply here.
 - Contract-level failures surface through the area's
   `ConnectionException` family where the contracts demand it; raw
   `QuicException` / `SocketException` pass through on driver-specific
@@ -142,6 +159,7 @@ repository EventSource convention (`.claude/rules/event-source.md`). Tools enabl
 | 4 | `ConnectionClosed` | Informational | `connectionId` |
 | 5 | `StreamOpened` | Verbose | `streamId`, `connectionId`, `direction` |
 | 6 | `StreamClosed` | Verbose | `streamId` |
+| 7 | `HandshakeFailed` | Warning | `listenerId`, `exceptionType`, `exceptionMessage` — an inbound connection whose handshake failed, which the listener dropped |
 
 Counters: `current-connections`, `total-connections`, `connections-per-second`, `current-streams`,
 and `streams-per-second`.
@@ -156,6 +174,10 @@ and `streams-per-second`.
   different async flows, which EventSource's activity tracking would mis-nest.
 - TLS handshake events come from the runtime's own `System.Net.Security` and `System.Net.Quic`
   sources; forward them by adding those prefixes to the forwarder.
+- `HandshakeFailed` is the one handshake event this driver raises, because dropping the connection
+  is its decision. It is a warning (the connection is lost, the listener recovered) and carries the
+  exception's type and message, never a certificate or key material. A dropped connection never
+  reports `ConnectionOpened`: `System.Net.Quic` disposed it before this driver wrapped it.
 
 ## AOT posture
 

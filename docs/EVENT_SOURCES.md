@@ -66,15 +66,17 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 
 | Event source (= assembly) | Events | Counters | Reference |
 | --- | --- | --- | --- |
+| `Assimalign.Cohesion.Connections` | Upgrade failed: a layered listener (a TLS listener, for example) closed a connection whose upgrade failed or timed out, and kept accepting | `current-upgrades`, `failed-upgrades` | [Connections DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections/docs/DESIGN.md#the-layered-listeners-event-source) |
 | `Assimalign.Cohesion.Connections.Tcp` | Listener bound/closed; connection opened/closed; peer end-of-stream, back-pressure pause/resume, reset (Verbose); connection error | `current-connections`, `total-connections`, `connections-per-second` | [Tcp DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Tcp/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Connections.Quic` | Listener bound/closed; connection opened/closed; stream opened/closed (Verbose) | `current-connections`, `total-connections`, `connections-per-second`, `current-streams`, `streams-per-second` | [Quic DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Quic/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Connections.Quic` | Listener bound/closed; connection opened/closed; stream opened/closed (Verbose); inbound handshake failed and dropped | `current-connections`, `total-connections`, `connections-per-second`, `current-streams`, `streams-per-second` | [Quic DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Quic/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Connections.NamedPipes` | Listener bound/closed; connection opened/closed | `current-connections`, `total-connections`, `connections-per-second` | [NamedPipes DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Connections.Udp` | Datagram connection opened (bind or connect)/closed | `current-connections`, `total-connections` | [Udp DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Udp/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.DependencyInjection` | Provider built; call site built, service resolved, scope disposed, provider descriptors, resolver compiled (Verbose); resolver compilation failed | none | [DependencyInjection DESIGN.md](../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/docs/DESIGN.md#diagnostics) |
 
-Deliberately not instrumented: `Assimalign.Cohesion.Connections` (contracts; it performs no network
-operations of its own), `Connections.InMemory` (a test driver), `Connections.Security` (TLS
-handshakes are already reported by the runtime's `System.Net.Security` source), and
+Deliberately not instrumented: `Connections.InMemory` (a test driver), `Connections.Security` (TLS
+handshakes are already reported by the runtime's `System.Net.Security` source, and a handshake that
+fails on a TLS-layered listener is reported by `Assimalign.Cohesion.Connections`, which owns the
+listener that closes the connection), and
 `Http.Connections` (requests are traced and measured by the Web server below, and connections are
 counted by the drivers above; its empty placeholder source was deleted, see its
 [DESIGN.md](../libraries/Http/Assimalign.Cohesion.Http.Connections/docs/DESIGN.md#diagnostics)).
