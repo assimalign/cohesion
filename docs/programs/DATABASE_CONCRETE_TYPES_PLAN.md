@@ -1575,8 +1575,10 @@ its server keeps serving its other databases
 (`BlobDatabaseServerTests.DisposeAsync_SessionDatabase_ShouldLeaveTheEngineRunningAndItsServerServing`;
 §6.4's Blob accounting). The other models' engines carried the same `IsOpen` shape; the
 follow-up of 2026-10-06 fixed it for Documents (reached through `session.Database` here as well),
-Graph and KeyValuePair (§6.4's accounting of each, §7 "The closed-database follow-up"), and the
-Sql PR fixes Sql's (§12). The Blob wire server runs the bound session's own
+Graph and KeyValuePair (§6.4's accounting of each, §7 "The closed-database follow-up"), the Sql
+PR fixed Sql's, and a later follow-up the same day made Blob's checkpointer skip a closed database
+through `BlobCheckpointWorker.IsCheckpointDue` (§12; §7, "The closed-database follow-up", "Blob's
+checkpointer"). The Blob wire server runs the bound session's own
 container operations, where it
 cast the session's database to `IBlobDatabase`, so its exchanges still join the session's
 transaction (a host-opened one included); Studio's `BlobWorkspace` runs its container and blob
@@ -2639,9 +2641,34 @@ the code had moved, the row now says what landed:
     `IOException`); with it, it passes ten runs in a row. Blob `DESIGN.md` ("Concrete types") and
     §6.4's Blob accounting now say the checkpointer skips a closed database through
     `IsCheckpointDue` (they said it inherited the skip through `IsOpen`), and that the flush and
-    write-back workers still visit the closed storage and tolerate its `ObjectDisposedException`.
-    *Gate, as run:* the Blob test project builds with no warning, and Blob 168 (167 and the new
-    test), Blob.Catalog 5, Blob.Storage 14, Blob.Client 21, Hosting 54 and Embedded 4 pass.
+    write-back workers still visit the closed storage: write-back writes nothing to a disposed
+    storage, and a flush of one does nothing when no commit is pending and otherwise ends in an
+    `ObjectDisposedException` that `IsOpen(BlobStorage)` tolerates. *Gate, as run:* the Blob test
+    project builds with no warning, and Blob 168 (167 and the new test), Blob.Catalog 5,
+    Blob.Storage 14, Blob.Client 21, Hosting 54 and Embedded 4 pass.
+    - *Review, as applied (2026-10-06),* on `fix/blob-checkpointer-closed-database-review`. One
+      review approved with two minor documentation findings, both applied. The reviewer reran the
+      mutation (with the guard removed the test failed, the engine `Faulted` for 30 seconds; with
+      it, ten runs in a row passed) and confirmed that an open database is never skipped: a second
+      database kept being checkpointed after the other's close that was not idle.
+      *§6.6 was stale (minor).* Its option-B paragraph still said the Sql PR "fixes" Sql's and did
+      not name Blob's checkpointer fix; it now says the Sql PR fixed Sql's and this follow-up made
+      Blob's checkpointer skip a closed database.
+      *Blob `DESIGN.md` gave the wrong reason (minor).* It said the flush and write-back workers
+      visit a storage "whose close flushed it", but a close whose page flush fails still disposes
+      the storage (`Storage.DisposeAsync` sets `_disposed` in its `finally`) without having
+      flushed it. The workers tolerate it because `Storage.WriteBackDirtyPages` returns 0 once the
+      storage is disposed, and `FlushPendingCommits` either finds no commit pending or reaches
+      `StorageJournal.EnsureDurable`, whose `ObjectDisposedException` `IsOpen(BlobStorage)`
+      absorbs (the review's suggested wording said a flush always throws; the applied text says
+      it does nothing when no commit is pending). The reviewer's probe kept page writes failing
+      through the close, and every worker's failure still ended with the engine `Running`. The
+      bullet also opened with "Its workers skip a closed database" and then said two of them still
+      visit it; it now says they leave a closed database alone. *Gate, as rerun after the
+      review:* the Blob test project builds with no warning; with the guard removed the new test
+      fails (the engine `Faulted` for its 30 seconds), and with it restored it passes ten runs in a
+      row; Blob 168, Blob.Catalog 5, Blob.Storage 14, Blob.Client 21, Hosting 54 and Embedded 4
+      pass.
 - **The Sql PR** carries:
   - §6.7, with the SDK strings in lockstep;
   - the `ExternalEngineBuilder` deletion and the builder-validation retests (row 83);
