@@ -16,13 +16,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 {
     private static readonly byte[] _clientPreface = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
 
-    // RFC 9113 §6.8 — the graceful close waits for streams already accepted
-    // to finish, but that wait is bounded: a slow or stuck in-flight
-    // response must not delay connection teardown indefinitely. When the
-    // window elapses the remaining exchanges are cut off and the output is
-    // completed regardless. Not host-configurable in this package (a
-    // host-facing drain trigger is a separate public-surface decision); a
-    // conservative fixed ceiling keeps shutdown latency bounded.
+    // RFC 9113 §6.8 — the teardown (GracefulCloseAsync) waits for streams
+    // already accepted to finish, but that wait is bounded: a slow or stuck
+    // in-flight response must not delay connection teardown indefinitely.
+    // When the window elapses the remaining exchanges are cut off and the
+    // output is completed regardless. A host that wants a longer, budgeted
+    // drain begins the close earlier (BeginGracefulClose) and disposes the
+    // connection only once its own exchanges are done; this fixed ceiling
+    // bounds only what the teardown itself waits for.
     private static readonly TimeSpan _gracefulDrainWindow = TimeSpan.FromSeconds(5);
 
     private readonly HPackDecoder _headerDecoder;
@@ -92,7 +93,19 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     private bool _initialized;
     private bool _receivedClientSettings;
     private int _lastInboundStreamId;
+    // RFC 9113 §6.8 — set once a graceful close begins (BeginGracefulClose, or GracefulCloseAsync at
+    // teardown). From then on a HEADERS frame that opens a new stream is refused with
+    // RST_STREAM(REFUSED_STREAM), and the receive enumeration ends once its queued contexts are read.
     private int _gracefulCloseStarted;
+    // The one-shot latch of GracefulCloseAsync, the teardown that drains, stops the pump, and completes
+    // the output. Separate from _gracefulCloseStarted because a host begins the close (lame-duck) well
+    // before it tears the connection down.
+    private int _teardownStarted;
+    // The graceful-close GOAWAY(NO_ERROR) is written once, in the background: _gracefulGoAwayClaimed is
+    // the one-shot claim, and _gracefulGoAwayWritten completes once that write has finished or failed,
+    // so the teardown can wait for it before it completes the connection output.
+    private int _gracefulGoAwayClaimed;
+    private readonly TaskCompletionSource _gracefulGoAwayWritten = new(TaskCreationOptions.RunContinuationsAsynchronously);
     // RFC 9113 §6.8 — the number of dispatched request exchanges whose
     // response has not yet been sent (nor whose stream has been reset or
     // shutdown-aborted). GracefulCloseAsync waits for this to reach zero —
@@ -186,6 +199,11 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// and the pump continues processing other streams on the same connection.
     /// Cancellation propagates so cooperative shutdown is unaffected.
     /// </para>
+    /// <para>
+    /// A graceful close (<see cref="BeginGracefulClose"/>) ends the enumerable once the contexts
+    /// already queued are read. Cancelling <paramref name="cancellationToken"/> stops the frame pump,
+    /// which cancels every exchange the connection yielded (see <see cref="AbortPendingRequests"/>).
+    /// </para>
     /// </remarks>
     public override async IAsyncEnumerable<IHttpContext> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -275,7 +293,12 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                     processed.Context.Stream.MarkExchangeCounted();
                     Interlocked.Increment(ref _activeExchangeCount);
 
-                    _readyContexts.Writer.TryWrite(processed.Context);
+                    if (!_readyContexts.Writer.TryWrite(processed.Context))
+                    {
+                        // A graceful close ended the receive enumeration while this stream's header
+                        // block was still arriving, so nothing will ever serve the exchange.
+                        await RefuseUndispatchedAsync(processed.Context, cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
         }
@@ -304,19 +327,26 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             // Abort in-flight body readers BEFORE signalling the consumer that no
             // more requests are coming, so a handler observes the abort rather than
             // racing a clean end-of-enumerable.
-            AbortPendingRequests();
+            AbortPendingRequests(cancelled: cancellationToken.IsCancellationRequested);
             _readyContexts.Writer.TryComplete();
         }
     }
 
     /// <summary>
-    /// Aborts every live stream when the pump stops (teardown, wire failure, or
-    /// connection error): fires each stream's <c>RequestAborted</c> and completes
-    /// its body pipe, so a request handler parked reading a still-incoming body
-    /// observes cancellation rather than a clean end-of-stream (which would let it
-    /// treat a truncated body as complete) — and never hangs.
+    /// Aborts the live streams when the pump stops: fires their <c>RequestAborted</c> and completes
+    /// their body pipes, so a request handler parked reading a still-incoming body observes
+    /// cancellation rather than a clean end-of-stream (which would let it treat a truncated body as
+    /// complete) — and never hangs.
     /// </summary>
-    private void AbortPendingRequests()
+    /// <param name="cancelled">
+    /// Whether the pump was stopped by cancellation: the host cancelled the receive enumeration, or the
+    /// teardown stopped the pump after its bounded drain. Nothing waits for any exchange then, so every
+    /// stream is aborted, a fully received request included — the same contract as HTTP/1.1 and HTTP/3,
+    /// whose exchanges observe the receive token directly. Otherwise (end of input, a wire failure, a
+    /// connection error) only a request still arriving is aborted, and a fully received one stays
+    /// answerable.
+    /// </param>
+    private void AbortPendingRequests(bool cancelled)
     {
         Http2Stream[] streams;
         lock (_syncRoot)
@@ -327,6 +357,13 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
         foreach (Http2Stream stream in streams)
         {
+            if (cancelled)
+            {
+                stream.AbortOnCancellation();
+                AccountExchangeComplete(stream);
+                continue;
+            }
+
             // A truncated request (input still incoming when the pump stopped)
             // can never complete normally — release its graceful-close drain
             // accounting so the drain does not wait the full window for it. A
@@ -717,7 +754,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             _writeScheduler.Release();
         }
 
-        _initialized = true;
+        // Read off the pump by a graceful close, which announces itself only once the peer has seen
+        // the server's preface.
+        Volatile.Write(ref _initialized, true);
     }
 
     private async Task<Http2Context?> ProcessFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
@@ -2572,16 +2611,94 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         return payload;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// RFC 9113 §6.8. From this call on, a HEADERS frame that opens a new stream is refused with
+    /// <c>RST_STREAM(REFUSED_STREAM)</c>, and a <c>GOAWAY(NO_ERROR)</c> carrying the highest stream
+    /// already accepted is written in the background. Before the connection preface has been
+    /// exchanged nothing is announced, because the peer can have opened no stream; the teardown
+    /// announces the close if the preface arrives later.
+    /// </para>
+    /// <para>
+    /// The receive enumeration ends once the contexts already queued for it are read. A stream whose
+    /// header block was still arriving is refused when it completes, so the peer learns it was not
+    /// processed. The frame pump keeps running — feeding request bodies, crediting send windows,
+    /// observing resets — so every exchange already yielded can finish its response.
+    /// </para>
+    /// </remarks>
+    public override void BeginGracefulClose()
+    {
+        if (Interlocked.Exchange(ref _gracefulCloseStarted, 1) == 1)
+        {
+            return;
+        }
+
+        // The pump is the channel's only other writer, and it refuses whatever it can no longer queue
+        // (RefuseUndispatchedAsync).
+        _readyContexts.Writer.TryComplete();
+
+        _ = AnnounceGracefulCloseAsync();
+    }
+
     /// <summary>
-    /// Performs an RFC 9113 §6.8 graceful close: refuses new streams, emits a
-    /// <c>GOAWAY</c> frame carrying <see cref="Http2ErrorCode.NoError"/>, waits —
-    /// bounded by <see cref="_gracefulDrainWindow"/> — for the request exchanges
-    /// already dispatched to finish their responses, then stops the frame pump and
-    /// signals the transport's send pipeline that no further bytes will be
-    /// written. The transport's send task reads the remaining bytes, performs its
-    /// final <c>Socket.SendAsync</c> (which waits for the kernel to accept the
-    /// bytes), then exits — at which point the underlying socket is torn down
-    /// through the transport's own teardown path.
+    /// Starts the graceful-close <c>GOAWAY(NO_ERROR)</c> write, once, and returns the task that
+    /// completes when it has been written or has failed. Nothing is written before the connection
+    /// preface has been exchanged. Never faults.
+    /// </summary>
+    private Task AnnounceGracefulCloseAsync()
+    {
+        if (!Volatile.Read(ref _initialized))
+        {
+            return Task.CompletedTask;
+        }
+
+        if (Interlocked.Exchange(ref _gracefulGoAwayClaimed, 1) == 0)
+        {
+            _ = WriteGracefulGoAwayAsync();
+        }
+
+        return _gracefulGoAwayWritten.Task;
+    }
+
+    private async Task WriteGracefulGoAwayAsync()
+    {
+        try
+        {
+            // Off the caller's thread: a host begins the graceful close of all its connections from
+            // one stop signal, and no connection's write may hold up the others.
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+
+            // The snapshot of the last stream id is exact: a stream opened after the close began is
+            // refused without raising it (OpenInboundStream).
+            await EmitGoAwayAsync(Http2ErrorCode.NoError, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gracefulGoAwayWritten.TrySetResult();
+        }
+    }
+
+    /// <summary>
+    /// Refuses an exchange the pump finished assembling after a graceful close had ended the receive
+    /// enumeration. RFC 9113 §8.7 — <c>REFUSED_STREAM</c> tells the peer the request was not processed
+    /// and can be retried. The reset removes the stream and releases its drain accounting; disposing
+    /// the exchange releases what the request hooks attached to it.
+    /// </summary>
+    private async Task RefuseUndispatchedAsync(Http2Context context, CancellationToken cancellationToken)
+    {
+        await EmitRstStreamAsync(context.StreamId, Http2ErrorCode.RefusedStream, cancellationToken).ConfigureAwait(false);
+        await context.DisposeAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Performs an RFC 9113 §6.8 graceful close: begins it (<see cref="BeginGracefulClose"/>) unless a
+    /// host already did, waits for its <c>GOAWAY</c>, waits — bounded by
+    /// <see cref="_gracefulDrainWindow"/> — for the request exchanges already dispatched to finish
+    /// their responses, then stops the frame pump and signals the transport's send pipeline that no
+    /// further bytes will be written. The transport's send task reads the remaining bytes, performs
+    /// its final <c>Socket.SendAsync</c> (which waits for the kernel to accept the bytes), then exits —
+    /// at which point the underlying socket is torn down through the transport's own teardown path.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -2591,7 +2708,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// credit for a streaming response writer, and observes peer resets that
     /// release the drain early. It is stopped only after the drain completes (or
     /// its bounded window elapses); GOAWAY-vs-pump write interleaving is prevented
-    /// by the connection write scheduler.
+    /// by the connection write scheduler. Stopping it cancels the exchanges still
+    /// running (see <see cref="AbortPendingRequests"/>).
     /// </para>
     /// <para>
     /// Closes the gap identified by #686: previously, <see cref="Http2Connection.DisposeAsync"/>
@@ -2608,16 +2726,20 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// </remarks>
     public async ValueTask GracefulCloseAsync(CancellationToken cancellationToken = default)
     {
-        if (Interlocked.Exchange(ref _gracefulCloseStarted, 1) == 1)
+        if (Interlocked.Exchange(ref _teardownStarted, 1) == 1)
         {
             return;
         }
+
+        // Synchronous, before the first await: from here new streams are refused, and the receive
+        // enumeration ends.
+        BeginGracefulClose();
 
         // EnsureInitializedAsync may not have run if the pump never started (or
         // has not reached initialization yet). Skip GOAWAY in that case; the peer
         // has not seen any HTTP/2 traffic from us yet — and nothing can have been
         // dispatched — so stopping the pump and closing the socket is enough.
-        if (!_initialized)
+        if (!Volatile.Read(ref _initialized))
         {
             await StopPumpAsync().ConfigureAwait(false);
             await CompleteOutputAsync().ConfigureAwait(false);
@@ -2626,7 +2748,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
         try
         {
-            await EmitGoAwayAsync(Http2ErrorCode.NoError, cancellationToken).ConfigureAwait(false);
+            // The GOAWAY a host's BeginGracefulClose started, or the first one now if the preface was
+            // exchanged only after that call.
+            await AnnounceGracefulCloseAsync().ConfigureAwait(false);
 
             // RFC 9113 §6.8 — after announcing GOAWAY, let the streams already
             // accepted finish their responses before the pump is stopped and the

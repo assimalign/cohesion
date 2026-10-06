@@ -647,6 +647,19 @@ internal sealed class Http2Stream
         return false;
     }
 
+    /// <summary>
+    /// Aborts the exchange because the host stopped waiting for the connection — it cancelled the
+    /// receive enumeration, or the graceful close's bounded drain ran out. Unlike
+    /// <see cref="AbortOnShutdown"/>, a fully received request is aborted too, since nothing waits for
+    /// its response any longer: fires <see cref="RequestAborted"/> and completes the body pipe.
+    /// Idempotent.
+    /// </summary>
+    public void AbortOnCancellation()
+    {
+        CompleteBody();
+        TryFireAbort();
+    }
+
     private void CompleteBody()
     {
         // Idempotent: END_STREAM, a peer reset, a local reset, and connection

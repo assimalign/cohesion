@@ -159,9 +159,11 @@ internal sealed class FakeHttpConnectionContext : IHttpConnectionContext, IAsync
     private readonly IReadOnlyList<IHttpContext> _exchanges;
     private readonly bool _parkAfterExchanges;
     private readonly Task? _holdUntil;
+    private readonly TaskCompletionSource _gracefulClose = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private int _sendCount;
     private int _disposeCount;
+    private int _gracefulCloseCount;
 
     public FakeHttpConnectionContext(
         IReadOnlyList<IHttpContext>? exchanges = null,
@@ -176,6 +178,16 @@ internal sealed class FakeHttpConnectionContext : IHttpConnectionContext, IAsync
     public int SendCount => Volatile.Read(ref _sendCount);
 
     public int DisposeCount => Volatile.Read(ref _disposeCount);
+
+    /// <summary>
+    /// Gets how many times the server began the connection's graceful close.
+    /// </summary>
+    public int GracefulCloseCount => Volatile.Read(ref _gracefulCloseCount);
+
+    /// <summary>
+    /// Gets a task that completes when the server begins the connection's graceful close.
+    /// </summary>
+    public Task GracefulCloseRequested => _gracefulClose.Task;
 
     public Func<IHttpContext, CancellationToken, ValueTask>? SendHandler { get; init; }
 
@@ -201,15 +213,22 @@ internal sealed class FakeHttpConnectionContext : IHttpConnectionContext, IAsync
         if (_holdUntil is not null)
         {
             // Model an active connection holding its slot until the test releases it. WaitAsync
-            // observes the shutdown token so a graceful stop still drains this connection.
+            // observes the receive token, so an aborted drain still unwinds this connection.
             await _holdUntil.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         else if (_parkAfterExchanges)
         {
-            // Model an idle HTTP/1.1 keep-alive: block waiting for a next request that never comes,
-            // until the server signals shutdown.
-            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            // Model an idle keep-alive: wait for a next request that never comes, until the server
+            // begins the connection's graceful close (which ends an idle connection's receive
+            // sequence, as the real transports do) or aborts the drain.
+            await _gracefulClose.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    public void BeginGracefulClose()
+    {
+        Interlocked.Increment(ref _gracefulCloseCount);
+        _gracefulClose.TrySetResult();
     }
 
     public async ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default)

@@ -34,4 +34,42 @@ public interface IHttpConnectionContext
     /// <param name="cancellationToken">The cancellation token for the write operation.</param>
     /// <returns>A task that completes when the response has been written.</returns>
     ValueTask SendAsync(IHttpContext context, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Starts a graceful close: the connection takes no new exchange and tells its peer so, while every
+    /// exchange <see cref="ReceiveAsync"/> has already yielded runs to completion.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The call returns at once. Each protocol announces the close the way its specification asks, and
+    /// any frame that takes is written in the background; the connection's own disposal waits for it.
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>HTTP/1.1 (RFC 9112 §9.6): the response to the exchange in flight carries
+    /// <c>Connection: close</c> and the connection ends after it. An idle keep-alive connection, one
+    /// still waiting for the first octet of its next request, ends at once without a response. A
+    /// request whose head has started to arrive is still read and answered, with
+    /// <c>Connection: close</c>.</description></item>
+    /// <item><description>HTTP/2 (RFC 9113 §6.8): a <c>GOAWAY(NO_ERROR)</c> carrying the highest stream
+    /// the connection accepted. A stream opened afterwards, or one whose header block was still
+    /// arriving, is refused with <c>RST_STREAM(REFUSED_STREAM)</c>, which tells the peer it was not
+    /// processed.</description></item>
+    /// <item><description>HTTP/3 (RFC 9114 §5.2): the connection stops accepting request streams and
+    /// sends a <c>GOAWAY</c> carrying the first stream it did not accept. A request whose head was still
+    /// arriving is reset with <c>H3_REQUEST_REJECTED</c>.</description></item>
+    /// </list>
+    /// <para>
+    /// <see cref="ReceiveAsync"/> then ends on its own once no further exchange can arrive. Nothing it
+    /// has yielded is cancelled: those exchanges keep reading their request bodies and are still sent
+    /// through <see cref="SendAsync"/>. A host that cannot wait for them any longer cancels the token it
+    /// enumerates <see cref="ReceiveAsync"/> with — every exchange the connection yielded then observes
+    /// <see cref="IHttpContext.RequestCancelled"/> — and aborts the connection
+    /// (<see cref="IHttpConnection.Abort"/>).
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, including while <see cref="ReceiveAsync"/> is being enumerated and
+    /// while exchanges are being sent. Calls after the first do nothing.
+    /// </para>
+    /// </remarks>
+    void BeginGracefulClose();
 }

@@ -7,6 +7,10 @@ internal sealed class Http1Context : TransportHttpContext
 {
     private readonly Http1RequestBodyStream _requestBody;
 
+    // Volatile: a graceful close clears it from the thread that began the close while the exchange's
+    // own thread reads it to frame the response head (Http1ConnectionContext.BeginGracefulClose).
+    private volatile bool _keepAlive;
+
     public Http1Context(
         in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
@@ -23,7 +27,16 @@ internal sealed class Http1Context : TransportHttpContext
         requestBody.SetOwner(this);
     }
 
-    public bool KeepAlive { get; set; }
+    /// <summary>
+    /// Whether the connection carries another request after this exchange. When it is
+    /// <see langword="false"/> as the response head is committed, the head carries
+    /// <c>Connection: close</c> (RFC 9112 §9.6).
+    /// </summary>
+    public bool KeepAlive
+    {
+        get => _keepAlive;
+        set => _keepAlive = value;
+    }
 
     /// <summary>
     /// Whether the response for this exchange was finalized out-of-band — the connection was

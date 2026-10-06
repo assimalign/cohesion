@@ -126,7 +126,9 @@ The connection-is-the-pipe model shows up at three points:
   `connection.AsStream()`.
 - Graceful teardown completes `connection.Output` directly (HTTP/2
   GOAWAY + bounded stream drain, HTTP/1.1 response drain) before disposal
-  (see "HTTP/2 graceful close").
+  (see "HTTP/2 graceful close"). A host that drains for longer begins the
+  close earlier through `IHttpConnectionContext.BeginGracefulClose` (see "The
+  host contract").
 - HTTP/3 reads every accepted stream's `Input` (`PipeReader`) directly —
   unidirectional streams and request streams alike (see "Request streams:
   dispatch at HEADERS, lazy body") — and writes responses through
@@ -134,8 +136,9 @@ The connection-is-the-pipe model shows up at three points:
 
 ### Audited context surface
 
-`IHttpConnectionContext` declares only what the HTTP internals actually
-consume: the endpoints plus `ReceiveAsync`/`SendAsync`. The inherited
+`IHttpConnectionContext` declares only what the HTTP internals and their host
+actually consume: the endpoints, `ReceiveAsync`/`SendAsync`, and the host's
+`BeginGracefulClose` (see "The host contract"). The inherited
 members of the old transport context (`Pipe`, `Items`,
 `ConnectionClosed`, `Close…`) were plumbing and are gone. Contexts that
 have no connection-level byte stream — the HTTP/3 connection context
@@ -213,6 +216,30 @@ of this package's contract, not implementation detail:
   finalize the started response as if its truncated body were whole, so the host resets
   instead. The probe is a type test over the transport's own exchange types and reports
   `false` for any other `IHttpContext`, whose response the transport cannot observe.
+- **A host stops a connection in two steps (#146).** `IHttpConnectionContext.BeginGracefulClose`
+  starts a lame-duck close: the connection takes no new exchange and announces the close
+  the way its version requires, while every exchange already yielded keeps its request body
+  and its `SendAsync`. `ReceiveAsync` then ends on its own once nothing more can arrive, so a
+  host's receive loop completes without being cancelled. When the host stops waiting, it
+  cancels the token it enumerates `ReceiveAsync` with: every exchange the connection yielded
+  observes `RequestCancelled`, on all three versions. The call returns at once; a frame it
+  needs is written in the background, and the connection's disposal waits for it.
+
+  | Version | Announcement | New work after the call | `ReceiveAsync` ends |
+  | --- | --- | --- | --- |
+  | HTTP/1.1 (RFC 9112 §9.6) | `Connection: close` on the response to the exchange in flight | not read; an idle keep-alive wait ends at once without a response, but a request whose head started to arrive is read and answered with `Connection: close` | after the exchange in flight, or at once when idle |
+  | HTTP/2 (RFC 9113 §6.8) | `GOAWAY(NO_ERROR)` carrying the highest stream accepted | a new stream, or one whose header block was still arriving, is refused with `RST_STREAM(REFUSED_STREAM)` | once the contexts already queued are read |
+  | HTTP/3 (RFC 9114 §5.2) | `GOAWAY` carrying the first stream not accepted, once the accept loop has stopped | not accepted; a request whose head was still arriving is reset with `H3_REQUEST_REJECTED` | after the requests already published |
+
+  The seam is a member of the context contract rather than a capability interface a host
+  type-tests for: every context this package produces implements it, and a host that drains
+  should not have to discover whether it can. Alternatives considered and rejected:
+  - **A second token on `ReceiveAsync`** ("stop receiving" beside "cancel"). On HTTP/1.1 and
+    HTTP/3 the enumeration token already *is* each exchange's abort token, and a token can
+    only say "now" — it cannot carry the announcement a version needs.
+  - **Draining inside disposal only**, as the HTTP/2 teardown did before. Disposal must be
+    bounded, so it cannot hold a connection open for the host's whole drain budget, and a
+    host disposes a connection only after its own exchanges are done.
 
 ### TLS is a pre-composed layer, not an HTTP concern
 
@@ -1296,6 +1323,27 @@ the same cap and data-rate enforcement. A drain that cannot complete cleanly
 connection is closed instead of reused. Draining works after the body stream has
 been disposed (it operates on the connection stream, not the disposed wrapper).
 
+### Graceful close (`BeginGracefulClose`)
+
+RFC 9112 §9.6: a server that intends to close a connection says so with
+`Connection: close` on the response, and then processes no further request on it.
+`Http1ConnectionContext.BeginGracefulClose` clears the keep-alive of the exchange in
+flight, so whichever path commits its head — the buffered writer or the streaming sink —
+writes `Connection: close`, and `ReceiveAsync` ends after the exchange. With no exchange in
+flight the connection is idle, and the read waiting for the next request is ended at once
+through `Http1ReadTimeout.CancelIdleWait`; the cancelled read is classified like a
+keep-alive timeout, so no `408` is written.
+
+The read-timeout phase is an interlocked latch (idle → headers, or idle → idle-cancelled),
+so the close and the first octet of a racing request cannot both win: either the wait is
+reclaimed as idle, or the request that started to arrive is read under its
+request-headers deadline and answered with `Connection: close`. That mirrors Kestrel, which
+ends a shutting-down connection only while no request is pending. The close and the receive
+loop register the exchange in flight and the pending read under one lock, so a close that
+lands between two exchanges is never lost: the loop reads no next request once it began. A
+response head committed before the close began goes out without `Connection: close`; the
+connection still ends after it, which RFC 9112 §9.5 permits at any time.
+
 ### The data-rate gate (`MinDataRateGate`)
 
 `MinRequestBodyDataRate` and `MinResponseDataRate` (both `HttpMinDataRate` =
@@ -1765,19 +1813,29 @@ volatile flags, and the cap is a running `long` counter maintained by the pump.
 
 RFC 9113 §6.8 makes an orderly HTTP/2 shutdown a two-part gesture: announce
 the close with `GOAWAY(NO_ERROR)`, then let the streams already accepted
-finish before the wire goes away. `Http2ConnectionContext.GracefulCloseAsync`
-performs both, in order:
+finish before the wire goes away. A host starts it with `BeginGracefulClose`
+(lame-duck, #146) and later disposes the connection; disposal runs
+`Http2ConnectionContext.GracefulCloseAsync`, which begins the close itself when
+no host did, and then performs the rest, in order:
 
 1. **Refuse new streams.** Setting `_gracefulCloseStarted` (an interlocked
-   one-shot) makes `OpenInboundStream` answer any HEADERS opening a *new*
-   stream with `RST_STREAM(REFUSED_STREAM)`. The connection stays alive and
-   keeps draining; the client may retry the refused request on a fresh
-   connection (RFC 9113 §8.1.4). Refused streams never bump the observed
-   last-stream-id, which is what makes the GOAWAY snapshot below exact.
+   one-shot, set by `BeginGracefulClose`) makes `OpenInboundStream` answer any
+   HEADERS opening a *new* stream with `RST_STREAM(REFUSED_STREAM)`. The
+   connection stays alive and keeps draining; the client may retry the refused
+   request on a fresh connection (RFC 9113 §8.1.4). Refused streams never bump
+   the observed last-stream-id, which is what makes the GOAWAY snapshot below
+   exact. The same call completes the ready-context channel, so the receive
+   enumeration ends once its queued contexts are read; a stream whose header
+   block was still arriving is refused (`REFUSED_STREAM`) when the pump finds it
+   can no longer queue it, rather than left unanswered.
 2. **Emit `GOAWAY(NO_ERROR)`** carrying the highest inbound stream ID
    observed (snapshotted under the stream-table lock — the pump is still
    processing frames concurrently), so the peer learns exactly which streams
-   will still be processed.
+   will still be processed. It is written once, in the background
+   (`_gracefulGoAwayClaimed`), and only after the connection preface was
+   exchanged; the teardown waits for that write before it goes on. A close
+   begun before the preface announces nothing then, and the teardown sends the
+   GOAWAY if the preface has arrived by the time it runs.
 3. **Drain, bounded.** `DrainActiveExchangesAsync` waits for every request
    already dispatched to the application to finish — its response sent, its
    stream reset, or its truncated request shutdown-aborted — before teardown
@@ -1803,6 +1861,17 @@ requests only — a fully-received request stays counted because its handler
 can still respond through the pump-independent write path, and the drain
 exists precisely to give it that chance.
 
+A pump stopped by **cancellation** is different (#146): the host cancelled the
+receive enumeration because it stopped waiting, or the teardown stopped the pump
+after its bounded window. Nothing waits for any exchange then, so
+`AbortPendingRequests` aborts every live stream (`Http2Stream.AbortOnCancellation`),
+a fully received request included, and releases its accounting. That gives HTTP/2
+the contract HTTP/1.1 and HTTP/3 already had, whose exchanges link their
+`RequestCancelled` to the enumeration token directly. HTTP/2 passes no connection
+token into each exchange, because a linked source per stream registered on a
+connection-lifetime token would accumulate until the connection closes; acting
+once, when the pump stops, needs no per-stream registration.
+
 The drain tracks an interlocked `_activeExchangeCount` rather than reading
 the `_streams` table from the close thread. A stream is counted by the pump
 (`MarkExchangeCounted`, immediately before its context is handed to the
@@ -1815,14 +1884,14 @@ woken through a published `TaskCompletionSource` (no polling); a re-check
 after publishing the signal closes the lost-wakeup window. When nothing is
 in flight the whole step is skipped.
 
-> The **host-facing** variant — a "drain now, close later" trigger the host
-> calls before dispose, rather than draining inside dispose — is a separate
-> public-surface decision (interface-first, implementation internal) and is
-> deliberately out of scope here. This section covers only the
-> drain-inside-`GracefulCloseAsync` behavior. The optional RFC 9113 §6.8
-> dual-`GOAWAY` pattern (a first `GOAWAY` at max stream ID, a second at the
-> true last-stream-ID after draining) is likewise not implemented; the
-> single `GOAWAY` carrying the real last-stream-ID is sufficient and simpler.
+> The **host-facing** "drain now, close later" trigger is `BeginGracefulClose`
+> (see "The host contract"); the host owns the drain budget, and disposal's
+> bounded window only covers what the teardown itself waits for. The optional
+> RFC 9113 §6.8 dual-`GOAWAY` pattern (a first `GOAWAY` at max stream ID, a
+> second at the true last-stream-ID after draining) is not implemented: the
+> single `GOAWAY` carrying the real last-stream-ID is sufficient and simpler,
+> and a request racing it is refused with `REFUSED_STREAM`, which the client
+> may retry.
 
 ## HTTP/3 stream model and SETTINGS engine
 
@@ -2247,10 +2316,29 @@ Acknowledgment / Stream Cancellation instructions (see "Live decoder-stream
 feedback").
 
 `SendGoAwayAsync` writes the frame to the retained outbound control stream
-and is best-effort and one-shot: if the receive loop never ran (no control
-stream, no advertised SETTINGS) there is nothing to announce and it is a
-no-op; a wire/QUIC failure while writing is swallowed because the
-`CONNECTION_CLOSE` that follows conveys the shutdown regardless.
+and is best-effort and one-shot, so the announced boundary never grows
+(RFC 9114 §5.2): if the receive loop has not run (no control stream, no
+advertised SETTINGS) there is nothing to announce yet, and the call returns
+without taking the one-shot; a wire/QUIC failure while writing is swallowed
+because the `CONNECTION_CLOSE` that follows conveys the shutdown regardless.
+
+**Lame-duck (#146).** A host announces the close earlier with
+`BeginGracefulClose`. It signals teardown, which stops the accept loop (and
+the head reads still in flight, whose requests are reset with
+`H3_REQUEST_REJECTED` — they were never processed), and the receive enumeration
+ends after the requests already published. The GOAWAY is written in the
+background once the accept loop has stopped (`_acceptStopped`), so its
+boundary counts every request stream the connection accepted and no stream at
+or above it can still be dispatched. `Http3Connection.DisposeAsync` waits for
+that write before it closes the QUIC connection. The exchanges already
+published keep their request bodies and response streams, which live until
+the connection closes ("Exchanges outlive the enumeration").
+
+One RFC 9114 §5.2 recommendation is not met: a server SHOULD explicitly cancel
+requests that arrive after its GOAWAY. The accept loop has stopped by then, so
+such a stream is never accepted, and it ends with the QUIC connection; the
+GOAWAY has already told the peer it was not processed. Cancelling them would
+need an accept loop that keeps running after the enumeration ends.
 
 ### Incremental reads off the PipeReader
 

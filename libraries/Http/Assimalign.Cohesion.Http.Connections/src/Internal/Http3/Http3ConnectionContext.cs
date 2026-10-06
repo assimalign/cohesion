@@ -86,6 +86,12 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     // Guards single GOAWAY emission across the receive-loop teardown and the
     // connection dispose path (Interlocked one-shot latch).
     private int _goAwaySent;
+    // RFC 9114 §5.2 — a host's graceful close (BeginGracefulClose): one-shot, then the GOAWAY it
+    // announces. The announcement waits on _acceptStopped, completed once the accept loop can accept
+    // no further stream, so the boundary it carries counts every request stream ever accepted.
+    private int _gracefulCloseStarted;
+    private Task? _gracefulCloseAnnouncement;
+    private readonly TaskCompletionSource _acceptStopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
     private readonly IHttpExchangeInterceptor[] _requestInterceptors;
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
@@ -192,8 +198,9 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// (<c>H3_FRAME_ERROR</c>), an invalid frame sequence or a prohibited frame
     /// (<c>H3_FRAME_UNEXPECTED</c>), a control-stream violation, a QPACK failure
     /// — aborts the connection; the enumeration ends after the contexts already
-    /// published. The QUIC connection going away, disposal, or cancellation end
-    /// the enumeration cleanly. An unexpected exception (a programmer error, such
+    /// published. The QUIC connection going away, disposal, cancellation, or a
+    /// graceful close (<see cref="BeginGracefulClose"/>) end the enumeration
+    /// cleanly. An unexpected exception (a programmer error, such
     /// as a request hook throwing something other than
     /// <see cref="HttpRequestRejectedException"/>) is not masked: it surfaces from
     /// the enumeration.
@@ -308,6 +315,10 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
                 }
             }
 
+            // No stream is accepted after this point, so the request-stream count is final; a
+            // graceful close waits for it before it announces its GOAWAY boundary.
+            _acceptStopped.TrySetResult();
+
             // Release the loop's own reference, then wait for every stream it started: a head still
             // being read may yet publish a context, so the channel stays open until they are done.
             EndStreamWork();
@@ -321,6 +332,8 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
         finally
         {
+            // Also when a fault ended the loop: nothing accepts afterwards.
+            _acceptStopped.TrySetResult();
             _readyContexts.Writer.TryComplete(fault);
         }
     }
@@ -493,9 +506,10 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// <returns>A task that completes once the GOAWAY has been written (or skipped).</returns>
     /// <remarks>
     /// <para>
-    /// One-shot: repeated calls after the first are no-ops. When the receive loop
-    /// never ran (no control stream was opened) there is nothing to announce and
-    /// the call returns without writing.
+    /// One-shot: repeated calls after the first write are no-ops, so the announced
+    /// boundary never grows (RFC 9114 §5.2). When the receive loop has not run (no
+    /// control stream was opened) there is nothing to announce yet: the call
+    /// returns without writing and leaves the one-shot to a later call.
     /// </para>
     /// <para>
     /// Best-effort, like the SETTINGS emission: writing GOAWAY requires a live
@@ -506,17 +520,17 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     /// </remarks>
     internal async Task SendGoAwayAsync(CancellationToken cancellationToken = default)
     {
-        if (Interlocked.Exchange(ref _goAwaySent, 1) == 1)
-        {
-            return;
-        }
-
-        IConnection? controlStream = _controlStream;
+        IConnection? controlStream = Volatile.Read(ref _controlStream);
         if (controlStream is null)
         {
             // The server never opened its control stream (the receive loop did
             // not run), so it advertised no SETTINGS and has no critical stream
             // to carry GOAWAY. The QUIC close alone tears the connection down.
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _goAwaySent, 1) == 1)
+        {
             return;
         }
 
@@ -544,6 +558,67 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         catch (Exception ex) when (IsWireLevelFailure(ex))
         {
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// RFC 9114 §5.2. Signals teardown, which stops the accept loop: no request stream is accepted from
+    /// here on, and a request whose head was still arriving is reset with <c>H3_REQUEST_REJECTED</c>
+    /// (the peer may retry it). Once the accept loop has stopped, the <c>GOAWAY</c> is written in the
+    /// background, carrying the first stream the connection did not accept — the same boundary the
+    /// teardown GOAWAY carries, so exactly one is ever sent. The receive enumeration ends after the
+    /// requests already published; the exchanges it yielded keep their request bodies and response
+    /// streams until they finish.
+    /// </para>
+    /// <para>
+    /// A request stream the peer opens after this point is not accepted. It is closed with the QUIC
+    /// connection; the GOAWAY tells the peer it was not processed.
+    /// </para>
+    /// </remarks>
+    public override void BeginGracefulClose()
+    {
+        if (Interlocked.Exchange(ref _gracefulCloseStarted, 1) == 1)
+        {
+            return;
+        }
+
+        _teardownSource.Cancel();
+        Volatile.Write(ref _gracefulCloseAnnouncement, AnnounceGracefulCloseAsync());
+    }
+
+    /// <summary>
+    /// Finishes a graceful close as the connection is disposed: waits for the GOAWAY a host's
+    /// <see cref="BeginGracefulClose"/> started, then writes the GOAWAY if none has been written yet.
+    /// Never faults.
+    /// </summary>
+    internal async Task CompleteGracefulCloseAsync()
+    {
+        if (Volatile.Read(ref _acceptLoopTask) is null)
+        {
+            // The receive enumeration never started, and nothing starts it during disposal, so no stream
+            // will be accepted: the announcement must not wait for an accept loop that will never run.
+            _acceptStopped.TrySetResult();
+        }
+
+        if (Volatile.Read(ref _gracefulCloseAnnouncement) is { } announcement)
+        {
+            await announcement.ConfigureAwait(false);
+        }
+
+        await SendGoAwayAsync().ConfigureAwait(false);
+    }
+
+    private async Task AnnounceGracefulCloseAsync()
+    {
+        // Off the caller's thread: a host begins the graceful close of all its connections from one stop
+        // signal, and no connection's write may hold up the others.
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+
+        // The accept loop observes the teardown signal; once it has stopped, the accepted-stream count
+        // the GOAWAY boundary is derived from is final.
+        await _acceptStopped.Task.ConfigureAwait(false);
+        await SendGoAwayAsync().ConfigureAwait(false);
     }
 
     /// <summary>

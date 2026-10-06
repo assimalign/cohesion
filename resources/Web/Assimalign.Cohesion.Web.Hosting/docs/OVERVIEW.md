@@ -13,8 +13,10 @@ implements as explicit shims over `WebApplicationBuilder.Services` registrations
 concrete `WebApplicationBuilder.AddService` instance or context-factory overload, which
 registers an `IHostService`. `Build()` closes registration and runs each service factory
 once; services start in registration order before servers and stop in reverse order after
-every server drains. Disposing the application disposes the service provider and every
-factory-created service.
+every server drains. The default server drains lame-duck style: it accepts nothing new, tells
+every peer the connection is closing (`Connection: close` or `GOAWAY`), lets the requests in
+flight finish within the host's shutdown budget, and cancels only what outlives it. Disposing
+the application disposes the service provider and every factory-created service.
 
 ## Telemetry
 

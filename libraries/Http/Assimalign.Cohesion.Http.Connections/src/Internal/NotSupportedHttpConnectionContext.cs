@@ -46,4 +46,9 @@ internal sealed class NotSupportedHttpConnectionContext : IHttpConnectionContext
     {
         throw new NotSupportedException(_message);
     }
+
+    public void BeginGracefulClose()
+    {
+        // Nothing to close gracefully: the receive sequence never yields an exchange.
+    }
 }

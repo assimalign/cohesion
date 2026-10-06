@@ -12,7 +12,9 @@ namespace Assimalign.Cohesion.Web.Testing;
 /// <remarks>
 /// Factories are independent: manual factories own private in-memory transports, while
 /// Program-backed factories own invocation-local <c>ResourceRuntime</c> scopes and loopback
-/// endpoints. Dispose the factory to request graceful stop and release its transport.
+/// endpoints. Dispose the factory to stop it and release its transport. A Program-backed factory
+/// requests a graceful stop bounded by its shutdown budget; a manual factory cancels the requests
+/// still in flight, so call <see cref="StopAsync"/> first when they must finish.
 /// </remarks>
 public interface IWebApplicationTestFactory : IAsyncDisposable
 {

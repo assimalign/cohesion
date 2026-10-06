@@ -50,8 +50,9 @@ Four properties fall out of that intent and shape the whole implementation:
 - **Application faults are contained.** Middleware is arbitrary user code. A
   throw from it is expected, not exceptional, and must cost exactly one
   exchange — never its siblings, never the accept loop, never the process.
-- **Shutdown is deterministic.** Stopping the server drains what is in flight and
-  releases every resource, without leaving an unobserved exception behind.
+- **Shutdown is deterministic.** Stopping the server lets what is in flight finish
+  within the stop's budget, cancels only what outlives it, and releases every
+  resource, without leaving an unobserved exception behind.
 
 ## Application lifecycle composition
 
@@ -242,10 +243,11 @@ The server therefore owns **only** the concerns above that layer:
 | Wire-protocol conformance, frame parsing, per-stream reset encoding | `Http.Connections` |
 | Wire-level failure isolation (bad frames, peer reset) | `Http.Connections` |
 | Stream admission (`SETTINGS_MAX_CONCURRENT_STREAMS`, QUIC stream credit) | `Http.Connections` |
+| Announcing a graceful close on the wire (`Connection: close`, `GOAWAY`, refused streams) | `Http.Connections` |
 | Application-exception isolation (middleware throws), per exchange | **this server** |
 | Per-connection and per-stream dispatch | **this server** |
 | Exchange + connection + context disposal | **this server** |
-| In-flight tracking + graceful drain, per connection and per stream | **this server** |
+| In-flight tracking + the lame-duck drain and its budget, per connection and per stream | **this server** |
 | Optional connection concurrency cap | **this server** |
 | Request spans, HTTP server metrics and the request id (#1064) | **this server** |
 
@@ -345,51 +347,103 @@ graceful close (`GOAWAY`, a bounded wait for dispatched exchanges, then the fram
 pump stops and the output completes), which is why the server drains the
 connection's streams before it disposes the context.
 
-## Stop semantics
+## Stop semantics — the lame-duck drain (#146)
 
-`StopAsync` performs a graceful, idempotent shutdown:
+`StopAsync(cancellationToken)` is a lame-duck drain: the server accepts nothing new,
+lets the exchanges in flight finish within the caller's budget, and cancels only what
+outlives it. The token is the budget. `Host<TContext>.StopAsync` passes a token that
+fires when its `ShutdownTimeout` elapses, which an orchestrated resource derives from
+its stop grace (`ResourceHostOptions.DeriveShutdownTimeout`: grace − 5 s, floor 5 s), so
+a Web app drains for at most that long.
 
-1. **Signal shutdown.** Cancel the single shutdown `CancellationTokenSource`. This
-   both stops the accept loop and unblocks every in-flight connection — an idle
-   keep-alive parked in `ReceiveAsync` observes the cancellation and unwinds, so
-   the drain cannot hang on it.
-2. **Wait for the accept loop.** Await the accept-loop task first, so no new
-   connection task can be added after the in-flight set is snapshotted.
-3. **Drain in-flight connections and their streams.** `await Task.WhenAll` over the
-   tracked connection tasks. A connection task completes only after every stream it
-   dispatched has finished (see "Dispatch within a connection"), so the drain covers
-   every in-flight exchange on every connection. Each task is self-contained — it
-   swallows its own cancellation and faults and never rethrows — so the drain
-   completes without surfacing an unobserved `OperationCanceledException` or any
-   other escaped exception.
-4. **Dispose the listener**, then the shutdown token source and (if present) the
-   concurrency semaphore. Listener disposal runs from a `finally`, including when
-   the caller's drain token expires, so `StopAsync` never completes with the port
-   still owned by this server.
+The server holds two signals (`Internal/WebApplicationServerDrain`). Each live
+connection registers on both once its context is open, so a connection accepted just
+as the stop begins is handled the same way as the rest.
 
-Cancelling before starting, or stopping twice, is safe and idempotent. The drain
-budget is owned by the caller's host lifecycle (`Host<TContext>.StopAsync` applies
-`ShutdownTimeout`); the server honors that token while awaiting its loops but
-still performs listener release.
+| Signal | Fires | Carries |
+| --- | --- | --- |
+| `Draining` | when the stop begins | the accept loop, a bind still in progress, and every connection's graceful close |
+| `Aborted` | when the budget runs out | every connection's open and receive, every exchange's pipeline and send, and every connection's abort |
 
-**Cancellation is drain, not force-kill of in-progress requests.** A single token
-governs both "stop accepting" and "unblock in-flight connections." Idle
-keep-alives unblock immediately; a request actively executing in the pipeline
-observes the same cancellation and unwinds. Letting an in-progress request run to
-completion before closing its connection (lame-duck draining) is a deliberate
-non-goal for this iteration — see below.
+The stop runs in order:
 
-What "observes" means depends on the transport's `RequestCancelled` token, and it
-differs by version. HTTP/1.1 and HTTP/3 link it to the server's shutdown token, so a
-handler that honors `RequestCancelled` unwinds as soon as the stop begins. HTTP/2
-links it only to the stream itself (a peer reset, or a request body cut off by
-teardown): `Http2ConnectionContext` passes no connection token when it creates an
-exchange, so a fully received HTTP/2 request keeps running until its handler returns
-or the host's shutdown budget expires. The server waits either way; it does not
-cancel exchanges on its own, which keeps the lame-duck decision (#146) open. Whatever
-an exchange produces after the stop began is not delivered: `SendAsync` observes the
-cancelled shutdown token, and the server falls back to a best-effort reset of the
-stream (an HTTP/1.1 connection simply closes) before the connection's graceful close.
+1. **Begin the drain.** `Draining` fires: the accept loop stops, and every live
+   connection begins its graceful close through `IHttpConnectionContext.BeginGracefulClose`,
+   which the transport implements per version (Http.Connections DESIGN, "The host
+   contract"):
+   - HTTP/1.1 (RFC 9112 §9.6): the response to the exchange in flight carries
+     `Connection: close` and the connection ends after it; an idle keep-alive
+     connection ends at once.
+   - HTTP/2 (RFC 9113 §6.8): `GOAWAY(NO_ERROR)` carrying the last stream processed;
+     new streams are refused with `RST_STREAM(REFUSED_STREAM)`; the frame pump keeps
+     feeding the open streams.
+   - HTTP/3 (RFC 9114 §5.2): no further request stream is accepted, and a `GOAWAY`
+     names the first one that was not.
+
+   Nothing is cancelled. An exchange already running finishes, and its response is
+   delivered, because its send runs under `Aborted`, which has not fired.
+2. **Wait for the accept loop**, so no connection task is added after the in-flight
+   set is snapshotted.
+3. **Drain in-flight connections and their streams**, within the budget. A
+   connection's receive loop ends on its own once its transport has nothing left to
+   yield, and a connection task completes only after every stream it dispatched has
+   finished (see "Dispatch within a connection"), so the drain covers every in-flight
+   exchange on every connection. Each task is self-contained — it swallows its own
+   cancellation and faults and never rethrows — so the drain completes without
+   surfacing an unobserved exception.
+4. **Abort, when the budget runs out first.** `Aborted` fires: every exchange still
+   running observes `RequestCancelled`, which every transport version links to the
+   receive token, and every connection still open is aborted with a
+   `ConnectionAbortedException`. The stop then waits up to one second
+   (`_abortGracePeriod`, Kestrel's figure) for them to unwind. An exchange that
+   ignores cancellation keeps running after the stop completes.
+5. **Dispose the listener**, then the drain's token sources and (if present) the
+   concurrency semaphore. Listener disposal runs from a `finally`, so `StopAsync`
+   never completes with the port still owned by this server.
+
+The stop completes normally when the budget runs out, as Kestrel's does: the server
+is stopped and its endpoint released; only the graceful part was cut short, which the
+caller knows from its own token and which the host already reports as `DrainAborted`
+(exit 130/143 for an orchestrated resource). Every later `StopAsync` call shares the
+first call's task. Cancelling before starting, or stopping twice, is safe.
+
+The server's states through a stop:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Serving: StartAsync bound the listener
+    Serving --> Draining: StopAsync began
+    Draining --> Released: every exchange finished
+    Draining --> Aborting: the budget ran out
+    Aborting --> Released: exchanges unwound, or one second passed
+    Released --> [*]: listener disposed
+```
+
+**Why two signals.** Before #146 one token did both jobs. It stopped the accept loop
+and cancelled every exchange in flight: through `RequestCancelled` on HTTP/1.1 and
+HTTP/3, and on every version through the send, which then failed. A request that
+would have finished a moment later was cut off, and whatever an exchange produced
+after the stop began was not delivered. Splitting the signal is what lets the budget
+be spent finishing work.
+
+Alternatives considered and rejected:
+
+- **Cancelling each exchange from the server when the budget runs out**
+  (`IHttpContext.Cancel` registered per exchange). It works over any transport, but it
+  costs a registration per exchange on a shared token for what the transport does once
+  per connection. The transport's receive token now cancels every exchange it yielded
+  on all three versions; HTTP/2 used to leave a fully received request running, and now
+  aborts it when its frame pump is cancelled (Http.Connections DESIGN, "HTTP/2 graceful
+  close").
+- **Failing the stop with `OperationCanceledException` when the budget runs out**, as
+  it did before #146. Every later caller shares the stop task, so the cancellation of a
+  test factory's or an explicit stop would be replayed to the host's own stop, failing
+  it after the server had in fact stopped.
+- **Waiting for the cancelled exchanges without a bound.** An exchange that ignores
+  `RequestCancelled` would hold the stop, and the host's shutdown, open past the budget.
+- **Draining inside connection disposal.** The HTTP/2 teardown's own drain is bounded
+  at five seconds, so it cannot spend the host's budget, and the server disposes a
+  connection only after its streams are done anyway.
 
 ## Concurrency cap (`MaxConcurrentConnections`)
 
@@ -697,12 +751,20 @@ must not parent requests; the duration and the active-request count; the request
 without a span; and no activity at all without a listener. Listeners are process-wide, so the class
 runs in the non-parallel `TelemetryCollection`.
 
+The lame-duck drain (#146) is pinned by `WebApplicationServerDrainTests`. Against the
+doubles: the stop begins every connection's graceful close and the exchange in flight
+finishes and is sent under a token that was never cancelled; when the budget runs out,
+the exchange is cancelled and reset, its connection is aborted with a
+`ConnectionAbortedException`, and the stop still completes. End to end: an HTTP/1.1
+request in flight when the stop begins completes in full with `Connection: close`; one
+that outlives the budget observes `RequestCancelled` and its client gets no response;
+and a raw prior-knowledge HTTP/2 client sees `GOAWAY(NO_ERROR)` naming its open stream
+as the last processed while that stream is still running, then the stream's full
+response. The per-version announcements are pinned in the transport's own suite
+(`HttpConnectionGracefulCloseTests`).
+
 ## Non-goals
 
-- **Lame-duck request draining.** Waiting for in-progress exchanges to finish
-  before cancelling on shutdown (versus cancelling them with the drain token) is
-  future work; it needs a two-phase signal ("finish the current exchange, accept
-  no new ones on this connection") that this iteration does not implement (#146).
 - **A server-side per-connection stream cap.** Stream admission is the transport's
   (`SETTINGS_MAX_CONCURRENT_STREAMS`, QUIC stream credit); a second, server-owned
   limit would silently disagree with the one advertised to the peer. The remaining

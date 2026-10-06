@@ -20,6 +20,14 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     private readonly IHttpExchangeInterceptor[] _responseInterceptors;
     private readonly string? _altSvcHeaderValue;
 
+    // A graceful close (BeginGracefulClose) and the receive loop meet under this lock: the close marks
+    // the exchange in flight and ends a read still waiting for the next request to begin, and the loop
+    // registers each of those under the same lock, so a close that races a transition is never lost.
+    private readonly Lock _gracefulCloseGate = new();
+    private bool _gracefulCloseRequested;
+    private Http1Context? _exchangeInFlight;
+    private Http1ReadTimeout? _pendingRead;
+
     public Http1ConnectionContext(IConnection connection, bool isSecure, Http1ConnectionListenerOptions.Http1Limits limits, IHttpExchangeInterceptor[] interceptors, IHttpExchangeInterceptor[] responseInterceptors, string? altSvcHeaderValue)
         : base(connection, isSecure)
     {
@@ -44,6 +52,10 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     /// (<see cref="OperationCanceledException"/>) and other non-wire
     /// exceptions still propagate so cooperative shutdown and programmer
     /// errors are not masked.
+    /// </para>
+    /// <para>
+    /// A graceful close (<see cref="BeginGracefulClose"/>) ends the enumerable after the exchange in
+    /// flight, whose keep-alive it clears, or at once when the connection is idle.
     /// </para>
     /// </remarks>
     public override async IAsyncEnumerable<IHttpContext> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -89,6 +101,37 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             {
                 yield break;
             }
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// RFC 9112 §9.6. The exchange in flight, if any, stops being kept alive, so its response head
+    /// carries <c>Connection: close</c> when it is committed and the receive loop ends after it. A read
+    /// still waiting for the first octet of the next request ends now: the connection is idle, so it is
+    /// reclaimed without a response, as on a keep-alive timeout. A request whose head has started to
+    /// arrive is read and answered under its request-headers deadline, with <c>Connection: close</c>.
+    /// No further request is read. A response head committed before the close began goes out without
+    /// <c>Connection: close</c>; the connection still ends after that exchange, which RFC 9112 §9.5
+    /// permits at any time.
+    /// </remarks>
+    public override void BeginGracefulClose()
+    {
+        lock (_gracefulCloseGate)
+        {
+            if (_gracefulCloseRequested)
+            {
+                return;
+            }
+
+            _gracefulCloseRequested = true;
+
+            if (_exchangeInFlight is { } exchange)
+            {
+                exchange.KeepAlive = false;
+            }
+
+            _pendingRead?.CancelIdleWait();
         }
     }
 
@@ -180,6 +223,13 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
     {
         using Http1ReadTimeout readTimeout = new(cancellationToken, _limits.KeepAliveTimeout, _limits.RequestHeadersTimeout);
 
+        // A graceful close that already began wants no next request; one that begins while this read
+        // waits for it ends the wait (BeginGracefulClose).
+        if (!TryBeginRead(readTimeout))
+        {
+            return null;
+        }
+
         try
         {
             Http1Context? context = await Http1MessageReader.ReadRequestAsync(
@@ -191,6 +241,11 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
                 _timeProvider,
                 readTimeout,
                 cancellationToken).ConfigureAwait(false);
+
+            if (context is not null)
+            {
+                AdmitExchange(context);
+            }
 
             return context;
         }
@@ -232,6 +287,64 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             // `await using` disposes the connection) and let the
             // listener keep accepting subsequent connections.
             return null;
+        }
+        finally
+        {
+            EndRead(readTimeout);
+        }
+    }
+
+    /// <summary>
+    /// Registers <paramref name="readTimeout"/> as the read a graceful close ends while it waits for the
+    /// next request, unless the close already began. The previous exchange is over by now, so a close
+    /// no longer needs to mark it.
+    /// </summary>
+    /// <returns><see langword="false"/> when a graceful close began and no further request is read.</returns>
+    private bool TryBeginRead(Http1ReadTimeout readTimeout)
+    {
+        lock (_gracefulCloseGate)
+        {
+            if (_gracefulCloseRequested)
+            {
+                return false;
+            }
+
+            _exchangeInFlight = null;
+            _pendingRead = readTimeout;
+
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Makes the exchange just read the one a graceful close marks. A close that began while its head
+    /// was arriving marks it now, so its response still carries <c>Connection: close</c>.
+    /// </summary>
+    private void AdmitExchange(Http1Context context)
+    {
+        lock (_gracefulCloseGate)
+        {
+            _exchangeInFlight = context;
+
+            if (_gracefulCloseRequested)
+            {
+                context.KeepAlive = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Unregisters <paramref name="readTimeout"/> before it is disposed, so a graceful close never
+    /// cancels a disposed read.
+    /// </summary>
+    private void EndRead(Http1ReadTimeout readTimeout)
+    {
+        lock (_gracefulCloseGate)
+        {
+            if (ReferenceEquals(_pendingRead, readTimeout))
+            {
+                _pendingRead = null;
+            }
         }
     }
 

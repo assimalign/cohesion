@@ -109,8 +109,8 @@ Web.Hosting.
 | Construct | Listener + dial factory created; `Builder` prepared with the in-memory `UseServer` registration. Nothing runs. |
 | `Application` access | `Builder.Build()` (once, thread-safe). |
 | `StartAsync` / first `CreateClient` | Default server resolved (pipeline snapshot) and started; accept loop live. Idempotent. |
-| `StopAsync` | Server's graceful stop: stop accepting, drain in-flight connections, dispose the listener chain. New dials are refused (`ConnectionAbortedException` → client `HttpRequestException`). Idempotent; no-op before start. |
-| `DisposeAsync` | `StopAsync`, then application disposal, then defensive in-memory listener teardown (idempotent for the never-started factory). Safe to call twice. |
+| `StopAsync` | Server's lame-duck stop: stop accepting, let in-flight requests finish within the caller's budget (none means no limit), cancel what outlives it, dispose the listener chain. New dials are refused (`ConnectionAbortedException` → client `HttpRequestException`). Idempotent; no-op before start. |
+| `DisposeAsync` | The server's stop with a budget that has already run out — in-flight requests are cancelled and their connections aborted, not waited for — then application disposal, then defensive in-memory listener teardown (idempotent for the never-started factory). Safe to call twice. |
 
 For Program-backed factories, construction reserves an ambient loopback endpoint but starts
 nothing; `StartAsync` creates a `Hosting.Resources` `ResourceRuntime` scope, invokes the
@@ -121,9 +121,14 @@ credential only on its internal graceful-stop request. Public clients are delibe
 uncredentialed so user middleware never receives the privileged token; tests that call a
 namespaced control-plane route directly must add the credential to that individual request.
 
-Stop semantics — including cancellation-as-drain for in-flight exchanges — are owned and
-documented by Web.Hosting (`docs/DESIGN.md`, "Stop semantics"); the factory adds no policy of
-its own on top.
+Stop semantics — the lame-duck drain, its budget, and what happens when the budget runs out —
+are owned and documented by Web.Hosting (`docs/DESIGN.md`, "Stop semantics"). The factory adds
+one policy on top: disposal is teardown, so it stops the server with an expired budget. A
+lame-duck drain with no budget waits for every in-flight request, and a handler parked until its
+request is cancelled would hold a test's disposal open forever. Before #146 the stop's single
+token cancelled such a handler on HTTP/1.1 (an HTTP/2 one kept running, and disposal waited for
+it); disposal now cancels it on both. A test that needs its requests to finish calls `StopAsync`
+first.
 
 ## Parallel test isolation
 

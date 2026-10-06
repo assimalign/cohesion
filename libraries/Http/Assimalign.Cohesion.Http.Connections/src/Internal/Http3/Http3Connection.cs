@@ -75,10 +75,11 @@ internal sealed class Http3Connection : HttpConnection
         // emission lives here in the HTTP/3 layer; the connection-first close
         // ordering (bidirectional streams drained, then CONNECTION_CLOSE, then
         // the critical unidirectional streams released) stays in the QUIC
-        // driver's DisposeAsync. Emission is best-effort and precedes it.
+        // driver's DisposeAsync. Emission is best-effort and precedes it. When a host began a graceful
+        // close earlier, its GOAWAY is the one sent, and the close is complete once it is written.
         if (_openContext is not null)
         {
-            await _openContext.SendGoAwayAsync().ConfigureAwait(false);
+            await _openContext.CompleteGracefulCloseAsync().ConfigureAwait(false);
         }
 
         await _connection.DisposeAsync().ConfigureAwait(false);
