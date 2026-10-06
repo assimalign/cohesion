@@ -29,6 +29,30 @@ Confidence tags follow the design review that produced this plan. **[Certain]** 
 this tree on 2026-10-04 or in a cited reference source. **[Likely]** means a strong inference.
 **[Guessing]** means a gap filled by judgment. File references are `path:line` at commit `3f379cca`.
 
+### Owner decisions of 2026-10-06
+
+The owner accepted every open recommendation on 2026-10-06. They settle the questions this file
+records as open or "pending owner confirmation" elsewhere; where an older paragraph says
+otherwise, this list wins.
+
+| # | Question | Decision |
+|---|---|---|
+| 27 | `StorageJournal` and `BTreeRecordVersionIndex` public constructors (§5.3, row 40) | `Create(...)` factories, no public constructors (rule 1). |
+| 28 | `DatabaseAuthenticator.AuthenticateAsync` null and cancellation checks (row 27) | Accepted (rule 4). |
+| 29 | `ProtocolFrameWriter` payload bound in the stream leaf (row 25) | Moves into the base's public `WriteFrameAsync` (rule 4). |
+| 30 | Server session version and principal set after the handshake (row 11) | Protected one-shot setters stay; rule 6 is amended to say so (O34a). |
+| 31 | A server start refused because the engine is not Running (row 9) | Terminal, as `DatabaseServer` makes it. |
+| 32 | `DocumentDatabase`/`BlobDatabase` session-less collection and container operations (§6.6) | Removed: every model's operations take the session. |
+| 33 | Reopening a database closed outside its engine (#1289) | The engine forgets it, so a later open reopens it from disk. |
+| 34 | SQL's coded aborted-transaction error (§6.4) | `COHSQLT005`. |
+
+Decisions 22-26 of the same day concern the storage and hosting runtime, not this program's
+types: hosted servers reopen an offline database with backoff (health Unhealthy until it
+reopens); a deferred checkpoint runs at the end of the statement holding the gate; every
+unconfirmed-commit message leads with the model's code (#1272); persistent worker failures take
+the database offline after N consecutive failures or a journal-size cap; and the
+`Storage.CommitDurability` setter is validated.
+
 ---
 
 ## 1. What this program buys, and what it does not
