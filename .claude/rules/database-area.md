@@ -118,9 +118,12 @@ contracts in this sense and stay.
    in a static extension member (`GetEngine<TEngine>`). A generic *type* with virtual members
    (`DatabaseProtocolExchange<TResult>`) is fine.
 6. **The base owns state as fields.** Values fixed at construction (name, model, id, isolation
-   level, protocol version, principal, the owning engine or database, a `Supports*` capability)
-   are non-virtual, field-backed getters. State changes go through protected, non-virtual
-   methods on the base, never through overridable setters. A base that owns products filled in
+   level, the owning engine or database, a `Supports*` capability) are non-virtual, field-backed
+   getters. A value the type learns once after construction is a field-backed getter too, set
+   through a protected, non-virtual one-shot setter that throws on a second call: a server
+   session exists from accept, before its handshake, so its negotiated protocol version and
+   authenticated principal are set this way (owner decision, 2026-10-06; O34a). State changes go
+   through protected, non-virtual methods on the base, never through overridable setters. A base that owns products filled in
    by a model assembly, such as an engine's workers and servers, accepts them through
    non-virtual `protected` attach methods. Those methods throw `InvalidOperationException` once
    composition is frozen after build.
