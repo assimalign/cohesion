@@ -301,8 +301,8 @@ once, in one of three ways, chosen by how its pipeline ended:
   `500` or a reset.
 - **The connection-level catch remains** for what is left: a receive-side failure the
   transport surfaced and an HTTP/1.1 send failure. Either way the connection cannot
-  carry another request, so it is `Abort`-ed and the enclosing `await using` disposes
-  it. The accept loop is untouched and keeps serving.
+  carry another request, so it is logged (see "Diagnostics"), `Abort`-ed, and the
+  enclosing `await using` disposes it. The accept loop is untouched and keeps serving.
 
 **Behaviour change for HTTP/1.1 (#1049).** Before #1049 a pipeline fault aborted the
 whole connection, so an HTTP/1.1 client saw a dropped connection instead of a status.
@@ -391,7 +391,8 @@ The stop runs in order:
    exchange on every connection. Each task is self-contained — it swallows its own
    cancellation and faults and never rethrows — so the drain completes without
    surfacing an unobserved exception.
-4. **Abort, when the budget runs out first.** `Aborted` fires: every exchange still
+4. **Abort, when the budget runs out first.** The server logs how much was still in flight
+   (see "Diagnostics"), then `Aborted` fires: every exchange still
    running observes `RequestCancelled`, which every transport version links to the
    receive token, and every connection still open is aborted with a
    `ConnectionAbortedException`. The stop then waits up to one second
@@ -620,6 +621,53 @@ and a `MeterListener` and checks a routed request's span and duration. In-proces
 `EventSourceSupport` in a NativeAOT application; tools that read meters out of process through
 EventPipe (`dotnet-counters`) do, as they do for event sources.
 
+## Diagnostics (#147)
+
+The default server writes its own diagnostics through the application's logging. The
+default server factory creates its logger, once, from the `ILoggerFactory` that
+`WebApplicationBuilder.Build` registers from `builder.Logging`, under the category
+`Assimalign.Cohesion.Web.Hosting.WebApplicationServer`, and hands it to the server through
+`WebApplicationServerOptions.Logger`. Composition stays builder-time; nothing resolves per
+request. The events, their levels, and their attribute names live in
+`Internal/WebApplicationServerLog`, and a logger that throws never changes what the server
+does. There is no `Microsoft.Extensions.*` dependency and no `EventSource`: these are discrete
+events an operator acts on, while counters and traces are the telemetry work (#1064).
+
+| Event | Level | When | Content |
+| --- | --- | --- | --- |
+| Bind failure | `Critical` | `StartAsync` cannot bind the listener; logged before `HostStartupException` propagates | the transport's exception; `http.server.listener.protocols` |
+| Accept-loop fault | `Critical` | accepting faults; the server keeps running but accepts nothing more | the exception |
+| Connection fault, a defect | `Error` | the connection-level isolation boundary caught a failure not attributable to the peer: an unexpected receive-side failure, an HTTP/1.1 response that could not be framed, a teardown failure | the exception; `connection.id`, `network.local.address`/`.port`, `network.peer.address`/`.port`, `network.protocol.version` |
+| Connection fault, the peer or the network | `Debug` | the same boundary, for an `IOException`, `SocketException`, or `ConnectionException`, or any fault after the server aborted its drain | as above |
+| Drain cut short | `Warning` | a stop's budget ran out with work in flight; logged before the abort | `http.server.drain.connections`, `.exchanges`, `.duration` |
+
+Why these levels:
+
+- **`Critical` for a bind or accept-loop failure.** After either, the server cannot serve: the
+  host fails to start (exit 70, or 64/69 for a classified cause), or the server runs on without
+  accepting anything. Kestrel logs its own startup failure at the same level.
+- **`Error` for a connection fault the server cannot blame on the peer.** It is a defect — in
+  the transport, an interceptor, or the application's response — that cost a connection. The
+  server isolated it and keeps serving, so it is not `Critical`.
+- **`Debug` for a connection the peer or the network ended.** That is routine on any reachable
+  endpoint and not actionable, and it is frequent enough to flood a log at a higher level. The
+  classification is by exception type, so an application stream that throws an `IOException`
+  is reported at `Debug` too. A fault after the drain was aborted is the server's own doing, and
+  the drain warning already reports it.
+- **`Warning` for a drain cut short.** The requests in flight got no response, which an operator
+  should see, but it is the outcome of a budget, not a defect; the host reports the same stop as
+  `DrainAborted` (exit 130/143 for an orchestrated resource).
+
+What is never logged is request or response content. A connection is identified by its id, its
+endpoints, and the version of the exchanges it carried (absent when it faulted before its first
+exchange); no header value, body, path, or query reaches an entry. An exception's message is the
+faulting component's own.
+
+Not logged here: an exception the application's pipeline throws. The server isolates it to its
+exchange (a `500`, or a reset), and reporting it belongs to the application's error handling
+(`Web.ErrorHandling`'s `OnException` hook) and to request telemetry, so the server does not add
+a second report of the same failure.
+
 ## AOT posture
 
 `IsAotCompatible=true` holds with no special handling. The dispatch machinery is
@@ -762,6 +810,15 @@ and a raw prior-knowledge HTTP/2 client sees `GOAWAY(NO_ERROR)` naming its open 
 as the last processed while that stream is still running, then the stream's full
 response. The per-version announcements are pinned in the transport's own suite
 (`HttpConnectionGracefulCloseTests`).
+
+The diagnostics (#147) are pinned by `WebApplicationServerDiagnosticsTests`, which records the
+entries through a real `LoggerFactoryBuilder`: a bind failure (`Critical`, with its cause), an
+accept-loop fault (`Critical`), a connection fault the server cannot blame on the peer (`Error`,
+whose attributes are exactly the connection id, both endpoints, and the protocol version), one
+the peer caused (`Debug`), and a drain cut short (`Warning`, two connections and three exchanges
+in flight across HTTP/1.1 and HTTP/2). End to end, a real exchange carrying a secret header and
+body whose response cannot be framed is logged without either, and an application built through
+`WebApplicationBuilder` reports a real port conflict through its own `builder.Logging`.
 
 ## Non-goals
 

@@ -54,6 +54,12 @@ internal sealed class FakeHttpConnectionListener : IHttpConnectionListener
 
     public Func<ValueTask>? DisposeHandler { get; init; }
 
+    /// <summary>
+    /// Replaces the queued connections: every accept runs this instead, so a test can fault the
+    /// accept loop.
+    /// </summary>
+    public Func<CancellationToken, Task<IHttpConnection>>? AcceptHandler { get; init; }
+
     public HttpProtocol Protocols => HttpProtocol.Http11;
 
     public ValueTask BindAsync(CancellationToken cancellationToken = default)
@@ -65,6 +71,12 @@ internal sealed class FakeHttpConnectionListener : IHttpConnectionListener
     public async Task<IHttpConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _acceptCount);
+
+        if (AcceptHandler is not null)
+        {
+            return await AcceptHandler(cancellationToken).ConfigureAwait(false);
+        }
+
         return await _connections.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -196,9 +208,9 @@ internal sealed class FakeHttpConnectionContext : IHttpConnectionContext, IAsync
     /// </summary>
     public Action<IHttpContext>? OnReceiving { get; init; }
 
-    public EndPoint? LocalEndPoint => null;
+    public EndPoint? LocalEndPoint { get; init; }
 
-    public EndPoint? RemoteEndPoint => null;
+    public EndPoint? RemoteEndPoint { get; init; }
 
     public async IAsyncEnumerable<IHttpContext> ReceiveAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.ExceptionServices;
@@ -57,6 +58,13 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
     // Aborted cancels what is still in flight once the stop's budget runs out.
     private readonly WebApplicationServerDrain _drain = new();
 
+    // The server's own diagnostics: a bind or accept-loop failure, a connection fault, a drain the
+    // budget cut short.
+    private readonly WebApplicationServerLog _log;
+
+    // The exchanges being served on every connection, reported when a stop's budget runs out.
+    private int _exchangesInFlight;
+
     // In-flight per-connection tasks, keyed by a monotonic id so a completing connection can remove
     // exactly its own entry. ConcurrentDictionary because the accept loop adds while the connection
     // tasks (running on arbitrary pool threads) remove themselves.
@@ -81,6 +89,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             ?? throw new ArgumentException("A pipeline must be configured on the server options.", nameof(options));
         _listener = options.Listener
             ?? throw new ArgumentException("A listener must be configured on the server options.", nameof(options));
+        _log = new WebApplicationServerLog(options.Logger);
 
         if (options.MaxConcurrentConnections is int limit)
         {
@@ -155,12 +164,14 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
             // failure.
             return;
         }
-        catch (HostStartupException)
+        catch (HostStartupException exception)
         {
+            _log.BindFailed(_listener.Protocols, exception);
             throw;
         }
         catch (Exception exception)
         {
+            _log.BindFailed(_listener.Protocols, exception);
             throw new HostStartupException(
                 "The web application server failed to bind its configured listener.",
                 exception);
@@ -217,6 +228,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
     {
         Volatile.Write(ref _stopped, 1);
         Exception? shutdownSignalFailure = null;
+        long drainStarted = Stopwatch.GetTimestamp();
 
         try
         {
@@ -241,6 +253,10 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 // the listener is released: its job is done, only the graceful part was cut short, and
                 // the caller knows that from its own token. Throwing would replay the cancellation to
                 // every later StopAsync caller, which shares this task.
+                _log.DrainTimedOut(
+                    _connections.Count,
+                    Volatile.Read(ref _exchangesInFlight),
+                    Stopwatch.GetElapsedTime(drainStarted));
                 await AbortDrainAsync().ConfigureAwait(false);
             }
 
@@ -388,11 +404,13 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         {
             // The listener was disposed concurrently with shutdown.
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             // A fatal accept-loop failure (e.g. the transport listener itself faulted) ends the
             // loop; already-accepted connections still drain through StopAsync. Swallowed so the
-            // stored task completes rather than escalating as an unobserved exception.
+            // stored task completes rather than escalating as an unobserved exception — and logged,
+            // because the server keeps running but accepts nothing more.
+            _log.AcceptLoopFaulted(exception);
         }
     }
 
@@ -413,10 +431,15 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 // exchange, so an HTTP/1.1 connection never allocates one.
                 MultiplexedExchangeTracker? streams = null;
 
+                // The version of the exchanges this connection carries, for its fault diagnostics.
+                HttpVersion version = HttpVersion.Unknown;
+
                 try
                 {
                     await foreach (IHttpContext exchange in context.ReceiveAsync(cancellationToken).ConfigureAwait(false))
                     {
+                        version = exchange.Version;
+
                         if (IsMultiplexed(exchange))
                         {
                             // One task per stream, started the moment the transport yields it; the
@@ -453,6 +476,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                     // Aborting signals the peer; the enclosing await using still disposes it. Catching
                     // Exception is the deliberate process-crash guard, mirroring the accept-loop
                     // isolation boundary in HttpConnectionListener.
+                    _log.ConnectionFaulted(connection, context, version, exception, _drain.Aborted.IsCancellationRequested);
                     connection.Abort(exception);
                 }
                 finally
@@ -473,10 +497,11 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         {
             // OpenAsync was cancelled during shutdown, or connection disposal observed cancellation.
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             // Teardown faults (OpenAsync or connection disposal) must not escape as an unobserved
             // task exception; the connection is being discarded regardless.
+            _log.ConnectionFaulted(connection, context: null, HttpVersion.Unknown, exception, _drain.Aborted.IsCancellationRequested);
         }
         finally
         {
@@ -512,6 +537,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         CancellationToken cancellationToken)
     {
         WebExchangeTelemetry telemetry = WebExchangeTelemetry.Start(exchange);
+        Interlocked.Increment(ref _exchangesInFlight);
 
         try
         {
@@ -550,6 +576,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         {
             telemetry.Stop();
             await DisposeExchangeAsync(exchange).ConfigureAwait(false);
+            Interlocked.Decrement(ref _exchangesInFlight);
         }
     }
 
