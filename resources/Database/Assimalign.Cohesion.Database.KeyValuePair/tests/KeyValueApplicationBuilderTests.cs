@@ -45,7 +45,7 @@ public class KeyValueApplicationBuilderTests
             options.AddServer(engine =>
             {
                 serverCreated = true;
-                return KeyValueDatabaseServer.Create((KeyValueDatabaseEngine)engine,
+                return KeyValueDatabaseServer.Create(engine,
                     new KeyValueDatabaseServerOptions { Listener = new InMemoryConnectionListener() });
             });
         });
@@ -66,7 +66,7 @@ public class KeyValueApplicationBuilderTests
         await using var engine = (KeyValueDatabaseEngine)builder.MaterializeEngine();
 
         // Act: the registered engine is immediately usable (in-memory default).
-        var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("verbs", TestTimeout.Token());
+        var database = await engine.CreateDatabaseAsync("verbs", TestTimeout.Token());
         await using var session = await database.CreateSessionAsync();
 
         var put = await database.PutAsync(session, Bytes("k"), Bytes("v"), cancellationToken: TestTimeout.Token());

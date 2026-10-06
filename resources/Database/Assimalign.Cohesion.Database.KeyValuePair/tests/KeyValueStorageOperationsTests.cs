@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -53,7 +52,7 @@ public sealed class KeyValueStorageOperationsTests
             options.MaintenanceInterval = TimeSpan.FromHours(1);
         });
         const string name = KeyValueServerHarness.DatabaseName;
-        var database = (KeyValueDatabaseInstance)await harness.Engine.OpenDatabaseAsync(name);
+        var database = await harness.Engine.OpenDatabaseAsync(name);
         await using var wire = await harness.DialAsync();
         await wire.HandshakeAsync();
         var session = await database.CreateSessionAsync();
@@ -113,7 +112,7 @@ public sealed class KeyValueStorageOperationsTests
         var dataBeforeTheReopen = strategy.Capture(name);
         var catalogBeforeTheReopen = strategy.Capture(name + KeyValueDatabaseEngine.CatalogSuffix);
 
-        var reopened = (KeyValueDatabaseInstance)await harness.Engine.OpenDatabaseAsync(name);
+        var reopened = await harness.Engine.OpenDatabaseAsync(name);
         await using var observer = await reopened.CreateSessionAsync();
         var keys = new List<string>();
         await foreach (var entry in reopened.ScanAsync(observer))
@@ -162,8 +161,8 @@ public sealed class KeyValueStorageOperationsTests
         const string control = "control";
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = KeyValueDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(name);
-        var controlDatabase = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(control);
+        var database = await engine.CreateDatabaseAsync(name);
+        var controlDatabase = await engine.CreateDatabaseAsync(control);
         await using var session = await database.CreateSessionAsync();
 
         // Act: the data journal's fsync fails on the commit.
@@ -208,7 +207,7 @@ public sealed class KeyValueStorageOperationsTests
         const string name = "catalog-fails";
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = KeyValueDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        var database = await engine.CreateDatabaseAsync(name);
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
         await database.PutAsync(session, Bytes("a"), Bytes("1"));
@@ -250,13 +249,12 @@ public sealed class KeyValueStorageOperationsTests
         // Arrange
         var (engine, database) = await CreateAsync();
         await using var _ = engine;
-        var instance = (KeyValueDatabaseInstance)database;
 
         // Act & Assert
         new KeyValueDatabaseEngineOptions().BufferPoolCapacity.ShouldBe(32L * 1024 * 1024);
-        instance.DataStorage.BufferPoolCapacity.ShouldBe(4096);
-        instance.CatalogStorage.BufferPoolCapacity.ShouldBe(KeyValueDatabaseEngine.CatalogBufferPoolPages);
-        instance.DataStorage.CheckpointJournalSize.ShouldBe(256L * 1024 * 1024);
+        database.DataStorage.BufferPoolCapacity.ShouldBe(4096);
+        database.CatalogStorage.BufferPoolCapacity.ShouldBe(KeyValueDatabaseEngine.CatalogBufferPoolPages);
+        database.DataStorage.CheckpointJournalSize.ShouldBe(256L * 1024 * 1024);
         new KeyValueDatabaseEngineOptions().CheckpointInterval.ShouldBe(TimeSpan.FromMinutes(5));
     }
 
@@ -267,13 +265,13 @@ public sealed class KeyValueStorageOperationsTests
         var strategy = new FaultInjectingJournalStorageStrategy();
         var options = new KeyValueDatabaseEngineOptions { StorageStrategy = strategy, BufferPoolCapacity = 2 * 1024 * 1024 };
         var engine = KeyValueDatabaseEngine.Create(options);
-        var created = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync("sized");
+        var created = await engine.CreateDatabaseAsync("sized");
         int createdPages = created.DataStorage.BufferPoolCapacity;
         await engine.DisposeAsync();
 
         // Act
         await using var reopenedEngine = KeyValueDatabaseEngine.Create(options);
-        var reopened = (KeyValueDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("sized");
+        var reopened = await reopenedEngine.OpenDatabaseAsync("sized");
 
         // Assert
         createdPages.ShouldBe(256);
@@ -291,8 +289,8 @@ public sealed class KeyValueStorageOperationsTests
         builder.CheckpointJournalSize = 8 * 1024 * 1024;
 
         // Act
-        await using var engine = (KeyValueDatabaseEngine)builder.Build();
-        var database = (KeyValueDatabaseInstance)await engine.CreateDatabaseAsync("built");
+        await using var engine = builder.Build();
+        var database = await engine.CreateDatabaseAsync("built");
 
         // Assert
         defaultPool.ShouldBe(32L * 1024 * 1024);
@@ -351,7 +349,6 @@ public sealed class KeyValueStorageOperationsTests
             options.CheckpointInterval = TimeSpan.FromHours(1);
         });
         await using var _ = engine;
-        var instance = (KeyValueDatabaseInstance)database;
         using var stop = new CancellationTokenSource();
         var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
         {
@@ -364,7 +361,7 @@ public sealed class KeyValueStorageOperationsTests
 
         // Act: sample the journal while the writers push well past the size many times over,
         // counting the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => instance.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
+        var journal = await JournalSamples.CollectAsync(() => database.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
         stop.Cancel();
         await Task.WhenAll(writers).WaitAsync(Timeout);
 
@@ -397,7 +394,6 @@ public sealed class KeyValueStorageOperationsTests
             configured = options;
         });
         await using var _ = engine;
-        var instance = (KeyValueDatabaseInstance)database;
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
@@ -408,13 +404,13 @@ public sealed class KeyValueStorageOperationsTests
         // the writer's key lock held; the pages are released at once. (Until #1252 a failed journal
         // write was the transient fault; a journal write failure now takes the database offline.)
         var watch = Stopwatch.StartNew();
-        using (PageWriteLockHolder.LockEveryPage(instance.DataStorage))
+        using (PageWriteLockHolder.LockEveryPage(database.DataStorage))
         {
             await transaction.RollbackAsync();
         }
 
         // The engine handed the coordinator its first retry delay: the retry is due within it.
-        var firstRetry = instance.Coordinator.NextDeferredUndoRetry;
+        var firstRetry = database.Coordinator.NextDeferredUndoRetry;
 
         var put = await database.PutAsync(other, Bytes("hot"), Bytes("next")).AsTask().WaitAsync(Timeout);
         watch.Stop();
@@ -425,7 +421,7 @@ public sealed class KeyValueStorageOperationsTests
         firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(retryDelay);
         put.Applied.ShouldBeTrue();
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        instance.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
         // The regression this guards against waits a full MaintenanceInterval (an hour here) per retry.
         // 100 retry delays (10 s) still catches it by a factor of 360 and leaves room for a loaded CI
         // runner; the exact wiring is the firstRetry check above.

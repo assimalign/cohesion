@@ -1,3 +1,8 @@
+// A model whose engine derives from the root DatabaseEngine, which carries the same pump and fold,
+// defines COHESION_DATABASE_ENGINE_PUMP_IN_BASE in its csproj, and this copy compiles to nothing
+// there (concrete-types plan, phase 4, #1260; KeyValuePair first). The last model's phase-4 PR
+// deletes this file and the constant.
+#if !COHESION_DATABASE_ENGINE_PUMP_IN_BASE
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -91,3 +96,4 @@ internal static class DatabaseEngineWorkerPump
         return EngineState.Running;
     }
 }
+#endif

@@ -143,7 +143,7 @@ public class KeyValueClientTests
             Text((await reused.GetAsync(Bytes("k"), KeyValueClientTestHarness.Timeout()))!.Value.Value).ShouldBe("v");
         }
 
-        harness.Server.Context.Sessions.Count.ShouldBe(1);
+        harness.Server.Sessions.Count.ShouldBe(1);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Telemetry: the observer sees command text, counts, and failures")]

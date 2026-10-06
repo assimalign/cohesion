@@ -60,7 +60,7 @@ internal sealed class KeyValueVersionPurgeWorker : DatabaseEngineWorker
     {
         // Until the next full pass, or the next deferred-undo retry when one is sooner.
         var wait = Interval - Stopwatch.GetElapsedTime(Volatile.Read(ref _lastFullPass));
-        foreach (KeyValueDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (KeyValueDatabase database in _engine.GetInstanceSnapshot())
         {
             if (!database.IsOffline && database.Coordinator.NextDeferredUndoRetry is { } retry && retry < wait)
             {
@@ -98,7 +98,7 @@ internal sealed class KeyValueVersionPurgeWorker : DatabaseEngineWorker
             Volatile.Write(ref _lastFullPass, Stopwatch.GetTimestamp());
         }
 
-        foreach (KeyValueDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (KeyValueDatabase database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {

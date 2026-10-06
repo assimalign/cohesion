@@ -3,7 +3,8 @@
 **Status:** Phase 0 landed with this file; phases 1 (#1257) and 2 (#1258, kernel and wire tracks)
 re-verified and implemented on 2026-10-05 (§7, §6.9); phase 3 (#1259) re-verified, implemented
 and reviewed on 2026-10-05, with two owner questions open at its merge (§7, §6.4, §6.5); step
-P4.0 (#1260) re-verified and implemented on 2026-10-05 (§7, §6.5) ·
+P4.0 (#1260) re-verified and implemented on 2026-10-05 (§7, §6.5); the KeyValuePair model PR of
+P4 (#1260, the first of five) re-verified and implemented on 2026-10-05 (§7, §6.4, §6.5, §6.9) ·
 **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
 · **Owner decision:** O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md` · **Supersedes:** #1232
@@ -216,8 +217,8 @@ interface is deleted in P6.
 | 3 | `IDatabaseApplicationBuilder` | Database `:7` | area root | keep | Retyped: `AddEngine(DatabaseEngine)` and `AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine>)`. | P6 |
 | 4 | `IDatabaseApplicationContext` | Database `:6` | area root | keep | `Engines` becomes `IReadOnlyList<DatabaseEngine>`, `Servers` becomes `IReadOnlyList<DatabaseServer>`, and `GetEngine` returns `DatabaseEngine`. Adds a static extension `GetEngine<TEngine>(name) where TEngine : DatabaseEngine`. | P6 |
 | 5 | `IDatabaseEngine` | Database `:29` | area root | abstract | `public abstract class DatabaseEngine : IAsyncDisposable, IDisposable`, with a protected constructor taking the name and model. `Name`, `Model`, `State`, `Workers` and `Servers` are non-virtual and field-backed. `protected` non-virtual `AttachWorker` and `AttachServer` are refused after `CompleteComposition()` (§6.5). NVI create, open, drop, list and try-get members call `*Core` members. A non-virtual `DisposeAsync` keeps the order servers, then workers, then `DisposeAsyncCore`. Leaves add `public new ValueTask<SqlDatabase> OpenDatabaseAsync(...)` over the base NVI member. **At P3 (re-verified):** the interface had gained `OfflineDatabases` (#1243) after the plan; it is the base's one abstract public member, state the leaf computes (rule 4). `Workers` is typed `IReadOnlyList<DatabaseEngineWorker>` and `Servers` `IReadOnlyList<DatabaseServer>`, published copies replaced on each attach. `AttachWorker` starts the worker's pump thread at once, as every engine did, and carries the checks the engines and `DatabaseEngineBuilderState` made: unique worker names (Sql and KeyValuePair checked them), no product attached twice, a server that fronts this engine. The disposal order is servers (last attached first), then every pump stopped and joined, then the workers (last attached first), then `DisposeAsyncCore`, continuing past failures into one `AggregateException`. The engines' pump frame and state fold (`shared/DatabaseEngineWorkerPump.cs`) moved into the base; the shared copy cannot be deleted in P3, because no model engine derives from the base yet and the root may grant no model its internals, so each model stops compiling it in its P4 PR and the last deletes it. **P3 review:** every NVI member checks the name, then disposal, then the token before its core; `GetDatabasesAsync` makes both checks when it is called (the models made the disposal check at the first `MoveNextAsync`), and the constructor rejects a blank name, which every model's options accept today. §6.4 lists these with the other P4 changes. | P3/P6 |
-| 6 | `IDatabaseEngineBuilder` | Database `:7` | area root | delete | Five `public sealed <Model>DatabaseEngineBuilder` types with internal constructors, typed `AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker>)` and `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)`, and a `Build()` that returns the model engine. Shared logic moves to `DatabaseEngineBuilderState<TEngine>` (P4.0). **At P4.0 (re-verified):** the state is `DatabaseEngineBuilderState<TEngine, TWorker, TServer>`, not `<TEngine>`. The factories are typed `Func<TEngine, TWorker>` and `Func<TEngine, TServer>`, but the products cannot be fixed to the bases yet: a model that has not adopted them composes `IDatabaseEngineWorker` and `IDatabaseServer` (its servers and its tests' worker and server doubles implement only the interfaces), the one that has composes `DatabaseEngineWorker` and `DatabaseServer`, and during P4 both kinds compile the same shared file. The constraints are `TEngine : class, IDatabaseEngine`, `TWorker : class, IDatabaseEngineWorker` and `TServer : class, IDatabaseServer`, which the bases satisfy until P6. `Complete` takes the leaf's internal compose method (§6.5); a bridge overload over the engine's two attach members serves the builders whose model has not adopted the base. P6 collapses the state to `DatabaseEngineBuilderState<TEngine> where TEngine : DatabaseEngine`, with the products fixed to the bases. | P4.0/P4/P6 |
-| 7 | `IDatabaseEngineWorker` | Database `:19` | area root | delete | The existing `DatabaseEngineWorker` (`DatabaseEngineWorker.cs:64`) is already mostly NVI: #1268 and its review landed a non-virtual `Run` (`:146`) and `RunIteration` (`:207`) over `protected abstract void RunIterationCore` (`:230`), with the per-database failure record (`protected` non-virtual `BeginDatabase`, `ReportFailure` and `ReportUnfinished`, `:242-329`), `Fault`, `ConsecutiveFailures`, `FailureCount` and `FailureBackoff`. The review changed the core from `bool` to `void`: a pass reports unfinished work per database (`ReportUnfinished`), so the return value carried nothing. P3 still makes `Name`, `Kind` and `Interval` set by the constructor and non-virtual (abstract today, `:102-108`). The trigger wait (`:350`) stays a `protected virtual` lifecycle hook; the checkpoint, purge and write-ahead flush workers override it (`*WriteAheadFlushWorker.cs:54`). P3 also moves the engines' shared pump and state fold (`shared/DatabaseEngineWorkerPump.cs`, compiled into each model since #1268's review) into the root engine base. **At P3:** landed. `protected DatabaseEngineWorker(string name, DatabaseEngineWorkerKind kind, TimeSpan interval)` rejects a blank name; the interval is not validated there, because the engines validate their options and an invalid one must keep failing the way it does today. The 22 leaves pass their values to the constructor (the shared `DatabaseCheckpointWorker` names itself `{engine}/checkpoint`), so a built-in worker's cadence is captured from the engine's options when the engine is created instead of read on every trigger wait. The pump and fold are in `DatabaseEngine` (row 5); the shared copy stays until P4. **Scheduled by the P3 review:** `DatabaseEngine` disposes a worker through type tests (`is IAsyncDisposable`, `is IDisposable`), kept from the shared pump, because the model engines that compile that pump dispose the same workers (the shared `DatabaseCheckpointWorker` is `IDisposable`) and the model tests' workers implement `IDatabaseEngineWorker, IDisposable` directly. The P4 PR that deletes the shared pump gives the worker base a non-virtual disposal over a `protected virtual DisposeAsyncCore` lifecycle hook (rule 4), moves `DatabaseCheckpointWorker`'s `Dispose` body into it, and replaces the type tests with the call. The hook's entry point should be `internal` to the root, not public: `DatabaseEngine.Workers` is public, and a public `DisposeAsync` would let outside code dispose a worker the engine still pumps. | P3 (NVI)/P6 |
+| 6 | `IDatabaseEngineBuilder` | Database `:7` | area root | delete | Five `public sealed <Model>DatabaseEngineBuilder` types with internal constructors, typed `AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker>)` and `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)`, and a `Build()` that returns the model engine. Shared logic moves to `DatabaseEngineBuilderState<TEngine>` (P4.0). **At P4.0 (re-verified):** the state is `DatabaseEngineBuilderState<TEngine, TWorker, TServer>`, not `<TEngine>`. The factories are typed `Func<TEngine, TWorker>` and `Func<TEngine, TServer>`, but the products cannot be fixed to the bases yet: a model that has not adopted them composes `IDatabaseEngineWorker` and `IDatabaseServer` (its servers and its tests' worker and server doubles implement only the interfaces), the one that has composes `DatabaseEngineWorker` and `DatabaseServer`, and during P4 both kinds compile the same shared file. The constraints are `TEngine : class, IDatabaseEngine`, `TWorker : class, IDatabaseEngineWorker` and `TServer : class, IDatabaseServer`, which the bases satisfy until P6. `Complete` takes the leaf's internal compose method (§6.5); a bridge overload over the engine's two attach members serves the builders whose model has not adopted the base. P6 collapses the state to `DatabaseEngineBuilderState<TEngine> where TEngine : DatabaseEngine`, with the products fixed to the bases. **KeyValuePair at P4:** landed as planned. `KeyValueDatabaseEngineBuilder` is public sealed with an internal constructor, its state is `<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`, `AddWorker`/`AddServer` take `Func<KeyValueDatabaseEngine, DatabaseEngineWorker>`/`Func<KeyValueDatabaseEngine, DatabaseServer>` and return the builder, and `Build()` returns the engine through `_state.Complete(engine, engine.Compose)`; it implements no root interface (no Hosting code consumed `IDatabaseEngineBuilder`). | P4.0/P4/P6 |
+| 7 | `IDatabaseEngineWorker` | Database `:19` | area root | delete | The existing `DatabaseEngineWorker` (`DatabaseEngineWorker.cs:64`) is already mostly NVI: #1268 and its review landed a non-virtual `Run` (`:146`) and `RunIteration` (`:207`) over `protected abstract void RunIterationCore` (`:230`), with the per-database failure record (`protected` non-virtual `BeginDatabase`, `ReportFailure` and `ReportUnfinished`, `:242-329`), `Fault`, `ConsecutiveFailures`, `FailureCount` and `FailureBackoff`. The review changed the core from `bool` to `void`: a pass reports unfinished work per database (`ReportUnfinished`), so the return value carried nothing. P3 still makes `Name`, `Kind` and `Interval` set by the constructor and non-virtual (abstract today, `:102-108`). The trigger wait (`:350`) stays a `protected virtual` lifecycle hook; the checkpoint, purge and write-ahead flush workers override it (`*WriteAheadFlushWorker.cs:54`). P3 also moves the engines' shared pump and state fold (`shared/DatabaseEngineWorkerPump.cs`, compiled into each model since #1268's review) into the root engine base. **At P3:** landed. `protected DatabaseEngineWorker(string name, DatabaseEngineWorkerKind kind, TimeSpan interval)` rejects a blank name; the interval is not validated there, because the engines validate their options and an invalid one must keep failing the way it does today. The 22 leaves pass their values to the constructor (the shared `DatabaseCheckpointWorker` names itself `{engine}/checkpoint`), so a built-in worker's cadence is captured from the engine's options when the engine is created instead of read on every trigger wait. The pump and fold are in `DatabaseEngine` (row 5); the shared copy stays until P4. **Scheduled by the P3 review:** `DatabaseEngine` disposes a worker through type tests (`is IAsyncDisposable`, `is IDisposable`), kept from the shared pump, because the model engines that compile that pump dispose the same workers (the shared `DatabaseCheckpointWorker` is `IDisposable`) and the model tests' workers implement `IDatabaseEngineWorker, IDisposable` directly. The P4 PR that deletes the shared pump gives the worker base a non-virtual disposal over a `protected virtual DisposeAsyncCore` lifecycle hook (rule 4), moves `DatabaseCheckpointWorker`'s `Dispose` body into it, and replaces the type tests with the call. The hook's entry point should be `internal` to the root, not public: `DatabaseEngine.Workers` is public, and a public `DisposeAsync` would let outside code dispose a worker the engine still pumps. **KeyValuePair at P4:** a single shared file cannot be left out of one consumer's `CohesionSharedSource` (the link is the whole `shared/` folder, and the per-file item is marked not ready), so `shared/DatabaseEngineWorkerPump.cs` is wrapped in `#if !COHESION_DATABASE_ENGINE_PUMP_IN_BASE`, and a model that adopts the engine base defines the constant in its csproj; KeyValuePair does. The last model PR deletes the file and the constant, and the disposal hook above stays scheduled for it: the type tests keep disposing KeyValuePair's checkpointer through `IDisposable`. A test worker that implemented only `IDatabaseEngineWorker` (`KeyValueWorkerResilienceTests`' `EscapingWorker`) cannot be registered through the typed `AddWorker`, so it derives from the base and its first pass throws instead of its loop. | P3 (NVI)/P6 |
 | 8 | `IDatabaseSchemaProvisioner` | Database `:7` | area root | delete | Folded into `DatabaseInstance`: a non-virtual `public bool SupportsSchemaProvisioning`, set by `protected DatabaseInstance(Name name, DatabaseEngine engine, bool supportsSchemaProvisioning = false)` (rule 6), and an NVI `ApplySchemaAsync` that throws `NotSupportedException` while the flag is `false` and otherwise calls a `protected virtual ApplySchemaCoreAsync` whose default throws `NotSupportedException`. It is the only capability member on `DatabaseInstance`. **Bridge:** Hosting's type test (`Hosting/src/Internal/DefaultDatabaseProvisioner.cs:49`) still needs the interface until P6, and the Sql PR of P4 deletes `ISqlDatabase` (`Sql/src/Abstractions/ISqlDatabase.cs:6`), which is how `SqlDatabase` carries it today. So `SqlDatabase` keeps `IDatabaseSchemaProvisioner` in its base list until P6, implemented by the inherited NVI member. Only Sql claims the interface, as today, and the SampleHost provisioning test stays green. P6 deletes it and turns the type test into a flag check. **At P3:** landed as planned; `DatabaseInstance` does not list `IDatabaseSchemaProvisioner`. `ApplySchemaAsync` checks disposal, a null schema, the capability and the token, in that order, before the core. | P3/P6 |
 | 9 | `IDatabaseServer` | Database `:26` | area root | abstract | `public abstract class DatabaseServer : IAsyncDisposable`, with a protected constructor taking the engine. `Engine` is non-virtual and field-backed (replacing `Context.Engine`), and leaves re-expose it typed with `new`. NVI `StartAsync` and `StopAsync`, with a state guard, call `StartCoreAsync` and `StopCoreAsync`. `public abstract IReadOnlyCollection<DatabaseServerSession> Sessions`. During the bridge, `Context` stays a temporary abstract member (row 10). **At P3 (re-verified):** the state guard is the lifecycle the Sql, KeyValuePair and Graph servers each carried (a lifecycle gate; created inert; a start while running returns; a failed start and any stop are terminal; a start after them throws `ObjectDisposedException`; stop is idempotent and runs for a server that never started, so the leaf releases its listener). `DisposeAsync` is the non-virtual stop. `Context` is public abstract until P6. **Corrected by the P3 review:** Blob's server differs on one path. It refuses a start while its engine is not `Running` ("The Blob engine is {State} and cannot accept sessions.") before it marks itself stopped, so the server stays inert: a later start can retry, and a later stop still disposes `options.Listener`. Under the base every start that throws is terminal and a later stop skips `StopCoreAsync`, so the Blob PR's `StartCoreAsync` disposes the listener before it rethrows that refusal, and adds a test (a start refused while the engine is `Faulted`, then `DisposeAsync` disposes the listener). Retry after a refused start is lost; keeping it would need a non-terminal refusal path in the base, an owner decision (§7, P3 owner questions). | P3/P6 |
 | 10 | `IDatabaseServerContext` | Database `:16` | area root | delete | `Engine` and `Sessions` fold into `DatabaseServer`. The four context classes (`Blob`, `Graph`, `KeyValuePair`, `Sql` `Internal/*DatabaseServerContext.cs:9`) and five test-double contexts are deleted **in P6**, because Hosting reads `server.Context.Engine` until P6 retypes it. | P6 |
@@ -283,11 +284,11 @@ interface is deleted in P6.
 | 70 | `IGraphStore` | Graph.Storage `:9` | model child | sealed | `public sealed class GraphStore`. It absorbs the static class (`GraphStore.cs:10`). | P4 |
 | 71 | `IGraphClient` | Graph.Client `:10` | client | sealed | `public sealed class GraphClient`. It absorbs the static class (`GraphClient.cs:9`). | P5 |
 | 72 | `IGraphConnection` | Graph.Client `:11` | client | sealed | `public sealed class GraphConnection`, with an internal constructor. | P5 |
-| 73 | `IKeyValueDatabase` | KeyValuePair `:23` | model | sealed | `public sealed class KeyValueDatabase : DatabaseInstance`. | P4 |
-| 74 | `IKeyValueDatabaseEngineBuilder` | KeyValuePair `:9` | model | sealed | `public sealed class KeyValueDatabaseEngineBuilder`, with an internal constructor. | P4 |
-| 75 | `IKeyValueStorageStrategy` | KeyValuePair `:13` | model | abstract *(internal)* | `internal abstract class KeyValueStorageStrategy`. It has two real variants plus the durability doubles, which derive through the existing grant. The option property becomes internal. | P4 |
-| 76 | `IKeyValueCatalog` | KeyValuePair.Catalog `:27` | model child | sealed | `public sealed class KeyValueCatalog`. It absorbs the static class (`KeyValueCatalog.cs:12`), and `CaptureSnapshot` (`:41`) becomes an instance method. | P4 |
-| 77 | `IKeyValueCatalogSnapshot` | KeyValuePair.Catalog `:14` | model child | sealed | `public sealed class KeyValueCatalogSnapshot`, with an internal constructor. | P4 |
+| 73 | `IKeyValueDatabase` | KeyValuePair `:23` | model | sealed | `public sealed class KeyValueDatabase : DatabaseInstance`. **At P4 (re-verified, then landed):** promoted from `Internal/KeyValueDatabaseInstance.cs` to `src/KeyValueDatabase.cs` in the `RootNamespace`, with an internal constructor that takes the typed engine; the base owns the name, the engine (re-exposed with `new` over a typed field) and the disposed flag, and the model's `Dispose`/`DisposeAsync` became `DisposeCore`/`DisposeAsyncCore`. `CreateSessionAsync` is a typed `new` member over the base's NVI member (offline refusal in the core). The five typed operations (`GetAsync`, `PutAsync`, `TryDeleteAsync`, `ExistsAsync`, `ScanAsync`) take `KeyValueDatabaseSession` instead of `IDatabaseSession`. The model's session and transaction became public sealed leaves too (`KeyValueDatabaseSession : DatabaseSession`, `KeyValueDatabaseTransaction : DatabaseTransaction`, rows 12 and 13), its server derives from `DatabaseServer` (row 9), and its server session is an internal sealed `DatabaseServerSession` leaf (row 11). | P4 |
+| 74 | `IKeyValueDatabaseEngineBuilder` | KeyValuePair `:9` | model | sealed | `public sealed class KeyValueDatabaseEngineBuilder`, with an internal constructor. **At P4:** landed with the typed factories of row 6, moved out of `Internal/`, with the deviation marker (§8). | P4 |
+| 75 | `IKeyValueStorageStrategy` | KeyValuePair `:13` | model | abstract *(internal)* | `internal abstract class KeyValueStorageStrategy`. It has two real variants plus the durability doubles, which derive through the existing grant. The option property becomes internal. **At P4:** landed in `Internal/` (rule 11), with `public abstract` members like `TransactionLog`'s; the builder's `StorageStrategy` became internal with the option's. The two test strategies (`FaultInjectingJournalStorageStrategy`, `KeyValueStorageDurabilityPolicyTests`' `NonDurableStorageStrategy`) override the members. | P4 |
+| 76 | `IKeyValueCatalog` | KeyValuePair.Catalog `:27` | model child | sealed | `public sealed class KeyValueCatalog`. It absorbs the static class (`KeyValueCatalog.cs:12`), and `CaptureSnapshot` (`:41`) becomes an instance method. **At P4:** landed; the internal `DefaultKeyValueCatalog` was folded in, the constructor is private behind `Open`, and the project's `Abstractions/` and `Internal/` folders are gone. | P4 |
+| 77 | `IKeyValueCatalogSnapshot` | KeyValuePair.Catalog `:14` | model child | sealed | `public sealed class KeyValueCatalogSnapshot`, with an internal constructor. **At P4:** landed as a class, not the former internal positional record, which would expose a public constructor and `with` (the row 81 reasoning). | P4 |
 | 78 | `IKeyValueClient` | KeyValuePair.Client `:20` | client | sealed | `public sealed class KeyValueClient`. It absorbs the static class (`KeyValueClient.cs:11`). | P5 |
 | 79 | `IKeyValueClientObserver` | KeyValuePair.Client `:18` | client | abstract | `public abstract class KeyValueClientObserver`, with a protected constructor. Its hooks are `protected internal virtual` with empty bodies. | P5 |
 | 80 | `IKeyValueConnection` | KeyValuePair.Client `:24` | client | sealed | `public sealed class KeyValueConnection`, with an internal constructor. | P5 |
@@ -342,13 +343,13 @@ decision.
 | `ProtocolFraming` (`Protocol/src/ProtocolFraming.cs:11`, `CreateReader` at `:19`, `CreateWriter` at `:31`) | `public static class`, returns the frame interfaces | Deleted. The factories move onto the abstract bases (`ProtocolFrameReader.Create`, `ProtocolFrameWriter.Create`), the `Aes.Create()` shape. The callers are the four model servers, `ProtocolChannel`, two test clients and the Protocol tests. **Landed at P2:** the caller list held (the servers' at-capacity rejection writer, the Sql and KeyValuePair test protocol clients, `ProtocolFramingTests` and `ProtocolFamilyTests`). | P2 |
 | `TransactionRecovery` (`TransactionRecovery.cs:18`, `Analyze` at `:25` and `:40`) | `public static class` taking `IStorageJournal` | Kept as a public static class: it is a stateless analysis with no interface twin. The parameter is retyped to `StorageJournal`. | P1 |
 | `Sql.Sum<TSource>` (`Sql/src/Sql.cs:23`) | returns `ISqlAggregateExpression` | Returns `SqlAggregateExpression` (row 81). | P4 |
-| `<Model>DatabaseEngine.CreateBuilder()` (`SqlDatabaseEngine.cs:181`, `KeyValueDatabaseEngine.cs:152`, Graph, Documents and Blob at `:67`) | return builder interfaces | Return the sealed builders. | P4 |
-| The five composition verbs `AddSql`, `AddKeyValue`, `AddGraph`, `AddDocuments` and `AddBlob` (`Extensions/SqlDatabaseApplicationExtensions.cs:16`, `KeyValueDatabaseApplicationExtensions.cs:16`, `GraphDatabaseApplicationExtensions.cs:17`, `DocumentDatabaseApplicationExtensions.cs:17`, `BlobDatabaseApplicationExtensions.cs:17`) | take `Action<IDatabaseApplicationContext, I<Model>DatabaseEngineBuilder>` | Retyped to the sealed builder in each model's PR. They stay `extension(IDatabaseApplicationBuilder)` members on the kept seam. The templates call them with untyped lambdas (`cohesion-database/Program.cs:11`), so they compile unchanged. | P4 |
+| `<Model>DatabaseEngine.CreateBuilder()` (`SqlDatabaseEngine.cs:181`, `KeyValueDatabaseEngine.cs:152`, Graph, Documents and Blob at `:67`) | return builder interfaces | Return the sealed builders. **KeyValuePair at P4:** returns `KeyValueDatabaseEngineBuilder`. | P4 |
+| The five composition verbs `AddSql`, `AddKeyValue`, `AddGraph`, `AddDocuments` and `AddBlob` (`Extensions/SqlDatabaseApplicationExtensions.cs:16`, `KeyValueDatabaseApplicationExtensions.cs:16`, `GraphDatabaseApplicationExtensions.cs:17`, `DocumentDatabaseApplicationExtensions.cs:17`, `BlobDatabaseApplicationExtensions.cs:17`) | take `Action<IDatabaseApplicationContext, I<Model>DatabaseEngineBuilder>` | Retyped to the sealed builder in each model's PR. They stay `extension(IDatabaseApplicationBuilder)` members on the kept seam. The templates call them with untyped lambdas (`cohesion-database/Program.cs:11`), so they compile unchanged. **KeyValuePair at P4:** `AddKeyValue(Action<IDatabaseApplicationContext, KeyValueDatabaseEngineBuilder>)`; a server factory inside it needs no cast. | P4 |
 | `SqlDatabaseEngineFactory` (`Sql/src/SqlDatabaseEngineFactory.cs:8`) | `public static class` that forwards to `SqlDatabaseEngine.Create(options)` (`SqlDatabaseEngine.cs:163`) | Deleted in the Sql PR: rule 1 puts the factory on the type itself, which already has it. No code calls it. Its `(rootPath, engineName)` overload is not carried over, and the two doc mentions (`Database.Sql/docs/DESIGN.md:634`, `docs/programs/DATABASE_HOSTING_DESIGN.md:61`) change with it. | P4 |
 | `BlobContainerExtensions.GetOwnershipAsync` (`Blob/src/Extensions/BlobContainerExtensions.cs:13`) | `extension(IBlobContainer)` that casts to the internal implementation and throws for anything else | Folded into the sealed `BlobContainer` as an instance method, and the extension container is deleted. It existed only to avoid widening the interface, and a type in the same assembly needs no extension of itself. | P4 |
 | `DatabaseClientStreamingExtensions.ExecuteStreamingAsync` (`Client/src/Extensions/DatabaseClientStreamingExtensions.cs:13`, parameter at `:30`) | `extension(IDatabaseClient)`, taking `IDatabaseStreamingExchange` | Folded into the sealed `DatabaseClient` as an instance method taking `DatabaseStreamingExchange`, for the same reason. The extension container is deleted. | P5 |
 | `SqlProtocolConnectionExtensions.ExecuteAsync` (`Sql.Client/src/Extensions/SqlProtocolConnectionExtensions.cs:24`) | old-style `this IDatabaseConnection` extension | Stays an extension, because `DatabaseConnection` lives in Database.Client. It is retyped to `DatabaseConnection` and moves into an `extension(DatabaseConnection connection)` block (`general-rules.md`, extension containers). | P5 |
-| `SqlCatalog.CaptureSnapshot` (`:72`), `KeyValueCatalog.CaptureSnapshot` (`:41`) | static, taking the catalog interface | Instance methods on the sealed catalogs. | P4 |
+| `SqlCatalog.CaptureSnapshot` (`:72`), `KeyValueCatalog.CaptureSnapshot` (`:41`) | static, taking the catalog interface | Instance methods on the sealed catalogs. **KeyValuePair at P4:** landed (row 76). | P4 |
 | `BTreeIndexManager.EnsureFormat` (`Indexing/src/BTreeIndexManager.cs:55`) | takes `IStorage` | Takes `Storage`. | P1 |
 | `BTreeIndexManagerOptions.Storage` (`Indexing/src/BTreeIndexManagerOptions.cs:16`) | `IStorage` (found at P1; the review missed it) | `Storage`. | P1 |
 | The five model storages' `WriteAheadJournal` (`SqlStorage`, `KeyValueStorage`, `GraphStorage`, `DocumentStorage`, `BlobStorage`) | return `IStorageJournal` (found at P1) | Return `StorageJournal`. Their engines pass it to the coordinator, so no call site changes. | P1 |
@@ -595,6 +596,49 @@ refusal wording folded in:
   teardown cause, so a later commit reports SQL's coded error naming "The session closed before
   the transaction ended." instead of "Cannot commit transaction in state 'RolledBack'.".
 
+**KeyValuePair at P4 (re-verified, then landed).** The model's copy was as listed
+(`KeyValueDatabaseTransaction.cs` with its own `_endGate`, the session's "A transaction is already
+active on this session." check). Both are deleted; the leaves supply `GetKernelState`,
+`CommitCoreAsync`/`RollbackCoreAsync` with the kernel translation, `GetOfflineRefusal`
+(`COHDBK002`) and `CreateAbortedException` (`COHDBK001`, unchanged wording). The session keeps the
+statement-level contract of the 2026-10-04 decision: it never calls `AbortAsync`, commands do not
+take the session's operation hold (an auto-commit command and a BEGIN may still run side by side),
+and a command is admitted into the explicit transaction through the base's
+`TryBeginOperation`/`EndOperation`, which the leaf re-exposes to its session as
+`TryBeginCommand`/`EndCommand`/`CreateCommandRefusal` (the base members are `protected` or
+`protected internal`, which a model session cannot reach). Each change of this section is
+accounted for:
+
+- *Asserted in the model's suites:* the "already active" message and BEGIN's refusal order (a
+  Serializable BEGIN on an active session gets the "already active" message, and the Serializable
+  refusal only when no transaction is open), the closed-session message for BEGIN and both execute
+  seams (`KeyValueTransactionFailureTests`); "The transaction is Committed; a committed transaction
+  cannot roll back." and "The transaction is RolledBack." (same suite, the first replacing a
+  `Contains("Committed")`); "An operation of the transaction is still running; commit after it
+  completes." (`KeyValueLifecycleTests`, replacing a `Contains("still running")`); the teardown
+  cause "The session closed before the transaction ended." (`KeyValueTransactionFailureTests`);
+  the engine's guard order, the enumeration's disposal check at its call and `TryGetDatabase`'s new
+  name check (`KeyValueEngineLifecycleTests`); the engine disposal aggregate's message, the blank
+  `EngineName` refusal, the duplicate and blank worker names and the composition paths of §6.5
+  (`KeyValueEngineCompositionTests`).
+- *Not reachable from the model without a kernel hook, pinned by the root suite
+  (`DatabaseTransactionTests`, `DatabaseSessionTests`):* the two refused-operation messages ("…
+  start the operation after it ends." and "… ended before the operation started; nothing was
+  written.") need the transaction ended with its kernel transaction still active, which happens
+  only while the database closes and the kernel refuses an end before it starts; and the session's
+  "The session failed to close." aggregate needs the session's teardown to fail, which needs the
+  same race (an offline database's teardown touches nothing, and the kernel ends a started rollback
+  whatever fails, #1226). The server session's cleanup now ignores that `AggregateException` where
+  it ignored the `DatabaseException` before, so a connection's teardown still never faults.
+- *Not observable through the public surface, so not asserted:* the worker disposal order (factory
+  workers before the built-in ones; the checkpointer's lanes end before the storages close either
+  way), the pump threads' names (KeyValuePair already named them for their workers), and the
+  token check `CreateSessionAsync` and `ExecuteAsync` now make before their cores (the kernel threw
+  the same `OperationCanceledException` from `BeginAsync`).
+- *One state the base reports differently:* a transaction whose session closed while its database
+  was offline (the teardown rolls nothing back) reports `Faulted`, where the model reported
+  `Active`; it refuses everything either way.
+
 ### 6.5 Root-base state, attach semantics and typed accessors (rows 1, 5, 9, 12)
 
 - **Attach.** `DatabaseEngine` owns `Workers` and `Servers`. Today a model fills them through the
@@ -663,6 +707,34 @@ the state's ownership test was also what kept it from disposing a product the en
   failing factory disposed the engine; and a failure to dispose a refused server was aggregated
   with the refusal. The KeyValuePair PR's builder tests are the first in-repository run of that
   path.
+
+**KeyValuePair at P4 (landed).** The engine has `internal void Compose(IEnumerable<DatabaseEngineWorker>, IEnumerable<DatabaseServer>)`
+and `internal static KeyValueDatabaseEngine CreateUncomposed(options)`, which validates the options
+(a blank `EngineName` included) and leaves composition open; `Create` calls it and then
+`CompleteComposition()`. The constructor attaches the five built-in workers last, after every field
+they read, through the base's `AttachWorker`, which starts each pump at once; the internal
+`AttachWorker`/`AttachServer`, the worker and server lists and the model's pump threads are gone.
+`KeyValueEngineCompositionTests` runs every path the P4.0 probe ran, in the repository: order and
+a later factory seeing the earlier product, the freeze (a `Compose` after `Build` or `Create` is
+refused), a repeated server and a returned built-in worker refused and released once by the
+engine, a foreign server and a duplicate worker name refused and released by the state, a blank
+worker name failing inside its factory, null products, a failing factory, the premature-build
+compensation of `AddKeyValue`, and a component's disposal failure reported in the engine's one
+aggregate.
+
+The typed accessors, as landed: `public new` members over the base's public members for the
+engine's `CreateDatabaseAsync`, `OpenDatabaseAsync` and `GetDatabasesAsync` (the leaf's core
+returns its own `IAsyncEnumerable<KeyValueDatabase>`, which the covariant interface lets the base
+hand out unchanged, so the typed member casts the sequence once rather than each item), the
+database's `Engine` and `CreateSessionAsync`, the session's `Database`, `CurrentTransaction` and
+both `BeginTransactionAsync` overloads, and the server's `Engine`. `CurrentTransaction` is not
+construction-fixed state: its `new` getter reads the base's public getter and casts once, on
+the same terms as an async factory (rule 7). `TryGetDatabase` keeps the base's
+`out DatabaseInstance`: an overload with `out KeyValueDatabase` is not hidden by `new` (the
+parameter types differ), and every `out var` or `out _` call would become ambiguous (CS0121); the
+server session casts the one result it reads, and tests use `ShouldBeOfType<KeyValueDatabase>()`.
+The server session overrides `DatabaseSession` covariantly (`KeyValueDatabaseSession?`), but the
+leaf is internal, so `DatabaseServer.Sessions` stays typed `DatabaseServerSession`.
 
 ### 6.6 Blob and Documents sessions: option B (rows 54, 61)
 
@@ -861,6 +933,15 @@ Documents.Language, Blob and Hosting.
   Documents and Graph `*ApplicationBuilderTests.cs` (`:232`/`:259`, `:234`/`:263`, `:234`/`:263`),
   and Sql's `SqlEngineCompositionTests.cs` doubles `ProbeWorker` (`:157`), `ProbeServer` (`:174`)
   and `CancellationFailureWorker` (`:228`).
+  - **KeyValuePair at P4:** the model had no worker or server double (its builder tests composed
+    only the real `KeyValueDatabaseServer`), so it gains `TestObjects/RecordingWorker.cs` and
+    `TestObjects/RecordingServer.cs`, derived from the bases through their protected constructors
+    with no grant (the server carries a private `IDatabaseServerContext` for the `Context` bridge
+    until P6), and `KeyValueEngineCompositionTests` (§6.5). `KeyValueWorkerResilienceTests`'
+    `EscapingWorker` implemented only `IDatabaseEngineWorker`; the typed `AddWorker` takes the base,
+    so it derives from `DatabaseEngineWorker` and its first pass throws (row 7). The strategy
+    doubles derive from the internal `KeyValueStorageStrategy` through the existing
+    KeyValuePair → KeyValuePair.Tests grant (row 75); no grant was added.
 - **Hosting and Embedded doubles** derive from the root bases (P6). They are:
   - `RecordingEngine.cs:12`, `ProvisioningEngine.cs:8` and `ProvisioningDatabase` (`:101`);
   - `RecordingServer.cs:12` and `RecordingEngineWorker.cs:6`;
@@ -1222,6 +1303,47 @@ the code had moved, the row now says what landed:
   - The model's tests, fixtures (including the Documents recovery fixture's casts) and Studio
     workspace are updated. Studio, which is MAUI with `IsPackable=false`, is built in every model
     PR.
+- **KeyValuePair, as landed (re-verified 2026-10-05 against the code after P4.0).** One commit on
+  `refactor/L03.02.01.56.05-concrete-types-p4-kv`. Rows 73 to 77 held against the code, and the
+  leaves landed as the P4 bullets say, with these readings of the code:
+  - *Leaves.* The engine, database, session, transaction and server are public sealed leaves of
+    the bases; the database, session, transaction and builder left `Internal/` for the
+    `RootNamespace`. The server session stays an internal sealed leaf (row 11), and the five
+    workers stay internal sealed (they derived from `DatabaseEngineWorker` since P3, and rule 1
+    keeps per-model plumbing internal). `KeyValueDatabaseServerContext` stays for the `Context`
+    bridge until P6 (row 10).
+  - *The shared pump.* Not compiled, through `COHESION_DATABASE_ENGINE_PUMP_IN_BASE` (row 7); the
+    worker disposal hook stays with the last model PR, which deletes the file.
+  - *The composition verb and the builder* (rows 6 and 74, §5.2): typed, and composing through
+    `Compose` (§6.5). The plan's "the last model PR deletes the bridge overload" holds: four
+    builders still use it.
+  - *Children:* the catalog and its snapshot are sealed (rows 76 and 77), and the KeyValuePair and
+    KeyValuePair.Catalog `Abstractions/` folders are gone, as is the catalog's `Internal/`.
+    KeyValuePair.Storage had no interface row. The KeyValuePair.Client rows (78 to 80) are P5's,
+    as the phase table says; this PR changed only the client's tests, for the server's new
+    `Sessions` and the typed factories.
+  - *Behavior.* §6.4's list, accounted for item by item there; §6.5's composition paths; the
+    worker resilience suite's interface-only worker became a base worker (row 7, §6.9).
+  - *Studio.* `KeyValueWorkspace` compiles unchanged: it reaches the engine and its sessions
+    through `ModelWorkspace`'s root-typed members, whose retype is P7's, and the client's
+    interfaces are P5's.
+  - *Docs.* KeyValuePair `DESIGN.md` ("Concrete types", and the sections that named the
+    interfaces) and `OVERVIEW.md`, KeyValuePair.Catalog's `DESIGN.md` and `OVERVIEW.md`, the root
+    `DESIGN.md` ("Root bases"), the area record's model table and Indexing's resolver table.
+
+  *Gate, as run:* a no-incremental build of every Database project but Database.Testing's tests
+  and the SampleHost fixture (they need a local SDK pack) has no Database warning but CS2008 on
+  Database.Refs; every Database suite passes with its baseline count (Database.Tests 101, Sql 1087,
+  Sql.Language 999, Graph 360, Documents 152, Blob 129, Hosting 53, Embedded 4 and the rest as
+  listed in the phase brief) apart from KeyValuePair.Tests, which grows from 158 to 177 (15
+  composition tests, three session and transaction contract tests, one engine guard test), among
+  them the #1188, #1225 and #1226 suites in process (`KeyValueTransactionFailureTests`,
+  `KeyValueLifecycleTests`, `KeyValueMvccTests`) and over the wire
+  (`KeyValueTransactionFailureWireTests`, KeyValuePair.Client's
+  `KeyValueTransactionFailureClientTests`); KeyValuePair.Catalog 4, KeyValuePair.Storage 3 and
+  KeyValuePair.Client 10 keep theirs; Sdk.Database 18; Studio builds clean and its `--smoke` run
+  gives 83 passed, 0 failed, 1 skipped; the dependency graph check passes (no reference changed);
+  and the Database runtime producer packs.
 - **Blob and Documents** use option B (§6.6). The Blob PR folds `GetOwnershipAsync` into
   `BlobContainer` (§5.2).
 - **The Sql PR** carries:
@@ -1344,6 +1466,12 @@ writes its type, or, for `Storage`, strips its interface.
 **At P3:** the seven P3 markers landed: the six root bases and `DatabaseEngineWorker`. The case
 column holds for each as written; `DatabaseServerSession`'s leaves (one per model server) still
 implement the interface until their model's P4 PR. `CompiledSchema` carries none (§5.3).
+
+**At P4, KeyValuePair:** the model's two markers landed, on `KeyValueDatabaseEngine` and
+`KeyValueDatabaseEngineBuilder`. Its other new public leaves (`KeyValueDatabase`,
+`KeyValueDatabaseSession`, `KeyValueDatabaseTransaction`, `KeyValueCatalog`,
+`KeyValueCatalogSnapshot`) carry none: `database-area.md` covers them. The internal
+`KeyValueStorageStrategy` carries none (internal abstract bases are not public API).
 
 ## 9. Performance evidence
 

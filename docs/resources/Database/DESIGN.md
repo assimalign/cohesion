@@ -114,7 +114,7 @@ Each model root project owns a public engine (`{Model}DatabaseEngine`, static `C
 | Documents | `IDocumentDatabase` | named collections of versioned documents (`IDocumentCollection`) | OQL query and index-DDL contract — `Documents.Language` |
 | Graph | `IGraphDatabase` | property graph: nodes, typed directed relationships, traversal | standard TBD (ISO GQL is the recommended default; decision gates deep language work) — `Graph.Language` |
 | Blob | `IBlobDatabase` | containers of streamed large objects + metadata catalog | none (API-driven) |
-| KeyValuePair | `IKeyValueDatabase` | ordered key space, point/range ops, TTL | none for MVP (commands ride the wire protocol directly) |
+| KeyValuePair | `KeyValueDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | ordered key space, point/range ops, TTL | none for MVP (commands ride the wire protocol directly) |
 
 Per-model satellite projects follow one matrix: `.Language` (where a language exists), `.Storage` (model-specific layouts on the shared substrate), `.Catalog` (schema/metadata, constraint enforcement, migration apply for SQL), `.Client` (typed client over the shared client core), `.Security` (model-specific authorization).
 

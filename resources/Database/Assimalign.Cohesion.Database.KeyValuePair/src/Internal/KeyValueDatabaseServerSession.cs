@@ -20,25 +20,31 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// grammar (<c>docs/COMMANDS.md</c>) riding the protocol's existing Execute
 /// message.
 /// </summary>
-internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
+/// <remarks>
+/// An internal sealed leaf of the root <see cref="DatabaseServerSession"/> (concrete-types plan,
+/// row 11): the base owns the identity, and the negotiated version and authenticated principal,
+/// which the handshake records once each; the engine session is re-exposed typed by a covariant
+/// override.
+/// </remarks>
+internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
 {
     private readonly KeyValueDatabaseServer _server;
     private readonly IConnection _connection;
     private readonly KeyValueDatabaseServerOptions _options;
-    private readonly IDatabaseEngine _engine;
+    private readonly KeyValueDatabaseEngine _engine;
     private readonly DatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
 
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
-    private IDatabaseSession? _databaseSession;
+    private KeyValueDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
 
     internal KeyValueDatabaseServerSession(
         KeyValueDatabaseServer server,
         IConnection connection,
         KeyValueDatabaseServerOptions options,
-        IDatabaseEngine engine,
+        KeyValueDatabaseEngine engine,
         DatabaseAuthenticator authenticator)
     {
         _server = server;
@@ -50,16 +56,7 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
     }
 
     /// <inheritdoc />
-    public Guid Id { get; } = Guid.NewGuid();
-
-    /// <inheritdoc />
-    public ProtocolVersion ProtocolVersion { get; private set; }
-
-    /// <inheritdoc />
-    public string? Principal { get; private set; }
-
-    /// <inheritdoc />
-    public IDatabaseSession? DatabaseSession => _databaseSession;
+    public override KeyValueDatabaseSession? DatabaseSession => _databaseSession;
 
     /// <summary>
     /// Gets the task that completes when the session pump has fully wound down.
@@ -90,7 +87,8 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    /// <remarks>Idempotent: aborting a session that already wound down is a no-op.</remarks>
+    protected override async ValueTask DisposeAsyncCore()
     {
         Abort();
         await _completion.ConfigureAwait(false);
@@ -185,9 +183,9 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
             return false;
         }
 
-        ProtocolVersion = negotiatedVersion;
+        SetNegotiatedVersion(negotiatedVersion);
 
-        IDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
+        KeyValueDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
 
         if (database is null)
         {
@@ -240,7 +238,7 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
             return false;
         }
 
-        Principal = startup.Principal;
+        SetAuthenticatedPrincipal(startup.Principal);
 
         await WriteFrameAsync(ProtocolMessageType.Ready, ReadOnlyMemory<byte>.Empty, handshakeSource.Token).ConfigureAwait(false);
         return true;
@@ -403,16 +401,18 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
     /// Resolves the startup-requested database on the server's one engine:
     /// already-open databases first, then an open attempt.
     /// </summary>
-    private async ValueTask<IDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
+    private async ValueTask<KeyValueDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
             return null;
         }
 
-        if (_engine.TryGetDatabase(name, out IDatabase database))
+        // The base lookup is typed DatabaseInstance (a typed overload would make every out-var
+        // call ambiguous); the key-value engine holds key-value databases only.
+        if (_engine.TryGetDatabase(name, out var open))
         {
-            return database;
+            return (KeyValueDatabase)open;
         }
 
         try
@@ -458,9 +458,10 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
             {
                 await _databaseSession.DisposeAsync().ConfigureAwait(false);
             }
-            catch (DatabaseException)
+            catch (AggregateException)
             {
-                // Session teardown must not mask the pump outcome.
+                // Session teardown must not mask the pump outcome. The root session reports every
+                // teardown failure in one aggregate ("The session failed to close.").
             }
         }
 

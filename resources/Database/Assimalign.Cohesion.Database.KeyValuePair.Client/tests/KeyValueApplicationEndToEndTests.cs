@@ -109,7 +109,7 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
                 {
                     EndPoint = new IPEndPoint(IPAddress.Loopback, 0),
                 });
-                return KeyValueDatabaseServer.Create((KeyValueDatabaseEngine)engine,
+                return KeyValueDatabaseServer.Create(engine,
                     new KeyValueDatabaseServerOptions { Listener = listener });
             });
         });

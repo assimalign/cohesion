@@ -50,7 +50,7 @@ public sealed class KeyValueTransactionFailureTests
             await database.PutAsync(other, Bytes("keep"), Bytes("changed"), cancellationToken: TestTimeout.Token());
         }
         await database.PutAsync(session, Bytes("pending"), Bytes("pending"), cancellationToken: TestTimeout.Token());
-        IDatabaseTransaction? blocking = null;
+        KeyValueDatabaseTransaction? blocking = null;
         if (failure == "canceled")
         {
             // Another transaction holds the key's lock, so the failing command waits until canceled.
@@ -135,12 +135,93 @@ public sealed class KeyValueTransactionFailureTests
         await rolledBack.DisposeAsync();
         var refusal = await Should.ThrowAsync<DatabaseException>(async () => await committed.RollbackAsync(TestTimeout.Token()));
 
-        // Assert
+        // Assert: the root base's message (concrete-types plan §6.4), for the model's former
+        // "Cannot rollback transaction in state 'Committed': …".
         currentAfterCommit.ShouldBeNull();
-        refusal.Message.ShouldContain("Committed", Case.Sensitive);
+        refusal.Message.ShouldBe("The transaction is Committed; a committed transaction cannot roll back.");
         rolledBack.State.ShouldBe(TransactionState.RolledBack);
         committed.State.ShouldBe(TransactionState.Committed);
         (await Keys(database, session)).ShouldBe(["kept"]);
+    }
+
+    /// <summary>
+    /// A commit of a transaction its caller already rolled back is refused by state, with the root
+    /// base's message (concrete-types plan §6.4), for the model's former "Cannot commit transaction
+    /// in state 'RolledBack'.".
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Transaction: COMMIT after ROLLBACK is refused with the transaction's state")]
+    public async Task CommitAsync_AfterRollback_ShouldBeRefusedWithTheState()
+    {
+        // Arrange
+        var (engine, database) = await CreateAsync();
+        await using var _ = engine;
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
+        await database.PutAsync(session, Bytes("discarded"), Bytes("v"), cancellationToken: TestTimeout.Token());
+        await transaction.RollbackAsync(TestTimeout.Token());
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(TestTimeout.Token()));
+
+        // Assert
+        refusal.Message.ShouldBe("The transaction is RolledBack.");
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await Keys(database, session)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// BEGIN on a session whose transaction is active is refused with the root base's one message,
+    /// for the model's former "A transaction is already active on this session.", and the base
+    /// checks it before the model's isolation-level refusal (concrete-types plan §6.4, BEGIN's
+    /// refusal order): a Serializable BEGIN fails the "already active" way while a transaction is
+    /// open, and the Serializable way only when none is.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Session: BEGIN while a transaction is active is refused with one message, before the isolation-level refusal")]
+    public async Task BeginTransactionAsync_WhileActive_ShouldBeRefusedBeforeTheIsolationLevel()
+    {
+        // Arrange
+        var (engine, database) = await CreateAsync();
+        await using var _ = engine;
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
+
+        // Act
+        var again = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(TestTimeout.Token()));
+        var serializable = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable, TestTimeout.Token()));
+        await transaction.RollbackAsync(TestTimeout.Token());
+        var unsupported = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable, TestTimeout.Token()));
+
+        // Assert
+        again.Message.ShouldBe("A transaction or operation is already active on this session.");
+        serializable.Message.ShouldBe("A transaction or operation is already active on this session.");
+        unsupported.Message.ShouldStartWith("IsolationLevel.Serializable is not supported by the key-value engine yet", Case.Sensitive);
+        session.CurrentTransaction.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A closed session refuses BEGIN and both execute seams with the root base's message, for the
+    /// model's former "Session is not open. Current state: Closed.", and before the isolation-level
+    /// refusal.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Session: a closed session refuses BEGIN and commands with one message")]
+    public async Task ClosedSession_ShouldRefuseBeginAndCommands()
+    {
+        // Arrange
+        var (engine, database) = await CreateAsync();
+        await using var _ = engine;
+        var session = await database.CreateSessionAsync();
+        await session.DisposeAsync();
+
+        // Act
+        var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable, TestTimeout.Token()));
+        var typed = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new KeyValueGetRequest(Bytes("k")), TestTimeout.Token()));
+        var text = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("GET @k", new Dictionary<string, object?> { ["k"] = Bytes("k") }, TestTimeout.Token()));
+
+        // Assert
+        begin.Message.ShouldBe("The session is closed.");
+        typed.Message.ShouldBe("The session is closed.");
+        text.Message.ShouldBe("The session is closed.");
+        session.State.ShouldBe(SessionState.Closed);
     }
 
     /// <summary>A token canceled before a commit or rollback starts leaves the transaction exactly as it was.</summary>
@@ -213,7 +294,7 @@ public sealed class KeyValueTransactionFailureTests
         await session.DisposeAsync();
         await engine.DisposeAsync();
         await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-tests", StorageStrategy = strategy });
-        var recovered = (IKeyValueDatabase)await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
+        var recovered = await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert: the rollback wrote nothing and ended the transaction; the drain that carried its
@@ -258,7 +339,7 @@ public sealed class KeyValueTransactionFailureTests
         await session.DisposeAsync();
         await engine.DisposeAsync();
         await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-tests", StorageStrategy = strategy });
-        var recovered = (IKeyValueDatabase)await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
+        var recovered = await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
@@ -299,7 +380,7 @@ public sealed class KeyValueTransactionFailureTests
         await session.DisposeAsync();
         await engine.DisposeAsync();
         await using var reopened = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-tests", StorageStrategy = strategy });
-        var recovered = (IKeyValueDatabase)await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
+        var recovered = await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
         await using var observer = await recovered.CreateSessionAsync();
 
         // Assert
@@ -343,13 +424,13 @@ public sealed class KeyValueTransactionFailureTests
         transaction.State.ShouldBe(TransactionState.RolledBack);
         commit.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
         commit.Message.ShouldContain("nothing was committed", Case.Sensitive);
-        commit.Message.ShouldContain("The key-value session closed before the transaction ended.", Case.Sensitive);
+        commit.Message.ShouldContain("The session closed before the transaction ended.", Case.Sensitive);
         session.CurrentTransaction.ShouldBeNull();
         await using var observer = await database.CreateSessionAsync();
         (await Keys(database, observer)).ShouldBeEmpty();
     }
 
-    private static async Task FailAsync(string failure, IKeyValueDatabase database, IDatabaseSession session)
+    private static async Task FailAsync(string failure, KeyValueDatabase database, KeyValueDatabaseSession session)
     {
         switch (failure)
         {
@@ -394,7 +475,7 @@ public sealed class KeyValueTransactionFailureTests
         }
     }
 
-    private static async Task<List<string>> Keys(IKeyValueDatabase database, IDatabaseSession session)
+    private static async Task<List<string>> Keys(KeyValueDatabase database, KeyValueDatabaseSession session)
     {
         var keys = new List<string>();
         await foreach (var entry in database.ScanAsync(session, cancellationToken: TestTimeout.Token()))

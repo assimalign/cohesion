@@ -63,7 +63,7 @@ internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
         // again and is picked up by the next pass instead of being lost.
         _commitPending.Reset();
 
-        foreach (KeyValueDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (KeyValueDatabase database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -82,7 +82,7 @@ internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
         }
     }
 
-    private void FlushPending(KeyValueDatabaseInstance database, KeyValueStorage storage)
+    private void FlushPending(KeyValueDatabase database, KeyValueStorage storage)
     {
         try
         {

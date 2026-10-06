@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database.KeyValuePair.Catalog — Overview
 
-The key-value model's metadata catalog: `IKeyValueCatalog`, opened over a
+The key-value model's metadata catalog: the sealed `KeyValueCatalog`, opened over a
 database's dedicated catalog storage file set (`KeyValueCatalog.Open`).
 
 ## Purpose

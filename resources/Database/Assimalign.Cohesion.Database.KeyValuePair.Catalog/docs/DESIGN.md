@@ -44,21 +44,30 @@ that has none.
 ## Query-time introspection captures (C2)
 
 The engine's `KEYSPACES` command describes the single implicit key space from
-this catalog. `KeyValueCatalog.CaptureSnapshot(IKeyValueCatalog)` returns an
-`IKeyValueCatalogSnapshot` containing the entry-format marker and index
+this catalog. `KeyValueCatalog.CaptureSnapshot()` returns a
+`KeyValueCatalogSnapshot` containing the entry-format marker and index
 registrations copied together under the existing metadata lock. The engine alone
 projects those values into client rows; the catalog stores no virtual objects or
 materialized discovery records. An existing capture is unaffected by later
-metadata publications. The capture is a `public static` method on `KeyValueCatalog`
-that downcasts to the internal implementation, not a member of `IKeyValueCatalog`:
-it replaces the shipped-to-shipped friend grant without making every future catalog
-implementation owe the capability. This deliberately mirrors
-`SqlCatalog.CaptureSnapshot`; the two sibling catalogs are the same shape and are
-kept that way. `IKeyValueCatalogSnapshot` is public because it is that method's
-return type; its implementation remains internal, the capture owns no storage and
+metadata publications. `KeyValueCatalogSnapshot` is public because it is that
+method's return type; it is a sealed class with an internal constructor, not a
+record, so no caller can build or clone one. The capture owns no storage and
 requires no disposal, and registrations are exposed through a read-only collection,
 matching their existing catalog vocabulary rather than adding command-result types
 here.
+
+## One sealed type (concrete-types plan, phase 4, #1260)
+
+`KeyValueCatalog` is one `public sealed` class. Until phase 4 the catalog was a
+public `IKeyValueCatalog` interface, an internal `DefaultKeyValueCatalog` and a
+`public static class KeyValueCatalog` whose `Open` returned the interface and whose
+static `CaptureSnapshot(IKeyValueCatalog)` downcast to the internal type; the capture
+was kept off the interface so a second catalog implementation would not owe it.
+There is no second implementation: a key-value database has exactly one catalog,
+over its own file set. So the three collapsed into the sealed class
+(`.claude/rules/database-area.md`, rule 1), `Open` is its static factory over a
+private constructor, and `CaptureSnapshot` is an instance method. The SQL catalog
+gets the same shape in the SQL model's phase-4 PR.
 
 The capture contains one database's metadata because this catalog is opened on
 that database's dedicated file set. The engine omits physical index page ids and

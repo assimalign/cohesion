@@ -32,10 +32,10 @@ public sealed class KeyValueTransactionFailureClientTests
         await using var harness = await KeyValueClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(KeyValueClientTestHarness.Timeout());
         await connection.PutAsync(Bytes("keep"), Bytes("original"), KeyValueClientTestHarness.Timeout());
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(KeyValueClientTestHarness.Timeout());
         harness.Engine.TryGetDatabase(KeyValueClientTestHarness.DatabaseName, out var opened).ShouldBeTrue();
-        var database = (IKeyValueDatabase)opened;
+        var database = opened.ShouldBeOfType<KeyValueDatabase>();
         await using (var other = await database.CreateSessionAsync())
         {
             // Another session replaces the key after the host's snapshot began: first-updater-wins.

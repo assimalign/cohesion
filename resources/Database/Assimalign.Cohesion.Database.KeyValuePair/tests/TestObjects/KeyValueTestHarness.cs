@@ -15,14 +15,14 @@ internal static class KeyValueTestHarness
     /// <summary>
     /// Creates an in-memory engine with one database named <see cref="DatabaseName"/>.
     /// </summary>
-    public static async Task<(KeyValueDatabaseEngine Engine, IKeyValueDatabase Database)> CreateAsync(
+    public static async Task<(KeyValueDatabaseEngine Engine, KeyValueDatabase Database)> CreateAsync(
         Action<KeyValueDatabaseEngineOptions>? configure = null)
     {
         var options = new KeyValueDatabaseEngineOptions { EngineName = "kv-tests" };
         configure?.Invoke(options);
 
         var engine = KeyValueDatabaseEngine.Create(options);
-        var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync(DatabaseName);
+        var database = await engine.CreateDatabaseAsync(DatabaseName);
 
         return (engine, database);
     }

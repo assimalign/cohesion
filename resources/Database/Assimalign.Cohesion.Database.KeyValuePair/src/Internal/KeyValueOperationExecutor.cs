@@ -93,12 +93,12 @@ internal sealed class KeyValueOperationExecutor
     ];
 
     private readonly DatabaseName _databaseName;
-    private readonly IKeyValueCatalog _catalog;
+    private readonly KeyValueCatalog _catalog;
     private readonly KeyValueStorage _storage;
     private readonly BTreeIndex _primaryIndex;
     private readonly BTreeRecordVersionIndex _primaryIndexVersions;
 
-    internal KeyValueOperationExecutor(DatabaseName databaseName, IKeyValueCatalog catalog, KeyValueStorage storage, BTreeIndex primaryIndex)
+    internal KeyValueOperationExecutor(DatabaseName databaseName, KeyValueCatalog catalog, KeyValueStorage storage, BTreeIndex primaryIndex)
     {
         _databaseName = databaseName;
         _catalog = catalog;
@@ -129,7 +129,7 @@ internal sealed class KeyValueOperationExecutor
     private QueryResult ExecuteKeySpaces(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var catalog = KeyValueCatalog.CaptureSnapshot(_catalog);
+        var catalog = _catalog.CaptureSnapshot();
         var rows = new List<object?[]>();
 
         // Only the implicit key space is supported. Catalog registrations are

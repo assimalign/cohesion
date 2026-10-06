@@ -36,7 +36,7 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
     {
         int batchSize = _engine.EngineOptions.PageWriteBackBatchSize;
 
-        foreach (KeyValueDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (KeyValueDatabase database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -55,7 +55,7 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
         }
     }
 
-    private void WriteBack(KeyValueDatabaseInstance database, KeyValueStorage storage, int batchSize)
+    private void WriteBack(KeyValueDatabase database, KeyValueStorage storage, int batchSize)
     {
         try
         {

@@ -41,8 +41,9 @@ call protected cores (the ADO.NET shape). Phase 3 of
 [the plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) adds the bases **beside**
 the interfaces: each base still implements its old interface (explicitly where the base retypes a
 member), so `Database.Hosting`, `Database.Embedded` and every model keep compiling against the
-interfaces. No model leaf derives from a base yet; each model moves its leaves onto them in its own
-phase-4 PR, and phase 6 deletes the interfaces. Every base carries the deviation marker.
+interfaces. Each model moves its leaves onto them in its own phase-4 PR (#1260), KeyValuePair
+first, and phase 6 deletes the interfaces; until then an adopted model's leaves reach the hosting
+layer through the interfaces the bases implement. Every base carries the deviation marker.
 
 | Base | Bridges | The leaf supplies | The base owns |
 |---|---|---|---|
@@ -74,7 +75,10 @@ phase-4 PR, and phase 6 deletes the interfaces. Every base carries the deviation
   unique within the engine, no product is attached twice, and a server must front its engine.
   The pump frame and the state fold are the ones every model compiled from
   `shared/DatabaseEngineWorkerPump.cs` since #1268's review; that shared copy stays compiled into
-  each model until the model's phase-4 PR derives its engine from the base.
+  each model until the model's phase-4 PR derives its engine from the base. A model that has
+  adopted the base defines `COHESION_DATABASE_ENGINE_PUMP_IN_BASE` in its csproj, and the shared
+  file compiles to nothing there (KeyValuePair since its phase-4 PR); the last model's PR deletes
+  the file and the constant.
 - **The shared build state composes through the leaf** (plan step P4.0, §6.5). Every model's
   builder compiles `shared/DatabaseEngineBuilderState<TEngine, TWorker, TServer>`, which runs typed
   factories (`Func<TEngine, TWorker>`, `Func<TEngine, TServer>`) and hands their products to the
@@ -87,8 +91,10 @@ phase-4 PR, and phase 6 deletes the interfaces. Every base carries the deviation
   engine derives from the base, its builder composes through a bridge overload that adapts the
   engine's own two attach members and makes the base's checks (a product attached twice, a server
   fronting another engine) with the same messages. Each model's phase-4 PR moves its builder to
-  the compose method, the last one deletes the bridge, and phase 6 fixes the products to the
-  bases and constrains the engine to `DatabaseEngine`.
+  the compose method (KeyValuePair's `KeyValueDatabaseEngine.Compose` first, with the state typed
+  `<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`), the last one deletes the
+  bridge, and phase 6 fixes the products to the bases and constrains the engine to
+  `DatabaseEngine`.
 - **Engine disposal has one order:** the servers (last attached first), then every worker pump is
   stopped and joined, then the workers (last attached first, a disposable worker such as the
   checkpointer ending the work it left on its lanes), then the leaf closes its databases
