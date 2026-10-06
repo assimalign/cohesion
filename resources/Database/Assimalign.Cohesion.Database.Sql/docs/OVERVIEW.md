@@ -49,11 +49,14 @@ shared storage, with DDL flowing through the relational catalog
 - **Storage operations** — a failed journal or data fsync takes the database offline, both
   file sets at once: every later operation, in process and over the server, is refused with
   `DatabaseOfflineException` (`COHSQLT004`) until `OpenDatabaseAsync` reopens it and
-  recovery decides the unconfirmed commit (#1243); a DDL statement running at the failure is
-  reported unconfirmed, and `OfflineDatabases` feeds health. `BufferPoolCapacity` (32 MiB),
+  recovery decides the unconfirmed commit (#1243); a DDL statement that had committed part of
+  itself at the failure is reported unconfirmed and one that had committed nothing is refused
+  (#1272), and `OfflineDatabases` feeds health. `BufferPoolCapacity` (32 MiB),
   `CheckpointJournalSize` (256 MiB) and `CheckpointInterval` (5 minutes) size the pool and
   trigger checkpoints (#1254); a failed undo is retried on a 100 ms backoff (#1226). See
   DESIGN.md, "Storage operations".
+- **Closing** — a database its holder disposed is forgotten once the close ends, and
+  `OpenDatabaseAsync` opens it again with its rows, in memory as on disk (owner decision 33).
 
 ## Usage
 

@@ -55,6 +55,8 @@ keys order by unsigned lexicographic byte comparison.
   decides the unconfirmed commit (#1243); `OfflineDatabases` feeds health. `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and
   `CheckpointInterval` (5 minutes) size the pool and trigger checkpoints (#1254). See
   DESIGN.md, "Storage operations".
+- Closing: a database its holder disposed is forgotten once the close ends, and
+  `OpenDatabaseAsync` opens it again with its entries, in memory as on disk (owner decision 33).
 
 ## Dependencies
 

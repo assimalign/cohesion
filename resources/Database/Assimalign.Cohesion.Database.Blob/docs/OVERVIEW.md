@@ -11,7 +11,8 @@ resulting engine and its nested components. The feature has no Hosting reference
 ```csharp
 await using var engine = BlobDatabaseEngine.Create(new() { RootPath = "data" });
 var database = await engine.CreateDatabaseAsync("media");
-var container = await database.CreateContainerAsync("images");
+await using var session = await database.CreateSessionAsync();
+var container = await session.CreateContainerAsync("images");
 await using (var upload = await container.OpenWriteAsync("cover", new() { ContentType = "image/png" }))
 {
     await source.CopyToAsync(upload);
@@ -25,13 +26,13 @@ chunks but does not publish the object. Failed or cancelled uploads abort. Reade
 selected version until their streams close. Listings use catalog metadata and optional ordinal
 name prefixes. Empty objects, replacements, checksums, and persisted timestamps are supported.
 
-For explicit transactions, create a `BlobDatabaseSession` and use its own container operations
-(`session.GetContainerAsync` and its siblings). Containers obtained from the session stay bound
-to it. `session.Database` is the same unbound `BlobDatabase`: its operations, and those of the
-containers it returns, run in autocommit, outside the session's transaction.
+Container operations exist only on the session (`session.CreateContainerAsync`,
+`GetContainerAsync`, `DropContainerAsync`, `GetContainersAsync`; owner decision 32), and the
+containers they return stay bound to that session. Disposing a database, directly or through
+`session.Database`, closes it for every session; once the close ends the engine forgets it, and
+`OpenDatabaseAsync` opens it again with its blobs, in memory as on disk (owner decision 33).
 
 ```csharp
-await using var session = await database.CreateSessionAsync();
 await using var transaction = await session.BeginTransactionAsync();
 var scopedContainer = await session.GetContainerAsync("images");
 await using (var upload = await scopedContainer.OpenWriteAsync("cover"))
@@ -41,10 +42,9 @@ await using (var upload = await scopedContainer.OpenWriteAsync("cover"))
 await transaction.CommitAsync();
 ```
 
-Direct database/container operations use automatic transactions. Session operations use the
-active explicit transaction when present; otherwise they also use automatic transactions. The
-engine has one writer at a time, so a write through the database (or `session.Database`) while
-a session's explicit transaction has written waits for that transaction to end.
+Session operations use the active explicit transaction when present; otherwise each uses an
+automatic transaction. The engine has one writer at a time, so a write from one session while
+another session's explicit transaction has written waits for that transaction to end.
 An operation that fails inside an explicit transaction aborts the whole transaction: the session
 refuses further operations and BEGIN with `COHDBB001` until the caller rolls back, and a commit
 fails without committing.

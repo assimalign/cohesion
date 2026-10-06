@@ -31,7 +31,9 @@ the explicit-transaction state machine and their checks, so the typed members ne
 
 A failed journal or data fsync takes the database offline: every later operation, in process
 and over the server, is refused with `DatabaseOfflineException` (`COHDBG012`) until
-`OpenDatabaseAsync` reopens it and recovery decides the unconfirmed commit (#1243).
+`OpenDatabaseAsync` reopens it and recovery decides the unconfirmed commit (#1243). A database
+its holder disposed is forgotten once the close ends, and `OpenDatabaseAsync` opens it again with
+its graph, in memory as on disk (owner decision 33).
 `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and `CheckpointInterval`
 (5 minutes) size the buffer pool and trigger checkpoints (#1254); a failed undo is retried on a
 100 ms backoff (#1226). See DESIGN.md, "Storage operations".

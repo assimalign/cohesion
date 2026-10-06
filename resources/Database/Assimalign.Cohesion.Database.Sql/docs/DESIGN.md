@@ -1118,11 +1118,33 @@ loop, so cadence is engine configuration; observers read it through
 `DatabaseEngineWorker.Interval`.
 
 A database disposed outside the engine (directly, or through a session's
-`SqlDatabaseSession.Database`) stays registered until it is dropped (an open hands back the
-closed instance, whose use throws `ObjectDisposedException`), but every worker skips it: `SqlDatabaseEngine.IsOpen` is false for it
-(`SqlDatabase.IsClosed`), the flush, write-back and version-purge workers do not begin it, and
-the checkpointer never finds it due. Before phase 4 the open test read only the registration, so
-the version-purge worker failed on the closed database's disposed transaction manager every pass
+`SqlDatabaseSession.Database`) stays registered only until its close ends (owner decision 33 of
+2026-10-06, #1289). The close then tells the engine (`SqlDatabaseEngine.ForgetClosedDatabaseCore`,
+through the root's shared `DatabaseRegistry.Forget`), which stops tracking it, so a later
+`OpenDatabaseAsync` opens it again from its two file sets: a new instance with every committed
+row. An in-memory database reopens with its rows too: `InMemorySqlStorageStrategy` keeps both
+file sets' streams for the engine's lifetime (`DatabaseMemoryFiles`), and the open copies the
+closed streams' bytes and runs the same recovery over them (#1272); before #1272 an in-memory
+reopen got empty storage and silently lost every row. While the close runs, an open waits for it
+(the root `DatabaseEngine.OpenDatabaseAsync`, which honors its token), `TryGetDatabase` and the
+enumeration do not report the database, a create of its name is refused as existing, and a drop
+or the engine's disposal waits for the close, so nothing reuses the files under it. Before
+decision 33 the database stayed registered until it was dropped, and an open handed back the
+closed instance, whose use threw `ObjectDisposedException`. The forget reads the engine's
+lock-free instance snapshot and takes the engine's lock only through a bounded
+`Monitor.TryEnter` loop: a drop, an offline reopen and the engine's disposal dispose a database
+while holding that lock, and that disposal waits for a close a holder started, so a forget that
+blocked on the lock would deadlock with them. `SqlEngineContractTests` covers the reopen in
+memory and on disk, closed directly and through a session (the reopened instance is new, holds
+the committed rows and not an uncommitted one, takes writes, and a second close and open keeps
+them), and the window: with the close held in its shutdown checkpoint by a data fsync that does
+not answer, every worker's pass succeeds and skips the database, the lookup misses it, a create
+is refused, an open waits and then reopens it, and a drop waits and then drops it.
+
+For the window between the close and the forget every worker skips it:
+`SqlDatabaseEngine.IsOpen` is false for it (`SqlDatabase.IsClosed`), the flush, write-back and
+version-purge workers do not begin it, and the checkpointer never finds it due. Before phase 4
+the open test read only the registration, so the version-purge worker failed on the closed database's disposed transaction manager every pass
 and the checkpointer on its disposed journal once it was due, and the engine stayed `Faulted` for
 good (the closed-database fault the Blob model's phase-4 review found; `SqlEngineContractTests`,
 `SqlDatabaseServerTests`). The checkpointer's skip covers a close that is not idle too: when the
@@ -1152,16 +1174,28 @@ writes the operating system already dropped. The engine stops the database, not 
 
 - The statement whose commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`
   (the kernel's `TransactionCommitUnconfirmedException` inside it, and the storage's
-  `StorageOfflineException` inside that).
-- A DDL statement that was running when the database went offline gets
-  `DatabaseTransactionCommitUnconfirmedException` too, led by `COHSQLT004`, never the refusal.
-  DDL commits durable brackets in the catalog and data file sets as it goes (catalog writes, and
+  `StorageOfflineException` inside that). Its message leads with `COHSQLT004` on every path, the
+  explicit COMMIT and an auto-commit statement's own commit alike (owner decision 24 of
+  2026-10-06, #1272: `SqlDatabase.CreateUnconfirmedCommit`, through the root's
+  `DatabaseTransactionCommitUnconfirmedException.Create(code, database, cause)`); before #1272
+  these paths carried the kernel's message alone.
+- A DDL statement that meets the offline storage is classified exactly (#1272). DDL commits
+  durable brackets in the catalog and data file sets as it goes (catalog writes, and
   `ApplyStatementAsync(..., durable: true)` for index builds and column changes), so any prefix
-  of it may survive the reopen; a bracket whose commit record was appended before its flush
-  failed is flagged (`StorageOfflineException.CommitRecordWritten`), and a statement the
-  database was online for when it started is never reported as refused. Only a DDL statement
-  refused before it wrote anything (the database already offline, or its transaction's begin
-  refused) gets `DatabaseOfflineException`.
+  of it may survive the reopen. Each such commit is recorded on the statement's metrics
+  (`SqlStatementMetrics.SelfCommits`, through `SqlPlanExecutor.SelfCommitAsync`), and a bracket
+  whose commit record was appended before its flush failed is flagged
+  (`StorageOfflineException.CommitRecordWritten`). A DDL statement that committed at least one
+  durable bracket of its own, or whose failing bracket had written its commit record, gets
+  `DatabaseTransactionCommitUnconfirmedException` led by `COHSQLT004`: part of it may survive.
+  One that met the offline storage before it committed anything (it waited for a lock while
+  another statement's fsync failed, the database was already offline, or its transaction's begin
+  was refused) gets `DatabaseOfflineException`: nothing of it was written. Until #1272 every
+  self-committing statement that met the offline storage was reported as unconfirmed, so a caller
+  looked for an effect that could not exist. PostgreSQL draws the same line: only the commit
+  record's flush, inside the commit's critical section, leaves an outcome unknown
+  (`RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`, `XLogFlush` at
+  `:1544`); an error before it aborts the transaction.
 - Every later operation on the database is refused with `DatabaseOfflineException`, code
   `COHSQLT004` (`Code`, and the message leads with it), carrying the storage's
   `StorageOfflineException`: a new session, every statement on an existing one, BEGIN, and the
@@ -1192,7 +1226,11 @@ other set is already offline and that a pass of every worker leaves its files by
 unchanged (a second database in the same engine shows the pass would have written). A theory
 fails each fsync of `CREATE TABLE`, `CREATE INDEX`, `DROP TABLE` and `ALTER TABLE ADD COLUMN` in
 turn, reopens, and checks the caller was told unconfirmed every time, including the cases whose
-effect survived.
+effect survived. Two more pin the DDL classification (#1272): a `DROP TABLE` waiting for its
+table's lock when another statement's fsync takes the database offline is refused with
+`COHSQLT004` and the table survives the reopen; a `DROP TABLE` that committed its catalog bracket
+and then waits for the apply gate when the database goes offline is unconfirmed, though its own
+failing operation wrote no commit record, and the drop survives the reopen.
 
 **A failed header slot write takes the database offline too (#1268).** A checkpoint whose
 header slot write fails leaves that slot possibly the newest generation on the media, so its
@@ -1488,9 +1526,11 @@ This limitation and the unavailable interface seam are recorded in
 `COHSQLT004` means the database is offline (#1243): a durable flush of its journal or data
 file failed, and every operation is refused with `DatabaseOfflineException` until the
 database is reopened ("Storage operations", above). Unlike the three state codes it is an
-exception, not a diagnostic, and the wire maps it to `Unavailable`. A DDL statement that was
-running when the database went offline is reported as `DatabaseTransactionCommitUnconfirmedException`
-led by `COHSQLT004` instead, because part or all of it may survive the reopen.
+exception, not a diagnostic, and the wire maps it to `Unavailable`. A DDL statement that had
+committed a durable bracket of its own when the database went offline is reported as
+`DatabaseTransactionCommitUnconfirmedException` led by `COHSQLT004` instead, because part or all
+of it may survive the reopen; one that had committed nothing is refused like any other statement
+(#1272).
 
 ### The transaction's end state machine (concrete-types plan, phase 4)
 
@@ -2154,6 +2194,8 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
   constructor inside its factory ("A worker must have a diagnostic name." is gone), and the
   engine releases every worker last attached first (it used to dispose the checkpointer, then
   its factory workers).
-- **A database closed outside the engine** stays registered until it is dropped, refuses its use
-  with `ObjectDisposedException`, and is skipped by every worker, so the engine stays `Running`
-  ("Engine-owned background workers", above).
+- **A database closed outside the engine** is skipped by every worker until its close ends, so
+  the engine stays `Running`, and is then forgotten, so the next open opens it again with its
+  rows, in memory as on disk ("Engine-owned background workers", above). Until owner decision 33
+  (2026-10-06, #1289) it stayed registered until it was dropped and refused its use with
+  `ObjectDisposedException`.

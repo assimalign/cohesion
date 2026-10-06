@@ -6,11 +6,13 @@ supports document CRUD, an explicit OQL query and index-DDL subset, secondary B+
 snapshot and read-committed transactions, and durable file or in-memory storage.
 
 The public entry point is `DocumentDatabaseEngine.Create(options)`. A created database is a
-`DocumentDatabase`; create a collection and use a `DocumentDatabaseSession` with the
-`DocumentCollection` methods. The session's own collection operations
-(`session.CreateCollectionAsync` and its siblings) carry collection changes into the session
-transaction; the database's own operations, and those of `session.Database` (the same unbound
-database), run in autocommit. Index definitions are changed with OQL on the session, using its
+`DocumentDatabase`; open a `DocumentDatabaseSession`, create or get a collection through it, and
+use the `DocumentCollection` methods. Collection operations exist only on the session
+(`session.CreateCollectionAsync` and its siblings; owner decision 32): they run in the session's
+transaction, or in an automatic statement transaction when none is active. Disposing a database,
+directly or through `session.Database`, closes it for every session; once the close ends the
+engine forgets it, and `OpenDatabaseAsync` opens it again with its documents, in memory as on
+disk (owner decision 33). Index definitions are changed with OQL on the session, using its
 active transaction or an automatic statement transaction; neither the database nor the session
 has index-management members. A statement that fails inside an explicit transaction aborts the
 whole transaction: the session refuses further statements and BEGIN with `COHDBD001` until the

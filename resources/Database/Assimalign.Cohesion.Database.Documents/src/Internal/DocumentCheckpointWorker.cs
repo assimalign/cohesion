@@ -52,10 +52,10 @@ internal sealed class DocumentCheckpointWorker : DatabaseCheckpointWorker<Docume
     /// <inheritdoc />
     /// <remarks>
     /// False for a database its holder closed (directly or through a session's
-    /// <see cref="DocumentDatabaseSession.Database"/>), which the engine keeps registered until its close ends
-    /// and then forgets. A close that was not idle (a writer the close kept in flight, #1226) leaves the
-    /// journal untruncated, so the closed storage would stay due for a checkpoint it refuses, and a
-    /// failure recorded for the database would never end.
+    /// <see cref="DocumentDatabaseSession.Database"/>), which the engine keeps registered until its
+    /// close ends and then forgets. A close that was not idle (a writer the close kept in flight,
+    /// #1226) leaves the journal untruncated, so the closed storage would stay due for a checkpoint
+    /// it refuses, and a failure recorded for the database would never end.
     /// </remarks>
     protected override bool IsCheckpointDue(DocumentDatabase database, TimeSpan interval)
         => !database.IsClosed && database.DataStorage.IsCheckpointDue(interval);

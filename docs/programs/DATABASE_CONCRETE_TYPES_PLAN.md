@@ -46,6 +46,9 @@ otherwise, this list wins.
 | 33 | Reopening a database closed outside its engine (#1289) | The engine forgets it, so a later open reopens it from disk. |
 | 34 | SQL's coded aborted-transaction error (§6.4) | `COHSQLT005`. |
 
+Decisions 32 and 33, with decision 24 and #1272, landed on 2026-10-06 on
+`feat/owner-decisions-engines` (§6.4, §6.6, §7, §12).
+
 Decisions 22-26 of the same day concern the storage and hosting runtime, not this program's
 types: hosted servers reopen an offline database with backoff (health Unhealthy until it
 reopens); a deferred checkpoint runs at the end of the statement holding the gate; every
@@ -1279,6 +1282,61 @@ Each change of this section that reaches SQL is accounted for:
   contract, its token observed only before it starts (`SqlTransactionRollbackTests`, unchanged
   apart from the retypes, like the other #1188, #1225 and #1226 suites).
 
+**Owner decisions 24, 32 and 33 (2026-10-06, re-verified, then landed).** Three behaviors every
+model carried move into the root bases or the root's shared source, once (rule 8):
+
+- *A database closed outside its engine is forgotten (decision 33, #1289).* Each engine kept a
+  database its holder disposed registered until it was dropped: Sql and KeyValuePair handed the
+  disposed instance back from `OpenDatabaseAsync` (KeyValuePair from `TryGetDatabase` and
+  `GetDatabasesAsync` too), and Documents, Graph and Blob refused the open with
+  `ObjectDisposedException`. Now `DatabaseInstance`'s disposal completes a close task after its
+  core and then calls the engine's new `protected abstract ForgetClosedDatabaseCore`, which each
+  leaf implements in one line through the shared `shared/DatabaseRegistry.Forget`. The base's
+  `OpenDatabaseAsync` waits for a holder's close in flight (honoring its token) and opens again,
+  and refuses a leaf that never forgets with `InvalidOperationException` rather than spinning;
+  `TryGetDatabase` does not report a closing database; a second disposal waits for the close in
+  flight, so a drop, an offline reopen and the engine's disposal never reuse files under a
+  holder's close. The forget reads the leaf's lock-free snapshot and takes the leaf's lock only
+  through a bounded `Monitor.TryEnter` loop, because those engine paths dispose the database
+  while holding that lock. The leaf keeps tracking the database until its close ends, so every
+  worker's `IsClosed` skip still covers the window. Engine-initiated closes are unchanged. Each
+  engine's open core now returns a tracked instance as it is unless it is offline and open (a
+  closing one goes back to the base, which waits), `OfflineDatabases` leaves closed databases out,
+  and KeyValuePair's create, open and drop check the engine's disposal under the lock.
+- *An in-memory database reopens with its data (#1272's third item).* An in-memory reopen built
+  fresh storage and silently lost every row. The shared `shared/DatabaseMemoryFiles` keeps each
+  in-memory file set's streams for the engine's lifetime, and an open copies the closed streams'
+  bytes into new streams and runs the same recovery a file reopen runs. Sql's and KeyValuePair's
+  in-memory strategies and the Documents, Graph and Blob engines (whose in-memory case has no
+  strategy) use it.
+- *Every unconfirmed-commit message leads with the model's code (decision 24, #1272).* The
+  kernel path (`TransactionCommitUnconfirmedException`) reached callers with the kernel's message
+  alone in every model, on the explicit commit and on an automatic statement's own commit. The
+  root's new `DatabaseTransactionCommitUnconfirmedException.Create(code, database,
+  TransactionCommitUnconfirmedException)` builds the coded message ("{code}: Database '{name}'
+  went offline while a transaction was committing: …", the kernel's exception inside), and every
+  model's translation calls it: Sql and KeyValuePair through `CreateUnconfirmedCommit`, Documents,
+  Graph and Blob through `TranslateKernelFailure`, now an instance member so it knows the
+  database. SQL's self-commit classification is exact as well: a DDL statement is unconfirmed only
+  if it committed a durable bracket of its own (`SqlStatementMetrics.SelfCommits`, recorded per
+  statement) or its failing bracket wrote its commit record; otherwise it is offline.
+- *Decision 32* removes the Documents and Blob session-less operations (§6.6).
+
+Asserted: the refused-reopen tests became per-model reopen theories, in memory and on disk,
+closed directly and through `session.Database`
+(`OpenDatabaseAsync_DatabaseClosedOutsideTheEngine_ShouldReopenItWith{Rows,Entries,Nodes,Documents,Blobs}`:
+a new instance, the committed data and not an uncommitted transaction's, writes taken, and a
+second close and open keeping them), and each model's worker-resilience or server test that
+closes a database outside the engine now asserts the reopen. The root suite's test leaf holds a
+close at a gate and pins an open, a canceled open, a drop and the engine's disposal during it,
+the refusal of a leaf that never forgets, and the second disposal's wait; Sql's contract suite
+does the same against a real engine whose close stalls in its shutdown checkpoint fsync. Each
+model's transaction-failure suite asserts the coded unconfirmed message, and two SQL tests pin
+the DDL classification. Three mutations were each caught: SQL's old classification (the refused
+DDL test fails), empty in-memory reopen streams (every model's in-memory reopen fails, the
+on-disk cases pass), and a disabled open loop (the root and Sql open-window tests fail, the drop
+and disposal ones pass).
+
 ### 6.5 Root-base state, attach semantics and typed accessors (rows 1, 5, 9, 12)
 
 - **Attach.** `DatabaseEngine` owns `Workers` and `Servers`. Today a model fills them through the
@@ -1608,6 +1666,29 @@ cast the session's database to `IBlobDatabase`, so its exchanges still join the 
 transaction (a host-opened one included); Studio's `BlobWorkspace` runs its container and blob
 tools on the session (a cast from `ModelWorkspace`'s root-typed session to `BlobDatabaseSession`,
 which phase 7's retype removes) where it cast the session's database to `IBlobDatabase`.
+
+**Owner decisions 32 and 33 (2026-10-06, re-verified, then landed).** The two consequences above
+that option B left are gone:
+
+- *Decision 32: the session-less operations are removed.* `DocumentDatabase` loses its four
+  collection operations and `BlobDatabase` its four container operations; the internal overloads
+  the sessions call now require the session. `DocumentCollection` and `BlobContainer` always
+  carry the session that produced them and always apply its binding check, and `DocumentOperation`
+  and `BlobOperation` always run under a session. So no write can wait on its caller's own
+  explicit transaction, and the self-wait tests
+  (`CreateCollectionAsync_ThroughSessionDatabaseAfterTransactionWrote_ShouldWaitForItsWriterLock`,
+  `CreateContainerAsync_ThroughSessionDatabaseAfterTransactionWrote_ShouldWaitForItsWriterLock`)
+  and the remarks that documented the self-wait are deleted. [Certain] Studio's
+  `DocumentWorkspace` and `BlobWorkspace` and the Blob wire server already ran the session's
+  operations (above), so none of them changed; `Database.Hosting` and `Database.Embedded` called
+  none of the removed members. The Documents and Blob suites and fixtures, and the Blob.Client
+  suite's harness and streaming fixture, create their collections and containers through a
+  session. The Blob suites keep their autocommit call shape through a test-only
+  `AutocommitContainer`, which runs each call in a session of its own.
+- *Decision 33: a database closed through `session.Database` reopens.* The engine forgets it
+  once its close ends (§6.4, "Owner decisions 24, 32 and 33"), so `OpenDatabaseAsync` opens it
+  again with its data, in memory as on disk. `Database_OfASession_ShouldBeTheUnboundDatabase`
+  in both suites now asserts the reopen where it pinned the refusal.
 
 ### 6.7 Sql.Schema behind an opaque `SqlSchema` (rows 87 to 101)
 
@@ -2861,6 +2942,57 @@ the code had moved, the row now says what landed:
       none of them in the global NuGet cache before the runs; the script's first step ran this
       time, with node reuse off), Sdk.Database's tests pass 18 of 18 and Database.Testing's 5 of
       5, the SampleHost provisioning test among them.
+- **Owner decisions 24, 32 and 33, as landed (re-verified 2026-10-06 against the code at
+  `3858db7e`).** One code commit and one docs commit on `feat/owner-decisions-engines`. The three
+  changes share files (each engine and the Documents and Blob databases carry hunks of all three),
+  so they land together. §6.4 ("Owner decisions 24, 32 and 33") and §6.6 account for them, and
+  each model's `DESIGN.md` records its part.
+  - *Re-verification.* Every engine kept a database its holder closed registered until a drop, as
+    §12 recorded. Sql's and KeyValuePair's in-memory strategies built fresh storage on reopen,
+    and the Documents, Graph and Blob engines built fresh in-memory storage in the open itself, so
+    an in-memory reopen lost every row (#1272). Every model translated the kernel's
+    `TransactionCommitUnconfirmedException` without a code. SQL classified every self-committing
+    statement that met the offline storage as unconfirmed. Studio and the Blob wire server
+    already ran the session's operations; `Database.Hosting` and `Database.Embedded` called none
+    of the removed members.
+  - *Deadlock found while designing the forget, avoided by construction.* A drop, an offline
+    reopen and the engine's disposal dispose a database while holding the leaf's lock, and with
+    the close task that disposal waits for a holder's close in flight. A forget that took the
+    lock unconditionally would wait for that lock while the engine path waits for the close: a
+    deadlock. Those paths remove the database from the lock-free snapshot first, so the forget
+    reads the snapshot, returns when the database is not in it, and otherwise polls the lock
+    with `Monitor.TryEnter` (10 ms attempts), rereading the snapshot between attempts. The root
+    suite's drop and engine-disposal window tests and Sql's drop window test pin it.
+  - *Test hardening found by mutation.* With the open loop disabled, the root suite's
+    canceled-open test hung instead of failing: its assertion threw before the test released the
+    close gate, and the engine's `await using` disposal then waited forever for the held close.
+    Every gated test (root, Sql's two window tests and Sql's DDL apply-gate test) now releases
+    its hold on scope exit through a `Release` declared after the engine, so a failure fails
+    fast.
+  - *Mutations, each caught and restored.* SQL's old classification fails the refused-DDL test;
+    empty in-memory reopen streams fail every model's in-memory reopen cases (Sql 3, Documents 4,
+    Graph 3, Blob 2, KeyValuePair 3, while the on-disk cases pass); a disabled open loop fails the
+    root suite's open, canceled-open and never-forgets tests and Sql's open window test, while
+    the drop and disposal window tests pass, as they should.
+  - *Gate.* A no-incremental build of every Database project and test project (the solution
+    filter of the Database solution without Database.Testing) has no Database warning but CS2008
+    on Database.Refs; Sdk.Database's tests and Studio build with none. Every suite passes:
+    Database.Tests 112 (104 + 8: six engine window tests, two instance tests), Sql.Tests 1128
+    (1121 + 7: the reopen theory's four cases replace one test, the open and drop window tests,
+    and the two DDL classification tests), Documents 195 (192 + 3: the reopen theory's four cases;
+    the self-wait test is deleted), Graph 402 (398 + 4), Blob 171 (168 + 3: the reopen theory's
+    four cases; the self-wait test is deleted), KeyValuePair 192 (188 + 4). Every other suite
+    passes at its recorded baseline: Storage 293, Transactions 108, Indexing 75, Protocol 21,
+    Security 5, Sql.Schema 39, Sql.Client 314, Graph.Client 57, Blob.Client 21,
+    KeyValuePair.Client 10, Client 41, Hosting 54, Embedded 4, ApplicationModel 15 and
+    Sdk.Database 18 against the local build. So do the suites without one: Language 105, Types 93,
+    Execution 2, Sql.Language 999, Sql.Catalog 47, Sql.Storage 14, Documents.Language 288,
+    Documents.Catalog 9, Documents.Storage 31, Graph.Language 387, Graph.Catalog 19,
+    Graph.Storage 17, Blob.Catalog 5, Blob.Storage 14, KeyValuePair.Catalog 4 and
+    KeyValuePair.Storage 3. The Security, Cache, Memory
+    and Documents.Client test projects hold no tests. Studio's `--smoke` run gives 83 passed,
+    0 failed, 1 skipped; the dependency graph check passes; and the Database runtime producer
+    packs. Database.Testing and the SampleHost were not run (out of this landing's scope).
 
 The template, fixture and example casts `(SqlDatabaseEngine)engine` become identity casts and
 still compile. *Gate:* each model's suites, including its #1188, #1225 and #1226 suites in
@@ -3133,6 +3265,17 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   `BlobWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
   ports the test; with the guard removed it fails (§7, "The closed-database follow-up", "Blob's
   checkpointer"). Closed: all five models' checkpointers skip a closed database.
+- #1289's last acceptance criterion, a database closed outside its engine reopening: **Done** by
+  owner decision 33 (§6.4, "Owner decisions 24, 32 and 33"; §7, "Owner decisions 24, 32 and 33,
+  as landed"). The engine forgets the database once its close ends and the next open opens it
+  again, in all five models, in memory as on disk. The workers' closed-database skips above now
+  cover only the window between a holder's close and the forget. Closing #1289 is the
+  integration merge's step (the session's GitHub access is read-only).
+- #1272: **Done** by the same landing. Every unconfirmed-commit message leads with the model's
+  code on every path (decision 24): the explicit commit, an automatic statement's own commit and a
+  flagged storage bracket. SQL's self-commit DDL classification is exact (unconfirmed only after a
+  durable bracket of its own committed, otherwise offline). An in-memory database reopens with its
+  data in all five models. Closing #1272 is the integration merge's step.
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never
