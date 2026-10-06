@@ -6,19 +6,26 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Assimalign.Cohesion.Database.Documents.Catalog.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Documents.Catalog.Internal;
+namespace Assimalign.Cohesion.Database.Documents.Catalog;
 
-internal sealed partial class DefaultDocumentCatalog
+public sealed partial class DocumentCatalog
 {
     private readonly Dictionary<(Guid CollectionId, string Name), List<Reference>> _indexDefinitions = new();
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
     private BTreeIndexManager _indexes = null!;
 
+    /// <summary>Lists visible index definitions in ordinal name order.</summary>
+    /// <param name="collectionId">The collection identity.</param>
+    /// <param name="snapshot">The visibility snapshot.</param>
+    /// <returns>The visible definitions.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    /// <exception cref="DocumentCatalogException">A persisted catalog record is malformed.</exception>
     public IReadOnlyList<DocumentIndexMetadata> GetIndexes(Guid collectionId, TransactionSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -37,9 +44,26 @@ internal sealed partial class DefaultDocumentCatalog
         }
     }
 
+    /// <summary>Builds a nonunique B+Tree and publishes its definition in the supplied transaction.</summary>
+    /// <param name="collectionId">The collection identity.</param>
+    /// <param name="name">The new index name.</param>
+    /// <param name="path">The scalar field path.</param>
+    /// <param name="context">The active transaction; the caller holds the collection's exclusive lock.</param>
+    /// <param name="cancellationToken">Cancels the build.</param>
+    /// <returns>The new index definition.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null or white space, or <paramref name="path"/> is not a scalar field path.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
+    /// <exception cref="DocumentCatalogException">
+    /// The collection is absent, the index already exists, or an existing document's indexed scalar
+    /// encodes beyond the index key limit.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the build applied.</exception>
+    /// <exception cref="TransactionAbortedException">The transaction ended, or its end began, before the build was applied.</exception>
     public async ValueTask<DocumentIndexMetadata> CreateIndexAsync(Guid collectionId, string name, string path,
         TransactionContext context, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
         EnsureActive(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         DocumentIndexKeys.ValidatePath(path);
@@ -91,9 +115,22 @@ internal sealed partial class DefaultDocumentCatalog
         return metadata;
     }
 
+    /// <summary>Tombstones an index definition, retaining its tree for older snapshots.</summary>
+    /// <param name="collectionId">The collection identity.</param>
+    /// <param name="name">The index name.</param>
+    /// <param name="context">The active transaction.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>A task representing the operation.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="context"/> is null.</exception>
+    /// <exception cref="DocumentCatalogException">The index does not exist in the transaction's snapshot.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the physical application.</exception>
+    /// <exception cref="TransactionAbortedException">The transaction ended, or its end began, before the mutation was applied.</exception>
     public async ValueTask DeleteIndexAsync(Guid collectionId, string name, TransactionContext context,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(context);
         Found? previous;
         lock (_sync)
         {
@@ -106,10 +143,29 @@ internal sealed partial class DefaultDocumentCatalog
         await DeleteAsync(previous, context, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Seeks a scalar key range and returns visible documents in ordinal identity order.</summary>
+    /// <param name="collectionId">The collection identity.</param>
+    /// <param name="indexName">The visible index name.</param>
+    /// <param name="lower">The inclusive or exclusive scalar lower bound, or null for unbounded.</param>
+    /// <param name="includeLower">Whether the lower bound is included.</param>
+    /// <param name="upper">The scalar upper bound, or null for unbounded.</param>
+    /// <param name="includeUpper">Whether the upper bound is included.</param>
+    /// <param name="snapshot">The visibility snapshot shared with the residual predicate.</param>
+    /// <param name="cancellationToken">Cancels iteration.</param>
+    /// <returns>The matching visible metadata.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="indexName"/> or <paramref name="snapshot"/> is null.</exception>
+    /// <exception cref="ArgumentException">A bound is not a scalar an index key can encode.</exception>
+    /// <exception cref="DocumentCatalogException">
+    /// The index is not visible in <paramref name="snapshot"/>, its physical tree is missing, or a
+    /// persisted catalog record is malformed.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled during the iteration.</exception>
     public async ValueTask<IReadOnlyList<DocumentCatalogEntry>> SearchIndexAsync(Guid collectionId, string indexName,
         object? lower, bool includeLower, object? upper, bool includeUpper, TransactionSnapshot snapshot,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(indexName);
+        ArgumentNullException.ThrowIfNull(snapshot);
         DocumentIndexMetadata definition;
         lock (_sync)
         {
@@ -136,6 +192,12 @@ internal sealed partial class DefaultDocumentCatalog
         return result.Values.OrderBy(document => document.Id, StringComparer.Ordinal).ToArray();
     }
 
+    /// <summary>Scrubs abandoned writers from every persisted B+Tree before recovery checkpointing.</summary>
+    /// <param name="writers">The uncommitted writers identified by shared recovery.</param>
+    /// <param name="cancellationToken">Cancels the scrub.</param>
+    /// <returns>A task representing the scrub.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="writers"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; the scrub's storage bracket is rolled back.</exception>
     public async ValueTask RecoverIndexesAsync(IReadOnlySet<TransactionSequence> writers, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(writers);
@@ -239,15 +301,6 @@ internal sealed partial class DefaultDocumentCatalog
         });
     }
 
-    /// <summary>
-    /// Checks the B-tree page format of every index tree the storage registers, without
-    /// opening the catalog: registration records carry no MVCC stamps, so they read the
-    /// same before and after the coordinator's recovery scrub.
-    /// </summary>
-    /// <exception cref="IndexFormatException">A tree is not in the B-tree page format this engine reads.</exception>
-    internal static void EnsureIndexFormat(DocumentStorage storage)
-        => BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
-
     private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot)> ReadRegistrations(DocumentStorage storage)
     {
         var registrations = new List<(BTreeIndexRegistration, PageId, int)>();
@@ -315,7 +368,7 @@ internal sealed partial class DefaultDocumentCatalog
 
     private sealed class IndexUndo : RecordVersionIndex
     {
-        private readonly DefaultDocumentCatalog _catalog;
+        private readonly DocumentCatalog _catalog;
         private readonly DocumentIndexMetadata _metadata;
 
         /// <summary>
@@ -323,7 +376,7 @@ internal sealed partial class DefaultDocumentCatalog
         /// </summary>
         /// <param name="catalog">The catalog that resolves the index's physical tree when an undo runs.</param>
         /// <param name="metadata">The metadata of the index whose entries are undone.</param>
-        public IndexUndo(DefaultDocumentCatalog catalog, DocumentIndexMetadata metadata)
+        public IndexUndo(DocumentCatalog catalog, DocumentIndexMetadata metadata)
         {
             _catalog = catalog;
             _metadata = metadata;

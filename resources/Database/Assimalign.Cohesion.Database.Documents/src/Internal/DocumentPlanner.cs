@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed class DocumentPlanner
 {
-    private readonly IDocumentCatalog _catalog;
+    private readonly DocumentCatalog _catalog;
     private readonly TransactionSnapshot _snapshot;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
@@ -20,7 +20,7 @@ internal sealed class DocumentPlanner
     /// <param name="catalog">The document catalog used to resolve collections and indexes.</param>
     /// <param name="snapshot">The transaction snapshot at which catalog metadata is read.</param>
     /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
-    public DocumentPlanner(IDocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters)
+    public DocumentPlanner(DocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters)
     {
         _catalog = catalog;
         _snapshot = snapshot;

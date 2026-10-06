@@ -1,7 +1,7 @@
 # Documents.Catalog
 
-`Assimalign.Cohesion.Database.Documents.Catalog` supplies `IDocumentCatalog`, implemented
-internally over the same `DocumentStorage` file set as document content. It stores collection
+`Assimalign.Cohesion.Database.Documents.Catalog` supplies the sealed `DocumentCatalog`, over the
+same `DocumentStorage` file set as document content. It stores collection
 ownership, versioned document identities/content references, and secondary index definitions.
 Its B+Trees come from `Database.Indexing`, and every data/index mutation joins the caller's
 `TransactionContext` through `TransactionCoordinator`.

@@ -67,7 +67,7 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
     public IDatabaseEngine Engine { get; }
     internal DocumentStorage DataStorage { get; }
     internal TransactionCoordinator Coordinator { get; }
-    internal IDocumentCatalog Catalog { get; }
+    internal DocumentCatalog Catalog { get; }
 
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
     {

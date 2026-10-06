@@ -20,9 +20,11 @@ flowchart LR
     Cat --> Types["Database.Types"]
 ```
 
-`IDocumentCatalog` is a new Documents-owned interface. The pre-existing engine, collection,
-session, storage-kernel, transaction, and index interfaces are unchanged. Public metadata records
-are immutable values; the implementation and codecs are internal.
+`DocumentCatalog.Open` returns the sealed `DocumentCatalog`, which has a private constructor; its
+record and codecs are internal. The former `IDocumentCatalog` interface, `DocumentCatalog` static
+factory and internal `DefaultDocumentCatalog` collapsed into it (concrete-types plan, phase 4,
+#1260), and its index members (`CreateIndexAsync`, `DeleteIndexAsync`, `SearchIndexAsync`) now
+check their reference arguments themselves. Public metadata records are immutable values.
 
 ## Snapshot directory and ownership
 
