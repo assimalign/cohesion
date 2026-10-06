@@ -53,7 +53,7 @@ internal sealed class GraphCheckpointWorker : DatabaseCheckpointWorker<GraphData
     /// <remarks>
     /// False for a database its holder closed (directly; a session's
     /// <see cref="GraphDatabaseSession.Database"/> is the same instance), which the engine keeps
-    /// registered to refuse its reopen. A close that was not idle (a writer the close kept in flight,
+    /// registered until its close ends and then forgets it. A close that was not idle (a writer the close kept in flight,
     /// #1226) leaves the journal untruncated, so the closed storage would stay due for a checkpoint
     /// it refuses, and a failure recorded for the database would never end.
     /// </remarks>

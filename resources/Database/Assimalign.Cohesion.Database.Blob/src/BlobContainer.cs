@@ -22,13 +22,12 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// stream is disposed after a successful write — readers never observe partial content.
 /// </para>
 /// <para>
-/// <b>Binding.</b> A container a session returned (<see cref="BlobDatabaseSession.GetContainerAsync"/>
-/// and its siblings) is bound to that session: each of its operations is an operation of the
-/// session, in its explicit transaction when one is open, and holds the session from its start to
-/// its end (a stream's end is its disposal). A container the database returned
-/// (<see cref="BlobDatabase.GetContainerAsync(string, CancellationToken)"/> and its siblings) is
-/// unbound: each of its operations runs in an autocommit transaction of its own, outside any
-/// session.
+/// <b>Binding.</b> A container is bound to the session that returned it
+/// (<see cref="BlobDatabaseSession.GetContainerAsync"/> and its siblings): each of its operations
+/// is an operation of the session, in its explicit transaction when one is open, and holds the
+/// session from its start to its end (a stream's end is its disposal). Every container comes from
+/// a session: the database has no container operations of its own (owner decision 32 of
+/// 2026-10-06), so no container operation runs outside a session.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed type with an internal
@@ -41,15 +40,15 @@ public sealed class BlobContainer
 {
     private readonly BlobDatabase _database;
     private readonly BlobContainerMetadata _container;
-    private readonly BlobDatabaseSession? _session;
+    private readonly BlobDatabaseSession _session;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BlobContainer"/> class.
     /// </summary>
     /// <param name="database">The blob database that owns the container.</param>
     /// <param name="container">The catalog metadata of the container.</param>
-    /// <param name="session">The session that scopes container operations, or <see langword="null"/> for autocommit operations.</param>
-    internal BlobContainer(BlobDatabase database, BlobContainerMetadata container, BlobDatabaseSession? session)
+    /// <param name="session">The session the container is bound to, whose operations its operations are.</param>
+    internal BlobContainer(BlobDatabase database, BlobContainerMetadata container, BlobDatabaseSession session)
     {
         _database = database;
         _container = container;
@@ -60,6 +59,13 @@ public sealed class BlobContainer
     /// Gets the name of the container, unique within its database.
     /// </summary>
     public string Name => _container.Name;
+
+    /// <summary>
+    /// Gets the catalog record this handle addresses: the container's identity, which a container
+    /// created later under the same name does not share. For this assembly's tests, which bind the
+    /// identity to sessions of their own.
+    /// </summary>
+    internal BlobContainerMetadata Metadata => _container;
 
     /// <summary>
     /// Opens a stream that writes a blob's content. The blob becomes visible atomically when the
@@ -258,7 +264,7 @@ public sealed class BlobContainer
         {
             cancellationToken.ThrowIfCancellationRequested();
             _database.EnsureNotDisposed();
-            _session?.ThrowIfNotOpen();
+            _session.ThrowIfNotOpen();
             yield return BlobDatabase.Properties(entry);
         }
     }
@@ -277,10 +283,10 @@ public sealed class BlobContainer
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
     /// <remarks>
-    /// Session-bound containers use the session's isolation level. The returned property bag is
+    /// The read uses the bound session's isolation level. The returned property bag is
     /// detached from the catalog; all dictionary mutation operations throw <see cref="NotSupportedException"/>.
-    /// Container discovery remains available through <see cref="BlobDatabaseSession.GetContainersAsync"/>
-    /// and <see cref="BlobDatabase.GetContainersAsync(CancellationToken)"/>. Before phase 4 of the
+    /// Container discovery remains available through <see cref="BlobDatabaseSession.GetContainersAsync"/>.
+    /// Before phase 4 of the
     /// concrete-types plan this was an extension over the container interface that cast to the
     /// implementation.
     /// </remarks>

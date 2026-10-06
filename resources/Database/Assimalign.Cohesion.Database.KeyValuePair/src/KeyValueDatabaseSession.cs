@@ -228,7 +228,7 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
         catch (TransactionCommitUnconfirmedException exception)
         {
             // The command committed; only the durability of its commit record is unconfirmed.
-            throw new DatabaseTransactionCommitUnconfirmedException(exception.Message, exception);
+            throw _database.CreateUnconfirmedCommit(exception);
         }
         catch (TransactionDeadlockException exception)
         {

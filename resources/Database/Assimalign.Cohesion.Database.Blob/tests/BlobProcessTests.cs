@@ -90,7 +90,7 @@ public sealed class BlobProcessTests
             long committedLength = long.Parse(fields[1], CultureInfo.InvariantCulture);
             await using var reopened = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions { RootPath = root });
             var database = await reopened.OpenDatabaseAsync("existing", timeout.Token);
-            var container = await database.GetContainerAsync("objects", timeout.Token);
+            var container = await AutocommitContainer.GetAsync(database, "objects", timeout.Token);
             (await container.GetPropertiesAsync("committed", timeout.Token))!.Value.Length.ShouldBe(committedLength);
             var (length, digest) = await ReadDigestAsync(container, "committed", timeout.Token);
             length.ShouldBe(committedLength);
@@ -103,7 +103,7 @@ public sealed class BlobProcessTests
             names.ShouldBe(new[] { "committed" });
 
             var otherDatabase = await reopened.OpenDatabaseAsync("new-object", timeout.Token);
-            var otherContainer = await otherDatabase.GetContainerAsync("objects", timeout.Token);
+            var otherContainer = await AutocommitContainer.GetAsync(otherDatabase, "objects", timeout.Token);
             (await otherContainer.GetPropertiesAsync("incomplete", timeout.Token)).ShouldBeNull();
             await Should.ThrowAsync<DatabaseException>(async () =>
                 await otherContainer.OpenReadAsync("incomplete", timeout.Token));
@@ -150,6 +150,21 @@ public sealed class BlobProcessTests
     }
 
     private static async Task<(long Length, string Digest)> ReadDigestAsync(BlobContainer container, string name, CancellationToken token)
+    {
+        await using var input = await container.OpenReadAsync(name, token);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[64 * 1024];
+        long length = 0;
+        int count;
+        while ((count = await input.ReadAsync(buffer, token)) != 0)
+        {
+            length += count;
+            hash.AppendData(buffer.AsSpan(0, count));
+        }
+        return (length, Convert.ToHexString(hash.GetHashAndReset()));
+    }
+
+    private static async Task<(long Length, string Digest)> ReadDigestAsync(AutocommitContainer container, string name, CancellationToken token)
     {
         await using var input = await container.OpenReadAsync(name, token);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);

@@ -405,4 +405,186 @@ public class DatabaseEngineTests
         await bridged.DisposeAsync();
         bridged.State.ShouldBe(EngineState.Disposed);
     }
+
+    /// <summary>
+    /// A holder closes a database outside the engine: once the close ended the leaf no longer
+    /// tracks it, the lookup does not find it, and an open opens the database again as a new
+    /// instance (owner decision 33, #1289).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: a database a holder closed is forgotten and reopened by the next open")]
+    public async Task OpenDatabaseAsync_DatabaseAHolderClosed_ShouldReopenIt()
+    {
+        // Arrange
+        await using var engine = new TestEngine();
+        var database = await engine.CreateDatabaseAsync("appdb");
+
+        // Act
+        await database.DisposeAsync();
+        bool trackedAfterTheClose = engine.Tracks(database);
+        bool found = engine.TryGetDatabase("appdb", out _);
+        var reopened = await engine.OpenDatabaseAsync("appdb");
+
+        // Assert
+        engine.Forgets.ShouldBe(1);
+        trackedAfterTheClose.ShouldBeFalse();
+        found.ShouldBeFalse();
+        reopened.ShouldNotBeSameAs(database);
+        engine.Reopens.ShouldBe(1);
+        engine.Tracks(reopened).ShouldBeTrue();
+        engine.TryGetDatabase("appdb", out var fetched).ShouldBeTrue();
+        fetched.ShouldBeSameAs(reopened);
+    }
+
+    /// <summary>
+    /// An open that finds the database while a holder's close still runs waits for the close to
+    /// end and opens the database again; it never hands out the closing instance. Meanwhile the
+    /// lookup does not report the closing database.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: an open during a holder's close waits for it, then reopens")]
+    public async Task OpenDatabaseAsync_WhileAHolderClosesTheDatabase_ShouldWaitForTheCloseThenReopen()
+    {
+        // Arrange: every close holds at the gate.
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var engine = new TestEngine { CloseGate = gate };
+        using var released = new Release(() => gate.TrySetResult());
+        var database = (TestDatabase)await engine.CreateDatabaseAsync("appdb");
+        var close = database.DisposeAsync().AsTask();
+        await database.Closing.WaitAsync(_timeout);
+
+        // Act
+        var open = engine.OpenDatabaseAsync("appdb").AsTask();
+        bool foundWhileClosing = engine.TryGetDatabase("appdb", out _);
+        bool openWaited = !await CompletesWithin(open, TimeSpan.FromMilliseconds(200));
+        bool trackedWhileClosing = engine.Tracks(database);
+        gate.SetResult();
+        await close.WaitAsync(_timeout);
+        var reopened = await open.WaitAsync(_timeout);
+
+        // Assert
+        foundWhileClosing.ShouldBeFalse();
+        openWaited.ShouldBeTrue();
+        trackedWhileClosing.ShouldBeTrue();
+        reopened.ShouldNotBeSameAs(database);
+        engine.Forgets.ShouldBe(1);
+        engine.Reopens.ShouldBe(1);
+        engine.Tracks(database).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// An open waiting for a holder's close observes its token: canceled, it throws and leaves the
+    /// close to end on its own, after which the database is forgotten as usual.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: an open waiting for a close observes its token")]
+    public async Task OpenDatabaseAsync_CanceledWhileWaitingForAClose_ShouldThrowAndLeaveTheClose()
+    {
+        // Arrange
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var engine = new TestEngine { CloseGate = gate };
+        using var released = new Release(() => gate.TrySetResult());
+        var database = (TestDatabase)await engine.CreateDatabaseAsync("appdb");
+        var close = database.DisposeAsync().AsTask();
+        await database.Closing.WaitAsync(_timeout);
+        using var source = new CancellationTokenSource();
+
+        // Act
+        var open = engine.OpenDatabaseAsync("appdb", source.Token).AsTask();
+        source.CancelAfter(TimeSpan.FromMilliseconds(50));
+        var canceled = await Should.ThrowAsync<OperationCanceledException>(async () => await open.WaitAsync(_timeout));
+        gate.SetResult();
+        await close.WaitAsync(_timeout);
+
+        // Assert
+        canceled.CancellationToken.ShouldBe(source.Token);
+        engine.Forgets.ShouldBe(1);
+        engine.Tracks(database).ShouldBeFalse();
+        engine.Reopens.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The leaf drops a database a holder is closing: its own disposal of the database waits for
+    /// the holder's close, which does not wait for the leaf's lock, because the leaf let the
+    /// database go first. Nothing deadlocks, and the database is closed once.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: a drop during a holder's close waits for it without deadlocking")]
+    public async Task DropDatabaseAsync_WhileAHolderClosesTheDatabase_ShouldWaitForTheClose()
+    {
+        // Arrange
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var engine = new TestEngine { CloseGate = gate };
+        using var released = new Release(() => gate.TrySetResult());
+        var database = (TestDatabase)await engine.CreateDatabaseAsync("appdb");
+        var close = database.DisposeAsync().AsTask();
+        await database.Closing.WaitAsync(_timeout);
+
+        // Act: the leaf's drop core closes under its lock, so it runs off the test's thread.
+        var drop = Task.Run(async () => await engine.DropDatabaseAsync("appdb"));
+        bool dropWaited = !await CompletesWithin(drop, TimeSpan.FromMilliseconds(200));
+        gate.SetResult();
+        await drop.WaitAsync(_timeout);
+        await close.WaitAsync(_timeout);
+
+        // Assert
+        dropWaited.ShouldBeTrue();
+        database.AsyncDisposeCores.ShouldBe(1);
+        database.DisposeCores.ShouldBe(0);
+        engine.Forgets.ShouldBe(1);
+        await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("appdb"));
+    }
+
+    /// <summary>
+    /// The engine's disposal closes its databases after a holder's close of one of them ended:
+    /// committed work is durable when the engine's disposal completes, whoever closed it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: disposal waits for a holder's close it finds running")]
+    public async Task DisposeAsync_WhileAHolderClosesADatabase_ShouldWaitForThatClose()
+    {
+        // Arrange
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var engine = new TestEngine { CloseGate = gate };
+        var database = (TestDatabase)await engine.CreateDatabaseAsync("appdb");
+        var close = database.DisposeAsync().AsTask();
+        await database.Closing.WaitAsync(_timeout);
+
+        // Act
+        var disposal = engine.DisposeAsync().AsTask();
+        bool disposalWaited = !await CompletesWithin(disposal, TimeSpan.FromMilliseconds(200));
+        gate.SetResult();
+        await disposal.WaitAsync(_timeout);
+        await close.WaitAsync(_timeout);
+
+        // Assert
+        disposalWaited.ShouldBeTrue();
+        database.AsyncDisposeCores.ShouldBe(1);
+        engine.State.ShouldBe(EngineState.Disposed);
+    }
+
+    /// <summary>
+    /// A leaf that keeps tracking a closed database would hand the closed instance back forever;
+    /// the open reports the defect instead of spinning.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: an open refuses a closed instance the leaf never forgot")]
+    public async Task OpenDatabaseAsync_LeafKeepsAClosedDatabase_ShouldRefuseRatherThanSpin()
+    {
+        // Arrange
+        await using var engine = new TestEngine { KeepClosedDatabases = true };
+        var database = await engine.CreateDatabaseAsync("appdb");
+        await database.DisposeAsync();
+
+        // Act
+        var error = await Should.ThrowAsync<InvalidOperationException>(async () => await engine.OpenDatabaseAsync("appdb").AsTask().WaitAsync(_timeout));
+
+        // Assert
+        error.Message.ShouldBe("Engine 'test-engine' still tracks database 'appdb' after its close ended; the engine did not forget it.");
+        engine.Forgets.ShouldBe(1);
+    }
+
+    private static async Task<bool> CompletesWithin(Task task, TimeSpan wait)
+        => await Task.WhenAny(task, Task.Delay(wait)) == task;
+
+    // Lets a held close end when a test leaves its scope, a failed assertion included. Declared
+    // after the engine, it runs before the engine's disposal, which waits for that close.
+    private sealed class Release(Action release) : IDisposable
+    {
+        public void Dispose() => release();
+    }
 }

@@ -72,7 +72,7 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseEngineWorker
 
             // An offline database flushes nothing (#1243): its waiting committers were released
             // when it went offline, and each gets the refusal from its own flush. Nor does a
-            // database its holder closed: the engine keeps it registered only to refuse its reopen,
+            // database its holder closed: the engine keeps it registered until its close ends, then forgets it,
             // and its disposed storages have no committers left to serve.
             if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {

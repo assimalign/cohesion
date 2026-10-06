@@ -425,6 +425,7 @@ public sealed class KeyValueTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
+        error.Message.ShouldStartWith("COHDBK002: Database 'kv' went offline while a transaction was committing", Case.Sensitive);
         stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
         (await Keys(recovered, observer)).ShouldBeEmpty();

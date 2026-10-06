@@ -16,7 +16,7 @@ public sealed class BlobReadCommittedTests
     {
         await using var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("statement-pin");
-        var container = await database.CreateContainerAsync("files");
+        var container = await AutocommitContainer.CreateAsync(database, "files");
         byte[] original = new byte[40_000];
         for (int i = 0; i < original.Length; i++)
         {
@@ -57,7 +57,7 @@ public sealed class BlobReadCommittedTests
     {
         await using var engine = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions());
         var database = await engine.CreateDatabaseAsync("stream-guard");
-        await database.CreateContainerAsync("files");
+        await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
         var container = await session.GetContainerAsync("files");
@@ -71,7 +71,7 @@ public sealed class BlobReadCommittedTests
 
         await WriteAsync(container, "second"u8.ToArray());
         await transaction.CommitAsync();
-        var committedContainer = await database.GetContainerAsync("files");
+        var committedContainer = await AutocommitContainer.GetAsync(database, "files");
         await using var content = await committedContainer.OpenReadAsync("item");
         using var copied = new MemoryStream();
         await content.CopyToAsync(copied);
@@ -79,6 +79,12 @@ public sealed class BlobReadCommittedTests
     }
 
     private static async Task WriteAsync(BlobContainer container, byte[] content)
+    {
+        await using var stream = await container.OpenWriteAsync("item");
+        await stream.WriteAsync(content);
+    }
+
+    private static async Task WriteAsync(AutocommitContainer container, byte[] content)
     {
         await using var stream = await container.OpenWriteAsync("item");
         await stream.WriteAsync(content);

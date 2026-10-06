@@ -79,7 +79,7 @@ public sealed partial class GraphDatabase
         ? offline
         : TranslateStatementFailure(error);
 
-    private static Exception TranslateStatementFailure(Exception error) => TranslateKernelFailure(error) switch
+    private Exception TranslateStatementFailure(Exception error) => TranslateKernelFailure(error) switch
     {
         var translated when !ReferenceEquals(translated, error) => translated,
         _ when error is InvalidOperationException => new DatabaseException("COHDBG003: " + error.Message, error),
@@ -92,15 +92,17 @@ public sealed partial class GraphDatabase
     /// <summary>
     /// Translates a failure of the transaction kernel or the storage child root into the area
     /// root's exception; any other failure is returned unchanged. Statements and the explicit
-    /// transaction's commit and rollback share it.
+    /// transaction's commit and rollback share it. An unconfirmed commit leads with
+    /// <see cref="OfflineCode"/>, as on every other unconfirmed path (owner decision 24 of
+    /// 2026-10-06, #1272).
     /// </summary>
     /// <param name="error">The failure to translate.</param>
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
-    internal static Exception TranslateKernelFailure(Exception error) => error switch
+    internal Exception TranslateKernelFailure(Exception error) => error switch
     {
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
-        TransactionCommitUnconfirmedException => new DatabaseTransactionCommitUnconfirmedException(error.Message, error),
+        TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
         // An element whose record or index key outgrows storage fails its statement; the store
         // wrote nothing for it. It derives from StorageException, so it is matched first.
         GraphElementTooLargeException => new DatabaseException("COHDBG009: " + error.Message, error),

@@ -45,7 +45,7 @@ internal sealed class SqlPageWriteBackWorker : DatabaseEngineWorker
 
             // Nothing of an offline database is written (#1243): neither file set, whichever
             // went offline. Each storage also refuses on its own. Nothing of a database its holder
-            // closed either: the engine keeps it registered only to refuse its reopen.
+            // closed either: the engine keeps it registered until its close ends, then forgets it.
             if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;

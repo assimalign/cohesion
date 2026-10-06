@@ -19,10 +19,10 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// conditional; a mismatch fails with a <see cref="DatabaseException"/>.
 /// </para>
 /// <para>
-/// A collection a session returned (<see cref="DocumentDatabaseSession.CreateCollectionAsync"/> and
-/// its siblings) is bound to that session and refuses any other; a collection the database
-/// returned (<see cref="DocumentDatabase.CreateCollectionAsync"/> and its siblings) takes any
-/// session of its database.
+/// A collection is bound to the session that returned it
+/// (<see cref="DocumentDatabaseSession.CreateCollectionAsync"/> and its siblings) and refuses any
+/// other. Every collection comes from a session: the database has no collection operations of its
+/// own (owner decision 32 of 2026-10-06), so no collection runs outside a session.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed type with an internal
@@ -34,15 +34,15 @@ public sealed class DocumentCollection
 {
     private readonly DocumentDatabase _database;
     private readonly DocumentCollectionMetadata _collection;
-    private readonly DocumentDatabaseSession? _boundSession;
+    private readonly DocumentDatabaseSession _boundSession;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentCollection"/> class.
     /// </summary>
     /// <param name="database">The document database that owns the collection.</param>
     /// <param name="collection">The catalog metadata of the collection.</param>
-    /// <param name="boundSession">The session the collection is bound to, or <see langword="null"/> when any session of the database may use it.</param>
-    internal DocumentCollection(DocumentDatabase database, DocumentCollectionMetadata collection, DocumentDatabaseSession? boundSession)
+    /// <param name="boundSession">The session the collection is bound to.</param>
+    internal DocumentCollection(DocumentDatabase database, DocumentCollectionMetadata collection, DocumentDatabaseSession boundSession)
     {
         _database = database;
         _collection = collection;
@@ -170,7 +170,7 @@ public sealed class DocumentCollection
     private DocumentDatabaseSession ValidateSession(DocumentDatabaseSession session)
     {
         ArgumentNullException.ThrowIfNull(session);
-        if (!ReferenceEquals(session.Database, _database) || (_boundSession is not null && !ReferenceEquals(_boundSession, session)))
+        if (!ReferenceEquals(session.Database, _database) || !ReferenceEquals(_boundSession, session))
         {
             throw new DatabaseException("The document collection and session must belong to the same bound database and session.");
         }

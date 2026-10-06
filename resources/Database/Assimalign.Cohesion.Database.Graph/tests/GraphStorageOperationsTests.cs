@@ -144,6 +144,7 @@ public sealed class GraphStorageOperationsTests
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
+        unconfirmed.Message.ShouldStartWith("COHDBG012: Database 'graph' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
         refusals.ShouldAllBe(refusal => refusal.Code == "COHDBG012" && refusal.Message.StartsWith("COHDBG012", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");

@@ -66,7 +66,7 @@ public sealed class BlobStorageOperationsTests
         await server.StartAsync(token);
         await using var wire = await ConnectAsync(listener, token);
         await HandshakeAsync(wire, token);
-        await database.CreateContainerAsync("files", token);
+        await AutocommitContainer.CreateAsync(database, "files", token);
         var session = await database.CreateSessionAsync(token);
         var other = await database.CreateSessionAsync(token);
         var files = await session.GetContainerAsync("files", token);
@@ -93,7 +93,7 @@ public sealed class BlobStorageOperationsTests
         var refusals = new List<DatabaseOfflineException>
         {
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateSessionAsync(token)),
-            await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateContainerAsync("late", token)),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await AutocommitContainer.CreateAsync(database, "late", token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.CreateContainerAsync("late", token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.ExecuteAsync("LIST files", null, token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await files.OpenReadAsync("kept", token)),
@@ -157,10 +157,11 @@ public sealed class BlobStorageOperationsTests
         var beforeTheReopen = strategy.Capture("blobs");
 
         var reopened = await engine.OpenDatabaseAsync("blobs", token);
-        var names = await NamesAsync(await reopened.GetContainerAsync("files", token));
+        var names = await NamesAsync(await AutocommitContainer.GetAsync(reopened, "files", token));
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
+        unconfirmed.Message.ShouldStartWith("COHDBB002: Database 'blobs' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
         refusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002" && refusal.Message.StartsWith("COHDBB002", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
@@ -259,7 +260,7 @@ public sealed class BlobStorageOperationsTests
             CheckpointInterval = TimeSpan.FromHours(1),
         });
         var database = await engine.CreateDatabaseAsync("bounded");
-        await database.CreateContainerAsync("files");
+        await AutocommitContainer.CreateAsync(database, "files");
         using var stop = new CancellationTokenSource();
         byte[] payload = new byte[128 * 1024];
         Random.Shared.NextBytes(payload);
@@ -309,7 +310,7 @@ public sealed class BlobStorageOperationsTests
         };
         await using var engine = BlobDatabaseEngine.Create(options);
         var database = await engine.CreateDatabaseAsync("blobs");
-        var container = await database.CreateContainerAsync("files");
+        var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "keep", "original");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -368,7 +369,7 @@ public sealed class BlobStorageOperationsTests
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
         var database = await engine.CreateDatabaseAsync("space");
-        var container = await database.CreateContainerAsync("files");
+        var container = await AutocommitContainer.CreateAsync(database, "files");
         long pagesBefore = database.DataStorage.PageManager.PageCount;
 
         // Act: each upload is its own transaction.
@@ -391,6 +392,12 @@ public sealed class BlobStorageOperationsTests
         await stream.WriteAsync(Encoding.UTF8.GetBytes(content), cancellationToken);
     }
 
+    private static async Task WriteAsync(AutocommitContainer container, string name, string content, CancellationToken cancellationToken = default)
+    {
+        await using var stream = await container.OpenWriteAsync(name, cancellationToken: cancellationToken);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(content), cancellationToken);
+    }
+
     private static async Task<string> ReadAsync(BlobContainer container, string name)
     {
         await using var stream = await container.OpenReadAsync(name);
@@ -399,7 +406,27 @@ public sealed class BlobStorageOperationsTests
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
 
+    private static async Task<string> ReadAsync(AutocommitContainer container, string name)
+    {
+        await using var stream = await container.OpenReadAsync(name);
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        return Encoding.UTF8.GetString(buffer.ToArray());
+    }
+
     private static async Task<List<string>> NamesAsync(BlobContainer container)
+    {
+        var names = new List<string>();
+        await foreach (var blob in container.GetBlobsAsync())
+        {
+            names.Add(blob.Name);
+        }
+
+        names.Sort(StringComparer.Ordinal);
+        return names;
+    }
+
+    private static async Task<List<string>> NamesAsync(AutocommitContainer container)
     {
         var names = new List<string>();
         await foreach (var blob in container.GetBlobsAsync())

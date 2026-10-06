@@ -902,6 +902,7 @@ public sealed class GraphTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
+        error.Message.ShouldStartWith("COHDBG012: Database 'graph' went offline while a transaction was committing", Case.Sensitive);
         stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
         (await Rows(observer, "SHOW LABELS")).ShouldBeEmpty();
@@ -1029,19 +1030,31 @@ public sealed class GraphTransactionFailureTests
         (await Rows(observer, "MATCH ()-[r]->() RETURN r")).ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed")]
-    public void TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheAreaRootsCommitUnconfirmedException()
+    /// <summary>
+    /// The kernel's unconfirmed commit crosses the model boundary as the area root's, its message led by
+    /// the model's offline code like every other unconfirmed commit (owner decision 24, #1272); the
+    /// kernel's exception is kept as the inner exception. Before #1272 this path kept the kernel's
+    /// message, uncoded.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed, led by COHDBG012")]
+    public async Task TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheCodedCommitUnconfirmedException()
     {
         // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
         var kernel = new TransactionCommitUnconfirmedException("Transaction 7 committed, but its commit record could not be made durable.", new IOException("flush"));
 
         // Act
-        var translated = GraphDatabase.TranslateKernelFailure(kernel);
+        var translated = database.TranslateKernelFailure(kernel);
 
         // Assert: not an abort, so a caller never retries work that committed.
         var unconfirmed = translated.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
         unconfirmed.ShouldNotBeAssignableTo<DatabaseTransactionAbortedException>();
-        unconfirmed.Message.ShouldBe(kernel.Message);
+        unconfirmed.Message.ShouldBe(
+            "COHDBG012: Database 'test' went offline while a transaction was committing: the durable flush of its commit record failed (flush) " +
+            "after the transaction's commit record was written. The transaction may or may not have committed; do not retry it. Reopen the " +
+            "database (OpenDatabaseAsync): its recovery keeps the commit if its record reached stable storage and discards it if not, and " +
+            "reading the data back then tells which.");
         unconfirmed.InnerException.ShouldBeSameAs(kernel);
     }
 

@@ -23,7 +23,7 @@ public sealed class BlobEngineTests
     {
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var container = await database.CreateContainerAsync("files");
+        var container = await AutocommitContainer.CreateAsync(database, "files");
         byte[] original = Encoding.UTF8.GetBytes("original");
         await WriteAsync(container, "a/file", original);
         var before = (await container.GetPropertiesAsync("a/file"))!.Value;
@@ -60,7 +60,7 @@ public sealed class BlobEngineTests
     {
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var container = await database.CreateContainerAsync("files");
+        var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "item", "old"u8.ToArray());
         await using var session = await database.CreateSessionAsync();
         var transactionalContainer = await session.GetContainerAsync("files");
@@ -73,7 +73,7 @@ public sealed class BlobEngineTests
             await transaction.RollbackAsync();
         }
         (await ReadAsync(container, "item")).ShouldBe("old"u8.ToArray());
-        await Should.ThrowAsync<DatabaseException>(async () => await database.GetContainerAsync("temporary"));
+        await Should.ThrowAsync<DatabaseException>(async () => await AutocommitContainer.GetAsync(database, "temporary"));
         await using (var transaction = await session.BeginTransactionAsync())
         {
             var stream = await transactionalContainer.OpenWriteAsync("item");
@@ -101,7 +101,7 @@ public sealed class BlobEngineTests
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        await database.CreateContainerAsync("files");
+        await AutocommitContainer.CreateAsync(database, "files");
         await using var session = await database.CreateSessionAsync();
         var scoped = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
@@ -120,7 +120,7 @@ public sealed class BlobEngineTests
         stateAfterRollback.ShouldBe(TransactionState.Active);
         pendingAfterRollback.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.Committed);
-        (await ReadAsync(await database.GetContainerAsync("files"), "item")).ShouldBe("kept"u8.ToArray());
+        (await ReadAsync(await AutocommitContainer.GetAsync(database, "files"), "item")).ShouldBe("kept"u8.ToArray());
     }
 
     [Theory]
@@ -130,7 +130,7 @@ public sealed class BlobEngineTests
     {
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var container = await database.CreateContainerAsync("files");
+        var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "item", "before"u8.ToArray());
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync(level);
@@ -145,7 +145,7 @@ public sealed class BlobEngineTests
     {
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var container = await database.CreateContainerAsync("files");
+        var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "item", "before"u8.ToArray());
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
@@ -164,7 +164,7 @@ public sealed class BlobEngineTests
     {
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var container = await database.CreateContainerAsync("files");
+        var container = await AutocommitContainer.CreateAsync(database, "files");
         using var cancellation = new CancellationTokenSource();
         var stream = await container.OpenWriteAsync("partial", cancellationToken: cancellation.Token);
         await stream.WriteAsync(new byte[20_000]);
@@ -179,7 +179,7 @@ public sealed class BlobEngineTests
     {
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var container = await database.CreateContainerAsync("files");
+        var container = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(container, "large", new byte[100_000]);
         var reader = await container.OpenReadAsync("large");
         (await container.DeleteAsync("large")).ShouldBeTrue();
@@ -201,7 +201,7 @@ public sealed class BlobEngineTests
         var context = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
         await database.Catalog.SaveContainerAsync(new BlobContainerMetadata(Guid.NewGuid(), "managed", DatabaseObjectOwner.Schema, "MediaSchema"), context);
         await database.Coordinator.CommitAsync(context);
-        var error = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await database.DropContainerAsync("managed"));
+        var error = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await AutocommitContainer.DropAsync(database, "managed"));
         error.Message.ShouldContain("managed");
         error.Message.ShouldContain("MediaSchema");
         error.Message.ShouldContain("DROP CONTAINER");
@@ -210,7 +210,7 @@ public sealed class BlobEngineTests
         var read = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
         database.Catalog.FindContainer("adhoc", read.Snapshot)!.Value.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
         await database.Coordinator.RollbackAsync(read);
-        await database.DropContainerAsync("adhoc");
+        await AutocommitContainer.DropAsync(database, "adhoc");
     }
 
     [Fact]
@@ -218,7 +218,7 @@ public sealed class BlobEngineTests
     {
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var original = await database.CreateContainerAsync("files");
+        var original = await AutocommitContainer.CreateAsync(database, "files");
         await WriteAsync(original, "item", new byte[20_000]);
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
@@ -226,8 +226,8 @@ public sealed class BlobEngineTests
         (await original.GetPropertiesAsync("item")).ShouldNotBeNull();
         await transaction.RollbackAsync();
         (await ReadAsync(original, "item")).Length.ShouldBe(20_000);
-        await database.DropContainerAsync("files");
-        await database.CreateContainerAsync("files");
+        await AutocommitContainer.DropAsync(database, "files");
+        await AutocommitContainer.CreateAsync(database, "files");
         await Should.ThrowAsync<DatabaseException>(async () => await original.GetPropertiesAsync("item"));
     }
 
@@ -244,7 +244,7 @@ public sealed class BlobEngineTests
             var database = await engine.CreateDatabaseAsync("Media");
             engine.TryGetDatabase("media", out var found).ShouldBeTrue();
             found.ShouldBeSameAs(database);
-            var container = await database.CreateContainerAsync("files");
+            var container = await AutocommitContainer.CreateAsync(database, "files");
             await WriteAsync(container, "item", "durable"u8.ToArray());
             await engine.DisposeAsync();
             engine.Dispose();
@@ -255,13 +255,89 @@ public sealed class BlobEngineTests
             await foreach (var item in reopened.GetDatabasesAsync()) { names.Add(item.Name.ToString()); }
             names.ShouldBe(["Media"]);
             var loaded = await reopened.OpenDatabaseAsync("media");
-            (await ReadAsync(await loaded.GetContainerAsync("files"), "item")).ShouldBe("durable"u8.ToArray());
+            (await ReadAsync(await AutocommitContainer.GetAsync(loaded, "files"), "item")).ShouldBe("durable"u8.ToArray());
             await reopened.DropDatabaseAsync("MEDIA");
             reopened.TryGetDatabase("media", out _).ShouldBeFalse();
             await Should.ThrowAsync<DatabaseNotFoundException>(async () => await reopened.OpenDatabaseAsync("Media"));
             await Should.ThrowAsync<ArgumentException>(async () => await reopened.CreateDatabaseAsync("../escape"));
         }
         finally { if (Directory.Exists(path)) { Directory.Delete(path, recursive: true); } }
+    }
+
+    /// <summary>
+    /// A database a holder closed outside the engine is forgotten once its close ends, so the next
+    /// open opens it again, a new instance with every container and blob it held, in memory as on
+    /// disk (owner decision 33, #1289; #1272's in-memory reopen): the engine keeps an in-memory
+    /// database's files for its own lifetime, and the open runs recovery over them as it does over
+    /// files. A blob of a transaction the close ended is not there. The reopened database takes writes,
+    /// and a second close and open keeps them too. Until decision 33 the engine refused the reopen
+    /// with <see cref="ObjectDisposedException"/> until the database was dropped.
+    /// </summary>
+    /// <param name="onDisk">True for a file-backed engine; false for an in-memory one.</param>
+    /// <param name="throughSession">Whether the database is closed through a session's database rather than directly.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Lifecycle: a database closed outside the engine reopens with its blobs, in memory and on disk")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task OpenDatabaseAsync_DatabaseClosedOutsideTheEngine_ShouldReopenItWithItsBlobs(bool onDisk, bool throughSession)
+    {
+        // Arrange: a database with committed blobs, and one more uploaded in an uncommitted transaction.
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-blob-reopen-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var engine = BlobDatabaseEngine.Create(onDisk ? new() { RootPath = root } : new());
+            var database = await engine.CreateDatabaseAsync("media");
+            var files = await AutocommitContainer.CreateAsync(database, "files");
+            await WriteAsync(files, "small", "small"u8.ToArray());
+            await WriteAsync(files, "large", new byte[100_000]);
+            var session = await database.CreateSessionAsync();
+            var bound = await session.GetContainerAsync("files");
+            _ = await session.BeginTransactionAsync();
+            await using (var upload = await bound.OpenWriteAsync("uncommitted"))
+            {
+                await upload.WriteAsync(new byte[20_000]);
+            }
+
+            // Act: close the database outside the engine, then open it again, write to it, and
+            // close and open it once more.
+            if (throughSession)
+            {
+                await session.Database.DisposeAsync();
+            }
+            else
+            {
+                await database.DisposeAsync();
+            }
+
+            bool foundAfterTheClose = engine.TryGetDatabase("media", out _);
+            var reopened = await engine.OpenDatabaseAsync("media");
+            var reopenedFiles = await AutocommitContainer.GetAsync(reopened, "files");
+            byte[] small = await ReadAsync(reopenedFiles, "small");
+            byte[] large = await ReadAsync(reopenedFiles, "large");
+            var uncommitted = await reopenedFiles.GetPropertiesAsync("uncommitted");
+            await WriteAsync(reopenedFiles, "after", "after"u8.ToArray());
+            await reopened.DisposeAsync();
+            var again = await engine.OpenDatabaseAsync("media");
+
+            // Assert
+            foundAfterTheClose.ShouldBeFalse();
+            reopened.ShouldNotBeSameAs(database);
+            small.ShouldBe("small"u8.ToArray());
+            large.Length.ShouldBe(100_000);
+            uncommitted.ShouldBeNull();
+            again.ShouldNotBeSameAs(reopened);
+            (await ReadAsync(await AutocommitContainer.GetAsync(again, "files"), "after")).ShouldBe("after"u8.ToArray());
+            engine.State.ShouldBe(EngineState.Running);
+            await session.DisposeAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Format: a database in storage format 2 (the format before #1253) is refused at open with COHDBS001 naming it, its files untouched (#1251, #1253)")]
@@ -274,7 +350,7 @@ public sealed class BlobEngineTests
             await using (var engine = BlobDatabaseEngine.Create(new() { RootPath = root }))
             {
                 var database = await engine.CreateDatabaseAsync("legacy");
-                var container = await database.CreateContainerAsync("files");
+                var container = await AutocommitContainer.CreateAsync(database, "files");
                 await WriteAsync(container, "item", "durable"u8.ToArray());
             }
 
@@ -415,7 +491,7 @@ public sealed class BlobEngineTests
             for (int index = 0; index < databases; index++)
             {
                 var database = await engine.CreateDatabaseAsync($"{name}-{index}");
-                var container = await database.CreateContainerAsync("files");
+                var container = await AutocommitContainer.CreateAsync(database, "files");
                 await WriteAsync(container, "item", "item"u8.ToArray());
             }
 
@@ -428,7 +504,22 @@ public sealed class BlobEngineTests
         await using var stream = await container.OpenWriteAsync(name);
         await stream.WriteAsync(bytes);
     }
+
+    internal static async Task WriteAsync(AutocommitContainer container, string name, byte[] bytes)
+    {
+        await using var stream = await container.OpenWriteAsync(name);
+        await stream.WriteAsync(bytes);
+    }
+
     internal static async Task<byte[]> ReadAsync(BlobContainer container, string name)
+    {
+        await using var stream = await container.OpenReadAsync(name);
+        using var result = new MemoryStream();
+        await stream.CopyToAsync(result);
+        return result.ToArray();
+    }
+
+    internal static async Task<byte[]> ReadAsync(AutocommitContainer container, string name)
     {
         await using var stream = await container.OpenReadAsync(name);
         using var result = new MemoryStream();

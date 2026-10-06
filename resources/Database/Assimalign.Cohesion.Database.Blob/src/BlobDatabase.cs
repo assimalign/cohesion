@@ -19,17 +19,15 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// <remarks>
 /// <para>
 /// A database composes its blob storage, the transaction coordinator every session binds to, and
-/// the catalog of containers and blob metadata (<see cref="BlobCatalog"/>). Its own container
-/// operations (<see cref="CreateContainerAsync(string, CancellationToken)"/>,
-/// <see cref="GetContainerAsync(string, CancellationToken)"/>,
-/// <see cref="DropContainerAsync(string, CancellationToken)"/>,
-/// <see cref="GetContainersAsync(CancellationToken)"/>), and the operations of a
-/// container they return, run in autocommit, outside any session; a session's own container
-/// operations run in its transaction (<see cref="BlobDatabaseSession"/>). The engine has one
-/// writer at a time, so a write through the database while a session's explicit transaction has
-/// written, that session's <see cref="BlobDatabaseSession.Database"/> included, waits for that
-/// transaction's writer lock until the transaction ends or the call's token is canceled; inside a
-/// transaction, use the session's own container operations.
+/// the catalog of containers and blob metadata (<see cref="BlobCatalog"/>). Every container and
+/// blob operation takes a session (owner decision 32 of 2026-10-06): the container operations are
+/// the session's (<see cref="BlobDatabaseSession.CreateContainerAsync"/> and its siblings), each an
+/// operation of it, in its explicit transaction when one is open, and a container is bound to the
+/// session that returned it. Until that decision the database had container operations of its
+/// own, which ran in autocommit outside any session, as did the operations of a container they
+/// returned, so one called through a session's <see cref="BlobDatabaseSession.Database"/> while
+/// that session's transaction had written waited for the transaction's writer lock, which only
+/// the caller could release.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of
@@ -37,10 +35,11 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// <c>IBlobDatabase</c> interface, its internal implementation and the session-bound view a
 /// session returned as its database (option B, §6.6: <see cref="BlobDatabaseSession.Database"/>
 /// is this unbound database, and disposing it closes the database for every session, never a
-/// session itself; the engine then refuses to reopen it with <see cref="ObjectDisposedException"/>
-/// until it is dropped or the engine is recreated, and its workers skip it, so the engine stays
-/// <see cref="EngineState.Running"/>). The engine creates and opens it. The base
-/// owns the name, the owning engine (re-exposed typed with <c>new</c>) and the disposed flag.
+/// session itself; once the close ends the engine forgets it, and the engine's
+/// <c>OpenDatabaseAsync</c> opens it again from its files, owner decision 33, #1289; until then
+/// its workers skip it, so the engine stays <see cref="EngineState.Running"/>). The engine creates
+/// and opens it. The base owns the name, the owning engine (re-exposed typed with <c>new</c>) and
+/// the disposed flag.
 /// </para>
 /// </remarks>
 public sealed class BlobDatabase : DatabaseInstance
@@ -110,9 +109,10 @@ public sealed class BlobDatabase : DatabaseInstance
     internal bool IsOffline => DataStorage.IsOffline;
 
     /// <summary>
-    /// Gets whether the database has been disposed: by the engine, or by a holder of the
+    /// Gets whether the database's close has started: by the engine, or by a holder of the
     /// database, a session's <see cref="BlobDatabaseSession.Database"/> included. The engine keeps
-    /// a database its holder closed registered, to refuse its reopen, and its workers skip it.
+    /// a database its holder is closing registered until the close ends, then forgets it; its
+    /// workers skip it meanwhile.
     /// </summary>
     internal bool IsClosed => IsDisposed;
 
@@ -126,67 +126,6 @@ public sealed class BlobDatabase : DatabaseInstance
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
     public new async ValueTask<BlobDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
         => (BlobDatabaseSession)await base.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
-
-    /// <summary>
-    /// Creates a new blob container in its own autocommit transaction, outside any session.
-    /// </summary>
-    /// <param name="name">The name of the container to create.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>The created container, whose operations run in autocommit.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
-    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseException">A container with the same name already exists.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
-    /// <exception cref="DatabaseTransactionAbortedException">The blob catalog changed since the transaction's snapshot (retryable).</exception>
-    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">The commit record could not be confirmed durable.</exception>
-    public ValueTask<BlobContainer> CreateContainerAsync(string name, CancellationToken cancellationToken = default)
-        => CreateContainerAsync(name, null, cancellationToken);
-
-    /// <summary>
-    /// Opens an existing blob container in its own autocommit snapshot, outside any session.
-    /// </summary>
-    /// <param name="name">The name of the container to open.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>The opened container, whose operations run in autocommit.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
-    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseException">The container does not exist.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
-    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">The commit record could not be confirmed durable.</exception>
-    public ValueTask<BlobContainer> GetContainerAsync(string name, CancellationToken cancellationToken = default)
-        => GetContainerAsync(name, null, cancellationToken);
-
-    /// <summary>
-    /// Drops a blob container and its blobs in its own autocommit transaction, outside any session.
-    /// </summary>
-    /// <param name="name">The name of the container to drop.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>A task that completes once the container is dropped.</returns>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
-    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseObjectLockedException">The container is owned by a schema.</exception>
-    /// <exception cref="DatabaseException">The container does not exist.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
-    /// <exception cref="DatabaseTransactionAbortedException">The container or its blobs changed since the transaction's snapshot (retryable).</exception>
-    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">The commit record could not be confirmed durable.</exception>
-    public ValueTask DropContainerAsync(string name, CancellationToken cancellationToken = default)
-        => DropContainerAsync(name, null, cancellationToken);
-
-    /// <summary>
-    /// Enumerates the containers of this database in one autocommit snapshot, outside any session,
-    /// taken when the enumeration starts; the containers are then yielded.
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>An async sequence of the containers, in ordinal name order.</returns>
-    /// <exception cref="ObjectDisposedException">The database has been disposed (also while the containers are yielded).</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
-    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">The commit record could not be confirmed durable.</exception>
-    public IAsyncEnumerable<BlobContainer> GetContainersAsync(CancellationToken cancellationToken = default)
-        => GetContainersAsync(null, cancellationToken);
 
     /// <summary>
     /// Refuses an operation on an offline database with <see cref="DatabaseOfflineException"/>
@@ -258,19 +197,20 @@ public sealed class BlobDatabase : DatabaseInstance
     /// Translates a failure of the transaction kernel into the area root's exception (the area
     /// error policy: the layer that owns both vocabularies translates at its boundary); any other
     /// failure is returned unchanged. Operations and the explicit transaction's commit and
-    /// rollback share it.
+    /// rollback share it. An unconfirmed commit leads with <see cref="OfflineCode"/>, as on every
+    /// other unconfirmed path (owner decision 24 of 2026-10-06, #1272).
     /// </summary>
     /// <param name="error">The failure to translate.</param>
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
-    internal static Exception TranslateKernelFailure(Exception error) => error switch
+    internal Exception TranslateKernelFailure(Exception error) => error switch
     {
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
-        TransactionCommitUnconfirmedException => new DatabaseTransactionCommitUnconfirmedException(error.Message, error),
+        TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
         _ => error,
     };
 
-    internal ValueTask<BlobContainer> CreateContainerAsync(string name, BlobDatabaseSession? session, CancellationToken token)
+    internal ValueTask<BlobContainer> CreateContainerAsync(string name, BlobDatabaseSession session, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         return RunAsync(session, async operation =>
@@ -293,14 +233,14 @@ public sealed class BlobDatabase : DatabaseInstance
         }, token);
     }
 
-    internal ValueTask<BlobContainer> GetContainerAsync(string name, BlobDatabaseSession? session, CancellationToken token)
+    internal ValueTask<BlobContainer> GetContainerAsync(string name, BlobDatabaseSession session, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         return RunAsync(session, operation => new ValueTask<BlobContainer>(new BlobContainer(this,
             Catalog.FindContainer(name, operation.Context.Snapshot) ?? throw new DatabaseException($"Container '{name}' does not exist."), session)), token);
     }
 
-    internal async ValueTask DropContainerAsync(string name, BlobDatabaseSession? session, CancellationToken token)
+    internal async ValueTask DropContainerAsync(string name, BlobDatabaseSession session, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         await RunAsync(session, async operation =>
@@ -335,7 +275,7 @@ public sealed class BlobDatabase : DatabaseInstance
         }, token).ConfigureAwait(false);
     }
 
-    internal async IAsyncEnumerable<BlobContainer> GetContainersAsync(BlobDatabaseSession? session, [EnumeratorCancellation] CancellationToken token)
+    internal async IAsyncEnumerable<BlobContainer> GetContainersAsync(BlobDatabaseSession session, [EnumeratorCancellation] CancellationToken token)
     {
         var containers = await RunAsync(session, operation => new ValueTask<IReadOnlyList<BlobContainerMetadata>>(
             Catalog.GetContainers(operation.Context.Snapshot)), token).ConfigureAwait(false);
@@ -343,32 +283,32 @@ public sealed class BlobDatabase : DatabaseInstance
         {
             token.ThrowIfCancellationRequested();
             ThrowIfDisposed();
-            session?.ThrowIfNotOpen();
+            session.ThrowIfNotOpen();
             yield return new BlobContainer(this, metadata, session);
         }
     }
 
     /// <summary>
-    /// Starts one operation: for a session's operation, holds the session and admits the operation
-    /// into the session's explicit transaction, or begins an autocommit context, and pins a
-    /// read-committed statement snapshot. A failure releases whatever the operation took.
+    /// Starts one operation of a session: holds the session and admits the operation into the
+    /// session's explicit transaction, or begins an autocommit context when none is open, and pins
+    /// a read-committed statement snapshot. A failure releases whatever the operation took.
     /// </summary>
-    /// <param name="session">The session the operation runs on, or null for an autocommit operation outside any session.</param>
+    /// <param name="session">The session the operation runs on.</param>
     /// <param name="token">Cancellation token for the start.</param>
     /// <returns>The running operation.</returns>
-    internal async ValueTask<BlobOperation> BeginOperationAsync(BlobDatabaseSession? session, CancellationToken token)
+    internal async ValueTask<BlobOperation> BeginOperationAsync(BlobDatabaseSession session, CancellationToken token)
     {
         ThrowIfDisposed();
         ThrowIfOffline();
         token.ThrowIfCancellationRequested();
-        var explicitTransaction = session?.EnterOperation();
+        var explicitTransaction = session.EnterOperation();
         BlobOperation? operation = null;
         try
         {
             var context = explicitTransaction?.Context ?? await Coordinator.BeginAsync(IsolationLevel.Snapshot, token).ConfigureAwait(false);
             operation = new BlobOperation(this, session, context, explicitTransaction);
             await operation.InitializeAsync(token).ConfigureAwait(false);
-            session?.Track(operation);
+            session.Track(operation);
             return operation;
         }
         catch (Exception error)
@@ -381,7 +321,7 @@ public sealed class BlobDatabase : DatabaseInstance
             }
             else
             {
-                session?.ReleaseOperation(explicitTransaction);
+                session.ReleaseOperation(explicitTransaction);
             }
 
             if (ReferenceEquals(reported, error)) { throw; }
@@ -389,7 +329,7 @@ public sealed class BlobDatabase : DatabaseInstance
         }
     }
 
-    internal async ValueTask<T> RunAsync<T>(BlobDatabaseSession? session, Func<BlobOperation, ValueTask<T>> action, CancellationToken token)
+    internal async ValueTask<T> RunAsync<T>(BlobDatabaseSession session, Func<BlobOperation, ValueTask<T>> action, CancellationToken token)
     {
         var operation = await BeginOperationAsync(session, token).ConfigureAwait(false);
         try

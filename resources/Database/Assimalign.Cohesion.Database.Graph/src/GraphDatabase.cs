@@ -31,10 +31,11 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <see cref="DatabaseInstance"/> with an internal constructor, replacing the former
 /// <c>IGraphDatabase</c> interface and its internal implementation; the engine creates and opens
 /// it. The base owns the name, the owning engine (re-exposed typed with <c>new</c>) and the
-/// disposed flag. Disposing it outside the engine closes it for every session; the engine keeps
-/// it registered, so it refuses to reopen it with <see cref="ObjectDisposedException"/> until it
-/// is dropped or the engine is recreated, and its workers skip it, so the engine stays
-/// <see cref="EngineState.Running"/>.
+/// disposed flag. Disposing it outside the engine closes it for every session; once the close
+/// ends the engine forgets it (owner decision 33 of 2026-10-06, #1289), and
+/// <see cref="GraphDatabaseEngine.OpenDatabaseAsync(DatabaseName, System.Threading.CancellationToken)"/>
+/// opens it again from its files, with its nodes and relationships, as a new instance. Until then
+/// its workers skip it, so the engine stays <see cref="EngineState.Running"/>.
 /// </para>
 /// </remarks>
 public sealed partial class GraphDatabase : DatabaseInstance
@@ -126,10 +127,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
     internal bool IsOffline => DataStorage.IsOffline;
 
     /// <summary>
-    /// Gets whether the database has been disposed: by the engine, or by a holder of the
+    /// Gets whether the database's close has started: by the engine, or by a holder of the
     /// database (a session's <see cref="GraphDatabaseSession.Database"/> is the same instance).
-    /// The engine keeps a database its holder closed registered, to refuse its reopen, and its
-    /// workers skip it.
+    /// The engine keeps a database its holder is closing registered until the close ends, then
+    /// forgets it; its workers skip it meanwhile.
     /// </summary>
     internal bool IsClosed => IsDisposed;
 

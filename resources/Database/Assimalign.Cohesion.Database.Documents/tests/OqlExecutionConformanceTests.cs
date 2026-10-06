@@ -93,8 +93,8 @@ public sealed class OqlExecutionConformanceTests
 
                 await using var engine = DocumentDatabaseEngine.Create(new());
                 var database = await engine.CreateDatabaseAsync("conformance", cancellationToken);
-                var collection = await database.CreateCollectionAsync("items", cancellationToken);
                 await using var session = await database.CreateSessionAsync(cancellationToken);
+                var collection = await session.CreateCollectionAsync("items", cancellationToken);
                 await SeedAsync(collection, session, cancellationToken);
                 foreach (string setup in execution.Setup ?? [])
                 {
@@ -143,8 +143,8 @@ public sealed class OqlExecutionConformanceTests
         new OqlQueryParser().Parse(statement).Diagnostics.ShouldBeEmpty();
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("conformance", CancellationToken.None);
-        await database.CreateCollectionAsync("items", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("items", CancellationToken.None);
 
         var exception = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));

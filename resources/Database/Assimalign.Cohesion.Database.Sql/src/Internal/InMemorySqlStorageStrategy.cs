@@ -1,19 +1,22 @@
-using System;
-using System.Collections.Generic;
-
-namespace Assimalign.Cohesion.Database.Sql.Internal;
-
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
+namespace Assimalign.Cohesion.Database.Sql.Internal;
+
 /// <summary>
-/// In-memory storage strategy that uses MemoryStreams for all three storage files.
+/// In-memory storage strategy: each file set's data, journal and backup files are memory streams
+/// the strategy keeps for the engine's lifetime, so a closed database reopens with its data.
 /// Useful for unit testing and embedded scenarios.
 /// </summary>
+/// <remarks>
+/// A reopen runs the same recovery a file-based open does, over the bytes the closed storage left
+/// (<see cref="DatabaseMemoryFiles"/>): a database its holder closed, or one that went offline,
+/// reopens with every commit its journal holds (#1272; owner decision 33 of 2026-10-06, #1289).
+/// Until then an open returned fresh empty storage and silently lost the database's rows.
+/// </remarks>
 internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
 {
-    private readonly HashSet<string> _databases = new(StringComparer.OrdinalIgnoreCase);
-    private readonly object _syncRoot = new();
+    private readonly DatabaseMemoryFiles _files = new();
     private readonly StorageCommitDurability? _durability;
 
     internal InMemorySqlStorageStrategy(StorageCommitDurability? durability = null)
@@ -24,48 +27,42 @@ internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
     /// <inheritdoc />
     public override SqlStorage CreateStorage(string databaseName)
     {
-        lock (_syncRoot)
+        if (!_files.TryCreate(databaseName, out var data, out var journal, out var backup))
         {
-            if (!_databases.Add(databaseName))
-            {
-                throw new DatabaseException($"In-memory storage for database '{databaseName}' already exists.");
-            }
+            throw new DatabaseException($"In-memory storage for database '{databaseName}' already exists.");
         }
 
-        return SqlStorage.Create(StorageStream.FromInMemory(), StorageStream.FromInMemory(), StorageStream.FromInMemory(), databaseName, _durability);
+        return SqlStorage.Create(data, journal, backup, databaseName, _durability);
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The open-time checkpoint is deferred, as the file-based strategy defers it: the engine runs
+    /// transaction-recovery analysis over the recovered journal first.
+    /// </remarks>
     public override SqlStorage OpenStorage(string databaseName)
     {
-        lock (_syncRoot)
+        if (!_files.TryOpen(databaseName, out var data, out var journal, out var backup))
         {
-            if (!_databases.Contains(databaseName))
-            {
-                throw new DatabaseException($"In-memory storage for database '{databaseName}' does not exist.");
-            }
+            throw new DatabaseException($"In-memory storage for database '{databaseName}' does not exist.");
         }
 
-        // In-memory storage cannot truly reopen persisted data without snapshot support.
-        // For now, open returns a fresh instance. Recovery scenarios require file-based storage.
-        return SqlStorage.Create(StorageStream.FromInMemory(), StorageStream.FromInMemory(), StorageStream.FromInMemory(), databaseName, _durability);
-    }
-
-    /// <inheritdoc />
-    public override void DropStorage(string databaseName)
-    {
-        lock (_syncRoot)
+        try
         {
-            _databases.Remove(databaseName);
+            return SqlStorage.Open(data, journal, backup, checkpointOnOpen: false, _durability);
+        }
+        catch
+        {
+            backup.Dispose();
+            journal.Dispose();
+            data.Dispose();
+            throw;
         }
     }
 
     /// <inheritdoc />
-    public override bool StorageExists(string databaseName)
-    {
-        lock (_syncRoot)
-        {
-            return _databases.Contains(databaseName);
-        }
-    }
+    public override void DropStorage(string databaseName) => _files.Drop(databaseName);
+
+    /// <inheritdoc />
+    public override bool StorageExists(string databaseName) => _files.Exists(databaseName);
 }

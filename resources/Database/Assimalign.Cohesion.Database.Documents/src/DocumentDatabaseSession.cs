@@ -38,16 +38,18 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// so is a BEGIN.
 /// </para>
 /// <para>
-/// <b>Option B (concrete-types plan, §6.6).</b> The session exposes its collection operations
-/// itself (<see cref="CreateCollectionAsync"/>, <see cref="GetCollectionAsync"/>,
+/// <b>Option B (concrete-types plan, §6.6).</b> The session exposes the collection operations
+/// (<see cref="CreateCollectionAsync"/>, <see cref="GetCollectionAsync"/>,
 /// <see cref="DropCollectionAsync"/>, <see cref="GetCollectionsAsync"/>), and
-/// <see cref="Database"/> is the unbound <see cref="DocumentDatabase"/>, whose own collection
-/// operations run in autocommit outside any session. Disposing the session closes the session;
-/// disposing its database closes the database for every session, and the engine refuses to reopen
-/// it (<see cref="ObjectDisposedException"/>) until it is dropped or the engine is recreated; the
-/// engine's workers skip the closed database, so the engine stays <see cref="EngineState.Running"/>.
-/// Before phase 4 the session's database was a session-bound view whose disposal closed the
-/// session, so <c>Dispose</c> meant two things on one type.
+/// <see cref="Database"/> is the unbound <see cref="DocumentDatabase"/>. Every collection and
+/// document operation takes the session (owner decision 32 of 2026-10-06): the database has no
+/// collection operations of its own, so none runs outside a session or waits for a session's own
+/// transaction. Disposing the session closes the session; disposing its database closes the
+/// database for every session, and once the close ends the engine forgets it, so the engine's
+/// <c>OpenDatabaseAsync</c> opens it again from its files (owner decision 33, #1289); meanwhile
+/// the engine's workers skip the closed database, so the engine stays
+/// <see cref="EngineState.Running"/>. Before phase 4 the session's database was a session-bound
+/// view whose disposal closed the session, so <c>Dispose</c> meant two things on one type.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root base with
@@ -76,21 +78,12 @@ public sealed class DocumentDatabaseSession : DatabaseSession
     /// closes the database, not the session (option B, §6.6 of the concrete-types plan).
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Disposing it closes the database for every session of it. The engine keeps the closed
-    /// database registered, so it refuses to reopen it (<see cref="ObjectDisposedException"/>)
-    /// until it is dropped or the engine is recreated, and its workers skip it, so the engine
-    /// stays <see cref="EngineState.Running"/>.
-    /// </para>
-    /// <para>
-    /// The database's own collection operations run in autocommit, never in this session's
-    /// transaction. A write through it (<see cref="DocumentDatabase.CreateCollectionAsync(string, CancellationToken)"/>,
-    /// <see cref="DocumentDatabase.DropCollectionAsync(string, CancellationToken)"/>) while the
-    /// session's explicit transaction has written waits for that transaction's writer lock (the
-    /// engine has one writer at a time) until the transaction ends or the call's token is
-    /// canceled; inside a transaction, use the session's own collection operations
-    /// (<see cref="CreateCollectionAsync"/>, <see cref="DropCollectionAsync"/>).
-    /// </para>
+    /// Disposing it closes the database for every session of it. Once the close ends the engine
+    /// forgets the database, so <see cref="DocumentDatabaseEngine.OpenDatabaseAsync(DatabaseName, CancellationToken)"/>
+    /// opens it again from its files as a new instance, with its documents (owner decision 33,
+    /// #1289); until then the engine's workers skip it, so the engine stays
+    /// <see cref="EngineState.Running"/>. The database has no collection operations of its own
+    /// (owner decision 32): they are this session's.
     /// </remarks>
     public new DocumentDatabase Database => _database;
 

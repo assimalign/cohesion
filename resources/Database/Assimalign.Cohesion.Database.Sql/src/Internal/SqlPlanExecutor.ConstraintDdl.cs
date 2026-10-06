@@ -33,9 +33,9 @@ internal sealed partial class SqlPlanExecutor
         await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
         // Rebind after waiting: a parent definition might have changed while acquiring its lock.
         constraints = BindConstraints(provisional, plan.Constraints);
-        var table = await _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
+        var table = await SelfCommitAsync(statement, _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
             statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-            statement.ProvisioningSchema, cancellationToken).ConfigureAwait(false);
+            statement.ProvisioningSchema, cancellationToken)).ConfigureAwait(false);
 
         // Bind the persisted definitions of the version about to be published, from their
         // stored text, so no write to the new table ever parses them.
@@ -113,7 +113,7 @@ internal sealed partial class SqlPlanExecutor
         {
             if (indexes.Count > 0)
             {
-                await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
+                await SelfCommitAsync(statement, statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
                 {
                     foreach (var metadata in indexes)
                     {
@@ -135,10 +135,10 @@ internal sealed partial class SqlPlanExecutor
                         }
                     }
                     return true;
-                }, durable: true, cancellationToken).ConfigureAwait(false);
+                }, durable: true, cancellationToken)).ConfigureAwait(false);
             }
-            await _catalog.PublishTableAsync(table, indexes, _indexManager.ExportRegistrations(),
-                replaceExisting, cancellationToken).ConfigureAwait(false);
+            await SelfCommitAsync(statement, _catalog.PublishTableAsync(table, indexes, _indexManager.ExportRegistrations(),
+                replaceExisting, cancellationToken)).ConfigureAwait(false);
         }
         catch
         {
@@ -239,7 +239,7 @@ internal sealed partial class SqlPlanExecutor
         {
             // The catalog publishes its own copy of the replacement definition, built from the
             // same column and constraint instances, so it adopts the replacement's bindings.
-            _definitions.Adopt(await _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken).ConfigureAwait(false),
+            _definitions.Adopt(await SelfCommitAsync(statement, _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken)).ConfigureAwait(false),
                 replacement);
         }
         else
@@ -257,8 +257,8 @@ internal sealed partial class SqlPlanExecutor
         {
             // The new version no longer carries the constraint, so the dropped predicate is
             // never evaluated again; it keeps the other bindings of the version it came from.
-            _definitions.Adopt(await _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName,
-                cancellationToken).ConfigureAwait(false), plan.Table);
+            _definitions.Adopt(await SelfCommitAsync(statement, _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName,
+                cancellationToken)).ConfigureAwait(false), plan.Table);
         }
         else if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.ConstraintName, out var index) && index.IsUnique)
         {

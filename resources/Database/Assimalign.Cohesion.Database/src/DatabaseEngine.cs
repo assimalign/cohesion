@@ -29,6 +29,18 @@ namespace Assimalign.Cohesion.Database;
 /// engine, and no product is attached twice.
 /// </para>
 /// <para>
+/// <b>A database closed outside the engine is forgotten</b> (owner decision 33 of 2026-10-06,
+/// #1289). A holder may dispose a database directly, or through a session's database; when that
+/// close ends, the database tells its engine, and the leaf stops tracking it
+/// (<see cref="ForgetClosedDatabaseCore"/>), so a later <see cref="OpenDatabaseAsync"/> opens it
+/// again from its files. Until the close ends the leaf still tracks the closing database, so its
+/// workers keep skipping a closed one; <see cref="OpenDatabaseAsync"/> waits for such a close to
+/// end before it opens the database again, <see cref="TryGetDatabase"/> does not report it, and
+/// the leaf's own disposal of a database (a drop, a reopen after going offline, the engine's
+/// disposal) waits for a close a holder started, so nothing reuses the database's files while
+/// its close still runs.
+/// </para>
+/// <para>
 /// <b>State.</b> <see cref="State"/> is folded from the engine's own life and its workers (#1268):
 /// <see cref="EngineState.Disposed"/> once disposal started, <see cref="EngineState.Faulted"/>
 /// while a worker holds a failure it has not worked off (<see cref="DatabaseEngineWorker.Fault"/>)
@@ -172,22 +184,32 @@ public abstract class DatabaseEngine : IDatabaseEngine
     }
 
     /// <summary>
-    /// Opens an existing logical database by name. A database that went offline is reopened: the
-    /// returned instance is a new one, opened again from its files.
+    /// Opens an existing logical database by name. A database that went offline, or that a holder
+    /// closed outside the engine, is reopened: the returned instance is a new one, opened again
+    /// from its files.
     /// </summary>
     /// <param name="name">The name of the database to open.</param>
-    /// <param name="cancellationToken">Observed before the database is opened.</param>
+    /// <param name="cancellationToken">
+    /// Observed before the database is opened, and while the open waits for a holder's close of
+    /// the database to end.
+    /// </param>
     /// <returns>The opened database.</returns>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran, or while the open waited for a close.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
+    /// <remarks>
+    /// A holder may close the database while the open runs. When the leaf's core hands back an
+    /// instance whose close has started, the open waits for that close to end, after which the
+    /// engine no longer tracks it (<see cref="ForgetClosedDatabaseCore"/>), and opens the
+    /// database again (owner decision 33, #1289). The open never returns a closed instance.
+    /// </remarks>
     public ValueTask<DatabaseInstance> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
     {
         ThrowIfEmpty(name);
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        return OpenDatabaseCoreAsync(name, cancellationToken);
+        return OpenUnclosedAsync(name, cancellationToken);
     }
 
     /// <summary>
@@ -227,14 +249,23 @@ public abstract class DatabaseEngine : IDatabaseEngine
     /// </summary>
     /// <param name="name">The name of the database.</param>
     /// <param name="database">When this method returns true, the database.</param>
-    /// <returns>True when the database is open in the engine; otherwise false.</returns>
+    /// <returns>
+    /// True when the database is open in the engine; otherwise false, for a database a holder is
+    /// closing too (owner decision 33, #1289).
+    /// </returns>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     public bool TryGetDatabase(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database)
     {
         ThrowIfEmpty(name);
         ThrowIfDisposed();
-        return TryGetDatabaseCore(name, out database);
+        if (TryGetDatabaseCore(name, out database) && !database.IsClosing)
+        {
+            return true;
+        }
+
+        database = null;
+        return false;
     }
 
     /// <summary>
@@ -497,8 +528,45 @@ public abstract class DatabaseEngine : IDatabaseEngine
     /// </summary>
     /// <param name="name">The name of the database; never empty.</param>
     /// <param name="cancellationToken">Not canceled when the call starts.</param>
-    /// <returns>The opened database.</returns>
+    /// <returns>
+    /// The opened database; or the tracked instance a holder is closing, which the leaf returns
+    /// as it is, without waiting and without touching the database's files:
+    /// <see cref="OpenDatabaseAsync"/> waits for that close to end and calls the core again.
+    /// </returns>
     protected abstract ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Forgets a database whose close has ended: the leaf stops tracking it if it still tracks
+    /// that instance, so a later open opens the database again from its files (owner decision 33,
+    /// #1289). Called once per database, by its first <see cref="DatabaseInstance.Dispose"/> or
+    /// <see cref="DatabaseInstance.DisposeAsync"/>, after the database's own disposal core, on the
+    /// thread that ran the close.
+    /// </summary>
+    /// <param name="database">A database of this engine whose close has ended.</param>
+    /// <remarks>
+    /// <para>
+    /// The leaf compares references: a database the leaf already let go (dropped, replaced by its
+    /// reopen after going offline, or closed by the engine's disposal) is not tracked any more,
+    /// and a newer instance of the same name is never removed.
+    /// </para>
+    /// <para>
+    /// <b>It must not wait for the leaf's lock while the leaf could hold it waiting for this close.</b>
+    /// The leaf disposes a database it let go while holding its lock, and that disposal waits for a
+    /// close a holder started; the leaf stops tracking such a database before it disposes it. A
+    /// leaf therefore first reads its lock-free published snapshot of the databases it tracks and
+    /// returns at once when the database is not in it, and otherwise takes its lock without
+    /// waiting on it indefinitely (it re-reads the snapshot between attempts), then removes the
+    /// database if it still tracks that instance.
+    /// </para>
+    /// </remarks>
+    protected abstract void ForgetClosedDatabaseCore(DatabaseInstance database);
+
+    /// <summary>
+    /// Hands a database whose close has ended to the leaf (<see cref="ForgetClosedDatabaseCore"/>):
+    /// the entry <see cref="DatabaseInstance"/> calls once its close ran.
+    /// </summary>
+    /// <param name="database">A database of this engine whose close has ended.</param>
+    internal void ForgetClosedDatabase(DatabaseInstance database) => ForgetClosedDatabaseCore(database);
 
     /// <summary>
     /// Drops a database whose name and engine state <see cref="DropDatabaseAsync"/> checked.
@@ -564,6 +632,30 @@ public abstract class DatabaseEngine : IDatabaseEngine
 
             cancellationToken.WaitHandle.WaitOne(DatabaseEngineWorker.FailureBackoff);
         }
+    }
+
+    // The open behind OpenDatabaseAsync: never hands out a closed instance. A database the core
+    // returns while a holder closes it is waited for, and opened again once its close ended and
+    // the leaf forgot it; ForgetClosedDatabaseCore runs before the close's waiters resume.
+    private async ValueTask<DatabaseInstance> OpenUnclosedAsync(DatabaseName name, CancellationToken cancellationToken)
+    {
+        var database = await OpenDatabaseCoreAsync(name, cancellationToken).ConfigureAwait(false);
+        while (database.IsClosing)
+        {
+            var closing = database;
+            await closing.Closure.WaitAsync(cancellationToken).ConfigureAwait(false);
+            ThrowIfDisposed();
+            database = await OpenDatabaseCoreAsync(name, cancellationToken).ConfigureAwait(false);
+            if (ReferenceEquals(database, closing))
+            {
+                // The leaf still tracks a database whose close ended: a leaf defect, reported
+                // rather than retried forever.
+                throw new InvalidOperationException(
+                    $"Engine '{_name}' still tracks database '{name}' after its close ended; the engine did not forget it.");
+            }
+        }
+
+        return database;
     }
 
     private void ThrowIfComposed()

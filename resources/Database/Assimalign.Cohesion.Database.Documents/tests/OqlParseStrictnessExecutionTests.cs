@@ -38,8 +38,8 @@ public sealed class OqlParseStrictnessExecutionTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("strictness", CancellationToken.None);
-        var collection = await database.CreateCollectionAsync("items", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
         await collection.PutAsync(session, "a", Encoding.UTF8.GetBytes("""{"name":"alpha","amount":2,"tags":["blue"]}"""),
             cancellationToken: CancellationToken.None);
         var statement = new OqlQueryParser().Parse(oql).ShouldBeOfType<OqlQueryStatement>();

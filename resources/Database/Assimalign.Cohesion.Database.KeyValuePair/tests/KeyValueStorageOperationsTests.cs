@@ -142,6 +142,7 @@ public sealed class KeyValueStorageOperationsTests
 
         // Assert: the coded refusals, everywhere.
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
+        unconfirmed.Message.ShouldStartWith("COHDBK002: Database 'kv' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
         refusals.ShouldAllBe(refusal => refusal.Code == "COHDBK002" && refusal.Message.StartsWith("COHDBK002", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");

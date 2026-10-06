@@ -1,11 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
@@ -16,7 +20,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// The SQL engine on the root <see cref="DatabaseEngine"/> base (concrete-types plan §6.4 and
 /// §6.5, #1260): the typed database members over the base's public members, the base's guards and
 /// their order, the disposal aggregate's shape when databases fail to close, and a database its
-/// holder closed, which the engine keeps registered to refuse its reopen while its workers skip it.
+/// holder closed, which the engine forgets once the close ended so its next open reopens it, while
+/// its workers skip it until then (owner decision 33).
 /// Each test names the behavior it replaces.
 /// </summary>
 public sealed class SqlEngineContractTests
@@ -170,63 +175,232 @@ public sealed class SqlEngineContractTests
     }
 
     /// <summary>
-    /// A database disposed outside the engine stays registered until it is dropped (an open hands
-    /// back the closed instance, whose use throws <see cref="ObjectDisposedException"/>), and the
-    /// engine's workers skip it: every worker's pass over it succeeds and records nothing, and the
-    /// engine stays <see cref="EngineState.Running"/>. Dropping it removes it, and a database of that
-    /// name can be created again. Before the fix the engine's open-database test read only its
-    /// registration, so the version-purge worker failed on the closed one's disposed transaction
-    /// manager every pass, the checkpointer on its disposed journal once it was due, and the engine
-    /// stayed <see cref="EngineState.Faulted"/> for good.
+    /// A database a holder closed outside the engine is forgotten once its close ends, so the next
+    /// open opens it again, a new instance with every row it held, in memory as on disk (owner
+    /// decision 33, #1289; #1272's in-memory reopen): the engine's in-memory strategy keeps a
+    /// database's two file sets for the engine's lifetime, and the open runs recovery over them as
+    /// it does over files. A row of a transaction the close ended is not there. The reopened
+    /// database takes writes, and a second close and open keeps them too. Until decision 33 the
+    /// engine kept the closed instance registered until it was dropped, and an open handed it back,
+    /// whose use threw <see cref="ObjectDisposedException"/>; before #1272 an in-memory reopen got
+    /// empty storage and silently lost every row.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Engine: a database disposed outside the engine is skipped by every worker until it is dropped")]
-    public async Task DisposeAsync_DatabaseOutsideTheEngine_ShouldBeSkippedByEveryWorkerUntilDropped()
+    /// <param name="onDisk">True for a file-backed engine; false for an in-memory one.</param>
+    /// <param name="throughSession">Whether the database is closed through a session's database rather than directly.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Engine: a database closed outside the engine reopens with its rows, in memory and on disk")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task OpenDatabaseAsync_DatabaseClosedOutsideTheEngine_ShouldReopenItWithItsRows(bool onDisk, bool throughSession)
     {
-        // Arrange: a database with committed rows and dirty pages, disposed by its holder.
-        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
+        // Arrange: a database with committed rows, and one more in an uncommitted transaction.
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-sql-reopen-" + Guid.NewGuid().ToString("N"));
+        try
         {
-            EngineName = "closed",
-            CheckpointInterval = TimeSpan.FromHours(1),
-            PageWriteBackInterval = TimeSpan.FromHours(1),
-            MaintenanceInterval = TimeSpan.FromHours(1),
-        });
-        var database = await engine.CreateDatabaseAsync("held", TestTimeout.Token());
-        await using (var session = await database.CreateSessionAsync(TestTimeout.Token()))
-        {
-            await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)", cancellationToken: TestTimeout.Token());
-            await session.ExecuteAsync("INSERT INTO t (id) VALUES (1)", cancellationToken: TestTimeout.Token());
-        }
+            await using var engine = SqlDatabaseEngine.Create(onDisk ? new() { RootPath = root } : new());
+            var database = await engine.CreateDatabaseAsync("held", TestTimeout.Token());
+            await using (var setup = await database.CreateSessionAsync(TestTimeout.Token()))
+            {
+                await setup.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)", cancellationToken: TestTimeout.Token());
+                await setup.ExecuteAsync("INSERT INTO t (id) VALUES (1), (2), (3)", cancellationToken: TestTimeout.Token());
+            }
 
+            var session = await database.CreateSessionAsync(TestTimeout.Token());
+            _ = await session.BeginTransactionAsync(TestTimeout.Token());
+            await session.ExecuteAsync("INSERT INTO t (id) VALUES (99)", cancellationToken: TestTimeout.Token());
+
+            // Act: close the database outside the engine, then open it again, write to it, and
+            // close and open it once more.
+            if (throughSession)
+            {
+                await session.Database.DisposeAsync();
+            }
+            else
+            {
+                await database.DisposeAsync();
+            }
+
+            bool foundAfterTheClose = engine.TryGetDatabase("held", out _);
+            var reopened = await engine.OpenDatabaseAsync("held", TestTimeout.Token());
+            long afterTheReopen = await CountAsync(reopened);
+            await using (var writer = await reopened.CreateSessionAsync(TestTimeout.Token()))
+            {
+                await writer.ExecuteAsync("INSERT INTO t (id) VALUES (4)", cancellationToken: TestTimeout.Token());
+            }
+
+            await reopened.DisposeAsync();
+            var again = await engine.OpenDatabaseAsync("held", TestTimeout.Token());
+
+            // Assert
+            foundAfterTheClose.ShouldBeFalse();
+            reopened.ShouldNotBeSameAs(database);
+            afterTheReopen.ShouldBe(3);
+            again.ShouldNotBeSameAs(reopened);
+            (await CountAsync(again)).ShouldBe(4);
+            engine.IsOpen(again).ShouldBeTrue();
+            engine.State.ShouldBe(EngineState.Running);
+            await session.DisposeAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// While a holder's close of a database runs, the engine still tracks the closing instance and
+    /// nothing races the close for its files (owner decision 33, #1289): the lookup does not report
+    /// it, a create of its name is refused as existing, every worker's pass skips it (a checkpoint
+    /// of both file sets is due, and none runs: the closed-database guards hold for the window
+    /// between the close and the engine forgetting it), and an open waits for the close to end.
+    /// Then the engine forgets it, and the open opens it again with its rows. The close is held in
+    /// its shutdown checkpoint by a data fsync that does not answer.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Engine: while a holder closes a database, workers skip it and an open waits, then reopens it with its rows")]
+    public async Task OpenDatabaseAsync_WhileAHolderClosesTheDatabase_ShouldWaitAndThenReopenIt()
+    {
+        // Arrange: a database with rows and a checkpoint due, whose data fsync will stall.
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        var database = await CreateWithRowsAsync(engine);
         database.DataStorage.CheckpointJournalSize = 1;
         database.CatalogStorage.CheckpointJournalSize = 1;
+        var faults = strategy.Faults("held");
+        faults.StallDataFlushes();
+        using var released = new Release(faults.ReleaseDataFlushes);
 
-        // Act: the holder closes it, and every worker runs passes over it.
-        await database.DisposeAsync();
-        var passes = new List<bool>();
-        for (int round = 0; round < 3; round++)
+        // Act: the holder's close stalls in its shutdown checkpoint; meanwhile every worker runs a
+        // pass, the name is looked up and created, and an open starts.
+        var close = Task.Run(async () => await database.DisposeAsync());
+        bool stalled = await Eventually(() => faults.StalledDataFlushes == 1);
+        bool trackedWhileClosing = Array.IndexOf(engine.GetInstanceSnapshot(), database) >= 0;
+        var passes = engine.Workers.Select(worker => worker.RunIteration(TestTimeout.Token())).ToArray();
+        bool foundWhileClosing = engine.TryGetDatabase("held", out _);
+        var create = await Should.ThrowAsync<DatabaseException>(async () => await engine.CreateDatabaseAsync("held", TestTimeout.Token()));
+        var open = engine.OpenDatabaseAsync("held", TestTimeout.Token(30)).AsTask();
+        bool openWaited = !await CompletesWithin(open, TimeSpan.FromMilliseconds(200));
+        faults.ReleaseDataFlushes();
+        await close.WaitAsync(TestTimeout.Token(30));
+        var reopened = await open.WaitAsync(TestTimeout.Token(30));
+
+        // Assert
+        stalled.ShouldBeTrue();
+        trackedWhileClosing.ShouldBeTrue();
+        passes.ShouldAllBe(passed => passed);
+        engine.Workers.ShouldAllBe(worker => worker.FailureCount == 0 && worker.Fault == null);
+        foundWhileClosing.ShouldBeFalse();
+        create.Message.ShouldBe("A database with name 'held' already exists.");
+        openWaited.ShouldBeTrue();
+        reopened.ShouldNotBeSameAs(database);
+        engine.IsOpen(database).ShouldBeFalse();
+        engine.IsOpen(reopened).ShouldBeTrue();
+        (await CountAsync(reopened)).ShouldBe(2);
+        engine.State.ShouldBe(EngineState.Running);
+        engine.OfflineDatabases.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A drop during a holder's close of the database waits for the close to end before it drops
+    /// the files: the engine lets the database go and disposes it, and that disposal waits for the
+    /// close a holder started, whose end does not wait for the engine's lock (owner decision 33,
+    /// #1289). Nothing deadlocks; the database is gone afterwards and its name can be created again.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Engine: a drop during a holder's close waits for the close, then drops the database")]
+    public async Task DropDatabaseAsync_WhileAHolderClosesTheDatabase_ShouldWaitForTheCloseThenDropIt()
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        var database = await CreateWithRowsAsync(engine);
+        var faults = strategy.Faults("held");
+        faults.StallDataFlushes();
+        using var released = new Release(faults.ReleaseDataFlushes);
+
+        // Act: the holder's close stalls in its shutdown checkpoint, and a drop starts.
+        var close = Task.Run(async () => await database.DisposeAsync());
+        bool stalled = await Eventually(() => faults.StalledDataFlushes == 1);
+        var drop = Task.Run(async () => await engine.DropDatabaseAsync("held", TestTimeout.Token(30)));
+        bool dropWaited = !await CompletesWithin(drop, TimeSpan.FromMilliseconds(200));
+        bool filesWhileClosing = strategy.StorageExists("held");
+        faults.ReleaseDataFlushes();
+        await close.WaitAsync(TestTimeout.Token(30));
+        await drop.WaitAsync(TestTimeout.Token(30));
+
+        // Assert
+        stalled.ShouldBeTrue();
+        dropWaited.ShouldBeTrue();
+        filesWhileClosing.ShouldBeTrue();
+        strategy.StorageExists("held").ShouldBeFalse();
+        await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("held", TestTimeout.Token()));
+        var recreated = await engine.CreateDatabaseAsync("held", TestTimeout.Token());
+        engine.IsOpen(recreated).ShouldBeTrue();
+        engine.State.ShouldBe(EngineState.Running);
+    }
+
+    // Quiet workers: the tests run the passes they need themselves.
+    private static SqlDatabaseEngineOptions QuietOptions(FaultInjectingJournalSqlStorageStrategy strategy) => new()
+    {
+        EngineName = "closing",
+        StorageStrategy = strategy,
+        CheckpointInterval = TimeSpan.FromHours(1),
+        PageWriteBackInterval = TimeSpan.FromHours(1),
+        MaintenanceInterval = TimeSpan.FromHours(1),
+    };
+
+    // A database "held" with a table of two rows.
+    private static async Task<SqlDatabase> CreateWithRowsAsync(SqlDatabaseEngine engine)
+    {
+        var database = await engine.CreateDatabaseAsync("held", TestTimeout.Token());
+        await using var session = await database.CreateSessionAsync(TestTimeout.Token());
+        await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)", cancellationToken: TestTimeout.Token());
+        await session.ExecuteAsync("INSERT INTO t (id) VALUES (1), (2)", cancellationToken: TestTimeout.Token());
+        return database;
+    }
+
+    private static async Task<long> CountAsync(SqlDatabase database)
+    {
+        await using var session = await database.CreateSessionAsync(TestTimeout.Token());
+        var result = await session.ExecuteAsync("SELECT COUNT(*) FROM t", cancellationToken: TestTimeout.Token());
+        var set = result.ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        await using (set)
         {
-            foreach (var worker in engine.Workers)
+            await foreach (var row in set.GetRowsAsync())
             {
-                passes.Add(worker.RunIteration(TestTimeout.Token()));
+                return Convert.ToInt64(row.GetValue(0));
             }
         }
 
-        bool registered = engine.TryGetDatabase("held", out var stillRegistered);
-        var reopen = await Should.ThrowAsync<ObjectDisposedException>(async () => await (await engine.OpenDatabaseAsync("held", TestTimeout.Token())).CreateSessionAsync(TestTimeout.Token()));
-        await engine.DropDatabaseAsync("held", TestTimeout.Token());
-        var recreated = await engine.CreateDatabaseAsync("held", TestTimeout.Token());
+        throw new InvalidOperationException("The count returned no row.");
+    }
 
-        // Assert
-        passes.ShouldAllBe(passed => passed);
-        engine.Workers.ShouldAllBe(worker => worker.FailureCount == 0 && worker.Fault == null);
-        engine.State.ShouldBe(EngineState.Running);
-        engine.OfflineDatabases.ShouldBeEmpty();
-        registered.ShouldBeTrue();
-        stillRegistered.ShouldBeSameAs(database);
-        database.IsClosed.ShouldBeTrue();
-        engine.IsOpen(database).ShouldBeFalse();
-        reopen.ShouldNotBeNull();
-        recreated.ShouldNotBeSameAs(database);
-        engine.IsOpen(recreated).ShouldBeTrue();
+    // Polls a condition another thread makes true, for at most ten seconds.
+    private static async Task<bool> Eventually(Func<bool> condition)
+    {
+        var watch = Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (watch.Elapsed > TimeSpan.FromSeconds(10))
+            {
+                return false;
+            }
+
+            await Task.Delay(10);
+        }
+
+        return true;
+    }
+
+    private static async Task<bool> CompletesWithin(Task task, TimeSpan wait)
+        => await Task.WhenAny(task, Task.Delay(wait)) == task;
+
+    // Lets a held close end when a test leaves its scope, a failed assertion included. Declared
+    // after the engine, it runs before the engine's disposal, which waits for that close.
+    private sealed class Release(Action release) : IDisposable
+    {
+        public void Dispose() => release();
     }
 }

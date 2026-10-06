@@ -723,6 +723,39 @@ internal sealed partial class SqlPlanExecutor
 
     // ── DDL ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Awaits one durable bracket a DDL statement commits by itself (a catalog self-commit or a
+    /// durably committed data bracket) and records it on the statement once its commit returned.
+    /// The session reads the record when the statement meets an offline storage: a statement that
+    /// already committed a durable bracket is unconfirmed, because that bracket survives the
+    /// reopen; one that committed nothing is refused like any other statement (#1272). A commit
+    /// whose own record was written before its flush failed is unconfirmed either way
+    /// (<c>StorageOfflineException.CommitRecordWritten</c>).
+    /// </summary>
+    /// <param name="statement">The DDL statement.</param>
+    /// <param name="commit">The self-commit.</param>
+    /// <returns>A task that completes once the bracket committed.</returns>
+    private static async ValueTask SelfCommitAsync(SqlStatementContext statement, ValueTask commit)
+    {
+        await commit.ConfigureAwait(false);
+        statement.Metrics.RecordSelfCommit();
+    }
+
+    /// <summary>
+    /// Awaits one durable bracket a DDL statement commits by itself and records it on the statement
+    /// once its commit returned (see <see cref="SelfCommitAsync(SqlStatementContext, ValueTask)"/>).
+    /// </summary>
+    /// <typeparam name="T">The commit's result.</typeparam>
+    /// <param name="statement">The DDL statement.</param>
+    /// <param name="commit">The self-commit.</param>
+    /// <returns>The commit's result.</returns>
+    private static async ValueTask<T> SelfCommitAsync<T>(SqlStatementContext statement, ValueTask<T> commit)
+    {
+        T result = await commit.ConfigureAwait(false);
+        statement.Metrics.RecordSelfCommit();
+        return result;
+    }
+
     private async Task<QueryResult> ExecuteCreateTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (plan.IfNotExists && _catalog.TryGetTable(plan.Schema, plan.Name, out _))
@@ -782,7 +815,7 @@ internal sealed partial class SqlPlanExecutor
         // The authoritative step: the catalog checks the drop again under its own lock
         // and commits it. Bind the published version before the statement completes, as
         // every DDL does, so no later write parses its definitions.
-        var updated = await _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken).ConfigureAwait(false);
+        var updated = await SelfCommitAsync(statement, _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken)).ConfigureAwait(false);
         _definitions.Get(updated);
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
@@ -821,7 +854,7 @@ internal sealed partial class SqlPlanExecutor
         // second, all under the exclusive lock so no writer maintains a ghost.
         var droppedIndexes = _catalog.GetIndexes(table.ObjectId);
 
-        await _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken).ConfigureAwait(false);
+        await SelfCommitAsync(statement, _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken)).ConfigureAwait(false);
 
         foreach (var metadata in droppedIndexes)
         {
@@ -907,7 +940,7 @@ internal sealed partial class SqlPlanExecutor
 
         try
         {
-            await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
+            await SelfCommitAsync(statement, statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
             {
                 var index = await _indexManager.CreateIndexAsync(statement.Transaction, plan.Table.ObjectId, definition, cancellationToken).ConfigureAwait(false);
                 registered = true;
@@ -929,7 +962,7 @@ internal sealed partial class SqlPlanExecutor
                 }
 
                 return true;
-            }, durable: true, cancellationToken).ConfigureAwait(false);
+            }, durable: true, cancellationToken)).ConfigureAwait(false);
         }
         catch
         {
@@ -949,13 +982,13 @@ internal sealed partial class SqlPlanExecutor
         // reverse). A crash before this write leaves only orphaned tree pages —
         // a safe leak, never a re-attached index.
         var registrations = _indexManager.ExportRegistrations();
-        await _catalog.CreateIndexAsync(
+        await SelfCommitAsync(statement, _catalog.CreateIndexAsync(
             new SqlCatalogIndex(
                 plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
                 statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
                 statement.ProvisioningSchema),
             registrations,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken)).ConfigureAwait(false);
 
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
@@ -1011,7 +1044,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        await _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken).ConfigureAwait(false);
+        await SelfCommitAsync(statement, _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken)).ConfigureAwait(false);
 
         if (_indexManager.TryGetIndex(plan.Table.ObjectId, metadata.Name, out _))
         {

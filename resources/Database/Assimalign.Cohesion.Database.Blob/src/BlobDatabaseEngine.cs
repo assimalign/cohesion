@@ -21,7 +21,18 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// workers (write-ahead-log group-commit flusher, page write-back, checkpointer and version purge)
 /// already pumping, and disposal is its one lifecycle transition, which closes every database
 /// according to its storage durability. Each database's files live in a directory of its own under
-/// <see cref="BlobDatabaseEngineOptions.RootPath"/>, or in memory when no root is set.
+/// <see cref="BlobDatabaseEngineOptions.RootPath"/>, or in memory when no root is set; the
+/// engine keeps an in-memory database's files for its own lifetime, so a closed in-memory database
+/// reopens with its data (#1272).
+/// </para>
+/// <para>
+/// <b>A database its holder closed.</b> A database disposed outside the engine (directly, or
+/// through a session's <see cref="BlobDatabaseSession.Database"/>) is forgotten once its close
+/// ends (owner decision 33 of 2026-10-06, #1289), so a later
+/// <see cref="OpenDatabaseAsync(DatabaseName, CancellationToken)"/> opens it again from its files,
+/// in memory as on disk, with its containers and blobs. Until the close ends the engine's
+/// workers skip it (<see cref="IsOpen(BlobDatabase)"/> is false for it), so the engine stays
+/// <see cref="EngineState.Running"/> and its server keeps serving its other databases.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A sealed leaf of the root
@@ -51,6 +62,10 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     private readonly ManualResetEventSlim _checkpointNeeded = new();
     private readonly ManualResetEventSlim _undoDeferred = new();
     private readonly string? _rootPath;
+
+    // The files of the engine's in-memory databases (no strategy and no root), kept for the
+    // engine's lifetime so a closed in-memory database reopens with its data (#1272); null otherwise.
+    private readonly DatabaseMemoryFiles? _memory;
     private BlobDatabase[] _instances = [];
     private BlobStorage[] _storages = [];
 
@@ -59,6 +74,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     {
         _options = options;
         _rootPath = options.StorageStrategy is null && options.RootPath is { IsEmpty: false } root ? Path.GetFullPath(root) : null;
+        _memory = options.StorageStrategy is null && _rootPath is null ? new DatabaseMemoryFiles() : null;
         if (_rootPath is not null)
         {
             Directory.CreateDirectory(_rootPath);
@@ -81,7 +97,8 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             List<DatabaseName>? offline = null;
             foreach (var database in GetInstanceSnapshot())
             {
-                if (database.IsOffline)
+                // A database its holder is closing is not one of the open databases any more.
+                if (database.IsOffline && !database.IsClosed)
                 {
                     (offline ??= []).Add(database.Name);
                 }
@@ -111,9 +128,9 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// Reports whether <paramref name="database"/> is still one of the engine's open databases:
     /// false once it was dropped, closed for a reopen, the engine closed it, or a holder of the
     /// database disposed it (a session's <see cref="BlobDatabaseSession.Database"/> included; the
-    /// engine keeps such a database registered only to refuse its reopen). A worker pass that
-    /// raced such a close tolerates the <see cref="ObjectDisposedException"/> it gets; one from a
-    /// database still open is a failure.
+    /// engine keeps such a database registered until its close ends, then forgets it). A worker
+    /// pass that raced such a close tolerates the <see cref="ObjectDisposedException"/> it gets;
+    /// one from a database still open is a failure.
     /// </summary>
     /// <param name="database">The database a worker pass visited.</param>
     internal bool IsOpen(BlobDatabase database) => !database.IsClosed && Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
@@ -240,17 +257,24 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
         => (BlobDatabase)await base.CreateDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
-    /// Opens an existing logical blob database by name. A database that went offline is reopened:
-    /// the returned instance is a new one, opened again from its files.
+    /// Opens an existing logical blob database by name. A database that went offline, or that a
+    /// holder closed outside the engine, is reopened: the returned instance is a new one, opened
+    /// again from its files.
     /// </summary>
     /// <param name="name">The name of the database to open: a single file-name component.</param>
-    /// <param name="cancellationToken">Observed before the database is opened.</param>
+    /// <param name="cancellationToken">Observed before the database is opened, and while the open waits for a holder's close of it.</param>
     /// <returns>The opened database.</returns>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or not a single file-name component.</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
     /// <exception cref="DatabaseException">The database's file set is in another storage format (COHDBS001).</exception>
+    /// <remarks>
+    /// A database a holder closed is forgotten once its close ends (owner decision 33, #1289), and
+    /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
+    /// the close still running waits for it to end first. Until that decision the engine refused
+    /// the reopen with <see cref="ObjectDisposedException"/> until the database was dropped.
+    /// </remarks>
     public new async ValueTask<BlobDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => (BlobDatabase)await base.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
 
@@ -315,11 +339,13 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             ThrowIfDisposed();
             var directory = FindDirectory(name);
             bool open = _databases.Remove(name, out var database);
-            if (!open && !(_options.StorageStrategy?.StorageExists(name) ?? directory is not null))
+            if (!open && !StorageExists(name, directory))
             {
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
 
+            // The engine lets the database go before it closes it, and the close waits for one a
+            // holder started, so the files are dropped only once nothing holds them.
             RebuildSnapshot();
             database?.Dispose();
             if (_options.StorageStrategy is { } strategy)
@@ -329,6 +355,10 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             else if (directory is not null)
             {
                 Directory.Delete(directory, recursive: true);
+            }
+            else
+            {
+                _memory?.Drop(name);
             }
         }
         return default;
@@ -356,11 +386,15 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
         return false;
     }
 
+    /// <inheritdoc />
+    protected override void ForgetClosedDatabaseCore(DatabaseInstance database)
+        => DatabaseRegistry.Forget((BlobDatabase)database, _sync, GetInstanceSnapshot, ForgetLocked);
+
     /// <summary>
     /// Closes every open database once the base disposed the servers, stopped the worker pumps
     /// and disposed the workers: each database durably flushes according to its storage's
-    /// durability policy, and an offline one closes without writing. Then the engine's worker
-    /// signals are released.
+    /// durability policy, and an offline one closes without writing. A close a holder started is
+    /// waited for. Then the engine's worker signals are released.
     /// </summary>
     /// <returns>A task that completes once every database is closed.</returns>
     protected override async ValueTask DisposeAsyncCore()
@@ -418,21 +452,24 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                     throw new DatabaseException($"Database '{name}' already exists.");
                 }
 
-                existing.EnsureNotDisposed();
-                if (!existing.IsOffline)
+                if (existing.IsClosed || !existing.IsOffline)
                 {
+                    // A database its holder is closing is returned as it is, without touching its
+                    // files: the base waits for the close, which forgets it, and opens it again.
                     return new ValueTask<DatabaseInstance>(existing);
                 }
 
                 // The database went offline after a failed durable flush (#1243): reopening it
                 // is the one way back. Its close writes nothing, and the open below runs
                 // recovery, which decides the outcome of every commit that was not confirmed.
+                // The engine lets it go before it closes it, and the close waits for one a holder
+                // started meanwhile, so the open below never races it for the files.
                 _databases.Remove(name);
                 RebuildSnapshot();
                 existing.Dispose();
             }
             var directory = FindDirectory(name);
-            bool exists = _options.StorageStrategy?.StorageExists(name) ?? directory is not null;
+            bool exists = StorageExists(name, directory);
             if (create && exists)
             {
                 throw new DatabaseException($"Database '{name}' already exists.");
@@ -453,7 +490,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             {
                 storage = _options.StorageStrategy is { } strategy
                     ? create ? strategy.CreateStorage(name, _options.Durability) : strategy.OpenStorage(name, _options.Durability)
-                    : OpenStorage(directory, name, create, _options.Durability);
+                    : OpenStorage(directory, _memory, name, create, _options.Durability);
                 if (storage is null)
                 {
                     throw new InvalidOperationException("The storage strategy returned null.");
@@ -487,19 +524,42 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
         }
     }
 
-    private static BlobStorage OpenStorage(string? directory, string name, bool create, StorageCommitDurability? durability)
+    // A database's files: in its directory, or, for an in-memory engine, the memory the engine
+    // keeps for it, created empty or opened again with the bytes its last storage left.
+    private static BlobStorage OpenStorage(string? directory, DatabaseMemoryFiles? memory, string name, bool create, StorageCommitDurability? durability)
     {
         StorageStream? data = null, journal = null, backup = null;
         try
         {
-            var mode = create ? FileMode.CreateNew : FileMode.Open;
-            data = directory is null ? StorageStream.FromInMemory() : StorageStream.FromFile(Path.Combine(directory, "blob.dat"), mode, FileShare.Read);
-            journal = directory is null ? StorageStream.FromInMemory() : StorageStream.FromFile(Path.Combine(directory, "blob.log"), mode, FileShare.Read);
-            backup = directory is null ? StorageStream.FromInMemory() : StorageStream.FromFile(Path.Combine(directory, "blob.bak"), mode, FileShare.Read);
-            return create ? BlobStorage.Create(data, journal, backup, name, durability) : BlobStorage.Open(data, journal, backup, checkpointOnOpen: false, durability);
+            if (directory is null)
+            {
+                bool found = memory is not null && (create
+                    ? memory.TryCreate(name, out data, out journal, out backup)
+                    : memory.TryOpen(name, out data, out journal, out backup));
+                if (!found)
+                {
+                    throw create
+                        ? new DatabaseException($"Database '{name}' already exists.")
+                        : new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                }
+            }
+            else
+            {
+                var mode = create ? FileMode.CreateNew : FileMode.Open;
+                data = StorageStream.FromFile(Path.Combine(directory, "blob.dat"), mode, FileShare.Read);
+                journal = StorageStream.FromFile(Path.Combine(directory, "blob.log"), mode, FileShare.Read);
+                backup = StorageStream.FromFile(Path.Combine(directory, "blob.bak"), mode, FileShare.Read);
+            }
+
+            return create ? BlobStorage.Create(data!, journal!, backup!, name, durability) : BlobStorage.Open(data!, journal!, backup!, checkpointOnOpen: false, durability);
         }
         catch { data?.Dispose(); journal?.Dispose(); backup?.Dispose(); throw; }
     }
+
+    // Whether a database's storage exists: the strategy's answer, its directory under the root,
+    // or the engine's in-memory files.
+    private bool StorageExists(string name, string? directory)
+        => _options.StorageStrategy?.StorageExists(name) ?? (directory is not null || (_memory?.Exists(name) ?? false));
 
     // The databases as one typed sequence, which GetDatabasesAsync hands out without a per-item
     // cast: the sequence is covariant, so it is the base's sequence too. Each name found in
@@ -510,7 +570,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
         lock (_sync)
         {
             ThrowIfDisposed();
-            names = _databases.Keys.Concat(_options.StorageStrategy is { } strategy ? strategy.GetDatabaseNames().Select(name => name.ToString()) : _rootPath is null ? [] : Directory.EnumerateDirectories(_rootPath)
+            names = _databases.Keys.Concat(_options.StorageStrategy is { } strategy ? strategy.GetDatabaseNames().Select(name => name.ToString()) : _rootPath is null ? _memory?.Names ?? [] : Directory.EnumerateDirectories(_rootPath)
                 .Where(path => File.Exists(Path.Combine(path, "blob.dat"))).Select(path => Path.GetFileName(path)))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
         }
@@ -531,6 +591,17 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
         if (name is "." or ".." || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.Contains('/') || name.Contains('\\'))
         {
             throw new ArgumentException("A database name must be a single file-name component.", nameof(name));
+        }
+    }
+
+    // Under the engine lock: removes a database whose close ended, when the registry still holds
+    // that instance (a reopen may have registered a new one of the same name).
+    private void ForgetLocked(BlobDatabase database)
+    {
+        if (_databases.TryGetValue(database.Name, out var tracked) && ReferenceEquals(tracked, database))
+        {
+            _databases.Remove(database.Name);
+            RebuildSnapshot();
         }
     }
 

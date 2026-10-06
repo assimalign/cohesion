@@ -22,8 +22,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await PutAsync(collection, session, "c", "{\"name\":\"third\",\"profile\":null,\"tags\":[]}");
         await PutAsync(collection, session, "b", "{\"name\":\"second\",\"other\":true}");
         await PutAsync(collection, session, "a", "{\"name\":\"first\",\"profile\":{\"city\":\"Paris\"},\"tags\":[\"blue\",{\"kind\":\"nested\"}]}");
@@ -47,8 +47,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         string content = "42";
         for (int i = 0; i < depth; i++) { content = "{\"x\":" + content + "}"; }
         string path = string.Join('.', Enumerable.Repeat("x", depth));
@@ -68,8 +68,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await PutAsync(collection, session, "d", "{\"category\":\"b\",\"amount\":4}");
         await PutAsync(collection, session, "c", "{\"category\":\"a\"}");
         await PutAsync(collection, session, "b", "{\"category\":\"a\",\"amount\":6}");
@@ -92,8 +92,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await PutAsync(collection, session, "a", "{\"key\":{\"a\":1,\"b\":[2,3]}}");
         await PutAsync(collection, session, "b", "{\"key\":{\"b\":[2.0,3],\"a\":1.0}}");
         await PutAsync(collection, session, "c", "{\"key\":[1,2]}");
@@ -111,8 +111,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await PutAsync(collection, session, "a", "{\"category\":\"b\",\"amount\":3,\"key\":1}");
         await PutAsync(collection, session, "b", "{\"category\":\"a\",\"amount\":2,\"key\":\"1\"}");
         await PutAsync(collection, session, "c", "{\"category\":\"a\",\"amount\":4,\"key\":2}");
@@ -134,8 +134,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await PutAsync(collection, session, "d", "{\"name\":\"four\",\"score\":4}");
         await PutAsync(collection, session, "c", "{\"name\":\"three\",\"score\":3}");
         await PutAsync(collection, session, "b", "{\"name\":\"two\",\"score\":2.0}");
@@ -168,8 +168,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await session.ExecuteAsync("CREATE INDEX by_nested ON items (values[0].number)");
         await PutAsync(collection, session, "a", "{\"name\":\"a\",\"values\":[{\"number\":1}]}");
         await PutAsync(collection, session, "b", "{\"name\":\"b\",\"values\":[{\"number\":2}]}");
@@ -193,8 +193,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await PutAsync(collection, session, "a", "{\"name\":\"match\",\"unusual.field\":{\"odd'name\":2}}");
         await PutAsync(collection, session, "b", "{\"name\":\"other\",\"unusual.field\":{\"odd'name\":3}}");
         const string query = "SELECT name FROM items WHERE \"unusual.field\"['odd''name'] = 2";
@@ -217,10 +217,10 @@ public sealed class DocumentQueryTests
             await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
             {
                 var seedDatabase = await engine.CreateDatabaseAsync("test");
-                var collection = await seedDatabase.CreateCollectionAsync("items");
                 await using var seedSession = await seedDatabase.CreateSessionAsync();
+                var collection = await seedSession.CreateCollectionAsync("items");
                 await PutAsync(collection, seedSession, "a", "{\"name\":\"match\",\"postal-code\":2}");
-                await seedDatabase.RunAsync(null, async operation =>
+                await seedDatabase.RunAsync(seedSession, async operation =>
                 {
                     await seedDatabase.LockWriterAsync(operation.Context, CancellationToken.None);
                     var metadata = seedDatabase.Catalog.FindCollection("items", operation.Context.Snapshot).ShouldNotBeNull();
@@ -249,8 +249,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await PutAsync(collection, session, "a", "{\"score\":\"a\"}");
         await PutAsync(collection, session, "b", "{\"score\":\"\\uD800\\uDC00\"}");
         await PutAsync(collection, session, "c", "{\"score\":\"\\uE000\"}");
@@ -271,8 +271,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await PutAsync(collection, session, "a", "{\"score\":false}");
         await PutAsync(collection, session, "b", "{\"score\":true}");
         await PutAsync(collection, session, "c", "{\"score\":1}");
@@ -291,8 +291,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await PutAsync(collection, session, "a", "{\"name\":\"null\",\"score\":null}");
         await PutAsync(collection, session, "b", "{\"name\":\"missing\"}");
         await PutAsync(collection, session, "c", "{\"name\":\"number\",\"score\":1}");
@@ -309,8 +309,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await PutAsync(collection, session, "c", "[1,{\"a\":true}]");
         await PutAsync(collection, session, "b", "\"text\"");
         await PutAsync(collection, session, "a", "42");
@@ -329,8 +329,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        await session.CreateCollectionAsync("items");
         await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(DocumentQueryRequest.FromOql(query)));
     }
 
@@ -339,8 +339,8 @@ public sealed class DocumentQueryTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        await session.CreateCollectionAsync("items");
         var statement = (OqlQueryStatement)new OqlQueryParser().Parse("SELECT * FROM items LIMIT 1");
         var exception = await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(new DocumentQueryRequest(statement)));
         exception.Message.ShouldContain("COHDBL001");
@@ -360,8 +360,12 @@ public sealed class DocumentQueryTests
         }
     }
 
-    private static ValueTask<DocumentPlan> PlanAsync(DocumentDatabase database, string query, IReadOnlyDictionary<string, object?>? parameters = null)
-        => database.RunAsync(null, operation => new ValueTask<DocumentPlan>(new DocumentPlanner(database.Catalog,
+    // Plans in a statement of a session of its own: every statement has a session (owner decision 32).
+    private static async ValueTask<DocumentPlan> PlanAsync(DocumentDatabase database, string query, IReadOnlyDictionary<string, object?>? parameters = null)
+    {
+        await using var session = await database.CreateSessionAsync();
+        return await database.RunAsync(session, operation => new ValueTask<DocumentPlan>(new DocumentPlanner(database.Catalog,
             operation.Context.Snapshot, parameters).Plan(
                 (OqlSelectExpression)DocumentQueryRequest.FromOql(query).Statement.OqlExpression)), CancellationToken.None);
+    }
 }

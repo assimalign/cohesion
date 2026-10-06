@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -318,8 +319,8 @@ public sealed class DocumentWorkerResilienceTests
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
         var faults = strategy.Faults(Failing);
-        var items = await failing.GetCollectionAsync("items");
         await using var session = await failing.CreateSessionAsync();
+        var items = await session.GetCollectionAsync("items");
 
         // Act: the failing database's journal drain, or its fsync, fails under the worker's group
         // flush.
@@ -369,8 +370,8 @@ public sealed class DocumentWorkerResilienceTests
         await PutAsync(failing, 0, 10);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
-        var items = await failing.GetCollectionAsync("items");
         await using var session = await failing.CreateSessionAsync();
+        var items = await session.GetCollectionAsync("items");
 
         // Act: the next checkpoint's header slot write fails.
         faults.FailHeaderWrites = true;
@@ -442,12 +443,13 @@ public sealed class DocumentWorkerResilienceTests
         await using var engine = DocumentDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await CreateAsync(engine, Failing);
         var faults = strategy.Faults(Failing);
-        var items = await failing.GetCollectionAsync("items");
         await using var holder = await failing.CreateSessionAsync();
         await using var queued = await failing.CreateSessionAsync();
+        var items = await holder.GetCollectionAsync("items");
+        var queuedItems = await queued.GetCollectionAsync("items");
         _ = await holder.BeginTransactionAsync();
         await items.PutAsync(holder, "held", Doc("held"));
-        var waiting = items.PutAsync(queued, "queued", Doc("queued")).AsTask();
+        var waiting = queuedItems.PutAsync(queued, "queued", Doc("queued")).AsTask();
 
         // The queued writer's transaction is open beside the holder's, and its write has not
         // completed, on a database still online.
@@ -508,12 +510,14 @@ public sealed class DocumentWorkerResilienceTests
     /// <summary>
     /// A database its holder closed outside the engine, directly or through a session's
     /// <see cref="DocumentDatabaseSession.Database"/> (option B of the concrete-types plan, §6.6:
-    /// the session's database is the unbound database), stays registered, so the engine refuses
-    /// to reopen it until it is dropped; but the engine's workers skip it, so every pass succeeds,
-    /// no worker records a failure, the engine stays <see cref="EngineState.Running"/>, and its
-    /// other database keeps its work. Before the workers skipped a closed database, the
+    /// the session's database is the unbound database), leaves the engine's workers passing:
+    /// every pass succeeds, no worker records a failure, the engine stays
+    /// <see cref="EngineState.Running"/>, and its other database keeps its work. Once the close
+    /// ends the engine forgets the database, and the next open opens it again from its files with
+    /// its documents (owner decision 33, #1289). Before the workers skipped a closed database, the
     /// version-purge worker failed on its disposed coordinator every pass, and the engine reported
-    /// <see cref="EngineState.Faulted"/> for good.
+    /// <see cref="EngineState.Faulted"/> for good; until decision 33 the engine refused the reopen
+    /// with <see cref="ObjectDisposedException"/> until the database was dropped.
     /// </summary>
     /// <param name="throughSession">Whether the database is closed through a session's database rather than directly.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Documents] - Workers: a database closed outside the engine is skipped, and the engine stays running")]
@@ -556,7 +560,76 @@ public sealed class DocumentWorkerResilienceTests
         engine.State.ShouldBe(EngineState.Running);
         engine.OfflineDatabases.ShouldBeEmpty();
         (await CountAsync(open)).ShouldBe(20);
-        await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.OpenDatabaseAsync(Failing, token));
+        engine.TryGetDatabase(Failing, out _).ShouldBeFalse();
+        var reopened = await engine.OpenDatabaseAsync(Failing, token);
+        reopened.ShouldNotBeSameAs(closed);
+        (await CountAsync(reopened)).ShouldBe(20);
+    }
+
+    /// <summary>
+    /// A database a holder closed outside the engine is forgotten once its close ends, so the next
+    /// open opens it again, a new instance with every document it held, in memory as on disk
+    /// (owner decision 33, #1289; #1272's in-memory reopen): the engine keeps an in-memory
+    /// database's files for its own lifetime, and the open runs recovery over them as it does over
+    /// files. The reopened database takes writes, and a second close and open keeps them too.
+    /// Until decision 33 the engine refused the reopen with <see cref="ObjectDisposedException"/>
+    /// until the database was dropped, and an in-memory engine could not have reopened it at all.
+    /// </summary>
+    /// <param name="onDisk">True for a file-backed engine; false for an in-memory one.</param>
+    /// <param name="throughSession">Whether the database is closed through a session's database rather than directly.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Lifecycle: a database closed outside the engine reopens with its documents, in memory and on disk")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task OpenDatabaseAsync_DatabaseClosedOutsideTheEngine_ShouldReopenItWithItsDocuments(bool onDisk, bool throughSession)
+    {
+        // Arrange: a database with committed documents, and one more in an uncommitted transaction.
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-reopen-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var engine = DocumentDatabaseEngine.Create(onDisk ? new() { RootPath = root } : new());
+            var database = await CreateAsync(engine, Failing);
+            await PutAsync(database, 0, 20);
+            var session = await database.CreateSessionAsync();
+            var items = await session.GetCollectionAsync("items");
+            _ = await session.BeginTransactionAsync();
+            await items.PutAsync(session, "uncommitted", Doc("uncommitted"));
+
+            // Act: close the database outside the engine, then open it again, write to it, and
+            // close and open it once more.
+            if (throughSession)
+            {
+                await session.Database.DisposeAsync();
+            }
+            else
+            {
+                await database.DisposeAsync();
+            }
+
+            bool foundAfterTheClose = engine.TryGetDatabase(Failing, out _);
+            var reopened = await engine.OpenDatabaseAsync(Failing);
+            int afterTheReopen = await CountAsync(reopened);
+            await PutAsync(reopened, 20, 5);
+            await reopened.DisposeAsync();
+            var again = await engine.OpenDatabaseAsync(Failing);
+
+            // Assert
+            foundAfterTheClose.ShouldBeFalse();
+            reopened.ShouldNotBeSameAs(database);
+            afterTheReopen.ShouldBe(20);
+            again.ShouldNotBeSameAs(reopened);
+            (await CountAsync(again)).ShouldBe(25);
+            engine.State.ShouldBe(EngineState.Running);
+            await session.DisposeAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     /// <summary>
@@ -579,7 +652,6 @@ public sealed class DocumentWorkerResilienceTests
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = DocumentDatabaseEngine.Create(Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
         var failing = await CreateAsync(engine, Failing);
-        var items = await failing.GetCollectionAsync("items");
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
         faults.FailPageWrites = true;
@@ -590,6 +662,7 @@ public sealed class DocumentWorkerResilienceTests
         // through the close, so no checkpoint of the storage can run from here on either.
         await using (var session = await failing.CreateSessionAsync())
         {
+            var items = await session.GetCollectionAsync("items");
             var transaction = await session.BeginTransactionAsync();
             await items.PutAsync(session, "rolled", Doc("rolled"));
             faults.FailPageWrites = false;
@@ -797,7 +870,11 @@ public sealed class DocumentWorkerResilienceTests
     private static async Task<DocumentDatabase> CreateAsync(DocumentDatabaseEngine engine, string name)
     {
         var database = await engine.CreateDatabaseAsync(name);
-        await database.CreateCollectionAsync("items");
+        await using (var setup = await database.CreateSessionAsync())
+        {
+            await setup.CreateCollectionAsync("items");
+        }
+
         return database;
     }
 
@@ -806,8 +883,8 @@ public sealed class DocumentWorkerResilienceTests
 
     private static async Task PutAsync(DocumentDatabase database, int first, int count)
     {
-        var items = await database.GetCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var items = await session.GetCollectionAsync("items");
         for (int id = first; id < first + count; id++)
         {
             await items.PutAsync(session, $"k{id}", Doc($"k{id}"));
@@ -817,8 +894,8 @@ public sealed class DocumentWorkerResilienceTests
     private static async Task<List<TimeSpan>> TimedPutsAsync(DocumentDatabase database, int count)
     {
         var latencies = new List<TimeSpan>();
-        var items = await database.GetCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var items = await session.GetCollectionAsync("items");
         for (int id = 0; id < count; id++)
         {
             var watch = Stopwatch.StartNew();

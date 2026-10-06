@@ -53,7 +53,7 @@ internal sealed class BlobCheckpointWorker : DatabaseCheckpointWorker<BlobDataba
     /// <remarks>
     /// False for a database its holder closed (directly or through a session's
     /// <see cref="BlobDatabaseSession.Database"/>, which is the same instance), which the engine
-    /// keeps registered to refuse its reopen. A close that was not idle (a writer the close kept in
+    /// keeps registered until its close ends and then forgets. A close that was not idle (a writer the close kept in
     /// flight, #1226) leaves the journal untruncated, so without this the closed storage would stay
     /// due for a checkpoint it refuses with <c>StorageTransactionException</c>, which
     /// <see cref="IsOpen"/> does not cover, and a failure recorded for the database would never end.

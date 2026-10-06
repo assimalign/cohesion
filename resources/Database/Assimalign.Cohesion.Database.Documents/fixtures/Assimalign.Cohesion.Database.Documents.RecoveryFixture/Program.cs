@@ -21,8 +21,8 @@ string original = "{\"rank\":1,\"nested\":{\"array\":[true,null,\"" + new string
 if (args[0] == "seed")
 {
     var database = await engine.CreateDatabaseAsync("crash");
-    var collection = await database.CreateCollectionAsync("items");
     await using var session = await database.CreateSessionAsync();
+    var collection = await session.CreateCollectionAsync("items");
     await collection.PutAsync(session, "committed", Encoding.UTF8.GetBytes(original));
     await session.ExecuteAsync("CREATE INDEX by_rank ON items (rank)");
     await session.BeginTransactionAsync();
@@ -44,8 +44,8 @@ if (args[0] == "seed")
 else if (args[0] == "verify")
 {
     var database = await engine.OpenDatabaseAsync("crash");
-    var collection = await database.GetCollectionAsync("items");
     await using var session = await database.CreateSessionAsync();
+    var collection = await session.GetCollectionAsync("items");
     var document = await collection.GetAsync(session, "committed");
     if (document is null || Encoding.UTF8.GetString(document.Value.Content.Span) != original)
     {

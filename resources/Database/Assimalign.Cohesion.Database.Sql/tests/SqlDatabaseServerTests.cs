@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
@@ -304,15 +305,15 @@ public class SqlDatabaseServerTests
 
     /// <summary>
     /// A database closed outside the engine (disposed directly, or through a session's
-    /// <see cref="SqlDatabaseSession.Database"/>) closes that database alone. The engine keeps it
-    /// registered until it is dropped (an open hands back the closed instance, whose use throws
-    /// <see cref="ObjectDisposedException"/>), but its workers skip it, so the
-    /// engine stays <see cref="EngineState.Running"/> and its server keeps serving the engine's
-    /// other databases. Before the workers skipped a closed database, the version-purge worker
-    /// failed on its disposed transaction manager every pass and the checkpointer on its disposed
-    /// journal once it was due, the engine reported <see cref="EngineState.Faulted"/> for good, and
-    /// its health and its operators saw a fault no pass could clear (the closed-database fault the
-    /// Blob review found, fixed here for SQL).
+    /// <see cref="SqlDatabaseSession.Database"/>) closes that database alone. Its workers skip it, so
+    /// the engine stays <see cref="EngineState.Running"/> and its server keeps serving the engine's
+    /// other databases; once the close ends the engine forgets it, and the next open opens it again
+    /// with its rows (owner decision 33, #1289; until then an open handed back the closed instance,
+    /// whose use threw <see cref="ObjectDisposedException"/>). Before the workers skipped a closed
+    /// database, the version-purge worker failed on its disposed transaction manager every pass and
+    /// the checkpointer on its disposed journal once it was due, the engine reported
+    /// <see cref="EngineState.Faulted"/> for good, and its health and its operators saw a fault no
+    /// pass could clear (the closed-database fault the Blob review found, fixed here for SQL).
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server: databases closed outside the engine leave it running and its server serving")]
     public async Task DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing()
@@ -364,9 +365,32 @@ public class SqlDatabaseServerTests
         harness.Engine.OfflineDatabases.ShouldBeEmpty();
         ids.ShouldBe(new object?[] { 1, 2, 3 });
         harness.Server.Sessions.Single().DatabaseSession!.Database.Name.ToString().ShouldBe(ServerTestHarness.DatabaseName);
-        await Should.ThrowAsync<ObjectDisposedException>(async () => await (await harness.Engine.OpenDatabaseAsync("closed-through-session", TestTimeout.Token())).CreateSessionAsync(TestTimeout.Token()));
-        await Should.ThrowAsync<ObjectDisposedException>(async () => await (await harness.Engine.OpenDatabaseAsync("closed-directly", TestTimeout.Token())).CreateSessionAsync(TestTimeout.Token()));
         await Should.ThrowAsync<ObjectDisposedException>(async () => await session.Database.CreateSessionAsync(TestTimeout.Token()));
+
+        // Assert: once their closes ended the engine forgot both, and an open opens each again with its rows.
+        harness.Engine.TryGetDatabase("closed-through-session", out _).ShouldBeFalse();
+        var reopenedThroughSession = await harness.Engine.OpenDatabaseAsync("closed-through-session", TestTimeout.Token());
+        var reopenedDirect = await harness.Engine.OpenDatabaseAsync("closed-directly", TestTimeout.Token());
+        reopenedThroughSession.ShouldNotBeSameAs(throughSession);
+        reopenedDirect.ShouldNotBeSameAs(direct);
+        (await CountRowsAsync(reopenedThroughSession)).ShouldBe(2);
+        (await CountRowsAsync(reopenedDirect)).ShouldBe(1);
+    }
+
+    private static async Task<long> CountRowsAsync(SqlDatabase database)
+    {
+        await using var reader = await database.CreateSessionAsync(TestTimeout.Token());
+        var result = await reader.ExecuteAsync("SELECT COUNT(*) FROM t", cancellationToken: TestTimeout.Token());
+        var set = result.ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
+        await using (set)
+        {
+            await foreach (var row in set.GetRowsAsync())
+            {
+                return Convert.ToInt64(row.GetValue(0));
+            }
+        }
+
+        throw new InvalidOperationException("The count returned no row.");
     }
 
     private static object?[] DecodeRow(byte[] payload)

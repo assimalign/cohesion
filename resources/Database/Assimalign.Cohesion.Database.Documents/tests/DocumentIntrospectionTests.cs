@@ -17,8 +17,8 @@ public sealed class DocumentIntrospectionTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("inventory");
-        await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        await session.CreateCollectionAsync("items");
         (await RowsAsync(session, "SELECT * FROM COHESION_SCHEMA.INDEXES")).ShouldBeEmpty();
         await session.ExecuteAsync("CREATE INDEX by_city ON items (addresses[0]['postal-code'])");
         await session.ExecuteAsync("CREATE INDEX by_name ON items (name)");
@@ -39,7 +39,7 @@ public sealed class DocumentIntrospectionTests
 
         await session.ExecuteAsync("DROP INDEX by_city ON items");
         (await RowsAsync(session, "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES")).Single().GetString(0).ShouldBe("by_name");
-        await database.DropCollectionAsync("items");
+        await session.DropCollectionAsync("items");
         (await RowsAsync(session, "SELECT * FROM COHESION_SCHEMA.INDEXES")).ShouldBeEmpty();
         (await RowsAsync(session, "SELECT * FROM COHESION_SCHEMA.OBJECT_OWNERSHIP")).ShouldBeEmpty();
     }
@@ -49,9 +49,9 @@ public sealed class DocumentIntrospectionTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("inventory");
-        await database.CreateCollectionAsync("adhoc");
-        await database.CreateCollectionAsync("owned");
         await using var session = await database.CreateSessionAsync();
+        await session.CreateCollectionAsync("adhoc");
+        await session.CreateCollectionAsync("owned");
         await session.ExecuteAsync("CREATE INDEX by_name ON owned (name)");
         var context = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
         var metadata = database.Catalog.FindCollection("owned", context.Snapshot).ShouldNotBeNull();
@@ -76,7 +76,7 @@ public sealed class DocumentIntrospectionTests
         error.Message.ShouldContain(rows[1].GetString(5)!);
 
         var collections = new List<string>();
-        await foreach (var collection in database.GetCollectionsAsync()) { collections.Add(collection.Name); }
+        await foreach (var collection in session.GetCollectionsAsync()) { collections.Add(collection.Name); }
         collections.ShouldBe(["adhoc", "owned"]);
     }
 
@@ -85,8 +85,8 @@ public sealed class DocumentIntrospectionTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("inventory");
-        await database.CreateCollectionAsync("items");
         await using var reader = await database.CreateSessionAsync();
+        await reader.CreateCollectionAsync("items");
         await using var writer = await database.CreateSessionAsync();
         await using (var transaction = await reader.BeginTransactionAsync())
         {
@@ -121,8 +121,8 @@ public sealed class DocumentIntrospectionTests
         }
         (await Should.ThrowAsync<DatabaseException>(async () => await session.CreateCollectionAsync(name))).Message.ShouldBe(expected);
         (await Should.ThrowAsync<DatabaseException>(async () => await session.DropCollectionAsync(name))).Message.ShouldBe(expected);
-        (await Should.ThrowAsync<DatabaseException>(async () => await database.CreateCollectionAsync(name.ToLowerInvariant()))).Message.ShouldBe(expected);
-        (await Should.ThrowAsync<DatabaseException>(async () => await database.DropCollectionAsync(name.ToLowerInvariant()))).Message.ShouldBe(expected);
+        (await Should.ThrowAsync<DatabaseException>(async () => await session.CreateCollectionAsync(name.ToLowerInvariant()))).Message.ShouldBe(expected);
+        (await Should.ThrowAsync<DatabaseException>(async () => await session.DropCollectionAsync(name.ToLowerInvariant()))).Message.ShouldBe(expected);
     }
 
     [Theory]
@@ -143,11 +143,11 @@ public sealed class DocumentIntrospectionTests
         await using var engine = DocumentDatabaseEngine.Create(new());
         var own = await engine.CreateDatabaseAsync("own");
         var other = await engine.CreateDatabaseAsync("other");
-        await own.CreateCollectionAsync("items");
-        await other.CreateCollectionAsync("items");
-        await other.CreateCollectionAsync("private");
         await using var ownSession = await own.CreateSessionAsync();
         await using var otherSession = await other.CreateSessionAsync();
+        await ownSession.CreateCollectionAsync("items");
+        await otherSession.CreateCollectionAsync("items");
+        await otherSession.CreateCollectionAsync("private");
         await ownSession.ExecuteAsync("CREATE INDEX by_value ON items (ownValue)");
         await otherSession.ExecuteAsync("CREATE INDEX by_value ON items (otherValue)");
         var rows = await RowsAsync(ownSession, "SELECT COLLECTION_CATALOG, PATH FROM COHESION_SCHEMA.INDEXES");
