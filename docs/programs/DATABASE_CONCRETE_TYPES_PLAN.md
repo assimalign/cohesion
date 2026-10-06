@@ -561,6 +561,14 @@ refusal wording folded in:
     "already active" (or the open transaction's refusal), then the token, and only then calls the
     leaf's core, where the isolation-level and offline refusals move. A BEGIN that fails two ways
     now reports the base's refusal.
+  - *The token before the core* (KeyValuePair P4 review). `DatabaseInstance.CreateSessionAsync`
+    and both `DatabaseSession.ExecuteAsync` seams check the token before the leaf's core. Where a
+    model checked its offline database or its transaction's refusal before the token, a canceled
+    token now gets `OperationCanceledException` instead of the model's code.
+  - *Databases that fail to close* (KeyValuePair P4 review). The engine base adds whatever the
+    leaf's `DisposeAsyncCore` throws to its aggregate as one component, so a leaf that aggregates
+    several database failures reports them nested one level down, where a model's single
+    aggregate held each failure directly.
   - *The engine's guards* (row 5). `GetDatabasesAsync` checks disposal and the token when it is
     called; every model's iterator checked disposal at its first `MoveNextAsync`. The other members
     check the name, then disposal, then the token; Sql and KeyValuePair checked disposal first and
@@ -609,35 +617,52 @@ and a command is admitted into the explicit transaction through the base's
 `protected internal`, which a model session cannot reach). Each change of this section is
 accounted for:
 
-- *Asserted in the model's suites:* the "already active" message and BEGIN's refusal order (a
-  Serializable BEGIN on an active session gets the "already active" message, and the Serializable
-  refusal only when no transaction is open), the closed-session message for BEGIN and both execute
-  seams (`KeyValueTransactionFailureTests`); "The transaction is Committed; a committed transaction
-  cannot roll back." and "The transaction is RolledBack." (same suite, the first replacing a
-  `Contains("Committed")`); "An operation of the transaction is still running; commit after it
-  completes." (`KeyValueLifecycleTests`, replacing a `Contains("still running")`); the teardown
-  cause "The session closed before the transaction ended." (`KeyValueTransactionFailureTests`);
-  the engine's guard order, the enumeration's disposal check at its call and `TryGetDatabase`'s new
-  name check (`KeyValueEngineLifecycleTests`); the engine disposal aggregate's message, the blank
-  `EngineName` refusal, the duplicate and blank worker names and the composition paths of §6.5
-  (`KeyValueEngineCompositionTests`).
+- *Asserted in the model's suites:*
+  - *BEGIN's refusal order.* A Serializable BEGIN on an active session gets the "already active"
+    message, and the Serializable refusal only when no transaction is open
+    (`KeyValueTransactionFailureTests`). On an offline database, BEGIN from the session that holds
+    an open transaction gets the "already active" message where it got `COHDBK002`
+    (`KeyValueStorageOperationsTests`). BEGIN refuses a transaction the kernel ended under its
+    caller with `COHDBK001` before it checks a canceled token, where it threw the token's
+    `OperationCanceledException` (`KeyValueTransactionFailureTests`, the database dropped under
+    the session).
+  - *The token before the core.* `CreateSessionAsync` and both execute seams check the token
+    before their cores, so a canceled token gets `OperationCanceledException` where an offline
+    database (`COHDBK002`, `KeyValueStorageOperationsTests`) or a transaction that refuses
+    commands (`COHDBK001`, `KeyValueTransactionFailureTests`) was reported first.
+  - *Messages.* The closed-session message for BEGIN and both execute seams
+    (`KeyValueTransactionFailureTests`); "The transaction is Committed; a committed transaction
+    cannot roll back." and "The transaction is RolledBack." (same suite, the first replacing a
+    `Contains("Committed")`); "An operation of the transaction is still running; commit after it
+    completes." (`KeyValueLifecycleTests`, replacing a `Contains("still running")`); the teardown
+    cause "The session closed before the transaction ended." (`KeyValueTransactionFailureTests`).
+  - *The offline teardown's state.* A transaction whose session closed while its database was
+    offline (the teardown rolls nothing back) reports `Faulted`, where the model reported
+    `Active`; it refuses everything either way (`KeyValueStorageOperationsTests`, and the root
+    suite's `DisposeCloseAbort_Offline_ShouldNotRollBack`).
+  - *The engine.* The guard order, the enumeration's disposal check at its call and
+    `TryGetDatabase`'s new name check (`KeyValueEngineLifecycleTests`). The disposal aggregate's
+    shape when databases fail to close (same suite): the leaf's `DisposeAsyncCore` reports one
+    failure as itself and several in one `AggregateException` ("One or more key-value databases
+    failed to close."), which the base adds to its own aggregate as one component, where the
+    model's single aggregate held each database's failure directly. A fully flat shape needs the
+    base to accept several failures from `DisposeAsyncCore`, a root-base change left to the
+    owner. The disposal aggregate's message, the blank `EngineName` refusal, the duplicate and
+    blank worker names and the composition paths of §6.5 (`KeyValueEngineCompositionTests`).
 - *Not reachable from the model without a kernel hook, pinned by the root suite
   (`DatabaseTransactionTests`, `DatabaseSessionTests`):* the two refused-operation messages ("…
   start the operation after it ends." and "… ended before the operation started; nothing was
-  written.") need the transaction ended with its kernel transaction still active, which happens
-  only while the database closes and the kernel refuses an end before it starts; and the session's
-  "The session failed to close." aggregate needs the session's teardown to fail, which needs the
-  same race (an offline database's teardown touches nothing, and the kernel ends a started rollback
-  whatever fails, #1226). The server session's cleanup now ignores that `AggregateException` where
-  it ignored the `DatabaseException` before, so a connection's teardown still never faults.
+  written.") need the transaction ended with its kernel transaction still active: transiently
+  while a caller's commit or rollback runs, and persistently while the database closes and the
+  kernel refuses an end before it starts; neither can be held open from the model without a
+  kernel hook. The session's "The session failed to close." aggregate needs the session's
+  teardown to fail, which needs the same race (an offline database's teardown touches nothing,
+  and the kernel ends a started rollback whatever fails, #1226). The server session's cleanup now
+  ignores that `AggregateException` where it ignored the `DatabaseException` before, so a
+  connection's teardown still never faults.
 - *Not observable through the public surface, so not asserted:* the worker disposal order (factory
   workers before the built-in ones; the checkpointer's lanes end before the storages close either
-  way), the pump threads' names (KeyValuePair already named them for their workers), and the
-  token check `CreateSessionAsync` and `ExecuteAsync` now make before their cores (the kernel threw
-  the same `OperationCanceledException` from `BeginAsync`).
-- *One state the base reports differently:* a transaction whose session closed while its database
-  was offline (the teardown rolls nothing back) reports `Faulted`, where the model reported
-  `Active`; it refuses everything either way.
+  way) and the pump threads' names (KeyValuePair already named them for their workers).
 
 ### 6.5 Root-base state, attach semantics and typed accessors (rows 1, 5, 9, 12)
 
@@ -729,11 +754,15 @@ hand out unchanged, so the typed member casts the sequence once rather than each
 database's `Engine` and `CreateSessionAsync`, the session's `Database`, `CurrentTransaction` and
 both `BeginTransactionAsync` overloads, and the server's `Engine`. `CurrentTransaction` is not
 construction-fixed state: its `new` getter reads the base's public getter and casts once, on
-the same terms as an async factory (rule 7). `TryGetDatabase` keeps the base's
-`out DatabaseInstance`: an overload with `out KeyValueDatabase` is not hidden by `new` (the
-parameter types differ), and every `out var` or `out _` call would become ambiguous (CS0121); the
-server session casts the one result it reads, and tests use `ShouldBeOfType<KeyValueDatabase>()`.
-The server session overrides `DatabaseSession` covariantly (`KeyValueDatabaseSession?`), but the
+the same terms as an async factory (rule 7). `TryGetDatabase` is typed as an overload, not a
+`new` member: `TryGetDatabase(DatabaseName, out KeyValueDatabase)` differs from the base's
+`out DatabaseInstance` in a parameter type, so it hides nothing (`new` would raise CS0109). It
+calls the base's public member and casts once, so the name and disposal checks run in their
+order. It is not ambiguous: overload resolution drops a base type's candidates once a method of
+the derived type applies (C# §12.8.10.2), so an `out var` or `out _` call on the engine binds the
+typed overload, and an explicitly typed `out DatabaseInstance` binds the base's (P4 review; the
+landing first kept the base type on the contrary belief, and a warnings-as-errors probe disproved
+it). The later model PRs type their lookup the same way. The server session overrides `DatabaseSession` covariantly (`KeyValueDatabaseSession?`), but the
 leaf is internal, so `DatabaseServer.Sessions` stays typed `DatabaseServerSession`.
 
 ### 6.6 Blob and Documents sessions: option B (rows 54, 61)
@@ -1303,9 +1332,10 @@ the code had moved, the row now says what landed:
   - The model's tests, fixtures (including the Documents recovery fixture's casts) and Studio
     workspace are updated. Studio, which is MAUI with `IsPackable=false`, is built in every model
     PR.
-- **KeyValuePair, as landed (re-verified 2026-10-05 against the code after P4.0).** One commit on
-  `refactor/L03.02.01.56.05-concrete-types-p4-kv`. Rows 73 to 77 held against the code, and the
-  leaves landed as the P4 bullets say, with these readings of the code:
+- **KeyValuePair, as landed (re-verified 2026-10-05 against the code after P4.0).** The landing
+  commit on `refactor/L03.02.01.56.05-concrete-types-p4-kv` and its review commit on
+  `refactor/L03.02.01.56.05-concrete-types-p4-kv-review`. Rows 73 to 77 held against the code,
+  and the leaves landed as the P4 bullets say, with these readings of the code:
   - *Leaves.* The engine, database, session, transaction and server are public sealed leaves of
     the bases; the database, session, transaction and builder left `Internal/` for the
     `RootNamespace`. The server session stays an internal sealed leaf (row 11), and the five
@@ -1330,13 +1360,19 @@ the code had moved, the row now says what landed:
   - *Docs.* KeyValuePair `DESIGN.md` ("Concrete types", and the sections that named the
     interfaces) and `OVERVIEW.md`, KeyValuePair.Catalog's `DESIGN.md` and `OVERVIEW.md`, the root
     `DESIGN.md` ("Root bases"), the area record's model table and Indexing's resolver table.
+  - *Review.* The typed `TryGetDatabase` overload (§6.5), which the landing had left root-typed on
+    a false ambiguity claim, so the server session's cast and the tests' `ShouldBeOfType` are
+    gone; assertions for §6.4's offline and token orderings, the offline teardown's `Faulted`
+    state and the nested database-close aggregate, which the landing had left unasserted or
+    called unobservable; the exception docs of the typed operations, the parameterless BEGIN and
+    the catalog's two async writes; and four test names given their scenario segment.
 
   *Gate, as run:* a no-incremental build of every Database project but Database.Testing's tests
   and the SampleHost fixture (they need a local SDK pack) has no Database warning but CS2008 on
   Database.Refs; every Database suite passes with its baseline count (Database.Tests 101, Sql 1087,
   Sql.Language 999, Graph 360, Documents 152, Blob 129, Hosting 53, Embedded 4 and the rest as
-  listed in the phase brief) apart from KeyValuePair.Tests, which grows from 158 to 177 (15
-  composition tests, three session and transaction contract tests, one engine guard test), among
+  listed in the phase brief) apart from KeyValuePair.Tests, which grows from 158 to 179 (15
+  composition tests, four session and transaction contract tests, two engine tests), among
   them the #1188, #1225 and #1226 suites in process (`KeyValueTransactionFailureTests`,
   `KeyValueLifecycleTests`, `KeyValueMvccTests`) and over the wire
   (`KeyValueTransactionFailureWireTests`, KeyValuePair.Client's

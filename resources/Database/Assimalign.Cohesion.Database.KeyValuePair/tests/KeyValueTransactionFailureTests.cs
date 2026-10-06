@@ -204,7 +204,7 @@ public sealed class KeyValueTransactionFailureTests
     /// refusal.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Session: a closed session refuses BEGIN and commands with one message")]
-    public async Task ClosedSession_ShouldRefuseBeginAndCommands()
+    public async Task BeginAndExecute_OnClosedSession_ShouldRefuseWithOneMessage()
     {
         // Arrange
         var (engine, database) = await CreateAsync();
@@ -222,6 +222,45 @@ public sealed class KeyValueTransactionFailureTests
         typed.Message.ShouldBe("The session is closed.");
         text.Message.ShouldBe("The session is closed.");
         session.State.ShouldBe(SessionState.Closed);
+    }
+
+    /// <summary>
+    /// A transaction the kernel ended under its caller (its database was dropped while the session
+    /// held it) refuses work with COHDBK001, and the root bases order that refusal against a
+    /// canceled token (concrete-types plan §6.4): both execute seams check the token first, and
+    /// BEGIN refuses the open transaction before it checks the token. Before the bases, both
+    /// execute seams reported COHDBK001 and BEGIN the canceled token.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Session: a transaction the kernel ended refuses work with COHDBK001; the execute seams check a canceled token first, BEGIN after")]
+    public async Task ExecuteAndBegin_TransactionEndedByTheKernel_ShouldOrderTheTokenAroundTheRefusal()
+    {
+        // Arrange
+        var (engine, database) = await CreateAsync();
+        await using var _ = engine;
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
+        await database.PutAsync(session, Bytes("pending"), Bytes("v"), cancellationToken: TestTimeout.Token());
+        await engine.DropDatabaseAsync(DatabaseName, TestTimeout.Token());
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act
+        var state = transaction.State;
+        var canceledText = await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("SCAN", null, canceled.Token));
+        var canceledTyped = await Should.ThrowAsync<OperationCanceledException>(async () => await database.GetAsync(session, Bytes("pending"), canceled.Token));
+        var canceledBegin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(canceled.Token));
+        var text = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SCAN", null, TestTimeout.Token()));
+        var typed = await Should.ThrowAsync<DatabaseException>(async () => await database.GetAsync(session, Bytes("pending"), TestTimeout.Token()));
+        await transaction.RollbackAsync(TestTimeout.Token());
+
+        // Assert
+        state.ShouldBe(TransactionState.Faulted);
+        canceledText.CancellationToken.ShouldBe(canceled.Token);
+        canceledTyped.CancellationToken.ShouldBe(canceled.Token);
+        canceledBegin.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
+        text.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
+        typed.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
+        session.CurrentTransaction.ShouldBeNull();
     }
 
     /// <summary>A token canceled before a commit or rollback starts leaves the transaction exactly as it was.</summary>

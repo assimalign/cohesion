@@ -79,10 +79,19 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
             names.Add(found.Name);
         }
 
+        // The typed overload binds an out-var lookup; an explicitly typed base out still binds the base's.
+        bool typedFound = engine.TryGetDatabase("kv", out var typed);
+        KeyValueDatabase? lookedUp = typed;
+        bool baseFound = engine.TryGetDatabase("kv", out DatabaseInstance? untyped);
+
         await engine.DropDatabaseAsync("kv", TestTimeout.Token());
 
         // Assert
         names.ShouldBe(["kv"]);
+        typedFound.ShouldBeTrue();
+        lookedUp.ShouldBeSameAs(database);
+        baseFound.ShouldBeTrue();
+        untyped.ShouldBeSameAs(database);
         engine.TryGetDatabase("kv", out _).ShouldBeFalse();
         await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("kv", TestTimeout.Token()));
     }
@@ -110,7 +119,7 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
     /// <c>TryGetDatabase</c>, and checked disposal at the enumeration's first <c>MoveNextAsync</c>.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Engine: the base checks the name, then disposal, then the token, and the enumeration at its call")]
-    public async Task Guards_ShouldCheckNameThenDisposalThenToken()
+    public async Task Members_InvalidNameDisposedOrCanceled_ShouldCheckNameThenDisposalThenToken()
     {
         // Arrange
         var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions());
@@ -131,6 +140,62 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         unnamedCreate.ParamName.ShouldBe("name");
         disposedCreate.ShouldNotBeNull();
         disposedEnumeration.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// Databases that fail to close are one component of the engine's disposal aggregate
+    /// (concrete-types plan §6.4): one failure is reported as itself, and two or more inside one
+    /// nested aggregate, "One or more key-value databases failed to close.". Before the root base,
+    /// the engine's single aggregate held each database's failure directly.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Engine: databases that fail to close are one component of the engine's aggregate, several of them nested")]
+    public async Task DisposeAsync_DatabasesFailToClose_ShouldReportThemAsOneComponent()
+    {
+        // Arrange: quiet workers, and a database of each engine holding a durable write; every
+        // journal flush of the closes fails.
+        var single = await CreateWithWritesAsync("single", databases: 1);
+        var several = await CreateWithWritesAsync("several", databases: 2);
+
+        // Act
+        AggregateException singleFailure;
+        AggregateException severalFailure;
+        using (FaultInjectingJournalStorageStrategy.FailJournalFlushes(100))
+        {
+            singleFailure = await Should.ThrowAsync<AggregateException>(async () => await single.DisposeAsync());
+            severalFailure = await Should.ThrowAsync<AggregateException>(async () => await several.DisposeAsync());
+        }
+
+        // Assert
+        singleFailure.Message.ShouldStartWith("One or more components of engine 'single' failed to close.", Case.Sensitive);
+        singleFailure.InnerExceptions.ShouldHaveSingleItem().ShouldBeOfType<StorageOfflineException>();
+        severalFailure.Message.ShouldStartWith("One or more components of engine 'several' failed to close.", Case.Sensitive);
+        var databases = severalFailure.InnerExceptions.ShouldHaveSingleItem().ShouldBeOfType<AggregateException>();
+        databases.Message.ShouldStartWith("One or more key-value databases failed to close.", Case.Sensitive);
+        databases.InnerExceptions.Count.ShouldBe(2);
+        databases.InnerExceptions.ShouldAllBe(failure => failure is StorageOfflineException);
+        single.State.ShouldBe(EngineState.Disposed);
+        several.State.ShouldBe(EngineState.Disposed);
+
+        static async Task<KeyValueDatabaseEngine> CreateWithWritesAsync(string name, int databases)
+        {
+            var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions
+            {
+                EngineName = name,
+                StorageStrategy = new FaultInjectingJournalStorageStrategy(durable: true),
+                CheckpointInterval = TimeSpan.FromHours(1),
+                PageWriteBackInterval = TimeSpan.FromHours(1),
+                MaintenanceInterval = TimeSpan.FromHours(1),
+            });
+
+            for (int index = 0; index < databases; index++)
+            {
+                var database = await engine.CreateDatabaseAsync($"{name}-{index}", TestTimeout.Token());
+                await using var session = await database.CreateSessionAsync();
+                await database.PutAsync(session, Bytes("key"), Bytes("value"), cancellationToken: TestTimeout.Token());
+            }
+
+            return engine;
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Recovery: Committed entries and the primary index survive a restart over both file sets")]

@@ -408,11 +408,9 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             return null;
         }
 
-        // The base lookup is typed DatabaseInstance (a typed overload would make every out-var
-        // call ambiguous); the key-value engine holds key-value databases only.
         if (_engine.TryGetDatabase(name, out var open))
         {
-            return (KeyValueDatabase)open;
+            return open;
         }
 
         try

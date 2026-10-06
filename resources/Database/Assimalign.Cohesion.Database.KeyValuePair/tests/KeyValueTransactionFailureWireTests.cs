@@ -72,8 +72,7 @@ public sealed class KeyValueTransactionFailureWireTests
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        harness.Engine.TryGetDatabase(KeyValueServerHarness.DatabaseName, out var opened).ShouldBeTrue();
-        var database = opened.ShouldBeOfType<KeyValueDatabase>();
+        harness.Engine.TryGetDatabase(KeyValueServerHarness.DatabaseName, out var database).ShouldBeTrue();
         await using var observer = await database.CreateSessionAsync();
         (await database.GetAsync(observer, Bytes("pending"), TestTimeout.Token())).ShouldBeNull();
     }
@@ -91,8 +90,7 @@ public sealed class KeyValueTransactionFailureWireTests
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
         var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
-        harness.Engine.TryGetDatabase(KeyValueServerHarness.DatabaseName, out var opened).ShouldBeTrue();
-        var database = opened.ShouldBeOfType<KeyValueDatabase>();
+        harness.Engine.TryGetDatabase(KeyValueServerHarness.DatabaseName, out var database).ShouldBeTrue();
         await using var blockingSession = await database.CreateSessionAsync();
         await using var observer = await database.CreateSessionAsync();
         var blocker = await blockingSession.BeginTransactionAsync(TestTimeout.Token());

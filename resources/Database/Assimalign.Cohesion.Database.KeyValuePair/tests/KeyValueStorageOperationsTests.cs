@@ -31,9 +31,12 @@ public sealed class KeyValueStorageOperationsTests
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, a command, BEGIN, COMMIT and ROLLBACK of an open
     /// transaction, over the wire too — is refused with COHDBK002, and nothing reaches either file
-    /// set, through the workers' passes and the sessions' close included. Reopening the database
-    /// runs recovery, which keeps the commit when its record's bytes survived and drops it when
-    /// they were lost with the failed fsync; the open transaction is aborted either way.
+    /// set, through the workers' passes and the sessions' close included. The root bases' checks
+    /// come first (concrete-types plan §6.4): BEGIN on the session holding the open transaction is
+    /// refused as already active, a canceled token is refused before the offline refusal, and the
+    /// transaction whose session closed reports Faulted. Reopening the database runs recovery,
+    /// which keeps the commit when its record's bytes survived and drops it when they were lost
+    /// with the failed fsync; the open transaction is aborted either way.
     /// </summary>
     /// <param name="recordSurvives">False to reopen with only the journal bytes a durable flush confirmed.</param>
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Offline: a failed journal fsync refuses every operation until the reopen, whose recovery decides")]
@@ -97,6 +100,21 @@ public sealed class KeyValueStorageOperationsTests
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.RollbackAsync()),
         };
 
+        // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
+        // open transaction is refused as already active before the offline refusal, and a canceled
+        // token is refused before the offline refusal of a new session, both execute seams and
+        // BEGIN. Before the bases, each of these was refused with COHDBK002.
+        var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync());
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        var canceledCalls = new List<OperationCanceledException>
+        {
+            await Should.ThrowAsync<OperationCanceledException>(async () => await database.CreateSessionAsync(canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await database.GetAsync(session, Bytes("kept"), canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("SCAN", null, canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.BeginTransactionAsync(canceled.Token)),
+        };
+
         // Over the wire: a command on a session opened before the failure, and a new session.
         await wire.SendAsync(ProtocolMessageType.Execute, new ProtocolExecuteMessage("SCAN", new Dictionary<string, byte[]>()).Encode());
         var commandError = ProtocolErrorMessage.Decode((await wire.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
@@ -106,8 +124,10 @@ public sealed class KeyValueStorageOperationsTests
         await late.SendAsync(ProtocolMessageType.AuthenticateResponse);
         var handshakeError = ProtocolErrorMessage.Decode((await late.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
 
-        // Then the sessions close.
+        // Then the sessions close. The open transaction's teardown rolls nothing back on the
+        // offline database, and the transaction reports Faulted (it reported Active before the bases).
         await other.DisposeAsync();
+        var closedState = open.State;
         await session.DisposeAsync();
         var dataBeforeTheReopen = strategy.Capture(name);
         var catalogBeforeTheReopen = strategy.Capture(name + KeyValueDatabaseEngine.CatalogSuffix);
@@ -124,6 +144,9 @@ public sealed class KeyValueStorageOperationsTests
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
         refusals.ShouldAllBe(refusal => refusal.Code == "COHDBK002" && refusal.Message.StartsWith("COHDBK002", StringComparison.Ordinal));
+        activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
+        canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
+        closedState.ShouldBe(TransactionState.Faulted);
         commandError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
         commandError.Message.ShouldStartWith("COHDBK002", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);

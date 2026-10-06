@@ -69,7 +69,11 @@ public sealed class KeyValueDatabaseSession : DatabaseSession
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The new transaction, now the session's transaction.</returns>
-    /// <exception cref="DatabaseException">The session is closed, or a transaction or operation is already active on it.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the transaction began.</exception>
+    /// <exception cref="DatabaseException">
+    /// The session is closed; a transaction or operation is already active on it; or the session's
+    /// transaction refuses work (<c>COHDBK001</c>).
+    /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
     public new async ValueTask<KeyValueDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         => (KeyValueDatabaseTransaction)await base.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);

@@ -38,9 +38,9 @@ using Assimalign.Cohesion.Database.Storage;
 /// state fold, the composition attach and freeze, the argument and disposed checks of every
 /// public member, and the disposal order (servers, the worker pumps and the workers, then
 /// <see cref="DisposeAsyncCore"/>, which closes the databases). The database members are
-/// re-exposed typed with <c>new</c> members over the base's public members.
-/// <see cref="DatabaseEngine.TryGetDatabase"/> keeps its base type: a typed overload would
-/// make every <c>out var</c> call ambiguous.
+/// re-exposed typed with <c>new</c> members over the base's public members, and
+/// <see cref="TryGetDatabase(DatabaseName, out KeyValueDatabase)"/> is a typed overload of the
+/// base's lookup (the parameter types differ, so it hides nothing).
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
@@ -279,6 +279,33 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled when the call is made.</exception>
     public new IAsyncEnumerable<KeyValueDatabase> GetDatabasesAsync(CancellationToken cancellationToken = default)
         => (IAsyncEnumerable<KeyValueDatabase>)base.GetDatabasesAsync(cancellationToken);
+
+    /// <summary>
+    /// Attempts to retrieve an open key-value database by name without throwing when it is not open.
+    /// </summary>
+    /// <param name="name">The name of the database.</param>
+    /// <param name="database">When this method returns true, the database.</param>
+    /// <returns>True when the database is open in the engine; otherwise false.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
+    /// <remarks>
+    /// An overload of the base's <see cref="DatabaseEngine.TryGetDatabase"/>, not a <c>new</c>
+    /// member: the parameter types differ, so nothing is hidden. Overload resolution prefers the
+    /// most derived applicable method, so an <c>out var</c> or <c>out _</c> call on the engine binds
+    /// here, and an explicitly typed <c>out DatabaseInstance</c> binds the base's. It reads the
+    /// base's public member and casts once, so the base's name and disposal checks always run.
+    /// </remarks>
+    public bool TryGetDatabase(DatabaseName name, [MaybeNullWhen(false)] out KeyValueDatabase database)
+    {
+        if (base.TryGetDatabase(name, out var found))
+        {
+            database = (KeyValueDatabase)found;
+            return true;
+        }
+
+        database = null;
+        return false;
+    }
 
     /// <inheritdoc />
     protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)

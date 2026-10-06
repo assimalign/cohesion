@@ -464,7 +464,9 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The entry, or null when the key has no visible, live entry.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
-    /// <exception cref="DatabaseException">Thrown when the session does not belong to this database.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
     public async ValueTask<KeyValueEntry?> GetAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueGetRequest(key), cancellationToken).ConfigureAwait(false);
@@ -491,8 +493,12 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The write outcome: whether it applied, and the new (or current) etag.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
-    /// <exception cref="DatabaseException">Thrown when the session does not belong to this database.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">Thrown when a concurrently committed transaction changed the key (first-updater-wins; retryable).</exception>
+    /// <exception cref="DatabaseTransactionDeadlockException">The command was chosen as a deadlock victim (retryable).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An auto-commit command's commit record could not be confirmed durable.</exception>
     public async ValueTask<KeyValuePutResult> PutAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, ReadOnlyMemory<byte> value, KeyValuePutOptions? options = null, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValuePutRequest(key, value, options), cancellationToken).ConfigureAwait(false);
@@ -518,8 +524,12 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>True when an entry was deleted; false when none was visible or the condition did not hold.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
-    /// <exception cref="DatabaseException">Thrown when the session does not belong to this database.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">Thrown when a concurrently committed transaction changed the key (first-updater-wins; retryable).</exception>
+    /// <exception cref="DatabaseTransactionDeadlockException">The command was chosen as a deadlock victim (retryable).</exception>
+    /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An auto-commit command's commit record could not be confirmed durable.</exception>
     public async ValueTask<bool> TryDeleteAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, long? expectedETag = null, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueDeleteRequest(key, expectedETag), cancellationToken).ConfigureAwait(false);
@@ -534,7 +544,9 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>True when the key has a visible entry; otherwise false.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
-    /// <exception cref="DatabaseException">Thrown when the session does not belong to this database.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
     public async ValueTask<bool> ExistsAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueExistsRequest(key), cancellationToken).ConfigureAwait(false);
@@ -559,7 +571,9 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>An async sequence of visible, live entries in ascending key order.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
-    /// <exception cref="DatabaseException">Thrown when the session does not belong to this database.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
     public async IAsyncEnumerable<KeyValueEntry> ScanAsync(KeyValueDatabaseSession session, KeyValueScanOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueScanRequest(options), cancellationToken).ConfigureAwait(false);

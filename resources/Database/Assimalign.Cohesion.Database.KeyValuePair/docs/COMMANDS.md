@@ -2,7 +2,7 @@
 
 **Status: contract.** This grammar is the key-value model's statement surface —
 the text the session's text-execute seam parses
-(`IDatabaseSession.ExecuteAsync(string, parameters)`), and therefore exactly what
+(`DatabaseSession.ExecuteAsync(string, parameters)`), and therefore exactly what
 rides the wire protocol's Execute message. Like the SQL dialect's `DIALECT.md`,
 changes here change a contract: update the parser
 (`Internal/KeyValueCommandParser.cs`), this document, and the corpus tests

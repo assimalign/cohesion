@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 public sealed class KeyValueEngineCompositionTests
 {
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: products attach in order, a later factory sees the earlier product, and the engine and builder freeze")]
-    public async Task Build_ShouldAttachProductsInOrderAndFreeze()
+    public async Task Build_WithWorkerAndServerFactories_ShouldAttachInOrderAndFreeze()
     {
         // Arrange
         var builder = KeyValueDatabaseEngine.CreateBuilder();
@@ -60,7 +60,7 @@ public sealed class KeyValueEngineCompositionTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Composition: an engine created without its builder takes no worker or server")]
-    public async Task Create_ShouldCompleteCompositionAtOnce()
+    public async Task Create_WithoutBuilder_ShouldCompleteCompositionAtOnce()
     {
         // Arrange
         await using var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "standalone" });

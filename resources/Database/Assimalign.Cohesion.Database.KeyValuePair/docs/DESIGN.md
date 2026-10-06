@@ -612,9 +612,11 @@ are sealed leaves; it has no public interface left, and no `Abstractions/` folde
   `CurrentTransaction` and both `BeginTransactionAsync` overloads
   (`KeyValueDatabaseTransaction`); the server its `Engine`. Each `new` member awaits
   or reads the base's public member and casts once, so the base's checks always run.
-  `TryGetDatabase` keeps the base's `DatabaseInstance`: a typed overload would make
-  every `out var` call ambiguous. The typed operations (`GetAsync` and its siblings)
-  take a `KeyValueDatabaseSession`.
+  `TryGetDatabase(DatabaseName, out KeyValueDatabase)` is a typed overload of the base's
+  lookup, not a `new` member (the parameter types differ): it calls the base's public
+  member and casts once, an `out var` or `out _` call on the engine binds it, and an
+  explicitly typed `out DatabaseInstance` binds the base's. The typed operations
+  (`GetAsync` and its siblings) take a `KeyValueDatabaseSession`.
 - **What the bases own now.** The engine base owns the name, the model, the workers'
   pumps (the model no longer compiles `shared/DatabaseEngineWorkerPump.cs`), the state
   fold, composition and the disposal order (servers, the pumps and the workers, then
@@ -629,8 +631,14 @@ are sealed leaves; it has no public interface left, and no `Abstractions/` folde
 - **What changed for a caller** (plan §6.4): BEGIN on an active session fails with
   "A transaction or operation is already active on this session." (was "A transaction
   is already active on this session."), and fails that way before the Serializable and
-  offline refusals; a closed session fails with "The session is closed." (was "Session
-  is not open. Current state: Closed."); a rollback after a commit fails with "The
+  offline refusals; BEGIN refuses a transaction the kernel ended under its caller
+  (`COHDBK001`) before it checks the token, where a canceled token was reported first; a
+  canceled token is refused by `CreateSessionAsync` and both execute seams before the
+  offline (`COHDBK002`) and refusing-transaction (`COHDBK001`) refusals, which were
+  reported first; a transaction whose session closed while its database was offline
+  reports `Faulted` (was `Active`), and refuses everything either way; a closed session
+  fails with "The session is closed." (was "Session is not open. Current state:
+  Closed."); a rollback after a commit fails with "The
   transaction is Committed; a committed transaction cannot roll back." and a commit of
   an ended transaction with "The transaction is {state}." (both were "Cannot … in
   state …"); a commit while a command runs fails with "An operation of the transaction
@@ -640,7 +648,10 @@ are sealed leaves; it has no public interface left, and no `Abstractions/` folde
   transaction ended."; a session that fails to close reports one `AggregateException`
   ("The session failed to close."), where the transaction's failure escaped
   unwrapped; and the engine's disposal aggregate is "One or more components of engine
-  '{name}' failed to close." (was "Engine disposal encountered failures."). The
+  '{name}' failed to close." (was "Engine disposal encountered failures."). When two or
+  more databases fail to close, the engine aggregate carries them inside one nested
+  `AggregateException` ("One or more key-value databases failed to close."), where each
+  was an inner exception of the engine's; one failure stays flat. The
   engine's guards check the name, then disposal, then the token (disposal used to
   come first, and `TryGetDatabase` did not check the name), `GetDatabasesAsync` checks
   disposal when it is called, and a blank `EngineName` is refused by `Create` and
