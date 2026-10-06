@@ -3,7 +3,6 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
 using Xunit;
@@ -32,12 +31,12 @@ public sealed class BlobLifecycleTests
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("lifecycle", timeout.Token);
+        var database = await engine.CreateDatabaseAsync("lifecycle", timeout.Token);
         var container = await database.CreateContainerAsync("files", timeout.Token);
         await using var first = await database.CreateSessionAsync(timeout.Token);
         await using var waiting = await database.CreateSessionAsync(timeout.Token);
-        var firstFiles = await ((IBlobDatabase)first.Database).GetContainerAsync("files", timeout.Token);
-        var waitingFiles = await ((IBlobDatabase)waiting.Database).GetContainerAsync("files", timeout.Token);
+        var firstFiles = await first.GetContainerAsync("files", timeout.Token);
+        var waitingFiles = await waiting.GetContainerAsync("files", timeout.Token);
         await using var firstTransaction = await first.BeginTransactionAsync(timeout.Token);
         await Write(firstFiles, "first", timeout.Token);
         await using var waitingTransaction = await waiting.BeginTransactionAsync(isolation, timeout.Token);
@@ -100,14 +99,14 @@ public sealed class BlobLifecycleTests
             Exception deleteError;
             await using (var engine = BlobDatabaseEngine.Create(options))
             {
-                var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("db", timeout.Token);
+                var database = await engine.CreateDatabaseAsync("db", timeout.Token);
                 var container = await database.CreateContainerAsync("files", timeout.Token);
                 await using (var upload = await container.OpenWriteAsync("big", cancellationToken: timeout.Token))
                 {
                     await upload.WriteAsync(content, timeout.Token);
                 }
                 var session = await database.CreateSessionAsync(timeout.Token);
-                var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files", timeout.Token);
+                var files = await session.GetContainerAsync("files", timeout.Token);
                 var transaction = await session.BeginTransactionAsync(timeout.Token);
 
                 // Another transaction's statement holds the apply gate, so the delete takes the writer
@@ -143,7 +142,7 @@ public sealed class BlobLifecycleTests
             }
 
             await using var reopened = BlobDatabaseEngine.Create(options);
-            var loaded = (BlobDatabaseInstance)await reopened.OpenDatabaseAsync("db", timeout.Token);
+            var loaded = await reopened.OpenDatabaseAsync("db", timeout.Token);
             loaded.Coordinator.RunVersionPurgePass(timeout.Token);
             var loadedFiles = await loaded.GetContainerAsync("files", timeout.Token);
             var properties = await loadedFiles.GetPropertiesAsync("big", timeout.Token);
@@ -164,13 +163,13 @@ public sealed class BlobLifecycleTests
         }
     }
 
-    private static async Task Write(IBlobContainer container, string name, CancellationToken cancellationToken)
+    private static async Task Write(BlobContainer container, string name, CancellationToken cancellationToken)
     {
         await using var stream = await container.OpenWriteAsync(name, cancellationToken: cancellationToken);
         await stream.WriteAsync(Encoding.UTF8.GetBytes(name), cancellationToken);
     }
 
-    private static async Task<byte[]> Read(IBlobContainer container, string name, CancellationToken cancellationToken)
+    private static async Task<byte[]> Read(BlobContainer container, string name, CancellationToken cancellationToken)
     {
         await using var stream = await container.OpenReadAsync(name, cancellationToken);
         using var buffer = new MemoryStream();

@@ -42,7 +42,7 @@ call protected cores (the ADO.NET shape). Phase 3 of
 the interfaces: each base still implements its old interface (explicitly where the base retypes a
 member), so `Database.Hosting`, `Database.Embedded` and every model keep compiling against the
 interfaces. Each model moves its leaves onto them in its own phase-4 PR (#1260), KeyValuePair
-first, Graph second and Documents third, and phase 6 deletes the interfaces; until then an adopted model's leaves reach the hosting
+first, Graph second, Documents third and Blob fourth, and phase 6 deletes the interfaces; until then an adopted model's leaves reach the hosting
 layer through the interfaces the bases implement. Every base carries the deviation marker.
 
 | Base | Bridges | The leaf supplies | The base owns |
@@ -77,7 +77,7 @@ layer through the interfaces the bases implement. Every base carries the deviati
   `shared/DatabaseEngineWorkerPump.cs` since #1268's review; that shared copy stays compiled into
   each model until the model's phase-4 PR derives its engine from the base. A model that has
   adopted the base defines `COHESION_DATABASE_ENGINE_PUMP_IN_BASE` in its csproj, and the shared
-  file compiles to nothing there (KeyValuePair, Graph and Documents since their phase-4 PRs); the last
+  file compiles to nothing there (KeyValuePair, Graph, Documents and Blob since their phase-4 PRs); the last
   model's PR deletes the file and the constant.
 - **The shared build state composes through the leaf** (plan step P4.0, §6.5). Every model's
   builder compiles `shared/DatabaseEngineBuilderState<TEngine, TWorker, TServer>`, which runs typed
@@ -97,7 +97,7 @@ layer through the interfaces the bases implement. Every base carries the deviati
   attached twice, a server fronting another engine) with the same messages. Each model's phase-4
   PR moves its builder to the compose method (KeyValuePair's `KeyValueDatabaseEngine.Compose`
   first, with the state typed `<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`,
-  then Graph's `GraphDatabaseEngine.Compose` and Documents' `DocumentDatabaseEngine.Compose`), the last one deletes the bridge, and phase 6 fixes
+  then Graph's `GraphDatabaseEngine.Compose`, Documents' `DocumentDatabaseEngine.Compose` and Blob's `BlobDatabaseEngine.Compose`), the last one deletes the bridge, and phase 6 fixes
   the products to the bases and constrains the engine to `DatabaseEngine`.
 - **Engine disposal has one order:** the servers (last attached first), then every worker pump is
   stopped and joined, then the workers (last attached first, a disposable worker such as the
@@ -139,7 +139,7 @@ layer through the interfaces the bases implement. Every base carries the deviati
   is created inert, starts once, and a failed start or any stop is terminal (a start after it
   throws `ObjectDisposedException`); stop is idempotent and runs for a server that never started,
   so the leaf releases its listener either way; disposal stops. One gate serializes start and
-  stop. Blob's server differs on one path, which its phase-4 PR changes (below).
+  stop. Blob's server differed on one path until its phase-4 PR moved it onto the base (below).
 - **Departures from the plan's rows, as landed.** The plan's `DatabaseServerSession` constructor
   took the protocol version and principal; a server session exists from accept, before either is
   known, so the base generates the identity and takes the two values through protected one-shot
@@ -167,7 +167,8 @@ layer through the interfaces the bases implement. Every base carries the deviati
     at session disposal with the teardown cause;
   - Blob's server, whose start refused while its engine is not running left the server inert (a
     later start could retry, and a later stop disposed the listener): under the base that start is
-    terminal, so its start core disposes the listener before it rethrows;
+    terminal, so its start core disposes the listener before it rethrows (landed with Blob's
+    phase-4 PR; the terminal refusal is pending owner confirmation, plan §7);
   - the worker-name uniqueness check for the models that did not check it, and the engine disposal
     order for SQL and KeyValuePair (all workers last attached first, instead of the checkpointer
     first);

@@ -1,10 +1,10 @@
 using System;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Database.Blob.Internal;
-
 using Assimalign.Cohesion.Database.Blob.Storage;
 using Assimalign.Cohesion.Database.Storage;
+
+namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 /// <summary>
 /// The engine-owned write-ahead-log group-commit flusher: woken when a grouped

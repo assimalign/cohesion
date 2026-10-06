@@ -39,7 +39,7 @@ internal sealed record BlobItem(BlobProperties Properties)
 }
 
 /// <summary>
-/// Blob: <see cref="IBlobDatabase"/> through an embedded session, or <see cref="IBlobConnection"/>
+/// Blob: <see cref="BlobDatabaseSession"/> (its container operations) embedded, or <see cref="IBlobConnection"/>
 /// over TCP. The blob wire has no container verbs, so container list/create/drop use an engine
 /// session (embedded / loopback only); against an external server the container name is typed in.
 /// </summary>
@@ -57,6 +57,10 @@ internal sealed class BlobWorkspace : ModelWorkspace
     protected override string ClientName => "Blob.Client IBlobConnection";
 
     public bool CanManageContainers => Mode != ConnectionMode.WireExternal;
+
+    // The session runs its own container operations (option B, concrete-types plan §6.6); the
+    // cast from the root-typed session goes with ModelWorkspace's retype (phase 7).
+    private BlobDatabaseSession BlobSession => (BlobDatabaseSession)RequireSession();
 
     protected override async Task OpenWireAsync(string database, EndPoint endPoint, CancellationToken cancellationToken)
     {
@@ -96,26 +100,26 @@ internal sealed class BlobWorkspace : ModelWorkspace
         return _connection!;
     }
 
-    /// <summary>Runs <paramref name="action"/> against an <see cref="IBlobDatabase"/> bound to a session (embedded session or a temporary admin session).</summary>
-    private async Task<T> WithBlobDatabaseAsync<T>(Func<IBlobDatabase, CancellationToken, Task<T>> action, CancellationToken cancellationToken)
+    /// <summary>Runs <paramref name="action"/> against a blob session (the embedded session or a temporary admin session), whose container operations run in it.</summary>
+    private async Task<T> WithBlobSessionAsync<T>(Func<BlobDatabaseSession, CancellationToken, Task<T>> action, CancellationToken cancellationToken)
     {
         if (Mode == ConnectionMode.Embedded)
         {
-            return await action((IBlobDatabase)RequireSession().Database, cancellationToken).ConfigureAwait(false);
+            return await action(BlobSession, cancellationToken).ConfigureAwait(false);
         }
 
         IDatabaseSession admin = await OpenAdminSessionAsync(cancellationToken).ConfigureAwait(false);
         await using (admin.ConfigureAwait(false))
         {
-            return await action((IBlobDatabase)admin.Database, cancellationToken).ConfigureAwait(false);
+            return await action((BlobDatabaseSession)admin, cancellationToken).ConfigureAwait(false);
         }
     }
 
     public Task<List<string>> ListContainersAsync(CancellationToken cancellationToken = default)
-        => RunExclusiveAsync(token => WithBlobDatabaseAsync(async (database, inner) =>
+        => RunExclusiveAsync(token => WithBlobSessionAsync(async (session, inner) =>
         {
             var names = new List<string>();
-            await foreach (IBlobContainer container in database.GetContainersAsync(inner).ConfigureAwait(false))
+            await foreach (BlobContainer container in session.GetContainersAsync(inner).ConfigureAwait(false))
             {
                 names.Add(container.Name);
             }
@@ -125,24 +129,24 @@ internal sealed class BlobWorkspace : ModelWorkspace
         }, token), cancellationToken);
 
     public Task CreateContainerAsync(string name, CancellationToken cancellationToken = default)
-        => RunExclusiveAsync(token => WithBlobDatabaseAsync(async (database, inner) =>
+        => RunExclusiveAsync(token => WithBlobSessionAsync(async (session, inner) =>
         {
-            await database.CreateContainerAsync(name, inner).ConfigureAwait(false);
+            await session.CreateContainerAsync(name, inner).ConfigureAwait(false);
             return true;
         }, token), cancellationToken);
 
     public Task DropContainerAsync(string name, CancellationToken cancellationToken = default)
-        => RunExclusiveAsync(token => WithBlobDatabaseAsync(async (database, inner) =>
+        => RunExclusiveAsync(token => WithBlobSessionAsync(async (session, inner) =>
         {
-            await database.DropContainerAsync(name, inner).ConfigureAwait(false);
+            await session.DropContainerAsync(name, inner).ConfigureAwait(false);
             return true;
         }, token), cancellationToken);
 
-    /// <summary>Container ownership facts (embedded/loopback only; an extension member on the engine container type).</summary>
+    /// <summary>Container ownership facts (embedded/loopback only; a member of the engine container type).</summary>
     public Task<IReadOnlyDictionary<string, object?>> GetContainerOwnershipAsync(string container, CancellationToken cancellationToken = default)
-        => RunExclusiveAsync(token => WithBlobDatabaseAsync(async (database, inner) =>
+        => RunExclusiveAsync(token => WithBlobSessionAsync(async (session, inner) =>
         {
-            IBlobContainer target = await database.GetContainerAsync(container, inner).ConfigureAwait(false);
+            BlobContainer target = await session.GetContainerAsync(container, inner).ConfigureAwait(false);
             return await target.GetOwnershipAsync(inner).ConfigureAwait(false);
         }, token), cancellationToken);
 
@@ -153,7 +157,7 @@ internal sealed class BlobWorkspace : ModelWorkspace
             var items = new List<BlobItem>();
             if (Mode == ConnectionMode.Embedded)
             {
-                IBlobContainer target = await ((IBlobDatabase)RequireSession().Database).GetContainerAsync(container, token).ConfigureAwait(false);
+                BlobContainer target = await BlobSession.GetContainerAsync(container, token).ConfigureAwait(false);
                 await foreach (BlobProperties properties in target.GetBlobsAsync(prefix, token).ConfigureAwait(false))
                 {
                     items.Add(new BlobItem(properties));
@@ -177,7 +181,7 @@ internal sealed class BlobWorkspace : ModelWorkspace
             BlobProperties? properties;
             if (Mode == ConnectionMode.Embedded)
             {
-                IBlobContainer target = await ((IBlobDatabase)RequireSession().Database).GetContainerAsync(container, token).ConfigureAwait(false);
+                BlobContainer target = await BlobSession.GetContainerAsync(container, token).ConfigureAwait(false);
                 properties = await target.GetPropertiesAsync(name, token).ConfigureAwait(false);
             }
             else
@@ -194,7 +198,7 @@ internal sealed class BlobWorkspace : ModelWorkspace
         {
             if (Mode == ConnectionMode.Embedded)
             {
-                IBlobContainer target = await ((IBlobDatabase)RequireSession().Database).GetContainerAsync(container, token).ConfigureAwait(false);
+                BlobContainer target = await BlobSession.GetContainerAsync(container, token).ConfigureAwait(false);
                 Stream destination = await target.OpenWriteAsync(name, new BlobWriteOptions { ContentType = contentType, Overwrite = overwrite }, token).ConfigureAwait(false);
                 long before = source.CanSeek ? source.Position : 0;
                 await using (destination.ConfigureAwait(false))
@@ -217,7 +221,7 @@ internal sealed class BlobWorkspace : ModelWorkspace
             Stream source;
             if (Mode == ConnectionMode.Embedded)
             {
-                IBlobContainer target = await ((IBlobDatabase)RequireSession().Database).GetContainerAsync(container, token).ConfigureAwait(false);
+                BlobContainer target = await BlobSession.GetContainerAsync(container, token).ConfigureAwait(false);
                 source = await target.OpenReadAsync(name, token).ConfigureAwait(false);
             }
             else
@@ -239,7 +243,7 @@ internal sealed class BlobWorkspace : ModelWorkspace
         {
             if (Mode == ConnectionMode.Embedded)
             {
-                IBlobContainer target = await ((IBlobDatabase)RequireSession().Database).GetContainerAsync(container, token).ConfigureAwait(false);
+                BlobContainer target = await BlobSession.GetContainerAsync(container, token).ConfigureAwait(false);
                 return await target.DeleteAsync(name, token).ConfigureAwait(false);
             }
 

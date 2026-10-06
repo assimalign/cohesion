@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 
+using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Blob;
@@ -98,14 +99,16 @@ public sealed class BlobDatabaseEngineOptions
     /// Gets or sets the root directory where per-database files are created.
     /// </summary>
     /// <remarks>
-    /// When <see cref="StorageStrategy"/> is null and <see cref="RootPath"/> is provided,
-    /// a file-based strategy is used automatically. When it is null, an in-memory
-    /// strategy is used.
+    /// When a root is provided, each database's files live in a directory of its own under it.
+    /// When it is null, the databases are held in memory.
     /// </remarks>
     public FileSystemPath? RootPath { get; set; }
 
     /// <summary>Gets or sets a borrowed storage strategy that overrides RootPath when provided.</summary>
-    /// <remarks>The engine owns storage returned by the strategy and does not dispose the strategy itself.</remarks>
-    public IBlobStorageStrategy? StorageStrategy { get; set; }
-
+    /// <remarks>
+    /// The engine owns storage returned by the strategy and does not dispose the strategy itself.
+    /// Internal (concrete-types plan, D9): the strategy base is internal, and this assembly's tests
+    /// set their fault-injecting and recording doubles here through the test-only grant.
+    /// </remarks>
+    internal BlobStorageStrategy? StorageStrategy { get; set; }
 }

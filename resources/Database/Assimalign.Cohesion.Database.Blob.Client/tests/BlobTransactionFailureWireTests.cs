@@ -29,7 +29,7 @@ public sealed class BlobTransactionFailureWireTests
         await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
         await Write(harness.Container, "keep", "original", timeout.Token);
         var connection = await harness.Client.ConnectAsync(timeout.Token);
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(timeout.Token);
         (await connection.DeleteAsync("files", "keep", timeout.Token)).ShouldBeTrue();
 
@@ -40,7 +40,7 @@ public sealed class BlobTransactionFailureWireTests
             await connection.DeleteAsync("files", "keep", timeout.Token));
         // The host's rollback may meet the session's teardown; both orders must succeed.
         await transaction.RollbackAsync(timeout.Token);
-        await WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0, timeout.Token);
+        await WaitUntilAsync(() => harness.Server.Sessions.Count == 0, timeout.Token);
         await transaction.RollbackAsync(timeout.Token);
         await connection.DisposeAsync();
 
@@ -63,14 +63,14 @@ public sealed class BlobTransactionFailureWireTests
         await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
         await Write(harness.Container, "keep", "original", timeout.Token);
         await using var connection = await harness.Client.ConnectAsync(timeout.Token);
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(timeout.Token);
         (await connection.DeleteAsync("files", "keep", timeout.Token)).ShouldBeTrue();
         await Should.ThrowAsync<BlobClientException>(async () => await connection.DeleteAsync("missing", "item", timeout.Token));
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
-        await WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0, timeout.Token);
+        await WaitUntilAsync(() => harness.Server.Sessions.Count == 0, timeout.Token);
         var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
 
         // Assert
@@ -96,7 +96,7 @@ public sealed class BlobTransactionFailureWireTests
         await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
         await Write(harness.Container, "keep", "original", timeout.Token);
         var connection = await harness.Client.ConnectAsync(timeout.Token);
-        var serverSession = harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(timeout.Token);
         (await connection.DeleteAsync("files", "keep", timeout.Token)).ShouldBeTrue();
 
@@ -104,13 +104,16 @@ public sealed class BlobTransactionFailureWireTests
         var failure = await Should.ThrowAsync<BlobClientException>(async () =>
             await connection.UploadAsync("files", "other", new MemoryStream(new byte[10]), cancellationToken: timeout.Token));
         var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
-        await WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 0, timeout.Token);
+        await WaitUntilAsync(() => harness.Server.Sessions.Count == 0, timeout.Token);
         var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
         await transaction.RollbackAsync(timeout.Token);
         await connection.DisposeAsync();
 
-        // Assert
+        // Assert: the refusal is the root session base's one "already active" message
+        // (concrete-types plan §6.4), for the model's former "A transaction or stream is already
+        // active on this session.".
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        failure.Message.ShouldContain("A transaction or operation is already active on this session.", Case.Sensitive);
         commit.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
         commit.Message.ShouldContain("nothing was committed", Case.Sensitive);
         commit.Message.ShouldContain(failure.Message, Case.Sensitive);
@@ -121,13 +124,13 @@ public sealed class BlobTransactionFailureWireTests
         (await next.GetPropertiesAsync("files", "other", timeout.Token)).ShouldBeNull();
     }
 
-    private static async Task Write(IBlobContainer container, string name, string content, CancellationToken cancellationToken)
+    private static async Task Write(BlobContainer container, string name, string content, CancellationToken cancellationToken)
     {
         await using var stream = await container.OpenWriteAsync(name, cancellationToken: cancellationToken);
         await stream.WriteAsync(Encoding.UTF8.GetBytes(content), cancellationToken);
     }
 
-    private static async Task<string> Read(IBlobContainer container, string name, CancellationToken cancellationToken)
+    private static async Task<string> Read(BlobContainer container, string name, CancellationToken cancellationToken)
     {
         await using var stream = await container.OpenReadAsync(name, cancellationToken);
         using var buffer = new MemoryStream();

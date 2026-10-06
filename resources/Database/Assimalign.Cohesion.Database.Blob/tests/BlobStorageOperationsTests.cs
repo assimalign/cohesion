@@ -12,7 +12,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
-using Assimalign.Cohesion.Database.Blob.Internal;
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -34,7 +34,11 @@ public sealed class BlobStorageOperationsTests
     /// every operation — a new session, an upload, a download, a read of a download stream opened
     /// before the failure, BEGIN, COMMIT and ROLLBACK of an open transaction, over the wire too —
     /// is refused with COHDBB002, and nothing reaches the file set, through the workers' passes
-    /// and the sessions' close included. Reopening the database runs recovery, which keeps the
+    /// and the sessions' close included. The root bases' checks come first (concrete-types plan
+    /// §6.4): BEGIN on the session holding the open transaction is refused as already active, a
+    /// canceled token is refused before the offline refusal of a new session, both execute seams
+    /// and BEGIN, the execute seams' argument checks come before it too, and the transaction whose
+    /// session closed reports Faulted. Reopening the database runs recovery, which keeps the
     /// upload when its commit record's bytes survived and drops it when they were lost with the
     /// failed fsync.
     /// </summary>
@@ -56,7 +60,7 @@ public sealed class BlobStorageOperationsTests
             PageWriteBackInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
-        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("blobs", token);
+        var database = await engine.CreateDatabaseAsync("blobs", token);
         var listener = new InMemoryConnectionListener();
         await using var server = BlobDatabaseServer.Create(engine, new() { Listener = listener });
         await server.StartAsync(token);
@@ -65,8 +69,8 @@ public sealed class BlobStorageOperationsTests
         await database.CreateContainerAsync("files", token);
         var session = await database.CreateSessionAsync(token);
         var other = await database.CreateSessionAsync(token);
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files", token);
-        var otherFiles = await ((IBlobDatabase)other.Database).GetContainerAsync("files", token);
+        var files = await session.GetContainerAsync("files", token);
+        var otherFiles = await other.GetContainerAsync("files", token);
         await Write(files, "kept", "kept", token);
 
         // A reader, and a download stream: the database has one writer at a time, so an open
@@ -74,7 +78,7 @@ public sealed class BlobStorageOperationsTests
         var open = await other.BeginTransactionAsync(token);
         (await Names(otherFiles)).ShouldBe(["kept"]);
         await using var reader = await database.CreateSessionAsync(token);
-        var download = await (await ((IBlobDatabase)reader.Database).GetContainerAsync("files", token)).OpenReadAsync("kept", token);
+        var download = await (await reader.GetContainerAsync("files", token)).OpenReadAsync("kept", token);
 
         // Act: the upload's commit record is appended and its fsync fails.
         DatabaseTransactionCommitUnconfirmedException unconfirmed;
@@ -90,6 +94,8 @@ public sealed class BlobStorageOperationsTests
         {
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateSessionAsync(token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateContainerAsync("late", token)),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.CreateContainerAsync("late", token)),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.ExecuteAsync("LIST files", null, token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await files.OpenReadAsync("kept", token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await files.OpenWriteAsync("late", cancellationToken: token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await files.GetPropertiesAsync("kept", token)),
@@ -99,6 +105,32 @@ public sealed class BlobStorageOperationsTests
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.CommitAsync(token)),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.RollbackAsync(token)),
         };
+
+        // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
+        // open transaction is refused as already active before the offline refusal, and a canceled
+        // token is refused before the offline refusal of a new session, both execute seams and
+        // BEGIN. Before the bases, each of these was refused with COHDBB002. The container and blob
+        // operations do not pass the session's execute seams, so their order holds.
+        var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync(token));
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        var canceledCalls = new List<OperationCanceledException>
+        {
+            await Should.ThrowAsync<OperationCanceledException>(async () => await database.CreateSessionAsync(canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(new BlobRequest(), canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("LIST files", null, canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.BeginTransactionAsync(canceled.Token)),
+        };
+        var containerRefusals = new List<DatabaseOfflineException>
+        {
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await files.GetPropertiesAsync("kept", canceled.Token)),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.GetContainerAsync("files", canceled.Token)),
+        };
+
+        // The execute seams' argument checks are the base's too, ahead of the offline refusal the
+        // model made first.
+        var nullRequest = await Should.ThrowAsync<ArgumentNullException>(async () => await session.ExecuteAsync((QueryRequest)null!));
+        var blankStatement = await Should.ThrowAsync<ArgumentException>(async () => await session.ExecuteAsync(" "));
 
         // Over the wire: an operation on a session opened before the failure, and a new session.
         await WriteAsync(wire, (ProtocolMessageType)BlobProtocolMessageType.Read, new BlobReadMessage("files", "kept").Encode(), token);
@@ -116,18 +148,27 @@ public sealed class BlobStorageOperationsTests
             worker.RunIteration(CancellationToken.None).ShouldBeTrue(worker.Fault?.ToString());
         }
 
+        // The open transaction's teardown rolls nothing back on the offline database, and the
+        // transaction reports Faulted, as the model's own teardown left it.
         await other.DisposeAsync();
+        var closedState = open.State;
         await session.DisposeAsync();
         await reader.DisposeAsync();
         var beforeTheReopen = strategy.Capture("blobs");
 
-        var reopened = (BlobDatabaseInstance)await engine.OpenDatabaseAsync("blobs", token);
+        var reopened = await engine.OpenDatabaseAsync("blobs", token);
         var names = await Names(await reopened.GetContainerAsync("files", token));
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
         refusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002" && refusal.Message.StartsWith("COHDBB002", StringComparison.Ordinal));
+        activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
+        canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
+        containerRefusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002");
+        nullRequest.ParamName.ShouldBe("request");
+        blankStatement.ParamName.ShouldBe("statement");
+        closedState.ShouldBe(TransactionState.Faulted);
         operationError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
         operationError.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
@@ -145,7 +186,7 @@ public sealed class BlobStorageOperationsTests
     {
         // Arrange
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("pool");
+        var database = await engine.CreateDatabaseAsync("pool");
 
         // Act & Assert
         database.DataStorage.BufferPoolCapacity.ShouldBe(4096);
@@ -158,7 +199,7 @@ public sealed class BlobStorageOperationsTests
         Should.Throw<ArgumentOutOfRangeException>(() => BlobDatabaseEngine.Create(new() { CheckpointJournalSize = -1 }))
             .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.CheckpointJournalSize));
         await using var sized = BlobDatabaseEngine.Create(new() { BufferPoolCapacity = 2 * 1024 * 1024 });
-        ((BlobDatabaseInstance)await sized.CreateDatabaseAsync("sized")).DataStorage.BufferPoolCapacity.ShouldBe(256);
+        (await sized.CreateDatabaseAsync("sized")).DataStorage.BufferPoolCapacity.ShouldBe(256);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Builder: the engine builder carries the buffer pool and checkpoint size to the engine it builds")]
@@ -173,7 +214,7 @@ public sealed class BlobStorageOperationsTests
 
         // Act
         await using var engine = (BlobDatabaseEngine)builder.Build();
-        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("built");
+        var database = await engine.CreateDatabaseAsync("built");
 
         // Assert
         defaultPool.ShouldBe(32L * 1024 * 1024);
@@ -217,7 +258,7 @@ public sealed class BlobStorageOperationsTests
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
-        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("bounded");
+        var database = await engine.CreateDatabaseAsync("bounded");
         await database.CreateContainerAsync("files");
         using var stop = new CancellationTokenSource();
         byte[] payload = new byte[128 * 1024];
@@ -227,7 +268,7 @@ public sealed class BlobStorageOperationsTests
         var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
         {
             await using var session = await database.CreateSessionAsync();
-            var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
+            var files = await session.GetContainerAsync("files");
             while (!stop.IsCancellationRequested)
             {
                 await using var stream = await files.OpenWriteAsync($"writer-{writer}");
@@ -267,13 +308,13 @@ public sealed class BlobStorageOperationsTests
             MaintenanceInterval = maintenance,
         };
         await using var engine = BlobDatabaseEngine.Create(options);
-        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("blobs");
+        var database = await engine.CreateDatabaseAsync("blobs");
         var container = await database.CreateContainerAsync("files");
         await Write(container, "keep", "original");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
-        var files = await ((IBlobDatabase)session.Database).GetContainerAsync("files");
-        var otherFiles = await ((IBlobDatabase)other.Database).GetContainerAsync("files");
+        var files = await session.GetContainerAsync("files");
+        var otherFiles = await other.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
         await Write(files, "rolled", "rolled");
         await Write(files, "keep", "overwritten");
@@ -326,7 +367,7 @@ public sealed class BlobStorageOperationsTests
             PageWriteBackInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
-        var database = (BlobDatabaseInstance)await engine.CreateDatabaseAsync("space");
+        var database = await engine.CreateDatabaseAsync("space");
         var container = await database.CreateContainerAsync("files");
         long pagesBefore = database.DataStorage.PageManager.PageCount;
 
@@ -344,13 +385,13 @@ public sealed class BlobStorageOperationsTests
         (await Read(container, $"k{uploads - 1}")).ShouldBe(new string('x', 2048));
     }
 
-    private static async Task Write(IBlobContainer container, string name, string content, CancellationToken cancellationToken = default)
+    private static async Task Write(BlobContainer container, string name, string content, CancellationToken cancellationToken = default)
     {
         await using var stream = await container.OpenWriteAsync(name, cancellationToken: cancellationToken);
         await stream.WriteAsync(Encoding.UTF8.GetBytes(content), cancellationToken);
     }
 
-    private static async Task<string> Read(IBlobContainer container, string name)
+    private static async Task<string> Read(BlobContainer container, string name)
     {
         await using var stream = await container.OpenReadAsync(name);
         using var buffer = new MemoryStream();
@@ -358,7 +399,7 @@ public sealed class BlobStorageOperationsTests
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
 
-    private static async Task<List<string>> Names(IBlobContainer container)
+    private static async Task<List<string>> Names(BlobContainer container)
     {
         var names = new List<string>();
         await foreach (var blob in container.GetBlobsAsync())
@@ -399,4 +440,7 @@ public sealed class BlobStorageOperationsTests
         frame.Type.ShouldBe(ProtocolMessageType.Error);
         return ProtocolErrorMessage.Decode(frame.Payload.Span);
     }
+
+    /// <summary>A request of no language: a blob session has none, so it refuses every request.</summary>
+    private sealed class BlobRequest() : QueryRequest(null!);
 }

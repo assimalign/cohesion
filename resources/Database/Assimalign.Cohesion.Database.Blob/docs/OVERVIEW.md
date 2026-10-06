@@ -4,14 +4,13 @@
 objects. Create an engine with `BlobDatabaseEngine.Create`; a null `RootPath` selects memory,
 and a path selects durable files. `AddBlob((context, engine) => ...)` captures
 construction through the root `IDatabaseApplicationBuilder` and returns that builder.
-At Build the callback configures `IBlobDatabaseEngineBuilder`, including an optional
-borrowed `IBlobStorageStrategy` and deferred nested worker/server factories. The
-application owns the resulting engine and its nested components. The feature has
-no Hosting reference.
+At Build the callback configures the sealed `BlobDatabaseEngineBuilder`, including deferred
+nested worker and server factories typed over `BlobDatabaseEngine`. The application owns the
+resulting engine and its nested components. The feature has no Hosting reference.
 
 ```csharp
 await using var engine = BlobDatabaseEngine.Create(new() { RootPath = "data" });
-var database = (IBlobDatabase)await engine.CreateDatabaseAsync("media");
+var database = await engine.CreateDatabaseAsync("media");
 var container = await database.CreateContainerAsync("images");
 await using (var upload = await container.OpenWriteAsync("cover", new() { ContentType = "image/png" }))
 {
@@ -26,14 +25,15 @@ chunks but does not publish the object. Failed or cancelled uploads abort. Reade
 selected version until their streams close. Listings use catalog metadata and optional ordinal
 name prefixes. Empty objects, replacements, checksums, and persisted timestamps are supported.
 
-For explicit transactions, create a session and use the `IBlobDatabase` returned by its
-existing `Database` property. Containers obtained from that view stay bound to the session.
+For explicit transactions, create a `BlobDatabaseSession` and use its own container operations
+(`session.GetContainerAsync` and its siblings). Containers obtained from the session stay bound
+to it. `session.Database` is the same unbound `BlobDatabase`: its operations, and those of the
+containers it returns, run in autocommit, outside the session's transaction.
 
 ```csharp
 await using var session = await database.CreateSessionAsync();
 await using var transaction = await session.BeginTransactionAsync();
-var scopedDatabase = (IBlobDatabase)session.Database;
-var scopedContainer = await scopedDatabase.GetContainerAsync("images");
+var scopedContainer = await session.GetContainerAsync("images");
 await using (var upload = await scopedContainer.OpenWriteAsync("cover"))
 {
     await source.CopyToAsync(upload);
@@ -42,7 +42,9 @@ await transaction.CommitAsync();
 ```
 
 Direct database/container operations use automatic transactions. Session operations use the
-active explicit transaction when present; otherwise they also use automatic transactions.
+active explicit transaction when present; otherwise they also use automatic transactions. The
+engine has one writer at a time, so a write through the database (or `session.Database`) while
+a session's explicit transaction has written waits for that transaction to end.
 An operation that fails inside an explicit transaction aborts the whole transaction: the session
 refuses further operations and BEGIN with `COHDBB001` until the caller rolls back, and a commit
 fails without committing.
@@ -64,7 +66,8 @@ listener. The composition root retains engine ownership. Startup binds each auth
 session to one database; requests identify only containers and objects in that database.
 The default authenticator trusts every principal; configure `Authenticator` for authenticated
 access. Session limits, authentication deadlines, idle eviction, and bounded two-phase shutdown
-are configurable. A non-running engine rejects new sessions and operations.
+are configurable. A non-running engine rejects new sessions and operations, and a start refused
+because the engine is not running releases the listener and leaves the server stopped for good.
 
 The package owns the Blob wire message family. Bind a `ProtocolChannel` to `BlobProtocol.Family`
 at the Blob endpoint. `BlobReadMessage` and `BlobWriteMessage` identify an object;
@@ -94,3 +97,9 @@ and the [catalog format](../../Assimalign.Cohesion.Database.Blob.Catalog/docs/DE
 standalone composition or the concrete hosting builder's build-aware engine
 factory. This lets the consumer pass already resolved values and register nested
 components while keeping the model package dependency-free.
+
+The engine, database, session, transaction, server, container and builder are sealed types; the
+first five are leaves of the area root's bases (`DatabaseEngine`, `DatabaseInstance`,
+`DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`), which own the shared lifecycle, the
+explicit-transaction state machine and their checks, so the typed members need no casts
+(concrete-types plan, phase 4; DESIGN.md, "Concrete types").

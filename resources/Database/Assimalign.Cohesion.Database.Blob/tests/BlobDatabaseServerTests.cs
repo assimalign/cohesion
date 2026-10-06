@@ -23,9 +23,9 @@ public sealed class BlobDatabaseServerTests
         CancellationToken token = deadline.Token;
         await using var engine = BlobDatabaseEngine.Create(new());
         await using var otherEngine = BlobDatabaseEngine.Create(new());
-        var own = (IBlobDatabase)await engine.CreateDatabaseAsync("own", token);
-        var other = (IBlobDatabase)await engine.CreateDatabaseAsync("other", token);
-        var remote = (IBlobDatabase)await otherEngine.CreateDatabaseAsync("own", token);
+        var own = await engine.CreateDatabaseAsync("own", token);
+        var other = await engine.CreateDatabaseAsync("other", token);
+        var remote = await otherEngine.CreateDatabaseAsync("own", token);
         var ownFiles = await own.CreateContainerAsync("files", token);
         var otherFiles = await other.CreateContainerAsync("files", token);
         var remoteFiles = await remote.CreateContainerAsync("files", token);
@@ -40,8 +40,8 @@ public sealed class BlobDatabaseServerTests
         await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
         await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
         await HandshakeAsync(channel, "own", token);
-        server.Context.Sessions.Single().DatabaseSession!.Database.Name.ShouldBe(own.Name);
-        remoteServer.Context.Sessions.ShouldBeEmpty();
+        server.Sessions.Single().DatabaseSession!.Database.Name.ShouldBe(own.Name);
+        remoteServer.Sessions.ShouldBeEmpty();
 
         await WriteAsync(channel, BlobProtocolMessageType.Write, new BlobWriteMessage("files", "item").Encode(), token);
         await BlobProtocolTransfer.SendAsync(channel, new MemoryStream("own"u8.ToArray()), new(3, "text/plain"), token);
@@ -86,7 +86,7 @@ public sealed class BlobDatabaseServerTests
         authenticator.Principal.ShouldBe("alice");
         authenticator.Evidence.ShouldBe("proof"u8.ToArray());
         await server.StopAsync(token);
-        server.Context.Sessions.ShouldBeEmpty();
+        server.Sessions.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Blob server: Session limits and idle eviction release slots")]
@@ -112,7 +112,7 @@ public sealed class BlobDatabaseServerTests
         idle.Code.ShouldBe(ProtocolErrorCode.Unavailable);
         idle.Message.ShouldContain("idle timeout");
         await server.StopAsync(token);
-        server.Context.Sessions.ShouldBeEmpty();
+        server.Sessions.ShouldBeEmpty();
         engine.State.ShouldBe(EngineState.Running);
         await Should.ThrowAsync<ObjectDisposedException>(() => server.StartAsync(token));
     }
@@ -132,7 +132,7 @@ public sealed class BlobDatabaseServerTests
         await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
         (await channel.Reader.ReadFrameAsync(deadline.Token)).ShouldBeNull();
         await server.StopAsync(deadline.Token);
-        server.Context.Sessions.ShouldBeEmpty();
+        server.Sessions.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Database] - Blob server: Shutdown drains completed uploads and rolls back stalled uploads")]
@@ -143,7 +143,7 @@ public sealed class BlobDatabaseServerTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         CancellationToken token = deadline.Token;
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("objects", token);
+        var database = await engine.CreateDatabaseAsync("objects", token);
         var container = await database.CreateContainerAsync("files", token);
         await WriteBlobAsync(container, "item", "previous"u8.ToArray(), token);
         var listener = new InMemoryConnectionListener();
@@ -167,7 +167,7 @@ public sealed class BlobDatabaseServerTests
             (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)BlobProtocolMessageType.TransferComplete);
         }
         await stop.WaitAsync(token);
-        server.Context.Sessions.ShouldBeEmpty();
+        server.Sessions.ShouldBeEmpty();
         (await ReadBlobAsync(container, "item", token)).ShouldBe(finish ? "new"u8.ToArray() : "previous"u8.ToArray());
         engine.State.ShouldBe(EngineState.Running);
     }
@@ -182,6 +182,47 @@ public sealed class BlobDatabaseServerTests
         await using var server = BlobDatabaseServer.Create(engine, new() { Listener = listener });
         var error = await Should.ThrowAsync<DatabaseException>(() => server.StartAsync(deadline.Token));
         error.Message.ShouldContain("Disposed");
+    }
+
+    /// <summary>
+    /// A start the server refuses because its engine is not <see cref="EngineState.Running"/> (here
+    /// <see cref="EngineState.Faulted"/>, a worker holding a failure) is terminal under the root
+    /// <see cref="DatabaseServer"/> lifecycle (concrete-types plan, row 9, pending owner
+    /// confirmation): the start core disposes the listener before the refusal propagates, a later
+    /// start throws <see cref="ObjectDisposedException"/>, and the disposal finds nothing left to
+    /// release. Before the base, the refused start left the server inert, so a later start could
+    /// retry and a later stop disposed the listener.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Blob server: a start refused for the engine's state disposes the listener and is terminal")]
+    public async Task StartAsync_EngineFaulted_ShouldDisposeTheListenerAndStayStopped()
+    {
+        // Arrange: a worker whose every pass fails holds a fault, so the engine reports Faulted.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        CancellationToken token = deadline.Token;
+        var builder = BlobDatabaseEngine.CreateBuilder();
+        builder.AddWorker(engine => new FailingWorker(engine.Name + "/failing"));
+        await using var engine = builder.Build();
+        while (engine.State != EngineState.Faulted)
+        {
+            await Task.Delay(10, token);
+        }
+
+        var listener = new CountingListener();
+        var server = BlobDatabaseServer.Create(engine, new() { Listener = listener });
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(() => server.StartAsync(token));
+        int disposalsAfterTheRefusal = listener.Disposals;
+        var retry = await Should.ThrowAsync<ObjectDisposedException>(() => server.StartAsync(token));
+        await server.DisposeAsync();
+
+        // Assert
+        refusal.Message.ShouldBe("The Blob engine is Faulted and cannot accept sessions.");
+        disposalsAfterTheRefusal.ShouldBe(1);
+        retry.ShouldNotBeNull();
+        listener.Binds.ShouldBe(0);
+        listener.Disposals.ShouldBe(1);
+        server.Sessions.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Blob server: Shutdown owns blocked capacity rejections")]
@@ -206,7 +247,7 @@ public sealed class BlobDatabaseServerTests
         await server.StopAsync(token).WaitAsync(token);
         listener.Rejected!.WasAborted.ShouldBeTrue();
         listener.Rejected.WasDisposed.ShouldBeTrue();
-        server.Context.Sessions.ShouldBeEmpty();
+        server.Sessions.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Blob server: Listener failure still drains and aborts accepted uploads")]
@@ -215,7 +256,7 @@ public sealed class BlobDatabaseServerTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         CancellationToken token = deadline.Token;
         await using var engine = BlobDatabaseEngine.Create(new());
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("objects", token);
+        var database = await engine.CreateDatabaseAsync("objects", token);
         var container = await database.CreateContainerAsync("files", token);
         var inner = new InMemoryConnectionListener();
         var listener = new FaultingAcceptListener(inner);
@@ -233,7 +274,7 @@ public sealed class BlobDatabaseServerTests
         (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)BlobProtocolMessageType.ChunkAcknowledgement);
         var error = await Should.ThrowAsync<IOException>(() => server.StopAsync(token).WaitAsync(token));
         error.Message.ShouldBe("Injected accept failure.");
-        server.Context.Sessions.ShouldBeEmpty();
+        server.Sessions.ShouldBeEmpty();
         listener.WasDisposed.ShouldBeTrue();
         (await container.GetPropertiesAsync("partial", token)).ShouldBeNull();
         await server.StopAsync(token);
@@ -259,18 +300,61 @@ public sealed class BlobDatabaseServerTests
     private static async Task<ProtocolFrame> ReadAsync(ProtocolChannel channel, CancellationToken token)
         => (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
 
-    private static async Task WriteBlobAsync(IBlobContainer container, string name, byte[] bytes, CancellationToken token)
+    private static async Task WriteBlobAsync(BlobContainer container, string name, byte[] bytes, CancellationToken token)
     {
         await using Stream stream = await container.OpenWriteAsync(name, cancellationToken: token);
         await stream.WriteAsync(bytes, token);
     }
 
-    private static async Task<byte[]> ReadBlobAsync(IBlobContainer container, string name, CancellationToken token)
+    private static async Task<byte[]> ReadBlobAsync(BlobContainer container, string name, CancellationToken token)
     {
         await using Stream stream = await container.OpenReadAsync(name, token);
         using var result = new MemoryStream();
         await stream.CopyToAsync(result, token);
         return result.ToArray();
+    }
+
+    /// <summary>A worker whose every pass fails, so it holds a fault and its engine reports Faulted.</summary>
+    private sealed class FailingWorker : DatabaseEngineWorker
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="FailingWorker"/> class.
+        /// </summary>
+        /// <param name="name">The worker's name, unique within its engine.</param>
+        public FailingWorker(string name)
+            : base(name, DatabaseEngineWorkerKind.IndexMaintenance, TimeSpan.FromMilliseconds(10))
+        {
+        }
+
+        protected override void RunIterationCore(CancellationToken cancellationToken)
+            => throw new InvalidOperationException("The worker's pass failed.");
+    }
+
+    /// <summary>A listener over an in-memory one that counts its binds and disposals.</summary>
+    private sealed class CountingListener : IConnectionListener
+    {
+        private readonly InMemoryConnectionListener _inner = new();
+        private int _binds;
+        private int _disposals;
+
+        internal int Binds => Volatile.Read(ref _binds);
+        internal int Disposals => Volatile.Read(ref _disposals);
+        public EndPoint EndPoint => _inner.EndPoint;
+        public ConnectionCapabilities Capabilities => _inner.Capabilities;
+
+        public ValueTask BindAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _binds);
+            return _inner.BindAsync(cancellationToken);
+        }
+
+        public async ValueTask<IConnection> AcceptAsync(CancellationToken cancellationToken = default) => await _inner.AcceptAsync(cancellationToken);
+
+        public async ValueTask DisposeAsync()
+        {
+            Interlocked.Increment(ref _disposals);
+            await _inner.DisposeAsync();
+        }
     }
 
     private sealed class FaultingAcceptListener : IConnectionListener

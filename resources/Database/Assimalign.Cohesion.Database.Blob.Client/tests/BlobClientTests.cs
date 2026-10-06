@@ -250,13 +250,13 @@ public sealed class BlobClientTests
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
         // Observe autonomous disconnect cleanup; stopping the server here could
         // hide a failed abort behind the server's forced-shutdown cancellation.
-        while (server.Context.Sessions.Count != 0)
+        while (server.Sessions.Count != 0)
         {
             await Task.Delay(10, timeout.Token);
         }
     }
 
-    private static async Task VerifyAbortedWriteAsync(IBlobContainer container, bool replaceExisting, CancellationToken token)
+    private static async Task VerifyAbortedWriteAsync(BlobContainer container, bool replaceExisting, CancellationToken token)
     {
         var properties = await container.GetPropertiesAsync("target", token);
         if (replaceExisting)

@@ -89,7 +89,7 @@ public sealed class BlobProcessTests
             fields.Length.ShouldBe(3);
             long committedLength = long.Parse(fields[1], CultureInfo.InvariantCulture);
             await using var reopened = BlobDatabaseEngine.Create(new BlobDatabaseEngineOptions { RootPath = root });
-            var database = (IBlobDatabase)await reopened.OpenDatabaseAsync("existing", timeout.Token);
+            var database = await reopened.OpenDatabaseAsync("existing", timeout.Token);
             var container = await database.GetContainerAsync("objects", timeout.Token);
             (await container.GetPropertiesAsync("committed", timeout.Token))!.Value.Length.ShouldBe(committedLength);
             var (length, digest) = await ReadDigestAsync(container, "committed", timeout.Token);
@@ -102,7 +102,7 @@ public sealed class BlobProcessTests
             }
             names.ShouldBe(new[] { "committed" });
 
-            var otherDatabase = (IBlobDatabase)await reopened.OpenDatabaseAsync("new-object", timeout.Token);
+            var otherDatabase = await reopened.OpenDatabaseAsync("new-object", timeout.Token);
             var otherContainer = await otherDatabase.GetContainerAsync("objects", timeout.Token);
             (await otherContainer.GetPropertiesAsync("incomplete", timeout.Token)).ShouldBeNull();
             await Should.ThrowAsync<DatabaseException>(async () =>
@@ -149,7 +149,7 @@ public sealed class BlobProcessTests
         await process.WaitForExitAsync(timeout.Token);
     }
 
-    private static async Task<(long Length, string Digest)> ReadDigestAsync(IBlobContainer container, string name, CancellationToken token)
+    private static async Task<(long Length, string Digest)> ReadDigestAsync(BlobContainer container, string name, CancellationToken token)
     {
         await using var input = await container.OpenReadAsync(name, token);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);

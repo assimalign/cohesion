@@ -70,7 +70,7 @@ internal static class Program
         string recoveryRoot = Path.Combine(root, "recovery-image");
         await using (var engine = CreateEngine(root))
         {
-            var database = (IBlobDatabase)await engine.CreateDatabaseAsync("large", token);
+            var database = await engine.CreateDatabaseAsync("large", token);
             var container = await database.CreateContainerAsync("objects", token);
             await using (var output = await container.OpenWriteAsync("payload", cancellationToken: token))
             {
@@ -104,7 +104,7 @@ internal static class Program
         // readback must obey the bound too, not only the upload stream.
         await using (var reopened = CreateEngine(recoveryRoot))
         {
-            var database = (IBlobDatabase)await reopened.OpenDatabaseAsync("large", token);
+            var database = await reopened.OpenDatabaseAsync("large", token);
             var container = await database.GetContainerAsync("objects", token);
             await VerifyAsync(container, "payload", LargeBlobLength, expectedHash, token);
         }
@@ -118,9 +118,9 @@ internal static class Program
         // the process after READY so no stream, transaction, or engine cleanup
         // can turn the crash test into a graceful shutdown test.
         var engine = CreateEngine(root);
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("existing", token);
+        var database = await engine.CreateDatabaseAsync("existing", token);
         var container = await database.CreateContainerAsync("objects", token);
-        var otherDatabase = (IBlobDatabase)await engine.CreateDatabaseAsync("new-object", token);
+        var otherDatabase = await engine.CreateDatabaseAsync("new-object", token);
         var otherContainer = await otherDatabase.CreateContainerAsync("objects", token);
         string committedHash;
         await using (var output = await container.OpenWriteAsync("committed", cancellationToken: token))
@@ -191,7 +191,7 @@ internal static class Program
         return Convert.ToHexString(hash.GetHashAndReset());
     }
 
-    private static async Task VerifyAsync(IBlobContainer container, string name, long length, string expectedHash, CancellationToken token)
+    private static async Task VerifyAsync(BlobContainer container, string name, long length, string expectedHash, CancellationToken token)
     {
         var properties = await container.GetPropertiesAsync(name, token);
         if (properties?.Length != length)

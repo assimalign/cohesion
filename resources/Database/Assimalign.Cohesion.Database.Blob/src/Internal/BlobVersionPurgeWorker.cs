@@ -2,9 +2,9 @@ using System;
 using System.Diagnostics;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Database.Blob.Internal;
-
 using Assimalign.Cohesion.Database.Storage;
+
+namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 /// <summary>
 /// The engine-owned MVCC version-purge worker: per pass, per open database, it
@@ -60,7 +60,7 @@ internal sealed class BlobVersionPurgeWorker : DatabaseEngineWorker
     {
         // Until the next full pass, or the next deferred-undo retry when one is sooner.
         var wait = Interval - Stopwatch.GetElapsedTime(Volatile.Read(ref _lastFullPass));
-        foreach (BlobDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (BlobDatabase database in _engine.GetInstanceSnapshot())
         {
             if (!database.IsOffline && database.Coordinator.NextDeferredUndoRetry is { } retry && retry < wait)
             {
@@ -98,7 +98,7 @@ internal sealed class BlobVersionPurgeWorker : DatabaseEngineWorker
             Volatile.Write(ref _lastFullPass, Stopwatch.GetTimestamp());
         }
 
-        foreach (BlobDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (BlobDatabase database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {

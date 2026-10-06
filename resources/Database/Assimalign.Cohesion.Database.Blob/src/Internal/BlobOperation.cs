@@ -1,32 +1,47 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Internal;
 
+/// <summary>
+/// One blob operation: a container operation, or a blob operation or stream of a container, of a
+/// session or of the database itself. It owns its transaction context (the session's explicit
+/// transaction's, or an autocommit context of its own) and, for a session's operation, the hold it
+/// keeps on the session and its admission into the explicit transaction, until it completes or is
+/// aborted. A stream's operation lasts until the stream is disposed.
+/// </summary>
 internal sealed class BlobOperation
 {
-    private readonly BlobDatabaseInstance _database;
+    private readonly BlobDatabase _database;
     private readonly BlobDatabaseSession? _session;
     private readonly BlobDatabaseTransaction? _transaction;
     private readonly TransactionContext _context;
     private readonly SemaphoreSlim _completionGate = new(1, 1);
     private TransactionContext? _snapshotPin;
     private int _finished;
-    internal BlobOperation(BlobDatabaseInstance database, BlobDatabaseSession? session, TransactionContext context, BlobDatabaseTransaction? transaction)
+
+    /// <summary>Initializes a new instance of the <see cref="BlobOperation"/> class.</summary>
+    /// <param name="database">The database the operation runs on.</param>
+    /// <param name="session">
+    /// The session the operation holds, which the operation releases when it finishes; null for an
+    /// operation of the database itself or of a container it returned, which runs in autocommit.
+    /// </param>
+    /// <param name="context">The transaction context the operation runs under.</param>
+    /// <param name="transaction">The explicit transaction that admitted the operation, or null for autocommit.</param>
+    internal BlobOperation(BlobDatabase database, BlobDatabaseSession? session, TransactionContext context, BlobDatabaseTransaction? transaction)
     {
         _database = database;
         _session = session;
         Context = context;
         _context = context;
         _transaction = transaction;
-        if (transaction is not null)
-        {
-            transaction.Operations++;
-        }
     }
+
     internal TransactionContext Context { get; private set; }
+
     internal async ValueTask InitializeAsync(CancellationToken cancellationToken)
     {
         if (_transaction?.IsolationLevel == IsolationLevel.ReadCommitted)
@@ -38,9 +53,10 @@ internal sealed class BlobOperation
             Context = _context.PinStatementSnapshot();
         }
     }
+
     internal void EnsureActive()
     {
-        _database.ThrowIfDisposed();
+        _database.EnsureNotDisposed();
 
         // A blob stream checks here before every read and write, and an upload before its
         // completion: an offline database refuses them with its coded error (#1243).
@@ -51,6 +67,7 @@ internal sealed class BlobOperation
             throw new DatabaseException("The blob operation's transaction is no longer active.");
         }
     }
+
     /// <summary>
     /// Translates a failure the operation's stream observed the way every other operation's
     /// failure is translated: the offline storage's coded refusal (#1243), or the area root's
@@ -99,7 +116,7 @@ internal sealed class BlobOperation
                     // physical bracket per chunk), so a failed operation aborts its whole explicit
                     // transaction, which records the cause and refuses later operations until the
                     // caller rolls back (#1225).
-                    await _transaction.AbortAsync(cause).ConfigureAwait(false);
+                    await _transaction.AbortForFailedOperationAsync(cause).ConfigureAwait(false);
                 }
                 else if (Context.State == TransactionState.Active && !_database.IsOffline)
                 {
@@ -115,11 +132,13 @@ internal sealed class BlobOperation
         }
         finally { _completionGate.Release(); }
     }
+
     private async ValueTask FinishAsync()
     {
         try { await ReleaseSnapshotPinAsync().ConfigureAwait(false); }
         finally { Finish(); }
     }
+
     private void Finish()
     {
         if (Interlocked.Exchange(ref _finished, 1) != 0)
@@ -127,12 +146,8 @@ internal sealed class BlobOperation
             return;
         }
 
-        if (_transaction is not null)
-        {
-            _transaction.Operations--;
-        }
-
-        _session?.Untrack(this);
+        // A session's operation ends its admission into the explicit transaction and its hold on the session.
+        _session?.ReleaseOperation(_transaction);
     }
 
     private async ValueTask ReleaseSnapshotPinAsync()
