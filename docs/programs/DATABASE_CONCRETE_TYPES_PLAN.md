@@ -871,6 +871,23 @@ Documents is accounted for:
   `DisposeAsync` where the model's ran the synchronous `Dispose`, and the engine closes its
   databases after it has cleared them under its lock where it disposed them inside it
   (`Storage.Dispose` and `DisposeAsync` run the same steps; Graph's landing made the same move).
+- *A database closed outside the engine* (found by the Blob review, §7 "Blob, as landed"; fixed
+  for this model by the follow-up of 2026-10-06, §7 "The closed-database follow-up"). The engine
+  keeps a database its holder disposed registered, to refuse its reopen, and `IsOpen` read only
+  that registration, so the version-purge worker failed on its disposed coordinator every pass and
+  the engine stayed `Faulted` for good (21 failed passes in half a second at 20 ms intervals,
+  reproduced at `e092cada` both ways); `Database.Hosting` reported the engine degraded. A directly
+  disposed database did this before P4 too; option B made it reachable from the session's own
+  property, where disposing the view only closed the session. `DocumentDatabase.IsClosed`,
+  `DocumentDatabaseEngine.IsOpen` false for a closed database and its storage, and the
+  version-purge worker skips a closed database in its pass and its trigger wait (the checkpointer
+  inherits the fix through `IsOpen`, and the flush and write-back workers, which visit storages,
+  through `IsOpen(DocumentStorage)`, as Blob's do). The refused reopen is unchanged. Asserted:
+  `DocumentWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunning`,
+  a theory that closes the database directly and through `session.Database` (20 ms worker
+  intervals, half a second of passes over the closed database, then one more pass of each worker:
+  every pass succeeds, no worker records a failure, the engine is `Running`, the other database
+  takes writes, and the reopen is still refused). Documents has no server.
 
 **Blob at P4 (re-verified, then landed).** The model's copy was as listed
 (`BlobDatabaseTransaction.cs` with its own `_endGate`, its `Operations` counter, `CloseAsync`,
@@ -1262,6 +1279,10 @@ cycle). Inside a transaction, use the session's own collection operations; the s
 and Documents `DESIGN.md` remarks say so. All of these changes are asserted
 (`DocumentTransactionFailureTests`: the option-B test, which also pins the refused reopen, and
 `CreateCollectionAsync_ThroughSessionDatabaseAfterTransactionWrote_ShouldWaitForItsWriterLock`).
+The Blob review found a third consequence, which reached Documents too: the workers treated the
+closed database as open, and the version-purge worker's failure on its disposed coordinator left
+the engine `Faulted` for good. The follow-up of 2026-10-06 fixed it as Blob's review did (§6.4's
+Documents accounting, §7 "The closed-database follow-up").
 Documents has no wire server, so only Studio's `DocumentWorkspace` moved: it runs its collection tools on the session (a cast
 from `ModelWorkspace`'s root-typed session to `DocumentDatabaseSession`, which phase 7's retype
 removes) where it cast the session's database to `IDocumentDatabase`.
