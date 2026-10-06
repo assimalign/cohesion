@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 using Assimalign.Cohesion.ObjectValidation;
 
@@ -19,16 +18,16 @@ internal static class ValidationErrorMap
     /// Builds the map: one entry per key, in the order the rules ran, each holding its messages in that
     /// order.
     /// </summary>
-    /// <param name="errors">The validation errors.</param>
+    /// <param name="errors">The validation errors, in the order the rules reported them.</param>
     /// <returns>The map, with <see cref="string"/> array values the problem-details writer serializes.</returns>
     public static Dictionary<string, object?> Create(IEnumerable<IValidationError> errors)
     {
         Dictionary<string, List<string>> messages = new(StringComparer.Ordinal);
         List<string> keys = new();
 
-        // ObjectValidation records errors on a stack, so they enumerate newest first: reverse them to
-        // report in the order the rules ran.
-        foreach (IValidationError error in errors.Reverse())
+        // ObjectValidation lists errors in the order its rules ran, which is the order the profile declares
+        // its members and chains their rules, so a key's first error places it.
+        foreach (IValidationError error in errors)
         {
             string key = GetKey(error.Source);
 

@@ -24,11 +24,15 @@ public sealed class ValidationResult
     /// </summary>
     public bool IsValid => Errors.Count() == 0;
     /// <summary>
-    /// A collection of validation failures.
+    /// The validation failures, in the order the validation context holds them. A
+    /// <see cref="ValidationContext{T}"/>, which <see cref="Validator"/> creates, holds them in the order they
+    /// were reported: members in the order they are declared, each member's rules in the order they are
+    /// chained.
     /// </summary>
     public IEnumerable<IValidationError> Errors { get; }
     /// <summary>
-    /// A collection of stats relating to invoked validation rules.
+    /// A collection of stats relating to invoked validation rules, in the order the validation context holds
+    /// them: for a <see cref="ValidationContext{T}"/>, the order the rules ran.
     /// </summary>
     public IEnumerable<ValidationInvocation> Invocations { get; }
     /// <summary>

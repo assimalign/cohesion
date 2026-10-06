@@ -24,8 +24,8 @@ namespace Assimalign.Cohesion.Web.Validation;
 /// registered.
 /// </para>
 /// <para>
-/// The <c>errors</c> map carries the failures the validator's options report. With the ObjectValidation
-/// defaults, every failing member is reported, each with one failing rule's messages;
+/// The <c>errors</c> map carries the failures the validator's options report, in declaration order. With the
+/// ObjectValidation defaults, every failing member is reported, each with its first failing rule's messages;
 /// <see cref="ValidationOptions.ContinueThroughValidationChain"/> reports every failing rule of every
 /// member, and <see cref="AddProfile{T}"/> sets it. A validator built with <see cref="ValidationMode.Stop"/>
 /// reports only the first failing member. A validator built with

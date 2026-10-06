@@ -16,7 +16,7 @@ public enum ValidationMode
 
     /// <summary>
     /// Evaluates no further <see cref="IValidationItem"/> once one has failed, so only the first failing
-    /// item is reported.
+    /// item, in the order the profile declares its members, is reported.
     /// </summary>
     Stop = 1
 }

@@ -92,8 +92,8 @@ public class RuleNestedErrorSourceTests
         // Act
         ValidationResult result = CreateValidator().Validate(order);
 
-        // Assert
-        Sources(result).ShouldBe(["order => order.Billing.City", "zip"], ignoreOrder: true);
+        // Assert — in the order the nested profile declares its members.
+        Sources(result).ShouldBe(["order => order.Billing.City", "zip"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [ObjectValidation] - Nested rules: nesting two levels deep composes both parent members")]

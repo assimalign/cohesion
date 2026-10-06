@@ -74,11 +74,12 @@ replacement. Lookup is exact on the type the value is bound as: no base-type or 
 which would need runtime type inspection.
 
 The `errors` map carries the failures the validator's ObjectValidation options report (that library's
-DESIGN, "Which Failures Are Reported"). With the defaults, every failing member is reported, each with
-one failing rule's messages. `AddProfile` sets `ContinueThroughValidationChain`, which adds the messages of
-each member's other failing rules, and a validator built with `ValidationMode.Stop` reports only the first
-failing member. Until ObjectValidation #1206, a default-options validator registered with `AddValidator`
-stopped at the first failing member, so a body with several invalid members was answered with one.
+DESIGN, "Which Failures Are Reported"). With the defaults, every failing member is reported, each with its
+first failing rule's messages. `AddProfile` sets `ContinueThroughValidationChain`, which adds the messages of
+each member's later failing rules, and a validator built with `ValidationMode.Stop` reports only the first
+failing member in declaration order. Until ObjectValidation #1206, a default-options validator registered
+with `AddValidator` stopped at the first failing member, so a body with several invalid members was answered
+with one.
 
 ## The generated call
 
@@ -145,10 +146,14 @@ for binding failures, so a client parses both the same way.
 
 Keys are CLR member names as the profile declares them, not JSON property names: the JSON naming policy
 lives in `Web.Serialization`'s internal options, and a profile that wants JSON names sets its sources.
-Messages keep the order the rules ran: ObjectValidation records errors on a stack, so the map reverses
-them. A nested profile (`ChildRules`, `UseProfile`) reports under its parent member because
+A nested profile (`ChildRules`, `UseProfile`) reports under its parent member because
 ObjectValidation composes nested sources (`p => p.Address.City`, see its DESIGN, "Error Sources"); under
 `RuleForEach` the key names the collection member without an element index.
+
+Keys and messages keep the order the rules ran, which is declaration order. ObjectValidation runs members in
+the order the profile declares them (a nested profile's members in place under their parent) and each
+member's rules in the order they are chained. It lists its errors in that order, so the map takes them as
+they come. Until ObjectValidation #1221, the map listed members in reverse declaration order.
 
 A validator built with `ThrowExceptionOnFailure` throws `ValidationFailureException`, which carries no
 errors. The request is still invalid, so it is answered `400` with an empty `errors` map rather than

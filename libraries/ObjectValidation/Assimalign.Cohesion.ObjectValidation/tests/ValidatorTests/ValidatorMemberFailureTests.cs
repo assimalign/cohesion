@@ -19,8 +19,8 @@ namespace Assimalign.Cohesion.ObjectValidation.Tests;
 /// member failed.
 /// </summary>
 /// <remarks>
-/// The assertions ignore order: the item and rule queues enumerate newest first, so the order members and
-/// chained rules run in is not the order they are declared in.
+/// The assertions pin order: members run in the order they are declared and chained rules in the order they
+/// are chained, and errors are listed in the order they were reported (#1221).
 /// </remarks>
 public class ValidatorMemberFailureTests
 {
@@ -101,7 +101,7 @@ public class ValidatorMemberFailureTests
         ValidationResult result = CreateValidator().Validate(customer);
 
         // Assert
-        Sources(result).ShouldBe([nameSource, ageSource, citySource, zipSource], ignoreOrder: true);
+        Sources(result).ShouldBe([nameSource, ageSource, citySource, zipSource]);
     }
 
     [Fact(DisplayName = "Cohesion Test [ObjectValidation] - Default options: a member's chain stops at its first failing rule, and the other members still run")]
@@ -116,7 +116,7 @@ public class ValidatorMemberFailureTests
         ValidationResult result = CreateValidator().Validate(customer);
 
         // Assert — one error for the name, whose chain stopped, and the age's.
-        Sources(result).ShouldBe([nameSource, ageSource], ignoreOrder: true);
+        Sources(result).ShouldBe([nameSource, ageSource]);
     }
 
     [Fact(DisplayName = "Cohesion Test [ObjectValidation] - ContinueThroughValidationChain: every failing rule of every member is reported")]
@@ -131,7 +131,7 @@ public class ValidatorMemberFailureTests
         ValidationResult result = CreateValidator(options => options.ContinueThroughValidationChain = true).Validate(customer);
 
         // Assert — both of the name's rules, and the age's.
-        Sources(result).ShouldBe([nameSource, nameSource, ageSource], ignoreOrder: true);
+        Sources(result).ShouldBe([nameSource, nameSource, ageSource]);
     }
 
     [Fact(DisplayName = "Cohesion Test [ObjectValidation] - Stop mode: validation stops at the first failing member")]
@@ -146,8 +146,8 @@ public class ValidatorMemberFailureTests
         // Act
         ValidationResult result = CreateValidator(options => options.ValidationMode = ValidationMode.Stop).Validate(customer);
 
-        // Assert
-        result.Errors.ShouldHaveSingleItem();
+        // Assert — the name, the first failing member in declaration order.
+        Sources(result).ShouldBe([nameSource]);
     }
 
     [Fact(DisplayName = "Cohesion Test [ObjectValidation] - Default options: a failing collection member does not stop another member")]
@@ -162,7 +162,7 @@ public class ValidatorMemberFailureTests
         ValidationResult result = CreateValidator().Validate(customer);
 
         // Assert
-        Sources(result).ShouldBe([tagsSource, ageSource], ignoreOrder: true);
+        Sources(result).ShouldBe([ageSource, tagsSource]);
     }
 
     [Fact(DisplayName = "Cohesion Test [ObjectValidation] - Default options: a collection's chain stops after the rule that fails first, which reports every failing element")]
@@ -176,8 +176,8 @@ public class ValidatorMemberFailureTests
         // Act
         ValidationResult result = CreateValidator().Validate(customer);
 
-        // Assert — one error per element from the rule that ran first, none from the rule after it, and the age's.
-        Sources(result).ShouldBe([tagsSource, tagsSource, ageSource], ignoreOrder: true);
+        // Assert — the age's error, then one per element from the rule that ran first, none from the rule after it.
+        Sources(result).ShouldBe([ageSource, tagsSource, tagsSource]);
     }
 
     [Fact(DisplayName = "Cohesion Test [ObjectValidation] - Default options: ValidateAsync reports every failing member")]
@@ -192,7 +192,7 @@ public class ValidatorMemberFailureTests
         ValidationResult result = await CreateValidator().ValidateAsync(customer, CancellationToken.None);
 
         // Assert
-        Sources(result).ShouldBe([nameSource, ageSource], ignoreOrder: true);
+        Sources(result).ShouldBe([nameSource, ageSource]);
     }
 
     [Fact(DisplayName = "Cohesion Test [ObjectValidation] - Default options: an error already in the context does not stop any member's rules")]
@@ -209,7 +209,7 @@ public class ValidatorMemberFailureTests
         // Act
         ValidationResult result = CreateValidator().Validate(context);
 
-        // Assert
-        Sources(result).ShouldBe(["order", nameSource, ageSource], ignoreOrder: true);
+        // Assert — the caller's error first: errors are listed in the order they were added.
+        Sources(result).ShouldBe(["order", nameSource, ageSource]);
     }
 }

@@ -47,14 +47,15 @@ public interface IValidationContext
 
     /// <summary>
     /// Specifies whether every rule chained to a validation item runs (<see langword="true"/>), or the
-    /// item's chain stops once one of its rules has failed (<see langword="false"/>, the default).
+    /// item's chain stops at the first of its rules that fails (<see langword="false"/>, the default). An
+    /// item runs its rules in the order they are chained.
     /// </summary>
     /// <remarks>
     /// <para>
     /// The chain stops on the item's own failure only. An error another item reported, or one already in
     /// the context, never keeps an item's rules from running: stopping between items is
     /// <see cref="ValidationMode.Stop"/>. With the defaults, every failing item is therefore reported, each
-    /// with the errors of one rule.
+    /// with the errors of its first failing rule.
     /// </para>
     /// <para>
     /// A collection item (<c>RuleForEach</c>) runs each rule over every element, so the rule that fails
@@ -66,7 +67,7 @@ public interface IValidationContext
     /// <code>
     /// RuleFor(p => p.Name)
     ///       .NotEmpty()
-    ///       .MaxLength(50);   // Once one of Name's rules fails, Name's chain stops.
+    ///       .MaxLength(50);   // Runs only when NotEmpty passed: Name's chain stops at its first failing rule.
     ///
     /// RuleFor(p => p.Email)
     ///       .NotEmpty();      // Email's rules run whether or not Name failed.

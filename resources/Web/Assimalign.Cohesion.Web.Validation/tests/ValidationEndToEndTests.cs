@@ -301,10 +301,13 @@ public class ValidationEndToEndTests
         // Act
         using HttpResponseMessage response = await client.PostAsync("/signups", Json(invalidSignup), cancellation.Token);
 
-        // Assert — every failing member, and both of the user name's failing rules.
+        // Assert — every failing member in declaration order, and both of the user name's failing rules in
+        // the order they are chained: NotEmpty, then MinLength.
         JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
-        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["UserName", "Age", "Address.City"], ignoreOrder: true);
+        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["UserName", "Age", "Address.City"]);
         errors.GetProperty("UserName").GetArrayLength().ShouldBe(2);
+        errors.GetProperty("UserName")[0].GetString()!.ShouldEndWith("was empty.", Case.Sensitive);
+        errors.GetProperty("UserName")[1].GetString()!.ShouldContain("minimum length", Case.Sensitive);
         errors.GetProperty("Age").GetArrayLength().ShouldBe(1);
         errors.GetProperty("Address.City").GetArrayLength().ShouldBe(1);
     }
@@ -323,12 +326,32 @@ public class ValidationEndToEndTests
         // Act
         using HttpResponseMessage response = await client.PostAsync("/signups", Json(invalidSignup), cancellation.Token);
 
-        // Assert — every failing member; the user name's chain stops once one of its rules fails.
+        // Assert — every failing member in declaration order; the user name's chain stops at its first
+        // failing rule, NotEmpty.
         JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
-        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["UserName", "Age", "Address.City"], ignoreOrder: true);
+        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["UserName", "Age", "Address.City"]);
         errors.GetProperty("UserName").GetArrayLength().ShouldBe(1);
+        errors.GetProperty("UserName")[0].GetString()!.ShouldEndWith("was empty.", Case.Sensitive);
         errors.GetProperty("Age").GetArrayLength().ShouldBe(1);
         errors.GetProperty("Address.City").GetArrayLength().ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Validation] - Typed: the errors map lists members in declaration order, a nested profile's members in place")]
+    public async Task MapPost_SeveralInvalidNestedMembers_ShouldListMembersInDeclarationOrder()
+    {
+        // Arrange — the label and both of the destination's members fail.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = CreateFactory(options => options.AddProfile(new ParcelProfile()));
+        factory.Application.MapPost("/parcels", (Parcel parcel) => "accepted");
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.PostAsync("/parcels", Json("""{"label":"","destination":{"city":"","zip":""}}"""), cancellation.Token);
+
+        // Assert
+        JsonElement errors = await ReadErrorsAsync(response, cancellation.Token);
+        errors.EnumerateObject().Select(member => member.Name).ShouldBe(["Label", "Destination.City", "Destination.Zip"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Validation] - Handlers: a handler validates a value it bound itself through context.ValidateAsync")]

@@ -14,10 +14,12 @@ internal sealed class Customer
     public Address? Address { get; set; }
 }
 
-/// <summary>The nested member <see cref="CustomerProfile"/> validates through <c>ChildRules</c>.</summary>
+/// <summary>The nested member the profiles validate through <c>ChildRules</c>.</summary>
 internal sealed class Address
 {
     public string? City { get; set; }
+
+    public string? Zip { get; set; }
 }
 
 /// <summary>A request-body model no validator is registered for.</summary>
@@ -37,6 +39,14 @@ internal sealed class Signup
     public int Age { get; set; }
 
     public Address? Address { get; set; }
+}
+
+/// <summary>A request-body model with a nested destination whose city and zip are both validated.</summary>
+internal sealed class Parcel
+{
+    public string? Label { get; set; }
+
+    public Address? Destination { get; set; }
 }
 
 /// <summary>
@@ -68,10 +78,28 @@ internal sealed class SignupProfile : ValidationProfile<Signup>
 }
 
 /// <summary>
+/// The rules for <see cref="Parcel"/>: a non-empty label, and, when a destination is given, a non-empty city
+/// and a non-empty zip, declared in that order.
+/// </summary>
+internal sealed class ParcelProfile : ValidationProfile<Parcel>
+{
+    public override void Configure(IValidationRuleDescriptor<Parcel> descriptor)
+    {
+        descriptor.RuleFor(parcel => parcel.Label!).NotEmpty();
+        descriptor.RuleFor(parcel => parcel.Destination!).ChildRules(destination =>
+        {
+            destination.RuleFor(a => a.City!).NotEmpty();
+            destination.RuleFor(a => a.Zip!).NotEmpty();
+        });
+    }
+}
+
+/// <summary>
 /// The source-generated serialization contracts for the test models — the <c>JsonTypeInfo</c> resolver
 /// shape applications register with <c>AddJsonSerialization</c>.
 /// </summary>
 [JsonSerializable(typeof(Customer))]
 [JsonSerializable(typeof(Note))]
 [JsonSerializable(typeof(Signup))]
+[JsonSerializable(typeof(Parcel))]
 internal sealed partial class ValidationTestJsonContext : JsonSerializerContext;

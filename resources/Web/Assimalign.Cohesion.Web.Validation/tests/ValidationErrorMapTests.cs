@@ -35,16 +35,16 @@ public class ValidationErrorMapTests
     [Fact(DisplayName = "Cohesion Test [Web.Validation] - Error map: messages are grouped per key in the order the rules ran")]
     public void Create_Errors_ShouldGroupMessagesPerKeyInRuleOrder()
     {
-        // Arrange — ObjectValidation enumerates its errors newest first.
-        List<IValidationError> newestFirst =
+        // Arrange — ObjectValidation lists its errors in the order its rules ran: declaration order.
+        List<IValidationError> inRuleOrder =
         [
-            new ValidationError { Source = "p => p.Age", Message = "too young" },
-            new ValidationError { Source = "p => p.Name", Message = "too short" },
             new ValidationError { Source = "p => p.Name", Message = "required" },
+            new ValidationError { Source = "p => p.Name", Message = "too short" },
+            new ValidationError { Source = "p => p.Age", Message = "too young" },
         ];
 
         // Act
-        Dictionary<string, object?> map = ValidationErrorMap.Create(newestFirst);
+        Dictionary<string, object?> map = ValidationErrorMap.Create(inRuleOrder);
 
         // Assert
         map.Keys.ShouldBe(["Name", "Age"]);
