@@ -71,12 +71,12 @@ public sealed class BlobStorageOperationsTests
         var other = await database.CreateSessionAsync(token);
         var files = await session.GetContainerAsync("files", token);
         var otherFiles = await other.GetContainerAsync("files", token);
-        await Write(files, "kept", "kept", token);
+        await WriteAsync(files, "kept", "kept", token);
 
         // A reader, and a download stream: the database has one writer at a time, so an open
         // writer would block the commit below.
         var open = await other.BeginTransactionAsync(token);
-        (await Names(otherFiles)).ShouldBe(["kept"]);
+        (await NamesAsync(otherFiles)).ShouldBe(["kept"]);
         await using var reader = await database.CreateSessionAsync(token);
         var download = await (await reader.GetContainerAsync("files", token)).OpenReadAsync("kept", token);
 
@@ -85,7 +85,7 @@ public sealed class BlobStorageOperationsTests
         using (var failures = FaultInjectingJournalStorageStrategy.FailJournalFlushes(1))
         {
             unconfirmed = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () =>
-                await Write(files, "unconfirmed", "unconfirmed", token));
+                await WriteAsync(files, "unconfirmed", "unconfirmed", token));
             failures.Remaining.ShouldBe(0);
         }
 
@@ -157,7 +157,7 @@ public sealed class BlobStorageOperationsTests
         var beforeTheReopen = strategy.Capture("blobs");
 
         var reopened = await engine.OpenDatabaseAsync("blobs", token);
-        var names = await Names(await reopened.GetContainerAsync("files", token));
+        var names = await NamesAsync(await reopened.GetContainerAsync("files", token));
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
@@ -213,7 +213,7 @@ public sealed class BlobStorageOperationsTests
         builder.CheckpointJournalSize = 8 * 1024 * 1024;
 
         // Act
-        await using var engine = (BlobDatabaseEngine)builder.Build();
+        await using var engine = builder.Build();
         var database = await engine.CreateDatabaseAsync("built");
 
         // Assert
@@ -310,14 +310,14 @@ public sealed class BlobStorageOperationsTests
         await using var engine = BlobDatabaseEngine.Create(options);
         var database = await engine.CreateDatabaseAsync("blobs");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "keep", "original");
+        await WriteAsync(container, "keep", "original");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
         var files = await session.GetContainerAsync("files");
         var otherFiles = await other.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Write(files, "rolled", "rolled");
-        await Write(files, "keep", "overwritten");
+        await WriteAsync(files, "rolled", "rolled");
+        await WriteAsync(files, "keep", "overwritten");
 
         // Act: another storage bracket holds every page while the rollback runs, so the undo's
         // bracket cannot touch the first page it undoes and the undo is deferred with the database
@@ -332,14 +332,14 @@ public sealed class BlobStorageOperationsTests
         // The engine handed the coordinator its first retry delay: the retry is due within it.
         var firstRetry = database.Coordinator.NextDeferredUndoRetry;
 
-        await Write(otherFiles, "other", "other").WaitAsync(Timeout);
+        await WriteAsync(otherFiles, "other", "other").WaitAsync(Timeout);
         watch.Stop();
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        (await Names(container)).ShouldBe(["keep", "other"]);
-        (await Read(container, "keep")).ShouldBe("original");
+        (await NamesAsync(container)).ShouldBe(["keep", "other"]);
+        (await ReadAsync(container, "keep")).ShouldBe("original");
         options.DeferredUndoRetryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
         firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(options.DeferredUndoRetryDelay);
         // The regression this guards against waits a full MaintenanceInterval (an hour here) per retry.
@@ -374,24 +374,24 @@ public sealed class BlobStorageOperationsTests
         // Act: each upload is its own transaction.
         for (int id = 0; id < uploads; id++)
         {
-            await Write(container, $"k{id}", new string('x', 2048));
+            await WriteAsync(container, $"k{id}", new string('x', 2048));
         }
 
         // Assert: three chunks to a page is 200 pages, and the catalog adds a few; a page per upload
         // was 607.
         long pages = database.DataStorage.PageManager.PageCount - pagesBefore;
         pages.ShouldBeLessThanOrEqualTo(uploads / 2, $"{pages} data pages for {uploads} uploads of 2 KiB");
-        (await Names(container)).Count.ShouldBe(uploads);
-        (await Read(container, $"k{uploads - 1}")).ShouldBe(new string('x', 2048));
+        (await NamesAsync(container)).Count.ShouldBe(uploads);
+        (await ReadAsync(container, $"k{uploads - 1}")).ShouldBe(new string('x', 2048));
     }
 
-    private static async Task Write(BlobContainer container, string name, string content, CancellationToken cancellationToken = default)
+    private static async Task WriteAsync(BlobContainer container, string name, string content, CancellationToken cancellationToken = default)
     {
         await using var stream = await container.OpenWriteAsync(name, cancellationToken: cancellationToken);
         await stream.WriteAsync(Encoding.UTF8.GetBytes(content), cancellationToken);
     }
 
-    private static async Task<string> Read(BlobContainer container, string name)
+    private static async Task<string> ReadAsync(BlobContainer container, string name)
     {
         await using var stream = await container.OpenReadAsync(name);
         using var buffer = new MemoryStream();
@@ -399,7 +399,7 @@ public sealed class BlobStorageOperationsTests
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
 
-    private static async Task<List<string>> Names(BlobContainer container)
+    private static async Task<List<string>> NamesAsync(BlobContainer container)
     {
         var names = new List<string>();
         await foreach (var blob in container.GetBlobsAsync())
@@ -440,7 +440,4 @@ public sealed class BlobStorageOperationsTests
         frame.Type.ShouldBe(ProtocolMessageType.Error);
         return ProtocolErrorMessage.Decode(frame.Payload.Span);
     }
-
-    /// <summary>A request of no language: a blob session has none, so it refuses every request.</summary>
-    private sealed class BlobRequest() : QueryRequest(null!);
 }

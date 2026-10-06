@@ -3,11 +3,11 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Blob.Storage;
-using Assimalign.Cohesion.Database.Transactions;
-
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Blob.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Catalog.Tests;
 

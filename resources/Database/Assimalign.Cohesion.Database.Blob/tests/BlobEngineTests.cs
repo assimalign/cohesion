@@ -5,12 +5,14 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
 using Assimalign.Cohesion.Database.Blob.Catalog;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
-using Shouldly;
-using Xunit;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -23,14 +25,14 @@ public sealed class BlobEngineTests
         var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
         byte[] original = Encoding.UTF8.GetBytes("original");
-        await Write(container, "a/file", original);
+        await WriteAsync(container, "a/file", original);
         var before = (await container.GetPropertiesAsync("a/file"))!.Value;
         await using var oldReader = await container.OpenReadAsync("a/file");
         var payload = new byte[110_321];
         for (int i = 0; i < payload.Length; i++) { payload[i] = (byte)(i * 31); }
         var upload = await container.OpenWriteAsync("a/file", new() { ContentType = "application/test" });
         await upload.WriteAsync(payload.AsMemory(0, 40_000));
-        (await Read(container, "a/file")).ShouldBe(original);
+        (await ReadAsync(container, "a/file")).ShouldBe(original);
         (await container.GetPropertiesAsync("a/file"))!.Value.ETag.ShouldBe(before.ETag);
         await upload.WriteAsync(payload.AsMemory(40_000));
         await upload.DisposeAsync();
@@ -40,37 +42,37 @@ public sealed class BlobEngineTests
         after.CreatedAt.ShouldBe(before.CreatedAt);
         after.ModifiedAt.ShouldBeGreaterThanOrEqualTo(before.ModifiedAt);
         after.ETag.ShouldNotBe(before.ETag);
-        (await Read(container, "a/file")).ShouldBe(payload);
+        (await ReadAsync(container, "a/file")).ShouldBe(payload);
         using var oldContent = new MemoryStream();
         await oldReader.CopyToAsync(oldContent);
         oldContent.ToArray().ShouldBe(original);
         await Should.ThrowAsync<DatabaseException>(async () => await container.OpenWriteAsync("a/file", new() { Overwrite = false }));
-        await Write(container, "b/empty", []);
+        await WriteAsync(container, "b/empty", []);
         var names = new List<string>();
         await foreach (var blob in container.GetBlobsAsync("a/")) { names.Add(blob.Name); }
         names.ShouldBe(["a/file"]);
-        (await Read(container, "b/empty")).ShouldBeEmpty();
+        (await ReadAsync(container, "b/empty")).ShouldBeEmpty();
         (await container.GetPropertiesAsync("b/empty"))!.Value.Checksum.ShouldBe(0u);
     }
 
-    [Fact]
-    public async Task Transactions_bind_through_the_session_and_rollback_chunks_and_catalog()
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Session: its container and blob operations join its transaction, which rolls back and commits chunks and catalog")]
+    public async Task BeginTransactionAsync_SessionContainerOperations_ShouldRollBackAndCommitChunksAndCatalog()
     {
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "item", "old"u8.ToArray());
+        await WriteAsync(container, "item", "old"u8.ToArray());
         await using var session = await database.CreateSessionAsync();
         var transactionalContainer = await session.GetContainerAsync("files");
         await using (var transaction = await session.BeginTransactionAsync())
         {
-            await Write(transactionalContainer, "item", new byte[30_000]);
+            await WriteAsync(transactionalContainer, "item", new byte[30_000]);
             (await transactionalContainer.GetPropertiesAsync("item"))!.Value.Length.ShouldBe(30_000);
-            (await Read(container, "item")).ShouldBe("old"u8.ToArray());
+            (await ReadAsync(container, "item")).ShouldBe("old"u8.ToArray());
             await session.CreateContainerAsync("temporary");
             await transaction.RollbackAsync();
         }
-        (await Read(container, "item")).ShouldBe("old"u8.ToArray());
+        (await ReadAsync(container, "item")).ShouldBe("old"u8.ToArray());
         await Should.ThrowAsync<DatabaseException>(async () => await database.GetContainerAsync("temporary"));
         await using (var transaction = await session.BeginTransactionAsync())
         {
@@ -86,7 +88,7 @@ public sealed class BlobEngineTests
             await stream.DisposeAsync();
             await transaction.CommitAsync();
         }
-        (await Read(container, "item")).ShouldBe("committed"u8.ToArray());
+        (await ReadAsync(container, "item")).ShouldBe("committed"u8.ToArray());
     }
 
     /// <summary>
@@ -103,7 +105,7 @@ public sealed class BlobEngineTests
         await using var session = await database.CreateSessionAsync();
         var scoped = await session.GetContainerAsync("files");
         var transaction = await session.BeginTransactionAsync();
-        await Write(scoped, "item", "kept"u8.ToArray());
+        await WriteAsync(scoped, "item", "kept"u8.ToArray());
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
 
@@ -118,7 +120,7 @@ public sealed class BlobEngineTests
         stateAfterRollback.ShouldBe(TransactionState.Active);
         pendingAfterRollback.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.Committed);
-        (await Read(await database.GetContainerAsync("files"), "item")).ShouldBe("kept"u8.ToArray());
+        (await ReadAsync(await database.GetContainerAsync("files"), "item")).ShouldBe("kept"u8.ToArray());
     }
 
     [Theory]
@@ -129,12 +131,12 @@ public sealed class BlobEngineTests
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "item", "before"u8.ToArray());
+        await WriteAsync(container, "item", "before"u8.ToArray());
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync(level);
         var scoped = await session.GetContainerAsync("files");
-        await Write(container, "item", "after"u8.ToArray());
-        Encoding.UTF8.GetString(await Read(scoped, "item")).ShouldBe(expected);
+        await WriteAsync(container, "item", "after"u8.ToArray());
+        Encoding.UTF8.GetString(await ReadAsync(scoped, "item")).ShouldBe(expected);
         await transaction.RollbackAsync();
     }
 
@@ -144,17 +146,17 @@ public sealed class BlobEngineTests
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "item", "before"u8.ToArray());
+        await WriteAsync(container, "item", "before"u8.ToArray());
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
         var scoped = await session.GetContainerAsync("files");
-        await Write(container, "item", "after"u8.ToArray());
+        await WriteAsync(container, "item", "after"u8.ToArray());
         await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await scoped.DeleteAsync("item"));
         // The conflict aborts the explicit transaction, which waits for the caller's rollback (#1225).
         transaction.State.ShouldBe(TransactionState.Faulted);
         await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        (await Read(container, "item")).ShouldBe("after"u8.ToArray());
+        (await ReadAsync(container, "item")).ShouldBe("after"u8.ToArray());
     }
 
     [Fact]
@@ -178,7 +180,7 @@ public sealed class BlobEngineTests
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
         var container = await database.CreateContainerAsync("files");
-        await Write(container, "large", new byte[100_000]);
+        await WriteAsync(container, "large", new byte[100_000]);
         var reader = await container.OpenReadAsync("large");
         (await container.DeleteAsync("large")).ShouldBeTrue();
         (await container.DeleteAsync("large")).ShouldBeFalse();
@@ -217,13 +219,13 @@ public sealed class BlobEngineTests
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
         var original = await database.CreateContainerAsync("files");
-        await Write(original, "item", new byte[20_000]);
+        await WriteAsync(original, "item", new byte[20_000]);
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
         await session.DropContainerAsync("files");
         (await original.GetPropertiesAsync("item")).ShouldNotBeNull();
         await transaction.RollbackAsync();
-        (await Read(original, "item")).Length.ShouldBe(20_000);
+        (await ReadAsync(original, "item")).Length.ShouldBe(20_000);
         await database.DropContainerAsync("files");
         await database.CreateContainerAsync("files");
         await Should.ThrowAsync<DatabaseException>(async () => await original.GetPropertiesAsync("item"));
@@ -243,7 +245,7 @@ public sealed class BlobEngineTests
             engine.TryGetDatabase("media", out var found).ShouldBeTrue();
             found.ShouldBeSameAs(database);
             var container = await database.CreateContainerAsync("files");
-            await Write(container, "item", "durable"u8.ToArray());
+            await WriteAsync(container, "item", "durable"u8.ToArray());
             await engine.DisposeAsync();
             engine.Dispose();
             engine.State.ShouldBe(EngineState.Disposed);
@@ -253,7 +255,7 @@ public sealed class BlobEngineTests
             await foreach (var item in reopened.GetDatabasesAsync()) { names.Add(item.Name.ToString()); }
             names.ShouldBe(["Media"]);
             var loaded = await reopened.OpenDatabaseAsync("media");
-            (await Read(await loaded.GetContainerAsync("files"), "item")).ShouldBe("durable"u8.ToArray());
+            (await ReadAsync(await loaded.GetContainerAsync("files"), "item")).ShouldBe("durable"u8.ToArray());
             await reopened.DropDatabaseAsync("MEDIA");
             reopened.TryGetDatabase("media", out _).ShouldBeFalse();
             await Should.ThrowAsync<DatabaseNotFoundException>(async () => await reopened.OpenDatabaseAsync("Media"));
@@ -273,7 +275,7 @@ public sealed class BlobEngineTests
             {
                 var database = await engine.CreateDatabaseAsync("legacy");
                 var container = await database.CreateContainerAsync("files");
-                await Write(container, "item", "durable"u8.ToArray());
+                await WriteAsync(container, "item", "durable"u8.ToArray());
             }
 
             StorageFormatFiles.WriteVersion(Path.Combine(root, "legacy", "blob.dat"), version: 2);
@@ -414,19 +416,19 @@ public sealed class BlobEngineTests
             {
                 var database = await engine.CreateDatabaseAsync($"{name}-{index}");
                 var container = await database.CreateContainerAsync("files");
-                await Write(container, "item", "item"u8.ToArray());
+                await WriteAsync(container, "item", "item"u8.ToArray());
             }
 
             return engine;
         }
     }
 
-    internal static async Task Write(BlobContainer container, string name, byte[] bytes)
+    internal static async Task WriteAsync(BlobContainer container, string name, byte[] bytes)
     {
         await using var stream = await container.OpenWriteAsync(name);
         await stream.WriteAsync(bytes);
     }
-    internal static async Task<byte[]> Read(BlobContainer container, string name)
+    internal static async Task<byte[]> ReadAsync(BlobContainer container, string name)
     {
         await using var stream = await container.OpenReadAsync(name);
         using var result = new MemoryStream();

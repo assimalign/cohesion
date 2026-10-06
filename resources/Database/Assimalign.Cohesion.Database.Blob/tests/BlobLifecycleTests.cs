@@ -3,9 +3,11 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Transactions;
+
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -38,7 +40,7 @@ public sealed class BlobLifecycleTests
         var firstFiles = await first.GetContainerAsync("files", timeout.Token);
         var waitingFiles = await waiting.GetContainerAsync("files", timeout.Token);
         await using var firstTransaction = await first.BeginTransactionAsync(timeout.Token);
-        await Write(firstFiles, "first", timeout.Token);
+        await WriteAsync(firstFiles, "first", timeout.Token);
         await using var waitingTransaction = await waiting.BeginTransactionAsync(isolation, timeout.Token);
 
         // The delete runs synchronously until the existing writer forces its first asynchronous
@@ -58,7 +60,7 @@ public sealed class BlobLifecycleTests
         var stateAfterEnd = waitingTransaction.State;
         await firstTransaction.CommitAsync(timeout.Token);
         var error = await Should.ThrowAsync<DatabaseException>(async () => await pending.WaitAsync(timeout.Token));
-        await Write(container, "after", timeout.Token);
+        await WriteAsync(container, "after", timeout.Token);
 
         // Assert
         parked.ShouldBeTrue();
@@ -146,7 +148,7 @@ public sealed class BlobLifecycleTests
             loaded.Coordinator.RunVersionPurgePass(timeout.Token);
             var loadedFiles = await loaded.GetContainerAsync("files", timeout.Token);
             var properties = await loadedFiles.GetPropertiesAsync("big", timeout.Token);
-            byte[] stored = await Read(loadedFiles, "big", timeout.Token);
+            byte[] stored = await ReadAsync(loadedFiles, "big", timeout.Token);
 
             // Assert
             deleteParked.ShouldBeTrue();
@@ -163,13 +165,13 @@ public sealed class BlobLifecycleTests
         }
     }
 
-    private static async Task Write(BlobContainer container, string name, CancellationToken cancellationToken)
+    private static async Task WriteAsync(BlobContainer container, string name, CancellationToken cancellationToken)
     {
         await using var stream = await container.OpenWriteAsync(name, cancellationToken: cancellationToken);
         await stream.WriteAsync(Encoding.UTF8.GetBytes(name), cancellationToken);
     }
 
-    private static async Task<byte[]> Read(BlobContainer container, string name, CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadAsync(BlobContainer container, string name, CancellationToken cancellationToken)
     {
         await using var stream = await container.OpenReadAsync(name, cancellationToken);
         using var buffer = new MemoryStream();

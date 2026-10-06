@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Protocol;
+
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
 

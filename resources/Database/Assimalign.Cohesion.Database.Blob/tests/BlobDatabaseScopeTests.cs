@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+
 using Shouldly;
 using Xunit;
 
@@ -20,14 +21,14 @@ public sealed class BlobDatabaseScopeTests
         var other = await engine.CreateDatabaseAsync("other");
         var ownContainer = await own.CreateContainerAsync("files");
         var otherContainer = await other.CreateContainerAsync("files");
-        await BlobEngineTests.Write(ownContainer, "item", "own"u8.ToArray());
-        await BlobEngineTests.Write(otherContainer, "item", "other"u8.ToArray());
+        await BlobEngineTests.WriteAsync(ownContainer, "item", "own"u8.ToArray());
+        await BlobEngineTests.WriteAsync(otherContainer, "item", "other"u8.ToArray());
         await using var session = await own.CreateSessionAsync();
         session.Database.Name.ShouldBe(own.Name);
-        (await BlobEngineTests.Read(await session.GetContainerAsync("files"), "item")).ShouldBe("own"u8.ToArray());
+        (await BlobEngineTests.ReadAsync(await session.GetContainerAsync("files"), "item")).ShouldBe("own"u8.ToArray());
         await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(command));
         await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("other/files"));
-        (await BlobEngineTests.Read(otherContainer, "item")).ShouldBe("other"u8.ToArray());
+        (await BlobEngineTests.ReadAsync(otherContainer, "item")).ShouldBe("other"u8.ToArray());
         engine.TryGetDatabase("other", out _).ShouldBeTrue();
         engine.TryGetDatabase("injected", out _).ShouldBeFalse();
         var boundContainer = await session.GetContainerAsync("files");

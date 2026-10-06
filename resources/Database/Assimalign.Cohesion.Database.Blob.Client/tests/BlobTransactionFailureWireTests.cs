@@ -3,10 +3,12 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Protocol;
-using Assimalign.Cohesion.Database.Transactions;
+
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
 
@@ -27,7 +29,7 @@ public sealed class BlobTransactionFailureWireTests
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
-        await Write(harness.Container, "keep", "original", timeout.Token);
+        await WriteAsync(harness.Container, "keep", "original", timeout.Token);
         var connection = await harness.Client.ConnectAsync(timeout.Token);
         var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(timeout.Token);
@@ -49,7 +51,7 @@ public sealed class BlobTransactionFailureWireTests
         failure.Message.ShouldContain("Container 'missing' does not exist.", Case.Sensitive);
         refusedWrite.ObjectName.ShouldNotBeNullOrEmpty();
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        (await Read(harness.Container, "keep", timeout.Token)).ShouldBe("original");
+        (await ReadAsync(harness.Container, "keep", timeout.Token)).ShouldBe("original");
         await using var next = await harness.Client.ConnectAsync(timeout.Token);
         (await next.GetPropertiesAsync("files", "keep", timeout.Token)).ShouldNotBeNull().Length.ShouldBe(8);
     }
@@ -61,7 +63,7 @@ public sealed class BlobTransactionFailureWireTests
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
-        await Write(harness.Container, "keep", "original", timeout.Token);
+        await WriteAsync(harness.Container, "keep", "original", timeout.Token);
         await using var connection = await harness.Client.ConnectAsync(timeout.Token);
         var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(timeout.Token);
@@ -78,7 +80,7 @@ public sealed class BlobTransactionFailureWireTests
         error.Message.ShouldContain("Container 'missing' does not exist.", Case.Sensitive);
         repeated.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        (await Read(harness.Container, "keep", timeout.Token)).ShouldBe("original");
+        (await ReadAsync(harness.Container, "keep", timeout.Token)).ShouldBe("original");
     }
 
     /// <summary>
@@ -94,7 +96,7 @@ public sealed class BlobTransactionFailureWireTests
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
-        await Write(harness.Container, "keep", "original", timeout.Token);
+        await WriteAsync(harness.Container, "keep", "original", timeout.Token);
         var connection = await harness.Client.ConnectAsync(timeout.Token);
         var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(timeout.Token);
@@ -119,18 +121,18 @@ public sealed class BlobTransactionFailureWireTests
         commit.Message.ShouldContain(failure.Message, Case.Sensitive);
         repeated.Message.ShouldBe(commit.Message);
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        (await Read(harness.Container, "keep", timeout.Token)).ShouldBe("original");
+        (await ReadAsync(harness.Container, "keep", timeout.Token)).ShouldBe("original");
         await using var next = await harness.Client.ConnectAsync(timeout.Token);
         (await next.GetPropertiesAsync("files", "other", timeout.Token)).ShouldBeNull();
     }
 
-    private static async Task Write(BlobContainer container, string name, string content, CancellationToken cancellationToken)
+    private static async Task WriteAsync(BlobContainer container, string name, string content, CancellationToken cancellationToken)
     {
         await using var stream = await container.OpenWriteAsync(name, cancellationToken: cancellationToken);
         await stream.WriteAsync(Encoding.UTF8.GetBytes(content), cancellationToken);
     }
 
-    private static async Task<string> Read(BlobContainer container, string name, CancellationToken cancellationToken)
+    private static async Task<string> ReadAsync(BlobContainer container, string name, CancellationToken cancellationToken)
     {
         await using var stream = await container.OpenReadAsync(name, cancellationToken);
         using var buffer = new MemoryStream();

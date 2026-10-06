@@ -163,7 +163,8 @@ container operations, and the containers they return, use automatic transactions
 session. `session.Database` is that unbound database (option B of the concrete-types plan,
 §6.6), so its operations run automatic transactions too, and disposing it closes the database
 for every session, never the session itself (the engine then refuses to reopen it with
-`ObjectDisposedException` until it is dropped or the engine is recreated). The engine has one
+`ObjectDisposedException` until it is dropped or the engine is recreated, and its workers skip
+it, so the engine stays `Running`). The engine has one
 writer at a time, so a write through `session.Database` or a container it returned
 (`CreateContainerAsync`, `DropContainerAsync`, an upload or delete) while the session's explicit
 transaction has written waits for that transaction's writer lock: the caller that awaits it before
@@ -688,7 +689,12 @@ behind its `Open` factory.
   the session closed (the view refused with "The blob session is closed."), and disposing it
   closes the database for every session, not the session: the engine refuses to reopen it
   (`ObjectDisposedException`) until it is dropped or the engine is recreated, as a directly
-  disposed database always was. The wire server and Studio run the session's operations.
+  disposed database always was. Its workers skip a closed database (`BlobDatabase.IsClosed`, and
+  `BlobDatabaseEngine.IsOpen` is false for it), so the engine stays `Running` and its server keeps
+  serving the other databases. Without the skip, the version-purge worker failed on the closed
+  database's disposed coordinator every pass, which left the engine `Faulted` for good and its
+  server refusing every start, connection and handshake; option B made that reachable from a
+  session's own property. The wire server and Studio run the session's operations.
 - **Typed surface without casts.** The engine re-exposes `CreateDatabaseAsync`,
   `OpenDatabaseAsync` and `GetDatabasesAsync` typed (`BlobDatabase`) with `new` members over the
   base's public members; a database re-exposes its `Engine` and `CreateSessionAsync`

@@ -8,8 +8,8 @@ P4 (#1260, the first of five) re-verified and implemented on 2026-10-05 (§7, §
 Graph model PR of P4 (#1260, the second) re-verified and implemented on 2026-10-05 and reviewed on
 2026-10-06 (§7, §6.4, §6.5, §6.9); the Documents model PR of P4 (#1260, the third) re-verified,
 implemented and reviewed on 2026-10-06 (§7, §6.4, §6.5, §6.6, §6.9); the Blob model PR of P4
-(#1260, the fourth) re-verified and implemented on 2026-10-06, with three interim choices pending
-owner confirmation (§7, §6.4, §6.5, §6.6, §6.9) ·
+(#1260, the fourth) re-verified, implemented and reviewed on 2026-10-06, with three interim
+choices pending owner confirmation (§7, §6.4, §6.5, §6.6, §6.9) ·
 **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
 · **Owner decision:** O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md` · **Supersedes:** #1232
@@ -971,7 +971,23 @@ accounted for:
     transaction's writer lock until the call's token is canceled, writes nothing and leaves the
     transaction committable (same suite,
     `CreateContainerAsync_ThroughSessionDatabaseAfterTransactionWrote_ShouldWaitForItsWriterLock`,
-    a container create and a blob delete).
+    a container create and a blob delete). A third consequence, found by the PR's review: the
+    engine keeps a database its holder disposed registered (to refuse the reopen), and
+    `IsOpen(BlobDatabase)` read only that registration, so the version-purge worker failed on the
+    closed database's disposed coordinator every pass and the engine stayed `Faulted` for good,
+    which made its server refuse every start, connection and handshake for every database. A
+    directly disposed database did this before P4 too; option B made it reachable from the
+    session's own property, where disposing the view only closed the session. The review's fix:
+    `BlobDatabase.IsClosed`, `BlobDatabaseEngine.IsOpen` false for a closed database (and for its
+    storage), and the version-purge worker skips a closed database in its pass and its trigger
+    wait (the checkpointer inherits the fix through `IsOpen`, and the flush and write-back
+    workers through `IsOpen(BlobStorage)`, which tolerates a disposed storage's
+    `ObjectDisposedException`; write-back already writes nothing for a disposed storage).
+    Asserted: `BlobDatabaseServerTests.DisposeAsync_SessionDatabase_ShouldLeaveTheEngineRunningAndItsServerServing`
+    (20 ms worker intervals, half a second of passes over the closed database, then one more pass
+    of each worker: every pass succeeds, no worker records a failure, the engine is `Running`, a
+    server starts and serves a handshake and an upload to another database, and the closed one's
+    reopen is still refused).
 - *Not reachable from the model without a kernel hook, pinned by the root suite* (as for the other
   models): "… ended before the operation started; nothing was written." (where the model reported
   `COHDBB001` without a cause), and the session's "The session failed to close." aggregate (for
@@ -1278,7 +1294,18 @@ write through `session.Database`, or through a container it returned (a create, 
 or a delete), while the session's explicit transaction has written waits for that transaction's
 writer lock until the call's token is canceled (the self-wait the session, database and Blob
 `DESIGN.md` remarks document). Inside a transaction, the session's own container operations are
-the ones to use. The Blob wire server runs the bound session's own container operations, where it
+the ones to use. The PR's review found a third consequence: the engine's workers treated the
+closed database as open (the engine keeps it registered to refuse the reopen), so the
+version-purge worker failed on its disposed coordinator every pass, the engine stayed `Faulted`
+for good, and the Blob server refused every start, connection and handshake, for every database.
+A directly disposed database did this before P4 too; option B put it behind the session's own
+property. Fixed in the review: the engine's `IsOpen` is false for a closed database and its
+storage, and the version-purge worker skips a closed database, so the engine stays `Running` and
+its server keeps serving its other databases
+(`BlobDatabaseServerTests.DisposeAsync_SessionDatabase_ShouldLeaveTheEngineRunningAndItsServerServing`;
+§6.4's Blob accounting). The other models' engines carry the same `IsOpen` shape, which a
+follow-up fixes (§7, "Blob, as landed"). The Blob wire server runs the bound session's own
+container operations, where it
 cast the session's database to `IBlobDatabase`, so its exchanges still join the session's
 transaction (a host-opened one included); Studio's `BlobWorkspace` runs its container and blob
 tools on the session (a cast from `ModelWorkspace`'s root-typed session to `BlobDatabaseSession`,
@@ -2115,6 +2142,37 @@ the code had moved, the row now says what landed:
         Documents landing, with the same documented self-wait: a write through `session.Database`
         while the session's transaction has written waits for that transaction's writer lock
         (row 54, §6.6).
+  - *The review's fixes.* Three reviews; two approved with minor findings only, one asked for
+    changes over one major finding. **Major:** option B let `session.Database.DisposeAsync()` leave
+    the engine `Faulted` for good, and with it the Blob server refusing every start, connection
+    and handshake: the engine keeps a database its holder closed registered, its `IsOpen` read
+    only that registration, and the version-purge worker failed on the closed database's disposed
+    coordinator every pass (a probe at `b6b669c2` stayed `Running`; at the PR's head it went
+    `Faulted` with 60 purge failures in 1.5 s). Fixed in code rather than recorded as a fourth
+    owner question: `BlobDatabase.IsClosed`, `BlobDatabaseEngine.IsOpen` false for a closed
+    database and its storage, and the version-purge worker skips a closed database (§6.4, §6.6),
+    pinned by
+    `BlobDatabaseServerTests.DisposeAsync_SessionDatabase_ShouldLeaveTheEngineRunningAndItsServerServing`,
+    which fails without the fix (the handshake is refused). The fix also covers the direct-dispose
+    path the model had before P4. The session's, the database's and Blob `DESIGN.md`'s remarks
+    say so. The other engines carry the same `IsOpen` (Documents' `DocumentDatabaseEngine.cs:117`,
+    reachable through `session.Database` since its own option-B landing; Graph's, KeyValuePair's
+    and Sql's for a directly disposed database). They are outside this model PR, so a follow-up
+    applies the same fix to each (Documents first). **Minor:** the last
+    `(BlobDatabaseEngine)builder.Build()` identity cast is gone (`BlobStorageOperationsTests`); `BlobDatabaseServerOptions.ShutdownDrainTimeout` names
+    `DatabaseServer.StopAsync` instead of the interface P6 deletes; the database's class remarks
+    name its four container operations with their parameter lists (each has an internal overload,
+    so the bare crefs were ambiguous); `BlobCatalog`'s four mutation members document the
+    `BlobCatalogException` a malformed persisted record raises, and its `Open` remark no longer
+    says the catalog keeps neither the storage nor the coordinator (it keeps both and owns
+    neither; Blob.Catalog's `DESIGN.md` likewise); the primary-constructor `BlobRequest` the PR
+    declared in two test files is one test object with an ordinary constructor
+    (`TestObjects/BlobRequest.cs`); the renamed snake_case engine test follows the naming rule
+    (`BeginTransactionAsync_SessionContainerOperations_ShouldRollBackAndCommitChunksAndCatalog`,
+    with a display name); the using-directive groups of the twelve test and fixture files the PR
+    touched that broke the order (System, third-party, Cohesion, each group apart); and the
+    Task-returning test helpers the PR retyped (`WriteAsync`, `ReadAsync`, `NamesAsync`, the
+    cross-file callers of `BlobEngineTests`' included). None was rejected.
 
   *Gate, as run:* a clean build of every Database project but Database.Testing's tests, the
   SampleHost fixture (they need a local SDK pack) and the stray `Cache/src` test csproj, plus
@@ -2127,10 +2185,11 @@ the code had moved, the row now says what landed:
   Graph.Storage 17, Graph.Client 57, Blob.Catalog 5, Blob.Storage 14, Blob.Client 21,
   KeyValuePair 186, KeyValuePair.Catalog 4, KeyValuePair.Storage 3, KeyValuePair.Client 10,
   Client 41, Hosting 53, Embedded 4, ApplicationModel 15, Sdk.Database 18) apart from Blob.Tests,
-  which grows from 130 to 166 (21 composition tests, ten session and transaction contract tests,
-  the session-closed commit pinned for an aborted transaction too, three engine tests and the
-  server's terminal start refusal); Blob.Client keeps its 21, one of them now pinning the server's
-  BEGIN refusal. Among them are the #1188, #1225 and #1226 suites in process
+  which grows from 130 to 167 (21 composition tests, ten session and transaction contract tests,
+  the session-closed commit pinned for an aborted transaction too, three engine tests, the
+  server's terminal start refusal, and the review's closed-database test); Blob.Client keeps its
+  21, one of them now pinning the server's BEGIN refusal. These are the counts of the full rerun
+  after the review's fixes. Among them are the #1188, #1225 and #1226 suites in process
   (`BlobTransactionFailureTests`, `BlobLifecycleTests`, `BlobStorageOperationsTests`,
   `BlobEngineTests`) and over the wire (Blob.Client's `BlobTransactionFailureWireTests` and
   `BlobClientFailureTests`, `BlobDatabaseServerTests`); the worker-resilience and holder-drain
@@ -2387,6 +2446,13 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   instance: the argument check's message says "not created by this storage instance", but it
   only ever tested the type (found at P2, row 36). Checking the owner is a behavior change, so P2
   left it for its own fix, #1286.
+- The other engines' `IsOpen` treats a database its holder disposed as open, because the engine
+  keeps it registered to refuse its reopen, so a worker that touches its disposed state can fail
+  every pass and leave the engine `Faulted`, as Blob's version-purge worker did (found by the
+  Blob P4 review, which fixed Blob; §7, "Blob, as landed"). Documents, whose workers mirror
+  Blob's, reaches it through `session.Database` since its option-B landing; Graph, KeyValuePair
+  and Sql through a directly disposed database (not probed). Each needs Blob's fix and a test;
+  Documents first.
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never

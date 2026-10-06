@@ -46,8 +46,8 @@ public sealed class BlobCatalog
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="BlobCatalogException">Persisted catalog metadata is malformed or unsupported.</exception>
     /// <remarks>
-    /// The catalog retains neither the storage nor the coordinator: the engine that opens it owns
-    /// their lifecycle.
+    /// The catalog keeps references to the storage and the coordinator but does not own them: the
+    /// engine that opens it disposes them.
     /// </remarks>
     public static BlobCatalog Open(BlobStorage storage, TransactionCoordinator coordinator)
     {
@@ -116,6 +116,7 @@ public sealed class BlobCatalog
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the physical application.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended, or its end began, before the mutation was applied.</exception>
+    /// <exception cref="BlobCatalogException">A persisted catalog record is malformed.</exception>
     public async ValueTask SaveContainerAsync(BlobContainerMetadata container, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -148,6 +149,7 @@ public sealed class BlobCatalog
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the physical application.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended, or its end began, before the mutation was applied.</exception>
+    /// <exception cref="BlobCatalogException">A persisted catalog record is malformed.</exception>
     public async ValueTask DeleteContainerAsync(Guid containerId, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -220,6 +222,7 @@ public sealed class BlobCatalog
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the physical application.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended, or its end began, before the mutation was applied.</exception>
+    /// <exception cref="BlobCatalogException">A persisted catalog record is malformed.</exception>
     public async ValueTask SaveBlobAsync(BlobCatalogEntry blob, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -248,6 +251,7 @@ public sealed class BlobCatalog
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the physical application.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended, or its end began, before the mutation was applied.</exception>
+    /// <exception cref="BlobCatalogException">A persisted catalog record is malformed.</exception>
     public async ValueTask DeleteBlobAsync(Guid containerId, string name, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(name);

@@ -5,12 +5,14 @@ using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Security;
-using Shouldly;
-using Xunit;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -223,6 +225,60 @@ public sealed class BlobDatabaseServerTests
         listener.Binds.ShouldBe(0);
         listener.Disposals.ShouldBe(1);
         server.Sessions.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Disposing a session's database (option B of the concrete-types plan, §6.6: the session's
+    /// <see cref="BlobDatabaseSession.Database"/> is the unbound database) closes that database
+    /// alone. The engine keeps it registered, so it refuses to reopen it until it is dropped, but
+    /// its workers skip it, so the engine stays <see cref="EngineState.Running"/> and its server
+    /// still starts and serves the engine's other databases. Before the workers skipped a closed
+    /// database, the version-purge worker failed on its disposed coordinator every pass, the engine
+    /// reported <see cref="EngineState.Faulted"/> for good, and the server refused every start,
+    /// connection and handshake.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Blob server: a database closed through a session leaves the engine running and its server serving")]
+    public async Task DisposeAsync_SessionDatabase_ShouldLeaveTheEngineRunningAndItsServerServing()
+    {
+        // Arrange: workers that pass every 20 ms, and a closed database with a written blob.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        CancellationToken token = deadline.Token;
+        var interval = TimeSpan.FromMilliseconds(20);
+        await using var engine = BlobDatabaseEngine.Create(new()
+        {
+            CheckpointInterval = interval, PageWriteBackInterval = interval, MaintenanceInterval = interval
+        });
+        var closed = await engine.CreateDatabaseAsync("closed", token);
+        var closedFiles = await closed.CreateContainerAsync("files", token);
+        await WriteBlobAsync(closedFiles, "item", "closed"u8.ToArray(), token);
+        var open = await engine.CreateDatabaseAsync("open", token);
+        await open.CreateContainerAsync("files", token);
+        await using var session = await closed.CreateSessionAsync(token);
+
+        // Act: close the database through the session, let the workers pass over it many times,
+        // run one more pass of each, then start a server and write over it to the other database.
+        await session.Database.DisposeAsync();
+        await Task.Delay(TimeSpan.FromMilliseconds(500), token);
+        var passes = engine.Workers.Select(worker => worker.RunIteration(token)).ToArray();
+        var listener = new InMemoryConnectionListener();
+        await using var server = BlobDatabaseServer.Create(engine, new() { Listener = listener });
+        await server.StartAsync(token);
+        await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
+        await HandshakeAsync(channel, "open", token);
+        await WriteAsync(channel, BlobProtocolMessageType.Write, new BlobWriteMessage("files", "item").Encode(), token);
+        await BlobProtocolTransfer.SendAsync(channel, new MemoryStream("open"u8.ToArray()), new(4, "text/plain"), token);
+        var written = BlobTransferCompleteMessage.Decode((await ReadAsync(channel, token)).Payload.Span);
+
+        // Assert
+        passes.ShouldAllBe(passed => passed);
+        engine.Workers.ShouldAllBe(worker => worker.FailureCount == 0 && worker.Fault == null);
+        engine.State.ShouldBe(EngineState.Running);
+        engine.OfflineDatabases.ShouldBeEmpty();
+        server.Sessions.Single().DatabaseSession!.Database.Name.ShouldBe(open.Name);
+        written.Length.ShouldBe(4);
+        (await ReadBlobAsync(await open.GetContainerAsync("files", token), "item", token)).ShouldBe("open"u8.ToArray());
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.OpenDatabaseAsync("closed", token));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Blob server: Shutdown owns blocked capacity rejections")]

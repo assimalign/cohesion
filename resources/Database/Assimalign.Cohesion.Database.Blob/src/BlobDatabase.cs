@@ -20,8 +20,10 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// <para>
 /// A database composes its blob storage, the transaction coordinator every session binds to, and
 /// the catalog of containers and blob metadata (<see cref="BlobCatalog"/>). Its own container
-/// operations (<see cref="CreateContainerAsync"/>, <see cref="GetContainerAsync"/>,
-/// <see cref="DropContainerAsync"/>, <see cref="GetContainersAsync"/>), and the operations of a
+/// operations (<see cref="CreateContainerAsync(string, CancellationToken)"/>,
+/// <see cref="GetContainerAsync(string, CancellationToken)"/>,
+/// <see cref="DropContainerAsync(string, CancellationToken)"/>,
+/// <see cref="GetContainersAsync(CancellationToken)"/>), and the operations of a
 /// container they return, run in autocommit, outside any session; a session's own container
 /// operations run in its transaction (<see cref="BlobDatabaseSession"/>). The engine has one
 /// writer at a time, so a write through the database while a session's explicit transaction has
@@ -36,7 +38,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// session returned as its database (option B, §6.6: <see cref="BlobDatabaseSession.Database"/>
 /// is this unbound database, and disposing it closes the database for every session, never a
 /// session itself; the engine then refuses to reopen it with <see cref="ObjectDisposedException"/>
-/// until it is dropped or the engine is recreated). The engine creates and opens it. The base
+/// until it is dropped or the engine is recreated, and its workers skip it, so the engine stays
+/// <see cref="EngineState.Running"/>). The engine creates and opens it. The base
 /// owns the name, the owning engine (re-exposed typed with <c>new</c>) and the disposed flag.
 /// </para>
 /// </remarks>
@@ -105,6 +108,13 @@ public sealed class BlobDatabase : DatabaseInstance
     /// Gets whether a failed durable flush took the database offline.
     /// </summary>
     internal bool IsOffline => DataStorage.IsOffline;
+
+    /// <summary>
+    /// Gets whether the database has been disposed: by the engine, or by a holder of the
+    /// database, a session's <see cref="BlobDatabaseSession.Database"/> included. The engine keeps
+    /// a database its holder closed registered, to refuse its reopen, and its workers skip it.
+    /// </summary>
+    internal bool IsClosed => IsDisposed;
 
     /// <summary>
     /// Creates a new lightweight blob session scoped to this database.

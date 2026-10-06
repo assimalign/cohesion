@@ -49,8 +49,9 @@ deleters. Rollback clears old tombstones and removes newly created records; dire
 observe those physical changes directly. Snapshot-safe purge later reclaims obsolete records.
 
 Open-time recovery scrubs uncommitted stamps before loading the directory. Metadata that
-references an unfinished chain is therefore absent after restart. The factory retains neither
-storage nor coordinator ownership; the engine controls their lifecycle. This assembly contains
+references an unfinished chain is therefore absent after restart. The catalog keeps references
+to the storage and the coordinator but does not own them; the engine that opens it disposes them.
+This assembly contains
 no local pager, journal, transaction manager, or model-lock implementation.
 
 ## Metadata disk format, version 1

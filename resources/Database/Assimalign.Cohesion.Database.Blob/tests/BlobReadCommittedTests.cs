@@ -2,10 +2,10 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Transactions;
-
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -22,13 +22,13 @@ public sealed class BlobReadCommittedTests
         {
             original[i] = (byte)(i * 19);
         }
-        await Write(container, original);
+        await WriteAsync(container, original);
 
         await using var writerSession = await database.CreateSessionAsync();
         await using var writer = await writerSession.BeginTransactionAsync();
         var writerContainer = await writerSession.GetContainerAsync("files");
         byte[] replacement = new byte[50_000];
-        await Write(writerContainer, replacement);
+        await WriteAsync(writerContainer, replacement);
 
         // Writer W predates reader R. R must see the original while W is active.
         // After W commits, a refreshed R snapshot would let purge pass W's deleter.
@@ -69,7 +69,7 @@ public sealed class BlobReadCommittedTests
         transaction.State.ShouldBe(TransactionState.Active);
         await first.DisposeAsync();
 
-        await Write(container, "second"u8.ToArray());
+        await WriteAsync(container, "second"u8.ToArray());
         await transaction.CommitAsync();
         var committedContainer = await database.GetContainerAsync("files");
         await using var content = await committedContainer.OpenReadAsync("item");
@@ -78,7 +78,7 @@ public sealed class BlobReadCommittedTests
         copied.ToArray().ShouldBe("second"u8.ToArray());
     }
 
-    private static async Task Write(BlobContainer container, byte[] content)
+    private static async Task WriteAsync(BlobContainer container, byte[] content)
     {
         await using var stream = await container.OpenWriteAsync("item");
         await stream.WriteAsync(content);

@@ -109,19 +109,34 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
 
     /// <summary>
     /// Reports whether <paramref name="database"/> is still one of the engine's open databases:
-    /// false once it was dropped, closed for a reopen, or the engine closed it. A worker pass that
+    /// false once it was dropped, closed for a reopen, the engine closed it, or a holder of the
+    /// database disposed it (a session's <see cref="BlobDatabaseSession.Database"/> included; the
+    /// engine keeps such a database registered only to refuse its reopen). A worker pass that
     /// raced such a close tolerates the <see cref="ObjectDisposedException"/> it gets; one from a
     /// database still open is a failure.
     /// </summary>
     /// <param name="database">The database a worker pass visited.</param>
-    internal bool IsOpen(BlobDatabase database) => Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
+    internal bool IsOpen(BlobDatabase database) => !database.IsClosed && Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
 
     /// <summary>
     /// Reports whether <paramref name="storage"/> still belongs to one of the engine's open
-    /// databases (see <see cref="IsOpen(BlobDatabase)"/>).
+    /// databases (see <see cref="IsOpen(BlobDatabase)"/>): false once its database was closed,
+    /// whoever closed it.
     /// </summary>
     /// <param name="storage">The storage a worker pass visited.</param>
-    internal bool IsOpen(BlobStorage storage) => Array.IndexOf(GetStorageSnapshot(), storage) >= 0;
+    internal bool IsOpen(BlobStorage storage)
+    {
+        foreach (var database in GetInstanceSnapshot())
+        {
+            if (ReferenceEquals(database.DataStorage, storage))
+            {
+                return !database.IsClosed;
+            }
+        }
+
+        // A storage the engine is still opening has no database yet.
+        return Array.IndexOf(GetStorageSnapshot(), storage) >= 0;
+    }
 
     /// <summary>Creates a dependency-free builder for an engine and its deferred workers and servers.</summary>
     /// <returns>A one-shot model builder; constructing the builder starts no components.</returns>
