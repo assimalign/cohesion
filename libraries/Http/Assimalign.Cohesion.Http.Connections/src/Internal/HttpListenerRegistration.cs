@@ -34,7 +34,8 @@ internal sealed class HttpListenerRegistration
     }
 
     /// <summary>
-    /// The single HTTP protocol this registration serves.
+    /// The HTTP protocol this registration serves: a single version, or HTTP/1.1 and HTTP/2 together
+    /// for a TLS registration that picks between them per connection through ALPN.
     /// </summary>
     public HttpProtocol Protocol { get; }
 
@@ -111,7 +112,9 @@ internal sealed class HttpListenerRegistration
 
     /// <summary>
     /// Gates a stream-protocol registration on transport capabilities (never on protocol
-    /// identity): HTTP/1.1 and HTTP/2 require a reliable, ordered byte stream.
+    /// identity): HTTP/1.1 and HTTP/2 require a reliable, ordered byte stream, and a registration
+    /// serving both on one listener also requires TLS, because it chooses between them through ALPN,
+    /// a TLS extension (RFC 7301).
     /// </summary>
     /// <param name="capabilities">The capabilities reported by the candidate listener.</param>
     /// <param name="protocol">The HTTP protocol being registered.</param>
@@ -119,18 +122,36 @@ internal sealed class HttpListenerRegistration
     /// <exception cref="ArgumentException">Thrown when the capabilities do not satisfy the protocol's requirements.</exception>
     public static void ValidateStreamCapabilities(ConnectionCapabilities capabilities, HttpProtocol protocol, string? paramName)
     {
-        if (capabilities.Delivery == ConnectionDelivery.Stream && capabilities.IsReliable && capabilities.IsOrdered)
+        string protocolName = protocol switch
         {
-            return;
+            HttpProtocol.Http20 => "HTTP/2",
+            HttpProtocol.Http11 | HttpProtocol.Http20 => "HTTP/1.1 and HTTP/2 on one listener",
+            _ => "HTTP/1.1",
+        };
+
+        if (capabilities.Delivery != ConnectionDelivery.Stream || !capabilities.IsReliable || !capabilities.IsOrdered)
+        {
+            throw CreateCapabilityException(
+                $"{protocolName} requires a transport whose capabilities report a reliable, ordered byte stream " +
+                $"(Delivery=Stream, IsReliable=true, IsOrdered=true); the supplied listener reports " +
+                $"Delivery={capabilities.Delivery}, IsReliable={capabilities.IsReliable}, IsOrdered={capabilities.IsOrdered}.",
+                paramName);
         }
 
-        string protocolName = protocol == HttpProtocol.Http20 ? "HTTP/2" : "HTTP/1.1";
-        string message =
-            $"{protocolName} requires a transport whose capabilities report a reliable, ordered byte stream " +
-            $"(Delivery=Stream, IsReliable=true, IsOrdered=true); the supplied listener reports " +
-            $"Delivery={capabilities.Delivery}, IsReliable={capabilities.IsReliable}, IsOrdered={capabilities.IsOrdered}.";
+        if (protocol == (HttpProtocol.Http11 | HttpProtocol.Http20) && capabilities.Security != ConnectionSecurity.Tls)
+        {
+            throw CreateCapabilityException(
+                $"{protocolName} chooses the protocol for each connection through ALPN (RFC 7301), a TLS extension, " +
+                $"so it requires a listener whose capabilities report Security=Tls; the supplied listener reports " +
+                $"Security={capabilities.Security}. Compose TLS onto the listener before registering it, or register " +
+                $"UseHttp1 and UseHttp2 on separate listeners.",
+                paramName);
+        }
+    }
 
-        throw paramName is null
+    private static ArgumentException CreateCapabilityException(string message, string? paramName)
+    {
+        return paramName is null
             ? new ArgumentException(message)
             : new ArgumentException(message, paramName);
     }

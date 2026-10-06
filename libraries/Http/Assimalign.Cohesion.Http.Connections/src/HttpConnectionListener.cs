@@ -496,7 +496,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                     .AcceptAsync(_disposeCancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
-                HttpConnection httpConnection;
+                HttpConnection? httpConnection;
 
                 try
                 {
@@ -506,6 +506,15 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                 {
                     await DisposeAfterFailedTransferAsync(connection).ConfigureAwait(false);
                     throw;
+                }
+
+                if (httpConnection is null)
+                {
+                    // The registration cannot serve this one connection: its TLS handshake negotiated
+                    // an application protocol the registration does not speak (RFC 7301 §3.2 binds the
+                    // connection to it). Close it and keep accepting; the listener itself is healthy.
+                    await DisposeAfterFailedTransferAsync(connection).ConfigureAwait(false);
+                    continue;
                 }
 
                 await QueueAcceptedConnectionAsync(httpConnection).ConfigureAwait(false);

@@ -24,7 +24,7 @@ correct for the protocols that run over it.
 | `QuicConnectionListener` | `public sealed` | Constructed unbound from options; async `BindAsync` acquires the endpoint and `AcceptAsync` yields server-side connections. `CreateAsync` remains the construct-and-bind convenience. |
 | `QuicConnectionFactory` | `public sealed` | Dials outbound connections; `ConnectAsync` yields client-side connections. |
 | `QuicConnectionListenerOptions` / `QuicConnectionFactoryOptions` | `public sealed` | Endpoint, TLS/ALPN, stream limits, pipe buffer sizes, default error codes. Both default ALPN to HTTP/3 (see "Error model"). |
-| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. |
+| `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. Implements the contracts library's `ITlsConnectionInfo` (see "Handshake facts"). |
 | `QuicStreamConnection` | `internal` | One QUIC stream as a `Connection`: pipes over the stream, direction from the stream's readable/writable halves. |
 
 `QuicMultiplexedConnection` and the listener/factory are `public sealed`
@@ -52,6 +52,15 @@ it, then immediately fall back to the `IMultiplexedConnection` /
   stream's `Output` is the graceful write-side close: the pipe flushes
   remaining bytes and disposes the `QuicStream`, which sends FIN and
   waits for the peer to acknowledge delivery.
+
+## Handshake facts
+
+QUIC runs a TLS 1.3 handshake inside its own (RFC 9001), so a QUIC connection is a TLS-terminating
+connection in the contracts' sense. `QuicMultiplexedConnection` implements `ITlsConnectionInfo` and
+reports the ALPN application protocol the handshake selected. The value is captured when the
+connection is wrapped, after `System.Net.Quic` has completed the handshake, and is the same on
+every stream of the connection; the streams themselves do not implement the facet. The driver
+reads the value and never branches on it, so it stays free of protocol semantics.
 
 ## Lifecycle and teardown
 

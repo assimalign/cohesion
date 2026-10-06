@@ -56,6 +56,26 @@ public class QuicMultiplexedConnectionTests
             ConnectionSecurity.Tls));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - ApplicationProtocol: Should report the protocol ALPN selected on both peers")]
+    public async Task ApplicationProtocol_OnEstablishedPair_ShouldReportNegotiatedProtocol()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        // Act
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+
+        // Assert — the QUIC handshake is a TLS 1.3 handshake (RFC 9001), so both peers expose it.
+        pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.ApplicationProtocol.ShouldBe(new SslApplicationProtocol("cohesion-test"));
+        pair.Client.ShouldBeAssignableTo<ITlsConnectionInfo>()!.ApplicationProtocol.ShouldBe(new SslApplicationProtocol("cohesion-test"));
+    }
+
     [Fact]
     public async Task OpenStreamAsync_Bidirectional_ShouldEchoAcrossPeers()
     {

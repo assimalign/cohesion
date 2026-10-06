@@ -61,6 +61,11 @@ HttpConnectionListener listener = HttpConnectionListener.Create(options =>
 - `UseHttp3` accepts an `IMultiplexedConnectionListener` — the parameter
   type itself is the shape gate, so no runtime capability check is
   needed for stream multiplexing.
+- `UseHttp1AndHttp2` registers one listener for both stream protocols and
+  chooses between them per connection from the protocol ALPN selected (see
+  "Serving HTTP/1.1 and HTTP/2 on one TLS listener"). Its gate adds one
+  capability: ALPN is a TLS extension, so the listener must report
+  `Security == Tls`, else an `ArgumentException` names the mismatch.
 
 ### Per-version options, captured per registration
 
@@ -221,6 +226,90 @@ per accept loop. There is no registration-time `isSecure` parameter, no
 `Items`-backed handshake probe, and no OR-promotion rule — the
 capability is the single source of truth, and the scheme
 (`http`/`https`) flows from it.
+
+What the handshake *negotiated* is a per-connection fact the capability
+cannot carry. HTTP reads it through the contracts library's
+`ITlsConnectionInfo`, which the connection that ran the handshake implements
+(the TLS layer's secured connection, a QUIC connection). The package still
+depends only on `Assimalign.Cohesion.Connections`; it never references the
+TLS layer.
+
+### Serving HTTP/1.1 and HTTP/2 on one TLS listener (ALPN)
+
+#### What it is
+
+An `https` origin is expected to answer HTTP/2 and HTTP/1.1 on one port:
+the client offers the protocols it speaks in the TLS handshake through ALPN
+(RFC 7301), the server selects one, and the connection speaks it (RFC 9113
+§3.2 identifies HTTP/2 over TLS as `h2`). `UseHttp1AndHttp2(listener,
+configureHttp1, configureHttp2)` registers such a listener. Each protocol
+keeps its own options, captured at registration like those of
+`UseHttp1`/`UseHttp2`, and both share the listener-wide interceptors.
+
+Each accepted connection is dispatched by the protocol its handshake
+negotiated, read through `ITlsConnectionInfo`:
+
+| Negotiated | Served |
+|---|---|
+| `h2` | HTTP/2 |
+| `http/1.1` | HTTP/1.1 |
+| none: the client sent no ALPN extension, or the connection does not implement `ITlsConnectionInfo` | HTTP/1.1, what a client that does not negotiate expects of an `https` origin |
+| anything else, which the server offered through an application-supplied list (`acme-tls/1`, say) | the connection is closed; the accept loop keeps accepting |
+
+The flow for one accepted connection:
+
+```mermaid
+flowchart TD
+    Accept["accept loop: listener.AcceptAsync, TLS already negotiated"] --> Read["read ITlsConnectionInfo.ApplicationProtocol"]
+    Read -->|"h2"| H2["Http2ConnectionFactory: HTTP/2 connection"]
+    Read -->|"http/1.1 or none"| H1["Http1ConnectionFactory: HTTP/1.1 connection"]
+    Read -->|"another protocol"| Close["close the connection, keep accepting"]
+    H2 --> Queue["backlog channel, AcceptOrListenAsync"]
+    H1 --> Queue
+```
+
+#### Where the choice is made
+
+The registration carries an internal `HttpAlpnConnectionFactory` in place of
+a single protocol's factory. It holds the HTTP/1.1 and the HTTP/2 factory and
+picks one per connection, so the accept loop is unchanged: it still asks the
+registration's factory for the connection. A factory that cannot serve a
+connection now returns `null`, and the loop disposes that one connection and
+keeps accepting instead of treating it as a listener fault. The `Alt-Svc`
+value is pushed into both inner factories, so an HTTP/1.1 and an HTTP/2
+response from the endpoint advertise the same h3 alternative.
+
+The listener reports both protocols in `HttpConnectionListener.Protocols`.
+
+#### Why here, and the alternatives rejected
+
+- **The transport owns the choice.** Picking the connection parser is
+  transport work: this package owns the factories and the accept loop, and
+  the host only exposes the surface (`Web.Hosting`'s `UseHttps`).
+- **Not two registrations on one listener.** Coalescing `UseHttp1` and
+  `UseHttp2` calls that name the same listener would be implicit, and would
+  need two accept loops to agree on one listener's connections.
+- **Not preface sniffing.** Detecting the HTTP/2 connection preface is how
+  prior knowledge works on cleartext (RFC 9113 §3.3). On a TLS connection the
+  handshake has already decided, and RFC 9113 §3.2 makes ALPN the way HTTP/2
+  starts for `https`.
+- **Unknown protocols close rather than fall back to HTTP/1.1.** RFC 7301
+  §3.2 binds the connection to the protocol the handshake selected; speaking
+  HTTP/1.1 on it would answer a client that agreed to something else.
+
+#### Scope
+
+- **TLS only.** A cleartext listener has no ALPN, so the registration rejects
+  it. HTTP/2 prior knowledge and the deprecated `h2c` upgrade on a shared
+  cleartext port are not supported; register `UseHttp1` and `UseHttp2` on
+  separate listeners.
+- **The single-protocol registrations ignore ALPN.** `UseHttp1` and
+  `UseHttp2` on a TLS listener serve their one protocol whatever was
+  negotiated, so their TLS options should offer only that protocol (the
+  `Web.Hosting` verbs default the list accordingly).
+- **The HTTP/2-over-TLS profile of RFC 9113 §9.2** (TLS 1.2 or later, the
+  TLS 1.2 cipher-suite blocklist) is left to the TLS options; the transport
+  does not inspect the negotiated version or suite before serving `h2`.
 
 ## Per-request feature injection — request-parse interceptors
 
@@ -527,10 +616,12 @@ gone, replaced by the listener's declared `ConnectionCapabilities`:
   is captured per accept loop and fixed for the connection's lifetime.
   RFC 2817 in-band TLS upgrade over HTTP/1.1 would require explicit
   re-construction of the connection and is intentionally out of scope.
-- **Rich TLS metadata** (client certificate, ALPN, cipher suite).
-  Future work; it belongs on the connections/security layer (where the
-  handshake runs), surfaced through a typed seam rather than through
-  HTTP-transport plumbing.
+- **Rich TLS metadata for handlers** (client certificate, protocol
+  version, cipher suite). Future work (#1065). The typed seam it needs
+  exists: the connections layer, where the handshake runs, reports what
+  it negotiated through `ITlsConnectionInfo`, and the transport already
+  reads the ALPN protocol from it to choose between HTTP/2 and HTTP/1.1
+  (see "Serving HTTP/1.1 and HTTP/2 on one TLS listener").
 
 ## Response streaming: raw body sink behind the response-interceptor seam
 
@@ -2688,6 +2779,8 @@ The precomputed value is pushed onto the stream connection factories
 (`HttpConnectionFactory.AltSvcHeaderValue`) before the first connection is accepted
 — the accept loops start lazily on the first `AcceptOrListenAsync`, so no factory
 observes a half-set value — and flows factory → connection → connection context.
+A `UseHttp1AndHttp2` registration forwards it to both of its protocol factories, so
+the endpoint advertises the same alternative whichever protocol a connection speaks.
 
 ### Why injection is at head-commit, guarded — not an exchange interceptor
 

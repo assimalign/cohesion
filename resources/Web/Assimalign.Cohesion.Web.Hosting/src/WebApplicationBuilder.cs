@@ -358,7 +358,10 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
                 _context.EndpointCertificates.Add(issuer);
             }
             SslStreamCertificateContext certificate = SslStreamCertificateContext.Create(leaf, chain, offline: true);
-            Server.UseServer(options => options.UseHttp1s(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),
+
+            // An https origin offers h2 and http/1.1 and serves each connection the protocol its TLS
+            // handshake negotiated (RFC 7301, RFC 9113 §3.2); a client that negotiates none gets HTTP/1.1.
+            Server.UseServer(options => options.UseHttps(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),
                 new TlsServerOptions { AuthenticationOptions = new SslServerAuthenticationOptions { ServerCertificateContext = certificate } }));
         }
         else

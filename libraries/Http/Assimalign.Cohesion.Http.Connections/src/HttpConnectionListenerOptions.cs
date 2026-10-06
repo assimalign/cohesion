@@ -15,7 +15,10 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// Each registration binds one HTTP protocol to one listener. Stream protocols (HTTP/1.1,
 /// HTTP/2) take an <see cref="IConnectionListener"/> whose capabilities must report a reliable,
 /// ordered byte stream; HTTP/3 takes an <see cref="IMultiplexedConnectionListener"/>, where the
-/// listener type itself is the shape gate.
+/// listener type itself is the shape gate. The one exception is
+/// <see cref="UseHttp1AndHttp2(IConnectionListener)"/>, which binds both stream protocols to one TLS
+/// listener and picks between them per connection from the application protocol the TLS handshake
+/// negotiated through ALPN (RFC 7301).
 /// </para>
 /// <para>
 /// Version-specific configuration (limits, QPACK) is captured per registration through the
@@ -267,6 +270,125 @@ public sealed class HttpConnectionListenerOptions
     }
 
     /// <summary>
+    /// Serves HTTP/1.1 and HTTP/2 over the supplied TLS connection listener, with default
+    /// configuration, choosing the protocol for each connection from the application protocol its
+    /// TLS handshake negotiated through ALPN (RFC 7301).
+    /// </summary>
+    /// <param name="listener">
+    /// The listener producing the transport connections. TLS must already be composed onto it (for
+    /// example through the security library's <c>UseTls</c> layer), and its handshake must offer the
+    /// <c>h2</c> and <c>http/1.1</c> protocol identifiers.
+    /// </param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="listener"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the listener's capabilities do not report a reliable, ordered byte stream secured by
+    /// TLS.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// A connection that negotiated <c>h2</c> is served HTTP/2 (RFC 9113 §3.2); one that negotiated
+    /// <c>http/1.1</c>, or no protocol at all because the client sent no ALPN extension, is served
+    /// HTTP/1.1. A connection that negotiated any other protocol is closed: the handshake bound it to a
+    /// protocol this registration does not speak. The protocol is read through
+    /// <see cref="ITlsConnectionInfo"/> on the accepted connection, so a connection that does not
+    /// report its handshake is served HTTP/1.1.
+    /// </para>
+    /// <para>
+    /// ALPN is a TLS extension, so the registration requires a listener whose
+    /// <see cref="ConnectionCapabilities.Security"/> is <see cref="ConnectionSecurity.Tls"/>. Serving
+    /// both protocols on a cleartext port (HTTP/2 prior knowledge or the retired <c>h2c</c> upgrade) is
+    /// not supported; register <see cref="UseHttp1(IConnectionListener)"/> and
+    /// <see cref="UseHttp2(IConnectionListener)"/> on separate listeners instead.
+    /// </para>
+    /// </remarks>
+    public HttpConnectionListenerOptions UseHttp1AndHttp2(IConnectionListener listener)
+    {
+        return UseHttp1AndHttp2(listener, static _ => { }, static _ => { });
+    }
+
+    /// <summary>
+    /// Serves HTTP/1.1 and HTTP/2 over the supplied TLS connection listener, choosing the protocol for
+    /// each connection from the application protocol its TLS handshake negotiated through ALPN
+    /// (RFC 7301). Each protocol keeps its own options, configured through
+    /// <paramref name="configureHttp1"/> and <paramref name="configureHttp2"/>.
+    /// </summary>
+    /// <param name="listener">
+    /// The listener producing the transport connections. TLS must already be composed onto it, and its
+    /// handshake must offer the <c>h2</c> and <c>http/1.1</c> protocol identifiers.
+    /// </param>
+    /// <param name="configureHttp1">Configures the options of the connections served HTTP/1.1 (see <see cref="Http1ConnectionListenerOptions"/>).</param>
+    /// <param name="configureHttp2">Configures the options of the connections served HTTP/2 (see <see cref="Http2ConnectionListenerOptions"/>).</param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="listener"/>, <paramref name="configureHttp1"/>, or
+    /// <paramref name="configureHttp2"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the listener's capabilities do not report a reliable, ordered byte stream secured by
+    /// TLS.
+    /// </exception>
+    /// <remarks>See <see cref="UseHttp1AndHttp2(IConnectionListener)"/> for how each connection's protocol is chosen.</remarks>
+    public HttpConnectionListenerOptions UseHttp1AndHttp2(
+        IConnectionListener listener,
+        Action<Http1ConnectionListenerOptions> configureHttp1,
+        Action<Http2ConnectionListenerOptions> configureHttp2)
+    {
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder =
+            CreateAlpnConnectionFactoryBuilder(configureHttp1, configureHttp2);
+
+        return UseStreamListener(HttpProtocol.Http11 | HttpProtocol.Http20, listener, connectionFactoryBuilder);
+    }
+
+    /// <summary>
+    /// Serves HTTP/1.1 and HTTP/2 over the TLS connection listener produced by the supplied factory,
+    /// with default configuration, choosing the protocol for each connection from the application
+    /// protocol its TLS handshake negotiated through ALPN (RFC 7301).
+    /// </summary>
+    /// <param name="listenerFactory">
+    /// The factory producing the listener; it is invoked (and its result capability-validated) when
+    /// the <see cref="HttpConnectionListener"/> is constructed. The listener it returns must have TLS
+    /// composed onto it.
+    /// </param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="listenerFactory"/> is <see langword="null"/>.</exception>
+    /// <remarks>See <see cref="UseHttp1AndHttp2(IConnectionListener)"/> for how each connection's protocol is chosen.</remarks>
+    public HttpConnectionListenerOptions UseHttp1AndHttp2(Func<IConnectionListener> listenerFactory)
+    {
+        return UseHttp1AndHttp2(listenerFactory, static _ => { }, static _ => { });
+    }
+
+    /// <summary>
+    /// Serves HTTP/1.1 and HTTP/2 over the TLS connection listener produced by the supplied factory,
+    /// choosing the protocol for each connection from the application protocol its TLS handshake
+    /// negotiated through ALPN (RFC 7301). Each protocol keeps its own options, configured through
+    /// <paramref name="configureHttp1"/> and <paramref name="configureHttp2"/>.
+    /// </summary>
+    /// <param name="listenerFactory">
+    /// The factory producing the listener; it is invoked (and its result capability-validated) when
+    /// the <see cref="HttpConnectionListener"/> is constructed. The listener it returns must have TLS
+    /// composed onto it.
+    /// </param>
+    /// <param name="configureHttp1">Configures the options of the connections served HTTP/1.1 (see <see cref="Http1ConnectionListenerOptions"/>).</param>
+    /// <param name="configureHttp2">Configures the options of the connections served HTTP/2 (see <see cref="Http2ConnectionListenerOptions"/>).</param>
+    /// <returns>The current options instance.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="listenerFactory"/>, <paramref name="configureHttp1"/>, or
+    /// <paramref name="configureHttp2"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>See <see cref="UseHttp1AndHttp2(IConnectionListener)"/> for how each connection's protocol is chosen.</remarks>
+    public HttpConnectionListenerOptions UseHttp1AndHttp2(
+        Func<IConnectionListener> listenerFactory,
+        Action<Http1ConnectionListenerOptions> configureHttp1,
+        Action<Http2ConnectionListenerOptions> configureHttp2)
+    {
+        Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> connectionFactoryBuilder =
+            CreateAlpnConnectionFactoryBuilder(configureHttp1, configureHttp2);
+
+        return UseStreamListener(HttpProtocol.Http11 | HttpProtocol.Http20, listenerFactory, connectionFactoryBuilder);
+    }
+
+    /// <summary>
     /// Serves HTTP/3 over the supplied multiplexed connection listener, with default
     /// (static-only QPACK) configuration.
     /// </summary>
@@ -344,6 +466,27 @@ public sealed class HttpConnectionListenerOptions
             (interceptors, responseInterceptors) => new Http3ConnectionFactory(http3Options.Limits, interceptors, responseInterceptors, http3Options.QPack)));
 
         return this;
+    }
+
+    private static Func<IHttpExchangeInterceptor[], IHttpExchangeInterceptor[], HttpConnectionFactory> CreateAlpnConnectionFactoryBuilder(
+        Action<Http1ConnectionListenerOptions> configureHttp1,
+        Action<Http2ConnectionListenerOptions> configureHttp2)
+    {
+        ArgumentNullException.ThrowIfNull(configureHttp1);
+        ArgumentNullException.ThrowIfNull(configureHttp2);
+
+        // Both protocols' options are captured now (registration time), exactly as UseHttp1/UseHttp2
+        // capture theirs; the listener-wide interceptors are bound when the HttpConnectionListener
+        // snapshots them, and both protocols share that one snapshot.
+        Http1ConnectionListenerOptions http1Options = new();
+        configureHttp1(http1Options);
+
+        Http2ConnectionListenerOptions http2Options = new();
+        configureHttp2(http2Options);
+
+        return (interceptors, responseInterceptors) => new HttpAlpnConnectionFactory(
+            new Http1ConnectionFactory(http1Options.Limits, interceptors, responseInterceptors),
+            new Http2ConnectionFactory(http2Options.Limits, interceptors, responseInterceptors));
     }
 
     private HttpConnectionListenerOptions UseStreamListener(

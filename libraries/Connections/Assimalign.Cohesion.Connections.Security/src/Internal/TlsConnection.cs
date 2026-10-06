@@ -13,15 +13,17 @@ namespace Assimalign.Cohesion.Connections.Security.Internal;
 /// An <see cref="IConnection"/> decorator that secures an inner connection with a TLS session.
 /// Identity, endpoints, state, and lifetime are delegated to the inner connection; the duplex pipe
 /// is replaced with a TLS-encrypted one and <see cref="Capabilities"/> reports
-/// <see cref="ConnectionSecurity.Tls"/>.
+/// <see cref="ConnectionSecurity.Tls"/>. What the handshake negotiated is reported through
+/// <see cref="ITlsConnectionInfo"/>, captured once the handshake has completed.
 /// </summary>
-internal sealed class TlsConnection : Connection
+internal sealed class TlsConnection : Connection, ITlsConnectionInfo
 {
     private readonly IConnection _inner;
     private readonly SslStream _ssl;
     private readonly PipeReader _input;
     private readonly PipeWriter _output;
     private readonly ConnectionCapabilities _capabilities;
+    private readonly SslApplicationProtocol _applicationProtocol;
 
     private TlsConnection(IConnection inner, SslStream ssl)
     {
@@ -30,6 +32,7 @@ internal sealed class TlsConnection : Connection
         _input = PipeReader.Create(ssl);
         _output = PipeWriter.Create(ssl);
         _capabilities = inner.Capabilities with { Security = ConnectionSecurity.Tls };
+        _applicationProtocol = ssl.NegotiatedApplicationProtocol;
     }
 
     public override ConnectionId Id => _inner.Id;
@@ -49,6 +52,8 @@ internal sealed class TlsConnection : Connection
     public override ConnectionState State => _inner.State;
 
     public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
+
+    public SslApplicationProtocol ApplicationProtocol => _applicationProtocol;
 
     public override void Abort(Exception? reason = null) => _inner.Abort(reason);
 

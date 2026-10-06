@@ -43,6 +43,11 @@ Two composition styles, both backed by the same decorator:
 - The returned `TlsConnection` delegates `Id`, endpoints, `Direction`, `State`, `ConnectionClosed`,
   and `Abort` to the inner connection, reports `Capabilities` with `Security = Tls`, and exposes the
   encrypted pipe as its `Input` / `Output`.
+- It also implements the contracts' `ITlsConnectionInfo`, so an application protocol can read what
+  the handshake negotiated without referencing this library: the ALPN application protocol
+  (`SslStream.NegotiatedApplicationProtocol`), captured once when the handshake completes. HTTP
+  reads it to serve HTTP/2 or HTTP/1.1 on one listener. This holds on the server and the client
+  side alike.
 - `TlsConnectionLayer.Describe` advertises `Security = Tls` so the capability is visible on the
   layered listener/factory before a connection is upgraded.
 

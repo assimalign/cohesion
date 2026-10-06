@@ -180,6 +180,39 @@ or a userspace reliable-UDP protocol tomorrow, with no consumer change. Branchin
 protocol-to-transport mapping this design deleted. `ConnectionProtocol` exists for diagnostics
 and logging only.
 
+### Handshake facts: `ITlsConnectionInfo`
+
+`ConnectionSecurity.Tls` says a connection is secured; it cannot say what the handshake agreed,
+because capabilities describe a transport class and the handshake is per connection. An
+application protocol needs that agreement: HTTP chooses between HTTP/2 and HTTP/1.1 from the
+application protocol ALPN selected (RFC 7301). `ITlsConnectionInfo` is the typed facet that
+carries it. A connection that terminates TLS implements it beside its connection contract, and a
+consumer finds it with a type test on the connection it holds:
+
+- the secured `IConnection` the TLS layer returns (`Assimalign.Cohesion.Connections.Security`),
+  which captures the values once its handshake completes;
+- a multiplexed connection whose transport is TLS itself (QUIC, RFC 9001).
+
+Today the facet reports `ApplicationProtocol`, the protocol ALPN selected, or none when the client
+offered none.
+
+Why this shape:
+
+- **It lives in the contracts library** so the TLS layer and the QUIC driver can each implement it
+  without a new reference, and a consumer reads it while depending on the contracts alone. HTTP
+  never references the TLS layer.
+- **Not an `Items` bag** (see Non-Goals): the facts are few, typed, and fixed at handshake time,
+  which is exactly what a typed contract is for.
+- **Not a member of `IConnection` or `IMultiplexedConnection`**: every driver and test double
+  would have to answer a question only TLS-terminating connections can, and a QUIC stream would
+  answer for its whole connection.
+- **A facet, not a base type**: `IConnection` and `IMultiplexedConnection` are different shapes,
+  and both have TLS-terminating implementations, so the facet extends neither.
+
+The cost is the usual one for decorators. A layer composed above TLS that returns a new
+connection hides the facet unless it implements the facet too and forwards it. A pass-through
+layer, which returns the connection it was given, keeps it visible.
+
 ### Precedents
 
 The shape matches the systems that survived production: Kestrel

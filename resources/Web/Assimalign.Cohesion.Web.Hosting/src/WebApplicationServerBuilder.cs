@@ -25,7 +25,25 @@ public sealed class WebApplicationServerBuilder
     // server's factory below; DI/Config integration for the Web server stays builder-time only.
     private int? _maxConcurrentConnections;
 
+    // The Limits:MaxConcurrentConnections a configuration binding read. It is set while the default
+    // server's factory runs the listener configurations, just before the factory reads it, and an
+    // explicit LimitConcurrentConnections call takes precedence over it.
+    private int? _configuredMaxConcurrentConnections;
+
     internal void OwnEndpointCertificate(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate) => _builder.OwnEndpointCertificate(certificate);
+
+    /// <summary>
+    /// Gets the application's content root, against which a relative configured certificate path
+    /// resolves.
+    /// </summary>
+    internal string? ContentRootPath => _builder.Environment.ContentRootPath?.ToString();
+
+    /// <summary>
+    /// Records the connection cap a configuration binding read. An explicit
+    /// <see cref="LimitConcurrentConnections(int)"/> call takes precedence.
+    /// </summary>
+    /// <param name="maxConcurrentConnections">The configured cap; the binder has already checked it is positive.</param>
+    internal void UseConfiguredConnectionLimit(int maxConcurrentConnections) => _configuredMaxConcurrentConnections = maxConcurrentConnections;
 
     internal WebApplicationServerBuilder(WebApplicationBuilder builder)
     {
@@ -58,7 +76,7 @@ public sealed class WebApplicationServerBuilder
             {
                 Pipeline = pipeline,
                 Listener = listener,
-                MaxConcurrentConnections = _maxConcurrentConnections
+                MaxConcurrentConnections = _maxConcurrentConnections ?? _configuredMaxConcurrentConnections
             });
         });
     }
@@ -70,7 +88,9 @@ public sealed class WebApplicationServerBuilder
     /// By default the server is unlimited. When a cap is set, the accept loop reserves a slot
     /// before accepting each connection, so once the cap is reached additional connections are left
     /// in the listener backlog — accepted but not opened or served — until an active connection
-    /// completes and frees a slot.
+    /// completes and frees a slot. The cap can also come from configuration
+    /// (<c>Http:Limits:MaxConcurrentConnections</c>, bound by <c>UseConfiguration</c> and by an entry
+    /// point's default endpoints); a cap set here takes precedence over a configured one.
     /// </remarks>
     /// <param name="maxConcurrentConnections">The maximum number of concurrently served connections. Must be greater than zero.</param>
     /// <returns>The same builder instance for chaining.</returns>
@@ -182,7 +202,9 @@ public sealed class WebApplicationServerBuilder
             HttpServerConfiguration.DefaultSectionKey,
             options,
             developmentEndPoint,
-            OwnEndpointCertificate));
+            OwnEndpointCertificate,
+            ContentRootPath,
+            UseConfiguredConnectionLimit));
     }
 
     /// <summary>

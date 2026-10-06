@@ -31,4 +31,5 @@ state is application code via `Assimalign.Cohesion.Http.Sessions`.
 
 Targets RFC 9112 (HTTP/1.1), RFC 9113 + RFC 7541 HPACK (HTTP/2),
 RFC 9114 + RFC 9204 QPACK (HTTP/3), with RFC 9110 for shared
-HTTP semantics.
+HTTP semantics. One TLS listener can serve HTTP/2 and HTTP/1.1,
+chosen per connection through ALPN (RFC 7301).

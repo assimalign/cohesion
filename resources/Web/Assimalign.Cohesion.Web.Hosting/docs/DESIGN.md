@@ -394,9 +394,13 @@ stream (an HTTP/1.1 connection simply closes) before the connection's graceful c
 ## Concurrency cap (`MaxConcurrentConnections`)
 
 Optional, configured builder-time via
-`WebApplicationServerBuilder.LimitConcurrentConnections(int)` and carried on
-`WebApplicationServerOptions.MaxConcurrentConnections`. `null` (the default) means
-**unlimited**.
+`WebApplicationServerBuilder.LimitConcurrentConnections(int)` or from configuration
+(`Http:Limits:MaxConcurrentConnections`, see "Configuration-bound server limits and
+endpoints"), and carried on `WebApplicationServerOptions.MaxConcurrentConnections`. `null`
+(the default) means **unlimited**. A cap set in code takes precedence over a configured one:
+the configuration binding records its value while the default server's factory runs the
+listener configurations, and the factory uses it only when `LimitConcurrentConnections` set
+none.
 
 When set to a positive `N`, a `SemaphoreSlim(N, N)` gates the accept loop: a slot
 is acquired **before** accepting a connection and released when that connection's
@@ -807,19 +811,25 @@ command-line configuration providers; it adds no reflection binder or
 
 `WebApplicationServerBuilder.UseConfiguration(IConfiguration, sectionKey = "Http")`
 (an extension member in `WebHostingExtensions`) binds the server's listener
-**endpoints** and **server limits** from a Cohesion `IConfiguration` section at
-builder time, giving `appsettings`-style Kestrel-section parity:
+**endpoints**, **server limits**, and **connection cap** from a Cohesion
+`IConfiguration` section, giving `appsettings`-style Kestrel-section parity:
 
 ```json
 "Http": {
   "Endpoints": {
-    "Primary": { "Protocol": "Http1", "Host": "localhost", "Port": 8080 }
+    "Public":   { "Protocol": "Https", "Host": "0.0.0.0", "Port": 443,
+                  "Certificate": { "Path": "certs/site.pem", "KeyPath": "certs/site.key" } },
+    "Quic":     { "Protocol": "Http3", "Host": "0.0.0.0", "Port": 443,
+                  "Certificate": { "Path": "certs/site.pfx", "Password": "…" } },
+    "Internal": { "Protocol": "Http1", "Host": "localhost", "Port": 8080 }
   },
   "Limits": {
+    "MaxConcurrentConnections": 1000,
     "MaxRequestLineSize": 8192,
     "MaxRequestBodySize": 30000000,
     "KeepAliveTimeout": "00:02:10",
-    "RequestHeadersTimeout": "00:00:30"
+    "RequestHeadersTimeout": "00:00:30",
+    "Http2": { "MaxStreamsPerConnection": 100, "MaxRequestHeaderListSize": 16384 }
   }
 }
 ```
@@ -829,15 +839,24 @@ from inside the `UseServer((serviceProvider, options) => …)` callback so it ru
 when the `HttpConnectionListener` is composed. Limits are per HTTP version on
 the transport, so the single `Limits` section is parsed eagerly (an unparseable
 value fails loudly even with no endpoints) into an
-`Http1ConnectionListenerOptions.Http1Limits` template, and each endpoint the
+`Http1ConnectionListenerOptions.Http1Limits` template and, for its `Http2`
+object, an `Http2ConnectionListenerOptions.Http2Limits` template. Each endpoint the
 section registers copies the bound values into its own per-registration limits
-through the transport's `UseHttp1` / `UseHttp2` configure overloads — HTTP/1.1
-endpoints receive every key; HTTP/2 endpoints receive the shared
-`HttpConnectionListenerLimits` keys (`MaxRequestBodySize`, `KeepAliveTimeout`,
-`RequestHeadersTimeout`), because the HTTP/1.1 wire-format keys have no HTTP/2
-meaning. The HTTP/2 abuse caps (`Http2ConnectionListenerOptions.Http2Limits`)
-are not yet config-bindable — a `Limits:Http2` section is a natural follow-up
-when a deployment needs it.
+through the registration verbs' configure overloads:
+
+| Endpoint protocol | Limits it receives |
+|---|---|
+| HTTP/1.1 (`Http1`, `Http1s`, and the HTTP/1.1 connections of `Https`) | every top-level key |
+| HTTP/2 (`Http2`, `Http2s`, and the HTTP/2 connections of `Https`) | the shared `HttpConnectionListenerLimits` keys (`MaxRequestBodySize`, `KeepAliveTimeout`, `RequestHeadersTimeout`) and the `Limits:Http2` keys (`MaxStreamsPerConnection`, `MaxRequestHeaderListSize`, `MaxResetStreamsPerWindow`, `MaxSettingsFramesPerWindow`, `MaxPingFramesPerWindow`, `FloodDetectionWindow`) |
+| HTTP/3 (`Http3`) | the shared keys |
+
+The HTTP/1.1 wire-format keys have no HTTP/2 or HTTP/3 meaning. HTTP/3's stream
+and flow-control bounds belong to the QUIC transport, and its one HTTP/3-specific
+limit (`Http3Limits.MaxRequestHeadersFrameSize`) is not bound yet.
+
+`Limits:MaxConcurrentConnections` is not an endpoint limit: it caps the default
+server (see "Concurrency cap (`MaxConcurrentConnections`)"). The binder hands it to the
+server builder, and a cap set through `LimitConcurrentConnections` takes precedence.
 
 ### Why explicit, hand-rolled binding
 
@@ -865,14 +884,52 @@ The binding is deliberately **not** reflection-based:
   **not** resolved at bind time — a hostname that is not one of those is an
   error, because binding-time DNS is an I/O surprise the composition root should
   not hide.
-- **Endpoint protocol.** `Http1` (default), `Http2`, `Https`/`Http1s`, or `Http2s`; anything else throws. TLS endpoints use `Certificate` to name a Secret mount.
+- **Endpoint protocol.** Each value names the registration verb it binds to (see
+  "TLS convenience surface" for the naming):
+
+  | `Protocol` | Verb | Serves |
+  |---|---|---|
+  | `Http1` (default; also `Http/1.1`, `Http1.1`, `h1`) | `UseHttp1` | HTTP/1.1, cleartext |
+  | `Http2` (also `Http/2`, `Http2.0`, `h2`) | `UseHttp2` | prior-knowledge HTTP/2, cleartext |
+  | `Https` | `UseHttps` | HTTP/2 and HTTP/1.1 over TLS, chosen per connection through ALPN |
+  | `Http1s` | `UseHttp1s` | HTTP/1.1 over TLS |
+  | `Http2s` | `UseHttp2s` | HTTP/2 over TLS |
+  | `Http3` (also `Http/3`, `Http3.0`, `h3`) | `UseHttp3` | HTTP/3 over QUIC |
+
+  Anything else throws. `Https` meant HTTP/1.1 over TLS until #1063; it now offers `h2` as
+  well, so an `https` origin answers browsers over HTTP/2 while `Http1s` keeps the HTTP/1.1-only
+  endpoint. An `Http3` endpoint is refused with `PlatformNotSupportedException` on an operating
+  system without `System.Net.Quic`; on one that has it but lacks a QUIC implementation, binding
+  fails at start (see "Platform posture").
+- **Alt-Svc.** Configuring an `Http3` endpoint turns on the RFC 7838 advertisement
+  (`HttpConnectionListenerOptions.AltServiceAdvertisement.Enabled`): a client that reached a
+  TCP endpoint can only discover h3 through it. The transport emits it only when a TCP
+  endpoint exists to carry it, and derives the port from the bound QUIC listener. A later
+  `UseServer` callback can still turn it off; the configuration has no key for it.
+- **Endpoint certificate.** A TLS endpoint (`Https`, `Http1s`, `Http2s`, `Http3`) reads its
+  certificate from `Certificate`:
+  - a **scalar** names the Secret mount carrying a PEM bundle (see "HTTPS endpoint certificate
+    contract"); an absent `Certificate` uses the endpoint's registered mount, or `tls`;
+  - a **section** names a file. `Path` is a PEM or PKCS#12 (PFX) file; `KeyPath` names a
+    separate PEM key file; `Password` decrypts an encrypted PEM key or a protected PFX. A file
+    that opens with the DER `SEQUENCE` tag (`0x30`) is PKCS#12, anything else is PEM, and a
+    `KeyPath` implies PEM. A relative path resolves against the content root. The leaf is the
+    PEM file's first certificate (or the PFX entry carrying a private key); the rest of the
+    file is its chain.
+
+  Either way the leaf must carry its private key and be inside its validity window, and a
+  file that cannot be read or decoded fails with an `InvalidOperationException` naming the
+  endpoint and the path. A PEM key is re-imported through PKCS#12, as the Secret-mount loader
+  does, because Windows Schannel rejects an ephemeral key for server authentication. The
+  host owns and disposes the loaded certificates. A `Password` in a checked-in
+  `appsettings.json` is plaintext; supply it through `COHESION_CONFIG__…` or the command line.
 
 ### Scope boundary
 
-`UseConfiguration` binds HTTP and HTTPS endpoints and their protocol-specific server limits.
-HTTP/3 registration and the connection-dispatch rewrite are
-separate concerns (the latter under #762). Data-rate limits are deferred with
-the transport's streaming-body rework.
+`UseConfiguration` binds HTTP, HTTPS, and HTTP/3 endpoints, their protocol-specific server
+limits, and the connection cap. Not bound: the HTTP/3 `MaxRequestHeadersFrameSize` and
+QPACK options, QUIC stream limits, and client-certificate policy. Data-rate limits are
+deferred with the transport's streaming-body rework.
 
 ### Entry-point defaults (#1047)
 
@@ -900,7 +957,8 @@ server are left exactly as composed. An orchestrated resource binds its ambient 
 
 No reflection, no codegen, no dynamic activation. The binder is straight-line
 `GetValue` / `TryParse` calls; endpoints are wired through the already-AOT-safe
-TCP convenience overloads.
+registration verbs, and certificate files load through the BCL's
+`X509Certificate2.CreateFromPemFile` / `X509CertificateLoader` APIs.
 
 ## Default request-parse interceptors
 
@@ -940,17 +998,17 @@ their packages land, but each is an explicit opt-in.
 
 ### What it is
 
-`HttpConnectionListenerOptions.UseHttp1s(configure, tlsOptions)` and
-`UseHttp2s(configure, tlsOptions)` (extension members in `WebHostingExtensions`)
-are the secure siblings of the plaintext `UseHttp1` / `UseHttp2` callback sugar.
-Each takes the same `Action<TcpConnectionListenerOptions>` used to configure the
-endpoint plus a `TlsServerOptions`, and registers a listener that serves the
-protocol over TLS:
+`HttpConnectionListenerOptions.UseHttps(configure, tlsOptions)`,
+`UseHttp1s(configure, tlsOptions)`, and `UseHttp2s(configure, tlsOptions)` (extension
+members in `WebHostingExtensions`) are the secure siblings of the plaintext
+`UseHttp1` / `UseHttp2` callback sugar. Each takes the same
+`Action<TcpConnectionListenerOptions>` used to configure the endpoint plus a
+`TlsServerOptions`, and registers a listener that serves HTTP over TLS:
 
 ```csharp
 builder.Server.UseServer(options =>
 {
-    options.UseHttp2s(
+    options.UseHttps(
         tcp => tcp.EndPoint = new IPEndPoint(IPAddress.Loopback, 8443),
         new TlsServerOptions
         {
@@ -958,6 +1016,33 @@ builder.Server.UseServer(options =>
         });
 });
 ```
+
+`UseHttps` is the registration an `https` origin normally wants: it offers `h2` and
+`http/1.1` through ALPN (RFC 7301) and serves each connection the protocol its handshake
+negotiated, HTTP/1.1 when it negotiated none (#1063). The choice is made per connection
+in `Http.Connections` (`UseHttp1AndHttp2`, see its DESIGN, "Serving HTTP/1.1 and HTTP/2
+on one TLS listener"); this module only composes the surface. `UseHttp1s` and `UseHttp2s`
+serve one protocol over TLS. Each verb also has an overload taking the protocol options
+(`UseHttps` takes one callback per protocol), which is how the configuration binder
+applies its limits.
+
+**Naming.** A verb names the protocol it serves and whether TLS is composed onto its
+listener, and the configuration's `Protocol` values are the verb names without `Use`:
+
+| Verb | `Protocol` | Serves |
+|---|---|---|
+| `UseHttp1` | `Http1` | HTTP/1.1, cleartext |
+| `UseHttp2` | `Http2` | prior-knowledge HTTP/2, cleartext |
+| `UseHttp1s` | `Http1s` | HTTP/1.1 over TLS |
+| `UseHttp2s` | `Http2s` | HTTP/2 over TLS |
+| `UseHttps` | `Https` | HTTP/2 and HTTP/1.1 over TLS, chosen per connection through ALPN |
+| `UseHttp3` | `Http3` | HTTP/3 over QUIC, whose TLS is inherent |
+
+The trailing `s` marks TLS on a single protocol. `Https` names the scheme, because what it
+serves is what a client expects of an `https` URI (RFC 9113 §3.2). `UseHttp3` has no `s` form
+because QUIC has no cleartext mode. The transport-level verb is `UseHttp1AndHttp2` because the
+transport does not run TLS and names what it serves; the hosting verb names the scheme the
+composition produces.
 
 ### Why here, and why compose-before-register
 
@@ -967,7 +1052,7 @@ TLS is a **pre-composed transport layer**, never an HTTP concern — the
 `HttpConnectionListenerOptions` deliberately carries no TLS or certificate
 options. The convenience honors that boundary by composing
 `TcpConnectionListener.Create(configure).UseTls(tlsOptions)` **before** handing
-the listener to `UseHttp1` / `UseHttp2`. Composition is deferred inside the same
+the listener to `UseHttp1` / `UseHttp2` / `UseHttp1AndHttp2`. Composition is deferred inside the same
 factory the plaintext sugar uses, so the TCP listener is not bound until the
 `HttpConnectionListener` materializes the registration.
 
@@ -975,7 +1060,7 @@ Because the security layer wraps the listener first, the layered listener report
 `Capabilities.Security == ConnectionSecurity.Tls`. That capability is the single
 source of truth for the `https` scheme — the HTTP layer reads it once per accept
 loop; there is no registration-time `isSecure` parameter to thread through. A
-request served over a `UseHttp1s` / `UseHttp2s` listener therefore carries
+request served over a `UseHttps` / `UseHttp1s` / `UseHttp2s` listener therefore carries
 `HttpScheme.Https` end to end.
 
 This is also the layering reason the surface lives in Web.Hosting rather than in
@@ -989,13 +1074,18 @@ direction of that composition.
 The .NET / browser HTTP client selects the HTTP version over TLS via ALPN
 (RFC 7301), so a secured HTTP/2 listener is only reachable as HTTP/2 if it
 advertises the `h2` protocol id. To make the common case work without ceremony,
-`UseHttp2s` defaults `AuthenticationOptions.ApplicationProtocols` to
-`SslApplicationProtocol.Http2` (`h2`) and `UseHttp1s` defaults it to
-`SslApplicationProtocol.Http11` (`http/1.1`) **when the caller left the list
-unset** (null or empty). A caller who supplies an explicit protocol list — for
-example to offer both `h2` and `http/1.1` on one endpoint — has it preserved
-unmodified. The default is written onto the caller's `TlsServerOptions` (an
-intentional mutation) so a later read observes the negotiated protocol.
+each verb defaults `AuthenticationOptions.ApplicationProtocols` **when the caller
+left the list unset** (null or empty): `UseHttps` to `h2` then `http/1.1` (the
+server's preference order, so a client offering both gets HTTP/2), `UseHttp2s` to
+`h2`, and `UseHttp1s` to `http/1.1`. A caller-supplied list is preserved unmodified.
+The default is written onto the caller's `TlsServerOptions` (an intentional
+mutation) so a later read observes the negotiated protocol.
+
+Only `UseHttps` reads what ALPN negotiated. `UseHttp1s` and `UseHttp2s` serve their one
+protocol on every connection, so a list that offers both `h2` and `http/1.1` to one of
+them breaks every client that negotiates the other protocol. Until #1063 this section
+suggested such a list as the way to share one endpoint between the protocols; nothing
+then read the negotiated value, so that never worked, and `UseHttps` replaces it.
 
 ### Certificates are the caller's concern
 
@@ -1007,7 +1097,7 @@ re-modeled on this convenience.
 
 ### Scope boundary
 
-`UseHttp1s` / `UseHttp2s` cover the stream protocols. HTTP/3 has its own
+`UseHttps` / `UseHttp1s` / `UseHttp2s` cover the stream protocols. HTTP/3 has its own
 always-on-TLS surface — QUIC's transport security is inherent and QUIC listeners
 bind asynchronously — documented in "HTTP/3 (QUIC) registration surface" below
 (issue #767).
@@ -1064,6 +1154,9 @@ Both default the ALPN application-protocol list to `h3` and the enabled TLS
 protocols to TLS 1.3 when the caller leaves them unset (a caller-supplied list is
 preserved unmodified); the `TlsServerOptions` overload applies those defaults
 eagerly to the passed options so a later read observes them, matching `UseHttp2s`.
+A third overload, `UseHttp3(configure, tlsOptions, configureHttp)`, also takes the
+`Http3ConnectionListenerOptions` (limits, QPACK); the configuration binder uses it for
+an `Http3` endpoint.
 
 ### Async binding without sync-over-async
 
@@ -1100,6 +1193,9 @@ wiring from this surface: `UseHttp3` registers the multiplexed listener that
 advertised port is taken from that listener's bound endpoint. An application opts in with
 `options.AdvertiseAltService(...)` alongside a stream listener; the server then injects
 `Alt-Svc: h3=":<port>"` on the h1/h2 responses so clients can discover and upgrade to h3.
+That includes both protocols of a `UseHttps` endpoint. The configuration binder opts in by
+itself when it binds an `Http3` endpoint (see "Configuration-bound server limits and
+endpoints").
 
 ### h3 response round-trip — verified end to end
 
@@ -1124,7 +1220,7 @@ handling.
 
 ## HTTPS endpoint certificate contract (31t)
 
-The enabled resource's `http` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. Ambient binding tries http and then https by endpoint name, admitting both URI schemes. Manual Http:Endpoints configuration also accepts Protocol Https/Http1s/Http2s and Certificate as a mount name. Server.UseConfiguration stays opt-in for explicit compositions; a plain entry-point application with no listener of its own binds `Http:Endpoints` by default (see "Entry-point defaults").
+The enabled resource's `http` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. Ambient binding tries http and then https by endpoint name, admitting both URI schemes. An ambient `https` endpoint is registered through `UseHttps`, so it offers `h2` and `http/1.1` and serves each connection the protocol it negotiated; until #1063 it served HTTP/1.1 only. Manual Http:Endpoints configuration also accepts Protocol Https/Http1s/Http2s/Http3, with Certificate either a mount name or a file section (`Path`, `KeyPath`, `Password`; see "Configuration-bound server limits and endpoints"). Server.UseConfiguration stays opt-in for explicit compositions; a plain entry-point application with no listener of its own binds `Http:Endpoints` by default (see "Entry-point defaults").
 
 ## Optional telemetry (31b)
 

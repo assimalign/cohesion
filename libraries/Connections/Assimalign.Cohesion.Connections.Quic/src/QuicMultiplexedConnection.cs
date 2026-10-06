@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Quic;
+using System.Net.Security;
 using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +15,9 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// A QUIC connection that multiplexes independent streams, each surfaced as a <see cref="Connection"/>.
 /// </summary>
 /// <remarks>
+/// QUIC carries TLS 1.3 in its own handshake (RFC 9001), so the connection reports what that
+/// handshake negotiated through <see cref="ITlsConnectionInfo"/>, captured when the connection is
+/// produced (a QUIC connection is accepted or established only after its handshake completes).
 /// The connection owns a single shared set of stream pipe options — one memory pool per
 /// connection, not per stream — from which every accepted or opened stream creates its pipes.
 /// Disposing the connection completes live bidirectional streams (delivering any in-flight
@@ -26,7 +30,7 @@ namespace Assimalign.Cohesion.Connections.Quic;
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-public sealed class QuicMultiplexedConnection : MultiplexedConnection
+public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConnectionInfo
 {
     private readonly QuicConnection _connection;
     private readonly long _defaultStreamErrorCode;
@@ -56,6 +60,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         _streamOptions = streamOptions;
         LocalEndPoint = connection.LocalEndPoint;
         RemoteEndPoint = connection.RemoteEndPoint;
+        ApplicationProtocol = connection.NegotiatedApplicationProtocol;
         _state = ConnectionState.Open;
 
         QuicConnectionEventSource.Log.ConnectionOpened(Id, listenerId, LocalEndPoint, RemoteEndPoint);
@@ -78,6 +83,10 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         IsOrdered: true,
         IsMultiplexed: true,
         ConnectionSecurity.Tls);
+
+    /// <inheritdoc />
+    /// <remarks>QUIC requires ALPN (RFC 9001 §8.1), so an established connection always reports one.</remarks>
+    public SslApplicationProtocol ApplicationProtocol { get; }
 
     /// <inheritdoc />
     public override ConnectionState State => _state;

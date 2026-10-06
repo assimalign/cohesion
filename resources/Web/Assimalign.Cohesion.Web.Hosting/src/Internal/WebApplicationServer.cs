@@ -87,10 +87,18 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
 
             _connectionSlots = new SemaphoreSlim(limit, limit);
         }
+
+        MaxConcurrentConnections = options.MaxConcurrentConnections;
     }
 
     /// <inheritdoc />
     public ServiceId Id { get; } = ServiceId.New();
+
+    /// <summary>
+    /// Gets the cap on concurrently served connections, or <see langword="null"/> when the server is
+    /// unlimited.
+    /// </summary>
+    internal int? MaxConcurrentConnections { get; }
 
     /// <summary>
     /// Binds the configured listener and then starts the accept loop.
