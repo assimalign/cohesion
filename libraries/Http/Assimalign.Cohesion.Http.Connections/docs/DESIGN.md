@@ -230,9 +230,11 @@ capability is the single source of truth, and the scheme
 What the handshake *negotiated* is a per-connection fact the capability
 cannot carry. HTTP reads it through the contracts library's
 `ITlsConnectionInfo`, which the connection that ran the handshake implements
-(the TLS layer's secured connection, a QUIC connection). The package still
-depends only on `Assimalign.Cohesion.Connections`; it never references the
-TLS layer.
+(the TLS layer's secured connection, a QUIC connection), for two purposes:
+choosing the protocol of a dual listener (next section) and showing the
+session to handlers (see "The TLS session on every exchange"). The package
+still depends only on `Assimalign.Cohesion.Connections`; it never references
+the TLS layer.
 
 ### Serving HTTP/1.1 and HTTP/2 on one TLS listener (ALPN)
 
@@ -616,12 +618,45 @@ gone, replaced by the listener's declared `ConnectionCapabilities`:
   is captured per accept loop and fixed for the connection's lifetime.
   RFC 2817 in-band TLS upgrade over HTTP/1.1 would require explicit
   re-construction of the connection and is intentionally out of scope.
-- **Rich TLS metadata for handlers** (client certificate, protocol
-  version, cipher suite). Future work (#1065). The typed seam it needs
-  exists: the connections layer, where the handshake runs, reports what
-  it negotiated through `ITlsConnectionInfo`, and the transport already
-  reads the ALPN protocol from it to choose between HTTP/2 and HTTP/1.1
-  (see "Serving HTTP/1.1 and HTTP/2 on one TLS listener").
+- **Mid-connection TLS changes.** The session reported to handlers (see
+  "The TLS session on every exchange") is fixed at the handshake; there
+  is no renegotiation or post-handshake client authentication, which
+  HTTP/2 forbids anyway (RFC 9113 §9.2.1, §9.2.3).
+
+## The TLS session on every exchange (`IHttpTlsConnectionFeature`)
+
+### What it is
+
+Every exchange that arrived over TLS carries the core's `IHttpTlsConnectionFeature`: the client
+certificate, the TLS protocol version, the cipher suite, and the application protocol ALPN
+selected. The transport does not run TLS, so it copies these from the connection that did, through
+the contracts library's `ITlsConnectionInfo`:
+
+| Version | Source of the session |
+|---|---|
+| HTTP/1.1, HTTP/2 | the accepted `IConnection`, which the TLS layer secured |
+| HTTP/3 | the accepted `IMultiplexedConnection`: QUIC's own TLS 1.3 handshake (RFC 9001) |
+
+A connection that does not implement `ITlsConnectionInfo` (cleartext, or secured by a layer that
+does not report its handshake) gives its exchanges no feature.
+
+### Where it is attached
+
+The internal `HttpTlsConnectionFeature` is built once per connection when the connection context
+opens (`HttpStreamConnectionContext` for HTTP/1.1 and HTTP/2, `Http3ConnectionContext` for HTTP/3)
+and set on each exchange's feature collection as the exchange is produced: in the HTTP/1.1
+receive loop, in the HTTP/2 stream dispatch, and when an HTTP/3 request stream's context is built.
+That is after the request-parse interceptors have run and before the response interceptors'
+`BeforeResponse`, so response hooks and middleware see it and request-parse hooks do not.
+Request-parse hooks run on a parse context that has no exchange yet; giving them the session would
+mean seeding every parse context, and no parse-time consumer needs it.
+
+### Sharing and ownership
+
+One immutable instance serves all of a connection's exchanges, which is safe for concurrent
+HTTP/2 and HTTP/3 streams. It is not disposable, because an exchange's disposal walk disposes the
+disposable features it carries and the session outlives every exchange: the certificate belongs to
+the connection, which disposes it when it is disposed.
 
 ## Response streaming: raw body sink behind the response-interceptor seam
 

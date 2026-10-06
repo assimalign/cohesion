@@ -60,7 +60,10 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 /// naming the Secret mount that carries a PEM bundle (the default mount is <c>tls</c>) or a section
 /// naming a file: <c>Path</c> to a PEM or PKCS#12 (PFX) file, with an optional <c>KeyPath</c> for a
 /// separate PEM key and an optional <c>Password</c> for an encrypted key or a protected PFX. A
-/// relative path resolves against the content root.
+/// relative path resolves against the content root. A TLS endpoint's <c>ClientCertificateMode</c>
+/// (<c>NoCertificate</c>, the default; <c>AllowCertificate</c>; <c>RequireCertificate</c>) requests
+/// client certificates in the handshake and accepts one only when it chains to a root the machine
+/// trusts; a cleartext endpoint that declares one is refused.
 /// </para>
 /// <para>
 /// Limits are per HTTP version on the transport
@@ -356,6 +359,13 @@ internal static class HttpServerConfiguration
 
         IPEndPoint bindEndPoint = new(ResolveHost(host), port);
 
+        if (protocol is EndpointProtocol.Http1 or EndpointProtocol.Http2
+            && ParseClientCertificateMode(endpoint, endpointName) is not ClientCertificateMode.NoCertificate)
+        {
+            throw new InvalidOperationException(
+                $"The HTTP endpoint '{endpointName}' declares a 'ClientCertificateMode', but client certificates need TLS: use Protocol Https, Http1s, Http2s, or Http3.");
+        }
+
         switch (protocol)
         {
             case EndpointProtocol.Http1:
@@ -435,13 +445,50 @@ internal static class HttpServerConfiguration
             ownCertificate?.Invoke(issuer);
         }
 
-        return new TlsServerOptions
+        TlsServerOptions tls = new()
         {
             AuthenticationOptions = new SslServerAuthenticationOptions
             {
                 ServerCertificateContext = SslStreamCertificateContext.Create(leaf, chain, offline: true),
             },
         };
+
+        // Configuration cannot carry a validation callback, so a presented client certificate is
+        // accepted only when it chains to a root the machine trusts (the platform's verdict).
+        switch (ParseClientCertificateMode(endpoint, endpointName))
+        {
+            case ClientCertificateMode.AllowCertificate:
+                tls.AllowClientCertificate();
+                break;
+            case ClientCertificateMode.RequireCertificate:
+                tls.RequireClientCertificate();
+                break;
+        }
+
+        return tls;
+    }
+
+    private static ClientCertificateMode ParseClientCertificateMode(IConfigurationSection endpoint, string endpointName)
+    {
+        string? mode = GetString(endpoint, "ClientCertificateMode");
+
+        if (mode is null || mode.Equals("NoCertificate", StringComparison.OrdinalIgnoreCase))
+        {
+            return ClientCertificateMode.NoCertificate;
+        }
+
+        if (mode.Equals("AllowCertificate", StringComparison.OrdinalIgnoreCase))
+        {
+            return ClientCertificateMode.AllowCertificate;
+        }
+
+        if (mode.Equals("RequireCertificate", StringComparison.OrdinalIgnoreCase))
+        {
+            return ClientCertificateMode.RequireCertificate;
+        }
+
+        throw new InvalidOperationException(
+            $"The HTTP endpoint '{endpointName}' declares an unsupported 'ClientCertificateMode' ('{mode}'). Supported values: NoCertificate, AllowCertificate, RequireCertificate.");
     }
 
     /// <summary>
@@ -804,6 +851,16 @@ internal static class HttpServerConfiguration
     private static string? GetString(IConfigurationSection section, Path relativePath)
     {
         return section.GetEntry(relativePath) is IConfigurationValue value ? value.Value : null;
+    }
+
+    /// <summary>
+    /// A TLS endpoint's <c>ClientCertificateMode</c> (Kestrel's names).
+    /// </summary>
+    private enum ClientCertificateMode
+    {
+        NoCertificate,
+        AllowCertificate,
+        RequireCertificate,
     }
 
     /// <summary>

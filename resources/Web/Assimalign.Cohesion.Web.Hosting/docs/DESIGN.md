@@ -923,13 +923,20 @@ The binding is deliberately **not** reflection-based:
   does, because Windows Schannel rejects an ephemeral key for server authentication. The
   host owns and disposes the loaded certificates. A `Password` in a checked-in
   `appsettings.json` is plaintext; supply it through `COHESION_CONFIG__…` or the command line.
+- **Client certificates.** A TLS endpoint's `ClientCertificateMode` is `NoCertificate` (the
+  default), `AllowCertificate`, or `RequireCertificate` — Kestrel's names — and maps to
+  `TlsServerOptions.AllowClientCertificate()` / `RequireClientCertificate()` (see "Client
+  certificates (mutual TLS)"). Configuration cannot carry a callback, so a presented certificate
+  passes only when it chains to a root the machine trusts; a private CA needs the code form. A
+  cleartext endpoint (`Http1`, `Http2`) that declares a mode other than `NoCertificate` is refused,
+  as is an unknown mode.
 
 ### Scope boundary
 
 `UseConfiguration` binds HTTP, HTTPS, and HTTP/3 endpoints, their protocol-specific server
-limits, and the connection cap. Not bound: the HTTP/3 `MaxRequestHeadersFrameSize` and
-QPACK options, QUIC stream limits, and client-certificate policy. Data-rate limits are
-deferred with the transport's streaming-body rework.
+limits, their client-certificate mode, and the connection cap. Not bound: the HTTP/3
+`MaxRequestHeadersFrameSize` and QPACK options, QUIC stream limits, and a client-certificate
+validation callback. Data-rate limits are deferred with the transport's streaming-body rework.
 
 ### Entry-point defaults (#1047)
 
@@ -1094,6 +1101,33 @@ The server certificate is supplied by the caller through
 callback). Certificate sourcing, storage, and rotation are Security-area concerns
 and are explicit non-goals of the security library's TLS surface, so they are not
 re-modeled on this convenience.
+
+### Client certificates (mutual TLS)
+
+An endpoint asks for client certificates through the `TlsServerOptions` it is registered with,
+using `Connections.Security`'s `RequireClientCertificate(validate)` or
+`AllowClientCertificate(validate)`:
+
+```csharp
+options.UseHttps(
+    tcp => tcp.EndPoint = new IPEndPoint(IPAddress.Any, 443),
+    new TlsServerOptions { AuthenticationOptions = { ServerCertificate = certificate } }
+        .RequireClientCertificate((client, chain, errors) => trustedThumbprints.Contains(client.Thumbprint)));
+```
+
+The policy rides on the TLS options, so every TLS verb honors it with no overload of its own:
+`UseHttps`, `UseHttp1s`, `UseHttp2s`, and `UseHttp3(configure, tlsOptions)`, which hands the same
+authentication options to the QUIC listener. The certificate is requested during the handshake,
+never afterwards: HTTP/2 forbids post-handshake authentication and renegotiation (RFC 9113 §9.2.1,
+§9.2.3), so there is no deferred mode. A configured endpoint sets the policy with
+`ClientCertificateMode` (see "Configuration-bound server limits and endpoints"). A handler reads
+the result as `context.TlsConnection` — the client certificate, TLS protocol, cipher suite, and
+negotiated application protocol on HTTP/1.1, HTTP/2, and HTTP/3 alike (`Http.Connections` DESIGN,
+"The TLS session on every exchange").
+
+This module stops at exposing the certificate. Authenticating a request from it — mapping a
+certificate to a `ClaimsPrincipal` under an authentication scheme — is a handler for
+`Web.Authentication`, not yet written.
 
 ### Scope boundary
 

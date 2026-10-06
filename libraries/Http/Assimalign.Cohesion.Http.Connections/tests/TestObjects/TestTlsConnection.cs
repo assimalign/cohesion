@@ -2,6 +2,8 @@ using System;
 using System.IO.Pipelines;
 using System.Net;
 using System.Net.Security;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,16 +13,24 @@ namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
 /// <summary>
 /// A <see cref="Connection"/> double for a connection a TLS layer secured: it reports
-/// <see cref="ConnectionSecurity.Tls"/> and the handshake's negotiated application protocol through
+/// <see cref="ConnectionSecurity.Tls"/> and the handshake's results through
 /// <see cref="ITlsConnectionInfo"/>, and delegates its pipes and lifetime to a plaintext
 /// <see cref="TestConnection"/> that carries the preloaded request bytes and captures the response.
 /// </summary>
 internal sealed class TestTlsConnection : Connection, ITlsConnectionInfo
 {
-    public TestTlsConnection(byte[] input, SslApplicationProtocol applicationProtocol)
+    public TestTlsConnection(
+        byte[] input,
+        SslApplicationProtocol applicationProtocol,
+        X509Certificate2? remoteCertificate = null,
+        SslProtocols tlsProtocol = SslProtocols.Tls13,
+        TlsCipherSuite cipherSuite = TlsCipherSuite.TLS_AES_256_GCM_SHA384)
     {
         Inner = new TestConnection(input, capabilities: TlsCapabilities);
         ApplicationProtocol = applicationProtocol;
+        RemoteCertificate = remoteCertificate;
+        TlsProtocol = tlsProtocol;
+        CipherSuite = cipherSuite;
     }
 
     /// <summary>
@@ -35,6 +45,12 @@ internal sealed class TestTlsConnection : Connection, ITlsConnectionInfo
     public TestConnection Inner { get; }
 
     public SslApplicationProtocol ApplicationProtocol { get; }
+
+    public SslProtocols TlsProtocol { get; }
+
+    public TlsCipherSuite CipherSuite { get; }
+
+    public X509Certificate2? RemoteCertificate { get; }
 
     public override ConnectionId Id => Inner.Id;
 

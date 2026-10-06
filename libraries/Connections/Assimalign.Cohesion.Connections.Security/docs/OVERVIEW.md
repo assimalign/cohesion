@@ -19,7 +19,10 @@ in the Connections area because it composes directly over the connection contrac
   `IConnectionFactory.UseTls(TlsClientOptions)` to compose the layer, and
   `IConnection.UpgradeToTlsAsync(…)` to upgrade a single connection.
 - `TlsServerOptions` / `TlsClientOptions` — wrap the BCL `Ssl*AuthenticationOptions` (as
-  `AuthenticationOptions`) plus a `HandshakeTimeout`.
+  `AuthenticationOptions`) plus a `HandshakeTimeout`. `TlsServerOptions.RequireClientCertificate` /
+  `AllowClientCertificate` set the mutual-TLS policy, with an optional validation callback.
+- The secured connection implements the contracts' `ITlsConnectionInfo`: ALPN protocol, TLS
+  version, cipher suite, and the peer's certificate.
 
 ## Source Layout
 

@@ -1,4 +1,6 @@
 using System.Net.Security;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 
 namespace Assimalign.Cohesion.Connections;
 
@@ -36,4 +38,27 @@ public interface ITlsConnectionInfo
     /// once the handshake completes.
     /// </remarks>
     SslApplicationProtocol ApplicationProtocol { get; }
+
+    /// <summary>
+    /// Gets the TLS protocol version the handshake negotiated (for example
+    /// <see cref="SslProtocols.Tls13"/>).
+    /// </summary>
+    SslProtocols TlsProtocol { get; }
+
+    /// <summary>
+    /// Gets the cipher suite the handshake negotiated.
+    /// </summary>
+    TlsCipherSuite CipherSuite { get; }
+
+    /// <summary>
+    /// Gets the certificate the remote peer presented during the handshake, or
+    /// <see langword="null"/> when it presented none.
+    /// </summary>
+    /// <remarks>
+    /// On a server-side connection this is the client certificate, which a server receives only when
+    /// it requested one in the handshake (RFC 8446 §4.3.2); on a client-side connection it is the
+    /// server's certificate. The connection owns the certificate and disposes it with itself, so a
+    /// consumer that keeps it beyond the connection's lifetime copies it first.
+    /// </remarks>
+    X509Certificate2? RemoteCertificate { get; }
 }

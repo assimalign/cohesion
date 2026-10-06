@@ -511,6 +511,57 @@ public class HttpServerConfigurationTests
         server.ShouldBeOfType<WebApplicationServer>().MaxConcurrentConnections.ShouldBe(3);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: An unsupported ClientCertificateMode names the endpoint")]
+    public void Bind_UnsupportedClientCertificateMode_ShouldThrow()
+    {
+        // Arrange
+        using CertificateFiles files = CertificateFiles.Create();
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Secure:Protocol"] = "Https",
+            ["Http:Endpoints:Secure:Port"] = "0",
+            ["Http:Endpoints:Secure:Certificate:Path"] = files.PfxPath,
+            ["Http:Endpoints:Secure:Certificate:Password"] = CertificateFiles.Password,
+            ["Http:Endpoints:Secure:ClientCertificateMode"] = "Sometimes",
+        });
+        var owned = new List<X509Certificate2>();
+
+        try
+        {
+            // Act
+            InvalidOperationException error = Should.Throw<InvalidOperationException>(
+                () => HttpServerConfiguration.Bind(configuration, "Http", new HttpConnectionListenerOptions(), owned.Add));
+
+            // Assert
+            error.Message.ShouldContain("Secure");
+            error.Message.ShouldContain("ClientCertificateMode");
+        }
+        finally
+        {
+            DisposeAll(owned);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HTTP configuration: A ClientCertificateMode on a cleartext endpoint is refused")]
+    public void Bind_ClientCertificateModeOnCleartextEndpoint_ShouldThrow()
+    {
+        // Arrange — client certificates are a TLS handshake feature.
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Plain:Protocol"] = "Http1",
+            ["Http:Endpoints:Plain:Port"] = "0",
+            ["Http:Endpoints:Plain:ClientCertificateMode"] = "RequireCertificate",
+        });
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => HttpServerConfiguration.Bind(configuration, "Http", new HttpConnectionListenerOptions()));
+
+        // Assert
+        error.Message.ShouldContain("Plain");
+        error.Message.ShouldContain("TLS");
+    }
+
     private static void DisposeAll(List<X509Certificate2> certificates)
     {
         foreach (X509Certificate2 certificate in certificates)
@@ -521,30 +572,6 @@ public class HttpServerConfigurationTests
 
     private static IConfiguration BuildConfiguration(IDictionary<string, string?> values)
     {
-        ConfigurationManager manager = new();
-        manager.AddProvider(new SeededConfigurationProvider(values));
-        return manager;
-    }
-
-    private sealed class SeededConfigurationProvider : ConfigurationProvider
-    {
-        private readonly IDictionary<string, string?> _values;
-
-        public SeededConfigurationProvider(IDictionary<string, string?> values)
-        {
-            _values = values;
-        }
-
-        public override string Name => "Seeded";
-
-        protected override Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
-        {
-            foreach (KeyValuePair<string, string?> value in _values)
-            {
-                entries[Path.Parse(value.Key)] = value.Value;
-            }
-
-            return Task.CompletedTask;
-        }
+        return SeededConfiguration.Build(values);
     }
 }

@@ -57,10 +57,16 @@ it, then immediately fall back to the `IMultiplexedConnection` /
 
 QUIC runs a TLS 1.3 handshake inside its own (RFC 9001), so a QUIC connection is a TLS-terminating
 connection in the contracts' sense. `QuicMultiplexedConnection` implements `ITlsConnectionInfo` and
-reports the ALPN application protocol the handshake selected. The value is captured when the
-connection is wrapped, after `System.Net.Quic` has completed the handshake, and is the same on
-every stream of the connection; the streams themselves do not implement the facet. The driver
-reads the value and never branches on it, so it stays free of protocol semantics.
+reports what that handshake negotiated: the ALPN application protocol, the TLS version (always
+TLS 1.3), the cipher suite, and the peer's certificate (the client's on a server-side connection,
+present when the listener's `ServerAuthenticationOptions` requested one). The values are captured
+when the connection is wrapped, after `System.Net.Quic` has completed the handshake, and are the
+same on every stream of the connection; the streams themselves do not implement the facet. The
+driver reads the values and never branches on them, so it stays free of protocol semantics.
+
+Reading `QuicConnection.RemoteCertificate` hands the certificate's ownership to the reader (a
+`QuicConnection` no longer disposes a certificate it has exposed), so `QuicMultiplexedConnection`
+disposes the peer certificate after it has disposed the QUIC connection.
 
 ## Lifecycle and teardown
 

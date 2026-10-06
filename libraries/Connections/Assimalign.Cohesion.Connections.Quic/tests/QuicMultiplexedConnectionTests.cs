@@ -76,6 +76,82 @@ public class QuicMultiplexedConnectionTests
         pair.Client.ShouldBeAssignableTo<ITlsConnectionInfo>()!.ApplicationProtocol.ShouldBe(new SslApplicationProtocol("cohesion-test"));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - TlsProtocol and CipherSuite: Should report the TLS 1.3 session on both peers")]
+    public async Task TlsProtocolAndCipherSuite_OnEstablishedPair_ShouldReportTls13Session()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        // Act
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+        ITlsConnectionInfo server = pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!;
+        ITlsConnectionInfo client = pair.Client.ShouldBeAssignableTo<ITlsConnectionInfo>()!;
+
+        // Assert
+        server.TlsProtocol.ShouldBe(SslProtocols.Tls13);
+        client.TlsProtocol.ShouldBe(SslProtocols.Tls13);
+        server.CipherSuite.ShouldNotBe(default);
+        server.CipherSuite.ShouldBe(client.CipherSuite);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - RemoteCertificate: Should report each peer's certificate to the other")]
+    public async Task RemoteCertificate_WithClientCertificate_ShouldReportPeerCertificates()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange — the server requests a client certificate and accepts the test one.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        using X509Certificate2 clientCertificate = QuicTestCertificate.CreateClient();
+
+        // Act
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(
+            certificate,
+            cancellation.Token,
+            listener =>
+            {
+                listener.ServerAuthenticationOptions.ClientCertificateRequired = true;
+                listener.ServerAuthenticationOptions.RemoteCertificateValidationCallback = static (_, _, _, _) => true;
+            },
+            client =>
+            {
+                client.ClientAuthenticationOptions.ClientCertificates = new X509CertificateCollection { clientCertificate };
+                client.ClientAuthenticationOptions.LocalCertificateSelectionCallback = (_, _, _, _, _) => clientCertificate;
+            });
+
+        // Assert
+        pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate!.Thumbprint.ShouldBe(clientCertificate.Thumbprint);
+        pair.Client.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate!.Thumbprint.ShouldBe(certificate.Thumbprint);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - RemoteCertificate: Should be null on the server when the client presents none")]
+    public async Task RemoteCertificate_WithoutClientCertificate_ShouldBeNullOnServer()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        // Act
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+
+        // Assert
+        pair.Server.ShouldBeAssignableTo<ITlsConnectionInfo>()!.RemoteCertificate.ShouldBeNull();
+    }
+
     [Fact]
     public async Task OpenStreamAsync_Bidirectional_ShouldEchoAcrossPeers()
     {
@@ -350,7 +426,8 @@ public class QuicMultiplexedConnectionTests
         public static async Task<LoopbackPair> CreateAsync(
             X509Certificate2 certificate,
             CancellationToken cancellationToken,
-            Action<QuicConnectionListenerOptions>? configureListener = null)
+            Action<QuicConnectionListenerOptions>? configureListener = null,
+            Action<QuicConnectionFactoryOptions>? configureClient = null)
         {
             SslApplicationProtocol applicationProtocol = new("cohesion-test");
 
@@ -380,6 +457,8 @@ public class QuicMultiplexedConnectionTests
                         EnabledSslProtocols = SslProtocols.Tls13,
                         RemoteCertificateValidationCallback = static (_, _, _, _) => true
                     };
+
+                    configureClient?.Invoke(options);
                 });
 
                 MultiplexedConnection client = await factory.ConnectAsync(listener.EndPoint, cancellationToken);

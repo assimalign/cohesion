@@ -185,16 +185,27 @@ and logging only.
 `ConnectionSecurity.Tls` says a connection is secured; it cannot say what the handshake agreed,
 because capabilities describe a transport class and the handshake is per connection. An
 application protocol needs that agreement: HTTP chooses between HTTP/2 and HTTP/1.1 from the
-application protocol ALPN selected (RFC 7301). `ITlsConnectionInfo` is the typed facet that
-carries it. A connection that terminates TLS implements it beside its connection contract, and a
+application protocol ALPN selected (RFC 7301), and shows its handlers the client certificate,
+TLS version, and cipher suite. `ITlsConnectionInfo` is the typed facet that carries it. A connection that terminates TLS implements it beside its connection contract, and a
 consumer finds it with a type test on the connection it holds:
 
 - the secured `IConnection` the TLS layer returns (`Assimalign.Cohesion.Connections.Security`),
   which captures the values once its handshake completes;
 - a multiplexed connection whose transport is TLS itself (QUIC, RFC 9001).
 
-Today the facet reports `ApplicationProtocol`, the protocol ALPN selected, or none when the client
-offered none.
+The facet reports four values, all fixed once the handshake completes:
+
+| Member | Meaning |
+|---|---|
+| `ApplicationProtocol` | the protocol ALPN selected (RFC 7301), or none when the client offered none |
+| `TlsProtocol` | the negotiated TLS version |
+| `CipherSuite` | the negotiated cipher suite |
+| `RemoteCertificate` | the certificate the peer presented, or `null`: the client's on a server-side connection (present only when the server requested one, RFC 8446 §4.3.2), the server's on a client-side one |
+
+The connection owns `RemoteCertificate` and disposes it with itself. Both platform stacks hand
+ownership of the peer certificate to whoever reads it (`SslStream.RemoteCertificate`,
+`QuicConnection.RemoteCertificate`), so an implementation that reads it to report it must
+release it; a consumer that keeps the certificate past the connection copies it.
 
 Why this shape:
 

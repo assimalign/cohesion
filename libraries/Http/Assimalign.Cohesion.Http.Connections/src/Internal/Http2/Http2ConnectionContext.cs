@@ -1669,6 +1669,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 $"HTTP/2 stream {stream.StreamId} was rejected by a request-parse interceptor with status '{rejection.StatusCode}'.");
         }
 
+        AttachTlsConnection(context);
+
         if (stream.IsDeclaredBodyOverLimit)
         {
             // RFC 9110 §15.5.14 — the declared content-length exceeds the frozen cap, so the request is

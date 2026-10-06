@@ -14,7 +14,9 @@ as every other transport.
   accepts inbound QUIC connections.
 - `QuicConnectionFactory` — client-side: dials outbound QUIC connections.
 - `QuicMultiplexedConnection` — one QUIC connection; accepts and opens
-  streams, each surfaced as a `Connection`.
+  streams, each surfaced as a `Connection`, and reports its TLS 1.3
+  handshake (ALPN protocol, cipher suite, peer certificate) through the
+  contracts' `ITlsConnectionInfo`.
 - Options types covering endpoint, TLS/ALPN, stream limits, pipe buffer
   sizes, and default QUIC application error codes (defaulting to the
   HTTP/3 codes, matching the default ALPN).

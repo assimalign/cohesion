@@ -4,6 +4,8 @@ using System.Net;
 using System.Net.Quic;
 using System.Net.Security;
 using System.Runtime.Versioning;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -61,6 +63,9 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
         LocalEndPoint = connection.LocalEndPoint;
         RemoteEndPoint = connection.RemoteEndPoint;
         ApplicationProtocol = connection.NegotiatedApplicationProtocol;
+        TlsProtocol = connection.SslProtocol;
+        CipherSuite = connection.NegotiatedCipherSuite;
+        RemoteCertificate = TakeRemoteCertificate(connection);
         _state = ConnectionState.Open;
 
         QuicConnectionEventSource.Log.ConnectionOpened(Id, listenerId, LocalEndPoint, RemoteEndPoint);
@@ -87,6 +92,19 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
     /// <inheritdoc />
     /// <remarks>QUIC requires ALPN (RFC 9001 §8.1), so an established connection always reports one.</remarks>
     public SslApplicationProtocol ApplicationProtocol { get; }
+
+    /// <inheritdoc />
+    /// <remarks>QUIC carries TLS 1.3 (RFC 9001 §4), so this is <see cref="SslProtocols.Tls13"/>.</remarks>
+    public SslProtocols TlsProtocol { get; }
+
+    /// <inheritdoc />
+    public TlsCipherSuite CipherSuite { get; }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The connection owns the certificate and disposes it when the connection is disposed.
+    /// </remarks>
+    public X509Certificate2? RemoteCertificate { get; }
 
     /// <inheritdoc />
     public override ConnectionState State => _state;
@@ -196,6 +214,10 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
 
         await _connection.DisposeAsync().ConfigureAwait(false);
 
+        // Reading QuicConnection.RemoteCertificate handed its ownership to this connection (see
+        // TakeRemoteCertificate), so the certificate is released here, with the connection.
+        RemoteCertificate?.Dispose();
+
         CancelConnectionClosedToken();
         ReportClosed();
 
@@ -209,6 +231,30 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection, ITlsConne
             {
                 _state = ConnectionState.Closed;
             }
+        }
+    }
+
+    /// <summary>
+    /// Reads the certificate the peer presented. Reading <see cref="QuicConnection.RemoteCertificate"/>
+    /// hands its ownership to the caller (a <see cref="QuicConnection"/> no longer disposes a
+    /// certificate it has exposed), so this connection disposes it. The platform surfaces an
+    /// <see cref="X509Certificate2"/>; any other instance is copied and released.
+    /// </summary>
+    private static X509Certificate2? TakeRemoteCertificate(QuicConnection connection)
+    {
+        X509Certificate? certificate = connection.RemoteCertificate;
+        if (certificate is null or X509Certificate2)
+        {
+            return (X509Certificate2?)certificate;
+        }
+
+        try
+        {
+            return X509CertificateLoader.LoadCertificate(certificate.GetRawCertData());
+        }
+        finally
+        {
+            certificate.Dispose();
         }
     }
 

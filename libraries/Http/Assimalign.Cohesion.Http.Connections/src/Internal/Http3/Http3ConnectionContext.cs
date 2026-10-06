@@ -30,6 +30,9 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
     private readonly IMultiplexedConnection _connection;
     private readonly bool _isSecure;
+    // The QUIC handshake's TLS session, attached to every exchange; null when the connection does not
+    // report it (see HttpTlsConnectionFeature.From).
+    private readonly HttpTlsConnectionFeature? _tlsConnection;
     private readonly Http3QPackOptions _qpackOptions;
     private readonly Http3PeerSettings _peerSettings = new();
     // Cancelled when the receive enumeration tears down — the consumer ended it, or a connection error
@@ -109,6 +112,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     {
         _connection = connection;
         _isSecure = isSecure;
+        _tlsConnection = HttpTlsConnectionFeature.From(connection);
         _limits = limits;
         _requestInterceptors = requestInterceptors;
         _responseInterceptors = responseInterceptors;
@@ -1376,6 +1380,11 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             body,
             interception.Features);
         body.AttachOwner(context);
+
+        if (_tlsConnection is not null)
+        {
+            context.Features.Set(_tlsConnection);
+        }
 
         // RFC 9218 §4 — the request's Priority header sets the effective priority.
         // Parsing is tolerant: a malformed value leaves the default (urgency 3,

@@ -24,8 +24,9 @@ transformations (such as TLS) compose over it.
 - `IDatagramConnection` / `DatagramConnection` — message-oriented send/receive (e.g., UDP).
 - `IConnectionLayer` — connection-to-connection transformation; composed via
   `listener.Use(layer)` / `factory.Use(layer)`.
-- `ITlsConnectionInfo` — what a TLS handshake negotiated (the ALPN application protocol),
-  implemented by connections that terminate TLS and found with a type test.
+- `ITlsConnectionInfo` — what a TLS handshake negotiated (ALPN application protocol, TLS version,
+  cipher suite, the peer's certificate), implemented by connections that terminate TLS and found
+  with a type test.
 - `ConnectionCapabilities`, `ConnectionProtocol`, `ConnectionDelivery`, `ConnectionSecurity`,
   `ConnectionDirection`, `ConnectionState`, `ConnectionId`, `DatagramReceiveResult`.
 - `DuplexPipeStream`, `ConnectionExtensions.AsStream()` — lazy pipe-to-stream adaptation.
