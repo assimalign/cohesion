@@ -151,7 +151,7 @@ public sealed class SqlCascadeFanOutTests
         (await ScalarAsync(session, $"SELECT COUNT(*) FROM c WHERE pid = {bystander}")).ShouldBe(100L);
     }
 
-    private static async Task<int> InsertChildrenAsync(IDatabaseSession session, int parent, int count, int firstChild)
+    private static async Task<int> InsertChildrenAsync(SqlDatabaseSession session, int parent, int count, int firstChild)
     {
         var sql = new StringBuilder();
         int end = firstChild + count;
@@ -175,7 +175,7 @@ public sealed class SqlCascadeFanOutTests
     /// <paramref name="children"/> children, and returns the microseconds of the process's CPU
     /// time the statements took per child (the class remarks).
     /// </summary>
-    private static async Task<double> CascadeAsync(IDatabaseSession session, int[] parents, int children)
+    private static async Task<double> CascadeAsync(SqlDatabaseSession session, int[] parents, int children)
     {
         var affected = new long[parents.Length];
         TimeSpan start = Environment.CpuUsage.TotalTime;
@@ -195,7 +195,7 @@ public sealed class SqlCascadeFanOutTests
         return elapsed / ((double)parents.Length * children);
     }
 
-    private static async Task<object?> ScalarAsync(IDatabaseSession session, string sql)
+    private static async Task<object?> ScalarAsync(SqlDatabaseSession session, string sql)
     {
         await using var rows = (await session.ExecuteAsync(sql, cancellationToken: Timeout())).ShouldBeAssignableTo<QueryResultSet>();
         await foreach (var row in rows!.GetRowsAsync())

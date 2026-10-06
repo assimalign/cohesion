@@ -477,7 +477,7 @@ internal sealed class CSharpExpressionCanonicalizer
     {
         string typeName = method.ContainingType.ToDisplayString(_qualifiedTypeFormat);
         return typeName is
-            "Assimalign.Cohesion.Database.Sql.Schema.ISqlTriggerContext" or
+            "Assimalign.Cohesion.Database.Sql.Schema.SqlTriggerContext" or
             "System.String" or "System.Math" or "System.MathF" or "System.Decimal" or "System.Convert";
     }
 

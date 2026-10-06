@@ -363,7 +363,7 @@ public sealed class SqlTemporalKeyIdentityTests
 
     // ── Helpers ────────────────────────────────────────────────────────
 
-    private static async Task CreateParityTablesAsync(IDatabaseSession session, string type, object?[][] rows, object?[][] keyed)
+    private static async Task CreateParityTablesAsync(SqlDatabaseSession session, string type, object?[][] rows, object?[][] keyed)
     {
         await ExecuteAsync(session, $"CREATE TABLE scanned (id INT, ts {type})");
         await ExecuteAsync(session, $"CREATE TABLE indexed (id INT, ts {type})");
@@ -395,7 +395,7 @@ public sealed class SqlTemporalKeyIdentityTests
     }
 
     /// <summary>Runs every predicate shape on the scan reference and on each indexed twin.</summary>
-    private static async Task AssertParityAsync(IDatabaseSession session, Dictionary<string, object?> parameters)
+    private static async Task AssertParityAsync(SqlDatabaseSession session, Dictionary<string, object?> parameters)
     {
         await AssertSeekMatchesScanAsync(session, "indexed", "scanned", "ts", "seek:ix_indexed", parameters);
         await AssertSeekMatchesScanAsync(session, "built", "scanned", "ts", "seek:ix_built", parameters);
@@ -403,7 +403,7 @@ public sealed class SqlTemporalKeyIdentityTests
     }
 
     private static async Task AssertSeekMatchesScanAsync(
-        IDatabaseSession session, string indexedTable, string scanTable, string column, string accessPath, Dictionary<string, object?> parameters)
+        SqlDatabaseSession session, string indexedTable, string scanTable, string column, string accessPath, Dictionary<string, object?> parameters)
     {
         foreach (string template in Predicates)
         {
@@ -426,10 +426,10 @@ public sealed class SqlTemporalKeyIdentityTests
 
     private static Dictionary<string, object?> P(object? value) => new() { ["p"] = value };
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(sql, parameters).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         await using var result = (await ExecuteAsync(session, sql, parameters)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();
@@ -445,14 +445,14 @@ public sealed class SqlTemporalKeyIdentityTests
         return rows;
     }
 
-    private static async Task<object?[]> ValuesAsync(IDatabaseSession session, string sql)
+    private static async Task<object?[]> ValuesAsync(SqlDatabaseSession session, string sql)
         => (await RowsAsync(session, sql)).Select(row => row[0]).ToArray();
 
-    private static async Task<int[]> IdsAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<int[]> IdsAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => (await RowsAsync(session, sql, parameters)).Select(row => (int)row[0]!).ToArray();
 
-    private static SqlStatementMetrics Metrics(IDatabaseSession session)
-        => ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull();
+    private static SqlStatementMetrics Metrics(SqlDatabaseSession session)
+        => session.LastStatementMetrics.ShouldNotBeNull();
 
     private static byte[] Encode(Action<DatabaseKeyWriter> append)
     {
@@ -462,14 +462,14 @@ public sealed class SqlTemporalKeyIdentityTests
     }
 
     /// <summary>Materializes the keys a fresh snapshot sees in the named index.</summary>
-    private static async Task<List<byte[]>> KeysAsync(IDatabase database, string table, string indexName)
+    private static async Task<List<byte[]>> KeysAsync(SqlDatabase database, string table, string indexName)
     {
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.Catalog.TryGetTable("dbo", table, out var catalogTable).ShouldBeTrue();
         instance.IndexManager.TryGetIndex(catalogTable.ObjectId, indexName, out var index).ShouldBeTrue($"index '{indexName}' should be attached");
 
         await using var session = await database.CreateSessionAsync();
-        var transaction = (SqlDatabaseTransaction)await session.BeginTransactionAsync();
+        var transaction = await session.BeginTransactionAsync();
 
         try
         {

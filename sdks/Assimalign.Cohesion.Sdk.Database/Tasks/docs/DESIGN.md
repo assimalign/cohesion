@@ -13,6 +13,16 @@ method signatures use the supplied argument and result types, matching runtime e
 without invoking consumer code. Known decimal operators are resolved from compiler symbols
 because Roslyn represents them as built-ins while runtime expression trees retain their methods.
 
+The extractor recognizes the declaration DSL by metadata name: calls on `SqlSchema` (its
+`Create` and `Compile` over a `SqlSchemaBuilder` callback), on the sealed `SqlSchemaBuilder`,
+`SqlTableBuilder<TRow>` (``SqlTableBuilder`1``), `SqlTypeBuilder` and `SqlPrincipalBuilder`, and
+the canonicalizer allows a trigger body's calls on `SqlTriggerContext`
+(`CSharpSchemaExtractor.cs`, `CSharpExpressionCanonicalizer.cs`). Those strings change in the
+same commit as the types they name: a stale one compiles and then rejects every schema at build
+time. Phase 4 of the concrete-types plan renamed the builders from their former interfaces
+(`ISqlSchemaBuilder` and its siblings) in lockstep, and the parity test compiles the same
+canonical document through the runtime and through the SDK.
+
 The SDK is a build-time layer. Its tasks may run under the JIT-based MSBuild host and reference
 the AOT-compatible `Database.Sql.Schema` package, but the task and Roslyn assemblies never enter the consumer's
 runtime closure. The task references only `Database.Sql.Schema`; it does not pull the SQL

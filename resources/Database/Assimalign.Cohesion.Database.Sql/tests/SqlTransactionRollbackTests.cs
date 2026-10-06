@@ -29,7 +29,7 @@ public sealed class SqlTransactionRollbackTests
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "rollback-canceled" });
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("canceled-db");
+        var database = await engine.CreateDatabaseAsync("canceled-db");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
         await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (1, 10)");
@@ -64,7 +64,7 @@ public sealed class SqlTransactionRollbackTests
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy();
         var engine = SqlDatabaseEngine.Create(QuietOptions("rollback-journal", strategy));
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("journal-db");
+        var database = await engine.CreateDatabaseAsync("journal-db");
         var session = await database.CreateSessionAsync();
         var other = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
@@ -132,7 +132,7 @@ public sealed class SqlTransactionRollbackTests
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create(QuietOptions("rollback-undo-journal", new FaultInjectingJournalSqlStorageStrategy()));
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("undo-db");
+        var database = await engine.CreateDatabaseAsync("undo-db");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
@@ -176,7 +176,7 @@ public sealed class SqlTransactionRollbackTests
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy();
         var engine = SqlDatabaseEngine.Create(QuietOptions("rollback-close", strategy));
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("close-db");
+        var database = await engine.CreateDatabaseAsync("close-db");
         await using (var session = await database.CreateSessionAsync())
         {
             await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
@@ -218,7 +218,7 @@ public sealed class SqlTransactionRollbackTests
         DeferredUndoRetryDelay = TimeSpan.FromHours(1),
     };
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();

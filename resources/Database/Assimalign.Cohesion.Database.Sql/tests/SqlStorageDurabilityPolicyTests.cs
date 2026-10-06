@@ -8,9 +8,10 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
+using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Execution;
 
 /// <summary>
 /// Engine durability follows the backing capability, while explicit durable
@@ -125,11 +126,11 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
         }
     }
 
-    private sealed class NonDurableStorageStrategy : ISqlStorageStrategy
+    private sealed class NonDurableStorageStrategy : SqlStorageStrategy
     {
         internal List<MemoryStream> Streams { get; } = [];
 
-        public SqlStorage CreateStorage(string databaseName)
+        public override SqlStorage CreateStorage(string databaseName)
         {
             var data = new MemoryStream();
             var journal = new MemoryStream();
@@ -138,10 +139,10 @@ public sealed class SqlStorageDurabilityPolicyTests : IDisposable
             return SqlStorage.Create(data, journal, backup, databaseName);
         }
 
-        public SqlStorage OpenStorage(string databaseName) => CreateStorage(databaseName);
+        public override SqlStorage OpenStorage(string databaseName) => CreateStorage(databaseName);
 
-        public bool StorageExists(string databaseName) => true;
+        public override bool StorageExists(string databaseName) => true;
 
-        public void DropStorage(string databaseName) { }
+        public override void DropStorage(string databaseName) { }
     }
 }

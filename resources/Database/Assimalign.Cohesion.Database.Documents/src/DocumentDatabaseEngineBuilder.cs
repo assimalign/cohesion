@@ -169,7 +169,7 @@ public sealed class DocumentDatabaseEngineBuilder
     {
         _state.BeginBuild();
         var engine = DocumentDatabaseEngine.CreateUncomposed(_options);
-        return _state.Complete(engine, engine.Compose);
+        return _state.Complete(engine, engine.Compose, DocumentDatabaseEngine.ReleaseRefusedWorkerAsync);
     }
 
     /// <summary>

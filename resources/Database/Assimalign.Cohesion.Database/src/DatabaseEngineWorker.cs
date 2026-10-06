@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
+using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Internal;
 
@@ -65,20 +66,44 @@ namespace Assimalign.Cohesion.Database;
 /// leaves the loop, and the thread with it, which ends the process: nothing ends the loop silently.
 /// </para>
 /// <para>
+/// <b>Release belongs to the engine that owns the worker.</b> A worker belongs to one engine: the
+/// engine claims it when it attaches it, before the worker's pump starts, and refuses a worker
+/// another engine owns or one already released. It releases the worker once it stopped the
+/// worker's pump: it runs the worker's <see cref="DisposeAsyncCore"/> (a checkpointer ends the
+/// checkpoints it left running on their lanes before the storages close). The worker has no
+/// public disposal: a worker no engine owns, a product a builder refused, is released through
+/// the engine base's protected <see cref="DatabaseEngine.ReleaseUnownedWorkerAsync"/>, which
+/// does nothing on a worker an engine owns, so code holding <see cref="DatabaseEngine.Workers"/>
+/// cannot release a worker whose pump still runs. Either path reaches
+/// <see cref="DisposeAsyncCore"/> once.
+/// </para>
+/// <para>
 /// <b>Shape (concrete-types plan, phase 3, #1259).</b> Every public member is non-virtual.
 /// <see cref="Name"/>, <see cref="Kind"/> and <see cref="Interval"/> are fixed by the protected
 /// constructor, so reading them makes no virtual call; a leaf supplies only the per-pass work
 /// (<see cref="RunIterationCore"/>) and, when it is signal-driven, its trigger wait
-/// (<see cref="WaitForTrigger"/>, the one lifecycle hook). The leaves live in the model
-/// assemblies, so the constructor is <c>protected</c>.
+/// (<see cref="WaitForTrigger"/>), and, when it holds work of its own, its release
+/// (<see cref="DisposeAsyncCore"/>): the two lifecycle hooks. The leaves live in the model
+/// assemblies, so the constructor is <c>protected</c>. The release hook landed with the last
+/// model's phase-4 PR (#1260, row 7), in place of the engines' <see cref="IDisposable"/> and
+/// <see cref="IAsyncDisposable"/> type tests; it is internal to the root, reached by the owning
+/// engine's disposal and, for a worker no engine owns, by the engine base's protected release.
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DatabaseEngineWorker : IDatabaseEngineWorker
 {
+    // The worker's lifetime: free until an engine claims it at attach, then owned by that engine,
+    // and released once, by the owning engine (ReleaseAsync) or, for a worker no engine owns, by
+    // the engine base's protected release (ReleaseUnownedAsync).
+    private const int free = 0;
+    private const int owned = 1;
+    private const int released = 2;
+
     private readonly string _name;
     private readonly DatabaseEngineWorkerKind _kind;
     private readonly TimeSpan _interval;
+    private int _lifetime = free;
 
     // Held for the whole of a pass: passes never overlap.
     private readonly object _passGate = new();
@@ -389,6 +414,49 @@ public abstract class DatabaseEngineWorker : IDatabaseEngineWorker
     /// <param name="cancellationToken">Signaled to stop the pump; the wait must return promptly.</param>
     protected virtual void WaitForTrigger(CancellationToken cancellationToken)
         => cancellationToken.WaitHandle.WaitOne(Interval);
+
+    /// <summary>
+    /// Releases what the worker holds once its pump has stopped: work it left running on threads of
+    /// its own (a checkpoint on its lane), which must end before the engine closes its storages.
+    /// Called once: by the owning engine's disposal, or, for a worker no engine owns (a product a
+    /// builder refused), by <see cref="DatabaseEngine.ReleaseUnownedWorkerAsync"/>. The default
+    /// releases nothing.
+    /// </summary>
+    /// <returns>A task that completes once the worker's resources are released.</returns>
+    protected virtual ValueTask DisposeAsyncCore() => ValueTask.CompletedTask;
+
+    /// <summary>
+    /// Claims the worker for the engine attaching it, before the engine starts its pump: from now on
+    /// only that engine releases it. Called by <see cref="DatabaseEngine"/> under its attach lock.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the worker was free; <see langword="false"/> when another engine
+    /// owns it or it was released.
+    /// </returns>
+    internal bool TryClaim() => Interlocked.CompareExchange(ref _lifetime, owned, free) == free;
+
+    /// <summary>
+    /// Returns a claimed worker to free when its engine's attach failed after the claim (its pump
+    /// thread did not start), so the builder that refused it can still release it.
+    /// </summary>
+    internal void Unclaim() => Interlocked.CompareExchange(ref _lifetime, free, owned);
+
+    /// <summary>
+    /// Releases the worker for the engine that owns it, once the engine stopped the worker's pump:
+    /// the worker's <see cref="DisposeAsyncCore"/>, unless it already ran.
+    /// </summary>
+    /// <returns>A task that completes once the worker's resources are released.</returns>
+    internal ValueTask ReleaseAsync()
+        => Interlocked.Exchange(ref _lifetime, released) == released ? ValueTask.CompletedTask : DisposeAsyncCore();
+
+    /// <summary>
+    /// Releases a worker no engine owns: the worker's <see cref="DisposeAsyncCore"/>, once. Does
+    /// nothing on a worker an engine owns, whose engine releases it after it stopped the worker's
+    /// pump, and nothing after the first release.
+    /// </summary>
+    /// <returns>A task that completes once the worker's resources are released.</returns>
+    internal ValueTask ReleaseUnownedAsync()
+        => Interlocked.CompareExchange(ref _lifetime, released, free) == free ? DisposeAsyncCore() : ValueTask.CompletedTask;
 
     private bool RunPass(CancellationToken cancellationToken, out bool threw)
     {

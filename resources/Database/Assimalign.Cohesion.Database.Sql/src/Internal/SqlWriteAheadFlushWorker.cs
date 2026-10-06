@@ -63,7 +63,7 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseEngineWorker
         // again and is picked up by the next pass instead of being lost.
         _commitPending.Reset();
 
-        foreach (SqlDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (SqlDatabase database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -71,8 +71,10 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseEngineWorker
             }
 
             // An offline database flushes nothing (#1243): its waiting committers were released
-            // when it went offline, and each gets the refusal from its own flush.
-            if (database.IsOffline || !BeginDatabase(database.Name))
+            // when it went offline, and each gets the refusal from its own flush. Nor does a
+            // database its holder closed: the engine keeps it registered only to refuse its reopen,
+            // and its disposed storages have no committers left to serve.
+            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }
@@ -82,7 +84,7 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseEngineWorker
         }
     }
 
-    private void FlushPending(SqlDatabaseInstance database, SqlStorage storage)
+    private void FlushPending(SqlDatabase database, SqlStorage storage)
     {
         try
         {

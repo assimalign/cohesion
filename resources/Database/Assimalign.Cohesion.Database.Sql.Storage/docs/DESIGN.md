@@ -30,7 +30,7 @@ by — `Assimalign.Cohesion.Database.Storage`.
   images to, for the manager's journal-bound transaction log and open-time recovery
   analysis. `Open(..., checkpointOnOpen: false)` exists for the same reason — the
   engine analyzes the recovered journal before the truncating checkpoint destroys
-  the records classification reads (see `ISqlStorageStrategy`). Storage retains
+  the records classification reads (see the Sql model's internal `SqlStorageStrategy`). Storage retains
   ownership of the journal; composers coordinate journal writes and checkpoints
   through their transaction coordinator and must not dispose it independently.
 

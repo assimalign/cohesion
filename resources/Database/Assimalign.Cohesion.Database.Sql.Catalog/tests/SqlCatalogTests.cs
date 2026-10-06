@@ -34,14 +34,14 @@ public class SqlCatalogTests
         private readonly MemoryStream _data = new();
         private readonly MemoryStream _journal = new();
 
-        public ISqlCatalog Open()
+        public SqlCatalog Open()
         {
             var storage = SqlStorage.Create(
                 new NonClosingStream(_data), new NonClosingStream(_journal), new MemoryStream(), "catalog-test");
             return SqlCatalog.Open(storage);
         }
 
-        public ISqlCatalog Reopen() => SqlCatalog.Open(OpenCopy());
+        public SqlCatalog Reopen() => SqlCatalog.Open(OpenCopy());
 
         /// <summary>
         /// Reads the raw catalog records the way a catalog's load does and returns
@@ -78,13 +78,13 @@ public class SqlCatalogTests
         }
     }
 
-    private static (ISqlCatalog Catalog, CatalogHarness Harness) OpenFresh()
+    private static (SqlCatalog Catalog, CatalogHarness Harness) OpenFresh()
     {
         var harness = new CatalogHarness();
         return (harness.Open(), harness);
     }
 
-    private static ISqlCatalog Reopen(CatalogHarness harness) => harness.Reopen();
+    private static SqlCatalog Reopen(CatalogHarness harness) => harness.Reopen();
 
     // NonClosingStream lives in TestObjects/ (shared with the index metadata suite).
 
@@ -92,16 +92,16 @@ public class SqlCatalogTests
     public async Task SchemaOwnership_AfterColumnChanges_ShouldPersistForTableAndIndex()
     {
         var (catalog, harness) = OpenFresh();
-        var table = await SqlCatalog.CreateSchemaTableAsync(catalog, "dbo", "customers",
+        var table = await catalog.CreateTableAsync("dbo", "customers",
             [Column("id", DatabaseType.Int64), Column("legacy", DatabaseType.String)],
-            null, "AppSchema", default);
+            null, DatabaseObjectOwner.Schema, "AppSchema", default);
         await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_customers_id", ["id"], false,
             DatabaseObjectOwner.Schema, "AppSchema"), []);
         await catalog.AddColumnAsync("dbo", "customers", Column("note", DatabaseType.String));
         await catalog.DropColumnAsync("dbo", "customers", "legacy");
         await catalog.CreateTableAsync("dbo", "scratch", [Column("id", DatabaseType.Int64)]);
 
-        ISqlCatalog reopened = Reopen(harness);
+        SqlCatalog reopened = Reopen(harness);
 
         reopened.TryGetTable("dbo", "customers", out var persisted).ShouldBeTrue();
         persisted.Owner.ShouldBe(DatabaseObjectOwner.Schema);
@@ -136,7 +136,7 @@ public class SqlCatalogTests
             transaction.Commit();
         }
 
-        ISqlCatalog catalog = SqlCatalog.Open(storage);
+        SqlCatalog catalog = SqlCatalog.Open(storage);
 
         catalog.TryGetTable("dbo", "legacy", out var loadedTable).ShouldBeTrue();
         loadedTable.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);

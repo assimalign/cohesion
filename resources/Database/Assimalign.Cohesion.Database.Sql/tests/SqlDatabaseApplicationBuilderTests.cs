@@ -79,7 +79,7 @@ public sealed class SqlDatabaseApplicationBuilderTests : IDisposable
             options.AddServer(engine =>
             {
                 serverCreated = true;
-                return SqlDatabaseServer.Create((SqlDatabaseEngine)engine, new SqlDatabaseServerOptions
+                return SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions
                 {
                     Listener = new Assimalign.Cohesion.Connections.InMemory.InMemoryConnectionListener(),
                 });
@@ -90,7 +90,7 @@ public sealed class SqlDatabaseApplicationBuilderTests : IDisposable
         serverCreated.ShouldBeTrue();
         var server = engine.Servers.ShouldHaveSingleItem().ShouldBeOfType<SqlDatabaseServer>();
         server.Engine.ShouldBeSameAs(engine);
-        server.Context.Sessions.ShouldBeEmpty();
+        server.Sessions.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - AddSql: Defaults register an in-memory engine that serves SQL")]
@@ -103,8 +103,8 @@ public sealed class SqlDatabaseApplicationBuilderTests : IDisposable
 
         // Act: drive the registered engine end-to-end through the root contracts —
         // no start ceremony, the engine is operational after construction.
-        IDatabase database = await engine.CreateDatabaseAsync("builder-db", TestContextToken());
-        await using IDatabaseSession session = await database.CreateSessionAsync(TestContextToken());
+        SqlDatabase database = await engine.CreateDatabaseAsync("builder-db", TestContextToken());
+        await using SqlDatabaseSession session = await database.CreateSessionAsync(TestContextToken());
 
         await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY, label VARCHAR(50));", cancellationToken: TestContextToken());
         await session.ExecuteAsync("INSERT INTO items (id, label) VALUES (1, 'one'), (2, 'two');", cancellationToken: TestContextToken());

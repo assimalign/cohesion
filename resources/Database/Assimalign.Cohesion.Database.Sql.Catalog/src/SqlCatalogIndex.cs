@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// The catalog's description of one secondary index: name, owning table, ordered
 /// key columns, and uniqueness. The physical tree identity (root page id) is not
 /// part of this description — it lives in the index-registration record the index
-/// manager exports (<see cref="ISqlCatalog.SaveIndexRegistrationsAsync"/>), because
+/// manager exports (<see cref="SqlCatalog.SaveIndexRegistrationsAsync"/>), because
 /// the description is schema while the registration is physical topology that the
 /// index manager owns (its root page stays fixed through splits since #1159).
 /// </summary>

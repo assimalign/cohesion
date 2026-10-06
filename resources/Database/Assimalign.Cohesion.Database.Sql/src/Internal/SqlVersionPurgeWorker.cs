@@ -38,7 +38,8 @@ using Assimalign.Cohesion.Database.Storage;
 /// failure of one database delays no other's retry. A database whose undo is still deferred, or
 /// whose storage was busy, keeps a failure recorded for it until a pass leaves nothing over; a
 /// failure of another database does not keep it, so a transient fault does not leave the engine
-/// Faulted for good. An offline database (#1243) is skipped.
+/// Faulted for good. An offline database (#1243) is skipped, and so is a database its holder
+/// disposed while the engine keeps it registered (directly, or through a session's database).
 /// </para>
 /// </remarks>
 internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
@@ -60,9 +61,9 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
     {
         // Until the next full pass, or the next deferred-undo retry when one is sooner.
         var wait = Interval - Stopwatch.GetElapsedTime(Volatile.Read(ref _lastFullPass));
-        foreach (SqlDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (SqlDatabase database in _engine.GetInstanceSnapshot())
         {
-            if (!database.IsOffline && database.Coordinator.NextDeferredUndoRetry is { } retry && retry < wait)
+            if (!database.IsClosed && !database.IsOffline && database.Coordinator.NextDeferredUndoRetry is { } retry && retry < wait)
             {
                 wait = retry;
             }
@@ -98,7 +99,7 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
             Volatile.Write(ref _lastFullPass, Stopwatch.GetTimestamp());
         }
 
-        foreach (SqlDatabaseInstance database in _engine.GetInstanceSnapshot())
+        foreach (SqlDatabase database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -106,8 +107,10 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
             }
 
             // An offline database is not begun: the engine reports it (#1243), and a failure the
-            // worker recorded for it ends.
-            if (database.IsOffline || !BeginDatabase(database.Name))
+            // worker recorded for it ends. Nor is a database its holder closed: the engine keeps it
+            // registered only to refuse its reopen, and its disposed coordinator has nothing left
+            // to purge.
+            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }

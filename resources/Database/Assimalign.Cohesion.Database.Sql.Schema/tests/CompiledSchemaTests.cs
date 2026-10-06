@@ -4,6 +4,7 @@ using System.Linq;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Sql.Schema.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
@@ -77,7 +78,7 @@ public class CompiledSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: typed diagnostics name the offending declaration")]
     public void Compile_WithInvalidDeclarations_ShouldReportTypedNamedErrors()
     {
-        ISqlSchema declaration = SqlSchema.Create("invalid", database =>
+        SqlSchema declaration = SqlSchema.Create("invalid", database =>
         {
             database.Table<Order>("orders", table => table.Key(order => order.Id));
             database.Table<Order>("orders", table => table.Key(order => order.Id));
@@ -96,7 +97,7 @@ public class CompiledSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: invalid references remain typed and named")]
     public void Compile_WithInvalidReferences_ShouldReportPreciseDiagnostics()
     {
-        ISqlSchema relational = SqlSchema.Create("invalid-references", database =>
+        SqlSchema relational = SqlSchema.Create("invalid-references", database =>
         {
             database.Table<Order>("orders", table => table.Key(order => order.Id));
             database.Table<InvalidOrderLine>("lines", table =>
@@ -120,7 +121,7 @@ public class CompiledSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Schema compiler: nondeterministic expressions are rejected")]
     public void Compile_WithNondeterministicExpression_ShouldRejectNamedFunction()
     {
-        ISqlSchema declaration = SqlSchema.Create("invalid-expression", database =>
+        SqlSchema declaration = SqlSchema.Create("invalid-expression", database =>
             database.Function("current_time", () => DateTime.Now));
 
         SqlSchemaValidationException exception = Should.Throw<SqlSchemaValidationException>(
@@ -148,7 +149,7 @@ public class CompiledSchemaTests
     [InlineData(EngineModel.Custom)]
     public void Compile_WithNonSqlModel_ShouldRejectModel(EngineModel model)
     {
-        ISqlSchema declaration = SqlSchema.Create("orders", _ => { });
+        SqlSchema declaration = SqlSchema.Create("orders", _ => { });
         SqlSchemaValidationException exception = Should.Throw<SqlSchemaValidationException>(
             () => SqlSchemaCompiler.Compile(declaration, model));
 
@@ -295,7 +296,7 @@ public class CompiledSchemaTests
         });
     }
 
-    private static void AddOrders(ISqlSchemaBuilder database)
+    private static void AddOrders(SqlSchemaBuilder database)
     {
         database.Table<Order>("orders", table =>
         {
@@ -305,7 +306,7 @@ public class CompiledSchemaTests
         });
     }
 
-    private static void AddLines(ISqlSchemaBuilder database)
+    private static void AddLines(SqlSchemaBuilder database)
     {
         database.Table<OrderLine>("order_lines", table =>
         {

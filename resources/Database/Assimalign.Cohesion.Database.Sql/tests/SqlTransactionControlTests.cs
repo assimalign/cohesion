@@ -31,7 +31,7 @@ public sealed class SqlTransactionControlTests
 
         await ExecuteAsync(writer, "COMMIT TRANSACTION");
         (await CountAsync(observer)).ShouldBe(4);
-        harness.Server.Context.Sessions.ShouldAllBe(s => s.DatabaseSession!.CurrentTransaction == null);
+        harness.Server.Sessions.ShouldAllBe(s => s.DatabaseSession!.CurrentTransaction == null);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public sealed class SqlTransactionControlTests
         var writer = await harness.DialAsync();
         await writer.HandshakeAsync();
         await ExecuteAsync(writer, "BEGIN");
-        var transaction = harness.Server.Context.Sessions
+        var transaction = harness.Server.Sessions
             .Where(s => s.DatabaseSession!.CurrentTransaction != null).ShouldHaveSingleItem()
             .DatabaseSession!.CurrentTransaction!;
         await ExecuteAsync(writer, "INSERT INTO users VALUES (3, 'lin')");
@@ -82,7 +82,7 @@ public sealed class SqlTransactionControlTests
         }
 
         await writer.DisposeAsync();
-        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Context.Sessions.Count == 1);
+        await ServerTestHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 1);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await CountAsync(observer)).ShouldBe(2);
         (await CountAsync(observer, "id = 3")).ShouldBe(0);
@@ -167,6 +167,49 @@ public sealed class SqlTransactionControlTests
         await ExecuteAsync(client, "INSERT INTO users VALUES (3, 'lin')");
         await ExecuteAsync(client, "COMMIT");
         (await CountAsync(client)).ShouldBe(3);
+    }
+
+    /// <summary>
+    /// Over the wire, a transaction the kernel ended under its caller (the served database was
+    /// dropped while the connection held it) refuses the connection's statements and its COMMIT with
+    /// <c>COHSQLT005</c> as execution failures, the COMMIT ends it, and the connection stays usable
+    /// (concrete-types plan §6.4, "Sql at P4"). Before the root bases the session dropped such a
+    /// transaction, so the statement ran in auto-commit against the dropped database and the COMMIT
+    /// answered <c>COHSQLT002</c>.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Wire transaction: one the kernel ended refuses work and COMMIT with COHSQLT005")]
+    public async Task ExecuteAsync_WireTransactionEndedByTheKernel_ShouldCarryCohsqlt005AndKeepConnectionUsable()
+    {
+        // Arrange
+        await using var harness = await ServerTestHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        await ExecuteAsync(client, "BEGIN");
+        await ExecuteAsync(client, "INSERT INTO users VALUES (3, 'lin')");
+        var session = harness.Server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull();
+        var transaction = session.CurrentTransaction.ShouldNotBeNull();
+        await harness.Engine.DropDatabaseAsync(ServerTestHarness.DatabaseName);
+
+        // Act
+        string statement = await ExpectExecutionFailureAsync(client, "SELECT COUNT(*) FROM users");
+        string commit = await ExpectExecutionFailureAsync(client, "COMMIT");
+        await client.SendAsync(ProtocolMessageType.Ping);
+
+        // Assert
+        await client.ExpectAsync(ProtocolMessageType.Pong);
+        statement.ShouldStartWith("COHSQLT005: The session's transaction is aborted; statements are refused until it is rolled back.", Case.Sensitive);
+        commit.ShouldStartWith("COHSQLT005: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        transaction.State.ShouldNotBe(TransactionState.Committed);
+        session.CurrentTransaction.ShouldBeNull();
+    }
+
+    private static async Task<string> ExpectExecutionFailureAsync(ProtocolTestClient client, string sql)
+    {
+        await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create(sql).Encode());
+        var frame = await client.ExpectAsync(ProtocolMessageType.Error);
+        var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
+        error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        return error.Message;
     }
 
     private static async Task ExecuteAsync(ProtocolTestClient client, string sql)

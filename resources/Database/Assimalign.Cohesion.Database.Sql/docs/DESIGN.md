@@ -62,7 +62,12 @@ for the exact supported forms and semantics.
 
 ## Compiled-schema provisioning
 
-`ISqlDatabase` implements the root `IDatabaseSchemaProvisioner` seam. Before a
+`SqlDatabase` provisions compiled schemas: it passes `supportsSchemaProvisioning: true` to
+the root `DatabaseInstance` and overrides `ApplySchemaCoreAsync`, behind the base's
+`ApplySchemaAsync` (which checks disposal, a null schema and the token first; the offline
+refusal, `COHSQLT004`, comes after them). Until phase 6 of the concrete-types plan it also lists
+the root `IDatabaseSchemaProvisioner`, implemented by that inherited member, because the hosting
+provisioner still finds a provisionable database by that type test. Before a
 schema is applied, the provisioner requires `EngineModel.Sql`, the same logical
 database name, and a shape the shipped SQL DDL surface can represent. It then
 reconstructs or reads the last canonical catalog state, uses
@@ -123,8 +128,8 @@ tables and ad-hoc indexes coexist with it and do not create false drift or becom
 implicit destructive migration targets. A desired name that collides with an
 ad-hoc object is rejected before applying any steps; adoption requires a future
 explicit policy. Table creation uses the catalog's reserve/build/publish lifecycle,
-including its ownership metadata, through the `public static` `SqlCatalog` bridges
-rather than any member of `ISqlCatalog`; ordinary `ISqlCatalog.CreateTableAsync`
+including its ownership metadata, through `SqlCatalog.ReserveTableAsync` and
+`SqlCatalog.PublishTableAsync`; ordinary `SqlCatalog.CreateTableAsync`
 stays ad-hoc. The catalog persists descriptions;
 the engine continues to authorize session operations against schema-owned objects.
 
@@ -156,8 +161,8 @@ planner limits on joins and subqueries also apply.
 Rows use the ordinary materialized result and wire codecs, so metadata is
 available over `SqlDatabaseServer` without a separate protocol operation.
 
-`SqlCatalog.CaptureSnapshot(ISqlCatalog)` returns the catalog-owned
-`ISqlCatalogSnapshot` contract, capturing tables and their index descriptions together under the
+`SqlCatalog.CaptureSnapshot()` returns the catalog-owned sealed
+`SqlCatalogSnapshot`, capturing tables and their index descriptions together under the
 catalog's existing metadata lock. The capture is read-only, carries no storage
 handle, and has no disposal lifetime. A snapshot transaction
 retains the capture taken at begin; auto-commit and `ReadCommitted` statements
@@ -426,7 +431,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   still loads, so that the gate below, not a decode error, refuses the database.
   `CreateDatabaseAsync` writes
   the format-6 marker as soon as the catalog opens, and first checks that the catalog is new
-  (no marker, no tables): `ISqlStorageStrategy.CreateStorage` must refuse
+  (no marker, no tables): `SqlStorageStrategy.CreateStorage` (internal) must refuse
   existing storage, and a strategy that reopened it instead would otherwise get
   an older catalog declared current. `OpenDatabaseAsync` refuses a database on
   any other version, older or newer, with a `DatabaseException` (the internal
@@ -465,7 +470,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   written by a newer engine, and format-5 engines refuse a format-6 one the same
   way (they would refuse its extension-3 table records first). **Behind the gate, the index manager checks the trees
   themselves (#1194).** `Database.Indexing` owns the B-tree page format and checks
-  every tree's root page when `SqlDatabaseInstance` attaches the catalog's
+  every tree's root page when `SqlDatabase` attaches the catalog's
   registrations, before recovery's scrub or checkpoint writes anything. A marker
   that does not describe its trees — a damaged root, or pages another engine build
   wrote — fails the open with `SqlDataStorageFormatException` ("uses data-storage
@@ -511,7 +516,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   physical ordinal (`PhysicalColumnCount`) up to its last live column, and a
   live column's component sits at `GetPhysicalOrdinal(i)`. DROP COLUMN removes the column from the live list
   and adds its physical ordinal to the dropped list, in one self-committed
-  catalog record (`DefaultSqlCatalog.DropColumnAsync`). The executor takes the
+  catalog record (`SqlCatalog.DropColumnAsync`). The executor takes the
   table's Exclusive lock, runs the constraint checks and calls the catalog
   (`SqlPlanExecutor.ExecuteDropColumnAsync`): no scan, no apply-gate hold and no
   data write, so the statement is O(1) in the table's size and no writer of any
@@ -687,15 +692,20 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   which is what the walks recurse through. The `FromSql` overload that takes
   `SqlQueryParserOptions` is public, so a typed caller parses with the engine's
   limit and accepts exactly what the text seam accepts; the overload without options
-  parses at the default 256. `ISqlDatabaseEngineBuilder.ExpressionNestingLimit` is an
-  ordinary member that every implementation supplies, the engine's own builder and
-  builders written outside the repository alike; it has no default implementation,
-  because the interface is meant to be implemented elsewhere and nothing has shipped
-  that predates it (owner decision of 2026-10-02). An implementation reports 256 until
-  the value is set and carries it to the engine it builds. A value outside 32..4096
-  fails in `Build()`, not in the setter, with the `ArgumentOutOfRangeException` that
-  `SqlDatabaseEngine.Create` and `SqlDatabaseEngineFactory.Create` throw, so a builder
-  that builds through `SqlDatabaseEngine.Create` needs no range check of its own. A
+  parses at the default 256. `SqlDatabaseEngineBuilder.ExpressionNestingLimit` is the
+  sealed builder's form of the option: it reports 256 until the value is set, and
+  `Build()` carries it to the engine it creates. A value outside 32..4096 fails in
+  `Build()`, not in the setter, with the `ArgumentOutOfRangeException` that
+  `SqlDatabaseEngine.Create` throws (`Build` creates its engine through the same
+  validation). **Reversed at phase 4 of the concrete-types plan:** the owner's ruling of
+  2026-10-02 kept the builder an interface "meant to be implemented elsewhere", which this
+  paragraph recorded, and its 2026-10-03 narrowing kept the limit an ordinary interface
+  member every implementation had to supply; decision D5 of 2026-10-04 made the builder sealed
+  with an internal constructor (`.claude/rules/database-area.md`), which supersedes both and
+  #1232. The test builder written outside the repository (`ExternalEngineBuilder`) went with
+  the interface, and its cases (the range refused in `Build`, both ends of it accepted, the
+  value carried to the engine) are retested against the sealed builder
+  (`SqlExpressionDepthExecutionTests`). A
   parse that runs out of stack (`SQL0007`) is not a syntax error: `FromSql` raises
   it as `COHSQLE004`, like any other walk out of stack. Text the engine generates
   rather than receives (persisted definitions, schema-migration statements) parses
@@ -978,8 +988,12 @@ The engine is a **data machine**: `Create(options)` returns it operational, with
 the five-worker inventory already pumping — one dedicated background thread per
 worker, spawned by the constructor and joined on dispose. Nothing outside the
 engine schedules, claims, or configures these loops (the 2026-07-13 redesign
-deleted the #902 claim handshake — see the root DESIGN.md); the root contract's
-`IDatabaseEngineWorker` view of them is observational (name, kind, cadence).
+deleted the #902 claim handshake — see the root DESIGN.md); the root base's
+`DatabaseEngine.Workers` view of them is observational (name, kind, cadence). Since phase 4 of
+the concrete-types plan the engine is a leaf of the root `DatabaseEngine`: its constructor
+attaches the five built-in workers through the base's `AttachWorker`, which starts each pump on a
+thread named for the worker, and the base stops the pumps and releases the workers on disposal
+(the checkpointer's lanes end in its release hook, `DisposeAsyncCore`).
 Each worker iterates a lock-free snapshot of every open storage file set (data +
 catalog per database, rebuilt when databases open/close; passes tolerate racing
 a drop):
@@ -1090,16 +1104,34 @@ per-pass record today, so this is an engine change with a ticket of its own, not
 A failure that took a database offline (a failed durable flush, #1243, a failed drain of the
 journal's append buffer, #1252, or a failed header slot write, #1268) is not the worker's: the
 workers skip that database and the engine lists it in `OfflineDatabases`. The engine's pump runs a
-worker again after the backoff if its loop ever ends early (only a worker that implements
-`IDatabaseEngineWorker` without the guided base can let that happen; the engine then reports
-`Faulted` until disposal). Before #1268 the pump caught outside the worker's loop, so one
+worker again after the backoff if its loop ever ends early (since phase 4 every worker the
+engine attaches derives from `DatabaseEngineWorker`, whose loop lets nothing but an
+`OutOfMemoryException` escape, so the frame is a backstop; before it, a worker that implemented
+`IDatabaseEngineWorker` alone could escape it, and the engine then reported `Faulted` until
+disposal). Before #1268 the pump caught outside the worker's loop, so one
 unexpected exception — a page write the checkpoint could not make, a deferred checkpoint's
 failure handed back by the coordinator — ended that worker for good, and the reproduction
 left the journal at 332,278 bytes ten seconds after the fault cleared.
 
 Cadence knobs live here, on `SqlDatabaseEngineOptions` — the engine owns the
 loop, so cadence is engine configuration; observers read it through
-`IDatabaseEngineWorker.Interval`.
+`DatabaseEngineWorker.Interval`.
+
+A database disposed outside the engine (directly, or through a session's
+`SqlDatabaseSession.Database`) stays registered until it is dropped (an open hands back the
+closed instance, whose use throws `ObjectDisposedException`), but every worker skips it: `SqlDatabaseEngine.IsOpen` is false for it
+(`SqlDatabase.IsClosed`), the flush, write-back and version-purge workers do not begin it, and
+the checkpointer never finds it due. Before phase 4 the open test read only the registration, so
+the version-purge worker failed on the closed database's disposed transaction manager every pass
+and the checkpointer on its disposed journal once it was due, and the engine stayed `Faulted` for
+good (the closed-database fault the Blob model's phase-4 review found; `SqlEngineContractTests`,
+`SqlDatabaseServerTests`). The checkpointer's skip covers a close that is not idle too: when the
+close keeps a writer in flight (a deferred undo it could not finish, #1226), the data journal
+stays untruncated and the closed storage refuses its checkpoint with
+`StorageTransactionException`, which the open test does not cover, so without the skip a
+checkpoint failure recorded for the database before the close would never end
+(`SqlWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`,
+the case the KeyValuePair, Graph and Documents suites carry).
 
 ## Storage operations (#1243, #1254, #1226)
 
@@ -1212,7 +1244,7 @@ themselves for an in-memory database: its journal up to the checkpoint size, bri
 that while the in-memory buffer doubles past it, released when the checkpoint truncates it. The
 defaults and their reasoning — PostgreSQL's 128 MB `shared_buffers`, 1 GB `max_wal_size` and
 5-minute `checkpoint_timeout` — are in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint
-triggers"). The same options are on `ISqlDatabaseEngineBuilder`. The configured capacity applies
+triggers"). The same options are on `SqlDatabaseEngineBuilder`. The configured capacity applies
 to databases created and reopened.
 
 The checkpoint worker visits the engine's databases in turn and never waits for a statement: when
@@ -1240,13 +1272,13 @@ before it, any failed pass slept the worker a second and held every database's r
 ## The SQL server runtime (`SqlDatabaseServer`)
 
 The SQL model ships its own wire-protocol server: `SqlDatabaseServer`, a sealed
-implementation of the area root's `IDatabaseServer` contract fronting exactly
+leaf of the area root's `DatabaseServer` base fronting exactly
 one `SqlDatabaseEngine` (`Create(engine, options)`, options in
 `SqlDatabaseServerOptions`). Servers are per-model by design: this type is
 where SQL-specific wire behavior grows (typed relational payloads, SQL
 transaction frames) as the protocol's model-specific surface lands; today
-execution rides the model-agnostic text-execute seam on the root's
-`IDatabaseSession`. "Running" lives here — the engine underneath has no
+execution rides the model-agnostic text-execute seam of the root's
+`DatabaseSession`. "Running" lives here — the engine underneath has no
 lifecycle; the server starts and stops around it.
 
 ### Why the machinery is Sql-internal — per-model duplication (2026-07-14, owner decision; the settled placement)
@@ -1273,8 +1305,10 @@ shared code**. The copies are allowed to be textually near-identical today —
 divergence over time is sanctioned, and no linked-source or shared-internals
 mechanism may be used to fake the independence. The prediction-vs-evidence
 table from the extraction is preserved in the area `DESIGN.md` §3.10. The root
-contracts (`IDatabaseServer`/`IDatabaseServerContext`/`IDatabaseServerSession`)
-remain the **only area-wide requirement** — every model implements them its own
+bases (`DatabaseServer`/`DatabaseServerSession`, which every model's server derives from since
+phase 4 of the concrete-types plan; the `IDatabaseServer`, `IDatabaseServerContext` and
+`IDatabaseServerSession` contracts they still implement go at its phase 6) remain the **only
+area-wide requirement** — every model derives from them its own
 way against `Connections` and the `Database.Protocol` child root (via the
 root's rollup).
 
@@ -1301,8 +1335,8 @@ dispose), and the server never disposes its engine.
 The server receives statement *text* and tuple-codec parameter bytes off the
 wire; the bridge to the engine is the **text-execute seam on the root
 contract** —
-`IDatabaseSession.ExecuteAsync(string, IReadOnlyDictionary<string, object?>?, CancellationToken)`
-— which `SqlDatabaseSession` implements with the model's own parser
+`DatabaseSession.ExecuteAsync(string, IReadOnlyDictionary<string, object?>?, CancellationToken)`
+— whose core `SqlDatabaseSession` implements with the model's own parser
 (`SqlQueryRequest.FromSql`). Parameters decode with `DatabaseValueCodec`
 (`Database.Types`), one self-describing component per parameter; result rows
 encode the same way, one component per column, so both directions ride the one
@@ -1387,7 +1421,7 @@ misuse (no listener, non-positive session limit, null engine) throws argument
 exceptions at creation.
 
 Server non-goals: no host-service adapter (`Database.Hosting` wraps
-`IDatabaseServer` generically through the root seam); no connection-level
+`DatabaseServer` generically through the root seam); no connection-level
 replication endpoints; no special transaction frames (SQL transaction commands
 use the existing `Execute` payload); no
 TLS/transport policy — transport configuration stays in `libraries/Connections`
@@ -1411,16 +1445,18 @@ journal's append buffer that carries it, at the rollback or at a later drain suc
 next commit's, which also takes the database offline (`Database.Storage` DESIGN.md,
 "The append buffer").
 
-The session owns `Stack<SqlTransactionScope>`, with zero entries outside a
-transaction and exactly one root entry in B2. Each scope carries its transaction
-and the existing `Database.Transactions.IsolationLevel` value. The session's
-default isolation value is `Snapshot`; begin and auto-commit pass that value to
-the coordinator instead of embedding a level at each call site. B7 anticipates
-`SAVEPOINT name`, `ROLLBACK TO [SAVEPOINT] name`, `RELEASE [SAVEPOINT] name`, and
-`SET TRANSACTION ISOLATION LEVEL ...`: named scopes and undo markers can extend
-the stack, while isolation syntax sets the carried value. B2 implements none of
-that syntax or savepoint undo machinery. `Serializable` remains rejected by the
-existing C# seam until the coordinator supports serialization detection.
+The session's transaction is the root `DatabaseSession`'s (concrete-types plan §6.4, phase 4):
+the base registers the `SqlDatabaseTransaction` the session's BEGIN core creates and reports it
+as `CurrentTransaction` until the caller ends it, so one transaction at a time is open on a
+session. The transaction carries its MVCC context and, under `Snapshot`, the catalog capture
+its system-view statements read (taken at BEGIN). The session's default isolation value is
+`Snapshot`; BEGIN and auto-commit pass that value to the coordinator instead of embedding a
+level at each call site. Before phase 4 the session kept a `Stack<SqlTransactionScope>` with
+one root entry; B7 anticipates `SAVEPOINT name`, `ROLLBACK TO [SAVEPOINT] name`,
+`RELEASE [SAVEPOINT] name`, and `SET TRANSACTION ISOLATION LEVEL ...`, and will add named
+scopes and undo markers inside the one transaction, while isolation syntax sets the carried
+value. B2 implements none of that syntax or savepoint undo machinery. `Serializable` remains
+rejected by the existing C# seam until the coordinator supports serialization detection.
 
 The session lifecycle below applies equally to SQL requests and C# transactions.
 
@@ -1431,6 +1467,8 @@ stateDiagram-v2
     Open --> Open: query or DML
     Open --> Idle: COMMIT or ROLLBACK
     Open --> Closed: disconnect rolls back
+    Open --> Faulted: the kernel ends it under the caller
+    Faulted --> Idle: ROLLBACK, or COMMIT failing with COHSQLT005
     Idle --> Closed: disconnect
 ```
 
@@ -1453,6 +1491,36 @@ database is reopened ("Storage operations", above). Unlike the three state codes
 exception, not a diagnostic, and the wire maps it to `Unavailable`. A DDL statement that was
 running when the database went offline is reported as `DatabaseTransactionCommitUnconfirmedException`
 led by `COHSQLT004` instead, because part or all of it may survive the reopen.
+
+### The transaction's end state machine (concrete-types plan, phase 4)
+
+`SqlDatabaseTransaction` and `SqlDatabaseSession` are sealed leaves of the root
+`DatabaseTransaction` and `DatabaseSession`, which own the end state machine every model shares
+(#1188, #1225, #1226): commit, rollback, disposal and the session's teardown pass one end gate
+and never race into the kernel; a transaction that did not commit accepts any number of
+rollbacks; a token is observed only before a commit or rollback starts (the commit's token no
+longer reaches the coordinator); and a commit while a statement of the transaction still runs
+is refused ("An operation of the transaction is still running; commit after it completes.")
+and leaves it active. A statement is admitted into the transaction through the base's
+operation admission, so a statement refused by a transaction that is ending or ended says why.
+
+A statement stays statement-atomic: a failed statement (a constraint violation, an evaluation
+fault, a deadlock victim) writes nothing and leaves the transaction active, the owner's
+2026-10-04 per-statement decision, so SQL never calls the base's abort. A transaction the
+kernel ended under its caller (its database was dropped or closed while the session held it)
+reports `Faulted`, stays the session's transaction, and refuses statements, BEGIN (typed or as
+text) and COMMIT with `COHSQLT005` until the caller rolls it back:
+"COHSQLT005: The session's transaction is aborted; statements are refused until it is rolled
+back." and, for a commit, "COHSQLT005: The session's transaction is aborted and cannot commit;
+nothing was committed.", each followed by " Cause: …" when there is one. `COHSQLT005` is the
+transaction-state family's next code (T001 to T003 are diagnostics, T004 the offline refusal);
+like `COHSQLT004` it is an exception, not a diagnostic, but a plain `DatabaseException`, so the
+wire maps it to `ExecutionFailure` (`COHSQLT004`'s `DatabaseOfflineException` maps to
+`Unavailable`). Closing the session ends its open transaction as the session's teardown and
+records the cause "The session closed before the transaction ended.", which a later commit
+names. Before phase 4 the session dropped a transaction whose kernel state left `Active`, so a
+statement after it ran in auto-commit, and a commit of an ended transaction said "Cannot commit
+transaction in state '…'".
 
 ## Integrity constraints
 
@@ -1757,7 +1825,7 @@ and add it again" as the only remedy.
   opened on a thread with a larger stack, while inside a statement (a DDL
   re-parsing canonical text, or a table version bound on first use) the session
   fails the statement with `COHSQLE004` like any other walk out of stack.
-- **When binding happens.** `SqlDatabaseInstance` binds every table right after
+- **When binding happens.** `SqlDatabase` binds every table right after
   the catalog opens and the format checks pass, before recovery or the index
   manager touch the data file set. Each DDL binds the version it publishes before
   the statement returns — CREATE TABLE before publishing it, ADD CONSTRAINT and
@@ -1798,26 +1866,31 @@ and add it again" as the only remedy.
 
 ## Application composition (Phase 29)
 
-`AddSql(Action<IDatabaseApplicationContext, ISqlDatabaseEngineBuilder>)` is an
+`AddSql(Action<IDatabaseApplicationContext, SqlDatabaseEngineBuilder>)` is an
 `extension(IDatabaseApplicationBuilder)` member in this model package. It captures
 one factory and returns the application builder. Application Build invokes the
 callback with the build-time root context and a model builder; no model registration
 uses DI, configuration binding, Hosting, or a container. The model builder exposes
-all SQL options, including `FileSystemPath? RootPath`, and permanently freezes them
+the SQL options, including `FileSystemPath? RootPath`, and permanently freezes them
 when its one Build attempt begins. Direct `SqlDatabaseEngine.Create(options)` stays
 supported for standalone use.
 
-Workers and servers are nested deferred factories on `IDatabaseEngineBuilder`.
-Build creates the operational engine first, executes worker factories against it,
-then server factories. Workers are pumped on engine-owned threads through
-`IDatabaseEngineWorker.Run`; this genuinely model-agnostic registration/execution
-is why the base builder interface earns its place. No strongly typed factory
-overloads are added: a model server factory can cast its supplied engine once;
-duplicate delegate overloads would introduce lambda ambiguity without adding a
-construction capability. The former `AddSqlDatabase` and sibling application
-`AddSqlServer` verbs are replaced by `AddSql` with nested `AddServer`.
+Workers and servers are nested deferred factories on the sealed builder, typed over
+the SQL engine: `AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker>)` and
+`AddServer(Func<SqlDatabaseEngine, DatabaseServer>)`, so a server factory needs no cast
+(`SqlDatabaseServer.Create(engine, options)`). Build creates the operational engine
+first (`SqlDatabaseEngine.CreateUncomposed`, which leaves its composition open), then
+composes through the engine's internal `Compose`: each worker factory runs when its
+product is requested and attaches through the root base's `AttachWorker`, which starts
+its pump on a thread named for it, then each server factory the same way, and the
+engine's composition is frozen. The base refuses a worker whose name another worker of
+the engine has, a product attached twice and a server that fronts another engine; the
+shared builder state refuses a null product and disposes what a failed build leaves
+unowned (`DatabaseEngineBuilderState`, plan §6.5). The former `AddSqlDatabase` and
+sibling application `AddSqlServer` verbs are replaced by `AddSql` with nested
+`AddServer`.
 
-`IDatabaseEngine.Servers` exposes the resulting read-only server collection.
+`SqlDatabaseEngine.Servers` exposes the resulting read-only server collection.
 Application Build snapshots it for start/stop only. The engine owns these factory
 products and disposes servers in reverse order before quiescing workers and closing
 databases. Application-owned factory engines transfer ownership at successful Build;
@@ -1826,14 +1899,16 @@ up accepted products, rejected products, and the engine; independent cleanup fai
 are aggregated. Async cleanup reached through synchronous Build/Dispose runs without
 the caller's synchronization context. Database name operations now accept
 `DatabaseName`, including SQL's collation-specific creation overload.
-No production hosting code currently consumes `IDatabaseEngineBuilder` generically.
-Its shared contract is retained for model-independent `AddWorker` composition;
-model-specific options stay on each derived builder interface.
 
-`SqlDatabaseEngine.CreateBuilder()` returns `ISqlDatabaseEngineBuilder`.
-This interface-first entry enables standalone nested composition and lets the concrete
-hosting-aware engine factory configure the same builder from its final configuration
-and services. The model still sees no DI or configuration contract.
+`SqlDatabaseEngine.CreateBuilder()` returns the sealed `SqlDatabaseEngineBuilder`,
+whose constructor is internal. **Reversed at phase 4 of the concrete-types plan:** this
+paragraph used to call the builder an "interface-first entry" (`ISqlDatabaseEngineBuilder`
+over the root `IDatabaseEngineBuilder`), kept so a hosting-aware factory or a builder
+written outside the repository could configure an engine through the interface. No
+production code consumed `IDatabaseEngineBuilder`, and the owner's 2026-10-04 decision (D5)
+made every model builder sealed, which supersedes the 2026-10-02 ruling, its 2026-10-03
+narrowing and #1232. A hosting-aware factory configures the same sealed builder through
+`AddSql`; the model still sees no DI or configuration contract.
 
 ## Error model
 
@@ -1927,7 +2002,7 @@ integration", "Secondary indexes", and the access-path bullets above.)
 Each session captures one database instance and its catalog/executor. Table
 qualification selects a schema inside that catalog; it cannot select another
 database or a server object. Database creation, enumeration, and deletion belong
-to the host-owned `IDatabaseEngine`, not to SQL session execution.
+to the host-owned `DatabaseEngine`, not to SQL session execution.
 
 `SqlDatabaseScopeTests` guards this boundary using two databases with the same
 table name and different values. Text and typed requests cannot read or mutate
@@ -2008,3 +2083,77 @@ equality for both types, they are range-sargable and join-seekable. The rule
 changed the on-disk key format to data-storage format 4, and a format-3
 database is refused at open rather than rebuilt (format rule above; upgrades
 are #1152); the dialect contract is DIALECT.md "Temporal value identity".
+
+## Concrete types (concrete-types plan, phase 4, #1260)
+
+The model is the last of the five to adopt the root bases
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7). Its public types are
+sealed leaves; it has no public interface left, and no `Abstractions/` folder.
+
+| Type | Base | Was |
+|---|---|---|
+| `SqlDatabaseEngine` | `DatabaseEngine` | a sealed `IDatabaseEngine` |
+| `SqlDatabase` | `DatabaseInstance` (and `IDatabaseSchemaProvisioner` until phase 6) | `ISqlDatabase` and the internal `SqlDatabaseInstance` |
+| `SqlDatabaseSession` | `DatabaseSession` | an internal `IDatabaseSession` |
+| `SqlDatabaseTransaction` | `DatabaseTransaction` | an internal `IDatabaseTransaction` |
+| `SqlDatabaseServer` | `DatabaseServer` | a sealed `IDatabaseServer` |
+| `SqlDatabaseServerSession` (internal) | `DatabaseServerSession` | an internal `IDatabaseServerSession` |
+| `SqlDatabaseEngineBuilder` | none | `ISqlDatabaseEngineBuilder` and its internal implementation |
+| `SqlAggregateExpression` | none | `ISqlAggregateExpression` over an internal positional record |
+| `SqlStorageStrategy` (internal abstract) | none | `ISqlStorageStrategy` |
+
+`SqlDatabaseEngineFactory`, a static class that forwarded to `SqlDatabaseEngine.Create`, is
+deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStrategy` is
+`internal sealed`, since a public class cannot derive from the internal strategy base.
+
+- **Typed surface without casts.** The engine re-exposes `CreateDatabaseAsync`,
+  `OpenDatabaseAsync` and `GetDatabasesAsync` typed (`SqlDatabase`) with `new` members over the
+  base's public members, and the collation overload of `CreateDatabaseAsync` makes the base's
+  checks itself (the name, a null collation, disposal, the token); a database re-exposes its
+  `Engine` and `CreateSessionAsync` (`SqlDatabaseSession`); a session its `Database`,
+  `CurrentTransaction` and both `BeginTransactionAsync` overloads (`SqlDatabaseTransaction`);
+  the server its `Engine`; the server session overrides `DatabaseSession` covariantly. Each
+  `new` member awaits or reads the base's public member and casts once, so the base's checks
+  always run. `TryGetDatabase(DatabaseName, out SqlDatabase)` is a typed overload of the base's
+  lookup: an `out var` binds it, an explicitly typed `out DatabaseInstance` binds the base's.
+- **What the bases own now.** The engine base owns the name, the model, the workers' pumps,
+  the state fold, composition and the disposal order (servers, the pumps and the workers, then
+  the databases); the database base owns the disposed flag and the schema-provisioning
+  capability; the session base owns the session state, the session's transaction and the
+  "already active" check; the transaction base owns the whole end state machine; the server
+  base owns the lifecycle. The model supplies its vocabulary: `COHSQLT004` and `COHSQLT005`,
+  the kernel calls and the translation of the kernel's exceptions. It keeps its per-statement
+  rule: a failed statement never aborts the transaction, and statements do not take the
+  session's operation hold.
+- **What changed for a caller** (plan §6.4, asserted in `SqlTransactionContractTests`,
+  `SqlEngineContractTests` and `SqlEngineCompositionTests`): BEGIN on an active session fails
+  with "A transaction or operation is already active on this session." (was "A transaction is
+  already active on this session."), before the Serializable and offline refusals; a transaction
+  the kernel ended under its caller stays the session's transaction, reports `Faulted`, and
+  refuses statements, BEGIN and COMMIT with `COHSQLT005` until it is rolled back (the session
+  used to drop it, so a statement after it ran in auto-commit, and its commit failed with
+  "Cannot commit transaction in state …"); a canceled token is refused by `CreateSessionAsync`,
+  BEGIN, both execute seams and `ApplySchemaAsync` before the offline refusal (`COHSQLT004`),
+  which was reported first; a commit or rollback with a canceled token never starts, and a
+  started commit takes no token; a rollback is repeatable, a rollback after a commit fails with
+  "The transaction is Committed; a committed transaction cannot roll back." and a commit of an
+  ended transaction with "The transaction is {state}." (both were "Cannot … in state …"); a
+  commit while a statement of the transaction runs fails with "An operation of the transaction
+  is still running; commit after it completes." and leaves it active; closing the session ends
+  its transaction with the cause "The session closed before the transaction ended.", which a
+  later commit names in `COHSQLT005`; a closed session fails with "The session is closed." (was
+  "Session is not open. Current state: Closed."); a session that fails to close reports one
+  `AggregateException` ("The session failed to close.", which no SQL path can provoke and the
+  root suite pins); and the engine's disposal aggregate is
+  "One or more components of engine '{name}' failed to close." (was "Engine disposal encountered
+  failures."), with two or more databases that fail to close nested in one "One or more SQL
+  databases failed to close.". The engine's guards check the name, then disposal, then the token
+  (disposal used to come first, `TryGetDatabase` did not check the name, and open and drop
+  observed no token), `GetDatabasesAsync` checks disposal when it is called, and a blank
+  `EngineName` is refused by `Create` and `Build`. A worker's blank name is refused by its own
+  constructor inside its factory ("A worker must have a diagnostic name." is gone), and the
+  engine releases every worker last attached first (it used to dispose the checkpointer, then
+  its factory workers).
+- **A database closed outside the engine** stays registered until it is dropped, refuses its use
+  with `ObjectDisposedException`, and is skipped by every worker, so the engine stays `Running`
+  ("Engine-owned background workers", above).

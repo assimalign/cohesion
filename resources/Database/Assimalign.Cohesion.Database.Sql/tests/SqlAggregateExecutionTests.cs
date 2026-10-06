@@ -329,7 +329,7 @@ public sealed class SqlAggregateExecutionTests
             (await SnapshotAsync(session)).ShouldBe(before, $"withRows: {withRows}");
         }
 
-        static async Task<string[]> SnapshotAsync(IDatabaseSession session)
+        static async Task<string[]> SnapshotAsync(SqlDatabaseSession session)
             => (await RowsAsync(session, "SELECT id, category, region, amount FROM metrics ORDER BY id;"))
                 .Select(row => string.Join(",", row)).ToArray();
     }
@@ -515,7 +515,7 @@ public sealed class SqlAggregateExecutionTests
     {
         // Arrange
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("aggregate");
+        var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, CreateMetrics);
         await ExecuteAsync(session, "CREATE TABLE categories (name TEXT, label TEXT);");
@@ -625,16 +625,16 @@ public sealed class SqlAggregateExecutionTests
     private static SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "aggregate-tests" });
 
-    private static async Task SeedAsync(IDatabaseSession session)
+    private static async Task SeedAsync(SqlDatabaseSession session)
     {
         (await ExecuteAsync(session, CreateMetrics)).Status.ShouldBe(QueryResultStatus.Success);
         (await ExecuteAsync(session, InsertMetrics)).AffectedCount.ShouldBe(9);
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(statement, parameters, CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         await using var result = (await ExecuteAsync(session, statement, parameters)).ShouldBeAssignableTo<QueryResultSet>();
         return await ReadRowsAsync(result);

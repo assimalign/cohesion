@@ -52,7 +52,7 @@ public sealed class SqlStorageOperationsTests
             options.MaintenanceInterval = TimeSpan.FromHours(1);
         });
         const string name = ServerTestHarness.DatabaseName;
-        var database = (SqlDatabaseInstance)await harness.Engine.OpenDatabaseAsync(name);
+        var database = await harness.Engine.OpenDatabaseAsync(name);
         await using var wire = await harness.DialAsync();
         await wire.HandshakeAsync();
         var session = await database.CreateSessionAsync();
@@ -111,7 +111,7 @@ public sealed class SqlStorageOperationsTests
         var dataBeforeTheReopen = strategy.Capture(name);
         var catalogBeforeTheReopen = strategy.Capture(name + SqlDatabaseEngine.CatalogSuffix);
 
-        var reopened = (SqlDatabaseInstance)await harness.Engine.OpenDatabaseAsync(name);
+        var reopened = await harness.Engine.OpenDatabaseAsync(name);
         await using var observer = await reopened.CreateSessionAsync();
         var ids = await Ids(observer);
 
@@ -164,8 +164,8 @@ public sealed class SqlStorageOperationsTests
         const string control = "control";
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
         await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(name);
-        var controlDatabase = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(control);
+        var database = await engine.CreateDatabaseAsync(name);
+        var controlDatabase = await engine.CreateDatabaseAsync(control);
         await using var session = await database.CreateSessionAsync();
         await using var controlSession = await controlDatabase.CreateSessionAsync();
         foreach (var target in new[] { session, controlSession })
@@ -218,7 +218,7 @@ public sealed class SqlStorageOperationsTests
         const string name = "catalog-fails";
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
         await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        var database = await engine.CreateDatabaseAsync(name);
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT)");
@@ -351,8 +351,8 @@ public sealed class SqlStorageOperationsTests
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
-        var busy = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("busy");
-        var written = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("written");
+        var busy = await engine.CreateDatabaseAsync("busy");
+        var written = await engine.CreateDatabaseAsync("written");
         await using (var setup = await written.CreateSessionAsync())
         {
             await setup.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, payload VARCHAR(6000))");
@@ -440,7 +440,7 @@ public sealed class SqlStorageOperationsTests
             CheckpointInterval = TimeSpan.FromHours(1),
             PageWriteBackInterval = TimeSpan.FromHours(1),
         });
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("undo-fault");
+        var database = await engine.CreateDatabaseAsync("undo-fault");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
@@ -476,7 +476,7 @@ public sealed class SqlStorageOperationsTests
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions());
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("pool");
+        var database = await engine.CreateDatabaseAsync("pool");
 
         // Act & Assert
         new SqlDatabaseEngineOptions().BufferPoolCapacity.ShouldBe(32L * 1024 * 1024);
@@ -493,13 +493,13 @@ public sealed class SqlStorageOperationsTests
         var strategy = new FaultInjectingJournalSqlStorageStrategy();
         var options = new SqlDatabaseEngineOptions { StorageStrategy = strategy, BufferPoolCapacity = 2 * 1024 * 1024 };
         var engine = SqlDatabaseEngine.Create(options);
-        var created = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("sized");
+        var created = await engine.CreateDatabaseAsync("sized");
         int createdPages = created.DataStorage.BufferPoolCapacity;
         await engine.DisposeAsync();
 
         // Act
         await using var reopenedEngine = SqlDatabaseEngine.Create(options);
-        var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("sized");
+        var reopened = await reopenedEngine.OpenDatabaseAsync("sized");
 
         // Assert
         createdPages.ShouldBe(256);
@@ -517,8 +517,8 @@ public sealed class SqlStorageOperationsTests
         builder.CheckpointJournalSize = 8 * 1024 * 1024;
 
         // Act
-        await using var engine = (SqlDatabaseEngine)builder.Build();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("built");
+        await using var engine = builder.Build();
+        var database = await engine.CreateDatabaseAsync("built");
 
         // Assert
         defaultPool.ShouldBe(32L * 1024 * 1024);
@@ -577,7 +577,7 @@ public sealed class SqlStorageOperationsTests
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("bounded");
+        var database = await engine.CreateDatabaseAsync("bounded");
         await using (var setup = await database.CreateSessionAsync())
         {
             await setup.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, payload VARCHAR(6000))");
@@ -629,7 +629,7 @@ public sealed class SqlStorageOperationsTests
             MaintenanceInterval = maintenance,
         };
         await using var engine = SqlDatabaseEngine.Create(options);
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("undo-retry");
+        var database = await engine.CreateDatabaseAsync("undo-retry");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
@@ -693,7 +693,7 @@ public sealed class SqlStorageOperationsTests
         return true;
     }
 
-    private static async Task<long> Scalar(IDatabaseSession session, string query)
+    private static async Task<long> Scalar(SqlDatabaseSession session, string query)
     {
         var result = await session.ExecuteAsync(query);
         var set = result.ShouldBeAssignableTo<QueryResultSet>().ShouldNotBeNull();
@@ -708,7 +708,7 @@ public sealed class SqlStorageOperationsTests
         throw new InvalidOperationException($"'{query}' returned no row.");
     }
 
-    private static async Task<List<long>> Ids(IDatabaseSession session)
+    private static async Task<List<long>> Ids(SqlDatabaseSession session)
     {
         var ids = new List<long>();
         var result = await session.ExecuteAsync("SELECT id FROM users ORDER BY id");

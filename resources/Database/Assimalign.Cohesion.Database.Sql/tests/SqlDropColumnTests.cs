@@ -98,7 +98,7 @@ public sealed class SqlDropColumnTests : IDisposable
             });
             var database = await reopened.OpenDatabaseAsync("crash-db");
             await using var session = await database.CreateSessionAsync();
-            ((SqlDatabaseInstance)database).Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+            database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
             bool dropped = table.FindColumn("b") is null;
 
             var found = await CheckTableAsync(session, "t", model, seeks: true);
@@ -273,7 +273,7 @@ public sealed class SqlDropColumnTests : IDisposable
                 : $"INSERT INTO t (id, grp, score, note, code) VALUES ({id}, {row.Grp}, {row.Score}, 'late-{id}', '{row.Code}')");
         }
 
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         ulong objectId = ObjectIdOf(instance, "t");
         instance.DataStorage.GetOwnerPages(objectId).Count.ShouldBeGreaterThanOrEqualTo(4);
         var before = StoredVersions(instance, objectId);
@@ -305,7 +305,7 @@ public sealed class SqlDropColumnTests : IDisposable
 
         // Assert: the dropped layout and every index survive reopen.
         await using var reopenedEngine = SqlDatabaseEngine.Create(options);
-        var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("pages-db");
+        var reopened = await reopenedEngine.OpenDatabaseAsync("pages-db");
         reopened.Catalog.TryGetTable("dbo", "t", out var persisted).ShouldBeTrue();
         persisted.DroppedColumnOrdinals.ShouldBe([3]);
         await using var session = await reopened.CreateSessionAsync();
@@ -327,7 +327,7 @@ public sealed class SqlDropColumnTests : IDisposable
         await ExecuteAsync(session, "CREATE INDEX ix_code ON t (code)");
         await ExecuteAsync(session, "INSERT INTO t (note, id, code) VALUES ('n1', 1, 'c1'), ('n2', 2, 'c2'), ('n3', 3, 'c3')");
 
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         ulong objectId = ObjectIdOf(instance, "t");
         var (location, intact) = StoredVersions(instance, objectId).OrderBy(pair => pair.Key).Last();
         byte[] malformed = intact.Bytes.ToArray();
@@ -401,7 +401,7 @@ public sealed class SqlDropColumnTests : IDisposable
 
             // Assert
             await AssertReAddedAsync(session, expected, "after three cycles");
-            ((SqlDatabaseInstance)database).Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+            database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
             table.Columns.Select(column => column.Name).ShouldBe(["id", "label", "tail", "extra"]);
             table.DroppedColumnOrdinals.ShouldBe([1, 4]);
             table.PhysicalColumnCount.ShouldBe(6);
@@ -434,7 +434,7 @@ public sealed class SqlDropColumnTests : IDisposable
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "drop-column-row-size" });
         var database = await engine.CreateDatabaseAsync("row-size-db");
         await using var session = await database.CreateSessionAsync();
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         string big = new('x', 8000);
         await ExecuteAsync(session, "CREATE TABLE t (id INT NOT NULL PRIMARY KEY, big VARCHAR(8000))");
         await ExecuteAsync(session, $"INSERT INTO t VALUES (1, '{big}')");
@@ -535,7 +535,7 @@ public sealed class SqlDropColumnTests : IDisposable
         await ExecuteAsync(session, "CREATE TABLE solo (sole INT)");
         await ExecuteAsync(session, "INSERT INTO solo (sole) VALUES (1)");
 
-        var instance = (SqlDatabaseInstance)database;
+        var instance = database;
         instance.Catalog.TryGetTable("dbo", tableName, out var target).ShouldBeTrue();
         var before = StoredVersions(instance, target.ObjectId);
 
@@ -613,7 +613,7 @@ public sealed class SqlDropColumnTests : IDisposable
     /// d, and a CHECK across a and c, so b is the droppable column between constrained
     /// neighbours and e the droppable last one.
     /// </summary>
-    private static async Task CreateModelTableAsync(IDatabaseSession session, string table, Dictionary<int, ModelRow> model, int rows)
+    private static async Task CreateModelTableAsync(SqlDatabaseSession session, string table, Dictionary<int, ModelRow> model, int rows)
     {
         await ExecuteAsync(session,
             $"CREATE TABLE {table} (id INT NOT NULL PRIMARY KEY, a INT NOT NULL, b VARCHAR(40), c INT NOT NULL, d VARCHAR(20) NOT NULL, e BIGINT, " +
@@ -680,7 +680,7 @@ public sealed class SqlDropColumnTests : IDisposable
     /// Checks a model table completely: the scan, then (optionally) every index and the
     /// primary key sought for every seventh model row, each against the model.
     /// </summary>
-    private static async Task<List<string>> CheckTableAsync(IDatabaseSession session, string table, Dictionary<int, ModelRow> model, bool seeks)
+    private static async Task<List<string>> CheckTableAsync(SqlDatabaseSession session, string table, Dictionary<int, ModelRow> model, bool seeks)
     {
         var mismatches = new List<string>();
         var (columns, rows) = await RowsAsync(session, $"SELECT * FROM {table}");
@@ -738,7 +738,7 @@ public sealed class SqlDropColumnTests : IDisposable
     /// The model table's constraints on the neighbours of the dropped column, and the
     /// child's foreign key and CHECK, still refuse what they refused.
     /// </summary>
-    private static async Task AssertNeighbourConstraintsAsync(IDatabaseSession session, Dictionary<int, ModelRow> model)
+    private static async Task AssertNeighbourConstraintsAsync(SqlDatabaseSession session, Dictionary<int, ModelRow> model)
     {
         var first = model[1];
         (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
@@ -765,7 +765,7 @@ public sealed class SqlDropColumnTests : IDisposable
     }
 
     /// <summary>The re-added table reads exactly the expected generation of every column, by scan and by seek.</summary>
-    private static async Task AssertReAddedAsync(IDatabaseSession session, Dictionary<int, (string Label, object? Extra, string Tail)> expected, string when)
+    private static async Task AssertReAddedAsync(SqlDatabaseSession session, Dictionary<int, (string Label, object? Extra, string Tail)> expected, string when)
     {
         var (columns, rows) = await RowsAsync(session, "SELECT * FROM t ORDER BY id");
         columns.ShouldBe(["id", "label", "tail", "extra"], when);
@@ -792,7 +792,7 @@ public sealed class SqlDropColumnTests : IDisposable
     /// version ever carried: each seek must return exactly the ids the scan holds for the key,
     /// through that index.
     /// </summary>
-    private static async Task AssertPagedConsistentAsync(SqlDatabaseInstance database, IDatabaseSession session,
+    private static async Task AssertPagedConsistentAsync(SqlDatabase database, SqlDatabaseSession session,
         Dictionary<long, PagedRow> expected, List<PagedRow> probe, string when)
     {
         var (_, scanned) = await RowsAsync(session, "SELECT id, grp, score, code, pad FROM t");
@@ -830,7 +830,7 @@ public sealed class SqlDropColumnTests : IDisposable
     }
 
     /// <summary>UNIQUE holds for live keys on the primary key and the unique index, through INSERT and UPDATE.</summary>
-    private static async Task AssertUniqueEnforcedAsync(IDatabaseSession session, Dictionary<long, PagedRow> model)
+    private static async Task AssertUniqueEnforcedAsync(SqlDatabaseSession session, Dictionary<long, PagedRow> model)
     {
         var live = model.Values.Where(row => row.Id < 360).OrderBy(row => row.Id).ToList();
         var first = live[0];
@@ -864,7 +864,7 @@ public sealed class SqlDropColumnTests : IDisposable
     };
 
     /// <summary>Every version stored in a table's record chain, by location.</summary>
-    private static Dictionary<(PageId PageId, int SlotIndex), StoredVersion> StoredVersions(SqlDatabaseInstance instance, ulong objectId)
+    private static Dictionary<(PageId PageId, int SlotIndex), StoredVersion> StoredVersions(SqlDatabase instance, ulong objectId)
     {
         var versions = new Dictionary<(PageId PageId, int SlotIndex), StoredVersion>();
         using var iterator = instance.DataStorage.GetUnitIterator(objectId);
@@ -912,14 +912,14 @@ public sealed class SqlDropColumnTests : IDisposable
         }
     }
 
-    private static ulong ObjectIdOf(SqlDatabaseInstance instance, string table)
+    private static ulong ObjectIdOf(SqlDatabase instance, string table)
     {
         instance.Catalog.TryGetTable("dbo", table, out var definition).ShouldBeTrue();
         return definition.ObjectId;
     }
 
-    private static string AccessPathOf(IDatabaseSession session)
-        => ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull().AccessPath;
+    private static string AccessPathOf(SqlDatabaseSession session)
+        => session.LastStatementMetrics.ShouldNotBeNull().AccessPath;
 
     private static string Format(object? value) => value switch
     {
@@ -928,13 +928,13 @@ public sealed class SqlDropColumnTests : IDisposable
         _ => $"{Convert.ToString(value, CultureInfo.InvariantCulture)} ({value.GetType().Name})",
     };
 
-    private static async Task ExecuteAsync(IDatabaseSession session, string sql)
+    private static async Task ExecuteAsync(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
         result.Status.ShouldBe(QueryResultStatus.Success, sql.Length > 120 ? sql[..120] : sql);
     }
 
-    private static async Task<(IReadOnlyList<string> Columns, List<object?[]> Rows)> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<(IReadOnlyList<string> Columns, List<object?[]> Rows)> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>()!;
         var columns = result.Columns.Select(column => column.Name).ToArray();

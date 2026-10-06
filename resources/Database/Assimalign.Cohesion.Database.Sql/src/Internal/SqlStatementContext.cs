@@ -19,7 +19,7 @@ internal readonly struct SqlStatementContext
         TransactionCoordinator coordinator,
         string? provisioningSchema = null,
         string databaseName = "",
-        ISqlCatalogSnapshot? catalogSnapshot = null)
+        SqlCatalogSnapshot? catalogSnapshot = null)
     {
         Transaction = transaction;
         Coordinator = coordinator;
@@ -58,5 +58,5 @@ internal readonly struct SqlStatementContext
     internal string DatabaseName { get; }
 
     /// <summary>Gets the catalog directory paired with this statement's visibility lifetime.</summary>
-    internal ISqlCatalogSnapshot? CatalogSnapshot { get; }
+    internal SqlCatalogSnapshot? CatalogSnapshot { get; }
 }

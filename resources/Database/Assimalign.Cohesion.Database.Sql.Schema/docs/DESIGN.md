@@ -11,14 +11,14 @@ through this seam without taking a dependency on the SQL engine, SQL storage,
 Connections.Tcp, or Hosting. The area's root independently composes its generic
 child roots; this package does not invert that direction.
 
-`SqlSchema.Compile` is the ordinary composition-root entry point: it declares and
-compiles a SQL schema without making the caller repeat `EngineModel.Sql`. It
-delegates to the same `SqlSchema.Create` and `SqlSchemaCompiler` path, so validation,
-canonical documents, and hashes remain identical. `Create` still returns an
-`ISqlSchema`, built by internal implementations of `ISqlSchemaBuilder` and the
-table/type/principal builder contracts, for build tooling and callers that compile
-a declaration they did not author. `SqlSchemaCompiler` accepts only `EngineModel.Sql`
-and lowers that retained C# declaration into `SqlCompiledSchema`. The derived type carries SQL tables,
+`SqlSchema.Compile(name, configure)` is the ordinary composition-root entry point: it
+declares and compiles a SQL schema in one step. It is `SqlSchema.Create(name, configure)`
+followed by the declaration's own `Compile()`, so validation, canonical documents, and
+hashes are identical on both paths. `Create` returns an opaque `SqlSchema`, built by the
+sealed `SqlSchemaBuilder`, `SqlTableBuilder<TRow>`, `SqlTypeBuilder` and
+`SqlPrincipalBuilder`, for build tooling and callers that compile a declaration they did
+not author. The internal `SqlSchemaCompiler` accepts only `EngineModel.Sql` and lowers
+that retained C# declaration into `SqlCompiledSchema`. The derived type carries SQL tables,
 columns, keys, indexes, constraints, types, functions, triggers, principals,
 grants, and extensions. The root `CompiledSchema` carries only identity and a
 canonical document, with SHA-256 hashing shared across models.
@@ -57,8 +57,7 @@ comparing or reconstructing the live catalog after a failed apply.
 `CompiledSchemaConstraint.OnDelete` uses `CompiledSchemaReferentialAction.Restrict`
 by default and can select `Cascade`. The default is omitted from canonical JSON,
 preserving hashes of existing documents that implicitly restricted parent deletes.
-The retained C# `References` builder keeps that default; its public interface is
-unchanged. The compiled concrete model carries the optional action directly.
+The retained C# `References` builder member keeps that default. The compiled concrete model carries the optional action directly.
 
 `UNIQUE` is represented by `CompiledSchemaIndex(IsUnique: true)`, consistently with
 the SQL language and catalog. A unique index supplies both enforcement and lookup,
@@ -75,7 +74,34 @@ list is advisory and is not part of check equivalence, because table-level SQL
 checks derive their dependencies from the expression. Function and trigger bodies
 retain their separate compiler-produced expression representation. The frozen
 retained table builder has no check declaration member; callers construct the
-compiled check model directly without adding an interface member.
+compiled check model directly.
+
+**Concrete types (concrete-types plan, phase 4, §6.7).** Until phase 4 the declaration
+surface was fifteen public interfaces: `ISqlSchema`, the four builder contracts
+(`ISqlSchemaBuilder`, `ISqlTableBuilder<TRow>`, `ISqlTypeBuilder`,
+`ISqlPrincipalBuilder`), the trigger context `ISqlTriggerContext`, and nine declaration
+contracts (`ISqlSchemaTable`, `ISqlSchemaType`, `ISqlSchemaColumn` and their siblings)
+over internal positional records; `SqlSchema` and `SqlSchemaCompiler` were public static
+classes. Each had one implementation, and only this package's tests read the declaration
+contracts. The builders and the trigger context are now public sealed classes (the
+builders with internal constructors, the trigger context with a private one: it is a
+phantom that appears only inside trigger expression trees, and its `Audit` member never
+runs). `SqlSchema` is an opaque public sealed class with an internal constructor, a
+`Name` and an instance `Compile()`; the static `Create(name, configure)` and
+`Compile(name, configure)` keep their names. The nine records stay internal
+(`Internal/SqlSchemaDeclaration.cs`), because a public positional record cannot close its
+primary constructor or its `with` clone, and `SqlSchemaCompiler` is internal; the tests
+reach both through `[InternalsVisibleTo("Assimalign.Cohesion.Database.Sql.Schema.Tests")]`
+(`src/Properties/AssemblyInfo.cs`, the package's first grant). The `Sdk.Database`
+extractor and canonicalizer match the builders and the trigger context by metadata name
+(`CSharpSchemaExtractor.cs`, `CSharpExpressionCanonicalizer.cs`), so their strings changed
+in the same commit; the SDK's parity test, which declares a type, a table with a
+reference, a function, a trigger and a principal, compiles the same document both ways.
+Two observable changes: the trigger context's type identity is part of a trigger's
+canonical expression text, so the compiled hash of a schema that declares a trigger
+changed with the rename (nothing has shipped), and `Table<T>(name, …)` and
+`Extension(name, …)` report a blank name with the parameter name `name`, which the former
+implementation reported as `tableName` and `extensionName`.
 
 The package targets `net10.0`, `LangVersion=Preview`, and is AOT-compatible.
 The compiler reads statically supplied expression nodes and their type metadata;

@@ -139,7 +139,7 @@ public sealed class SqlUnaryPlusExecutionTests
     {
         // Arrange
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("signs");
+        var database = await engine.CreateDatabaseAsync("signs");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
 
         // Act
@@ -175,13 +175,13 @@ public sealed class SqlUnaryPlusExecutionTests
         DecodeRow(row.Payload.ToArray()).ShouldBe(new object?[] { 2, 4L, -2L });
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         error.Message.ShouldStartWith(InvalidOperandType + ":", Case.Sensitive);
-        harness.Server.Context.Sessions.Count.ShouldBe(1);
+        harness.Server.Sessions.Count.ShouldBe(1);
     }
 
     private static SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "unary-plus" });
 
-    private static async Task<IDatabaseSession> SeedAsync(SqlDatabaseEngine engine, bool withRow)
+    private static async Task<SqlDatabaseSession> SeedAsync(SqlDatabaseEngine engine, bool withRow)
     {
         var database = await engine.CreateDatabaseAsync("signs");
         var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -195,7 +195,7 @@ public sealed class SqlUnaryPlusExecutionTests
         return session;
     }
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         await using var result = (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
         return await ReadRowsAsync(result);

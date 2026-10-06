@@ -22,15 +22,15 @@ using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 /// </summary>
 public sealed class SqlVersionPurgeTests
 {
-    private static async Task<(SqlDatabaseInstance Database, IDatabaseSession Session)> CreateSessionAsync(
+    private static async Task<(SqlDatabase Database, SqlDatabaseSession Session)> CreateSessionAsync(
         SqlDatabaseEngine engine, string name)
     {
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(name);
+        var database = await engine.CreateDatabaseAsync(name);
         var session = await database.CreateSessionAsync();
         return (database, session);
     }
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql);
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
@@ -49,7 +49,7 @@ public sealed class SqlVersionPurgeTests
         return rows;
     }
 
-    private static int CountPhysicalRecords(SqlDatabaseInstance database)
+    private static int CountPhysicalRecords(SqlDatabase database)
     {
         int count = 0;
         using var iterator = database.DataStorage.GetUnitIterator();
@@ -178,7 +178,7 @@ public sealed class SqlVersionPurgeTests
         // Act: reopen (the open-time scan seeds the prunable set) and purge.
         var reopened = strategy.CaptureDurableImages();
         await using var restarted = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "purge-restart-2", StorageStrategy = reopened });
-        var database = (SqlDatabaseInstance)await restarted.OpenDatabaseAsync("restart-db");
+        var database = await restarted.OpenDatabaseAsync("restart-db");
         await using var restartedSession = await database.CreateSessionAsync();
 
         CountPhysicalRecords(database).ShouldBe(2);

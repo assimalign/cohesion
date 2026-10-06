@@ -102,7 +102,7 @@ public sealed class SqlFunctionArityTests : IDisposable
         {
             // Arrange
             await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-function-arity" });
-            var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("arity");
+            var database = await engine.CreateDatabaseAsync("arity");
             await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
             await SeedAsync(session, withRows);
             var before = await SnapshotAsync(session);
@@ -159,7 +159,7 @@ public sealed class SqlFunctionArityTests : IDisposable
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-function-arity-check" });
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("arity");
+        var database = await engine.CreateDatabaseAsync("arity");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
 
         // Act
@@ -312,14 +312,14 @@ public sealed class SqlFunctionArityTests : IDisposable
         // as an engine that did not check arity stored it.
         await using (var engine = CreateEngine())
         {
-            var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("shop");
+            var database = await engine.CreateDatabaseAsync("shop");
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
             await session.ExecuteAsync("CREATE TABLE orders (id INT, qty INT, note TEXT, CONSTRAINT ck_arity CHECK (qty > 0))");
             database.Catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
             var stored = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, table.Columns.ToArray(), table.PrimaryKeyColumns,
                 table.Owner, table.OwningSchema,
                 [new SqlCatalogConstraint("ck_arity", SqlCatalogConstraintKind.Check, [], checkExpression: predicate)]);
-            await SqlCatalog.PublishTableAsync(database.Catalog, stored, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
+            await database.Catalog.PublishTableAsync(stored, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
         }
 
         // Act
@@ -345,7 +345,7 @@ public sealed class SqlFunctionArityTests : IDisposable
         return ((SqlSelectExpression)statement.SqlExpression!).Columns[0].Expression;
     }
 
-    private static async Task SeedAsync(IDatabaseSession session, bool withRows)
+    private static async Task SeedAsync(SqlDatabaseSession session, bool withRows)
     {
         foreach (string statement in withRows ? [.. _schema, .. _rows] : _schema)
         {
@@ -353,17 +353,17 @@ public sealed class SqlFunctionArityTests : IDisposable
         }
     }
 
-    private static async Task<string[]> SnapshotAsync(IDatabaseSession session)
+    private static async Task<string[]> SnapshotAsync(SqlDatabaseSession session)
     {
         var t = await RowsAsync(session, "SELECT id, name, age, flag FROM t ORDER BY id;");
         var u = await RowsAsync(session, "SELECT id, name FROM u ORDER BY id;");
         return [.. t.Select(row => "t:" + string.Join(",", row)), .. u.Select(row => "u:" + string.Join(",", row))];
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string statement)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement)
         => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string statement)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement)
     {
         await using var result = (await ExecuteAsync(session, statement)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

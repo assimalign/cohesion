@@ -55,7 +55,7 @@ public sealed class SqlEngineWorkerTests : IDisposable
         return stream.Length;
     }
 
-    private static async Task<int> CountRowsAsync(IDatabaseSession session)
+    private static async Task<int> CountRowsAsync(SqlDatabaseSession session)
     {
         var result = await session.ExecuteAsync("SELECT id FROM t");
         var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();

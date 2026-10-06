@@ -176,7 +176,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
 
         // Synchronous over the ValueTask by design: the in-process
         // implementations complete synchronously and instance open is a
-        // synchronous path (the SqlDatabaseInstance precedent).
+        // synchronous path (the SqlDatabase precedent).
         var context = _coordinator.BeginAsync(IsolationLevel.Snapshot)
             .AsTask().GetAwaiter().GetResult();
 

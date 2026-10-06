@@ -175,6 +175,104 @@ public class DatabaseEngineTests
         engine.State.ShouldBe(EngineState.Disposed);
     }
 
+    /// <summary>
+    /// The worker base's release (concrete-types plan, row 7): an engine releases every worker it
+    /// owns once, through the worker's release hook, after the worker's pump stopped. The worker has
+    /// no public disposal; the base's protected release, which a model's builder reaches through its
+    /// engine's internal re-exposure, leaves a worker an engine owns to the engine, and releases a
+    /// worker no engine owns, once. The engine no longer type-tests its workers for disposal
+    /// interfaces.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: a worker the engine owns is released by the engine only; one no engine owns is released once by the base's release")]
+    public async Task DisposeAsync_Worker_ShouldBeReleasedOnceByItsOwner()
+    {
+        // Arrange
+        var log = new TestLog();
+        var engine = new TestEngine(log: log);
+        var owned = new RecordingWorker(log, "test-engine/owned");
+        var unowned = new RecordingWorker(log, "test-engine/unowned");
+        engine.Attach(owned);
+        engine.Complete();
+        owned.Waiting.Wait(_timeout).ShouldBeTrue();
+
+        // Act
+        await TestEngine.Release(owned);
+        int ownedBeforeEngine = owned.Disposes;
+        await engine.DisposeAsync();
+        await TestEngine.Release(owned);
+        await TestEngine.Release(unowned);
+        await TestEngine.Release(unowned);
+
+        // Assert
+        ownedBeforeEngine.ShouldBe(0);
+        owned.Disposes.ShouldBe(1);
+        unowned.Disposes.ShouldBe(1);
+        var entries = log.Entries;
+        Array.IndexOf(entries, "test-engine/owned:stopped").ShouldBeGreaterThanOrEqualTo(0);
+        Array.IndexOf(entries, "test-engine/owned:stopped").ShouldBeLessThan(Array.IndexOf(entries, "test-engine/owned:dispose"));
+        engine.Workers.ShouldNotContain(unowned);
+        typeof(IAsyncDisposable).IsAssignableFrom(typeof(DatabaseEngineWorker)).ShouldBeFalse();
+        typeof(IDisposable).IsAssignableFrom(typeof(DatabaseEngineWorker)).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A worker belongs to one engine (concrete-types plan, row 7): the engine claims it before it
+    /// starts the worker's pump, so a worker released before the attach is refused rather than
+    /// pumped with its release hook already run, and the refused worker is not released again.
+    /// Before the claim moved ahead of the pump's start, the engine accepted and pumped it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: an attach of a released worker is refused, and the worker is not pumped")]
+    public async Task AttachWorker_ReleasedWorker_ShouldBeRefused()
+    {
+        // Arrange
+        var log = new TestLog();
+        await using var engine = new TestEngine(log: log);
+        var worker = new RecordingWorker(log, "test-engine/released");
+        await TestEngine.Release(worker);
+
+        // Act
+        var refusal = Should.Throw<InvalidOperationException>(() => engine.Attach(worker));
+        await TestEngine.Release(worker);
+
+        // Assert
+        refusal.Message.ShouldContain("belongs to one engine");
+        engine.Workers.ShouldBeEmpty();
+        worker.Waiting.IsSet.ShouldBeFalse();
+        worker.Disposes.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A worker belongs to one engine (concrete-types plan, row 7): one another engine owns is
+    /// refused by a second engine's attach, and neither the second engine nor the base's release
+    /// releases it; its owner releases it once, at its own disposal. Before the claim, the second
+    /// engine pumped it too, and the first engine's disposal released it while the second engine's
+    /// pump still ran it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: an attach of a worker another engine owns is refused, and only its owner releases it")]
+    public async Task AttachWorker_WorkerAnotherEngineOwns_ShouldBeRefused()
+    {
+        // Arrange
+        var log = new TestLog();
+        var owner = new TestEngine("owner-engine", log);
+        await using var other = new TestEngine("other-engine", log);
+        var worker = new RecordingWorker(log, "owner-engine/shared");
+        owner.Attach(worker);
+        worker.Waiting.Wait(_timeout).ShouldBeTrue();
+
+        // Act
+        var refusal = Should.Throw<InvalidOperationException>(() => other.Attach(worker));
+        await TestEngine.Release(worker);
+        await other.DisposeAsync();
+        int beforeOwner = worker.Disposes;
+        await owner.DisposeAsync();
+
+        // Assert
+        refusal.Message.ShouldContain("belongs to one engine");
+        other.Workers.ShouldBeEmpty();
+        beforeOwner.ShouldBe(0);
+        worker.Disposes.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - Engine: the state is Faulted exactly while a worker holds a failure")]
     public async Task State_WorkerFailure_ShouldBeFaultedUntilTheWorkerRecovers()
     {

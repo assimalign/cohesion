@@ -298,8 +298,8 @@ public sealed class SqlArithmeticFaultTests
         // Arrange
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
-        engine.TryGetDatabase("arithmetic", out IDatabase database).ShouldBeTrue();
-        await using var observer = await database.CreateSessionAsync(CancellationToken.None);
+        engine.TryGetDatabase("arithmetic", out SqlDatabase? database).ShouldBeTrue();
+        await using var observer = await database!.CreateSessionAsync(CancellationToken.None);
         await ExecuteAsync(session, "BEGIN");
         var transaction = session.CurrentTransaction.ShouldNotBeNull();
         await ExecuteAsync(session, "INSERT INTO numbers (id, int_value) VALUES (3, 30)");
@@ -520,7 +520,7 @@ public sealed class SqlArithmeticFaultTests
         var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         error.Message.ShouldStartWith(code + ":", Case.Sensitive);
-        harness.Server.Context.Sessions.Count.ShouldBe(1);
+        harness.Server.Sessions.Count.ShouldBe(1);
         (await CountAsync(client)).ShouldBe(2L);
         (await CountAsync(client, "id = 2")).ShouldBe(1L);
     }
@@ -543,7 +543,7 @@ public sealed class SqlArithmeticFaultTests
         var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         error.Message.ShouldStartWith("Cannot compare values of types", Case.Sensitive);
-        harness.Server.Context.Sessions.Count.ShouldBe(1);
+        harness.Server.Sessions.Count.ShouldBe(1);
         (await CountAsync(client)).ShouldBe(2L);
     }
 
@@ -573,7 +573,7 @@ public sealed class SqlArithmeticFaultTests
         (await CountAsync(observer)).ShouldBe(3L);
         (await CountAsync(observer, "id = 1")).ShouldBe(1L);
         (await CountAsync(observer, "id = 2")).ShouldBe(1L);
-        harness.Server.Context.Sessions.Count.ShouldBe(2);
+        harness.Server.Sessions.Count.ShouldBe(2);
     }
 
     private static void AssertCode(DatabaseException failure, string code)
@@ -585,7 +585,7 @@ public sealed class SqlArithmeticFaultTests
     private static SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "arithmetic-faults" });
 
-    private static async Task<IDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
+    private static async Task<SqlDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
     {
         var database = await engine.CreateDatabaseAsync("arithmetic");
         var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -594,16 +594,16 @@ public sealed class SqlArithmeticFaultTests
         return session;
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(statement, parameters, CancellationToken.None).AsTask();
 
-    private static async Task<object?> ScalarAsync(IDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<object?> ScalarAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         var rows = await RowsAsync(session, statement, parameters);
         return rows.ShouldHaveSingleItem().ShouldHaveSingleItem();
     }
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         await using var result = (await ExecuteAsync(session, statement, parameters)).ShouldBeAssignableTo<QueryResultSet>();
         return await ReadRowsAsync(result);

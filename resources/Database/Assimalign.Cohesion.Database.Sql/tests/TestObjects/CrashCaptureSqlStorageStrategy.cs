@@ -5,6 +5,7 @@ using System.IO;
 namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests;
@@ -17,7 +18,7 @@ using Assimalign.Cohesion.Database.Storage.Tests;
 /// leave behind. A second strategy constructed over those images "reopens the
 /// files" — both data and journal travel together, as they must.
 /// </summary>
-public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
+internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 {
     private readonly Dictionary<string, (GatedStream Data, GatedStream Journal, GatedStream Backup)> _live = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)> _images = new(StringComparer.OrdinalIgnoreCase);
@@ -187,7 +188,7 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public SqlStorage CreateStorage(string databaseName)
+    public override SqlStorage CreateStorage(string databaseName)
     {
         lock (_sync)
         {
@@ -208,7 +209,7 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public SqlStorage OpenStorage(string databaseName)
+    public override SqlStorage OpenStorage(string databaseName)
     {
         lock (_sync)
         {
@@ -231,7 +232,7 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public void DropStorage(string databaseName)
+    public override void DropStorage(string databaseName)
     {
         lock (_sync)
         {
@@ -241,7 +242,7 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public bool StorageExists(string databaseName)
+    public override bool StorageExists(string databaseName)
     {
         lock (_sync)
         {

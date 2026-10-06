@@ -311,7 +311,7 @@ public sealed class SqlInsertValuesValidationTests
         error.Message.ShouldStartWith($"{ColumnReferenceNotAllowed}: Column reference '", Case.Sensitive);
         error.Message.ShouldEndWith(" is not allowed in INSERT ... VALUES, which has no columns in scope. " +
             "Use literals, parameters and expressions over them, or INSERT ... SELECT to read values from a table.", Case.Sensitive);
-        harness.Server.Context.Sessions.Count.ShouldBe(1);
+        harness.Server.Sessions.Count.ShouldBe(1);
         (await QueryAsync(client, "SELECT 1 FROM users")).ShouldBe([[1L], [1L]]);
         (await QueryAsync(client, "SELECT COUNT(*) FROM users")).ShouldBe([[2L]]);
 
@@ -328,13 +328,13 @@ public sealed class SqlInsertValuesValidationTests
             ProtocolExecuteMessage.Create("INSERT INTO users (id, name) VALUES (4, 'kay')").Encode());
         await client.ExpectAsync(ProtocolMessageType.ResultComplete);
         (await QueryAsync(client, "SELECT id, name FROM users ORDER BY id")).ShouldBe([[1, "ada"], [2, "grace"], [3, "LIN"], [4, "kay"]]);
-        harness.Server.Context.Sessions.Count.ShouldBe(1);
+        harness.Server.Sessions.Count.ShouldBe(1);
     }
 
     private static SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "insert-values" });
 
-    private static async Task<IDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
+    private static async Task<SqlDatabaseSession> SeedAsync(SqlDatabaseEngine engine)
     {
         var database = await engine.CreateDatabaseAsync("values");
         var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -346,7 +346,7 @@ public sealed class SqlInsertValuesValidationTests
     private static SqlQueryRequest Request(string sql)
         => new((SqlQueryStatement)new SqlQueryParser().Parse(sql));
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         await using var result = (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

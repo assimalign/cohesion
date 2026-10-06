@@ -1573,7 +1573,7 @@ memory to reopen.
 **Symptom.** Concurrent `ALTER TABLE ... ADD/DROP COLUMN` (or `ADD/DROP CONSTRAINT`)
 beside `INSERT` writers ended the process with `AccessViolationException` in
 `LinkedList.Remove` ← `StorageBufferPool.Touch` ← `Pin` ← `StoragePageManager.GetPage`
-← `Storage.CommitTransaction` ← `DefaultSqlCatalog.ReplaceTable`. `Pin` and `Touch`
+← `Storage.CommitTransaction` ← `SqlCatalog.ReplaceTable`. `Pin` and `Touch`
 already ran under the pool lock, so the list was not raced: something had overwritten
 managed memory.
 

@@ -77,7 +77,7 @@ public sealed class SqlDatabaseScopeTests
         engine.TryGetDatabase("third", out _).ShouldBeFalse();
     }
 
-    private static async Task<List<int>> ReadValuesAsync(IDatabaseSession session)
+    private static async Task<List<int>> ReadValuesAsync(SqlDatabaseSession session)
     {
         var result = (await session.ExecuteAsync("SELECT value FROM marker")).ShouldBeAssignableTo<QueryResultSet>();
         var values = new List<int>();

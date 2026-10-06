@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Database.Storage;
 /// In-memory storage strategy that uses MemoryStreams for all three storage files.
 /// Useful for unit testing and embedded scenarios.
 /// </summary>
-internal sealed class InMemorySqlStorageStrategy : ISqlStorageStrategy
+internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
 {
     private readonly HashSet<string> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _syncRoot = new();
@@ -22,7 +22,7 @@ internal sealed class InMemorySqlStorageStrategy : ISqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public SqlStorage CreateStorage(string databaseName)
+    public override SqlStorage CreateStorage(string databaseName)
     {
         lock (_syncRoot)
         {
@@ -36,7 +36,7 @@ internal sealed class InMemorySqlStorageStrategy : ISqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public SqlStorage OpenStorage(string databaseName)
+    public override SqlStorage OpenStorage(string databaseName)
     {
         lock (_syncRoot)
         {
@@ -52,7 +52,7 @@ internal sealed class InMemorySqlStorageStrategy : ISqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public void DropStorage(string databaseName)
+    public override void DropStorage(string databaseName)
     {
         lock (_syncRoot)
         {
@@ -61,7 +61,7 @@ internal sealed class InMemorySqlStorageStrategy : ISqlStorageStrategy
     }
 
     /// <inheritdoc />
-    public bool StorageExists(string databaseName)
+    public override bool StorageExists(string databaseName)
     {
         lock (_syncRoot)
         {

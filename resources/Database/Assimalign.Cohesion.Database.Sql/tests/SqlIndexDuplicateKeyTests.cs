@@ -21,7 +21,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 public sealed class SqlIndexDuplicateKeyTests
 {
-    private static async Task<(SqlDatabaseEngine Engine, IDatabaseSession Session)> CreateAsync(string name)
+    private static async Task<(SqlDatabaseEngine Engine, SqlDatabaseSession Session)> CreateAsync(string name)
     {
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = name });
         var database = await engine.CreateDatabaseAsync(name + "-db");
@@ -29,7 +29,7 @@ public sealed class SqlIndexDuplicateKeyTests
         return (engine, session);
     }
 
-    private static async Task<List<object?[]>> Rows(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)
     {
         var result = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();
@@ -41,16 +41,16 @@ public sealed class SqlIndexDuplicateKeyTests
         return rows;
     }
 
-    private static async Task<long> CountAsync(IDatabaseSession session, string sql)
+    private static async Task<long> CountAsync(SqlDatabaseSession session, string sql)
         => Convert.ToInt64((await Rows(session, sql)).Single()[0]);
 
-    private static async Task<List<int>> IdsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<int>> IdsAsync(SqlDatabaseSession session, string sql)
         => (await Rows(session, sql)).Select(row => Convert.ToInt32(row[0])).Order().ToList();
 
-    private static string AccessPathOf(IDatabaseSession session)
-        => ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull().AccessPath;
+    private static string AccessPathOf(SqlDatabaseSession session)
+        => session.LastStatementMetrics.ShouldNotBeNull().AccessPath;
 
-    private static async Task InsertRowsAsync(IDatabaseSession session, string table, IEnumerable<string> tuples)
+    private static async Task InsertRowsAsync(SqlDatabaseSession session, string table, IEnumerable<string> tuples)
     {
         foreach (var batch in tuples.Chunk(250))
         {
@@ -326,7 +326,7 @@ public sealed class SqlIndexDuplicateKeyTests
         await VerifyAsync(session, model, domain, random);
     }
 
-    private static async Task VerifyAsync(IDatabaseSession session, Dictionary<int, int> model, int domain, Random random)
+    private static async Task VerifyAsync(SqlDatabaseSession session, Dictionary<int, int> model, int domain, Random random)
     {
         // The scan: every live row, exactly once.
         var scanned = (await Rows(session, "SELECT id, qty FROM t"))

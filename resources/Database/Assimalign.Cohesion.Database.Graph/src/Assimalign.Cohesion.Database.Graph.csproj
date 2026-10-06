@@ -1,11 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Database.Graph</RootNamespace>
-		<!-- The engine derives from the root DatabaseEngine, which pumps its workers and folds
-		     its state, so the Database root's shared copy of that pump
-		     (shared/DatabaseEngineWorkerPump.cs) compiles to nothing here (concrete-types plan,
-		     phase 4, #1260). The last model's phase-4 PR deletes that file and this constant. -->
-		<DefineConstants>$(DefineConstants);COHESION_DATABASE_ENGINE_PUMP_IN_BASE</DefineConstants>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database" />

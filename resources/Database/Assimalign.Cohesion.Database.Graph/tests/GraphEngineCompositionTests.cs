@@ -326,7 +326,7 @@ public sealed class GraphEngineCompositionTests
         };
 
         // Act
-        var failure = Should.Throw<InvalidOperationException>(() => state.Complete(engine, compose));
+        var failure = Should.Throw<InvalidOperationException>(() => state.Complete(engine, compose, GraphDatabaseEngine.ReleaseRefusedWorkerAsync));
 
         // Assert: an attached product is released by the engine, an unattached one by the state.
         failure.Message.ShouldBe(message);

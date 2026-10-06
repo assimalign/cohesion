@@ -48,7 +48,7 @@ public sealed class SqlCatalogCollationTests
         table.FindColumn("exact")!.Collation.ShouldBe(Collation.Binary);
         table.FindColumn("accent")!.Collation.ShouldBe(Collation.CaseAccentInsensitive);
         table.FindColumn("legacy").ShouldBeNull();
-        SqlCatalog.CaptureSnapshot(reopened).DefaultCollation.ShouldBe(Collation.CaseInsensitive);
+        reopened.CaptureSnapshot().DefaultCollation.ShouldBe(Collation.CaseInsensitive);
     }
 
     /// <summary>Existing indexes cannot silently acquire a different inherited collation.</summary>

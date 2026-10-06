@@ -194,7 +194,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private static IEnumerable<(string Name, IReadOnlyList<string> Columns, bool IsPrimaryKey)> SystemKeyConstraints(
-        ISqlCatalogSnapshot catalog, SqlCatalogTable table)
+        SqlCatalogSnapshot catalog, SqlCatalogTable table)
     {
         var indexes = catalog.GetIndexes(table.ObjectId);
         // Catalogs created before primary indexes existed still retain the

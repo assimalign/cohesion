@@ -67,13 +67,13 @@ public sealed class SqlDataStorageFormatTests : IDisposable
 
         // Assert: the reopened database is on format 6 and its identity keys seek.
         await using var engine = CreateEngine();
-        var database = (SqlDatabaseInstance)await engine.OpenDatabaseAsync(TestDatabase);
+        var database = await engine.OpenDatabaseAsync(TestDatabase);
         database.Catalog.RecordSpaceFormatVersion.ShouldBe(6);
         SqlRowCodec.RecordSpaceFormatVersion.ShouldBe(6);
 
         await using var session = await database.CreateSessionAsync();
         (await IdsAsync(session, "SELECT id FROM events WHERE at = @p ORDER BY id", Instant.ToOffset(TimeSpan.FromHours(9)))).ShouldBe([1, 2]);
-        ((SqlDatabaseSession)session).LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_at");
+        session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_at");
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: an older database is refused at open and its files are left untouched (#1099, #1194, #1241)")]
@@ -250,7 +250,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         await Should.ThrowAsync<DatabaseException>(async () => await engine.CreateDatabaseAsync(TestDatabase));
 
         await engine.DropDatabaseAsync(TestDatabase);
-        var created = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(TestDatabase);
+        var created = await engine.CreateDatabaseAsync(TestDatabase);
         created.Catalog.RecordSpaceFormatVersion.ShouldBe(SqlRowCodec.RecordSpaceFormatVersion);
     }
 
@@ -262,7 +262,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // made durable, then a crash.
         var strategy = new CrashCaptureSqlStorageStrategy();
         var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "format-crash", StorageStrategy = strategy });
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(TestDatabase);
+        var database = await engine.CreateDatabaseAsync(TestDatabase);
         var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE events (id INT PRIMARY KEY, at TIMESTAMPTZ)");
         await session.ExecuteAsync("CREATE INDEX ix_at ON events (at)");
@@ -316,7 +316,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
             var recovered = await recoveringEngine.OpenDatabaseAsync(TestDatabase);
             await using var verify = await recovered.CreateSessionAsync();
             (await IdsAsync(verify, "SELECT id FROM events WHERE at = @p ORDER BY id", Instant)).ShouldBe([1, 2, 4]);
-            ((SqlDatabaseSession)verify).LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_at");
+            verify.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_at");
             (await IdsAsync(verify, "SELECT id FROM events WHERE id > @p ORDER BY id", 0)).ShouldBe([1, 2, 4]);
         }
 
@@ -393,7 +393,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
 
         try
         {
-            var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync(TestDatabase);
+            var database = await engine.CreateDatabaseAsync(TestDatabase);
             await using (var session = await database.CreateSessionAsync())
             {
                 await session.ExecuteAsync("CREATE TABLE events (id INT PRIMARY KEY, at TIMESTAMPTZ)");
@@ -433,22 +433,29 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         => after.AsSpan().SequenceEqual(before).ShouldBeTrue($"The {what} was modified by the refused open.");
 
     /// <summary>
-    /// A storage strategy that breaks the <see cref="ISqlStorageStrategy.CreateStorage"/>
+    /// A storage strategy that breaks the <see cref="SqlStorageStrategy.CreateStorage"/>
     /// contract by reopening storage that already exists instead of refusing it.
     /// </summary>
-    private sealed class ReopeningStorageStrategy(ISqlStorageStrategy inner) : ISqlStorageStrategy
+    private sealed class ReopeningStorageStrategy : SqlStorageStrategy
     {
-        public SqlStorage CreateStorage(string databaseName)
-            => inner.StorageExists(databaseName) ? inner.OpenStorage(databaseName) : inner.CreateStorage(databaseName);
+        private readonly SqlStorageStrategy _inner;
 
-        public SqlStorage OpenStorage(string databaseName) => inner.OpenStorage(databaseName);
+        public ReopeningStorageStrategy(SqlStorageStrategy inner)
+        {
+            _inner = inner;
+        }
 
-        public void DropStorage(string databaseName) => inner.DropStorage(databaseName);
+        public override SqlStorage CreateStorage(string databaseName)
+            => _inner.StorageExists(databaseName) ? _inner.OpenStorage(databaseName) : _inner.CreateStorage(databaseName);
 
-        public bool StorageExists(string databaseName) => inner.StorageExists(databaseName);
+        public override SqlStorage OpenStorage(string databaseName) => _inner.OpenStorage(databaseName);
+
+        public override void DropStorage(string databaseName) => _inner.DropStorage(databaseName);
+
+        public override bool StorageExists(string databaseName) => _inner.StorageExists(databaseName);
     }
 
-    private static async Task<int[]> IdsAsync(IDatabaseSession session, string sql, object parameter)
+    private static async Task<int[]> IdsAsync(SqlDatabaseSession session, string sql, object parameter)
     {
         await using var result = (await session.ExecuteAsync(sql, new Dictionary<string, object?> { ["p"] = parameter }))
             .ShouldBeAssignableTo<QueryResultSet>();

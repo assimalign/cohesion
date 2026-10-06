@@ -42,7 +42,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     {
         // Arrange
         await using var engine = CreateEngine("persisted-canonical");
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
 
         // Act
@@ -60,7 +60,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     {
         // Arrange
         await using var engine = CreateEngine("persisted-alter");
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t (qty INT)");
 
@@ -91,7 +91,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
 
         await using (var engine = CreateEngine("persisted-default", _rootPath))
         {
-            var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+            var database = await engine.CreateDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
 
             // Act
@@ -107,7 +107,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
 
         await using (var reopenedEngine = CreateEngine("persisted-default", _rootPath))
         {
-            var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("db");
+            var reopened = await reopenedEngine.OpenDatabaseAsync("db");
             await using var session = await reopened.CreateSessionAsync(CancellationToken.None);
             await session.ExecuteAsync("INSERT INTO d (id) VALUES (2)");
             (await RowsAsync(session, "SELECT * FROM d WHERE id = 2")).ShouldHaveSingleItem()
@@ -124,7 +124,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     {
         // Arrange
         await using var engine = CreateEngine("persisted-parse-once");
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t (id INT, qty INT CHECK (qty > 0), label TEXT DEFAULT 'x')");
         long bindings = database.Definitions.BindCount;
@@ -153,7 +153,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     {
         // Arrange
         await using var engine = CreateEngine("persisted-invalidate");
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE t (id INT, qty INT, other INT)");
 
@@ -187,7 +187,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     /// Runs DDL that changes <c>t</c> and proves the statement published a new table version and
     /// bound it before returning, so the next write finds it bound.
     /// </summary>
-    private static async Task DdlAsync(SqlDatabaseInstance database, IDatabaseSession session, string sql)
+    private static async Task DdlAsync(SqlDatabase database, SqlDatabaseSession session, string sql)
     {
         database.Catalog.TryGetTable("dbo", "t", out var before);
         await session.ExecuteAsync(sql);
@@ -197,7 +197,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     }
 
     /// <summary>Runs a write that succeeds and proves it parsed no persisted definition.</summary>
-    private static async Task WriteAsync(SqlDatabaseInstance database, IDatabaseSession session, string sql)
+    private static async Task WriteAsync(SqlDatabase database, SqlDatabaseSession session, string sql)
     {
         long before = database.Definitions.BindCount;
         await session.ExecuteAsync(sql);
@@ -205,7 +205,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     }
 
     /// <summary>Runs a write a CHECK rejects and proves it parsed no persisted definition.</summary>
-    private static async Task WriteFailsAsync(SqlDatabaseInstance database, IDatabaseSession session, string sql)
+    private static async Task WriteFailsAsync(SqlDatabase database, SqlDatabaseSession session, string sql)
     {
         long before = database.Definitions.BindCount;
         await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync(sql));
@@ -227,7 +227,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
 
         // Act
         await using var reopenedEngine = CreateEngine("persisted-reopen", _rootPath);
-        var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("db");
+        var reopened = await reopenedEngine.OpenDatabaseAsync("db");
         await using var reopenedSession = await reopened.CreateSessionAsync(CancellationToken.None);
 
         // Assert: the open bound both tables, and every write after it reuses those bindings.
@@ -256,7 +256,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         // Arrange: a healthy database, then a damaged definition written straight to the catalog.
         await using (var engine = CreateEngine("persisted-damaged", _rootPath))
         {
-            var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("shop");
+            var database = await engine.CreateDatabaseAsync("shop");
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
             await session.ExecuteAsync("CREATE TABLE orders (id INT, qty INT, note TEXT DEFAULT 'n', CONSTRAINT ck_qty CHECK (qty > 0))");
             await session.ExecuteAsync("CREATE TABLE healthy (id INT CHECK (id > 0))");
@@ -282,7 +282,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
 
             var damaged = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, table.PrimaryKeyColumns,
                 table.Owner, table.OwningSchema, constraints);
-            await SqlCatalog.PublishTableAsync(database.Catalog, damaged, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
+            await database.Catalog.PublishTableAsync(damaged, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
         }
 
         // Act
@@ -322,7 +322,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         }
 
         await using var reopenedEngine = CreateEngine("persisted-long-check", _rootPath);
-        var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("db");
+        var reopened = await reopenedEngine.OpenDatabaseAsync("db");
         await using var reopenedSession = await reopened.CreateSessionAsync(CancellationToken.None);
         await WriteFailsAsync(reopened, reopenedSession, $"INSERT INTO t VALUES ({terms.ToString(CultureInfo.InvariantCulture)})");
         await WriteAsync(reopened, reopenedSession, $"INSERT INTO t VALUES ({(terms + 1).ToString(CultureInfo.InvariantCulture)})");
@@ -346,7 +346,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         // Arrange: predicates the current DDL rejects, written straight to the catalog.
         await using (var engine = CreateEngine("persisted-rules", _rootPath))
         {
-            var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+            var database = await engine.CreateDatabaseAsync("db");
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
             await session.ExecuteAsync("CREATE TABLE t (id INT, label TEXT, qty INT, extra INT)");
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("ALTER TABLE t ADD CONSTRAINT signed CHECK (-label IS NULL)")))
@@ -361,12 +361,12 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
                     new SqlCatalogConstraint("signed", SqlCatalogConstraintKind.Check, [], checkExpression: "-label IS NULL"),
                     new SqlCatalogConstraint("via_cast", SqlCatalogConstraintKind.Check, [], checkExpression: "CAST(qty AS VARCHAR(5)) <> '13'"),
                 ]);
-            await SqlCatalog.PublishTableAsync(database.Catalog, stored, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
+            await database.Catalog.PublishTableAsync(stored, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
         }
 
         // Act
         await using var reopenedEngine = CreateEngine("persisted-rules", _rootPath);
-        var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("db");
+        var reopened = await reopenedEngine.OpenDatabaseAsync("db");
         await using var reopenedSession = await reopened.CreateSessionAsync(CancellationToken.None);
 
         // Assert: both predicates are enforced as stored.
@@ -395,7 +395,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         // Arrange
         await using (var engine = CreateEngine("persisted-format", _rootPath))
         {
-            var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("legacy");
+            var database = await engine.CreateDatabaseAsync("legacy");
             await using var session = await database.CreateSessionAsync(CancellationToken.None);
             await session.ExecuteAsync("CREATE TABLE notes (id INT, body TEXT DEFAULT 'x')");
 
@@ -404,7 +404,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
             columns[1] = new SqlCatalogColumn("body", columns[1].Type, columns[1].IsNullable, storedDefault);
             var legacy = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, table.PrimaryKeyColumns,
                 table.Owner, table.OwningSchema, table.Constraints);
-            await SqlCatalog.PublishTableAsync(database.Catalog, legacy, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
+            await database.Catalog.PublishTableAsync(legacy, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
             await database.Catalog.SetRecordSpaceFormatVersionAsync(3);
         }
 
@@ -434,7 +434,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     {
         // Arrange
         await using var engine = CreateEngine("persisted-default-check");
-        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
 
         // Act
@@ -465,7 +465,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
 
         await using (var engine = CreateEngine("persisted-schema", _rootPath))
         {
-            var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("app");
+            var database = await engine.CreateDatabaseAsync("app");
 
             // Act
             (await database.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeFalse();
@@ -477,19 +477,19 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         }
 
         await using var reopenedEngine = CreateEngine("persisted-schema", _rootPath);
-        var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("app");
+        var reopened = await reopenedEngine.OpenDatabaseAsync("app");
         (await reopened.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
         await using var session = await reopened.CreateSessionAsync(CancellationToken.None);
         await Should.ThrowAsync<SqlConstraintViolationException>(async () => await session.ExecuteAsync("INSERT INTO items VALUES (1, 101)"));
     }
 
-    private static SqlCatalogTable Table(SqlDatabaseInstance database, string name)
+    private static SqlCatalogTable Table(SqlDatabase database, string name)
     {
         database.Catalog.TryGetTable("dbo", name, out var table).ShouldBeTrue();
         return table;
     }
 
-    private static SqlCatalogConstraint Check(SqlDatabaseInstance database, string table, string name)
+    private static SqlCatalogConstraint Check(SqlDatabase database, string table, string name)
         => Table(database, table).Constraints.Single(constraint => constraint.Name == name);
 
     private static SqlDatabaseEngine CreateEngine(string name)
@@ -498,7 +498,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     private static SqlDatabaseEngine CreateEngine(string name, string rootPath)
         => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = name, RootPath = rootPath });
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

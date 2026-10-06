@@ -33,7 +33,7 @@ internal sealed partial class SqlPlanExecutor
         await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
         // Rebind after waiting: a parent definition might have changed while acquiring its lock.
         constraints = BindConstraints(provisional, plan.Constraints);
-        var table = await SqlCatalog.ReserveTableAsync(_catalog, plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
+        var table = await _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
             statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
             statement.ProvisioningSchema, cancellationToken).ConfigureAwait(false);
 
@@ -137,7 +137,7 @@ internal sealed partial class SqlPlanExecutor
                     return true;
                 }, durable: true, cancellationToken).ConfigureAwait(false);
             }
-            await SqlCatalog.PublishTableAsync(_catalog, table, indexes, _indexManager.ExportRegistrations(),
+            await _catalog.PublishTableAsync(table, indexes, _indexManager.ExportRegistrations(),
                 replaceExisting, cancellationToken).ConfigureAwait(false);
         }
         catch
@@ -257,7 +257,7 @@ internal sealed partial class SqlPlanExecutor
         {
             // The new version no longer carries the constraint, so the dropped predicate is
             // never evaluated again; it keeps the other bindings of the version it came from.
-            _definitions.Adopt(await SqlCatalog.DropConstraintAsync(_catalog, plan.Table.Schema, plan.Table.Name, plan.ConstraintName,
+            _definitions.Adopt(await _catalog.DropConstraintAsync(plan.Table.Schema, plan.Table.Name, plan.ConstraintName,
                 cancellationToken).ConfigureAwait(false), plan.Table);
         }
         else if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.ConstraintName, out var index) && index.IsUnique)

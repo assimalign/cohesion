@@ -321,13 +321,13 @@ public sealed class SqlCastTests
         (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBe("43");
     }
 
-    private static async Task SeedAsync(IDatabaseSession session)
+    private static async Task SeedAsync(SqlDatabaseSession session)
     {
         await ExecuteAsync(session, "CREATE TABLE t (id INT);");
         await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
         => session.ExecuteAsync(sql, parameters, cancellationToken: CancellationToken.None).AsTask();
 
     private static async Task<List<object?[]>> ReadRowsAsync(QueryResultSet result)

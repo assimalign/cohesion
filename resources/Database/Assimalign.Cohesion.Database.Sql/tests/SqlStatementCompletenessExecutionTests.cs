@@ -224,7 +224,7 @@ public sealed class SqlStatementCompletenessExecutionTests
             error.ShouldNotBeOfType<DatabaseParseException>();
             error.Message.ShouldBe("Unknown function 'FOO'.", $"withRows: {withRows}");
             (await SnapshotAsync(session)).ShouldBe(before);
-            ((SqlDatabaseInstance)session.Database).Catalog.TryGetTable("dbo", "c", out _).ShouldBeFalse();
+            session.Database.Catalog.TryGetTable("dbo", "c", out _).ShouldBeFalse();
         }
     }
 
@@ -268,7 +268,7 @@ public sealed class SqlStatementCompletenessExecutionTests
             .Message.ShouldNotContain("Unknown function", Case.Sensitive);
     }
 
-    private static async Task SeedAsync(IDatabaseSession session, bool withRows)
+    private static async Task SeedAsync(SqlDatabaseSession session, bool withRows)
     {
         foreach (string statement in withRows ? [.. _schema, .. _rows] : _schema)
         {
@@ -276,7 +276,7 @@ public sealed class SqlStatementCompletenessExecutionTests
         }
     }
 
-    private static async Task<string[]> SchemaSnapshotAsync(IDatabaseSession session)
+    private static async Task<string[]> SchemaSnapshotAsync(SqlDatabaseSession session)
     {
         var columns = await RowsAsync(session,
             "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, IS_NULLABLE " +
@@ -286,17 +286,17 @@ public sealed class SqlStatementCompletenessExecutionTests
         return [.. columns.Select(row => "c:" + string.Join(",", row)), .. indexes.Select(row => "i:" + string.Join(",", row)), .. await SnapshotAsync(session)];
     }
 
-    private static async Task<string[]> SnapshotAsync(IDatabaseSession session)
+    private static async Task<string[]> SnapshotAsync(SqlDatabaseSession session)
     {
         var t = await RowsAsync(session, "SELECT id, name, age, flag FROM t ORDER BY id;");
         var u = await RowsAsync(session, "SELECT id, name FROM u ORDER BY id;");
         return [.. t.Select(row => "t:" + string.Join(",", row)), .. u.Select(row => "u:" + string.Join(",", row))];
     }
 
-    private static Task<QueryResult> ExecuteAsync(IDatabaseSession session, string statement)
+    private static Task<QueryResult> ExecuteAsync(SqlDatabaseSession session, string statement)
         => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask();
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string statement)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string statement)
     {
         await using var result = (await ExecuteAsync(session, statement)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

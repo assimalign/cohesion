@@ -15,7 +15,7 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </summary>
 public sealed class SqlTransactionIsolationTests
 {
-    private static async Task<IDatabaseSession> CreateSessionAsync(SqlDatabaseEngine engine)
+    private static async Task<SqlDatabaseSession> CreateSessionAsync(SqlDatabaseEngine engine)
     {
         var database = await engine.CreateDatabaseAsync("iso-db");
         return await database.CreateSessionAsync();

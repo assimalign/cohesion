@@ -18,9 +18,11 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// and a failed checkpoint is that database's failure (#1268). A SQL database's checkpoint covers
 /// both of its file sets on its lane: the data set through the transaction coordinator, which
 /// defers the checkpoint to a statement holding the apply gate, and the catalog set directly.
-/// Before #1268 any failure escaped the pass and ended the worker for good.
+/// Before #1268 any failure escaped the pass and ended the worker for good. A database its holder
+/// closed while the engine keeps it registered is never due, and its checkpoint racing the close is
+/// not a failure (<see cref="SqlDatabaseEngine.IsOpen(SqlDatabase)"/> is false for it).
 /// </remarks>
-internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabaseInstance>
+internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase>
 {
     private readonly SqlDatabaseEngine _engine;
 
@@ -34,23 +36,31 @@ internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase
     protected override ManualResetEventSlim CheckpointNeededSignal => _engine.CheckpointNeededSignal;
 
     /// <inheritdoc />
-    protected override SqlDatabaseInstance[] GetDatabases() => _engine.GetInstanceSnapshot();
+    protected override SqlDatabase[] GetDatabases() => _engine.GetInstanceSnapshot();
 
     /// <inheritdoc />
-    protected override string GetName(SqlDatabaseInstance database) => database.Name;
+    protected override string GetName(SqlDatabase database) => database.Name;
 
     /// <inheritdoc />
-    protected override bool IsOffline(SqlDatabaseInstance database) => database.IsOffline;
+    protected override bool IsOffline(SqlDatabase database) => database.IsOffline;
 
     /// <inheritdoc />
-    protected override bool IsOpen(SqlDatabaseInstance database) => _engine.IsOpen(database);
+    protected override bool IsOpen(SqlDatabase database) => _engine.IsOpen(database);
 
     /// <inheritdoc />
-    protected override bool IsCheckpointDue(SqlDatabaseInstance database, TimeSpan interval)
-        => database.DataStorage.IsCheckpointDue(interval) || database.CatalogStorage.IsCheckpointDue(interval);
+    /// <remarks>
+    /// A database its holder closed is never due: the engine keeps it registered only to refuse its
+    /// reopen, and its disposed storages have nothing left to checkpoint. A close that was not idle
+    /// (a writer the close kept in flight, #1226) leaves the data journal untruncated, so without
+    /// this the closed data set would stay due for a checkpoint the storage refuses with
+    /// <c>StorageTransactionException</c>, which <see cref="IsOpen"/> does not cover, and a failure
+    /// recorded for the database would never end.
+    /// </remarks>
+    protected override bool IsCheckpointDue(SqlDatabase database, TimeSpan interval)
+        => !database.IsClosed && (database.DataStorage.IsCheckpointDue(interval) || database.CatalogStorage.IsCheckpointDue(interval));
 
     /// <inheritdoc />
-    protected override bool Checkpoint(SqlDatabaseInstance database, TimeSpan interval, CancellationToken cancellationToken)
+    protected override bool Checkpoint(SqlDatabase database, TimeSpan interval, CancellationToken cancellationToken)
     {
         bool dataDue = database.DataStorage.IsCheckpointDue(interval);
         bool catalogDue = database.CatalogStorage.IsCheckpointDue(interval);

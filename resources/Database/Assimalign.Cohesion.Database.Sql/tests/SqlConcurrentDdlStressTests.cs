@@ -469,7 +469,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
     /// <param name="session">The session to run the statement on.</param>
     /// <param name="sql">The statement.</param>
     /// <param name="failures">When given, counts each lost race by message.</param>
-    private static async Task<bool> TryExecuteAsync(IDatabaseSession session, string sql, ConcurrentDictionary<string, int>? failures = null)
+    private static async Task<bool> TryExecuteAsync(SqlDatabaseSession session, string sql, ConcurrentDictionary<string, int>? failures = null)
     {
         try
         {
@@ -494,7 +494,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
     }
 
     private static async Task AssertRowsAsync(
-        IDatabaseSession session,
+        SqlDatabaseSession session,
         ConcurrentDictionary<int, byte> committed,
         ConcurrentDictionary<int, byte> attempted,
         string ddl)
@@ -517,7 +517,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
         missing.ShouldBeEmpty("committed rows missing");
     }
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         var result = (await session.ExecuteAsync(sql)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

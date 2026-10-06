@@ -116,7 +116,7 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
     private SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "schema-constraints", RootPath = _rootPath });
 
-    private static async Task<long> CountAsync(IDatabaseSession session, string table)
+    private static async Task<long> CountAsync(SqlDatabaseSession session, string table)
     {
         await using var result = (await session.ExecuteAsync($"SELECT COUNT(*) FROM {table}"))
             .ShouldBeAssignableTo<QueryResultSet>();

@@ -9,7 +9,9 @@ Graph model PR of P4 (#1260, the second) re-verified and implemented on 2026-10-
 2026-10-06 (§7, §6.4, §6.5, §6.9); the Documents model PR of P4 (#1260, the third) re-verified,
 implemented and reviewed on 2026-10-06 (§7, §6.4, §6.5, §6.6, §6.9); the Blob model PR of P4
 (#1260, the fourth) re-verified, implemented and reviewed on 2026-10-06, with three interim
-choices pending owner confirmation (§7, §6.4, §6.5, §6.6, §6.9) ·
+choices pending owner confirmation (§7, §6.4, §6.5, §6.6, §6.9); the Sql model PR
+of P4 (#1260, the fifth and last) re-verified and implemented on 2026-10-06, with the
+closed-database fix and the worker's release hook (§7, §6.4, §6.5, §6.7, §6.9) ·
 **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
 · **Owner decision:** O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md` · **Supersedes:** #1232
@@ -222,12 +224,12 @@ interface is deleted in P6.
 | 3 | `IDatabaseApplicationBuilder` | Database `:7` | area root | keep | Retyped: `AddEngine(DatabaseEngine)` and `AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine>)`. | P6 |
 | 4 | `IDatabaseApplicationContext` | Database `:6` | area root | keep | `Engines` becomes `IReadOnlyList<DatabaseEngine>`, `Servers` becomes `IReadOnlyList<DatabaseServer>`, and `GetEngine` returns `DatabaseEngine`. Adds a static extension `GetEngine<TEngine>(name) where TEngine : DatabaseEngine`. | P6 |
 | 5 | `IDatabaseEngine` | Database `:29` | area root | abstract | `public abstract class DatabaseEngine : IAsyncDisposable, IDisposable`, with a protected constructor taking the name and model. `Name`, `Model`, `State`, `Workers` and `Servers` are non-virtual and field-backed. `protected` non-virtual `AttachWorker` and `AttachServer` are refused after `CompleteComposition()` (§6.5). NVI create, open, drop, list and try-get members call `*Core` members. A non-virtual `DisposeAsync` keeps the order servers, then workers, then `DisposeAsyncCore`. Leaves add `public new ValueTask<SqlDatabase> OpenDatabaseAsync(...)` over the base NVI member. **At P3 (re-verified):** the interface had gained `OfflineDatabases` (#1243) after the plan; it is the base's one abstract public member, state the leaf computes (rule 4). `Workers` is typed `IReadOnlyList<DatabaseEngineWorker>` and `Servers` `IReadOnlyList<DatabaseServer>`, published copies replaced on each attach. `AttachWorker` starts the worker's pump thread at once, as every engine did, and carries the checks the engines and `DatabaseEngineBuilderState` made: unique worker names (Sql and KeyValuePair checked them), no product attached twice, a server that fronts this engine. The disposal order is servers (last attached first), then every pump stopped and joined, then the workers (last attached first), then `DisposeAsyncCore`, continuing past failures into one `AggregateException`. The engines' pump frame and state fold (`shared/DatabaseEngineWorkerPump.cs`) moved into the base; the shared copy cannot be deleted in P3, because no model engine derives from the base yet and the root may grant no model its internals, so each model stops compiling it in its P4 PR and the last deletes it. **P3 review:** every NVI member checks the name, then disposal, then the token before its core; `GetDatabasesAsync` makes both checks when it is called (the models made the disposal check at the first `MoveNextAsync`), and the constructor rejects a blank name, which every model's options accept today. §6.4 lists these with the other P4 changes. | P3/P6 |
-| 6 | `IDatabaseEngineBuilder` | Database `:7` | area root | delete | Five `public sealed <Model>DatabaseEngineBuilder` types with internal constructors, typed `AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker>)` and `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)`, and a `Build()` that returns the model engine. Shared logic moves to `DatabaseEngineBuilderState<TEngine>` (P4.0). **At P4.0 (re-verified):** the state is `DatabaseEngineBuilderState<TEngine, TWorker, TServer>`, not `<TEngine>`. The factories are typed `Func<TEngine, TWorker>` and `Func<TEngine, TServer>`, but the products cannot be fixed to the bases yet: a model that has not adopted them composes `IDatabaseEngineWorker` and `IDatabaseServer` (its servers and its tests' worker and server doubles implement only the interfaces), the one that has composes `DatabaseEngineWorker` and `DatabaseServer`, and during P4 both kinds compile the same shared file. The constraints are `TEngine : class, IDatabaseEngine`, `TWorker : class, IDatabaseEngineWorker` and `TServer : class, IDatabaseServer`, which the bases satisfy until P6. `Complete` takes the leaf's internal compose method (§6.5); a bridge overload over the engine's two attach members serves the builders whose model has not adopted the base. P6 collapses the state to `DatabaseEngineBuilderState<TEngine> where TEngine : DatabaseEngine`, with the products fixed to the bases. **KeyValuePair at P4:** landed as planned. `KeyValueDatabaseEngineBuilder` is public sealed with an internal constructor, its state is `<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`, `AddWorker`/`AddServer` take `Func<KeyValueDatabaseEngine, DatabaseEngineWorker>`/`Func<KeyValueDatabaseEngine, DatabaseServer>` and return the builder, and `Build()` returns the engine through `_state.Complete(engine, engine.Compose)`; it implements no root interface (no Hosting code consumed `IDatabaseEngineBuilder`). **Graph at P4:** landed the same way (row 66): `GraphDatabaseEngineBuilder`, state `<GraphDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`, typed `AddWorker`/`AddServer`, `Build()` through `GraphDatabaseEngine.Compose`. **Documents at P4:** landed the same way (row 62): `DocumentDatabaseEngineBuilder`, state `<DocumentDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`, typed `AddWorker`/`AddServer` (Documents has no wire server, but the builder keeps the server factory every model's builder has), `Build()` through `DocumentDatabaseEngine.Compose`. **Blob at P4:** landed the same way (row 55): `BlobDatabaseEngineBuilder`, state `<BlobDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`, typed `AddWorker`/`AddServer`, `Build()` through `BlobDatabaseEngine.Compose`. One builder (Sql) still uses the bridge, which its PR deletes. | P4.0/P4/P6 |
-| 7 | `IDatabaseEngineWorker` | Database `:19` | area root | delete | The existing `DatabaseEngineWorker` (`DatabaseEngineWorker.cs:64`) is already mostly NVI: #1268 and its review landed a non-virtual `Run` (`:146`) and `RunIteration` (`:207`) over `protected abstract void RunIterationCore` (`:230`), with the per-database failure record (`protected` non-virtual `BeginDatabase`, `ReportFailure` and `ReportUnfinished`, `:242-329`), `Fault`, `ConsecutiveFailures`, `FailureCount` and `FailureBackoff`. The review changed the core from `bool` to `void`: a pass reports unfinished work per database (`ReportUnfinished`), so the return value carried nothing. P3 still makes `Name`, `Kind` and `Interval` set by the constructor and non-virtual (abstract today, `:102-108`). The trigger wait (`:350`) stays a `protected virtual` lifecycle hook; the checkpoint, purge and write-ahead flush workers override it (`*WriteAheadFlushWorker.cs:54`). P3 also moves the engines' shared pump and state fold (`shared/DatabaseEngineWorkerPump.cs`, compiled into each model since #1268's review) into the root engine base. **At P3:** landed. `protected DatabaseEngineWorker(string name, DatabaseEngineWorkerKind kind, TimeSpan interval)` rejects a blank name; the interval is not validated there, because the engines validate their options and an invalid one must keep failing the way it does today. The 22 leaves pass their values to the constructor (the shared `DatabaseCheckpointWorker` names itself `{engine}/checkpoint`), so a built-in worker's cadence is captured from the engine's options when the engine is created instead of read on every trigger wait. The pump and fold are in `DatabaseEngine` (row 5); the shared copy stays until P4. **Scheduled by the P3 review:** `DatabaseEngine` disposes a worker through type tests (`is IAsyncDisposable`, `is IDisposable`), kept from the shared pump, because the model engines that compile that pump dispose the same workers (the shared `DatabaseCheckpointWorker` is `IDisposable`) and the model tests' workers implement `IDatabaseEngineWorker, IDisposable` directly. The P4 PR that deletes the shared pump gives the worker base a non-virtual disposal over a `protected virtual DisposeAsyncCore` lifecycle hook (rule 4), moves `DatabaseCheckpointWorker`'s `Dispose` body into it, and replaces the type tests with the call. The hook's entry point should be `internal` to the root, not public: `DatabaseEngine.Workers` is public, and a public `DisposeAsync` would let outside code dispose a worker the engine still pumps. **KeyValuePair at P4:** a single shared file cannot be left out of one consumer's `CohesionSharedSource` (the link is the whole `shared/` folder, and the per-file item is marked not ready), so `shared/DatabaseEngineWorkerPump.cs` is wrapped in `#if !COHESION_DATABASE_ENGINE_PUMP_IN_BASE`, and a model that adopts the engine base defines the constant in its csproj; KeyValuePair does. The last model PR deletes the file and the constant, and the disposal hook above stays scheduled for it: the type tests keep disposing KeyValuePair's checkpointer through `IDisposable`. A test worker that implemented only `IDatabaseEngineWorker` (`KeyValueWorkerResilienceTests`' `EscapingWorker`) cannot be registered through the typed `AddWorker`, so it derives from the base and its first pass throws instead of its loop. **Graph at P4:** the Graph csproj defines the constant too, and the base's type tests dispose Graph's checkpointer (the shared `DatabaseCheckpointWorker`) through `IDisposable`; `GraphWorkerResilienceTests`' `EscapingWorker` moved to the base the same way, and the builder tests' interface-only `RecordingWorker` became a base worker (§6.9). **Documents at P4:** the Documents csproj defines the constant too, and the base's type tests dispose Documents' checkpointer (the shared `DatabaseCheckpointWorker`) through `IDisposable`; `DocumentWorkerResilienceTests`' `EscapingWorker` moved to the base, and the builder tests' interface-only `RecordingWorker` became a base worker (§6.9). **Blob at P4:** the Blob csproj defines the constant too, and the base's type tests dispose Blob's checkpointer (the shared `DatabaseCheckpointWorker`) through `IDisposable`; `BlobWorkerResilienceTests`' `EscapingWorker` moved to the base, and the builder tests' interface-only `RecordingWorker` became a base worker (§6.9). Sql's PR, the last, deletes the file and the constant and gives the worker base its disposal hook. | P3 (NVI)/P6 |
-| 8 | `IDatabaseSchemaProvisioner` | Database `:7` | area root | delete | Folded into `DatabaseInstance`: a non-virtual `public bool SupportsSchemaProvisioning`, set by `protected DatabaseInstance(Name name, DatabaseEngine engine, bool supportsSchemaProvisioning = false)` (rule 6), and an NVI `ApplySchemaAsync` that throws `NotSupportedException` while the flag is `false` and otherwise calls a `protected virtual ApplySchemaCoreAsync` whose default throws `NotSupportedException`. It is the only capability member on `DatabaseInstance`. **Bridge:** Hosting's type test (`Hosting/src/Internal/DefaultDatabaseProvisioner.cs:49`) still needs the interface until P6, and the Sql PR of P4 deletes `ISqlDatabase` (`Sql/src/Abstractions/ISqlDatabase.cs:6`), which is how `SqlDatabase` carries it today. So `SqlDatabase` keeps `IDatabaseSchemaProvisioner` in its base list until P6, implemented by the inherited NVI member. Only Sql claims the interface, as today, and the SampleHost provisioning test stays green. P6 deletes it and turns the type test into a flag check. **At P3:** landed as planned; `DatabaseInstance` does not list `IDatabaseSchemaProvisioner`. `ApplySchemaAsync` checks disposal, a null schema, the capability and the token, in that order, before the core. | P3/P6 |
-| 9 | `IDatabaseServer` | Database `:26` | area root | abstract | `public abstract class DatabaseServer : IAsyncDisposable`, with a protected constructor taking the engine. `Engine` is non-virtual and field-backed (replacing `Context.Engine`), and leaves re-expose it typed with `new`. NVI `StartAsync` and `StopAsync`, with a state guard, call `StartCoreAsync` and `StopCoreAsync`. `public abstract IReadOnlyCollection<DatabaseServerSession> Sessions`. During the bridge, `Context` stays a temporary abstract member (row 10). **At P3 (re-verified):** the state guard is the lifecycle the Sql, KeyValuePair and Graph servers each carried (a lifecycle gate; created inert; a start while running returns; a failed start and any stop are terminal; a start after them throws `ObjectDisposedException`; stop is idempotent and runs for a server that never started, so the leaf releases its listener). `DisposeAsync` is the non-virtual stop. `Context` is public abstract until P6. **Corrected by the P3 review:** Blob's server differs on one path. It refuses a start while its engine is not `Running` ("The Blob engine is {State} and cannot accept sessions.") before it marks itself stopped, so the server stays inert: a later start can retry, and a later stop still disposes `options.Listener`. Under the base every start that throws is terminal and a later stop skips `StopCoreAsync`, so the Blob PR's `StartCoreAsync` disposes the listener before it rethrows that refusal, and adds a test (a start refused while the engine is `Faulted`, then `DisposeAsync` disposes the listener). Retry after a refused start is lost; keeping it would need a non-terminal refusal path in the base, an owner decision (§7, P3 owner questions). **Blob at P4 (re-verified, then landed):** the refusal was as described (`Server/BlobDatabaseServer.cs:104`, inside the server's own lifecycle gate, before it marked itself stopped). `BlobDatabaseServer` is a sealed leaf of the base: `StartCoreAsync` checks the engine's state first and disposes `options.Listener` before it throws the refusal ("The Blob engine is {State} and cannot accept sessions."), as a bind failure already did; `StopCoreAsync` keeps the model's drain of sessions and rejections and its rethrow of an accept-loop failure after the drain. A later start throws `ObjectDisposedException` and a later stop or disposal releases nothing more (`BlobDatabaseServerTests.StartAsync_EngineFaulted_ShouldDisposeTheListenerAndStayStopped`: a `Faulted` engine, the listener disposed once and never bound). The terminal refusal is the interim choice, pending owner confirmation (§7, Blob decision 31). The server's `Engine` is re-exposed typed with `new`, and `Sessions` is the base's abstract getter (the tests read it instead of `Context.Sessions`). | P3/P6 |
+| 6 | `IDatabaseEngineBuilder` | Database `:7` | area root | delete | Five `public sealed <Model>DatabaseEngineBuilder` types with internal constructors, typed `AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker>)` and `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)`, and a `Build()` that returns the model engine. Shared logic moves to `DatabaseEngineBuilderState<TEngine>` (P4.0). **At P4.0 (re-verified):** the state is `DatabaseEngineBuilderState<TEngine, TWorker, TServer>`, not `<TEngine>`. The factories are typed `Func<TEngine, TWorker>` and `Func<TEngine, TServer>`, but the products cannot be fixed to the bases yet: a model that has not adopted them composes `IDatabaseEngineWorker` and `IDatabaseServer` (its servers and its tests' worker and server doubles implement only the interfaces), the one that has composes `DatabaseEngineWorker` and `DatabaseServer`, and during P4 both kinds compile the same shared file. The constraints are `TEngine : class, IDatabaseEngine`, `TWorker : class, IDatabaseEngineWorker` and `TServer : class, IDatabaseServer`, which the bases satisfy until P6. `Complete` takes the leaf's internal compose method (§6.5); a bridge overload over the engine's two attach members serves the builders whose model has not adopted the base. P6 collapses the state to `DatabaseEngineBuilderState<TEngine> where TEngine : DatabaseEngine`, with the products fixed to the bases. **KeyValuePair at P4:** landed as planned. `KeyValueDatabaseEngineBuilder` is public sealed with an internal constructor, its state is `<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`, `AddWorker`/`AddServer` take `Func<KeyValueDatabaseEngine, DatabaseEngineWorker>`/`Func<KeyValueDatabaseEngine, DatabaseServer>` and return the builder, and `Build()` returns the engine through `_state.Complete(engine, engine.Compose)`; it implements no root interface (no Hosting code consumed `IDatabaseEngineBuilder`). **Graph at P4:** landed the same way (row 66): `GraphDatabaseEngineBuilder`, state `<GraphDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`, typed `AddWorker`/`AddServer`, `Build()` through `GraphDatabaseEngine.Compose`. **Documents at P4:** landed the same way (row 62): `DocumentDatabaseEngineBuilder`, state `<DocumentDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`, typed `AddWorker`/`AddServer` (Documents has no wire server, but the builder keeps the server factory every model's builder has), `Build()` through `DocumentDatabaseEngine.Compose`. **Blob at P4:** landed the same way (row 55): `BlobDatabaseEngineBuilder`, state `<BlobDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`, typed `AddWorker`/`AddServer`, `Build()` through `BlobDatabaseEngine.Compose`. **Sql at P4:** landed the same way (row 83): `SqlDatabaseEngineBuilder`, state `<SqlDatabaseEngine, DatabaseEngineWorker, DatabaseServer>`, typed `AddWorker`/`AddServer`, `Build()` through `SqlDatabaseEngine.Compose`. It was the last builder on the bridge, so the Sql PR deleted the bridge overload of `Complete` and its `ThrowIfAttached` helper (§6.5); the state's constraints stay the root interfaces until P6, as planned. | P4.0/P4/P6 |
+| 7 | `IDatabaseEngineWorker` | Database `:19` | area root | delete | The existing `DatabaseEngineWorker` (`DatabaseEngineWorker.cs:64`) is already mostly NVI: #1268 and its review landed a non-virtual `Run` (`:146`) and `RunIteration` (`:207`) over `protected abstract void RunIterationCore` (`:230`), with the per-database failure record (`protected` non-virtual `BeginDatabase`, `ReportFailure` and `ReportUnfinished`, `:242-329`), `Fault`, `ConsecutiveFailures`, `FailureCount` and `FailureBackoff`. The review changed the core from `bool` to `void`: a pass reports unfinished work per database (`ReportUnfinished`), so the return value carried nothing. P3 still makes `Name`, `Kind` and `Interval` set by the constructor and non-virtual (abstract today, `:102-108`). The trigger wait (`:350`) stays a `protected virtual` lifecycle hook; the checkpoint, purge and write-ahead flush workers override it (`*WriteAheadFlushWorker.cs:54`). P3 also moves the engines' shared pump and state fold (`shared/DatabaseEngineWorkerPump.cs`, compiled into each model since #1268's review) into the root engine base. **At P3:** landed. `protected DatabaseEngineWorker(string name, DatabaseEngineWorkerKind kind, TimeSpan interval)` rejects a blank name; the interval is not validated there, because the engines validate their options and an invalid one must keep failing the way it does today. The 22 leaves pass their values to the constructor (the shared `DatabaseCheckpointWorker` names itself `{engine}/checkpoint`), so a built-in worker's cadence is captured from the engine's options when the engine is created instead of read on every trigger wait. The pump and fold are in `DatabaseEngine` (row 5); the shared copy stays until P4. **Scheduled by the P3 review:** `DatabaseEngine` disposes a worker through type tests (`is IAsyncDisposable`, `is IDisposable`), kept from the shared pump, because the model engines that compile that pump dispose the same workers (the shared `DatabaseCheckpointWorker` is `IDisposable`) and the model tests' workers implement `IDatabaseEngineWorker, IDisposable` directly. The P4 PR that deletes the shared pump gives the worker base a non-virtual disposal over a `protected virtual DisposeAsyncCore` lifecycle hook (rule 4), moves `DatabaseCheckpointWorker`'s `Dispose` body into it, and replaces the type tests with the call. The hook's entry point should be `internal` to the root, not public: `DatabaseEngine.Workers` is public, and a public `DisposeAsync` would let outside code dispose a worker the engine still pumps. **KeyValuePair at P4:** a single shared file cannot be left out of one consumer's `CohesionSharedSource` (the link is the whole `shared/` folder, and the per-file item is marked not ready), so `shared/DatabaseEngineWorkerPump.cs` is wrapped in `#if !COHESION_DATABASE_ENGINE_PUMP_IN_BASE`, and a model that adopts the engine base defines the constant in its csproj; KeyValuePair does. The last model PR deletes the file and the constant, and the disposal hook above stays scheduled for it: the type tests keep disposing KeyValuePair's checkpointer through `IDisposable`. A test worker that implemented only `IDatabaseEngineWorker` (`KeyValueWorkerResilienceTests`' `EscapingWorker`) cannot be registered through the typed `AddWorker`, so it derives from the base and its first pass throws instead of its loop. **Graph at P4:** the Graph csproj defines the constant too, and the base's type tests dispose Graph's checkpointer (the shared `DatabaseCheckpointWorker`) through `IDisposable`; `GraphWorkerResilienceTests`' `EscapingWorker` moved to the base the same way, and the builder tests' interface-only `RecordingWorker` became a base worker (§6.9). **Documents at P4:** the Documents csproj defines the constant too, and the base's type tests dispose Documents' checkpointer (the shared `DatabaseCheckpointWorker`) through `IDisposable`; `DocumentWorkerResilienceTests`' `EscapingWorker` moved to the base, and the builder tests' interface-only `RecordingWorker` became a base worker (§6.9). **Blob at P4:** the Blob csproj defines the constant too, and the base's type tests dispose Blob's checkpointer (the shared `DatabaseCheckpointWorker`) through `IDisposable`; `BlobWorkerResilienceTests`' `EscapingWorker` moved to the base, and the builder tests' interface-only `RecordingWorker` became a base worker (§6.9). **Sql at P4 (the last model):** `shared/DatabaseEngineWorkerPump.cs` and the four `COHESION_DATABASE_ENGINE_PUMP_IN_BASE` defines (KeyValuePair, Graph, Documents and Blob csprojs) are deleted, and the worker base has its release hook: `protected virtual ValueTask DisposeAsyncCore()`, empty by default (rule 4, a lifecycle hook beside `WaitForTrigger`). The shared `DatabaseCheckpointWorker` overrides it with its former `Dispose` body (its lanes) and no longer implements `IDisposable`, and the engine's `IAsyncDisposable`/`IDisposable` type tests are gone. **As the review applied it, no public entry:** the worker has no public disposal and is neither `IAsyncDisposable` nor `IDisposable`. The shared `DatabaseEngineBuilderState`, compiled into each model assembly, must release a worker it refused or one a failed build left unattached, and the root grants no model its internals; it reaches the release the way it reaches the leaf's compose method. The root engine base has `protected static ValueTask ReleaseUnownedWorkerAsync(DatabaseEngineWorker)`, each model engine re-exposes it as `internal static ReleaseRefusedWorkerAsync`, and each builder passes that to `Complete(engine, engine.Compose, …ReleaseRefusedWorkerAsync)`, whose third parameter (`Func<TWorker, ValueTask>`) releases a rejected worker; a rejected server or engine is still disposed through its public disposal. A worker belongs to one engine: `AttachWorker` claims it before it starts the pump and refuses one that is not free (another engine owns it, or it was released) with `InvalidOperationException`, and a failed thread start returns it to free so the builder can release it. The owning engine's disposal releases it through the internal `ReleaseAsync` after the pumps stop, and `ReleaseUnownedWorkerAsync` does nothing on an owned worker, so code holding `DatabaseEngine.Workers` cannot release a worker at all. The hook runs at most once whichever path reaches it (`DatabaseEngineTests.DisposeAsync_Worker_ShouldBeReleasedOnceByItsOwner`, `AttachWorker_ReleasedWorker_ShouldBeRefused`, `AttachWorker_WorkerAnotherEngineOwns_ShouldBeRefused`). As the implementer first landed it, the worker was `IAsyncDisposable` with a public, ownership-guarded `DisposeAsync`, and `AttachWorker` marked it owned only after the pump started and accepted a worker that was not free; both reviews showed the internal-only shape needs no grant (§7, "Sql, as landed", "Review, as applied"). The model and root tests' `RecordingWorker` doubles count releases in the hook instead of implementing `IDisposable` (§6.9). | P3 (NVI)/P6 |
+| 8 | `IDatabaseSchemaProvisioner` | Database `:7` | area root | delete | Folded into `DatabaseInstance`: a non-virtual `public bool SupportsSchemaProvisioning`, set by `protected DatabaseInstance(Name name, DatabaseEngine engine, bool supportsSchemaProvisioning = false)` (rule 6), and an NVI `ApplySchemaAsync` that throws `NotSupportedException` while the flag is `false` and otherwise calls a `protected virtual ApplySchemaCoreAsync` whose default throws `NotSupportedException`. It is the only capability member on `DatabaseInstance`. **Bridge:** Hosting's type test (`Hosting/src/Internal/DefaultDatabaseProvisioner.cs:49`) still needs the interface until P6, and the Sql PR of P4 deletes `ISqlDatabase` (`Sql/src/Abstractions/ISqlDatabase.cs:6`), which is how `SqlDatabase` carries it today. So `SqlDatabase` keeps `IDatabaseSchemaProvisioner` in its base list until P6, implemented by the inherited NVI member. Only Sql claims the interface, as today, and the SampleHost provisioning test stays green. P6 deletes it and turns the type test into a flag check. **At P3:** landed as planned; `DatabaseInstance` does not list `IDatabaseSchemaProvisioner`. `ApplySchemaAsync` checks disposal, a null schema, the capability and the token, in that order, before the core. **Sql at P4:** landed as planned: `SqlDatabase` passes `supportsSchemaProvisioning: true`, overrides `ApplySchemaCoreAsync` (the offline refusal, `COHSQLT004`, then the provisioner) and lists `IDatabaseSchemaProvisioner` after `DatabaseInstance`, implemented by the inherited `ApplySchemaAsync`. Hosting's type test still finds it, and the SampleHost provisioning test passes (§7). | P3/P6 |
+| 9 | `IDatabaseServer` | Database `:26` | area root | abstract | `public abstract class DatabaseServer : IAsyncDisposable`, with a protected constructor taking the engine. `Engine` is non-virtual and field-backed (replacing `Context.Engine`), and leaves re-expose it typed with `new`. NVI `StartAsync` and `StopAsync`, with a state guard, call `StartCoreAsync` and `StopCoreAsync`. `public abstract IReadOnlyCollection<DatabaseServerSession> Sessions`. During the bridge, `Context` stays a temporary abstract member (row 10). **At P3 (re-verified):** the state guard is the lifecycle the Sql, KeyValuePair and Graph servers each carried (a lifecycle gate; created inert; a start while running returns; a failed start and any stop are terminal; a start after them throws `ObjectDisposedException`; stop is idempotent and runs for a server that never started, so the leaf releases its listener). `DisposeAsync` is the non-virtual stop. `Context` is public abstract until P6. **Corrected by the P3 review:** Blob's server differs on one path. It refuses a start while its engine is not `Running` ("The Blob engine is {State} and cannot accept sessions.") before it marks itself stopped, so the server stays inert: a later start can retry, and a later stop still disposes `options.Listener`. Under the base every start that throws is terminal and a later stop skips `StopCoreAsync`, so the Blob PR's `StartCoreAsync` disposes the listener before it rethrows that refusal, and adds a test (a start refused while the engine is `Faulted`, then `DisposeAsync` disposes the listener). Retry after a refused start is lost; keeping it would need a non-terminal refusal path in the base, an owner decision (§7, P3 owner questions). **Blob at P4 (re-verified, then landed):** the refusal was as described (`Server/BlobDatabaseServer.cs:104`, inside the server's own lifecycle gate, before it marked itself stopped). `BlobDatabaseServer` is a sealed leaf of the base: `StartCoreAsync` checks the engine's state first and disposes `options.Listener` before it throws the refusal ("The Blob engine is {State} and cannot accept sessions."), as a bind failure already did; `StopCoreAsync` keeps the model's drain of sessions and rejections and its rethrow of an accept-loop failure after the drain. A later start throws `ObjectDisposedException` and a later stop or disposal releases nothing more (`BlobDatabaseServerTests.StartAsync_EngineFaulted_ShouldDisposeTheListenerAndStayStopped`: a `Faulted` engine, the listener disposed once and never bound). The terminal refusal is the interim choice, pending owner confirmation (§7, Blob decision 31). The server's `Engine` is re-exposed typed with `new`, and `Sessions` is the base's abstract getter (the tests read it instead of `Context.Sessions`). **Sql at P4:** `SqlDatabaseServer` is a sealed leaf of the base. Its lifecycle was one of the three the base's guard came from and it refused no start for the engine's state, so no lifecycle behavior changed and interim decision 31 does not reach it: `StartCoreAsync` binds the listener (a bind failure still disposes it before it propagates) and starts the accept loop; `StopCoreAsync` keeps the drain, the hard abort after `ShutdownDrainTimeout` and the listener's release last. `Engine` is re-exposed typed with `new`, `Sessions` overrides the base's getter (the server tests and `SqlClientTests` read it instead of `Context.Sessions`), and `Context` stays for the bridge until P6 (row 10). | P3/P6 |
 | 10 | `IDatabaseServerContext` | Database `:16` | area root | delete | `Engine` and `Sessions` fold into `DatabaseServer`. The four context classes (`Blob`, `Graph`, `KeyValuePair`, `Sql` `Internal/*DatabaseServerContext.cs:9`) and five test-double contexts are deleted **in P6**, because Hosting reads `server.Context.Engine` until P6 retypes it. | P6 |
-| 11 | `IDatabaseServerSession` | Database `:11` | area root | abstract | `public abstract class DatabaseServerSession`, with a protected constructor taking `(Guid, ProtocolVersion, string? principal)` that backs non-virtual getters. `public abstract DatabaseSession? DatabaseSession`. Leaves stay internal sealed. **Corrected at P3:** a server session exists from accept, before its handshake (`Start` runs the pump), and its four leaves set `ProtocolVersion` during the handshake and `Principal` after authentication. So the protected constructor takes nothing and generates the `Id` (every leaf did `Guid.NewGuid()`), and the version and principal are base fields set once through protected, non-virtual `SetNegotiatedVersion` and `SetAuthenticatedPrincipal` (rule 6). Disposal is a non-virtual `DisposeAsync` over `protected abstract DisposeAsyncCore`. This follows rule 6's second sentence (state changes go through protected, non-virtual methods on the base) but not its list, which names the protocol version and principal among the values fixed at construction. The rule file is binding and changing it is an owner decision recorded in O34a, so P3 does not edit it; the amendment is an open owner question (§7). **Blob at P4:** `BlobDatabaseServerSession` is an internal sealed leaf; its handshake records the negotiated version and the authenticated principal through the base's one-shot setters, as the KeyValuePair and Graph leaves do (the interim choice, pending owner confirmation, §7, Blob decision 30), and its `DatabaseSession` is a covariant `BlobDatabaseSession?` override. | P3/P6 |
+| 11 | `IDatabaseServerSession` | Database `:11` | area root | abstract | `public abstract class DatabaseServerSession`, with a protected constructor taking `(Guid, ProtocolVersion, string? principal)` that backs non-virtual getters. `public abstract DatabaseSession? DatabaseSession`. Leaves stay internal sealed. **Corrected at P3:** a server session exists from accept, before its handshake (`Start` runs the pump), and its four leaves set `ProtocolVersion` during the handshake and `Principal` after authentication. So the protected constructor takes nothing and generates the `Id` (every leaf did `Guid.NewGuid()`), and the version and principal are base fields set once through protected, non-virtual `SetNegotiatedVersion` and `SetAuthenticatedPrincipal` (rule 6). Disposal is a non-virtual `DisposeAsync` over `protected abstract DisposeAsyncCore`. This follows rule 6's second sentence (state changes go through protected, non-virtual methods on the base) but not its list, which names the protocol version and principal among the values fixed at construction. The rule file is binding and changing it is an owner decision recorded in O34a, so P3 does not edit it; the amendment is an open owner question (§7). **Blob at P4:** `BlobDatabaseServerSession` is an internal sealed leaf; its handshake records the negotiated version and the authenticated principal through the base's one-shot setters, as the KeyValuePair and Graph leaves do (the interim choice, pending owner confirmation, §7, Blob decision 30), and its `DatabaseSession` is a covariant `BlobDatabaseSession?` override. **Sql at P4:** `SqlDatabaseServerSession` is an internal sealed leaf on the same terms: the handshake records the version and the principal through the one-shot setters (interim decision 30), and its `DatabaseSession` is a covariant `SqlDatabaseSession?` override. | P3/P6 |
 | 12 | `IDatabaseSession` | Database `:19` | area root | abstract | `public abstract class DatabaseSession : IAsyncDisposable`. The base owns `State`, `CurrentTransaction` and the one "already active" check, with one message (§6.4). `Database` is non-virtual and field-backed, and leaves re-expose it typed with `new`. NVI `BeginTransactionAsync` and `ExecuteAsync` call `BeginTransactionCoreAsync(IsolationLevel)` and `ExecuteCoreAsync`. **At P3:** landed (§6.4). `Database` is typed `DatabaseInstance`; both `ExecuteAsync` overloads have a core. The session also owns the reservation of a BEGIN in flight and, for models whose sessions run one operation at a time, a protected operation hold (`TryEnterOperation`/`ExitOperation`) that the "already active" check reads, and its teardown order: the leaf's `DisposeAsyncCore` ends its running operations, then the base ends the open transaction. | P3/P6 |
 | 13 | `IDatabaseTransaction` | Database `:18` | area root | abstract | `public abstract class DatabaseTransaction : IAsyncDisposable`, with a protected constructor taking `(TransactionId, IsolationLevel)`. It owns the explicit-transaction state machine (§6.4). NVI `CommitAsync` and `RollbackAsync` call `CommitCoreAsync` and `RollbackCoreAsync`. A non-virtual `DisposeAsync` rolls back if the transaction is active, then calls `DisposeAsyncCore`. **At P3:** landed (§6.4). The cores take no token: the base observes it only before an end starts. The leaf's other vocabulary is `GetKernelState`, `GetOfflineRefusal` and `CreateAbortedException`; `DisposeAsyncCore` is a `protected virtual` lifecycle hook with an empty default, run once. | P3/P6 |
 | 14 | `IQueryExecutor` | Execution `:13` | child root | delete | `SqlQueryExecutor` stays internal sealed. **At P1:** its public `ExecuteAsync(QueryRequest, CancellationToken)`, which only threw `NotSupportedException` to satisfy the interface, went with it. | P1 |
@@ -297,27 +299,27 @@ interface is deleted in P6.
 | 78 | `IKeyValueClient` | KeyValuePair.Client `:20` | client | sealed | `public sealed class KeyValueClient`. It absorbs the static class (`KeyValueClient.cs:11`). | P5 |
 | 79 | `IKeyValueClientObserver` | KeyValuePair.Client `:18` | client | abstract | `public abstract class KeyValueClientObserver`, with a protected constructor. Its hooks are `protected internal virtual` with empty bodies. | P5 |
 | 80 | `IKeyValueConnection` | KeyValuePair.Client `:24` | client | sealed | `public sealed class KeyValueConnection`, with an internal constructor. | P5 |
-| 81 | `ISqlAggregateExpression` | Sql `:9` | model | sealed | `public sealed class SqlAggregateExpression`, with get-only `SourceType`, `Selector` and `Predicate` and an internal constructor. Not a record: the current type is a positional record (`Internal/SqlAggregateExpression.cs:9`), and a public one would expose a public `with` that clones around validation (C7). `Sql.Sum` (`Sql.cs:23`) returns it. | P4 |
-| 82 | `ISqlDatabase` | Sql `:6` | model | sealed | `public sealed class SqlDatabase : DatabaseInstance`, which passes `supportsSchemaProvisioning: true` to the base constructor and overrides `ApplySchemaCoreAsync`. Until P6 it also lists `IDatabaseSchemaProvisioner` (row 8). | P4 |
-| 83 | `ISqlDatabaseEngineBuilder` | Sql `:10` | model | sealed | `public sealed class SqlDatabaseEngineBuilder`, with an internal constructor and a typed `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)` (D5). `ExternalEngineBuilder` (`tests/SqlExpressionDepthExecutionTests.cs:1230`) is deleted, and its `ExpressionNestingLimit` cases (32 to 4096, checked in `Build()`) are retested against the sealed builder. | P4 |
-| 84 | `ISqlStorageStrategy` | Sql `:13` | model | abstract *(internal)* | `internal abstract class SqlStorageStrategy`, with an internal option property. The crash doubles derive through the existing grant. `CrashCaptureSqlStorageStrategy` is `public sealed` today (`tests/TestObjects/CrashCaptureSqlStorageStrategy.cs:20`) and becomes `internal sealed`, because a public class cannot derive from an internal one (CS0060); only Sql.Tests uses it. | P4 |
-| 85 | `ISqlCatalog` | Sql.Catalog `:23` | model child | sealed | `public sealed class SqlCatalog`. It absorbs the static class (`SqlCatalog.cs:25`, `Open` at `:33` and `:53`), and `CaptureSnapshot` (`:72`) becomes an instance method. | P4 |
-| 86 | `ISqlCatalogSnapshot` | Sql.Catalog `:14` | model child | sealed | `public sealed class SqlCatalogSnapshot`, with an internal constructor. | P4 |
-| 87 | `ISqlSchemaBuilder` | Sql.Schema `:9` | model child | sealed | `public sealed class SqlSchemaBuilder`, with an internal constructor. `Table<T>` is a non-virtual generic method. The SDK constant (`CSharpSchemaExtractor.cs:20`) changes in the same commit. | P4 |
-| 88 | `ISqlTableBuilder<TRow>` | Sql.Schema `:8` | model child | sealed | `public sealed class SqlTableBuilder<TRow>`. The SDK constants (`CSharpSchemaExtractor.cs:21`, `:729-730`) change in lockstep. | P4 |
-| 89 | `ISqlTypeBuilder` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlTypeBuilder`, with the SDK constant at `:22`. | P4 |
-| 90 | `ISqlPrincipalBuilder` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlPrincipalBuilder`, with the SDK constant at `:23`. | P4 |
-| 91 | `ISqlTriggerContext` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlTriggerContext`, with a private constructor. It is a phantom that appears only inside trigger expression trees. The canonicalizer string (`CSharpExpressionCanonicalizer.cs:480`) changes in lockstep. | P4 |
-| 92 | `ISqlSchema` | Sql.Schema `:9` | model child | sealed | An opaque `public sealed class SqlSchema` that exposes `Name` and `Compile()` (§6.7). | P4 |
-| 93 | `ISqlSchemaTable` | Sql.Schema `:7` | model child | delete | The internal record (`Internal/SqlSchemaBuilder.cs:228`) stays internal behind `SqlSchema`. | P4 |
-| 94 | `ISqlSchemaType` | Sql.Schema `:6` | model child | delete | The internal record (`:148`) stays internal. | P4 |
-| 95 | `ISqlSchemaColumn` | Sql.Schema `:6` | model child | delete | The internal record (`:239`) stays internal. | P4 |
-| 96 | `ISqlSchemaExtension` | Sql.Schema `:4` | model child | delete | The internal record (`:241`) stays internal. | P4 |
-| 97 | `ISqlSchemaFunction` | Sql.Schema `:6` | model child | delete | The internal record (`:243`) stays internal. | P4 |
-| 98 | `ISqlSchemaGrant` | Sql.Schema `:6` | model child | delete | The internal record (`:289`) stays internal. | P4 |
-| 99 | `ISqlSchemaPrincipal` | Sql.Schema `:6` | model child | delete | The internal record (`:285`) stays internal. | P4 |
-| 100 | `ISqlSchemaReference` | Sql.Schema `:6` | model child | delete | The internal record (`:237`) stays internal. | P4 |
-| 101 | `ISqlSchemaTrigger` | Sql.Schema `:7` | model child | delete | The internal record (`:245`) stays internal. | P4 |
+| 81 | `ISqlAggregateExpression` | Sql `:9` | model | sealed | `public sealed class SqlAggregateExpression`, with get-only `SourceType`, `Selector` and `Predicate` and an internal constructor. Not a record: the current type is a positional record (`Internal/SqlAggregateExpression.cs:9`), and a public one would expose a public `with` that clones around validation (C7). `Sql.Sum` (`Sql.cs:23`) returns it. **At P4 (re-verified, then landed):** the interface was `Abstractions/ISqlAggregateExpression.cs` over the internal positional record, as listed. The record became `src/SqlAggregateExpression.cs`, a public sealed class with the three get-only properties and an internal constructor; `Sql.Sum` (now `Sql.cs:21`) returns it (§5.2), and its consumers read the same three properties. | P4 |
+| 82 | `ISqlDatabase` | Sql `:6` | model | sealed | `public sealed class SqlDatabase : DatabaseInstance`, which passes `supportsSchemaProvisioning: true` to the base constructor and overrides `ApplySchemaCoreAsync`. Until P6 it also lists `IDatabaseSchemaProvisioner` (row 8). **At P4 (re-verified, then landed):** promoted from `Internal/SqlDatabaseInstance.cs` (internal sealed, implementing `ISqlDatabase : IDatabase, IDatabaseSchemaProvisioner`) to `src/SqlDatabase.cs` in the `RootNamespace`, with an internal constructor that takes the typed engine; the base owns the name, the engine (re-exposed typed with `new`) and the disposed flag, and the model's `Dispose`/`DisposeAsync` became `DisposeCore`/`DisposeAsyncCore`. `CreateSessionAsync` is a typed `new` member over the base's NVI member (the offline refusal in the core), and `IsClosed` (internal) reads the disposed flag for the closed-database fix (§6.4). The session and transaction became public sealed leaves (`SqlDatabaseSession : DatabaseSession`, `SqlDatabaseTransaction : DatabaseTransaction`, rows 12 and 13), the server derives from `DatabaseServer` (row 9), and the server session is an internal sealed leaf (row 11). | P4 |
+| 83 | `ISqlDatabaseEngineBuilder` | Sql `:10` | model | sealed | `public sealed class SqlDatabaseEngineBuilder`, with an internal constructor and a typed `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)` (D5). `ExternalEngineBuilder` (`tests/SqlExpressionDepthExecutionTests.cs:1230`) is deleted, and its `ExpressionNestingLimit` cases (32 to 4096, checked in `Build()`) are retested against the sealed builder. **At P4 (re-verified, then landed):** `ExternalEngineBuilder` was at `:1230`, as listed, and is deleted with the interface. The builder left `Internal/` with the typed factories of row 6 and the deviation marker (§8); its `StorageStrategy` became internal with the option's (row 84). The retests in `SqlExpressionDepthExecutionTests`: `Create_LimitOutOfRange_ShouldThrow` drives the sealed builder too (its `Build()` refuses `int.MinValue`, 0, 31, 4097 and `int.MaxValue` with the engine's `ArgumentOutOfRangeException`, and a failed build freezes the builder), `Build_LimitAtTheRangeEnds_ShouldBuildAnEngineThatParsesWithIt` (32 and 4096) and `Builder_Limit_ShouldDefaultToTheEnginesAndReachTheEngineThroughBuild`. | P4 |
+| 84 | `ISqlStorageStrategy` | Sql `:13` | model | abstract *(internal)* | `internal abstract class SqlStorageStrategy`, with an internal option property. The crash doubles derive through the existing grant. `CrashCaptureSqlStorageStrategy` is `public sealed` today (`tests/TestObjects/CrashCaptureSqlStorageStrategy.cs:20`) and becomes `internal sealed`, because a public class cannot derive from an internal one (CS0060); only Sql.Tests uses it. **At P4 (re-verified, then landed):** `Internal/SqlStorageStrategy.cs`, with `public abstract` members like the other models' strategies; `FileSystemSqlStorageStrategy` and `InMemorySqlStorageStrategy` derive from it, and the option's and the builder's `StorageStrategy` are internal. `CrashCaptureSqlStorageStrategy` is `internal sealed`, and the test strategies derive through the existing Sql → Sql.Tests grant; no grant was added. One consumer the row missed: Hosting.Tests compiled linked copies of `FaultInjectingJournalSqlStorageStrategy` and two Storage test helpers to fault a real SQL engine, and a linked copy cannot derive from the internal base, so those Hosting tests were rewritten on Hosting's engine doubles (§6.9). | P4 |
+| 85 | `ISqlCatalog` | Sql.Catalog `:23` | model child | sealed | `public sealed class SqlCatalog`. It absorbs the static class (`SqlCatalog.cs:25`, `Open` at `:33` and `:53`), and `CaptureSnapshot` (`:72`) becomes an instance method. **At P4 (re-verified, then landed):** the static class had three more public statics over the interface that the row did not name, `ReserveTableAsync`, `PublishTableAsync` and `DropConstraintAsync` (`:106`, `:146`, `:169`), kept off the interface so a second implementation would not owe them; with one type they are instance members too, with the statics' documentation less their `InvalidCastException`. The internal `DefaultSqlCatalog` was folded in as `SqlCatalog.cs`, with the interface's documentation on its public members; the constructor is private behind the two `Open` overloads, and the static class's internal test helpers (`CreateSchemaTableAsync`, `CreateTableAsync` with constraints, `AddConstraintAsync`) are the instance's internal members, which the catalog's tests reach through the existing Sql.Catalog → Sql.Catalog.Tests grant. The project's `Abstractions/` folder is gone. No behavior changed: every member kept its checks. | P4 |
+| 86 | `ISqlCatalogSnapshot` | Sql.Catalog `:14` | model child | sealed | `public sealed class SqlCatalogSnapshot`, with an internal constructor. **At P4:** landed, promoted from `Internal/SqlCatalogSnapshot.cs` to the `RootNamespace` with the interface's documentation. | P4 |
+| 87 | `ISqlSchemaBuilder` | Sql.Schema `:9` | model child | sealed | `public sealed class SqlSchemaBuilder`, with an internal constructor. `Table<T>` is a non-virtual generic method. The SDK constant (`CSharpSchemaExtractor.cs:20`) changes in the same commit. **At P4 (landed):** promoted from the internal implementation to `src/SqlSchemaBuilder.cs` in the `RootNamespace`, with the interface's documentation; `Table<T>` and the other generic members are non-virtual, and the former implementation's public `AllowsDestructiveChanges` getter, which the interface did not have, is a private field. The extractor's constant (`CSharpSchemaExtractor.cs:20`) changed in the same commit. | P4 |
+| 88 | `ISqlTableBuilder<TRow>` | Sql.Schema `:8` | model child | sealed | `public sealed class SqlTableBuilder<TRow>`. The SDK constants (`CSharpSchemaExtractor.cs:21`, `:729-730`) change in lockstep. **At P4 (landed):** `src/SqlTableBuilder.cs`; the constant is `SqlTableBuilder<TRow>` and the metadata name ``SqlTableBuilder`1`` (`:21`, `:729`). `PrimaryKey` and `References<TTarget>` were explicit interface implementations (the class had a private `PrimaryKey` property); they are public members over a private field. | P4 |
+| 89 | `ISqlTypeBuilder` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlTypeBuilder`, with the SDK constant at `:22`. **At P4 (landed):** `src/SqlTypeBuilder.cs`. | P4 |
+| 90 | `ISqlPrincipalBuilder` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlPrincipalBuilder`, with the SDK constant at `:23`. **At P4 (landed):** `src/SqlPrincipalBuilder.cs`. | P4 |
+| 91 | `ISqlTriggerContext` | Sql.Schema `:6` | model child | sealed | `public sealed class SqlTriggerContext`, with a private constructor. It is a phantom that appears only inside trigger expression trees. The canonicalizer string (`CSharpExpressionCanonicalizer.cs:480`) changes in lockstep. **At P4 (landed):** `src/SqlTriggerContext.cs`; its `Audit<TValue>` throws `NotSupportedException`, never reached, because no instance exists. The runtime canonicalizer's allow-list (`SqlSchemaCompiler.cs`) and the SDK's (`CSharpExpressionCanonicalizer.cs:480`) moved together. The type identity is in a trigger's canonical text, so the hash of a schema that declares a trigger changed (§6.7). | P4 |
+| 92 | `ISqlSchema` | Sql.Schema `:9` | model child | sealed | An opaque `public sealed class SqlSchema` that exposes `Name` and `Compile()` (§6.7). **At P4 (landed):** as planned (§6.7). | P4 |
+| 93 | `ISqlSchemaTable` | Sql.Schema `:7` | model child | delete | The internal record (`Internal/SqlSchemaBuilder.cs:228`) stays internal behind `SqlSchema`. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 94 | `ISqlSchemaType` | Sql.Schema `:6` | model child | delete | The internal record (`:148`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 95 | `ISqlSchemaColumn` | Sql.Schema `:6` | model child | delete | The internal record (`:239`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 96 | `ISqlSchemaExtension` | Sql.Schema `:4` | model child | delete | The internal record (`:241`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 97 | `ISqlSchemaFunction` | Sql.Schema `:6` | model child | delete | The internal record (`:243`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 98 | `ISqlSchemaGrant` | Sql.Schema `:6` | model child | delete | The internal record (`:289`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 99 | `ISqlSchemaPrincipal` | Sql.Schema `:6` | model child | delete | The internal record (`:285`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 100 | `ISqlSchemaReference` | Sql.Schema `:6` | model child | delete | The internal record (`:237`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
+| 101 | `ISqlSchemaTrigger` | Sql.Schema `:7` | model child | delete | The internal record (`:245`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
 | 102 | `ISqlClient` | Sql.Client `:19` | client | sealed | `public sealed class SqlClient`. It absorbs the static class (`SqlClient.cs:11`). | P5 |
 | 103 | `ISqlClientObserver` | Sql.Client `:16` | client | abstract | `public abstract class SqlClientObserver`, with a protected constructor and `protected internal virtual` hooks with empty bodies. | P5 |
 | 104 | `ISqlConnection` | Sql.Client `:18` | client | sealed | `public sealed class SqlConnection`, with an internal constructor. | P5 |
@@ -344,17 +346,17 @@ decision.
 | `TransactionManager` (`TransactionManager.cs:12`, `Create` at `:40`) | `public static class`, `Create(ITransactionLog, ILockManager, IVersionStore, Func<TransactionSequence>?)` | The name passes to the public sealed `TransactionManager`. A public `Create(LockManager, VersionStore, Func<TransactionSequence>? = null)` builds a standalone, non-durable manager over an in-memory log. The durable manager is the one `TransactionCoordinator` builds. An internal overload takes a `TransactionLog`, for the coordinator and Transactions.Tests. In P1 the parameters are still the interfaces; P2 retypes them. **At P2:** retyped to `LockManager` and `VersionStore`, both overloads. | P1/P2 |
 | `TransactionLog` (`TransactionLog.cs:12`, `CreateInMemory` at `:19`, `CreateJournalBound(IStorageJournal)` at `:28`) | `public static class` | The public class is deleted. The name passes to `internal abstract class TransactionLog`, and its factories become internal statics on it. [Certain] Only tests called them: Transactions.Tests, and Indexing.Tests through the harness, which the new `Create` no longer needs. | P1 |
 | `VersionStore` (`VersionStore.cs:8`, `CreateInMemory` at `:16`) | `public static class`, returns `IVersionStore` | The name passes to `public abstract class VersionStore` (row 45), and `CreateInMemory()` stays as a static on the base. **At P2:** landed as planned. | P2 |
-| `SqlSchemaCompiler` (`Sql.Schema/src/SqlSchemaCompiler.cs:13`, `Compile(ISqlSchema, EngineModel)` at `:20`) | `public static class` | Becomes `internal static`. The public compile entry points are `SqlSchema.Compile(name, configure)` (static, unchanged) and the instance `SqlSchema.Compile()`. [Certain] Outside Sql.Schema, only Sql.Schema's own tests call it. | P4 |
+| `SqlSchemaCompiler` (`Sql.Schema/src/SqlSchemaCompiler.cs:13`, `Compile(ISqlSchema, EngineModel)` at `:20`) | `public static class` | Becomes `internal static`. The public compile entry points are `SqlSchema.Compile(name, configure)` (static, unchanged) and the instance `SqlSchema.Compile()`. [Certain] Outside Sql.Schema, only Sql.Schema's own tests call it. **At P4 (landed):** `internal static`, with `Compile(SqlSchema, EngineModel)` reading the declaration behind the opaque type; the tests reach it through the new grant (§6.9), among them the four model-mismatch cases, which no public path can reach any more (the public entry points compile for `EngineModel.Sql` only). The review moved it to `src/Internal/SqlSchemaCompiler.cs` under `Assimalign.Cohesion.Database.Sql.Schema.Internal`, as `general-rules.md`'s folder table requires of an internal type (it had stayed in the `src/` root under the public namespace). | P4 |
 | `ProtocolFraming` (`Protocol/src/ProtocolFraming.cs:11`, `CreateReader` at `:19`, `CreateWriter` at `:31`) | `public static class`, returns the frame interfaces | Deleted. The factories move onto the abstract bases (`ProtocolFrameReader.Create`, `ProtocolFrameWriter.Create`), the `Aes.Create()` shape. The callers are the four model servers, `ProtocolChannel`, two test clients and the Protocol tests. **Landed at P2:** the caller list held (the servers' at-capacity rejection writer, the Sql and KeyValuePair test protocol clients, `ProtocolFramingTests` and `ProtocolFamilyTests`). | P2 |
 | `TransactionRecovery` (`TransactionRecovery.cs:18`, `Analyze` at `:25` and `:40`) | `public static class` taking `IStorageJournal` | Kept as a public static class: it is a stateless analysis with no interface twin. The parameter is retyped to `StorageJournal`. | P1 |
-| `Sql.Sum<TSource>` (`Sql/src/Sql.cs:23`) | returns `ISqlAggregateExpression` | Returns `SqlAggregateExpression` (row 81). | P4 |
-| `<Model>DatabaseEngine.CreateBuilder()` (`SqlDatabaseEngine.cs:181`, `KeyValueDatabaseEngine.cs:152`, Graph, Documents and Blob at `:67`) | return builder interfaces | Return the sealed builders. **KeyValuePair at P4:** returns `KeyValueDatabaseEngineBuilder`. **Graph at P4:** returns `GraphDatabaseEngineBuilder`. **Documents at P4:** returns `DocumentDatabaseEngineBuilder`. **Blob at P4:** returns `BlobDatabaseEngineBuilder` (Blob's `CreateBuilder` was at `BlobDatabaseEngine.cs:134`, not `:67`). | P4 |
-| The five composition verbs `AddSql`, `AddKeyValue`, `AddGraph`, `AddDocuments` and `AddBlob` (`Extensions/SqlDatabaseApplicationExtensions.cs:16`, `KeyValueDatabaseApplicationExtensions.cs:16`, `GraphDatabaseApplicationExtensions.cs:17`, `DocumentDatabaseApplicationExtensions.cs:17`, `BlobDatabaseApplicationExtensions.cs:17`) | take `Action<IDatabaseApplicationContext, I<Model>DatabaseEngineBuilder>` | Retyped to the sealed builder in each model's PR. They stay `extension(IDatabaseApplicationBuilder)` members on the kept seam. The templates call them with untyped lambdas (`cohesion-database/Program.cs:11`), so they compile unchanged. **KeyValuePair at P4:** `AddKeyValue(Action<IDatabaseApplicationContext, KeyValueDatabaseEngineBuilder>)`; a server factory inside it needs no cast. **Graph at P4:** `AddGraph(Action<IDatabaseApplicationContext, GraphDatabaseEngineBuilder>)`. **Documents at P4:** `AddDocuments(Action<IDatabaseApplicationContext, DocumentDatabaseEngineBuilder>)`; Hosting's `DatabaseCompositionTests` call it with an untyped lambda and compile unchanged. **Blob at P4:** `AddBlob(Action<IDatabaseApplicationContext, BlobDatabaseEngineBuilder>)`; no Hosting, Embedded or Studio code calls it, and the Blob builder tests call it with untyped lambdas. | P4 |
-| `SqlDatabaseEngineFactory` (`Sql/src/SqlDatabaseEngineFactory.cs:8`) | `public static class` that forwards to `SqlDatabaseEngine.Create(options)` (`SqlDatabaseEngine.cs:163`) | Deleted in the Sql PR: rule 1 puts the factory on the type itself, which already has it. No code calls it. Its `(rootPath, engineName)` overload is not carried over, and the two doc mentions (`Database.Sql/docs/DESIGN.md:634`, `docs/programs/DATABASE_HOSTING_DESIGN.md:61`) change with it. | P4 |
+| `Sql.Sum<TSource>` (`Sql/src/Sql.cs:23`) | returns `ISqlAggregateExpression` | Returns `SqlAggregateExpression` (row 81). **At P4 (landed):** as planned. | P4 |
+| `<Model>DatabaseEngine.CreateBuilder()` (`SqlDatabaseEngine.cs:181`, `KeyValueDatabaseEngine.cs:152`, Graph, Documents and Blob at `:67`) | return builder interfaces | Return the sealed builders. **KeyValuePair at P4:** returns `KeyValueDatabaseEngineBuilder`. **Graph at P4:** returns `GraphDatabaseEngineBuilder`. **Documents at P4:** returns `DocumentDatabaseEngineBuilder`. **Blob at P4:** returns `BlobDatabaseEngineBuilder` (Blob's `CreateBuilder` was at `BlobDatabaseEngine.cs:134`, not `:67`). **Sql at P4:** returns `SqlDatabaseEngineBuilder` (Sql's `CreateBuilder` was at `SqlDatabaseEngine.cs:254`, not `:181`). | P4 |
+| The five composition verbs `AddSql`, `AddKeyValue`, `AddGraph`, `AddDocuments` and `AddBlob` (`Extensions/SqlDatabaseApplicationExtensions.cs:16`, `KeyValueDatabaseApplicationExtensions.cs:16`, `GraphDatabaseApplicationExtensions.cs:17`, `DocumentDatabaseApplicationExtensions.cs:17`, `BlobDatabaseApplicationExtensions.cs:17`) | take `Action<IDatabaseApplicationContext, I<Model>DatabaseEngineBuilder>` | Retyped to the sealed builder in each model's PR. They stay `extension(IDatabaseApplicationBuilder)` members on the kept seam. The templates call them with untyped lambdas (`cohesion-database/Program.cs:11`), so they compile unchanged. **KeyValuePair at P4:** `AddKeyValue(Action<IDatabaseApplicationContext, KeyValueDatabaseEngineBuilder>)`; a server factory inside it needs no cast. **Graph at P4:** `AddGraph(Action<IDatabaseApplicationContext, GraphDatabaseEngineBuilder>)`. **Documents at P4:** `AddDocuments(Action<IDatabaseApplicationContext, DocumentDatabaseEngineBuilder>)`; Hosting's `DatabaseCompositionTests` call it with an untyped lambda and compile unchanged. **Blob at P4:** `AddBlob(Action<IDatabaseApplicationContext, BlobDatabaseEngineBuilder>)`; no Hosting, Embedded or Studio code calls it, and the Blob builder tests call it with untyped lambdas. **Sql at P4:** `AddSql(Action<IDatabaseApplicationContext, SqlDatabaseEngineBuilder>)`. The templates, the SampleHost fixture and Hosting's tests call it with untyped lambdas and compile unchanged; the `(SqlDatabaseEngine)engine` casts inside their `AddServer` factories are identity casts now (§7). | P4 |
+| `SqlDatabaseEngineFactory` (`Sql/src/SqlDatabaseEngineFactory.cs:8`) | `public static class` that forwards to `SqlDatabaseEngine.Create(options)` (`SqlDatabaseEngine.cs:163`) | Deleted in the Sql PR: rule 1 puts the factory on the type itself, which already has it. No code calls it. Its `(rootPath, engineName)` overload is not carried over, and the two doc mentions (`Database.Sql/docs/DESIGN.md:634`, `docs/programs/DATABASE_HOSTING_DESIGN.md:61`) change with it. **At P4 (landed):** deleted as planned, with its `(rootPath, engineName)` overload; no code called it. The Sql `DESIGN.md` mention went with the nesting-limit paragraph's rewrite, and the hosting design (now `:62`) says the factory was deleted. | P4 |
 | `BlobContainerExtensions.GetOwnershipAsync` (`Blob/src/Extensions/BlobContainerExtensions.cs:13`) | `extension(IBlobContainer)` that casts to the internal implementation and throws for anything else | Folded into the sealed `BlobContainer` as an instance method, and the extension container is deleted. It existed only to avoid widening the interface, and a type in the same assembly needs no extension of itself. **At P4 (landed):** `BlobContainer.GetOwnershipAsync(CancellationToken)` is an instance member with the extension's body, its token check first included; `Extensions/BlobContainerExtensions.cs` is deleted. The extension's two refusals cannot be reached any more, so they went with it: a null container (`ArgumentNullException`) and a foreign implementation of the interface ("This blob container does not support ownership discovery."). `BlobOwnershipIntrospectionTests` and Studio's `BlobWorkspace` call the member unchanged. | P4 |
 | `DatabaseClientStreamingExtensions.ExecuteStreamingAsync` (`Client/src/Extensions/DatabaseClientStreamingExtensions.cs:13`, parameter at `:30`) | `extension(IDatabaseClient)`, taking `IDatabaseStreamingExchange` | Folded into the sealed `DatabaseClient` as an instance method taking `DatabaseStreamingExchange`, for the same reason. The extension container is deleted. | P5 |
 | `SqlProtocolConnectionExtensions.ExecuteAsync` (`Sql.Client/src/Extensions/SqlProtocolConnectionExtensions.cs:24`) | old-style `this IDatabaseConnection` extension | Stays an extension, because `DatabaseConnection` lives in Database.Client. It is retyped to `DatabaseConnection` and moves into an `extension(DatabaseConnection connection)` block (`general-rules.md`, extension containers). | P5 |
-| `SqlCatalog.CaptureSnapshot` (`:72`), `KeyValueCatalog.CaptureSnapshot` (`:41`) | static, taking the catalog interface | Instance methods on the sealed catalogs. **KeyValuePair at P4:** landed (row 76). | P4 |
+| `SqlCatalog.CaptureSnapshot` (`:72`), `KeyValueCatalog.CaptureSnapshot` (`:41`) | static, taking the catalog interface | Instance methods on the sealed catalogs. **KeyValuePair at P4:** landed (row 76). **Sql at P4:** landed with the sealed catalog (row 85); its one caller, the SQL executor's `CaptureCatalogSnapshot`, calls the instance member. | P4 |
 | `BTreeIndexManager.EnsureFormat` (`Indexing/src/BTreeIndexManager.cs:55`) | takes `IStorage` | Takes `Storage`. | P1 |
 | `BTreeIndexManagerOptions.Storage` (`Indexing/src/BTreeIndexManagerOptions.cs:16`) | `IStorage` (found at P1; the review missed it) | `Storage`. | P1 |
 | The five model storages' `WriteAheadJournal` (`SqlStorage`, `KeyValueStorage`, `GraphStorage`, `DocumentStorage`, `BlobStorage`) | return `IStorageJournal` (found at P1) | Return `StorageJournal`. Their engines pass it to the coordinator, so no call site changes. | P1 |
@@ -1095,6 +1097,155 @@ accounted for:
 - *Gone with the types, not a behavior a caller can reach:* `GetOwnershipAsync`'s refusals of a null
   container and of a foreign container implementation (§5.2).
 
+**Sql at P4 (re-verified, then landed).** The model's copy was as "SQL in P4" above lists, with
+one reading the plan had not spelled out: the session kept its transaction in a
+`Stack<SqlTransactionScope>` whose `ActiveScope` popped an entry once its kernel state left
+`Active`, so a transaction the kernel ended under its caller (its database dropped, or closed by a
+holder, while the session held it) silently stopped being the session's transaction. The
+transaction refused a commit or a rollback of an ended transaction by its kernel state ("Cannot
+commit transaction in state '…'", "Cannot rollback transaction in state '…'", so a second
+rollback failed), checked the offline database before that state, passed the commit's token to
+`TransactionCoordinator.CommitAsync`, and had no end gate. All of it is deleted, the scope stack
+with it (B7's savepoints will mark inside the one transaction; Sql `DESIGN.md`). The leaves supply
+`GetKernelState` (the MVCC context's state), `CommitCoreAsync`/`RollbackCoreAsync` (the
+coordinator calls with the model's translation: an unconfirmed commit keeps its type, a failure
+the offline storage caused becomes `COHSQLT004`, then the deadlock and the kernel abort),
+`GetOfflineRefusal` (`COHSQLT004`) and `CreateAbortedException` (`COHSQLT005`, below). SQL keeps
+its per-statement contract: a failed statement writes nothing and leaves the transaction active,
+so the model never calls `AbortAsync`, and a statement takes no session operation hold, as
+KeyValuePair's commands take none. A statement inside the transaction is admitted through
+`TryBeginOperation`/`EndOperation`, re-exposed as `TryBeginStatement`/`EndStatement`/
+`CreateStatementRefusal`, which is what refuses a commit while a statement runs. Text BEGIN,
+COMMIT and ROLLBACK keep their diagnostics where the transaction allows them: BEGIN as text on a
+session with an open transaction first asks the base whether that transaction refuses work
+(`ThrowIfTransactionRefuses`), so an aborted one answers `COHSQLT005` and an active one still
+`COHSQLT001`; COMMIT and ROLLBACK without a transaction still answer `COHSQLT002`.
+
+*The coded aborted error, chosen here as this section asked: `COHSQLT005`.* It is the next code
+of SQL's transaction family (`COHSQLT001` to `COHSQLT003` are the transaction-control
+diagnostics, `COHSQLT004` the offline refusal of #1243). Like the other models' aborted codes
+(`COHDBK001`, `COHDBG007`, `COHDBB001`) it leads a `DatabaseException`'s message in the bases'
+two wordings, "COHSQLT005: The session's transaction is aborted; statements are refused until it
+is rolled back." and, for a commit, "COHSQLT005: The session's transaction is aborted and cannot
+commit; nothing was committed.", each followed by " Cause: {message}" when the transaction
+recorded a cause (the wire carries message text, not inner exceptions). A plain
+`DatabaseException` reaches the wire as `ExecutionFailure`; `COHSQLT004`'s
+`DatabaseOfflineException` stays `Unavailable`. Rejected: reusing `COHSQLT002`, a diagnostic
+result rather than an exception that would tell the caller no transaction existed; and an
+uncoded `DatabaseTransactionAbortedException`, which SQL already raises when the caller's own
+commit loses to the kernel (a deadlock victim, a write conflict), so the two cases would read the
+same. Sql `DESIGN.md` ("The transaction's end state machine") and `DIALECT.md` record the code.
+
+Each change of this section that reaches SQL is accounted for:
+
+- *Asserted in the model's suites:*
+  - *The end gate and the repeatable rollback.* A rollback of a rolled-back transaction is a no-op,
+    a rollback of a committed one fails with "The transaction is Committed; a committed
+    transaction cannot roll back.", and a commit of a rolled-back one with "The transaction is
+    RolledBack." (`SqlTransactionContractTests.RollbackAsync_AfterEnd_ShouldBeNoOpUnlessCommitted`;
+    the model refused the second rollback). A commit while a statement of the transaction waits
+    for another transaction's row lock is refused with "An operation of the transaction is still
+    running; commit after it completes.", and the transaction commits once the statement completes
+    (`CommitAsync_WhileAStatementRuns_ShouldBeRefusedAndLeaveTheTransactionActive`; the model's
+    commit raced the statement into the coordinator).
+  - *The commit token stops at the base.* A commit or rollback whose token is canceled before it
+    starts throws `OperationCanceledException` and leaves the transaction active and committable
+    (`EndAsync_TokenCanceledBeforeStart_ShouldLeaveTheTransactionActive`). `CommitCoreAsync` calls
+    `TransactionCoordinator.CommitAsync(context)` without a token, so a started commit runs to its
+    end; that half is read from the code, since no test can cancel inside the coordinator without
+    a kernel hook.
+  - *`Faulted` for a transaction the kernel ended.* Dropping the database while the session holds
+    a transaction leaves it the session's `CurrentTransaction` with `State` `Faulted`; statements
+    (typed, text and DDL) and BEGIN (typed and text) are refused with `COHSQLT005` until the caller
+    rolls it back, twice without error, after which the session's BEGIN reports the dropped
+    database (`ObjectDisposedException`) (`ExecuteAsync_TransactionEndedByTheKernel_ShouldBeFaultedAndRefuseWorkWithCohsqlt005`).
+    A COMMIT, typed or as text, ends it with `COHSQLT005` and commits nothing, and a second commit
+    reports "The transaction is {state}." (`CommitAsync_TransactionEndedByTheKernel_ShouldFailWithCohsqlt005`,
+    both cases). Over the wire the statement and the COMMIT reach the client as `ExecutionFailure`
+    carrying the code, the COMMIT ends the transaction, and the connection still answers a ping
+    (`SqlTransactionControlTests.ExecuteAsync_WireTransactionEndedByTheKernel_ShouldCarryCohsqlt005AndKeepConnectionUsable`).
+    On this path the state read `Faulted` before the bases too: the closing `TransactionManager`
+    ends its active contexts as `Faulted`, and the model returned the kernel state. What changed is
+    that the session keeps the transaction and refuses with a code; the model dropped it, so the
+    statement ran in auto-commit and the text COMMIT answered `COHSQLT002`.
+  - *The teardown cause.* Closing a session ends its transaction: a later rollback is a no-op, and a
+    commit fails with "COHSQLT005: … nothing was committed. Cause: The session closed before the
+    transaction ended." with that cause as its inner exception, and another session sees nothing
+    of its writes (`DisposeAsync_SessionWithTransaction_ShouldEndItWithTheTeardownCause`, for
+    "Cannot commit transaction in state 'RolledBack'.").
+  - *BEGIN's refusal order.* BEGIN on a session with an active transaction is refused "already
+    active" before the Serializable refusal, which it gets only on a session with none
+    (`BeginTransactionAsync_WhileActive_ShouldBeRefusedBeforeTheIsolationLevel`, for "A
+    transaction is already active on this session."); a closed session refuses BEGIN and both
+    execute seams with "The session is closed." before the isolation level
+    (`BeginAndExecute_OnClosedSession_ShouldRefuseWithOneMessage`, for "Session is not open.
+    Current state: Closed."); on an offline database, BEGIN from the session that holds an open
+    transaction is refused "already active" where it got `COHSQLT004`
+    (`ExecuteAsync_OnOfflineDatabase_ShouldRunTheBaseChecksFirst`). On a kernel-ended transaction
+    BEGIN refuses the transaction before the token (above).
+  - *The token before the core.* `CreateSessionAsync`, BEGIN, both execute seams and
+    `ApplySchemaAsync` refuse a canceled token before the offline refusal, which the model
+    reported first, and the transaction's commit still gets `COHSQLT004`
+    (`ExecuteAsync_OnOfflineDatabase_ShouldRunTheBaseChecksFirst`); both execute seams refuse it
+    before a kernel-ended transaction's `COHSQLT005` (above).
+  - *The engine.* The guard order on create, open, drop and the lookup (the name, disposal, the
+    token) and the enumeration's disposal check at its call
+    (`SqlEngineContractTests.Members_InvalidNameDisposedOrCanceled_ShouldCheckNameThenDisposalThenToken`;
+    the model checked disposal first, `TryGetDatabase` did not check the name, open and drop
+    observed no token, and the enumeration checked disposal at its first `MoveNextAsync`); the
+    collation overload of `CreateDatabaseAsync`, which cannot await the base's member, makes the
+    same checks in the same order with a null collation refused after the name and before
+    disposal (pinned in the same test since the review: a blank name before disposal, a null
+    collation before disposal, a canceled token on a live engine before anything is created); the
+    typed members and the typed `TryGetDatabase` overload
+    (`CreateDatabaseAsync_TypedMembers_ShouldHandOutTheSqlDatabase`); the disposal aggregate's message and the
+    nested "One or more SQL databases failed to close." (`DisposeAsync_DatabasesFailToClose_ShouldReportThemAsOneComponent`,
+    for "Engine disposal encountered failures."); the blank `EngineName` refusal, duplicate worker
+    names, a blank worker name failing inside its factory (for "A worker must have a diagnostic
+    name."), the pump threads named for their workers and the composition paths of §6.5
+    (`SqlEngineCompositionTests`). `SqlWorkerResilienceTests` already asserted the flush worker's
+    thread by the worker's name.
+  - *The closed-database fault* (the Blob review's finding, §12, applied to SQL here).
+    `SqlDatabase.IsClosed` (internal, the base's disposed flag), `SqlDatabaseEngine.IsOpen` false
+    for a closed database, and every worker that visits a database skips a closed one: the flush,
+    write-back and version-purge workers do not begin it, the purge worker's trigger wait ignores
+    its deferred-undo retry, and the checkpointer never finds it due. With the fix removed both
+    new tests fail: the version-purge worker throws `ObjectDisposedException` on the closed
+    database's disposed `TransactionManager` every pass, the checkpointer on its disposed
+    `StorageJournal` once it is due, and the engine goes `Faulted`.
+    `SqlEngineContractTests.DisposeAsync_DatabaseOutsideTheEngine_ShouldBeSkippedByEveryWorkerUntilDropped`
+    runs three passes of every worker over a closed database whose checkpoint is due: every pass
+    succeeds, no worker records a failure, the engine stays `Running`, the database stays
+    registered (an open hands back the closed instance, whose use throws
+    `ObjectDisposedException`) until it is dropped, and a new database of that name is open.
+    `SqlDatabaseServerTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing`
+    closes one database through `session.Database` and one directly under 20 ms worker intervals:
+    after half a second and one more pass of each worker, no worker failed, the engine is
+    `Running`, and a new connection to the served database inserts and reads its rows. Neither
+    test reaches the checkpointer's own guard (`!database.IsClosed` in `IsCheckpointDue`): an
+    idle close leaves nothing due, and a closed storage's refusal under `IsOpen` is tolerated
+    anyway. The review added the case the other three models carry, a close that keeps a writer
+    in flight (#1226), whose storage refuses the checkpoint with `StorageTransactionException`
+    rather than `ObjectDisposedException`:
+    `SqlWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
+    fails with the guard removed (the engine `Faulted` for the test's 30 seconds, the
+    checkpointer holding the injected `IOException`) and passes with it.
+- *Not reachable from the model without a kernel hook or a race, pinned by the root suite* (as for
+  the other models): "… ended before the operation started; nothing was written." (a statement
+  admitted between the session's check and the transaction's admission), "… start the operation
+  after it ends." (a statement starting while the caller's own commit or rollback runs), and the
+  session's "The session failed to close." aggregate (SQL's teardown let the transaction's
+  failure out unwrapped).
+- *Changed but not observable:* SQL disposed its checkpointer, then its factory workers last
+  attached first; the base releases every worker last attached first, the built-in ones
+  included. Only the checkpointer has a release hook among the built-in workers, so the order
+  differs only between it and a custom worker, which no caller can observe.
+- *Unchanged for SQL, and asserted where the bases now carry it:* the offline teardown (disposing
+  an active transaction of an offline database touches nothing; `SqlStorageOperationsTests`),
+  the server's lifecycle (row 9; `SqlDatabaseServerTests`), and the rollback's own #1226
+  contract, its token observed only before it starts (`SqlTransactionRollbackTests`, unchanged
+  apart from the retypes, like the other #1188, #1225 and #1226 suites).
+
 ### 6.5 Root-base state, attach semantics and typed accessors (rows 1, 5, 9, 12)
 
 - **Attach.** `DatabaseEngine` owns `Workers` and `Servers`. Today a model fills them through the
@@ -1198,6 +1349,31 @@ the state's ownership test was also what kept it from disposing a product the en
   the message, that no later factory ran, and that every product made was released once, by the
   engine when attached and by the state when not; all five cases fail against the state as
   landed.
+
+**Sql at P4 (landed).** The engine follows the shape the other four landed:
+`internal void Compose(IEnumerable<DatabaseEngineWorker>, IEnumerable<DatabaseServer>)`,
+`internal static SqlDatabaseEngine CreateUncomposed(options)` (which validates the options, a blank
+`EngineName`, the nesting limit, the buffer pool and the checkpoint settings, and leaves
+composition open) and `Create` over both; the constructor attaches its five built-in workers last,
+after every field they observe is set, through the base's `AttachWorker`; the internal attach
+members, the worker, server and custom-worker lists, the stop token, the pump threads and the
+model's state fold are gone. The builder composes through `_state.Complete(engine, engine.Compose)`
+(since the review, with `SqlDatabaseEngine.ReleaseRefusedWorkerAsync` as a third argument, as
+every model builder passes its engine's; row 7), and with it the last caller of the bridge overload went, so the overload and its `ThrowIfAttached`
+helper are deleted from `DatabaseEngineBuilderState` (the P4.0 plan's "The last model PR deletes
+the bridge overload"). `SqlEngineCompositionTests`, rewritten from Blob's suite with the five
+built-in workers, runs every path `KeyValueEngineCompositionTests` runs (the compose-contract cases
+against `SqlDatabaseEngine.Compose`, the pump thread names, the failing factory and `AddSql`'s
+premature-build compensation) plus the two SQL-specific cases the old suite had: a refused
+server whose stop yields does not resume on the caller's synchronization context, and a
+cancellation callback that throws during disposal still joins the pump before the worker is
+released. The typed accessors are Graph's set: the engine's three database members as `new`
+members and `TryGetDatabase` as a typed overload, plus SQL's collation overload of
+`CreateDatabaseAsync`, which makes the base's checks itself; the database's `Engine` and
+`CreateSessionAsync`; the session's `Database`, `CurrentTransaction` and both
+`BeginTransactionAsync` overloads; the server's `Engine`; and the server session's covariant
+`DatabaseSession`. The database cores check disposal under the engine's lock, and
+`GetDatabasesCore` is the model's iterator.
 
 **Blob at P4 (landed).** The engine, the builder, the strategy, the options and the four
 workers were, before this PR, Documents' pre-P4 files with the model's names (a diff with the
@@ -1419,6 +1595,35 @@ which phase 7's retype removes) where it cast the session's database to `IBlobDa
 - **Gate.** The SDK tests run against refreshed canonical packs, because a stale pack hides a real
   failure.
 
+**At P4 (re-verified, then landed).** The section held against the code, with three readings:
+
+- *The builders' file.* The four builders, their records and `SqlSchemaModel` shared
+  `Internal/SqlSchemaBuilder.cs`. The builders moved to their own files in the `RootNamespace`
+  (`SqlSchemaBuilder.cs`, `SqlTableBuilder.cs`, `SqlTypeBuilder.cs`, `SqlPrincipalBuilder.cs`,
+  `SqlTriggerContext.cs`); the records stayed, in the renamed `Internal/SqlSchemaDeclaration.cs`,
+  with `SqlSchemaModel` renamed `SqlSchemaDeclaration` so "model" means only `EngineModel`. The
+  builder classes had been the internal implementations: `SqlSchemaTableBuilder<TRow>` became
+  `SqlTableBuilder<TRow>`, `SqlSchemaTypeBuilder` `SqlTypeBuilder` and
+  `SqlSchemaPrincipalBuilder` `SqlPrincipalBuilder`, each with an internal constructor and the
+  interface's documentation.
+- *The opaque type.* `SqlSchema` exposes `Name`, the instance `Compile()` and the two statics;
+  `Compile(name, configure)` is `Create(name, configure).Compile()`, so both paths validate and
+  hash alike (`SqlSchemaTests.Compile_FromDeclaration_ShouldMatchOneStepCompilation`). The
+  declaration is an internal `Declaration` property the compiler and the tests read.
+- *What a caller can observe.* The trigger context's assembly-qualified identity is part of a
+  trigger's canonical expression (`lambda<…>(p0:…SqlTriggerContext,…)` and the `Audit` call's
+  method id), so the hash of a schema that declares a trigger changed with the rename; nothing has
+  shipped (§1). The builder's `Table<T>(name, …)` and `Extension(name, …)` report a blank name
+  with `ParamName` `name`, the documented parameter, where the former implementation reported
+  `tableName` and `extensionName` (`SqlSchemaTests.Create_WithInvalidArguments_ShouldRejectDeclaration`).
+  Nothing else changed: the extractor matches the new names (`SchemaBuilderType`,
+  `TableBuilderType`, `TypeBuilderType`, `PrincipalBuilderType` and the ``SqlTableBuilder`1``
+  metadata name in `CSharpSchemaExtractor.cs`, `SqlTriggerContext` in
+  `CSharpExpressionCanonicalizer.cs`), and the SDK's parity test
+  (`CompileDatabaseSchemaTaskTests`), which declares a custom type, tables with a reference, a
+  function, a trigger and a principal, compiles the same canonical document through the runtime and
+  through the SDK.
+
 ### 6.8 One Diagnostics convention: never null (D12)
 
 `QueryResult.Diagnostics` is nullable (`Execution/src/QueryResult.cs:33`), and its ten overrides
@@ -1450,7 +1655,7 @@ statement (#1228).
 | Grant | Phase | Needed by |
 |---|---|---|
 | Transactions → `Assimalign.Cohesion.Database.Transactions.Tests` (**already present** at P1: `src/Properties/AssemblyInfo.cs` landed with the deferred-undo backoff's internal clock, so P1 adds no grant) | P1 | `FailingCommitLog` (`TransactionManagerTests.cs`); `ControlledLog` (`TransactionManagerRollbackTests.cs`); `ControlledVersionStore` (from P2); tests that call the now-internal log factories and the internal `TransactionManager.Create` overload; the coordinator's three internal test hooks (below) |
-| Sql.Schema → `Assimalign.Cohesion.Database.Sql.Schema.Tests` (new `src/Properties/AssemblyInfo.cs`) | P4 (Sql) | `SqlSchemaTests.cs` and `CompiledSchemaTests.cs`, which read the internal declaration model |
+| Sql.Schema → `Assimalign.Cohesion.Database.Sql.Schema.Tests` (new `src/Properties/AssemblyInfo.cs`) | P4 (Sql) | `SqlSchemaTests.cs` and `CompiledSchemaTests.cs`, which read the internal declaration model. **Landed at P4**, the package's first grant; the tests also call the internal `SqlSchemaCompiler` |
 
 Every other derivation goes through a protected constructor, or through a grant that already
 exists. [Certain] The existing grants cover Storage, Sql, Sql.Catalog, Sql.Storage, Sql.Language,
@@ -1616,6 +1821,38 @@ Documents.Language, Blob and Hosting.
     and Blob.Client needed none (row 57). The server suite gained two private doubles of its own,
     a `FailingWorker` derived from the worker base (to fault the engine) and a listener that counts
     its binds and disposals (row 9).
+  - **Sql at P4:** the old `SqlEngineCompositionTests`' nested `ProbeWorker`, `ProbeServer`,
+    `ProbeContext` and `CancellationFailureWorker` gave way to `TestObjects/RecordingWorker.cs` and
+    `TestObjects/RecordingServer.cs`, Blob's doubles with the model's names (the server keeps a
+    private `IDatabaseServerContext` for the bridge until P6), plus a nested `YieldingServer` and
+    `CancellationFailureWorker` derived from the bases. `SqlWorkerResilienceTests`' `EscapingWorker` derives from
+    `DatabaseEngineWorker` (row 7), and `SqlExpressionDepthExecutionTests`' `ExternalEngineBuilder`
+    is deleted (row 83). The strategy doubles derive from the internal `SqlStorageStrategy` through
+    the existing Sql → Sql.Tests grant (row 84); no grant was added. Sql.Schema gained its grant
+    (above); Sql.Catalog, Sql.Storage, Sql.Language and Sql.Client needed none. The worker release
+    hook (row 7) reached every model's `RecordingWorker` (KeyValuePair, Graph, Documents, Blob,
+    Sql) and the root suite's: each counts its releases in `DisposeAsyncCore` instead of
+    implementing `IDisposable`.
+- **Hosting.Tests, rewritten at P4 (Sql).** The project compiled linked copies of Sql.Tests'
+  `FaultInjectingJournalSqlStorageStrategy` and Storage.Tests' journal-frame and device-fault
+  helpers to fault a real SQL engine. A linked copy is compiled into Hosting.Tests, where the
+  internal `SqlStorageStrategy` is out of reach, so the links are removed. Only the offline paths
+  lost a real engine: no public API takes a real database offline, so
+  `DatabaseWorkerHealthTests.CheckAsync_OfflineDatabase_ShouldBeUnhealthyUntilTheReopen` and
+  `ResourceControlPlaneHostingTests.CheckAsync_WithDatabaseOfflineAfterFailedFsync_ShouldReportUnhealthyUntilReopened`
+  report the offline database through Hosting's `RecordingEngine` double, and the real engine's
+  offline path is the SQL model's own suites' (`SqlWorkerResilienceTests`,
+  `SqlStorageOperationsTests`). The worker-fault path still runs on a real SQL engine:
+  `CheckAsync_WorkerFaultsOnARealEngine_ShouldFollowTheWorker` registers a guided worker through
+  the public typed `SqlDatabaseEngineBuilder.AddWorker`, fails a pass the test runs, and reads
+  the real engine's `Faulted` and `Running` from the root base's fold and the application's
+  degraded and healthy contributions from it. As first landed the whole test drove the double,
+  through a `Report(EngineState)` setter the review deleted, on the reading that a real fault
+  needed a public fault seam on a model; the public typed `AddWorker` is that seam for a worker
+  fault. `CheckAsync_RegisteredWorkerLoopFailed_ShouldSayTheEngineStaysFaultedUntilDisposed`
+  keeps the double: since phase 4 no engine of a model can register a worker whose loop escapes.
+  `DatabaseCompositionTests` composes the real `SqlDatabaseServer` over an in-memory listener
+  where it cast to the interface.
 - **Hosting and Embedded doubles** derive from the root bases (P6). They are:
   - `RecordingEngine.cs:12`, `ProvisioningEngine.cs:8` and `ProvisioningDatabase` (`:101`);
   - `RecordingServer.cs:12` and `RecordingEngineWorker.cs:6`;
@@ -1636,7 +1873,7 @@ Documents.Language, Blob and Hosting.
 - **Test-double contexts** go in P6 (Graph's, Documents' and Blob's became the private context of their
   `RecordingServer` at P4, above): `RecordingServerContext` in the Blob (`:277`), Documents
   (`:282`), Graph (`:282`) and Hosting (`RecordingServer.cs:57`) tests, and Sql's `ProbeContext`
-  (`:205`).
+  (`:205`; at P4 the private context of Sql's `RecordingServer`).
 
 `RecordingBuilder` and `RecordingApplicationBuilder` implement the kept
 `IDatabaseApplicationBuilder` and stay.
@@ -2389,6 +2626,163 @@ the code had moved, the row now says what landed:
   - the reversal of Sql DESIGN's 2026-10-02 ruling (`Database.Sql/docs/DESIGN.md:627-631`) and its
     "interface-first entry" paragraph (`:1554`);
   - the note that #1232 is superseded.
+- **Sql, as landed (re-verified 2026-10-06 against the code after the Blob PR).** Three commits
+  on `refactor/L03.02.01.56.05-concrete-types-p4-sql`, based on the integration branch's
+  `e092cada`: the catalog (`47aafdfe`, rows 85 and 86), Sql.Schema behind the opaque `SqlSchema`
+  (`c4d10a14`, §6.7 and rows 87 to 101, with the SDK strings in lockstep), then the model. Rows 81
+  to 84 held against the code, with the readings their entries record (§5.2's `CreateBuilder`
+  line had moved, and Hosting.Tests linked the fault-injecting strategy, row 84), and the leaves
+  landed as the bullets above say:
+  - *Leaves.* The engine, database, session, transaction and server are public sealed leaves of
+    the bases; the database, session, transaction, builder and aggregate expression left
+    `Internal/` for the `RootNamespace`. The server session stays an internal sealed leaf (row 11),
+    the five workers stay internal sealed, and `SqlDatabaseServerContext` stays for the `Context`
+    bridge until P6 (row 10).
+  - *The phase-4 scaffolding* (rows 6 and 7): the bridge overload of `DatabaseEngineBuilderState`,
+    `shared/DatabaseEngineWorkerPump.cs` and the four `COHESION_DATABASE_ENGINE_PUMP_IN_BASE`
+    defines are deleted, and `DatabaseEngineWorker` has its release hook.
+  - *The composition verb and the builder* (rows 6 and 83, §5.2): typed, composing through
+    `Compose` (§6.5); `ExternalEngineBuilder` is deleted and its cases retested.
+  - *Provisioning* (row 8): `SqlDatabase` keeps `IDatabaseSchemaProvisioner` in its base list until
+    P6.
+  - *Deleted:* the four interfaces of the model's `Abstractions/` folder and
+    `SqlDatabaseEngineFactory` (§5.2); `CrashCaptureSqlStorageStrategy` is internal (row 84).
+  - *Behavior.* §6.4's SQL accounting item by item, `COHSQLT005` (the coded aborted error this PR
+    chose) and the closed-database fix among it, and §6.5's composition paths.
+  - *Docs.* Sql `DESIGN.md` (the 2026-10-02 nesting-limit ruling and the "interface-first entry"
+    paragraph reversed, each naming #1232 superseded; "The transaction's end state machine"; the
+    workers' closed-database paragraph; "Concrete types") and `OVERVIEW.md`, Sql.Language's
+    `DIALECT.md` (`COHSQLT005`), the root `DESIGN.md` (the shared pump, the bridge and the release
+    hook), the area record's model table (every model's database is now a type), the hosting
+    design's factory mention, and stale SQL type names in the Sql.Storage, Storage and Indexing
+    `DESIGN.md` files and a `KeyValueDatabase` comment.
+  - *Interim choices pending owner confirmation.* Decision 30 reaches SQL too: its server session
+    sets the version and principal through the one-shot setters (row 11). Decision 31 does not:
+    the SQL server never refused a start for its engine's state (row 9). Decision 32 is
+    Documents' and Blob's alone.
+  - *Owner review.*
+    33. **The worker's release entry** (row 7). As first landed it was public: the worker was
+        `IAsyncDisposable` with a `DisposeAsync` that did nothing on a worker an engine owns, on
+        the reading that an entry internal to the root could not reach the shared builder state
+        compiled into the model assemblies without a root grant. The review showed it can, and
+        applied the plan's recommendation ("Review, as applied", below): no public disposal; a
+        `protected static ReleaseUnownedWorkerAsync` on `DatabaseEngine`, re-exposed by each model
+        engine as an internal `ReleaseRefusedWorkerAsync` and handed to
+        `DatabaseEngineBuilderState.Complete` beside the compose method. What remains for the
+        owner: the protected static is visible to any engine author deriving from
+        `DatabaseEngine`, who can release a worker no engine owns with it (it does nothing on an
+        owned one); the cost is one `Complete` parameter and one internal static per model engine.
+    34. **`COHSQLT005`** as SQL's coded aborted error, with the rejected alternatives in §6.4.
+    35. **Hosting's offline-database health tests no longer take a real SQL database offline**
+        (§6.9): no public API takes a real database offline, so they report the offline database
+        through Hosting's engine double, and the real offline path stays in the SQL suites. The
+        worker-fault half runs on a real SQL engine again since the review, through a guided worker
+        registered with the public typed `AddWorker`; as first landed it drove the double too, on
+        the reading that a real fault needed a public fault seam on a model.
+  - *Outside the rows:* the `(SqlDatabaseEngine)engine` casts inside `AddServer` factories (the
+    templates, the SampleHost fixture, Database.Testing's README, Hosting's `OVERVIEW.md`, the
+    hosting and developer-experience designs) are identity casts now and still compile; they are
+    left for one sweep with the companion examples rather than churned here.
+
+  *Gate, as run:* a no-incremental build of every Database project but Database.Testing's tests,
+  the SampleHost fixture (they need a local SDK pack) and the stray `Cache/src` test csproj, plus
+  Sdk.Database, has no Database warning but CS2008 on Database.Refs (the only other warnings are
+  the DependencyInjection and Configuration libraries' own); every Database suite passes with its
+  baseline count (Language 105, Types 93, Storage 293, Transactions 108, Indexing 75, Execution 2,
+  Protocol 21, Security 5, Sql.Language 999, Sql.Catalog 47, Sql.Storage 14, Sql.Client 314,
+  Documents 189, Documents.Language 288, Documents.Catalog 9, Documents.Storage 31, Graph 396,
+  Graph.Language 387, Graph.Catalog 19, Graph.Storage 17, Graph.Client 57, Blob 167,
+  Blob.Catalog 5, Blob.Storage 14, Blob.Client 21, KeyValuePair 186, KeyValuePair.Catalog 4,
+  KeyValuePair.Storage 3, KeyValuePair.Client 10, Client 41, Hosting 53 (three tests rewritten,
+  §6.9), Embedded 4, ApplicationModel 15, Sdk.Database 18) apart from three: Database.Tests grows
+  from 101 to 102 (the release hook's test), Sql.Schema from 38 to 39 (the declaration-compile
+  test of `c4d10a14`), and Sql.Tests from 1089 to 1120 (14 more composition tests, ten session
+  and transaction contract tests, four engine contract tests, the wire `COHSQLT005` test, the
+  server's closed-database test and one more nesting-limit case). Among them are the #1188, #1225
+  and #1226 suites in process (`SqlTransactionContractTests`, `SqlTransactionRollbackTests`,
+  `SqlStorageOperationsTests`, `SqlTransactionControlTests`) and over the wire
+  (`SqlTransactionControlTests`' wire cases, `SqlDatabaseServerTests`, Sql.Client's suites).
+  Studio builds clean and its `--smoke` run gives 83 passed, 0 failed, 1 skipped; the dependency
+  graph check passes; and the Database runtime producer packs.
+  Against refreshed canonical packs (`Install-Local.ps1 -UseCanonicalVersion -SkipLibraries -Rids
+  win-arm64`, 59 packages at `10.0.0-preview.1`, none of them left in the global NuGet cache),
+  Sdk.Database's tests pass 18 of 18 and Database.Testing's 5 of 5, among them the SampleHost
+  test (`LocalGateway_WithGeneratedSampleManifest_ShouldServeAndRecoverAcrossRelaunch`), whose
+  seeded `orders` table exists only if Hosting's provisioner found `SqlDatabase` through its
+  `IDatabaseSchemaProvisioner` type test. The first run of the script failed in its first step,
+  the rebuild of `build/Tasks`, because idle shared MSBuild nodes held that DLL open; the rerun
+  used a scratch copy of the script without that step, since the task assembly was unchanged and
+  already built.
+  - *Review, as applied (2026-10-06),* on `refactor/L03.02.01.56.05-concrete-types-p4-sql-review`,
+    on top of the three commits. One review approved with four minor findings; two required
+    changes, one for each major finding. Every finding was applied; none was rejected.
+    - *Merged first.* The integration branch's closed-database follow-up for KeyValuePair, Graph
+      and Documents (`9acddea5`) landed after this PR branched, and this PR edits the shared
+      checkpoint worker and the worker base those fixes run on, so the review merged it before
+      its fixes and gates the combined tree. The one conflict was §12's closed-database bullet;
+      the integration side's text is kept, with Sql's fix and checkpointer guard marked done.
+    - *The checkpointer's closed-database guard had no test (major).*
+      `SqlCheckpointWorker.IsCheckpointDue` reads `!database.IsClosed && …`, but neither
+      closed-database test reached it: it matters only when a close keeps a writer in flight
+      (#1226), where the storage refuses the checkpoint with `StorageTransactionException`, which
+      `IsOpen` does not cover. `SqlWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
+      ports the test the three models carry; with the guard removed it fails (the engine
+      `Faulted` for 30 seconds, the checkpointer holding the injected `IOException`), and with it
+      it passes. The checkpointer's remarks and Sql `DESIGN.md` name the case (§6.4, §12).
+    - *`SqlSchemaCompiler` outside `Internal/` (major).* Made internal but left in the Sql.Schema
+      `src/` root under the public namespace; it moved to `src/Internal/` under
+      `Assimalign.Cohesion.Database.Sql.Schema.Internal` (§5.2), and `CompiledSchemaTests` imports
+      that namespace. The area record's `DESIGN.md` no longer calls it public.
+    - *The worker's release entry, internal-only (minor, three reviews).* Owner-review item 33
+      said an internal-only entry was impossible without a root grant; the reviews showed the
+      shared builder state reaches a root release the way it reaches the leaf's compose method.
+      Applied as row 7 records: `DatabaseEngine.ReleaseUnownedWorkerAsync` (protected static), an
+      internal `ReleaseRefusedWorkerAsync` on each of the five model engines, a third
+      `Complete` parameter, and no `IAsyncDisposable` or public `DisposeAsync` on the worker. The
+      five model composition-contract tests pass the release to `Complete` as their builders do.
+    - *The ownership guard's gaps (minor, three reviews).* `AttachWorker` marked a worker owned
+      only after its pump thread started and accepted a worker that was not free: a released one
+      was pumped with its lanes disposed, and one another engine owned was pumped by both and
+      released by the first engine's disposal while the second still pumped it. The claim now
+      comes before the thread starts, a worker that is not free is refused with
+      `InvalidOperationException`, and a failed start returns the worker to free
+      (`DatabaseEngineTests.AttachWorker_ReleasedWorker_ShouldBeRefused`,
+      `AttachWorker_WorkerAnotherEngineOwns_ShouldBeRefused`).
+    - *Hosting's health test (minor, three reviews).* Owner-review item 35 said a real fault
+      needed a public fault seam; the public typed `AddWorker` is one for a worker fault. The
+      test is split: the worker half runs on a real SQL engine and reads its fold
+      (`CheckAsync_WorkerFaultsOnARealEngine_ShouldFollowTheWorker`), the offline half keeps the
+      double (`CheckAsync_OfflineDatabase_ShouldBeUnhealthyUntilTheReopen`), and the double's
+      `Report(EngineState)` setter is deleted (§6.9; item 35 narrowed).
+    - *Minor, applied.* `SqlCatalog`'s public members document the `ArgumentNullException`,
+      `ArgumentOutOfRangeException` and `OperationCanceledException` they throw, and its remarks
+      name both `Open` overloads; the collation overload of `CreateDatabaseAsync` points at the
+      base's check order and the engine contract test pins it (a blank name and a null collation
+      before disposal, a canceled token before anything is created); four Sql test names lead
+      with the method (`ExecuteAsync_TransactionEndedByTheKernel_…`,
+      `ExecuteAsync_OnOfflineDatabase_…`, `CreateDatabaseAsync_TypedMembers_…`,
+      `ExecuteAsync_WireTransactionEndedByTheKernel_…`), while the names that mirror the sibling
+      models' (`Members_…`, `EndAsync_…`, `BeginAndExecute_…`) stay; `SqlDataStorageFormatTests`'
+      reopening strategy double has an explicit constructor instead of a primary one; the SDK
+      extractor's four private consts are camelCase; `SqlDatabase`, `SqlDatabaseSession`,
+      `SqlDatabaseTransaction`, `SqlDatabaseEngine` and `SqlStorageStrategy` put their usings
+      before the namespace; root `DESIGN.md` loses its blank lines inside the bullet list and
+      its stray indents and lists `COHSQLT005`; Sql `DESIGN.md` rejoins a split paragraph; and
+      KeyValuePair.Catalog's `DESIGN.md` names `SqlCatalog`, not the deleted `DefaultSqlCatalog`.
+    - *Gate, as rerun after the review:* a no-incremental build of the same projects has no
+      Database warning but CS2008 on Database.Refs (the others are DependencyInjection's 198 and
+      Configuration's 4 lines); every Database suite passes: Database.Tests 104 (the two attach
+      refusals), Sql.Tests 1121 (the checkpointer test), Hosting 54 (the split health test),
+      Documents 192, Graph 398 and KeyValuePair 188 (the merged follow-up's tests), and every
+      other suite at the count above (Sql.Schema 39, Sql.Catalog 47, Sql.Client 314, Blob 167,
+      Graph.Client 57, Embedded 4, ApplicationModel 15, Sdk.Database 18 against the local
+      build). Studio builds with no warning and its `--smoke` run gives 83 passed, 0 failed,
+      1 skipped; the dependency graph check passes; and the Database runtime producer packs.
+      Against canonical packs refreshed from the review's head (`Install-Local.ps1
+      -UseCanonicalVersion -SkipLibraries -Rids win-arm64`, 59 packages at `10.0.0-preview.1`,
+      none of them in the global NuGet cache before the runs; the script's first step ran this
+      time, with node reuse off), Sdk.Database's tests pass 18 of 18 and Database.Testing's 5 of
+      5, the SampleHost provisioning test among them.
 
 The template, fixture and example casts `(SqlDatabaseEngine)engine` become identity casts and
 still compile. *Gate:* each model's suites, including its #1188, #1225 and #1226 suites in
@@ -2500,6 +2894,13 @@ writes its type, or, for `Storage`, strips its interface.
 **At P3:** the seven P3 markers landed: the six root bases and `DatabaseEngineWorker`. The case
 column holds for each as written; `DatabaseServerSession`'s leaves (one per model server) still
 implement the interface until their model's P4 PR. `CompiledSchema` carries none (§5.3).
+
+**At P4, Sql:** the model's two markers landed, on `SqlDatabaseEngine` and
+`SqlDatabaseEngineBuilder`, completing the five engine and five builder markers. Its other new
+public leaves (`SqlDatabase`, `SqlDatabaseSession`, `SqlDatabaseTransaction`, `SqlDatabaseServer`,
+`SqlAggregateExpression`, and from its child roots `SqlCatalog`, `SqlCatalogSnapshot`, `SqlSchema`
+and the four Sql.Schema builders) carry none, and neither does the internal `SqlStorageStrategy`.
+`DatabaseEngineWorker`'s P3 marker stands; its release hook is a lifecycle hook under rule 4.
 
 **At P4, Blob:** the model's two markers landed, on `BlobDatabaseEngine` and
 `BlobDatabaseEngineBuilder`. Its other new public leaves (`BlobDatabase`, `BlobDatabaseSession`,
@@ -2621,7 +3022,7 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   at P1, re-counted after #1252 renamed and split one of the original six);
   #1259 (P3) gates on a Database.Tests base suite, and each model PR under #1260 (P4) carries
   its own #1188, #1225 and #1226 gate (§6.4).
-- #1232 is closed as superseded when the Sql PR of P4 lands.
+- #1232 is superseded: the Sql PR of P4 sealed the builder and reversed Sql `DESIGN.md`'s 2026-10-02 ruling and "interface-first entry" paragraph. Closing the issue is the integration merge's step (the PR's session has read-only GitHub access).
 - `Storage`'s record and page operations accept a `StorageTransaction` of another storage
   instance: the argument check's message says "not created by this storage instance", but it
   only ever tested the type (found at P2, row 36). Checking the owner is a behavior change, so P2
@@ -2632,20 +3033,23 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   Blob P4 review, which fixed Blob; §7, "Blob, as landed"). **Done for Documents, Graph and
   KeyValuePair** by the follow-up of 2026-10-06 (§7, "The closed-database follow-up"), each
   reproduced at `e092cada` with a test that failed (the version-purge worker, 21 to 24 failed
-  passes in half a second) and fixed with Blob's pattern. Sql's, reached through a directly
-  disposed database, is the Sql PR's.
-- The checkpointer of Blob and of Sql still visits a database its holder closed: the shared pass
+  passes in half a second) and fixed with Blob's pattern. **Done for Sql** by the Sql PR (§6.4,
+  "Sql at P4"; §7, "Sql, as landed"), reached through a directly disposed database: with the fix
+  removed its version-purge worker and checkpointer failed on such a database and the engine
+  went `Faulted`.
+- The checkpointer of Blob still visits a database its holder closed: the shared pass
   (`Database/shared/DatabaseCheckpointWorker.cs`) asks the model's `IsCheckpointDue`, and Blob's
-  and Sql's read only the storage. After a close that is not idle (a deferred undo's writer the
-  close keeps in flight, #1226) the closed storage stays due, every poll runs a checkpoint it
-  refuses, and a checkpoint failure recorded for the database before the close never ends, so the
-  engine stays `Faulted` (found by the closed-database follow-up's review, reproduced for
-  Documents, Graph and KeyValuePair; §7, "The closed-database follow-up", "Review, as applied").
-  The fix is the one those three landed: `BlobCheckpointWorker.IsCheckpointDue` and
-  `SqlCheckpointWorker.IsCheckpointDue` return false for a closed database
-  (`!database.IsClosed && …`; Sql's database gets `IsClosed` with the Sql PR's closed-database
-  fix), with the test the three models carry. Blob's is a Blob follow-up; Sql's belongs with the
-  Sql PR's closed-database fix.
+  reads only the storage. After a close that is not idle (a deferred undo's writer the close keeps
+  in flight, #1226) the closed storage stays due, every poll runs a checkpoint it refuses, and a
+  checkpoint failure recorded for the database before the close never ends, so the engine stays
+  `Faulted` (found by the closed-database follow-up's review, reproduced for Documents, Graph and
+  KeyValuePair; §7, "The closed-database follow-up", "Review, as applied"). The fix is the one
+  those three landed: `BlobCheckpointWorker.IsCheckpointDue` returns false for a closed database
+  (`!database.IsClosed && …`), with the test the three models carry; it is a Blob follow-up.
+  **Done for Sql** by the Sql PR: `SqlCheckpointWorker.IsCheckpointDue` reads
+  `!database.IsClosed && …`, and
+  `SqlWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
+  ports the three models' test (§7, "Sql, as landed", "Review, as applied").
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never

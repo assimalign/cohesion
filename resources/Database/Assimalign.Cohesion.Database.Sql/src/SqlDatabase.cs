@@ -4,31 +4,59 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Sql.Internal;
-
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
+namespace Assimalign.Cohesion.Database.Sql;
+
 /// <summary>
-/// Internal implementation of a SQL database instance: the data storage, the
-/// dedicated catalog storage, the catalog opened over it, and the transaction
-/// coordinator — the per-database MVCC composition (transaction manager, lock
-/// manager, version store) every session binds to.
+/// A SQL-model database: relational tables and their indexes, queried and changed through the
+/// sessions it creates (<see cref="CreateSessionAsync"/>), and provisioned from a compiled schema
+/// (<see cref="DatabaseInstance.ApplySchemaAsync"/>).
 /// </summary>
-internal sealed class SqlDatabaseInstance : ISqlDatabase
+/// <remarks>
+/// <para>
+/// A database composes the data storage, the dedicated catalog storage, the catalog opened over
+/// it (<see cref="SqlCatalog"/>), and the transaction coordinator: the per-database MVCC
+/// composition (transaction manager, lock manager, version store) every session binds to.
+/// </para>
+/// <para>
+/// <b>Schema provisioning</b> is the one capability of the root base (row 8 of the concrete-types
+/// plan): the database passes <c>supportsSchemaProvisioning: true</c> and overrides
+/// <see cref="ApplySchemaCoreAsync"/>. Until phase 6 it also lists
+/// <see cref="IDatabaseSchemaProvisioner"/>, implemented by the base's inherited
+/// <see cref="DatabaseInstance.ApplySchemaAsync"/>, because the hosting layer's provisioner finds a
+/// provisionable database by that type test until phase 6 makes it a flag check.
+/// </para>
+/// <para>
+/// <b>Closed by its holder.</b> Disposing the database closes it for every session. The engine
+/// keeps a database its holder closed registered, so it refuses to reopen it
+/// (<see cref="ObjectDisposedException"/>) until it is dropped or the engine is recreated, and its
+/// workers skip it, so the engine stays <see cref="EngineState.Running"/> and its server keeps
+/// serving the engine's other databases.
+/// </para>
+/// <para>
+/// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of
+/// <see cref="DatabaseInstance"/> with an internal constructor, replacing the former
+/// <c>ISqlDatabase</c> interface and its internal implementation; the engine creates and opens
+/// it. The base owns the name, the owning engine (re-exposed typed with <c>new</c>) and the
+/// disposed flag.
+/// </para>
+/// </remarks>
+public sealed class SqlDatabase : DatabaseInstance, IDatabaseSchemaProvisioner
 {
     private readonly SqlStorage _storage;
     private readonly SqlStorage _catalogStorage;
-    private readonly ISqlCatalog _catalog;
+    private readonly SqlCatalog _catalog;
     private readonly TransactionCoordinator _coordinator;
     private readonly BTreeIndexManager _indexManager;
     private readonly SqlSchemaProvisioner _schemaProvisioner;
     private readonly SqlBoundTableCache _definitions;
     private readonly SqlDatabaseEngine _engine;
-    private bool _disposed;
 
     /// <summary>
     /// Composes a database over its two file sets and the catalog the engine opened
@@ -44,11 +72,10 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// <see cref="ThrowIfFormatIsNotCurrent"/> before its data file set was opened;
     /// <see langword="false"/> for a new one, which is born on this engine's format.
     /// </param>
-    internal SqlDatabaseInstance(string name, SqlDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage,
-        ISqlCatalog catalog, bool recover)
+    internal SqlDatabase(DatabaseName name, SqlDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage,
+        SqlCatalog catalog, bool recover)
+        : base(name, engine, supportsSchemaProvisioning: true)
     {
-        Name = name;
-        Engine = engine;
         _engine = engine;
         _storage = storage;
         _catalogStorage = catalogStorage;
@@ -182,7 +209,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// <param name="name">The database name, for the message.</param>
     /// <param name="catalog">The database's catalog, opened on its catalog file set.</param>
     /// <exception cref="SqlDataStorageFormatException">The data-storage format is not <see cref="SqlRowCodec.RecordSpaceFormatVersion"/>.</exception>
-    internal static void ThrowIfFormatIsNotCurrent(string name, ISqlCatalog catalog)
+    internal static void ThrowIfFormatIsNotCurrent(string name, SqlCatalog catalog)
     {
         int version = catalog.RecordSpaceFormatVersion;
         int current = SqlRowCodec.RecordSpaceFormatVersion;
@@ -215,7 +242,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// <summary>
     /// Writes this engine's format marker into a new database's catalog. The
     /// storage strategy contract makes a created catalog empty
-    /// (<see cref="ISqlStorageStrategy.CreateStorage"/> throws when storage
+    /// (<see cref="SqlStorageStrategy.CreateStorage"/> throws when storage
     /// already exists); the check enforces it here too, because stamping an
     /// existing catalog would declare its older index keys current — the silent
     /// corruption the format gate exists to prevent.
@@ -228,7 +255,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             throw new DatabaseException(
                 $"Database '{Name}' cannot be created: its catalog storage already holds data-storage format " +
                 $"{_catalog.RecordSpaceFormatVersion} and {_catalog.Tables.Count} table(s). " +
-                "ISqlStorageStrategy.CreateStorage must return new, empty storage.");
+                "SqlStorageStrategy.CreateStorage must return new, empty storage.");
         }
 
         // Synchronous over the ValueTask by design: catalog writes complete
@@ -237,11 +264,10 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             .AsTask().GetAwaiter().GetResult();
     }
 
-    /// <inheritdoc />
-    public DatabaseName Name { get; }
-
-    /// <inheritdoc />
-    public IDatabaseEngine Engine { get; }
+    /// <summary>
+    /// Gets the SQL engine that owns this database.
+    /// </summary>
+    public new SqlDatabaseEngine Engine => _engine;
 
     /// <summary>
     /// Gets the data storage file set, for the engine's background workers.
@@ -257,7 +283,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// Gets the database's catalog (schema authority), for the engine's background
     /// workers and tests.
     /// </summary>
-    internal ISqlCatalog Catalog => _catalog;
+    internal SqlCatalog Catalog => _catalog;
 
     /// <summary>
     /// Gets the database's index manager (the live B+Tree directory over the data
@@ -391,11 +417,28 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// <exception cref="DatabaseOfflineException">The database is offline.</exception>
     internal void ThrowIfOffline()
     {
-        if (OfflineError is { } error)
+        if (GetOfflineRefusal() is { } refusal)
         {
-            throw DatabaseOfflineException.Create(OfflineCode, Name, error);
+            throw refusal;
         }
     }
+
+    /// <summary>
+    /// Gets the coded refusal of an operation on the offline database (<see cref="OfflineCode"/>),
+    /// or null while it is online: what <see cref="ThrowIfOffline"/> throws, for the
+    /// transaction base's offline refusal.
+    /// </summary>
+    /// <returns>The refusal, or null.</returns>
+    internal DatabaseOfflineException? GetOfflineRefusal()
+        => OfflineError is { } error ? DatabaseOfflineException.Create(OfflineCode, Name, error) : null;
+
+    /// <summary>
+    /// Gets whether the database has been disposed: by the engine, or by a holder of the
+    /// database (<c>await using var database = await engine.CreateDatabaseAsync(...)</c>, or a
+    /// session's <see cref="SqlDatabaseSession.Database"/>). The engine keeps a database its holder
+    /// closed registered, to refuse its reopen, and its workers skip it.
+    /// </summary>
+    internal bool IsClosed => IsDisposed;
 
     /// <summary>
     /// Translates a failure the storage's offline state caused into the coded refusal
@@ -427,24 +470,33 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             : DatabaseOfflineException.Create(OfflineCode, Name, OfflineError ?? offline);
     }
 
+    /// <summary>
+    /// Creates a new lightweight SQL session scoped to this database.
+    /// </summary>
+    /// <param name="cancellationToken">Observed before the session is created.</param>
+    /// <returns>A new session.</returns>
+    /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the session was created.</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHSQLT004</c>, #1243).</exception>
+    public new async ValueTask<SqlDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
+        => (SqlDatabaseSession)await base.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+
     /// <inheritdoc />
-    public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
+    protected override ValueTask<DatabaseSession> CreateSessionCoreAsync(CancellationToken cancellationToken)
     {
-        ThrowIfDisposed();
         ThrowIfOffline();
-        cancellationToken.ThrowIfCancellationRequested();
 
         var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager, _definitions);
         var session = new SqlDatabaseSession(this, _coordinator, executor, _engine.ParserOptions);
 
-        return new ValueTask<IDatabaseSession>(session);
+        return new ValueTask<DatabaseSession>(session);
     }
 
     /// <summary>
     /// Creates the provisioner's private session. Only this path stamps schema ownership
     /// and authorizes schema-owned DDL; ordinary sessions have no ownership bypass.
     /// </summary>
-    internal IDatabaseSession CreateSchemaSession(string provisioningSchema, CancellationToken cancellationToken)
+    internal SqlDatabaseSession CreateSchemaSession(string provisioningSchema, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         ThrowIfOffline();
@@ -454,25 +506,19 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     }
 
     /// <inheritdoc />
-    public ValueTask<SchemaMigrationResult> ApplySchemaAsync(
-        CompiledSchema schema,
-        CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// The base checks disposal, a null schema and the token first; an offline database is
+    /// refused here, after them (<c>COHSQLT004</c>, #1243).
+    /// </remarks>
+    protected override ValueTask<SchemaMigrationResult> ApplySchemaCoreAsync(CompiledSchema schema, CancellationToken cancellationToken)
     {
-        ThrowIfDisposed();
         ThrowIfOffline();
         return _schemaProvisioner.ApplyAsync(schema, cancellationToken);
     }
 
     /// <inheritdoc />
-    public void Dispose()
+    protected override void DisposeCore()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-
         // An offline database closes without writing anything (#1243): both file sets are
         // taken offline, so the coordinator's aborts undo nothing, no registration is saved,
         // and neither storage flushes at its close.
@@ -509,16 +555,9 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    protected override async ValueTask DisposeAsyncCore()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-
-        // See Dispose: an offline database closes without writing anything (#1243).
+        // See DisposeCore: an offline database closes without writing anything (#1243).
         bool offline = OfflineError is not null;
         try
         {
@@ -557,10 +596,5 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
 
         throw new DatabaseException(
             $"Transaction {context.Sequence} has no statement bracket applying on this database.");
-    }
-
-    private void ThrowIfDisposed()
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 }

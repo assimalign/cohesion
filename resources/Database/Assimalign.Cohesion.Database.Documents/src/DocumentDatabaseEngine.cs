@@ -196,7 +196,8 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     /// Attaches the products of the builder's factories, workers first and then servers, and
     /// freezes the engine's composition: the builder's compose method
     /// (<c>DatabaseEngineBuilderState.Complete</c>). The base refuses a product attached twice, a
-    /// server that fronts another engine and a worker whose name another worker of the engine has.
+    /// server that fronts another engine, a worker whose name another worker of the engine has, and
+    /// a worker that is not free (another engine owns it, or it was released).
     /// </summary>
     /// <param name="workers">The workers, produced one factory at a time as they are requested.</param>
     /// <param name="servers">The servers, produced one factory at a time as they are requested.</param>
@@ -214,6 +215,16 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
 
         CompleteComposition();
     }
+
+    /// <summary>
+    /// Releases a worker the builder refused, or one its failed composition left unattached: the
+    /// engine base's <see cref="DatabaseEngine.ReleaseUnownedWorkerAsync"/>, which the builder's
+    /// rollback (<c>DatabaseEngineBuilderState.Complete</c>) cannot reach itself. It does nothing on a
+    /// worker an engine owns (concrete-types plan, row 7).
+    /// </summary>
+    /// <param name="worker">The refused worker.</param>
+    /// <returns>A task that completes once the worker's resources are released.</returns>
+    internal static ValueTask ReleaseRefusedWorkerAsync(DatabaseEngineWorker worker) => ReleaseUnownedWorkerAsync(worker);
 
     /// <summary>
     /// Creates a new logical document database with the specified name.

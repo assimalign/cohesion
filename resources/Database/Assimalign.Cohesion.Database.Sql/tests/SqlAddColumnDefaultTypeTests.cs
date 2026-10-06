@@ -126,13 +126,13 @@ public sealed class SqlAddColumnDefaultTypeTests
         (await RowsAsync(session, "SELECT * FROM child WHERE id = 4;")).ShouldBeEmpty();
     }
 
-    private static async Task ExecuteAsync(IDatabaseSession session, string sql)
+    private static async Task ExecuteAsync(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
         result.Status.ShouldBe(QueryResultStatus.Success);
     }
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None))
             .ShouldBeAssignableTo<QueryResultSet>();
