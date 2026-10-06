@@ -26,7 +26,10 @@ flowchart LR
 
 ## Public seam and ownership
 
-`GraphCatalog.Open` returns `IGraphCatalog`; implementation classes and codecs are internal.
+`GraphCatalog.Open` returns the sealed `GraphCatalog`, which has a private constructor; its
+record and codec are internal. The former `IGraphCatalog` interface, `GraphCatalog` static
+factory and internal `DefaultGraphCatalog` collapsed into it (concrete-types plan, phase 4,
+#1260).
 Every mutation takes the caller's `TransactionContext`, and none commits it. The caller
 holds the database definition lock to serialize DDL and detect conflicting writes before
 publication. Reads use the caller's snapshot.

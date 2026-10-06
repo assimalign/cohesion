@@ -5,7 +5,7 @@ surface, `WriteAheadJournal`, and `Records` for coordinator construction. Their 
 owner-zero record methods support Graph.Catalog. `PackLocation` and `UnpackLocation`
 convert the stable page/slot reference format.
 
-`GraphStore.Open(GraphStorage, TransactionCoordinator)` returns `IGraphStore`, whose
+`GraphStore.Open(GraphStorage, TransactionCoordinator)` returns the sealed `GraphStore`, whose
 operations create/find/delete nodes and relationships, enumerate nodes and incident
 relationships, create/drop/search/list exact property indexes, and recover index writers.
 Mutations require an active caller transaction and do not commit it. Snapshot reads

@@ -2,8 +2,10 @@
 
 ## Ownership and composition
 
-The public `IGraphStore` contract is implemented by internal `DefaultGraphStore` and
-created by `GraphStore.Open`. `GraphStorage` is the thin shared-kernel storage subclass.
+The store is one public sealed type, `GraphStore`, with a private constructor behind
+`GraphStore.Open` (concrete-types plan, phase 4, #1260): the former `IGraphStore` interface,
+`GraphStore` static factory and internal `DefaultGraphStore` collapsed into it, so the Graph
+engine's calls are non-virtual. `GraphStorage` is the thin shared-kernel storage subclass.
 The engine owns its storage streams and coordinator; the store owns neither and has
 no independent disposal or background workers. All identities are reserved from the
 kernel's durable transaction-sequence namespace, so rollback and restart do not reuse

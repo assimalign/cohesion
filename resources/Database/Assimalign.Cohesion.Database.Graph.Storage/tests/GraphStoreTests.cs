@@ -427,7 +427,7 @@ public sealed class GraphStoreTests
     {
         internal GraphStorage Storage { get; } = GraphStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "test");
         internal TransactionCoordinator Coordinator { get; }
-        internal IGraphStore Store { get; }
+        internal GraphStore Store { get; }
         internal Fixture()
         {
             Coordinator = new TransactionCoordinator(Storage, Storage.WriteAheadJournal, Storage.Records);

@@ -6,21 +6,29 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Assimalign.Cohesion.Database.Graph.Storage.Internal;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Graph.Storage.Internal;
+namespace Assimalign.Cohesion.Database.Graph.Storage;
 
-internal sealed partial class DefaultGraphStore
+public sealed partial class GraphStore
 {
     private const ulong AdjacencyId = ulong.MaxValue;
     private const string TreeName = "graph";
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
     private BTreeIndexManager _indexes = null!;
 
+    /// <summary>Tests whether an exact property index is visible.</summary>
+    /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="snapshot">Visibility snapshot.</param><returns>True when an index is visible.</returns>
     public bool HasIndex(string label, string propertyKey, TransactionSnapshot snapshot) => Definition(label, propertyKey, snapshot) is not null;
 
+    /// <summary>
+    /// Lists every exact property index visible to a snapshot in one pass over the index
+    /// definitions, so a planner can match many labels and property keys without a lookup per pair.
+    /// </summary>
+    /// <param name="snapshot">Visibility snapshot.</param><returns>The visible indexes, each label/property pair once.</returns>
     public IReadOnlyList<StoredGraphIndex> GetIndexes(TransactionSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -30,6 +38,11 @@ internal sealed partial class DefaultGraphStore
         return indexes;
     }
 
+    /// <summary>Builds a transactional B+Tree for a node label and property.</summary>
+    /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing index creation.</returns>
+    /// <exception cref="InvalidOperationException">An index already exists for this label/property pair.</exception>
+    /// <exception cref="ArgumentException">The label or property name is null or whitespace.</exception>
+    /// <exception cref="GraphElementTooLargeException">The names exceed one graph record, or an existing node's value exceeds the index key.</exception>
     public async ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
@@ -57,6 +70,10 @@ internal sealed partial class DefaultGraphStore
         Add(record, inserted, context.Sequence);
     }
 
+    /// <summary>Drops a node-property index definition; older snapshots retain its tree.</summary>
+    /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing index deletion.</returns>
+    /// <exception cref="InvalidOperationException">No visible index exists for this label/property pair.</exception>
+    /// <exception cref="TransactionAbortedException">The index changed after the transaction snapshot.</exception>
     public async ValueTask DropIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
     {
         await LockAsync(context, cancellationToken).ConfigureAwait(false);
@@ -74,6 +91,11 @@ internal sealed partial class DefaultGraphStore
         }, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Seeks an exact scalar property value through its B+Tree.</summary>
+    /// <param name="label">Node label.</param><param name="propertyKey">Property name.</param><param name="value">Scalar value.</param><param name="snapshot">Visibility snapshot.</param><param name="cancellationToken">Cancellation token.</param><returns>The matching visible nodes.</returns>
+    /// <exception cref="InvalidOperationException">No visible index exists for this label/property pair.</exception>
+    /// <exception cref="ArgumentException">The scalar bound is not a supported scalar.</exception>
+    /// <remarks>A value too long for the index key matches nothing: no write can store one.</remarks>
     public async ValueTask<IReadOnlyList<StoredGraphNode>> SearchIndexAsync(string label, string propertyKey, object? value,
         TransactionSnapshot snapshot, CancellationToken cancellationToken = default)
     {
@@ -97,6 +119,9 @@ internal sealed partial class DefaultGraphStore
         return result;
     }
 
+    /// <summary>Scrubs unproven index writers after coordinator record recovery and before checkpoint.</summary>
+    /// <param name="writers">Aborted or uncommitted writers.</param><param name="cancellationToken">Cancellation token.</param><returns>A task representing recovery.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="writers"/> is null.</exception>
     public async ValueTask RecoverIndexesAsync(IReadOnlySet<TransactionSequence> writers, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(writers);
@@ -166,15 +191,6 @@ internal sealed partial class DefaultGraphStore
         });
     }
 
-    /// <summary>
-    /// Checks the B-tree page format of every index tree the storage registers, without
-    /// opening the store: registration records carry no MVCC stamps, so they read the
-    /// same before and after the coordinator's recovery scrub.
-    /// </summary>
-    /// <exception cref="IndexFormatException">A tree is not in the B-tree page format this engine reads.</exception>
-    internal static void EnsureIndexFormat(GraphStorage storage)
-        => BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
-
     private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot)> ReadRegistrations(GraphStorage storage)
     {
         var registrations = new List<(BTreeIndexRegistration, PageId, int)>();
@@ -227,13 +243,13 @@ internal sealed partial class DefaultGraphStore
 
     private sealed class IndexUndo : RecordVersionIndex
     {
-        private readonly DefaultGraphStore _store;
+        private readonly GraphStore _store;
         private readonly ulong _id;
 
         /// <summary>Initializes a new instance of the <see cref="IndexUndo"/> class.</summary>
         /// <param name="store">The graph store whose index registry resolves the index.</param>
         /// <param name="id">The identity of the index the undo entries target.</param>
-        public IndexUndo(DefaultGraphStore store, ulong id)
+        public IndexUndo(GraphStore store, ulong id)
         {
             _store = store;
             _id = id;

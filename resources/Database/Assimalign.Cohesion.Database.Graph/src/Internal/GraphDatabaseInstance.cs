@@ -68,8 +68,8 @@ internal sealed partial class GraphDatabaseInstance : IGraphDatabase
     public IDatabaseEngine Engine { get; }
     internal GraphStorage DataStorage { get; }
     internal TransactionCoordinator Coordinator { get; }
-    internal IGraphCatalog Catalog { get; }
-    internal IGraphStore Store { get; }
+    internal GraphCatalog Catalog { get; }
+    internal GraphStore Store { get; }
 
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
     {

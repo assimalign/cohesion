@@ -6,8 +6,8 @@ compatible, and uses explicit binary codecs without reflection.
 
 `GraphStorage` owns the data, journal and backup streams and delegates page allocation,
 checksums and physical recovery to `Database.Storage`. Construct a `TransactionCoordinator`
-from its `WriteAheadJournal` and `Records`, then use `GraphStore.Open` to obtain an
-`IGraphStore`. Every mutation takes the caller's `TransactionContext` and leaves commit
+from its `WriteAheadJournal` and `Records`, then use `GraphStore.Open` to obtain the sealed
+`GraphStore`. Every mutation takes the caller's `TransactionContext` and leaves commit
 or rollback to that caller. Reads take an immutable `TransactionSnapshot`.
 
 The store exposes creation, lookup, restricted or cascading deletion, incident-edge

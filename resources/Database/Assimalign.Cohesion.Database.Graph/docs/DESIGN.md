@@ -292,7 +292,7 @@ A conjunction or disjunction of labels, and an `AND` chain of predicates, is one
 engine evaluates it with a loop that stops at the first operand that decides it, under three-valued
 logic for `AND` (false, otherwise unknown, otherwise true). Validation, name collection and the
 anchor's equality search walk with an explicit stack. Anchor selection reads the visible indexes
-once per plan (`IGraphStore.GetIndexes`, grouped by label) and the `WHERE` chain's equalities once,
+once per plan (`GraphStore.GetIndexes`, grouped by label) and the `WHERE` chain's equalities once,
 keeping each variable's first non-null value per key; each node then tries, for each distinct label
 in order, only the keys that label has an index on. A plan therefore costs time linear in its `E`
 equalities, its `D` pattern labels and properties and its `I` visible indexes, plus for each node the
@@ -327,7 +327,7 @@ statement failure (an explicit transaction is aborted until the caller rolls bac
 wire, stays open. A search for a value too long for its index matches nothing, since no write can
 store one. Neo4j instead spills labels to dynamic label records and long properties to property
 chains, which this store's format does not yet have. Defining a new label or relationship type
-checks identity uniqueness by listing every definition (`DefaultGraphCatalog.SaveDefinitionAsync`),
+checks identity uniqueness by listing every definition (`GraphCatalog.SaveDefinitionAsync`),
 so a statement that introduces N new labels costs time quadratic in N (measured in Release: 1,000
 new labels in one `INSERT` take 7.5 s, 2,000 take 42 s). Neither limit counts expression length;
 both are follow-up storage items.
