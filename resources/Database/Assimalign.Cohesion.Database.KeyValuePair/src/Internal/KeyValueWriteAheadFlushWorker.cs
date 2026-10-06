@@ -71,8 +71,10 @@ internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
             }
 
             // An offline database flushes nothing (#1243): its waiting committers were released
-            // when it went offline, and each gets the refusal from its own flush.
-            if (database.IsOffline || !BeginDatabase(database.Name))
+            // when it went offline, and each gets the refusal from its own flush. Nor does a
+            // database its holder closed: its close flushes its file sets, and the engine keeps it
+            // registered only as a name.
+            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }

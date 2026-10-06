@@ -673,6 +673,23 @@ accounted for:
 - *Not observable through the public surface, so not asserted:* the worker disposal order (factory
   workers before the built-in ones; the checkpointer's lanes end before the storages close either
   way) and the pump threads' names (KeyValuePair already named them for their workers).
+- *A database closed outside the engine* (found by the Blob review, §7 "Blob, as landed"; fixed
+  for this model by the follow-up of 2026-10-06, §7 "The closed-database follow-up"). The engine
+  keeps a database its holder disposed (directly; `session.Database` is the same instance)
+  registered, and `IsOpen` read only that registration, so the version-purge worker failed on its
+  disposed coordinator every pass and the engine stayed `Faulted` for good (24 failed passes in
+  half a second at 20 ms intervals, reproduced at `e092cada`); the key-value server does not read
+  the engine's state, so it kept serving, and `Database.Hosting` reported the engine degraded.
+  `KeyValueDatabase.IsClosed`, `KeyValueDatabaseEngine.IsOpen` false for a closed database, and
+  the version-purge worker (pass and trigger wait), the flush worker and the write-back worker,
+  which visit databases here, skip a closed one; the checkpointer inherits the skip through
+  `IsOpen`. The reopen is unchanged: `OpenDatabaseAsync` returns the closed instance, which refuses
+  a session with `ObjectDisposedException` (the other engines refuse the reopen itself). Asserted:
+  `KeyValueWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing`
+  (20 ms worker intervals, half a second of passes over the closed database, then one more pass
+  of each worker: every pass succeeds, no worker records a failure, the engine is `Running`, a
+  server starts and serves a handshake and a `PUT` to another database, and the reopen returns
+  the closed instance).
 
 **Graph at P4 (re-verified, then landed).** The model's copy was as listed
 (`GraphDatabaseTransaction.cs` with its own `_endGate`, its `Operations` counter and its
@@ -1341,8 +1358,10 @@ property. Fixed in the review: the engine's `IsOpen` is false for a closed datab
 storage, and the version-purge worker skips a closed database, so the engine stays `Running` and
 its server keeps serving its other databases
 (`BlobDatabaseServerTests.DisposeAsync_SessionDatabase_ShouldLeaveTheEngineRunningAndItsServerServing`;
-§6.4's Blob accounting). The other models' engines carry the same `IsOpen` shape, which a
-follow-up fixes (§7, "Blob, as landed"). The Blob wire server runs the bound session's own
+§6.4's Blob accounting). The other models' engines carried the same `IsOpen` shape; the
+follow-up of 2026-10-06 fixed it for Documents (reached through `session.Database` here as well),
+Graph and KeyValuePair (§6.4's accounting of each, §7 "The closed-database follow-up"), and the
+Sql PR fixes Sql's (§12). The Blob wire server runs the bound session's own
 container operations, where it
 cast the session's database to `IBlobDatabase`, so its exchanges still join the session's
 transaction (a host-opened one included); Studio's `BlobWorkspace` runs its container and blob
@@ -2238,6 +2257,56 @@ the code had moved, the row now says what landed:
   builds clean and its `--smoke` run gives 83 passed, 0 failed, 1 skipped (the Blob embedded and
   wire steps among the passes); the dependency graph check passes (no reference changed); and the
   Database runtime producer packs.
+- **The closed-database follow-up, as landed (2026-10-06).** Blob's review fix applied to the
+  KeyValuePair, Graph and Documents engines (§12), on `fix/database-closed-outside-engine` from the
+  integration branch's `e092cada`, one commit per model; Sql's is the Sql PR's.
+  - *Reproduced first.* Each model got a test that closes a database outside the engine under
+    20 ms worker intervals, lets the workers pass over it for half a second, runs one more pass of
+    each, and asserts that no worker records a failure and the engine stays `Running`. At
+    `e092cada` all four cases failed on the version-purge worker alone, its full pass reaching the
+    closed database's disposed `TransactionManager` (`ObjectDisposedException` from
+    `RetryDeferredUndoAsync`): Documents 21 failed passes closed directly and through
+    `session.Database`, Graph 21, KeyValuePair 24. The flush, write-back and checkpoint workers
+    recorded nothing. The KeyValuePair and Graph servers do not read the engine's state, so they
+    kept serving; the engine's `Faulted` reached `Database.Hosting`'s health, degraded for good.
+  - *The fix, Blob's pattern.* An internal `IsClosed` on each database (the base's disposed flag);
+    each engine's `IsOpen` overloads false for a closed database (and, for Graph and Documents, its
+    storage); and every worker that visits databases skips a closed one: the version-purge worker
+    in its pass and its trigger wait, and KeyValuePair's flush and write-back workers, which visit
+    databases (both file sets each) where Graph's, Documents' and Blob's visit storages and inherit
+    the fix through `IsOpen(storage)`. The checkpointer's pass is the engines' shared one
+    (`Database/shared/DatabaseCheckpointWorker.cs`, outside this change), so it inherits the fix
+    through `IsOpen`, as Blob's does. The reopen is unchanged: Documents and Graph refuse it with
+    `ObjectDisposedException` until the database is dropped, and KeyValuePair returns the closed
+    instance, which refuses a session. PostgreSQL's background workers treat a dropped object the
+    same way, skipping it quietly rather than failing on it (autovacuum,
+    `src/backend/postmaster/autovacuum.c:998-1000`, `:1859-1868`, `:2510-2513`; the checkpointer's
+    canceled fsync requests, `src/backend/storage/sync/sync.c:400-411`, `:492-503`); the close here
+    happens outside the engine, so the workers read the database's own flag.
+  - *Tests.* `DocumentWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunning`
+    (a theory: directly and through `session.Database`; the other database takes writes),
+    `GraphWorkerResilienceTests` and `KeyValueWorkerResilienceTests`'
+    `DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing`
+    (a server over the engine starts and serves a handshake and a write to the other database).
+    Each also pins the reopen. They pass with the fix, eight runs in a row each.
+  - *Docs.* Each model's `DESIGN.md` (Documents' and Graph's "Lifecycle" section, KeyValuePair's
+    "Engine-owned background workers"), the three databases' and engines' remarks, §6.4's
+    accounting of each model, §6.6 and §12. The sessions' remarks are unchanged (outside this
+    change's files); they still say the reopen is refused, which holds.
+  - *Gate, as run:* a clean build of every Database project but Database.Testing's tests, the
+    SampleHost fixture and the stray `Cache/src` test csproj, plus Sdk.Database, has no Database
+    warning but CS2008 on Database.Refs (the only other warnings are the DependencyInjection and
+    Configuration libraries' own); every Database suite passes with its baseline count (Database.Tests
+    101, Language 105, Types 93, Storage 293, Transactions 108, Indexing 75, Execution 2, Protocol
+    21, Security 5, Sql 1089, Sql.Language 999, Sql.Catalog 47, Sql.Schema 38, Sql.Storage 14,
+    Sql.Client 314, Documents.Language 288, Documents.Catalog 9, Documents.Storage 31,
+    Graph.Language 387, Graph.Catalog 19, Graph.Storage 17, Graph.Client 57, Blob 167,
+    Blob.Catalog 5, Blob.Storage 14, Blob.Client 21, KeyValuePair.Catalog 4, KeyValuePair.Storage
+    3, KeyValuePair.Client 10, Client 41, Hosting 53, Embedded 4, ApplicationModel 15,
+    Sdk.Database 18) apart from the three models' own, which grow by their new tests: Documents 189
+    to 191, Graph 396 to 397, KeyValuePair 186 to 187. Studio builds clean and its `--smoke` run
+    gives 83 passed, 0 failed, 1 skipped; the dependency graph check passes (no reference changed);
+    and the Database runtime producer packs.
 - **The Sql PR** carries:
   - §6.7, with the SDK strings in lockstep;
   - the `ExternalEngineBuilder` deletion and the builder-validation retests (row 83);
@@ -2484,13 +2553,14 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   instance: the argument check's message says "not created by this storage instance", but it
   only ever tested the type (found at P2, row 36). Checking the owner is a behavior change, so P2
   left it for its own fix, #1286.
-- The other engines' `IsOpen` treats a database its holder disposed as open, because the engine
+- The other engines' `IsOpen` treated a database its holder disposed as open, because the engine
   keeps it registered to refuse its reopen, so a worker that touches its disposed state can fail
   every pass and leave the engine `Faulted`, as Blob's version-purge worker did (found by the
-  Blob P4 review, which fixed Blob; §7, "Blob, as landed"). Documents, whose workers mirror
-  Blob's, reaches it through `session.Database` since its option-B landing; Graph, KeyValuePair
-  and Sql through a directly disposed database (not probed). Each needs Blob's fix and a test;
-  Documents first.
+  Blob P4 review, which fixed Blob; §7, "Blob, as landed"). **Done for Documents, Graph and
+  KeyValuePair** by the follow-up of 2026-10-06 (§7, "The closed-database follow-up"), each
+  reproduced at `e092cada` with a test that failed (the version-purge worker, 21 to 24 failed
+  passes in half a second) and fixed with Blob's pattern. Sql's, reached through a directly
+  disposed database, is the Sql PR's.
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never

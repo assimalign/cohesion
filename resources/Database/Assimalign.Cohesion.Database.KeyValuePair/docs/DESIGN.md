@@ -384,6 +384,32 @@ reopen, because the coordinator ends every lock wait of an offline database
 (`TransactionCoordinator.AbandonLockWaits`, wired to the data file set's offline hook), while
 the writer that holds the lock keeps it, since an offline database undoes nothing.
 
+**A database closed outside the engine is skipped, not failed.** A database its holder disposed
+(directly; `session.Database` is the same instance) stays registered: `OpenDatabaseAsync`,
+`TryGetDatabase` and `GetDatabasesAsync` return the closed instance, which refuses a new session
+with `ObjectDisposedException`, until it is dropped or the engine is recreated (unchanged; the
+Documents, Graph and Blob engines refuse the reopen itself). The workers skip it:
+`KeyValueDatabase.IsClosed` reads the base's disposed flag, `KeyValueDatabaseEngine.IsOpen` is
+false for it, and the version-purge worker skips it in its pass and in its trigger wait, as do
+the flush and write-back workers, which visit databases here (both file sets each). The
+checkpointer inherits the skip through `IsOpen` (its pass is the engines' shared one): a
+disposed file set's `ObjectDisposedException` is a race with a close, never its failure. Before
+the skip, the version-purge worker failed on the closed database's disposed coordinator every
+pass (24 failed passes in half a second at 20 ms intervals), so the engine reported `Faulted` for
+good and `Database.Hosting` reported it degraded until the engine was recreated; the key-value
+server does not read the engine's state, so it kept serving. The workers do what PostgreSQL's
+background workers do with an object dropped under them: check that it still exists and skip it
+quietly (autovacuum, `src/backend/postmaster/autovacuum.c:998-1000`, `:1859-1868`,
+`:2510-2513`; the checkpointer's canceled fsync requests,
+`src/backend/storage/sync/sync.c:400-411`, `:492-503`). A close here happens outside the
+engine, which is never told, so the workers read the database's own flag where PostgreSQL reads
+the cancellation.
+`KeyValueWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing`
+closes a database under 20 ms worker intervals and asserts that every pass succeeds, no worker
+records a failure, the engine is `Running`, a server over the engine starts and serves a
+handshake and a `PUT` to the other database, and the reopen still returns the closed instance,
+which refuses a session.
+
 ## Storage operations (#1243, #1254, #1226)
 
 **A failed fsync takes the database offline (#1243).** When a durable flush of either file

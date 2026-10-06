@@ -159,12 +159,14 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
 
     /// <summary>
     /// Reports whether <paramref name="database"/> is still one of the engine's open databases:
-    /// false once it was dropped, closed for a reopen, or the engine closed it. A worker pass that
-    /// raced such a close tolerates the <see cref="ObjectDisposedException"/> it gets; one from a
-    /// database still open is a failure.
+    /// false once it was dropped, closed for a reopen, the engine closed it, or a holder of the
+    /// database disposed it (directly or through a session's
+    /// <see cref="KeyValueDatabaseSession.Database"/>, the same instance; the engine keeps such a
+    /// database registered). A worker pass that raced such a close tolerates the
+    /// <see cref="ObjectDisposedException"/> it gets; one from a database still open is a failure.
     /// </summary>
     /// <param name="database">The database a worker pass visited.</param>
-    internal bool IsOpen(KeyValueDatabase database) => Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
+    internal bool IsOpen(KeyValueDatabase database) => !database.IsClosed && Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
 
     /// <summary>
     /// Creates a new key-value database engine from options. The engine is

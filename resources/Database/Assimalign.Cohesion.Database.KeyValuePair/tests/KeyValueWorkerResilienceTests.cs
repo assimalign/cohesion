@@ -8,8 +8,11 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
@@ -500,6 +503,65 @@ public sealed class KeyValueWorkerResilienceTests
         restarted.ShouldBeTrue();
         state.ShouldBe(EngineState.Faulted);
         worker.Stopped.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A database its holder closed outside the engine (disposed directly; a session's
+    /// <see cref="KeyValueDatabaseSession.Database"/> is the same instance) stays registered; but
+    /// the engine's workers skip it, so every pass succeeds, no worker records a failure, the
+    /// engine stays <see cref="EngineState.Running"/>, and a server over the engine still starts
+    /// and serves the engine's other database. Before the workers skipped a closed database, the
+    /// version-purge worker failed on its disposed coordinator every pass, and the engine
+    /// reported <see cref="EngineState.Faulted"/> for good. The engine's reopen of the closed
+    /// database is unchanged: it returns the closed instance, which refuses a session with
+    /// <see cref="ObjectDisposedException"/>.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a database closed outside the engine is skipped, the engine stays running and its server serves")]
+    public async Task DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing()
+    {
+        // Arrange: workers that pass every 20 ms, and a closed database with written entries.
+        using var deadline = new CancellationTokenSource(Timeout);
+        CancellationToken token = deadline.Token;
+        var interval = TimeSpan.FromMilliseconds(20);
+        await using var engine = KeyValueDatabaseEngine.Create(new()
+        {
+            CheckpointInterval = interval, PageWriteBackInterval = interval, MaintenanceInterval = interval
+        });
+        var closed = await engine.CreateDatabaseAsync(Failing, token);
+        await PutAsync(closed, 0, 20);
+        var open = await engine.CreateDatabaseAsync(Healthy, token);
+
+        // Act: close the database, let the workers pass over it many times, run one more pass of
+        // each, then start a server and write over it to the other database.
+        await closed.DisposeAsync();
+        await Task.Delay(TimeSpan.FromMilliseconds(500), token);
+        var passes = engine.Workers.Select(worker => worker.RunIteration(token)).ToArray();
+        var listener = new InMemoryConnectionListener();
+        await using var server = KeyValueDatabaseServer.Create(engine, new() { Listener = listener });
+        await server.StartAsync(token);
+        await using var client = new KeyValueProtocolClient(await listener.CreateFactory().ConnectAsync(listener.EndPoint, token));
+        await client.HandshakeAsync(database: Healthy);
+        await client.SendAsync(ProtocolMessageType.Execute, new ProtocolExecuteMessage("PUT @k @v", new Dictionary<string, byte[]>
+        {
+            ["k"] = DatabaseValueCodec.EncodeComponent(Bytes("wire")),
+            ["v"] = DatabaseValueCodec.EncodeComponent(Bytes("served")),
+        }).Encode());
+        await client.ExpectAsync(ProtocolMessageType.ResultHeader);
+        await client.ExpectAsync(ProtocolMessageType.ResultRow);
+        var written = await client.ExpectAsync(ProtocolMessageType.ResultComplete);
+
+        // Assert
+        passes.ShouldAllBe(passed => passed);
+        engine.Workers.Where(worker => worker.FailureCount != 0 || worker.Fault is not null)
+            .Select(worker => $"{worker.Name}: {worker.FailureCount} failed passes, {worker.Fault}").ShouldBeEmpty();
+        engine.State.ShouldBe(EngineState.Running);
+        engine.OfflineDatabases.ShouldBeEmpty();
+        server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull().Database.Name.ShouldBe(open.Name);
+        ProtocolResultCompleteMessage.Decode(written.Payload.Span).AffectedCount.ShouldBe(1);
+        (await CountAsync(open)).ShouldBe(1);
+        var reopened = await engine.OpenDatabaseAsync(Failing, token);
+        reopened.ShouldBeSameAs(closed);
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await reopened.CreateSessionAsync(token));
     }
 
     // The checkpoint trigger, the load window of the pace test, compared second by second, and the
