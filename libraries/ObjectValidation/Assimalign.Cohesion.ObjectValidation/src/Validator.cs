@@ -60,9 +60,9 @@ public sealed class Validator : IValidator
     /// <inheritdoc cref="IValidator.Validate(IValidationContext)"/>
     public ValidationResult Validate(IValidationContext context)
     {
-        var stopwatch = SimpleObjectPool.Rent<Stopwatch>();
-
-        stopwatch.Start();
+        // A timestamp, not a Stopwatch instance: concurrent validations by one shared validator share no
+        // timing state, and the elapsed time is measured in TimeSpan ticks on every platform.
+        long started = Stopwatch.GetTimestamp();
 
         //for (int i = 0; i < (Profiles as IList<IValidationProfile>).Count; i++)
         //{
@@ -104,7 +104,7 @@ public sealed class Validator : IValidator
             }
         }
 
-        stopwatch.Stop();
+        TimeSpan elapsed = Stopwatch.GetElapsedTime(started);
 
         // Let's throw exception for any validation failure if requested.
         if (this._options.ThrowExceptionOnFailure && context.Errors.Any())
@@ -112,7 +112,7 @@ public sealed class Validator : IValidator
             throw new ValidationFailureException(context);
         }
 
-        return new ValidationResult(context, stopwatch.ElapsedTicks);
+        return new ValidationResult(context, elapsed.Ticks);
     }
 
     /// <inheritdoc cref="IValidator.ValidateAsync{T}(T, CancellationToken)"/>
@@ -132,9 +132,7 @@ public sealed class Validator : IValidator
     {
         return Task.Run<ValidationResult>(() =>
         {
-            var stopwatch = SimpleObjectPool.Rent<Stopwatch>();
-
-            stopwatch.Start();
+            long started = Stopwatch.GetTimestamp();
 
             foreach (var profile in this.Profiles)
             {
@@ -161,14 +159,14 @@ public sealed class Validator : IValidator
                 }
             }
 
-            stopwatch.Stop();
+            TimeSpan elapsed = Stopwatch.GetElapsedTime(started);
 
             if (this._options.ThrowExceptionOnFailure && context.Errors.Any())
             {
                 throw new ValidationFailureException(context);
             }
 
-            return new ValidationResult(context, stopwatch.ElapsedTicks);
+            return new ValidationResult(context, elapsed.Ticks);
         });
     }
 

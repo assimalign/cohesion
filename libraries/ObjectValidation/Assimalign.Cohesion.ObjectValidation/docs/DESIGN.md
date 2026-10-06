@@ -82,6 +82,23 @@ its last failing rule: `RuleFor(x => x.Name).NotEmpty().MinLength(3)` on `""` re
 not `NotEmpty`'s. `Stop` reported the last-declared failing member, and Web.Validation's `errors` map listed
 members in reverse declaration order.
 
+## Concurrency
+
+A validator, its profiles, their items and their rules are built once and shared by every validation that
+uses them: Web.Validation registers one validator per model type and every request validates through it.
+Evaluation therefore keeps per-validation state in the `ValidationContext` and in locals, never on a
+shared object.
+
+- **Timing.** Each validation and each rule invocation is timed from a `Stopwatch.GetTimestamp()` local
+  and reported in `TimeSpan` ticks (`Stopwatch.GetElapsedTime`). Until #1291 the validator rented a
+  `Stopwatch` from an unsynchronized static pool on every validation, and each item rented one in its
+  constructor and restarted it on every evaluation. Concurrent validations raced on the pool's list, which
+  could hand a validation `null`, and they shared one stopwatch per item. The pool's `ElapsedTicks` were
+  also `Stopwatch` ticks, read as `TimeSpan` ticks, which is wrong wherever the timer is not 10 MHz.
+- **Known shared state.** A rule's `ParentContext` is still assigned on the shared rule before it runs,
+  so two concurrent validations with different options can run a nested profile with the other's options
+  (#1207). Errors never cross between validations: each lands in its own context.
+
 ## NativeAOT Posture
 
 The library is NativeAOT-clean: no `System.Linq.Expressions.Expression.Compile` and no other
