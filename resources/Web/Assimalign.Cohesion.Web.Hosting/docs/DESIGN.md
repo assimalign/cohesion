@@ -663,6 +663,14 @@ endpoints, and the version of the exchanges it carried (absent when it faulted b
 exchange); no header value, body, path, or query reaches an entry. An exception's message is the
 faulting component's own.
 
+The peer's address is logged even though server telemetry leaves it out of spans and metrics ("Server
+telemetry (#1064)", "Deliberately not emitted"). The two go to different sinks under different
+policies. A connection-fault entry is an operator's lead when investigating a failing or abusive peer,
+and logs stay under the application's own retention and access control. Span and metric attributes
+flow to telemetry backends, where a client address is personal data, a cardinality risk on metrics,
+and ambiguous until forwarded headers are trusted. The logged address is the transport's peer, which
+behind a proxy is the proxy.
+
 Not logged here: an exception the application's pipeline throws. The server isolates it to its
 exchange (a `500`, or a reset), and reporting it belongs to the application's error handling
 (`Web.ErrorHandling`'s `OnException` hook) and to request telemetry, so the server does not add

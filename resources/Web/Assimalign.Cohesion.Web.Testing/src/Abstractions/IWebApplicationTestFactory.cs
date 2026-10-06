@@ -61,10 +61,20 @@ public interface IWebApplicationTestFactory : IAsyncDisposable
     /// Gracefully stops the factory's server or resource Program. Stopping a never-started or
     /// already-stopped factory is a no-op.
     /// </summary>
+    /// <remarks>
+    /// A factory over the default server drains lame-duck style: it stops accepting and lets requests in
+    /// flight finish. When <paramref name="cancellationToken"/> cancels, it cancels the requests still
+    /// running, aborts their connections, and completes normally. A Program-backed factory asks the Program
+    /// to stop and observes the token while it waits for the Program to exit.
+    /// </remarks>
     /// <param name="cancellationToken">The caller's shutdown budget.</param>
-    /// <returns>A task that completes when the server has fully drained.</returns>
+    /// <returns>
+    /// A task that completes when the server has stopped, drained or cut short by the budget, or when the
+    /// Program has exited.
+    /// </returns>
     /// <exception cref="OperationCanceledException">
-    /// Thrown when <paramref name="cancellationToken"/> cancels the shutdown wait.
+    /// Thrown by a Program-backed factory when <paramref name="cancellationToken"/> cancels the wait for the
+    /// Program to exit.
     /// </exception>
     Task StopAsync(CancellationToken cancellationToken = default);
 
