@@ -111,7 +111,7 @@ Each model root project owns a public engine (`{Model}DatabaseEngine`, static `C
 | Model | Interface | Shape | Language |
 |---|---|---|---|
 | SQL | `ISqlDatabase` | tables/schemas/views over row-oriented slotted pages | SQL dialect (declared matrix, conformance corpus) — `Sql.Language` |
-| Documents | `IDocumentDatabase` | named collections of versioned documents (`IDocumentCollection`) | OQL query and index-DDL contract — `Documents.Language` |
+| Documents | `DocumentDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | named collections of versioned documents (`DocumentCollection`) | OQL query and index-DDL contract — `Documents.Language` |
 | Graph | `GraphDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | property graph: nodes, typed directed relationships, traversal | standard TBD (ISO GQL is the recommended default; decision gates deep language work) — `Graph.Language` |
 | Blob | `IBlobDatabase` | containers of streamed large objects + metadata catalog | none (API-driven) |
 | KeyValuePair | `KeyValueDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | ordered key space, point/range ops, TTL | none for MVP (commands ride the wire protocol directly) |

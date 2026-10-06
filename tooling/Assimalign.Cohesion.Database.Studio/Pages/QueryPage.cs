@@ -556,7 +556,7 @@ internal sealed class QueryPage : ContentPage
             Spacing = 3,
             Children =
             {
-                Ui.Heading("Collection tools (IDocumentCollection)"),
+                Ui.Heading("Collection tools (DocumentCollection)"),
                 Ui.Bar(
                     collection,
                     Ui.Button("Create", async () =>

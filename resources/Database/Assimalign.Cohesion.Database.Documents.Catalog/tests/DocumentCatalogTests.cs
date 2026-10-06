@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
@@ -197,13 +198,50 @@ public sealed class DocumentCatalogTests
         Should.Throw<IndexFormatException>(() => DocumentCatalog.Open(fixture.Storage, fixture.Coordinator)).FoundVersion.ShouldBe(1);
     }
 
+    /// <summary>
+    /// The index members check their reference arguments themselves (concrete-types plan, phase 4,
+    /// #1260): a null snapshot or index name given to the search, and a null name or transaction
+    /// given to the index DDL, are <see cref="ArgumentNullException"/>, where the former interface's
+    /// implementation reported a <see cref="NullReferenceException"/> or, for a name or snapshot
+    /// with no visible index, a <see cref="DocumentCatalogException"/>.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents.Catalog] - Arguments: the index members refuse null references with ArgumentNullException")]
+    public async Task IndexMembers_NullReferences_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        await using var fixture = await Fixture.Create();
+        await fixture.Write("one", "{\"score\":1}");
+        await fixture.CreateIndex("by_score", "score");
+        var reader = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // Act
+        var nullSnapshot = await Should.ThrowAsync<ArgumentNullException>(async () =>
+            await fixture.Catalog.SearchIndexAsync(fixture.Collection.Id, "by_score", null, true, null, true, null!));
+        var nullIndexName = await Should.ThrowAsync<ArgumentNullException>(async () =>
+            await fixture.Catalog.SearchIndexAsync(fixture.Collection.Id, null!, null, true, null, true, reader.Snapshot));
+        var nullCreateContext = await Should.ThrowAsync<ArgumentNullException>(async () =>
+            await fixture.Catalog.CreateIndexAsync(fixture.Collection.Id, "by_other", "score", null!));
+        var nullDropName = await Should.ThrowAsync<ArgumentNullException>(async () =>
+            await fixture.Catalog.DeleteIndexAsync(fixture.Collection.Id, null!, reader));
+        var nullDropContext = await Should.ThrowAsync<ArgumentNullException>(async () =>
+            await fixture.Catalog.DeleteIndexAsync(fixture.Collection.Id, "by_score", null!));
+        await fixture.Coordinator.CommitAsync(reader);
+
+        // Assert
+        nullSnapshot.ParamName.ShouldBe("snapshot");
+        nullIndexName.ParamName.ShouldBe("indexName");
+        nullCreateContext.ParamName.ShouldBe("context");
+        nullDropName.ParamName.ShouldBe("name");
+        nullDropContext.ParamName.ShouldBe("context");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         internal MemoryStream Data { get; } = new();
         internal MemoryStream Journal { get; } = new();
         internal DocumentStorage Storage { get; }
         internal TransactionCoordinator Coordinator { get; }
-        internal IDocumentCatalog Catalog { get; }
+        internal DocumentCatalog Catalog { get; }
         internal DocumentCollectionMetadata Collection { get; } = new(Guid.NewGuid(), "items");
 
         private Fixture()

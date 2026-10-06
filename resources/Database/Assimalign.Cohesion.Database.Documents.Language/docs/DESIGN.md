@@ -218,8 +218,8 @@ Multiple statements per parse are rejected. Logical database creation and deleti
 engine-side C# operations.
 
 OQL still has no document data-mutation syntax. Document insert/replacement and delete use the
-frozen `IDocumentCollection.PutAsync` and `DeleteAsync` contracts, including their transaction and
-expected-version semantics. No existing public interface was widened for index management or a
+`DocumentCollection.PutAsync` and `DeleteAsync` operations, including their transaction and
+expected-version semantics. No public surface was widened for index management or a
 second data-mutation language. The Documents engine design states query ordering, mixed-shape
 behavior, index-DDL ownership, and aggregate/mutation semantics.
 

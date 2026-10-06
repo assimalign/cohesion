@@ -20,9 +20,11 @@ flowchart LR
     Cat --> Types["Database.Types"]
 ```
 
-`IDocumentCatalog` is a new Documents-owned interface. The pre-existing engine, collection,
-session, storage-kernel, transaction, and index interfaces are unchanged. Public metadata records
-are immutable values; the implementation and codecs are internal.
+`DocumentCatalog.Open` returns the sealed `DocumentCatalog`, which has a private constructor; its
+record and codecs are internal. The former `IDocumentCatalog` interface, `DocumentCatalog` static
+factory and internal `DefaultDocumentCatalog` collapsed into it (concrete-types plan, phase 4,
+#1260), and its index members (`CreateIndexAsync`, `DeleteIndexAsync`, `SearchIndexAsync`) now
+check their reference arguments themselves. Public metadata records are immutable values.
 
 ## Snapshot directory and ownership
 
@@ -80,7 +82,7 @@ layer. Document content has its separate multi-page chunk mechanism.
 Index definitions are lower-level catalog mutations, not a second public engine entry point. The
 Documents planner turns OQL `CREATE INDEX` and `DROP INDEX` expressions into catalog-operation
 plans, and the plan executor invokes this package under the statement's `TransactionContext`
-after lock acquisition and ownership enforcement. `IDocumentDatabase` therefore needs no index
+after lock acquisition and ownership enforcement. `DocumentDatabase` therefore needs no index
 members, and the catalog and B+Tree updates retain the same transaction as the DDL statement.
 
 Each index is a nonunique B+Tree over one case-sensitive field path. The catalog stores that path

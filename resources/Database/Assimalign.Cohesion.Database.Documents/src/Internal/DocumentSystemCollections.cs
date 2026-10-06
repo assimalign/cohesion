@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
+
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -26,7 +27,7 @@ internal static class DocumentSystemCollections
         }
     }
 
-    internal static IEnumerable<JsonElement> Enumerate(DocumentDatabaseInstance database, TransactionSnapshot snapshot,
+    internal static IEnumerable<JsonElement> Enumerate(DocumentDatabase database, TransactionSnapshot snapshot,
         string name, CancellationToken cancellationToken)
     {
         // Every lookup uses the same statement snapshot, including a transaction's

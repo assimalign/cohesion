@@ -6,7 +6,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -30,7 +29,11 @@ public sealed class DocumentStorageOperationsTests
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, a read, a write, a query, BEGIN, COMMIT and ROLLBACK of an
     /// open transaction — is refused with COHDBD002, and nothing reaches the file set, through the
-    /// workers' passes and the sessions' close included. Reopening the database runs recovery,
+    /// workers' passes and the sessions' close included. The root bases' checks come first
+    /// (concrete-types plan §6.4): BEGIN on the session holding the open transaction is refused as
+    /// already active, a canceled token is refused before the offline refusal of a new session,
+    /// both execute seams and BEGIN, the execute seams' argument checks come before it too, and the
+    /// transaction whose session closed reports Faulted. Reopening the database runs recovery,
     /// which keeps the commit when its record's bytes survived and drops it when they were lost
     /// with the failed fsync.
     /// </summary>
@@ -50,7 +53,7 @@ public sealed class DocumentStorageOperationsTests
             PageWriteBackInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
         var other = await database.CreateSessionAsync();
@@ -79,9 +82,36 @@ public sealed class DocumentStorageOperationsTests
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.ExecuteAsync("SELECT id FROM items")),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.BeginTransactionAsync()),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateCollectionAsync("late")),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.CreateCollectionAsync("late")),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.CommitAsync()),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.RollbackAsync()),
         };
+
+        // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
+        // open transaction is refused as already active before the offline refusal, and a canceled
+        // token is refused before the offline refusal of a new session, both execute seams and
+        // BEGIN. Before the bases, each of these was refused with COHDBD002. The collection and
+        // document operations do not pass the session's execute seams, so their order holds.
+        var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync());
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        var canceledCalls = new List<OperationCanceledException>
+        {
+            await Should.ThrowAsync<OperationCanceledException>(async () => await database.CreateSessionAsync(canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(DocumentQueryRequest.FromOql("SELECT id FROM items"), canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync("SELECT id FROM items", null, canceled.Token)),
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.BeginTransactionAsync(canceled.Token)),
+        };
+        var collectionRefusals = new List<DatabaseOfflineException>
+        {
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await collection.GetAsync(session, "kept", canceled.Token)),
+            await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.GetCollectionAsync("items", canceled.Token)),
+        };
+
+        // The execute seams' argument checks are the base's too, ahead of the offline refusal the
+        // model made first.
+        var nullRequest = await Should.ThrowAsync<ArgumentNullException>(async () => await session.ExecuteAsync((QueryRequest)null!));
+        var blankStatement = await Should.ThrowAsync<ArgumentException>(async () => await session.ExecuteAsync(" "));
 
         // Every worker runs a pass, with a checkpoint due by size; then the sessions close.
         database.DataStorage.CheckpointJournalSize = 1;
@@ -90,18 +120,27 @@ public sealed class DocumentStorageOperationsTests
             worker.RunIteration(CancellationToken.None).ShouldBeTrue(worker.Fault?.ToString());
         }
 
+        // The open transaction's teardown rolls nothing back on the offline database, and the
+        // transaction reports Faulted, as the model's own teardown left it.
         await other.DisposeAsync();
+        var closedState = open.State;
         await session.DisposeAsync();
         var beforeTheReopen = strategy.Capture("test");
 
-        var reopened = (DocumentDatabaseInstance)await engine.OpenDatabaseAsync("test");
+        var reopened = await engine.OpenDatabaseAsync("test");
         await using var observer = await reopened.CreateSessionAsync();
-        var ids = await Ids(observer);
+        var ids = await IdsAsync(observer);
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
         refusals.ShouldAllBe(refusal => refusal.Code == "COHDBD002" && refusal.Message.StartsWith("COHDBD002", StringComparison.Ordinal));
+        activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
+        canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
+        collectionRefusals.ShouldAllBe(refusal => refusal.Code == "COHDBD002");
+        nullRequest.ParamName.ShouldBe("request");
+        blankStatement.ParamName.ShouldBe("statement");
+        closedState.ShouldBe(TransactionState.Faulted);
         engine.State.ShouldBe(EngineState.Running);
         beforeTheReopen.Data.ShouldBe(atTheFailure.Data);
         beforeTheReopen.Journal.ShouldBe(atTheFailure.Journal);
@@ -115,7 +154,7 @@ public sealed class DocumentStorageOperationsTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("pool");
+        var database = await engine.CreateDatabaseAsync("pool");
 
         // Act & Assert
         database.DataStorage.BufferPoolCapacity.ShouldBe(4096);
@@ -128,7 +167,7 @@ public sealed class DocumentStorageOperationsTests
         Should.Throw<ArgumentOutOfRangeException>(() => DocumentDatabaseEngine.Create(new() { CheckpointJournalSize = -1 }))
             .ParamName.ShouldBe(nameof(DocumentDatabaseEngineOptions.CheckpointJournalSize));
         await using var sized = DocumentDatabaseEngine.Create(new() { BufferPoolCapacity = 2 * 1024 * 1024 });
-        ((DocumentDatabaseInstance)await sized.CreateDatabaseAsync("sized")).DataStorage.BufferPoolCapacity.ShouldBe(256);
+        (await sized.CreateDatabaseAsync("sized")).DataStorage.BufferPoolCapacity.ShouldBe(256);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Builder: the engine builder carries the buffer pool and checkpoint size to the engine it builds")]
@@ -142,8 +181,8 @@ public sealed class DocumentStorageOperationsTests
         builder.CheckpointJournalSize = 8 * 1024 * 1024;
 
         // Act
-        await using var engine = (DocumentDatabaseEngine)builder.Build();
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("built");
+        await using var engine = builder.Build();
+        var database = await engine.CreateDatabaseAsync("built");
 
         // Assert
         defaultPool.ShouldBe(32L * 1024 * 1024);
@@ -179,7 +218,7 @@ public sealed class DocumentStorageOperationsTests
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("bounded");
+        var database = await engine.CreateDatabaseAsync("bounded");
         var collection = await database.CreateCollectionAsync("items");
         using var stop = new CancellationTokenSource();
         var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
@@ -223,7 +262,7 @@ public sealed class DocumentStorageOperationsTests
             MaintenanceInterval = maintenance,
         };
         await using var engine = DocumentDatabaseEngine.Create(options);
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
@@ -278,7 +317,7 @@ public sealed class DocumentStorageOperationsTests
             PageWriteBackInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("space");
+        var database = await engine.CreateDatabaseAsync("space");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         long pagesBefore = database.DataStorage.PageManager.PageCount;
@@ -292,13 +331,13 @@ public sealed class DocumentStorageOperationsTests
         // Assert: about 300 bytes a put is under 40 pages; a page per put was 1,009.
         long pages = database.DataStorage.PageManager.PageCount - pagesBefore;
         pages.ShouldBeLessThanOrEqualTo(puts / 10, $"{pages} data pages for {puts} puts of 180-byte documents");
-        (await Ids(session)).Count.ShouldBe(puts);
+        (await IdsAsync(session)).Count.ShouldBe(puts);
     }
 
     private static ReadOnlyMemory<byte> Doc(string id, string? members = null)
         => Encoding.UTF8.GetBytes(members is null ? $"{{\"id\":\"{id}\"}}" : $"{{\"id\":\"{id}\",{members}}}");
 
-    private static async Task<List<string>> Ids(IDatabaseSession session)
+    private static async Task<List<string>> IdsAsync(DocumentDatabaseSession session)
     {
         var ids = new List<string>();
         var result = await session.ExecuteAsync("SELECT id FROM items");

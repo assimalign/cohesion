@@ -3,7 +3,7 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Documents.Internal;
+
 using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
 using Xunit;
@@ -21,7 +21,7 @@ public sealed class DocumentLifecycleTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("lifecycle", timeout.Token);
+        var database = await engine.CreateDatabaseAsync("lifecycle", timeout.Token);
         var collection = await database.CreateCollectionAsync("items", timeout.Token);
         await using var first = await database.CreateSessionAsync(timeout.Token);
         await using var waiting = await database.CreateSessionAsync(timeout.Token);
@@ -82,7 +82,7 @@ public sealed class DocumentLifecycleTests
             Exception deleteError;
             await using (var engine = DocumentDatabaseEngine.Create(options))
             {
-                var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("db", timeout.Token);
+                var database = await engine.CreateDatabaseAsync("db", timeout.Token);
                 var collection = await database.CreateCollectionAsync("items", timeout.Token);
                 await using (var seed = await database.CreateSessionAsync(timeout.Token))
                 {
@@ -124,7 +124,7 @@ public sealed class DocumentLifecycleTests
             }
 
             await using var reopened = DocumentDatabaseEngine.Create(options);
-            var loaded = (DocumentDatabaseInstance)await reopened.OpenDatabaseAsync("db", timeout.Token);
+            var loaded = await reopened.OpenDatabaseAsync("db", timeout.Token);
             loaded.Coordinator.RunVersionPurgePass(timeout.Token);
             var items = await loaded.GetCollectionAsync("items", timeout.Token);
             await using var observer = await loaded.CreateSessionAsync(timeout.Token);

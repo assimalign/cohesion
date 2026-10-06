@@ -37,7 +37,7 @@ public sealed class OqlParseStrictnessExecutionTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("strictness", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("strictness", CancellationToken.None);
         var collection = await database.CreateCollectionAsync("items", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await collection.PutAsync(session, "a", Encoding.UTF8.GetBytes("""{"name":"alpha","amount":2,"tags":["blue"]}"""),
@@ -58,7 +58,7 @@ public sealed class OqlParseStrictnessExecutionTests
         (await RowsAsync(session, "SELECT INDEX_NAME FROM COHESION_SCHEMA.INDEXES")).ShouldBeEmpty();
     }
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string oql)
+    private static async Task<List<object?[]>> RowsAsync(DocumentDatabaseSession session, string oql)
     {
         await using var result = (await session.ExecuteAsync(oql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
         var rows = new List<object?[]>();

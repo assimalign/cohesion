@@ -92,7 +92,7 @@ public sealed class OqlExecutionConformanceTests
                 ContainsClause(parsed.OqlExpression, clause).ShouldBeTrue(context);
 
                 await using var engine = DocumentDatabaseEngine.Create(new());
-                var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("conformance", cancellationToken);
+                var database = await engine.CreateDatabaseAsync("conformance", cancellationToken);
                 var collection = await database.CreateCollectionAsync("items", cancellationToken);
                 await using var session = await database.CreateSessionAsync(cancellationToken);
                 await SeedAsync(collection, session, cancellationToken);
@@ -142,7 +142,7 @@ public sealed class OqlExecutionConformanceTests
     {
         new OqlQueryParser().Parse(statement).Diagnostics.ShouldBeEmpty();
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("conformance", CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("conformance", CancellationToken.None);
         await database.CreateCollectionAsync("items", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
 
@@ -176,7 +176,7 @@ public sealed class OqlExecutionConformanceTests
         _ => false,
     };
 
-    private static async Task SeedAsync(IDocumentCollection collection, IDatabaseSession session, CancellationToken cancellationToken)
+    private static async Task SeedAsync(DocumentCollection collection, DocumentDatabaseSession session, CancellationToken cancellationToken)
     {
         (string Id, string Json)[] documents =
         [

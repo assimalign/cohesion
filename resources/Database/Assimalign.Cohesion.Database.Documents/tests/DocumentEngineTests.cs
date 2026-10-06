@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Documents.Internal;
+
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
@@ -21,7 +22,7 @@ public sealed class DocumentEngineTests
     public async Task Nested_arrays_scalars_and_mixed_shapes_round_trip_without_changing_bytes()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         string[] values = ["{\"nested\":{\"array\":[1,null,{\"name\":\"雪\"}]}}", "{\"other\":true}", "[1,2,3]", "null", "42", "\"scalar\""];
@@ -39,7 +40,7 @@ public sealed class DocumentEngineTests
     public async Task Versions_are_conditional_and_never_reused_after_delete()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         var first = await collection.PutAsync(session, "one", "{}"u8.ToArray());
@@ -60,7 +61,7 @@ public sealed class DocumentEngineTests
     public async Task Explicit_transactions_have_the_requested_visibility(IsolationLevel isolation, int expected)
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var writer = await database.CreateSessionAsync();
         await using var reader = await database.CreateSessionAsync();
@@ -75,7 +76,7 @@ public sealed class DocumentEngineTests
     public async Task Explicit_rollback_and_session_disposal_undo_all_document_mutations()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await collection.PutAsync(session, "old", "1"u8.ToArray());
@@ -100,12 +101,12 @@ public sealed class DocumentEngineTests
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "kept", "1"u8.ToArray());
-        using var canceled = new System.Threading.CancellationTokenSource();
+        using var canceled = new CancellationTokenSource();
         canceled.Cancel();
 
         // Act
@@ -126,7 +127,7 @@ public sealed class DocumentEngineTests
     public async Task Snapshot_write_conflicts_abort_and_do_not_overwrite_newer_content()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var old = await database.CreateSessionAsync();
         await using var current = await database.CreateSessionAsync();
@@ -145,15 +146,14 @@ public sealed class DocumentEngineTests
     public async Task Schema_owned_collection_refuses_drop_and_index_ddl_and_adhoc_is_mutable()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         await database.CreateCollectionAsync("owned");
         var context = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
         var metadata = database.Catalog.FindCollection("owned", context.Snapshot).ShouldNotBeNull();
         await database.Catalog.SaveCollectionAsync(metadata with { Owner = DatabaseObjectOwner.Schema, OwningSchema = "Sales" }, context);
         await database.Coordinator.CommitAsync(context);
         await using var session = await database.CreateSessionAsync();
-        var scoped = (IDocumentDatabase)session.Database;
-        var error = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await scoped.DropCollectionAsync("owned"));
+        var error = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await session.DropCollectionAsync("owned"));
         error.Message.ShouldContain("owned");
         error.Message.ShouldContain("Sales");
         error.Message.ShouldContain("DROP COLLECTION");
@@ -167,10 +167,10 @@ public sealed class DocumentEngineTests
         dropError.Message.ShouldContain("owned");
         dropError.Message.ShouldContain("Sales");
         dropError.Message.ShouldContain("DROP INDEX");
-        await scoped.CreateCollectionAsync("adhoc");
+        await session.CreateCollectionAsync("adhoc");
         await session.ExecuteAsync("CREATE INDEX ix ON adhoc (a)");
         await session.ExecuteAsync("DROP INDEX ix ON adhoc");
-        await scoped.DropCollectionAsync("adhoc");
+        await session.DropCollectionAsync("adhoc");
     }
 
     [Theory]
@@ -179,7 +179,7 @@ public sealed class DocumentEngineTests
     public async Task Transactions_older_than_index_ddl_cannot_mutate_or_drop_the_collection(bool drop)
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
@@ -187,7 +187,7 @@ public sealed class DocumentEngineTests
         await ddlSession.ExecuteAsync("CREATE INDEX ix ON items (a)");
         if (drop)
         {
-            await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await ((IDocumentDatabase)session.Database).DropCollectionAsync("items"));
+            await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await session.DropCollectionAsync("items"));
         }
         else
         {
@@ -210,7 +210,7 @@ public sealed class DocumentEngineTests
             var engine = DocumentDatabaseEngine.Create(new() { RootPath = root, Durability = StorageCommitDurability.Grouped });
             engine.State.ShouldBe(EngineState.Running);
             engine.Workers.Select(worker => worker.Kind).Distinct().Count().ShouldBe(4);
-            var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("saved");
+            var database = await engine.CreateDatabaseAsync("saved");
             var collection = await database.CreateCollectionAsync("items");
             var bytes = Encoding.UTF8.GetBytes("{\"large\":\"" + new string('x', 50000) + "\"}");
             await using (var session = await database.CreateSessionAsync()) { await collection.PutAsync(session, "large", bytes); }
@@ -223,7 +223,7 @@ public sealed class DocumentEngineTests
             names.ShouldBe(["saved"]);
             reopened.TryGetDatabase("SAVED", out var stored).ShouldBeTrue();
             await using var reader = await stored.CreateSessionAsync();
-            var reopenedCollection = await ((IDocumentDatabase)stored).GetCollectionAsync("items");
+            var reopenedCollection = await stored.GetCollectionAsync("items");
             (await reopenedCollection.GetAsync(reader, "large")).ShouldNotBeNull().Content.ToArray().ShouldBe(bytes);
             await reader.DisposeAsync();
             await reopened.DropDatabaseAsync("saved");
@@ -254,7 +254,7 @@ public sealed class DocumentEngineTests
             // the layout engines before #1194 wrote (entries ordered by key alone).
             await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
             {
-                var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("legacy");
+                var database = await engine.CreateDatabaseAsync("legacy");
                 var collection = await database.CreateCollectionAsync("items");
                 await using var session = await database.CreateSessionAsync();
                 await collection.PutAsync(session, "a", Encoding.UTF8.GetBytes("{\"score\":1}"));
@@ -294,7 +294,7 @@ public sealed class DocumentEngineTests
             // Arrange: a closed database whose page 0 names storage format 2, the format before #1253.
             await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
             {
-                var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("legacy");
+                var database = await engine.CreateDatabaseAsync("legacy");
                 var collection = await database.CreateCollectionAsync("items");
                 await using var session = await database.CreateSessionAsync();
                 await collection.PutAsync(session, "a", Encoding.UTF8.GetBytes("{\"score\":1}"));
@@ -321,5 +321,128 @@ public sealed class DocumentEngineTests
             }
         }
         finally { Directory.Delete(root, recursive: true); }
+    }
+
+    /// <summary>
+    /// The engine's lookup is typed (concrete-types plan, §6.5): an <c>out var</c> call binds the
+    /// typed overload, and an explicitly typed base <c>out</c> still binds the base's lookup.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Engine: the typed lookup binds an out-var call, and a base-typed out binds the base's")]
+    public async Task TryGetDatabase_OutVarAndBaseTypedOut_ShouldBindTheTypedAndTheBaseLookups()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+
+        // Act
+        bool typedFound = engine.TryGetDatabase("test", out var typed);
+        DocumentDatabase? lookedUp = typed;
+        bool baseFound = engine.TryGetDatabase("test", out DatabaseInstance? untyped);
+
+        // Assert
+        typedFound.ShouldBeTrue();
+        lookedUp.ShouldBeSameAs(database);
+        baseFound.ShouldBeTrue();
+        untyped.ShouldBeSameAs(database);
+        database.Engine.ShouldBeSameAs(engine);
+    }
+
+    /// <summary>
+    /// The root engine base's guards (concrete-types plan §6.4, the engine's guards): every member
+    /// checks an empty name, then disposal, then the token, and the enumeration checks disposal
+    /// when it is called. The document engine's own name rule (a single file-name component) runs
+    /// in its cores, after those checks. Before the base, the engine checked the whole name, then
+    /// the token, then disposal, and the enumeration checked disposal at its first
+    /// <c>MoveNextAsync</c>.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Engine: the base checks an empty name, then disposal, then the token, and the model's name rule after them")]
+    public async Task Members_InvalidNameDisposedOrCanceled_ShouldCheckNameThenDisposalThenToken()
+    {
+        // Arrange
+        var engine = DocumentDatabaseEngine.Create(new());
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        var canceledOpen = await Should.ThrowAsync<OperationCanceledException>(async () => await engine.OpenDatabaseAsync("test", canceled.Token));
+        var canceledComponent = await Should.ThrowAsync<OperationCanceledException>(async () => await engine.OpenDatabaseAsync("..", canceled.Token));
+        var component = await Should.ThrowAsync<ArgumentException>(async () => await engine.OpenDatabaseAsync(".."));
+        var unnamedLookup = Should.Throw<ArgumentException>(() => engine.TryGetDatabase(default, out _));
+        await engine.DisposeAsync();
+
+        // Act
+        var unnamedCreate = await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(default, canceled.Token));
+        var disposedCreate = await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.CreateDatabaseAsync("test", canceled.Token));
+        var disposedComponent = await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.DropDatabaseAsync(".."));
+        var disposedLookup = Should.Throw<ObjectDisposedException>(() => engine.TryGetDatabase("..", out _));
+        var disposedEnumeration = Should.Throw<ObjectDisposedException>(() => engine.GetDatabasesAsync());
+
+        // Assert
+        canceledOpen.CancellationToken.ShouldBe(canceled.Token);
+        canceledComponent.CancellationToken.ShouldBe(canceled.Token);
+        component.Message.ShouldStartWith("A database name must be a single file-name component.", Case.Sensitive);
+        unnamedLookup.Message.ShouldStartWith("A database name is required.", Case.Sensitive);
+        unnamedCreate.ParamName.ShouldBe("name");
+        disposedCreate.ShouldNotBeNull();
+        disposedComponent.ShouldNotBeNull();
+        disposedLookup.ShouldNotBeNull();
+        disposedEnumeration.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// Databases that fail to close are one component of the engine's disposal aggregate
+    /// (concrete-types plan §6.4): one failure is reported as itself, and two or more inside one
+    /// nested aggregate, "One or more document databases failed to close.". The engine's aggregate
+    /// is the root base's, "One or more components of engine '{name}' failed to close.". Before the
+    /// root base, the engine's single aggregate, "One or more document engine components failed to
+    /// close.", held each database's failure directly.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Engine: databases that fail to close are one component of the engine's aggregate, several of them nested")]
+    public async Task DisposeAsync_DatabasesFailToClose_ShouldReportThemAsOneComponent()
+    {
+        // Arrange: quiet workers, and a database of each engine holding a durable write; every
+        // journal flush of the closes fails.
+        var single = await CreateWithWritesAsync("single", databases: 1);
+        var several = await CreateWithWritesAsync("several", databases: 2);
+
+        // Act
+        AggregateException singleFailure;
+        AggregateException severalFailure;
+        using (FaultInjectingJournalStorageStrategy.FailJournalFlushes(100))
+        {
+            singleFailure = await Should.ThrowAsync<AggregateException>(async () => await single.DisposeAsync());
+            severalFailure = await Should.ThrowAsync<AggregateException>(async () => await several.DisposeAsync());
+        }
+
+        // Assert
+        singleFailure.Message.ShouldStartWith("One or more components of engine 'single' failed to close.", Case.Sensitive);
+        singleFailure.InnerExceptions.ShouldHaveSingleItem().ShouldBeOfType<StorageOfflineException>();
+        severalFailure.Message.ShouldStartWith("One or more components of engine 'several' failed to close.", Case.Sensitive);
+        var databases = severalFailure.InnerExceptions.ShouldHaveSingleItem().ShouldBeOfType<AggregateException>();
+        databases.Message.ShouldStartWith("One or more document databases failed to close.", Case.Sensitive);
+        databases.InnerExceptions.Count.ShouldBe(2);
+        databases.InnerExceptions.ShouldAllBe(failure => failure is StorageOfflineException);
+        single.State.ShouldBe(EngineState.Disposed);
+        several.State.ShouldBe(EngineState.Disposed);
+
+        static async Task<DocumentDatabaseEngine> CreateWithWritesAsync(string name, int databases)
+        {
+            var engine = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions
+            {
+                EngineName = name,
+                StorageStrategy = new FaultInjectingJournalStorageStrategy(durable: true),
+                CheckpointInterval = TimeSpan.FromHours(1),
+                PageWriteBackInterval = TimeSpan.FromHours(1),
+                MaintenanceInterval = TimeSpan.FromHours(1),
+            });
+
+            for (int index = 0; index < databases; index++)
+            {
+                var database = await engine.CreateDatabaseAsync($"{name}-{index}");
+                var collection = await database.CreateCollectionAsync("items");
+                await using var session = await database.CreateSessionAsync();
+                await collection.PutAsync(session, "item", Encoding.UTF8.GetBytes("{\"id\":\"item\"}"));
+            }
+
+            return engine;
+        }
     }
 }

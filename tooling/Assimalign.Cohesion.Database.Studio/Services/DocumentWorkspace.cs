@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Studio;
 /// <summary>
 /// Documents (OQL). Embedded only: there is no Documents wire server and Documents.Client/src is
 /// empty. OQL has no data-mutation syntax, so documents are written through
-/// <see cref="IDocumentCollection"/> (the collection tools on the page).
+/// <see cref="DocumentCollection"/> (the collection tools on the page).
 /// </summary>
 internal sealed class DocumentWorkspace : LanguageWorkspace
 {
@@ -32,7 +32,9 @@ internal sealed class DocumentWorkspace : LanguageWorkspace
 
     public override IReadOnlyList<SampleScript> Samples => DocumentSamples.All;
 
-    private IDocumentDatabase Documents => (IDocumentDatabase)RequireSession().Database;
+    // The session runs its own collection operations (option B, concrete-types plan §6.6); the
+    // cast from the root-typed session goes with ModelWorkspace's retype (phase 7).
+    private DocumentDatabaseSession DocumentSession => (DocumentDatabaseSession)RequireSession();
 
     protected override QueryStatement ParseLocally(string statement) => new OqlQueryParser().Parse(statement);
 
@@ -51,7 +53,7 @@ internal sealed class DocumentWorkspace : LanguageWorkspace
     {
         var lines = new List<CatalogLine>();
         var collections = new List<string>();
-        await foreach (IDocumentCollection collection in Documents.GetCollectionsAsync(cancellationToken).ConfigureAwait(false))
+        await foreach (DocumentCollection collection in DocumentSession.GetCollectionsAsync(cancellationToken).ConfigureAwait(false))
         {
             collections.Add(collection.Name);
         }
@@ -93,7 +95,7 @@ internal sealed class DocumentWorkspace : LanguageWorkspace
         => RunExclusiveAsync<IReadOnlyList<string>>(async token =>
         {
             var names = new List<string>();
-            await foreach (IDocumentCollection collection in Documents.GetCollectionsAsync(token).ConfigureAwait(false))
+            await foreach (DocumentCollection collection in DocumentSession.GetCollectionsAsync(token).ConfigureAwait(false))
             {
                 names.Add(collection.Name);
             }
@@ -103,40 +105,40 @@ internal sealed class DocumentWorkspace : LanguageWorkspace
         }, cancellationToken);
 
     public Task CreateCollectionAsync(string name, CancellationToken cancellationToken = default)
-        => RunExclusiveAsync(async token => await Documents.CreateCollectionAsync(name, token).ConfigureAwait(false), cancellationToken);
+        => RunExclusiveAsync(async token => await DocumentSession.CreateCollectionAsync(name, token).ConfigureAwait(false), cancellationToken);
 
     public Task DropCollectionAsync(string name, CancellationToken cancellationToken = default)
-        => RunExclusiveAsync(async token => await Documents.DropCollectionAsync(name, token).ConfigureAwait(false), cancellationToken);
+        => RunExclusiveAsync(async token => await DocumentSession.DropCollectionAsync(name, token).ConfigureAwait(false), cancellationToken);
 
     public Task<Document> PutAsync(string collection, string id, string json, ulong? expectedVersion, CancellationToken cancellationToken = default)
         => RunExclusiveAsync(async token =>
         {
-            IDocumentCollection target = await Documents.GetCollectionAsync(collection, token).ConfigureAwait(false);
+            DocumentCollection target = await DocumentSession.GetCollectionAsync(collection, token).ConfigureAwait(false);
             DocumentVersion? expected = expectedVersion is { } version ? new DocumentVersion(version) : null;
-            return await target.PutAsync(RequireSession(), id, Encoding.UTF8.GetBytes(json), expected, token).ConfigureAwait(false);
+            return await target.PutAsync(DocumentSession, id, Encoding.UTF8.GetBytes(json), expected, token).ConfigureAwait(false);
         }, cancellationToken);
 
     public Task<Document?> GetAsync(string collection, string id, CancellationToken cancellationToken = default)
         => RunExclusiveAsync(async token =>
         {
-            IDocumentCollection target = await Documents.GetCollectionAsync(collection, token).ConfigureAwait(false);
-            return await target.GetAsync(RequireSession(), id, token).ConfigureAwait(false);
+            DocumentCollection target = await DocumentSession.GetCollectionAsync(collection, token).ConfigureAwait(false);
+            return await target.GetAsync(DocumentSession, id, token).ConfigureAwait(false);
         }, cancellationToken);
 
     public Task<bool> DeleteAsync(string collection, string id, ulong? expectedVersion, CancellationToken cancellationToken = default)
         => RunExclusiveAsync(async token =>
         {
-            IDocumentCollection target = await Documents.GetCollectionAsync(collection, token).ConfigureAwait(false);
+            DocumentCollection target = await DocumentSession.GetCollectionAsync(collection, token).ConfigureAwait(false);
             DocumentVersion? expected = expectedVersion is { } version ? new DocumentVersion(version) : null;
-            return await target.DeleteAsync(RequireSession(), id, expected, token).ConfigureAwait(false);
+            return await target.DeleteAsync(DocumentSession, id, expected, token).ConfigureAwait(false);
         }, cancellationToken);
 
     /// <summary>Creates <c>items</c> (if missing) and writes a handful of documents the OQL samples query.</summary>
     public Task<int> SeedSampleDataAsync(CancellationToken cancellationToken = default)
         => RunExclusiveAsync(async token =>
         {
-            IDocumentCollection? items = null;
-            await foreach (IDocumentCollection collection in Documents.GetCollectionsAsync(token).ConfigureAwait(false))
+            DocumentCollection? items = null;
+            await foreach (DocumentCollection collection in DocumentSession.GetCollectionsAsync(token).ConfigureAwait(false))
             {
                 if (collection.Name == "items")
                 {
@@ -144,10 +146,10 @@ internal sealed class DocumentWorkspace : LanguageWorkspace
                 }
             }
 
-            items ??= await Documents.CreateCollectionAsync("items", token).ConfigureAwait(false);
+            items ??= await DocumentSession.CreateCollectionAsync("items", token).ConfigureAwait(false);
             foreach (var (id, json) in DocumentSamples.SeedDocuments)
             {
-                await items.PutAsync(RequireSession(), id, Encoding.UTF8.GetBytes(json), null, token).ConfigureAwait(false);
+                await items.PutAsync(DocumentSession, id, Encoding.UTF8.GetBytes(json), null, token).ConfigureAwait(false);
             }
 
             return DocumentSamples.SeedDocuments.Count;
