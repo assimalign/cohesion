@@ -689,12 +689,27 @@ behind its `Open` factory.
   the session closed (the view refused with "The blob session is closed."), and disposing it
   closes the database for every session, not the session: the engine refuses to reopen it
   (`ObjectDisposedException`) until it is dropped or the engine is recreated, as a directly
-  disposed database always was. Its workers skip a closed database (`BlobDatabase.IsClosed`, and
-  `BlobDatabaseEngine.IsOpen` is false for it), so the engine stays `Running` and its server keeps
-  serving the other databases. Without the skip, the version-purge worker failed on the closed
-  database's disposed coordinator every pass, which left the engine `Faulted` for good and its
-  server refusing every start, connection and handshake; option B made that reachable from a
-  session's own property. The wire server and Studio run the session's operations.
+  disposed database always was. Its workers leave a closed database alone
+  (`BlobDatabase.IsClosed`, and `BlobDatabaseEngine.IsOpen` is false for it), so the engine stays
+  `Running` and its server keeps serving the other databases: the version-purge worker skips it in
+  its pass and its trigger wait, and the checkpointer through `BlobCheckpointWorker.IsCheckpointDue`,
+  which is false for a closed database (the pass is the engines' shared one, and its `IsOpen` check
+  covers only a checkpoint that raced the close). The flush and write-back workers visit storages,
+  so they still visit the closed database's storage: write-back writes nothing to a disposed
+  storage, and a flush of one does nothing when no commit is pending and otherwise ends in an
+  `ObjectDisposedException` that `IsOpen(BlobStorage)` tolerates. Without the skip, the
+  version-purge worker failed on the closed database's disposed coordinator every pass, which left
+  the engine `Faulted` for good and its server refusing every start, connection and handshake;
+  option B made that reachable from a session's own property. The checkpointer's skip came with
+  #1289: a close that was not idle leaves the journal untruncated (when its retry of a deferred
+  undo still fails, the close keeps that writer in flight, #1226), so the closed storage stayed due
+  for a checkpoint it refuses with `StorageTransactionException`, and a checkpoint failure recorded
+  for the database before the close never ended, which kept the engine `Faulted`.
+  `BlobWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
+  records a checkpoint failure for a database whose page writes fail, closes it with a rolled-back
+  transaction's undo deferred behind a bracket that holds every page, and asserts that the
+  checkpointer's failure ends and the engine runs again (without the skip it stayed `Faulted` for
+  the test's 30 seconds). The wire server and Studio run the session's operations.
 - **Typed surface without casts.** The engine re-exposes `CreateDatabaseAsync`,
   `OpenDatabaseAsync` and `GetDatabasesAsync` typed (`BlobDatabase`) with `new` members over the
   base's public members; a database re-exposes its `Engine` and `CreateSessionAsync`

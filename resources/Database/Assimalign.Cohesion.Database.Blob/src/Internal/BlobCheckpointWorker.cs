@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// and a failed checkpoint is that database's failure (#1268). A blob database checkpoints its
 /// data storage through its transaction coordinator, which defers the checkpoint to a statement
 /// holding the apply gate. Before #1268 any failure escaped the pass and ended the worker for good.
+/// A database its holder closed is never due (<see cref="IsCheckpointDue"/>), so a failure recorded
+/// for it ends with the first pass after its backoff.
 /// </remarks>
 internal sealed class BlobCheckpointWorker : DatabaseCheckpointWorker<BlobDatabase>
 {
@@ -48,8 +50,16 @@ internal sealed class BlobCheckpointWorker : DatabaseCheckpointWorker<BlobDataba
     protected override bool IsOpen(BlobDatabase database) => _engine.IsOpen(database);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// False for a database its holder closed (directly or through a session's
+    /// <see cref="BlobDatabaseSession.Database"/>, which is the same instance), which the engine
+    /// keeps registered to refuse its reopen. A close that was not idle (a writer the close kept in
+    /// flight, #1226) leaves the journal untruncated, so without this the closed storage would stay
+    /// due for a checkpoint it refuses with <c>StorageTransactionException</c>, which
+    /// <see cref="IsOpen"/> does not cover, and a failure recorded for the database would never end.
+    /// </remarks>
     protected override bool IsCheckpointDue(BlobDatabase database, TimeSpan interval)
-        => database.DataStorage.IsCheckpointDue(interval);
+        => !database.IsClosed && database.DataStorage.IsCheckpointDue(interval);
 
     /// <inheritdoc />
     /// <remarks>
