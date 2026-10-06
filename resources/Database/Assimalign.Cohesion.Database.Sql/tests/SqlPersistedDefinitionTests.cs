@@ -282,7 +282,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
 
             var damaged = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, table.PrimaryKeyColumns,
                 table.Owner, table.OwningSchema, constraints);
-            await SqlCatalog.PublishTableAsync(database.Catalog, damaged, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
+            await database.Catalog.PublishTableAsync(damaged, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
         }
 
         // Act
@@ -361,7 +361,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
                     new SqlCatalogConstraint("signed", SqlCatalogConstraintKind.Check, [], checkExpression: "-label IS NULL"),
                     new SqlCatalogConstraint("via_cast", SqlCatalogConstraintKind.Check, [], checkExpression: "CAST(qty AS VARCHAR(5)) <> '13'"),
                 ]);
-            await SqlCatalog.PublishTableAsync(database.Catalog, stored, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
+            await database.Catalog.PublishTableAsync(stored, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
         }
 
         // Act
@@ -404,7 +404,7 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
             columns[1] = new SqlCatalogColumn("body", columns[1].Type, columns[1].IsNullable, storedDefault);
             var legacy = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, table.PrimaryKeyColumns,
                 table.Owner, table.OwningSchema, table.Constraints);
-            await SqlCatalog.PublishTableAsync(database.Catalog, legacy, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
+            await database.Catalog.PublishTableAsync(legacy, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
             await database.Catalog.SetRecordSpaceFormatVersionAsync(3);
         }
 

@@ -30,7 +30,7 @@ public sealed class SqlCatalogDroppedColumnTests
         using var data = new MemoryStream();
         using var journal = new MemoryStream();
         using var storage = SqlStorage.Create(new NonClosingStream(data), new NonClosingStream(journal), new MemoryStream(), "dropped");
-        ISqlCatalog catalog = SqlCatalog.Open(storage);
+        SqlCatalog catalog = SqlCatalog.Open(storage);
         await catalog.CreateTableAsync("dbo", "t", [Column("id", nullable: false), Column("a"), Column("b", DatabaseType.String), Column("c")], ["id"]);
 
         // Act: drop a middle column, re-add its name, drop another, then change constraints.
@@ -38,9 +38,9 @@ public sealed class SqlCatalogDroppedColumnTests
         var afterReAdd = await catalog.AddColumnAsync("dbo", "t", Column("b", DatabaseType.Int64));
         await catalog.DropColumnAsync("dbo", "t", "a");
         var check = new SqlCatalogConstraint("ck_c", SqlCatalogConstraintKind.Check, [], checkExpression: "c > 0");
-        await SqlCatalog.AddConstraintAsync(catalog, "dbo", "t", check, default);
-        await SqlCatalog.DropConstraintAsync(catalog, "dbo", "t", "ck_c");
-        await SqlCatalog.AddConstraintAsync(catalog, "dbo", "t", check, default);
+        await catalog.AddConstraintAsync("dbo", "t", check, default);
+        await catalog.DropConstraintAsync("dbo", "t", "ck_c");
+        await catalog.AddConstraintAsync("dbo", "t", check, default);
 
         // Assert: each step's layout.
         afterDrop.Columns.Select(column => column.Name).ShouldBe(["id", "a", "c"]);
@@ -61,7 +61,7 @@ public sealed class SqlCatalogDroppedColumnTests
 
         // ...and after a reopen without a checkpoint.
         using var reopenedStorage = SqlStorage.Open(Copy(data), Copy(journal), new MemoryStream());
-        ISqlCatalog reopened = SqlCatalog.Open(reopenedStorage);
+        SqlCatalog reopened = SqlCatalog.Open(reopenedStorage);
         reopened.TryGetTable("dbo", "t", out var persisted).ShouldBeTrue();
         AssertFinalLayout(persisted);
         persisted.FindColumn("b").ShouldNotBeNull().Type.Type.ShouldBe(DatabaseType.Int64);
@@ -88,7 +88,7 @@ public sealed class SqlCatalogDroppedColumnTests
         Insert(storage, record.ToArray());
 
         // Act
-        ISqlCatalog catalog = SqlCatalog.Open(storage);
+        SqlCatalog catalog = SqlCatalog.Open(storage);
 
         // Assert
         catalog.TryGetTable("dbo", "legacy", out var table).ShouldBeTrue();
@@ -124,7 +124,7 @@ public sealed class SqlCatalogDroppedColumnTests
     {
         // Arrange: (id, a, b, c) with b dropped.
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "publish-layout");
-        ISqlCatalog catalog = SqlCatalog.Open(storage);
+        SqlCatalog catalog = SqlCatalog.Open(storage);
         await catalog.CreateTableAsync("dbo", "t", [Column("id", nullable: false), Column("a"), Column("b"), Column("c")], ["id"]);
         var current = await catalog.DropColumnAsync("dbo", "t", "b");
         SqlCatalogTable Replacement(SqlCatalogColumn[] columns, int[]? dropped)
@@ -141,23 +141,23 @@ public sealed class SqlCatalogDroppedColumnTests
         })
         {
             (await Should.ThrowAsync<SqlCatalogException>(async () =>
-                await SqlCatalog.PublishTableAsync(catalog, renumbered, [], [], replaceExisting: true)))
+                await catalog.PublishTableAsync(renumbered, [], [], replaceExisting: true)))
                 .Message.ShouldContain("does not keep the physical column layout");
             catalog.TryGetTable("dbo", "t", out var unchanged).ShouldBeTrue();
             unchanged.ShouldBeSameAs(current);
         }
 
         var appended = Replacement([.. current.Columns, Column("d")], [2]);
-        await SqlCatalog.PublishTableAsync(catalog, appended, [], [], replaceExisting: true);
+        await catalog.PublishTableAsync(appended, [], [], replaceExisting: true);
         catalog.TryGetTable("dbo", "t", out var published).ShouldBeTrue();
         published.GetPhysicalOrdinal(3).ShouldBe(4);
 
         // A new table starts with no dropped column.
-        var reserved = await SqlCatalog.ReserveTableAsync(catalog, "dbo", "fresh", [Column("id"), Column("x")], null, [],
+        var reserved = await catalog.ReserveTableAsync("dbo", "fresh", [Column("id"), Column("x")], null, [],
             DatabaseObjectOwner.Adhoc, null, default);
         var withDropped = new SqlCatalogTable(reserved.ObjectId, "dbo", "fresh", reserved.Columns, droppedColumnOrdinals: [0]);
         (await Should.ThrowAsync<SqlCatalogException>(async () =>
-            await SqlCatalog.PublishTableAsync(catalog, withDropped, [], [])))
+            await catalog.PublishTableAsync(withDropped, [], [])))
             .Message.ShouldContain("cannot be created with dropped columns");
         catalog.TryGetTable("dbo", "fresh", out _).ShouldBeFalse();
     }
@@ -170,7 +170,7 @@ public sealed class SqlCatalogDroppedColumnTests
         using var data = new MemoryStream();
         using var journal = new MemoryStream();
         using var storage = SqlStorage.Create(new NonClosingStream(data), new NonClosingStream(journal), new MemoryStream(), "outgrown");
-        ISqlCatalog catalog = SqlCatalog.Open(storage);
+        SqlCatalog catalog = SqlCatalog.Open(storage);
         await catalog.CreateTableAsync("dbo", "t", [Column("id", nullable: false), Column("note", DatabaseType.String)], ["id"]);
         SqlCatalogException? failure = null;
         int cycles = 0;

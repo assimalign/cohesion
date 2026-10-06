@@ -27,14 +27,14 @@ public class SqlCatalogIndexTests
         private readonly MemoryStream _data = new();
         private readonly MemoryStream _journal = new();
 
-        public ISqlCatalog Open()
+        public SqlCatalog Open()
         {
             var storage = SqlStorage.Create(
                 new NonClosingStream(_data), new NonClosingStream(_journal), new MemoryStream(), "index-catalog-test");
             return SqlCatalog.Open(storage);
         }
 
-        public ISqlCatalog Reopen()
+        public SqlCatalog Reopen()
         {
             var dataCopy = new MemoryStream();
             dataCopy.Write(_data.ToArray());
@@ -46,7 +46,7 @@ public class SqlCatalogIndexTests
         }
     }
 
-    private static async Task<(ISqlCatalog Catalog, CatalogHarness Harness, SqlCatalogTable Table)> OpenWithTableAsync()
+    private static async Task<(SqlCatalog Catalog, CatalogHarness Harness, SqlCatalogTable Table)> OpenWithTableAsync()
     {
         var harness = new CatalogHarness();
         var catalog = harness.Open();

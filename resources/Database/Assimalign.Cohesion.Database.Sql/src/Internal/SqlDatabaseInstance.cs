@@ -22,7 +22,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
 {
     private readonly SqlStorage _storage;
     private readonly SqlStorage _catalogStorage;
-    private readonly ISqlCatalog _catalog;
+    private readonly SqlCatalog _catalog;
     private readonly TransactionCoordinator _coordinator;
     private readonly BTreeIndexManager _indexManager;
     private readonly SqlSchemaProvisioner _schemaProvisioner;
@@ -45,7 +45,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// <see langword="false"/> for a new one, which is born on this engine's format.
     /// </param>
     internal SqlDatabaseInstance(string name, SqlDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage,
-        ISqlCatalog catalog, bool recover)
+        SqlCatalog catalog, bool recover)
     {
         Name = name;
         Engine = engine;
@@ -182,7 +182,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// <param name="name">The database name, for the message.</param>
     /// <param name="catalog">The database's catalog, opened on its catalog file set.</param>
     /// <exception cref="SqlDataStorageFormatException">The data-storage format is not <see cref="SqlRowCodec.RecordSpaceFormatVersion"/>.</exception>
-    internal static void ThrowIfFormatIsNotCurrent(string name, ISqlCatalog catalog)
+    internal static void ThrowIfFormatIsNotCurrent(string name, SqlCatalog catalog)
     {
         int version = catalog.RecordSpaceFormatVersion;
         int current = SqlRowCodec.RecordSpaceFormatVersion;
@@ -257,7 +257,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// Gets the database's catalog (schema authority), for the engine's background
     /// workers and tests.
     /// </summary>
-    internal ISqlCatalog Catalog => _catalog;
+    internal SqlCatalog Catalog => _catalog;
 
     /// <summary>
     /// Gets the database's index manager (the live B+Tree directory over the data

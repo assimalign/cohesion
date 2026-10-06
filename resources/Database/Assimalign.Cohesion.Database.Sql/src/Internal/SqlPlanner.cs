@@ -26,13 +26,13 @@ internal sealed partial class SqlPlanner
     /// <summary>The dialect's name for a row of an INSERT's table value constructor, in diagnostics.</summary>
     private const string insertValuesClause = "INSERT ... VALUES";
 
-    private readonly ISqlCatalog _catalog;
+    private readonly SqlCatalog _catalog;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
     /// <summary>Backs <see cref="ScopelessEvaluator"/>.</summary>
     private SqlExpressionEvaluator? _scopelessEvaluator;
 
-    internal SqlPlanner(ISqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters)
+    internal SqlPlanner(SqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters)
     {
         _catalog = catalog;
         _parameters = parameters;

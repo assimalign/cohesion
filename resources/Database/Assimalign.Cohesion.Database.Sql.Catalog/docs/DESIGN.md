@@ -8,21 +8,20 @@ two questions for the planner: *what objects exist* (with stable identities) and
 ## Collation metadata (#1025)
 
 `SqlCatalogColumn.Collation` is an optional string-column override. Null inherits
-`ISqlCatalog.DefaultCollation`, which is Binary when no default record exists.
+`SqlCatalog.DefaultCollation`, which is Binary when no default record exists.
 The default is persisted in a dedicated kind-7 catalog record and captured in
 immutable statement snapshots.
 
-`DefaultCollation` is read-only on the contract. The default is established when
+`DefaultCollation` is read-only. The default is established when
 the catalog is opened — `SqlCatalog.Open(storage, defaultCollation)` — and is
 fixed for the lifetime of the database, because every index key on a column that
 inherited it is encoded through that collation's byte transform. Opening an
 already-populated catalog under a different default is rejected; reopening under
 the same one, or with no default supplied, keeps the persisted value.
 
-Making this creation-time state rather than a mutator is deliberate: a setter on
-the contract would tell every implementer the value is changeable and then guard
-that promise at runtime, which is the kind of one-off bridging API the repo's
-abstraction rule exists to keep off interfaces.
+Making this creation-time state rather than a mutator is deliberate: a setter
+would tell every caller the value is changeable and then guard that promise at
+runtime.
 
 Table metadata extension version 2 appends one collation identifier per column
 after the existing constraints. Version-1 and pre-extension records still read
@@ -200,9 +199,10 @@ and continues to support drift detection independently of per-object ownership.
 
 The engine enforces the live-session DDL lock; the catalog remains the durable
 metadata component used by sanctioned schema application as well. Ownership
-metadata is accepted by the staged-publication statics on `SqlCatalog`;
-authorization to change an existing schema-owned object remains an engine/session
-decision. `ISqlCatalog` itself has no new member. The older direct-creation helpers
+metadata is accepted by the staged-publication members of `SqlCatalog`
+(`ReserveTableAsync`, `PublishTableAsync`); authorization to change an existing
+schema-owned object remains an engine/session decision. The older direct-creation
+helpers (`CreateTableAsync` with ownership and constraints, `AddConstraintAsync`)
 remain internal and are used only by catalog tests.
 
 ## Constraint persistence
@@ -224,20 +224,15 @@ then the engine commits the empty index trees before publishing the table,
 constraints, index descriptions, and registrations in one catalog transaction.
 A crash before publication leaves no visible table with missing enforcement.
 Replacement publication similarly commits newly added columns/constraints and
-their new indexes together. `SqlCatalog.ReserveTableAsync(ISqlCatalog, ...)` and
-`SqlCatalog.PublishTableAsync(ISqlCatalog, ...)` expose this composition lifecycle as
-`public static` methods that downcast to the internal implementation - the same bridge
-shape as the existing `CreateTableAsync`/`AddConstraintAsync` helpers, and for the same
-reason: the lifecycle is a capability of *this* catalog, not a contract every
-`ISqlCatalog` implementation must honour. A reservation
+their new indexes together. `SqlCatalog.ReserveTableAsync` and
+`SqlCatalog.PublishTableAsync` expose this composition lifecycle. A reservation
 persists only the identity counter and does not lock the name; callers serialize
 DDL and durably build enforcing indexes before publishing. New publications reject
 zero or unallocated identities so they cannot bypass the durable identity counter.
 Replacement publication
 retains existing index descriptions while adding the supplied new descriptions.
-`SqlCatalog.DropConstraintAsync(ISqlCatalog, ...)` owns removal of persisted
-foreign-key/check metadata, alongside the existing table, column, and index mutations
-on the interface.
+`SqlCatalog.DropConstraintAsync` owns removal of persisted foreign-key/check
+metadata, alongside the catalog's table, column, and index mutations.
 
 Index records have their own version-`1` trailing extension carrying `IsPrimaryKey`.
 This identifies the physical index enforcing primary-key metadata, allowing schema
@@ -283,10 +278,10 @@ metadata store. `SqlCatalogTable` describes stored objects only and gains no
 virtual/system flag. SQL view names, columns, binding, and row projection belong
 to the SQL engine, not to this persistence library.
 
-`SqlCatalog.CaptureSnapshot(ISqlCatalog)` returns an `ISqlCatalogSnapshot` containing
+`SqlCatalog.CaptureSnapshot()` returns a `SqlCatalogSnapshot` containing
 an atomic capture of tables, index descriptions, and default collation under the
-catalog's metadata lock. `ISqlCatalogSnapshot` is public because it is the return type
-of a public static method; the implementation stays internal; callers can retain
+catalog's metadata lock. `SqlCatalogSnapshot` is a public sealed type with an internal
+constructor, the return type of a public member; callers can retain
 the read-only capture without holding a storage handle or disposing it. Table
 columns, primary-key columns, and index key-column names are copied into read-only
 collections when descriptions are created; callers cannot mutate retained input
@@ -296,14 +291,29 @@ start for `ReadCommitted` or auto-commit. The engine derives every view row and
 referenced constraint from that capture, preventing an enumeration from mixing
 metadata before and after a DDL publication. Captures expose existing catalog
 descriptions, with no SQL view binding, query execution, or mutable persistence
-capability. These `SqlCatalog` statics replace the shipped-to-shipped friend grant
-without widening `ISqlCatalog`: consistent reads and staged publication are
-capabilities of this catalog implementation, and putting them on the interface would
-make every future implementation owe four more members.
+capability. These `SqlCatalog` members replace a shipped-to-shipped friend grant.
 After a table drop, fresh snapshots contain none of its table, index, constraint,
 column, or ownership metadata. See the SQL engine's
 [virtual relation design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#virtual-system-relations-c1)
 for the query surface and the two deliberately non-standard extension views.
+
+## One sealed type (concrete-types plan, phase 4, #1260)
+
+`SqlCatalog` is one `public sealed` class, and `SqlCatalogSnapshot` another with an
+internal constructor. Until phase 4 the catalog was a public `ISqlCatalog`
+interface, an internal `DefaultSqlCatalog` and a `public static class SqlCatalog`
+whose `Open` returned the interface and whose statics (`CaptureSnapshot`,
+`ReserveTableAsync`, `PublishTableAsync`, `DropConstraintAsync`) took the interface
+and downcast to the internal type, so a second catalog implementation would not owe
+them; the snapshot was likewise an `ISqlCatalogSnapshot` interface over an internal
+class. There is no second implementation: a SQL database has exactly one catalog,
+over its own file set. So the three collapsed into the sealed class
+(`.claude/rules/database-area.md`, rule 1): `Open` is its static factory over a
+private constructor, and the four statics are instance members with the same
+checks and documentation. The internal test helpers (`CreateTableAsync` with
+ownership and constraints, `AddConstraintAsync`) became internal instance members
+the catalog's tests reach through the existing Sql.Catalog → Sql.Catalog.Tests grant.
+No behavior changed. The `Abstractions/` folder is gone.
 
 ## Error model
 

@@ -31,14 +31,14 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </remarks>
 internal sealed class SqlBoundTableCache
 {
-    private readonly ISqlCatalog _catalog;
+    private readonly SqlCatalog _catalog;
     private readonly ConditionalWeakTable<SqlCatalogTable, SqlBoundTable> _bound = new();
     private readonly object _sync = new();
     private long _bindCount;
 
     /// <summary>Initializes an empty cache over a catalog.</summary>
     /// <param name="catalog">The catalog whose table versions are bound.</param>
-    internal SqlBoundTableCache(ISqlCatalog catalog)
+    internal SqlBoundTableCache(SqlCatalog catalog)
     {
         _catalog = catalog;
     }

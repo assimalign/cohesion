@@ -123,8 +123,8 @@ tables and ad-hoc indexes coexist with it and do not create false drift or becom
 implicit destructive migration targets. A desired name that collides with an
 ad-hoc object is rejected before applying any steps; adoption requires a future
 explicit policy. Table creation uses the catalog's reserve/build/publish lifecycle,
-including its ownership metadata, through the `public static` `SqlCatalog` bridges
-rather than any member of `ISqlCatalog`; ordinary `ISqlCatalog.CreateTableAsync`
+including its ownership metadata, through `SqlCatalog.ReserveTableAsync` and
+`SqlCatalog.PublishTableAsync`; ordinary `SqlCatalog.CreateTableAsync`
 stays ad-hoc. The catalog persists descriptions;
 the engine continues to authorize session operations against schema-owned objects.
 
@@ -156,8 +156,8 @@ planner limits on joins and subqueries also apply.
 Rows use the ordinary materialized result and wire codecs, so metadata is
 available over `SqlDatabaseServer` without a separate protocol operation.
 
-`SqlCatalog.CaptureSnapshot(ISqlCatalog)` returns the catalog-owned
-`ISqlCatalogSnapshot` contract, capturing tables and their index descriptions together under the
+`SqlCatalog.CaptureSnapshot()` returns the catalog-owned sealed
+`SqlCatalogSnapshot`, capturing tables and their index descriptions together under the
 catalog's existing metadata lock. The capture is read-only, carries no storage
 handle, and has no disposal lifetime. A snapshot transaction
 retains the capture taken at begin; auto-commit and `ReadCommitted` statements

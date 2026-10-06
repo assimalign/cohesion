@@ -319,7 +319,7 @@ public sealed class SqlFunctionArityTests : IDisposable
             var stored = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, table.Columns.ToArray(), table.PrimaryKeyColumns,
                 table.Owner, table.OwningSchema,
                 [new SqlCatalogConstraint("ck_arity", SqlCatalogConstraintKind.Check, [], checkExpression: predicate)]);
-            await SqlCatalog.PublishTableAsync(database.Catalog, stored, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
+            await database.Catalog.PublishTableAsync(stored, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
         }
 
         // Act

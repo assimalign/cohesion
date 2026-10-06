@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private readonly SqlStorage _storage;
-    private readonly ISqlCatalog _catalog;
+    private readonly SqlCatalog _catalog;
     private readonly BTreeIndexManager _indexManager;
     private readonly SqlBoundTableCache _definitions;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
@@ -47,7 +47,7 @@ internal sealed partial class SqlPlanExecutor
     /// write and every read of a missing trailing field use.
     /// </param>
     /// <param name="parameters">The statement's bound parameter values.</param>
-    internal SqlPlanExecutor(SqlStorage storage, ISqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions,
+    internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions,
         IReadOnlyDictionary<string, object?>? parameters)
     {
         _storage = storage;

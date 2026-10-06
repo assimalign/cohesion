@@ -16,10 +16,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed class SqlSchemaProvisioner
 {
     private readonly SqlDatabaseInstance _database;
-    private readonly ISqlCatalog _catalog;
+    private readonly SqlCatalog _catalog;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
 
-    internal SqlSchemaProvisioner(SqlDatabaseInstance database, ISqlCatalog catalog)
+    internal SqlSchemaProvisioner(SqlDatabaseInstance database, SqlCatalog catalog)
     {
         _database = database;
         _catalog = catalog;

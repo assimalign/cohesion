@@ -20,11 +20,11 @@ using Assimalign.Cohesion.Database.Storage;
 internal sealed class SqlQueryExecutor
 {
     private readonly SqlStorage _storage;
-    private readonly ISqlCatalog _catalog;
+    private readonly SqlCatalog _catalog;
     private readonly BTreeIndexManager _indexManager;
     private readonly SqlBoundTableCache _definitions;
 
-    internal SqlQueryExecutor(SqlStorage storage, ISqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions)
+    internal SqlQueryExecutor(SqlStorage storage, SqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions)
     {
         _storage = storage;
         _catalog = catalog;
@@ -32,7 +32,7 @@ internal sealed class SqlQueryExecutor
         _definitions = definitions;
     }
 
-    internal ISqlCatalogSnapshot CaptureCatalogSnapshot() => SqlCatalog.CaptureSnapshot(_catalog);
+    internal SqlCatalogSnapshot CaptureCatalogSnapshot() => _catalog.CaptureSnapshot();
 
     /// <summary>
     /// Executes a statement inside the statement's transaction context: the MVCC

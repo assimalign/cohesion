@@ -411,7 +411,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     // Ordinary DML does not enumerate the catalog just to construct a context.
     // Explicit Snapshot transactions capture at BEGIN even if their first metadata
     // SELECT comes later; read committed and auto-commit capture at statement start.
-    private ISqlCatalogSnapshot? CaptureSystemViewSnapshot(QueryRequest request)
+    private SqlCatalogSnapshot? CaptureSystemViewSnapshot(QueryRequest request)
         => request is SqlQueryRequest sql && UsesSystemView(sql.Statement.SqlExpression)
             ? _executor.CaptureCatalogSnapshot() : null;
 
@@ -448,7 +448,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     }
 
     private sealed record SqlTransactionScope(
-        SqlDatabaseTransaction Transaction, IsolationLevel IsolationLevel, ISqlCatalogSnapshot? CatalogSnapshot);
+        SqlDatabaseTransaction Transaction, IsolationLevel IsolationLevel, SqlCatalogSnapshot? CatalogSnapshot);
 
     private void ThrowIfNotOpen()
     {
