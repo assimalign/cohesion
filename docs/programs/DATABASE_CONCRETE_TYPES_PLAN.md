@@ -6,8 +6,8 @@ and reviewed on 2026-10-05, with two owner questions open at its merge (§7, §6
 P4.0 (#1260) re-verified, implemented and reviewed on 2026-10-05 (§7, §6.5); the KeyValuePair model PR of
 P4 (#1260, the first of five) re-verified and implemented on 2026-10-05 (§7, §6.4, §6.5, §6.9); the
 Graph model PR of P4 (#1260, the second) re-verified and implemented on 2026-10-05 and reviewed on
-2026-10-06 (§7, §6.4, §6.5, §6.9); the Documents model PR of P4 (#1260, the third) re-verified and
-implemented on 2026-10-06 (§7, §6.4, §6.5, §6.6, §6.9) ·
+2026-10-06 (§7, §6.4, §6.5, §6.9); the Documents model PR of P4 (#1260, the third) re-verified,
+implemented and reviewed on 2026-10-06 (§7, §6.4, §6.5, §6.6, §6.9) ·
 **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
 · **Owner decision:** O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md` · **Supersedes:** #1232
@@ -754,7 +754,11 @@ section that reaches Graph is accounted for:
   "The session failed to close." aggregate (for "One or more graph operations failed to close.").
 - *Unchanged for Graph:* the "already active" message (the model's was the base's), the worker
   disposal order (the model disposed its workers last attached first already) and the server
-  lifecycle (the base carries the one the model's server had).
+  lifecycle (the base carries the one the model's server had). The database's disposal steps and
+  their order are unchanged as well, though their path moved: `GraphDatabase.DisposeAsync` awaits
+  the coordinator's and the storage's `DisposeAsync` where the model's ran the synchronous
+  `Dispose`, and the engine closes its databases after clearing them under its lock where it
+  disposed them inside it (recorded with the Documents landing, which made the same move).
 
 **Documents at P4 (re-verified, then landed).** The model's copy was as listed
 (`DocumentDatabaseTransaction.cs` with its own `_endGate`, its `Operations` counter, `CloseAsync`
@@ -827,7 +831,16 @@ Documents is accounted for:
   - *Option B* (§6.6). `session.Database` is the unbound database: its collection operations run
     in autocommit whatever transaction the session holds, where they ran in it; it creates a
     session after the session closed, where the view refused with "The document session is
-    closed."; and disposing it closes the database, not the session (`DocumentTransactionFailureTests`).
+    closed."; and disposing it closes the database for every session, not the session, after
+    which the engine refuses to reopen it with `ObjectDisposedException` until it is dropped or
+    the engine is recreated, as a directly disposed database always was
+    (`DocumentTransactionFailureTests`, the option-B test). Because those operations no longer
+    join the session's transaction, a write through `session.Database` while that transaction has
+    written waits for the transaction's writer lock (one writer at a time), so a caller that
+    awaits it before ending the transaction waits until the call's token is canceled; the
+    canceled wait writes nothing and leaves the transaction committable (same suite,
+    `CreateCollectionAsync_ThroughSessionDatabaseAfterTransactionWrote_ShouldWaitForItsWriterLock`).
+    Inside a transaction, the session's own collection operations are the ones to use.
   - *Typed parameters.* A collection's operations take `DocumentDatabaseSession`: a null one is
     still an `ArgumentNullException`, and a session of another database or another session than a
     bound collection's is still the model's `DatabaseException` (`DocumentDatabaseScopeTests`).
@@ -839,13 +852,22 @@ Documents is accounted for:
   failed to close.").
 - *Unchanged for Documents, and asserted where the bases now carry it:* the "already active"
   message (the model's was the base's); every commit of an aborted transaction reporting
-  `COHDBD001` with the cause, a second commit included, and a commit after the teardown aborted a
-  running statement reporting that statement's cause (the model already closed the transaction
-  with a cause, unlike Graph; `DocumentTransactionFailureTests`); the offline teardown's `Faulted`
-  state (the model's `CloseAsync` recorded the cause too, so it already reported `Faulted`, unlike
-  KeyValuePair and Graph; `DocumentStorageOperationsTests`); and the worker disposal order (the
+  `COHDBD001` with the cause, a second commit included, a commit after the teardown aborted a
+  running statement reporting that statement's cause, and a commit after the session closed on a
+  transaction a failed statement had already aborted reporting that statement's failure, which
+  the base's teardown keeps rather than its own cause (the model already closed the transaction
+  with a cause, unlike Graph; `DocumentTransactionFailureTests`, the last as
+  `CommitAsync_AfterSessionClosed_ShouldReportWhyNothingCommitted(aborted: true)` beside the
+  active case, as Graph pins both); the offline teardown's `Faulted` state (the model's
+  `CloseAsync` recorded the cause too, so it already reported `Faulted`, unlike KeyValuePair and
+  Graph; `DocumentStorageOperationsTests`); and the worker disposal order (the
   model disposed its workers last attached first already). Documents has no server, so the server
-  lifecycle does not reach it.
+  lifecycle does not reach it. The database's disposal steps and their order are unchanged too
+  (the coordinator, then the storage: shutdown flush, journal, pool, streams), but their path
+  moved: `DocumentDatabase.DisposeAsync` now awaits the coordinator's and the storage's
+  `DisposeAsync` where the model's ran the synchronous `Dispose`, and the engine closes its
+  databases after it has cleared them under its lock where it disposed them inside it
+  (`Storage.Dispose` and `DisposeAsync` run the same steps; Graph's landing made the same move).
 
 ### 6.5 Root-base state, attach semantics and typed accessors (rows 1, 5, 9, 12)
 
@@ -1060,9 +1082,20 @@ name, and each has a home:
   database's own and creates a session after the session closed.
 
 Disposal now has one meaning per type: disposing the session closes the session, and disposing
-`session.Database` closes the database (the view's disposal closed the session). All three changes
-are asserted (`DocumentTransactionFailureTests`, the option-B test). Documents has no wire server,
-so only Studio's `DocumentWorkspace` moved: it runs its collection tools on the session (a cast
+`session.Database` closes the database (the view's disposal closed the session). That reaches
+every session of the database, and the engine keeps the disposed instance registered, so
+`OpenDatabaseAsync` refuses it with `ObjectDisposedException` until it is dropped or the engine is
+recreated, as it always did for a directly disposed database; option B lets any session holder
+reach it. A second consequence of the database's autocommit operations: a write through
+`session.Database` (`CreateCollectionAsync`, `DropCollectionAsync`) while the session's explicit
+transaction has written waits for that transaction's writer lock, because the engine has one
+writer at a time and the write is not part of the transaction, so the caller that awaits it
+before ending the transaction waits until the call's token is canceled (the lock manager sees no
+cycle). Inside a transaction, use the session's own collection operations; the session, database
+and Documents `DESIGN.md` remarks say so. All of these changes are asserted
+(`DocumentTransactionFailureTests`: the option-B test, which also pins the refused reopen, and
+`CreateCollectionAsync_ThroughSessionDatabaseAfterTransactionWrote_ShouldWaitForItsWriterLock`).
+Documents has no wire server, so only Studio's `DocumentWorkspace` moved: it runs its collection tools on the session (a cast
 from `ModelWorkspace`'s root-typed session to `DocumentDatabaseSession`, which phase 7's retype
 removes) where it cast the session's database to `IDocumentDatabase`.
 
@@ -1774,9 +1807,10 @@ the code had moved, the row now says what landed:
   runtime producer packs.
 - **Documents, as landed (re-verified 2026-10-06 against the code after the Graph PR).** Two
   commits on `refactor/L03.02.01.56.05-concrete-types-p4-documents`, based on the integration
-  branch's `4e07649c`: the child root, then the model. Rows 60 to 64 held against the code, with
-  the readings their entries record (row 61's and §6.6's line numbers had moved), and the leaves
-  landed as the P4 bullets say:
+  branch's `4e07649c`: the child root, then the model; the review's fixes (below) followed in a
+  third, on `refactor/L03.02.01.56.05-concrete-types-p4-documents-review`. Rows 60 to 64 held
+  against the code, with the readings their entries record (row 61's and §6.6's line numbers had
+  moved), and the leaves landed as the P4 bullets say:
   - *Leaves.* The engine, database, session and transaction are public sealed leaves of the bases;
     the database, session, transaction, collection and builder left `Internal/` for the
     `RootNamespace`. The four workers stay internal sealed. Documents has no wire server, so it has
@@ -1799,6 +1833,23 @@ the code had moved, the row now says what landed:
     the session-bound view) and `OVERVIEW.md`, Documents.Catalog's `DESIGN.md` and `OVERVIEW.md`,
     Documents.Language's `DESIGN.md`, the root `DESIGN.md` ("Root bases"), the area record's model
     table and Indexing's resolver table.
+  - *The review's fixes.* Three reviews approved with minor findings only. Option B's two
+    consequences that had gone unrecorded are recorded (§6.4, §6.6, the session's, the database's
+    and Documents `DESIGN.md`'s remarks) and asserted: disposing `session.Database` leaves the
+    engine refusing to reopen the database (`ObjectDisposedException`), and a write through
+    `session.Database` while the session's transaction has written waits for that transaction's
+    writer lock until its token is canceled (a new test). The commit after a session closed on a
+    transaction a failed statement had aborted is pinned beside the active case, as Graph pins
+    both (`CommitAsync_AfterSessionClosed_ShouldReportWhyNothingCommitted`, now a theory). The
+    session's class remarks no longer say a closed session refuses everything with one message
+    (its collection operations and a collection's document operations check the database first);
+    `DocumentCollection.PutAsync` documents the `DocumentCatalogException` an indexed scalar beyond
+    the 1024-byte key limit raises, which crosses the model boundary untranslated, as before; the
+    database's async disposal path is in §6.4's accounting. Also corrected: the using-directive
+    groups of the files the PR touched (a blank line between the System and Cohesion groups, and
+    the workers' usings above the namespace), the fault-injecting strategy's three static fields
+    (`_camelCase`), and the Task-returning test helpers the PR retyped (`PutAsync`, `RowsAsync`,
+    `PlanAsync`, `IdsAsync`).
 
   *Gate, as run:* a no-incremental build of every Database project but Database.Testing's tests,
   the SampleHost fixture (they need a local SDK pack) and the stray `Cache/src` test csproj, plus
@@ -1811,9 +1862,10 @@ the code had moved, the row now says what landed:
   Blob.Catalog 5, Blob.Storage 14, Blob.Client 21, KeyValuePair 186, KeyValuePair.Catalog 4,
   KeyValuePair.Storage 3, KeyValuePair.Client 10, Client 41, Hosting 53, Embedded 4,
   ApplicationModel 15, Sdk.Database 18; Documents.Client has no tests) apart from Documents.Tests,
-  which grows from 153 to 187 (21 composition tests, nine session and transaction contract tests,
-  three engine tests and one scope test), and Documents.Catalog.Tests, which grows from 8 to 9 (the
-  index members' argument checks). Among them are the #1225 and #1226 suites, in process only
+  which grows from 153 to 189 (21 composition tests, eleven session and transaction contract
+  tests, two of them added by the review, three engine tests and one scope test), and
+  Documents.Catalog.Tests, which grows from 8 to 9 (the index members' argument checks). Among
+  them are the #1225 and #1226 suites, in process only
   (Documents has no wire server or client): `DocumentTransactionFailureTests`,
   `DocumentStorageOperationsTests`, `DocumentWorkerResilienceTests` and `DocumentLifecycleTests`;
   the crash and recovery fixture (`DocumentProcessTests`); and the content-packing regressions of
@@ -1823,7 +1875,10 @@ the code had moved, the row now says what landed:
   embedded steps among the passes); the dependency graph check passes (no reference changed); and
   the Database runtime producer packs.
 - **Blob** uses option B (§6.6), as Documents did. The Blob PR folds `GetOwnershipAsync` into
-  `BlobContainer` (§5.2).
+  `BlobContainer` (§5.2), and checks whether the two consequences §6.6 records for Documents (a
+  database disposed through `session.Database` that the engine refuses to reopen, and a write
+  through it that waits for the session's own transaction's writer lock) reach Blob, recording and
+  asserting those that do.
 - **The Sql PR** carries:
   - §6.7, with the SDK strings in lockstep;
   - the `ExternalEngineBuilder` deletion and the builder-validation retests (row 83);

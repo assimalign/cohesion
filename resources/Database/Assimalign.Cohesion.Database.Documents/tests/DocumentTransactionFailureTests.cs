@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
@@ -68,7 +69,7 @@ public sealed class DocumentTransactionFailureTests
         var stored = (await collection.GetAsync(observer, "keep")).ShouldNotBeNull();
         stored.Version.ShouldBe(keep.Version);
         Encoding.UTF8.GetString(stored.Content.Span).ShouldBe("{\"id\":\"keep\",\"v\":1}");
-        (await Ids(observer)).ShouldBe(["keep"]);
+        (await IdsAsync(observer)).ShouldBe(["keep"]);
     }
 
     /// <summary>Every statement surface refuses work on a faulted transaction, and a rollback restores autocommit and BEGIN.</summary>
@@ -115,7 +116,7 @@ public sealed class DocumentTransactionFailureTests
             await next.CommitAsync();
         }
         session.CurrentTransaction.ShouldBeNull();
-        (await Ids(session)).ShouldBe(["keep", "next"]);
+        (await IdsAsync(session)).ShouldBe(["keep", "next"]);
     }
 
     /// <summary>COMMIT on a faulted transaction fails with COHDBD001, commits nothing, and ends the transaction.</summary>
@@ -144,9 +145,9 @@ public sealed class DocumentTransactionFailureTests
         session.CurrentTransaction.ShouldBeNull();
         // The client's rollback in a catch block after the failed commit is a no-op, not a second error.
         await transaction.RollbackAsync();
-        (await Ids(session)).ShouldBeEmpty();
+        (await IdsAsync(session)).ShouldBeEmpty();
         await collection.PutAsync(session, "after", Doc("after"));
-        (await Ids(session)).ShouldBe(["after"]);
+        (await IdsAsync(session)).ShouldBe(["after"]);
     }
 
     /// <summary>Disposing a faulted transaction ends it without throwing, and the session is idle again.</summary>
@@ -169,7 +170,7 @@ public sealed class DocumentTransactionFailureTests
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        (await Ids(session)).ShouldBe(["after"]);
+        (await IdsAsync(session)).ShouldBe(["after"]);
         await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
     }
 
@@ -196,11 +197,11 @@ public sealed class DocumentTransactionFailureTests
         // Assert
         error.Message.ShouldContain("1024-byte key limit", Case.Sensitive);
         faultedState.ShouldBe(TransactionState.Faulted);
-        (await Ids(session)).ShouldBe(["keep"]);
+        (await IdsAsync(session)).ShouldBe(["keep"]);
         var stored = (await collection.GetAsync(session, "keep")).ShouldNotBeNull();
         Encoding.UTF8.GetString(stored.Content.Span).ShouldBe("{\"id\":\"keep\",\"a\":\"k\"}");
-        (await Ids(session, "WHERE a = 'k'")).ShouldBe(["keep"]);
-        (await Ids(session, "WHERE a = 'e'")).ShouldBeEmpty();
+        (await IdsAsync(session, "WHERE a = 'k'")).ShouldBe(["keep"]);
+        (await IdsAsync(session, "WHERE a = 'e'")).ShouldBeEmpty();
     }
 
     /// <summary>A faulted transaction holds no writer lock: another session writes while it awaits rollback.</summary>
@@ -223,7 +224,7 @@ public sealed class DocumentTransactionFailureTests
 
         // Assert
         transaction.State.ShouldBe(TransactionState.Faulted);
-        (await Ids(other)).ShouldBe(["other"]);
+        (await IdsAsync(other)).ShouldBe(["other"]);
     }
 
     /// <summary>An autocommit failure ends only its own statement: the session stays idle and usable.</summary>
@@ -243,7 +244,7 @@ public sealed class DocumentTransactionFailureTests
 
         // Assert
         session.CurrentTransaction.ShouldBeNull();
-        (await Ids(session)).ShouldBe(["after", "keep"]);
+        (await IdsAsync(session)).ShouldBe(["after", "keep"]);
         await using var transaction = await session.BeginTransactionAsync();
         transaction.State.ShouldBe(TransactionState.Active);
     }
@@ -301,7 +302,7 @@ public sealed class DocumentTransactionFailureTests
         refused.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
         refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
         faultedState.ShouldBe(TransactionState.Faulted);
-        (await Ids(waiting)).ShouldBe(["blocker"]);
+        (await IdsAsync(waiting)).ShouldBe(["blocker"]);
     }
 
     /// <summary>Closing a session with a faulted transaction ends the transaction without an error.</summary>
@@ -324,18 +325,23 @@ public sealed class DocumentTransactionFailureTests
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.State.ShouldBe(SessionState.Closed);
         await using var observer = await database.CreateSessionAsync();
-        (await Ids(observer)).ShouldBeEmpty();
+        (await IdsAsync(observer)).ShouldBeEmpty();
     }
 
     /// <summary>
-    /// A commit after the session closed under an open transaction fails with COHDBD001 naming the
-    /// closure, whichever is asked first, and commits nothing; a rollback afterwards is a no-op. The
-    /// closure is the root session base's teardown cause, "The session closed before the
-    /// transaction ended." (concrete-types plan §6.4), for the model's former "The document session
-    /// closed before the transaction ended.".
+    /// A commit after the session closed under an open transaction fails with COHDBD001 naming why
+    /// nothing committed, whichever is asked first, and commits nothing; a rollback afterwards is a
+    /// no-op. For an active transaction the cause is the root session base's teardown cause, "The
+    /// session closed before the transaction ended." (concrete-types plan §6.4), for the model's
+    /// former "The document session closed before the transaction ended."; for one a statement
+    /// aborted before the session closed it is the statement's failure, which the base's teardown
+    /// keeps (the model's own close did the same before phase 4).
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT after the session closed fails with COHDBD001")]
-    public async Task CommitAsync_AfterSessionClosed_ShouldFailWithCodeNamingTheClosure()
+    /// <param name="aborted">True when a statement aborted the transaction before the session closed.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT after the session closed reports COHDBD001 naming why nothing committed")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CommitAsync_AfterSessionClosed_ShouldReportWhyNothingCommitted(bool aborted)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
@@ -344,6 +350,9 @@ public sealed class DocumentTransactionFailureTests
         var session = await database.CreateSessionAsync();
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "pending", Doc("pending"));
+        DatabaseException? failure = aborted
+            ? await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM missing"))
+            : null;
 
         // Act
         await session.DisposeAsync();
@@ -352,13 +361,21 @@ public sealed class DocumentTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        error.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
-        error.Message.ShouldContain("nothing was committed", Case.Sensitive);
-        error.Message.ShouldEndWith("Cause: The session closed before the transaction ended.", Case.Sensitive);
+        error.Message.ShouldStartWith("COHDBD001: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        if (failure is null)
+        {
+            error.Message.ShouldEndWith("Cause: The session closed before the transaction ended.", Case.Sensitive);
+        }
+        else
+        {
+            error.InnerException.ShouldBeSameAs(failure);
+            error.Message.ShouldEndWith("Cause: " + failure.Message, Case.Sensitive);
+        }
+
         repeated.Message.ShouldBe(error.Message);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         await using var observer = await database.CreateSessionAsync();
-        (await Ids(observer)).ShouldBeEmpty();
+        (await IdsAsync(observer)).ShouldBeEmpty();
     }
 
     /// <summary>Failures that come before a statement starts leave the transaction active.</summary>
@@ -393,7 +410,7 @@ public sealed class DocumentTransactionFailureTests
         rejections.ShouldAllBe(error => !error.Message.StartsWith("COHDBD001", StringComparison.Ordinal));
         state.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
-        (await Ids(session)).ShouldBe(["pending"]);
+        (await IdsAsync(session)).ShouldBe(["pending"]);
     }
 
     /// <summary>A rollback is idempotent for a transaction that did not commit, and refused for one that did.</summary>
@@ -422,7 +439,7 @@ public sealed class DocumentTransactionFailureTests
         refusal.Message.ShouldBe("The transaction is Committed; a committed transaction cannot roll back.");
         rolledBack.State.ShouldBe(TransactionState.RolledBack);
         committed.State.ShouldBe(TransactionState.Committed);
-        (await Ids(session)).ShouldBe(["kept"]);
+        (await IdsAsync(session)).ShouldBe(["kept"]);
     }
 
     /// <summary>A token canceled before a commit or rollback starts leaves the transaction exactly as it was.</summary>
@@ -449,7 +466,7 @@ public sealed class DocumentTransactionFailureTests
         // Assert
         state.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
-        (await Ids(session)).ShouldBe(["first", "second"]);
+        (await IdsAsync(session)).ShouldBe(["first", "second"]);
     }
 
     /// <summary>
@@ -474,7 +491,7 @@ public sealed class DocumentTransactionFailureTests
         // Assert
         refusal.Message.ShouldBe("The transaction is RolledBack.");
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        (await Ids(session)).ShouldBeEmpty();
+        (await IdsAsync(session)).ShouldBeEmpty();
     }
 
     /// <summary>
@@ -510,7 +527,7 @@ public sealed class DocumentTransactionFailureTests
         commit.Message.ShouldEndWith("Cause: The document session closed while the operation was running.", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         await using var observer = await database.CreateSessionAsync();
-        (await Ids(observer)).ShouldBe(["blocker"]);
+        (await IdsAsync(observer)).ShouldBe(["blocker"]);
     }
 
     /// <summary>
@@ -545,7 +562,7 @@ public sealed class DocumentTransactionFailureTests
         refusal.Message.ShouldBe("An operation of the transaction is still running; commit after it completes.");
         stateAfterRefusal.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
-        (await Ids(session)).ShouldBe(["blocker", "waiting"]);
+        (await IdsAsync(session)).ShouldBe(["blocker", "waiting"]);
     }
 
     /// <summary>
@@ -733,7 +750,7 @@ public sealed class DocumentTransactionFailureTests
         stillWaiting.ShouldBeTrue();
         completed.Id.Value.ShouldBe("waiting");
         session.CurrentTransaction.ShouldBeNull();
-        (await Ids(session)).ShouldBe(["blocker", "waiting"]);
+        (await IdsAsync(session)).ShouldBe(["blocker", "waiting"]);
     }
 
     /// <summary>
@@ -741,9 +758,11 @@ public sealed class DocumentTransactionFailureTests
     /// concrete-types plan, §6.6): its collection operations run in autocommit outside the session,
     /// whatever transaction the session holds, while the session's own collection operations run in
     /// that transaction; it creates sessions after the session closed; and disposing it closes the
-    /// database, never the session. Before phase 4 a session returned a session-bound view: its
-    /// collection operations ran in the session's transaction, it refused a closed session with
-    /// "The document session is closed.", and disposing it closed the session.
+    /// database for every session, never the session itself, and the engine refuses to reopen it
+    /// (<see cref="ObjectDisposedException"/>) until it is dropped or the engine is recreated, as a
+    /// directly disposed database always was. Before phase 4 a session returned a session-bound
+    /// view: its collection operations ran in the session's transaction, it refused a closed
+    /// session with "The document session is closed.", and disposing it closed the session.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: the session's database is the unbound database, and the session runs its own collection operations")]
     public async Task Database_OfASession_ShouldBeTheUnboundDatabase()
@@ -779,6 +798,44 @@ public sealed class DocumentTransactionFailureTests
         other.State.ShouldBe(SessionState.Open);
         await Should.ThrowAsync<ObjectDisposedException>(async () => await database.CreateSessionAsync());
         await Should.ThrowAsync<ObjectDisposedException>(async () => await other.ExecuteAsync("SELECT id FROM outside"));
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.OpenDatabaseAsync("test"));
+    }
+
+    /// <summary>
+    /// A write through a session's database runs in autocommit, outside the session's explicit
+    /// transaction (option B of the concrete-types plan, §6.6), so once that transaction has
+    /// written, the write waits for the transaction's writer lock (the engine has one writer at a
+    /// time): a caller that awaits it before ending the transaction waits until the call's token is
+    /// canceled. The canceled wait writes nothing and leaves the transaction active and
+    /// committable, and the write succeeds once the transaction has ended. Before phase 4 the
+    /// session-bound view ran the write in the session's transaction.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: a write through the session's database waits for the session transaction's writer lock")]
+    public async Task CreateCollectionAsync_ThroughSessionDatabaseAfterTransactionWrote_ShouldWaitForItsWriterLock()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync();
+        await collection.PutAsync(session, "pending", Doc("pending"));
+
+        // Act: only the token ends the wait.
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await session.Database.CreateCollectionAsync("outside", cancellation.Token));
+        var stateAfterWait = transaction.State;
+        var missing = await Should.ThrowAsync<DatabaseException>(async () => await database.GetCollectionAsync("outside"));
+        await transaction.CommitAsync();
+        var created = await session.Database.CreateCollectionAsync("outside");
+
+        // Assert
+        stateAfterWait.ShouldBe(TransactionState.Active);
+        missing.Message.ShouldBe("Collection 'outside' does not exist.");
+        created.Name.ShouldBe("outside");
+        transaction.State.ShouldBe(TransactionState.Committed);
+        (await IdsAsync(session)).ShouldBe(["pending"]);
     }
 
     /// <summary>
@@ -838,7 +895,7 @@ public sealed class DocumentTransactionFailureTests
         session.CurrentTransaction.ShouldBeNull();
         StorageOfflineException.Find(lost).ShouldNotBeNull();
         refused.InnerException.ShouldNotBeNull();
-        (await Ids(observer)).ShouldBe(["keep"]);
+        (await IdsAsync(observer)).ShouldBe(["keep"]);
     }
 
     /// <summary>
@@ -880,7 +937,7 @@ public sealed class DocumentTransactionFailureTests
         unspent.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
-        (await Ids(observer)).ShouldBe(["keep"]);
+        (await IdsAsync(observer)).ShouldBe(["keep"]);
     }
 
     /// <summary>
@@ -924,7 +981,7 @@ public sealed class DocumentTransactionFailureTests
         StorageOfflineException.Find(error).ShouldNotBeNull();
         stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
-        (await Ids(observer)).ShouldBeEmpty();
+        (await IdsAsync(observer)).ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Rollback: a late operation of a rolled-back transaction does not release its deferred writer lock")]
@@ -1058,7 +1115,7 @@ public sealed class DocumentTransactionFailureTests
         // Assert: only the committed document is there.
         checkpointFailuresLeft.ShouldBe(0);
         offline.ShouldBeTrue();
-        (await Ids(observer)).ShouldBe(["kept"]);
+        (await IdsAsync(observer)).ShouldBe(["kept"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed")]
@@ -1134,7 +1191,7 @@ public sealed class DocumentTransactionFailureTests
         refused.Message.ShouldContain("the statement was not applied", Case.Sensitive);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
         await collection.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(Timeout);
-        (await Ids(other)).ShouldBe(["other"]);
+        (await IdsAsync(other)).ShouldBe(["other"]);
     }
 
     // The engine's own maintenance workers stay out of the way, the deferred-undo retry included:
@@ -1176,7 +1233,7 @@ public sealed class DocumentTransactionFailureTests
     private static ReadOnlyMemory<byte> Doc(string id, string? members = null)
         => Encoding.UTF8.GetBytes(members is null ? $"{{\"id\":\"{id}\"}}" : $"{{\"id\":\"{id}\",{members}}}");
 
-    private static async Task<List<string>> Ids(DocumentDatabaseSession session, string? where = null)
+    private static async Task<List<string>> IdsAsync(DocumentDatabaseSession session, string? where = null)
     {
         var ids = new List<string>();
         var result = await session.ExecuteAsync("SELECT id FROM items " + where);

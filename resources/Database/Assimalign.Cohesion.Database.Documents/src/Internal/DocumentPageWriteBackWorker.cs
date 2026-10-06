@@ -1,9 +1,9 @@
 using System;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Database.Documents.Internal;
-
 using Assimalign.Cohesion.Database.Documents.Storage;
+
+namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 /// <summary>
 /// The engine-owned dirty-page writer: paced write-back of buffered pages between

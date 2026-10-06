@@ -56,7 +56,14 @@ session's collection methods (`DocumentDatabaseSession.CreateCollectionAsync`,
 `GetCollectionAsync`, `DropCollectionAsync`, `GetCollectionsAsync`) use that session's active
 transaction, as OQL statements do; without one, each runs in an automatic statement transaction.
 `session.Database` is the unbound database (option B of the concrete-types plan, §6.6), so its
-methods run automatic transactions too, and disposing it closes the database, never the session.
+methods run automatic transactions too, and disposing it closes the database for every session,
+never the session itself (the engine then refuses to reopen it with `ObjectDisposedException`
+until it is dropped or the engine is recreated). The engine has one writer at a time, so a write
+through `session.Database` (`CreateCollectionAsync`, `DropCollectionAsync`) while the session's
+explicit transaction has written waits for that transaction's writer lock: the caller that awaits
+it before ending the transaction waits until the call's token is canceled. Inside a transaction,
+use the session's own collection operations.
+
 Collection CRUD always takes a `DocumentDatabaseSession`; a collection rejects sessions from
 another database. A handle obtained through a session remains bound to that specific session and
 fails once it closes. Collection names are database-local, case-sensitive names;
@@ -655,9 +662,12 @@ session leaf.
   (`CreateCollectionAsync`, `GetCollectionAsync`, `DropCollectionAsync`, `GetCollectionsAsync`,
   in its transaction), and `session.Database` is the unbound `DocumentDatabase`, whose collection
   operations run in autocommit and whose disposal closes the database. So a collection operation
-  called on `session.Database` no longer joins the session's transaction, `session.Database`
-  creates sessions after the session closed (the view refused with "The document session is
-  closed."), and disposing it closes the database, not the session.
+  called on `session.Database` no longer joins the session's transaction (a write through it
+  while that transaction has written waits for the transaction's writer lock, "Sessions and
+  authority"), `session.Database` creates sessions after the session closed (the view refused with
+  "The document session is closed."), and disposing it closes the database for every session, not
+  the session: the engine refuses to reopen it (`ObjectDisposedException`) until it is dropped or
+  the engine is recreated, as a directly disposed database always was.
 - **Typed surface without casts.** The engine re-exposes `CreateDatabaseAsync`,
   `OpenDatabaseAsync` and `GetDatabasesAsync` typed (`DocumentDatabase`) with `new` members over
   the base's public members; a database re-exposes its `Engine` and `CreateSessionAsync`

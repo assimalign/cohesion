@@ -28,9 +28,9 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 /// </remarks>
 internal sealed class FaultInjectingJournalStorageStrategy : DocumentStorageStrategy
 {
-    private static readonly AsyncLocal<Budget?> s_failures = new();
-    private static readonly AsyncLocal<Budget?> s_flushFailures = new();
-    private static readonly AsyncLocal<Budget?> s_recordFailures = new();
+    private static readonly AsyncLocal<Budget?> _failures = new();
+    private static readonly AsyncLocal<Budget?> _flushFailures = new();
+    private static readonly AsyncLocal<Budget?> _recordFailures = new();
     private readonly Dictionary<string, Files> _databases = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DeviceFaults> _faults = new(StringComparer.Ordinal);
     private readonly object _sync = new();
@@ -63,10 +63,10 @@ internal sealed class FaultInjectingJournalStorageStrategy : DocumentStorageStra
     /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
     internal static FailureScope FailJournalWrites(int writes, int skip = 0)
     {
-        var previous = s_failures.Value;
+        var previous = _failures.Value;
         var budget = new Budget { Skip = skip, Fail = writes };
-        s_failures.Value = budget;
-        return new FailureScope(s_failures, previous, budget);
+        _failures.Value = budget;
+        return new FailureScope(_failures, previous, budget);
     }
 
     /// <summary>
@@ -85,10 +85,10 @@ internal sealed class FaultInjectingJournalStorageStrategy : DocumentStorageStra
     /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
     internal static FailureScope FailJournalWritesContaining(JournalRecordType type, int writes = 1)
     {
-        var previous = s_recordFailures.Value;
+        var previous = _recordFailures.Value;
         var budget = new Budget { Fail = writes, RecordType = type };
-        s_recordFailures.Value = budget;
-        return new FailureScope(s_recordFailures, previous, budget);
+        _recordFailures.Value = budget;
+        return new FailureScope(_recordFailures, previous, budget);
     }
 
     /// <summary>
@@ -101,10 +101,10 @@ internal sealed class FaultInjectingJournalStorageStrategy : DocumentStorageStra
     /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
     internal static FailureScope FailJournalFlushes(int flushes, int skip = 0)
     {
-        var previous = s_flushFailures.Value;
+        var previous = _flushFailures.Value;
         var budget = new Budget { Skip = skip, Fail = flushes };
-        s_flushFailures.Value = budget;
-        return new FailureScope(s_flushFailures, previous, budget);
+        _flushFailures.Value = budget;
+        return new FailureScope(_flushFailures, previous, budget);
     }
 
     /// <summary>
@@ -250,7 +250,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : DocumentStorageStra
     // Spends the calling flow's record budget when the write carries a record of its type.
     private static bool SpendCarrying(ReadOnlySpan<byte> written)
     {
-        if (s_recordFailures.Value is not { RecordType: { } type, Fail: > 0 } budget || !JournalFrames.Carries(written, type))
+        if (_recordFailures.Value is not { RecordType: { } type, Fail: > 0 } budget || !JournalFrames.Carries(written, type))
         {
             return false;
         }
@@ -308,7 +308,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : DocumentStorageStra
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            if (Spend(s_failures) || SpendCarrying(buffer.AsSpan(offset, count)))
+            if (Spend(_failures) || SpendCarrying(buffer.AsSpan(offset, count)))
             {
                 throw new IOException("Injected journal write failure.");
             }
@@ -385,7 +385,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : DocumentStorageStra
                 return;
             }
 
-            if (Spend(s_flushFailures))
+            if (Spend(_flushFailures))
             {
                 throw new IOException("Injected journal fsync failure.");
             }

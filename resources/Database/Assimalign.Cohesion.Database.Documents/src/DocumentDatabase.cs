@@ -22,16 +22,21 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// Its own collection operations (<see cref="CreateCollectionAsync"/>,
 /// <see cref="GetCollectionAsync"/>, <see cref="DropCollectionAsync"/>,
 /// <see cref="GetCollectionsAsync"/>) run in autocommit, outside any session; a session's own
-/// collection operations run in its transaction (<see cref="DocumentDatabaseSession"/>).
+/// collection operations run in its transaction (<see cref="DocumentDatabaseSession"/>). The
+/// engine has one writer at a time, so a write through the database while a session's explicit
+/// transaction has written, that session's <see cref="DocumentDatabaseSession.Database"/>
+/// included, waits for that transaction's writer lock until the transaction ends or the call's
+/// token is canceled; inside a transaction, use the session's own collection operations.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of
 /// <see cref="DatabaseInstance"/> with an internal constructor, replacing the former
 /// <c>IDocumentDatabase</c> interface, its internal implementation and the session-bound view a
 /// session returned as its database (option B, §6.6: <see cref="DocumentDatabaseSession.Database"/>
-/// is this unbound database, and disposing it closes the database, never a session). The engine
-/// creates and opens it. The base owns the name, the owning engine (re-exposed typed with
-/// <c>new</c>) and the disposed flag.
+/// is this unbound database, and disposing it closes the database for every session, never a
+/// session itself; the engine then refuses to reopen it with <see cref="ObjectDisposedException"/>
+/// until it is dropped or the engine is recreated). The engine creates and opens it. The base
+/// owns the name, the owning engine (re-exposed typed with <c>new</c>) and the disposed flag.
 /// </para>
 /// </remarks>
 public sealed class DocumentDatabase : DatabaseInstance

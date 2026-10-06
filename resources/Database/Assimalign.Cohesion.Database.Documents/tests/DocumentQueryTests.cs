@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
@@ -23,19 +24,19 @@ public sealed class DocumentQueryTests
         var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
-        await Put(collection, session, "c", "{\"name\":\"third\",\"profile\":null,\"tags\":[]}");
-        await Put(collection, session, "b", "{\"name\":\"second\",\"other\":true}");
-        await Put(collection, session, "a", "{\"name\":\"first\",\"profile\":{\"city\":\"Paris\"},\"tags\":[\"blue\",{\"kind\":\"nested\"}]}");
-        var rows = await Rows(session, "SELECT d.name, d.profile.city AS city, d.tags[1].kind AS kind FROM items AS d");
+        await PutAsync(collection, session, "c", "{\"name\":\"third\",\"profile\":null,\"tags\":[]}");
+        await PutAsync(collection, session, "b", "{\"name\":\"second\",\"other\":true}");
+        await PutAsync(collection, session, "a", "{\"name\":\"first\",\"profile\":{\"city\":\"Paris\"},\"tags\":[\"blue\",{\"kind\":\"nested\"}]}");
+        var rows = await RowsAsync(session, "SELECT d.name, d.profile.city AS city, d.tags[1].kind AS kind FROM items AS d");
         rows.Select(row => row.GetString(0)).ShouldBe(["first", "second", "third"]);
         rows[0].GetString(1).ShouldBe("Paris");
         rows[0].GetString(2).ShouldBe("nested");
         rows[1].IsNull(1).ShouldBeTrue();
         rows[2].IsNull(2).ShouldBeTrue();
-        var nested = await Rows(session, "SELECT profile, tags FROM items WHERE name = 'first'");
+        var nested = await RowsAsync(session, "SELECT profile, tags FROM items WHERE name = 'first'");
         ((JsonElement)nested[0].GetValue(0)!).GetProperty("city").GetString().ShouldBe("Paris");
         ((JsonElement)nested[0].GetValue(1)!)[1].GetProperty("kind").GetString().ShouldBe("nested");
-        var whole = await Rows(session, "SELECT * FROM items WHERE tags[0] = 'blue'");
+        var whole = await RowsAsync(session, "SELECT * FROM items WHERE tags[0] = 'blue'");
         ((JsonElement)whole.Single().GetValue(0)!).GetProperty("name").GetString().ShouldBe("first");
     }
 
@@ -51,15 +52,15 @@ public sealed class DocumentQueryTests
         string content = "42";
         for (int i = 0; i < depth; i++) { content = "{\"x\":" + content + "}"; }
         string path = string.Join('.', Enumerable.Repeat("x", depth));
-        await Put(collection, session, "deep", content);
-        var whole = ((JsonElement)(await Rows(session, "SELECT * FROM items")).Single().GetValue(0)!);
+        await PutAsync(collection, session, "deep", content);
+        var whole = ((JsonElement)(await RowsAsync(session, "SELECT * FROM items")).Single().GetValue(0)!);
         for (int i = 0; i < depth; i++) { whole = whole.GetProperty("x"); }
         whole.GetInt32().ShouldBe(42);
         string query = $"SELECT d.{path} AS value FROM items AS d WHERE d.{path} = 42";
-        (await Rows(session, query)).Single().GetInt32(0).ShouldBe(42);
+        (await RowsAsync(session, query)).Single().GetInt32(0).ShouldBe(42);
         await session.ExecuteAsync($"CREATE INDEX deep_value ON items ({path})");
-        (await Plan(database, query)).Access.ShouldBeOfType<DocumentIndexPath>();
-        (await Rows(session, query)).Single().GetInt32(0).ShouldBe(42);
+        (await PlanAsync(database, query)).Access.ShouldBeOfType<DocumentIndexPath>();
+        (await RowsAsync(session, query)).Single().GetInt32(0).ShouldBe(42);
     }
 
     [Fact]
@@ -69,19 +70,19 @@ public sealed class DocumentQueryTests
         var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
-        await Put(collection, session, "d", "{\"category\":\"b\",\"amount\":4}");
-        await Put(collection, session, "c", "{\"category\":\"a\"}");
-        await Put(collection, session, "b", "{\"category\":\"a\",\"amount\":6}");
-        await Put(collection, session, "a", "{\"category\":\"a\",\"amount\":2}");
-        await Put(collection, session, "e", "{\"amount\":9}");
-        var rows = await Rows(session, "SELECT category, COUNT(*) AS count, COUNT(amount) AS present, SUM(amount) AS total, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items GROUP BY category HAVING COUNT(*) > 1 ORDER BY total DESC");
+        await PutAsync(collection, session, "d", "{\"category\":\"b\",\"amount\":4}");
+        await PutAsync(collection, session, "c", "{\"category\":\"a\"}");
+        await PutAsync(collection, session, "b", "{\"category\":\"a\",\"amount\":6}");
+        await PutAsync(collection, session, "a", "{\"category\":\"a\",\"amount\":2}");
+        await PutAsync(collection, session, "e", "{\"amount\":9}");
+        var rows = await RowsAsync(session, "SELECT category, COUNT(*) AS count, COUNT(amount) AS present, SUM(amount) AS total, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items GROUP BY category HAVING COUNT(*) > 1 ORDER BY total DESC");
         rows.Count.ShouldBe(1);
         rows[0].GetString(0).ShouldBe("a");
         Enumerable.Range(1, 6).Select(rows[0].GetInt32).ShouldBe([3, 2, 8, 4, 2, 6]);
-        var groups = await Rows(session, "SELECT category, SUM(amount) AS total FROM items GROUP BY category");
+        var groups = await RowsAsync(session, "SELECT category, SUM(amount) AS total FROM items GROUP BY category");
         groups[0].IsNull(0).ShouldBeTrue();
         groups.Skip(1).Select(row => row.GetString(0)).ShouldBe(["a", "b"]);
-        var empty = await Rows(session, "SELECT COUNT(*) AS count, SUM(amount) AS total FROM items WHERE amount > 100");
+        var empty = await RowsAsync(session, "SELECT COUNT(*) AS count, SUM(amount) AS total FROM items WHERE amount > 100");
         empty.Single().GetInt64(0).ShouldBe(0L);
         empty.Single().IsNull(1).ShouldBeTrue();
     }
@@ -93,12 +94,12 @@ public sealed class DocumentQueryTests
         var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
-        await Put(collection, session, "a", "{\"key\":{\"a\":1,\"b\":[2,3]}}");
-        await Put(collection, session, "b", "{\"key\":{\"b\":[2.0,3],\"a\":1.0}}");
-        await Put(collection, session, "c", "{\"key\":[1,2]}");
-        await Put(collection, session, "d", "{\"key\":\"1\"}");
-        await Put(collection, session, "e", "{\"key\":1}");
-        var rows = await Rows(session, "SELECT key, COUNT(*) AS count FROM items GROUP BY key");
+        await PutAsync(collection, session, "a", "{\"key\":{\"a\":1,\"b\":[2,3]}}");
+        await PutAsync(collection, session, "b", "{\"key\":{\"b\":[2.0,3],\"a\":1.0}}");
+        await PutAsync(collection, session, "c", "{\"key\":[1,2]}");
+        await PutAsync(collection, session, "d", "{\"key\":\"1\"}");
+        await PutAsync(collection, session, "e", "{\"key\":1}");
+        var rows = await RowsAsync(session, "SELECT key, COUNT(*) AS count FROM items GROUP BY key");
         rows.Count.ShouldBe(4);
         rows.Select(row => row.GetInt32(1)).ShouldBe([1, 1, 1, 2]);
         rows[0].GetValue(0).ShouldBe(1m);
@@ -112,15 +113,15 @@ public sealed class DocumentQueryTests
         var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
-        await Put(collection, session, "a", "{\"category\":\"b\",\"amount\":3,\"key\":1}");
-        await Put(collection, session, "b", "{\"category\":\"a\",\"amount\":2,\"key\":\"1\"}");
-        await Put(collection, session, "c", "{\"category\":\"a\",\"amount\":4,\"key\":2}");
-        var rows = await Rows(session, "SELECT d.category AS label, SUM(d.amount) AS total FROM items AS d GROUP BY category HAVING SUM(amount) > 1 ORDER BY label, total");
+        await PutAsync(collection, session, "a", "{\"category\":\"b\",\"amount\":3,\"key\":1}");
+        await PutAsync(collection, session, "b", "{\"category\":\"a\",\"amount\":2,\"key\":\"1\"}");
+        await PutAsync(collection, session, "c", "{\"category\":\"a\",\"amount\":4,\"key\":2}");
+        var rows = await RowsAsync(session, "SELECT d.category AS label, SUM(d.amount) AS total FROM items AS d GROUP BY category HAVING SUM(amount) > 1 ORDER BY label, total");
         rows.Select(row => row.GetString(0)).ShouldBe(["a", "b"]);
         rows.Select(row => row.GetInt32(1)).ShouldBe([6, 3]);
         // The group predicate key = 1 merges string '1' and numeric 2 into
         // the false group. key = '1' cannot choose one representative value.
-        await Should.ThrowAsync<DatabaseException>(async () => await Rows(session,
+        await Should.ThrowAsync<DatabaseException>(async () => await RowsAsync(session,
             "SELECT key = '1' AS category FROM items GROUP BY key = 1"));
     }
 
@@ -135,30 +136,30 @@ public sealed class DocumentQueryTests
         var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
-        await Put(collection, session, "d", "{\"name\":\"four\",\"score\":4}");
-        await Put(collection, session, "c", "{\"name\":\"three\",\"score\":3}");
-        await Put(collection, session, "b", "{\"name\":\"two\",\"score\":2.0}");
-        await Put(collection, session, "a", "{\"name\":\"one\",\"score\":1}");
-        await Put(collection, session, "e", "{\"name\":\"text\",\"score\":\"2\"}");
-        await Put(collection, session, "f", "{\"name\":\"missing\"}");
-        await Put(collection, session, "g", "{\"name\":\"null\",\"score\":null}");
-        await Put(collection, session, "h", "{\"name\":\"bool\",\"score\":true}");
-        await Put(collection, session, "i", "{\"name\":\"array\",\"score\":[2]}");
-        await Put(collection, session, "j", "{\"name\":\"object\",\"score\":{\"value\":2}}");
+        await PutAsync(collection, session, "d", "{\"name\":\"four\",\"score\":4}");
+        await PutAsync(collection, session, "c", "{\"name\":\"three\",\"score\":3}");
+        await PutAsync(collection, session, "b", "{\"name\":\"two\",\"score\":2.0}");
+        await PutAsync(collection, session, "a", "{\"name\":\"one\",\"score\":1}");
+        await PutAsync(collection, session, "e", "{\"name\":\"text\",\"score\":\"2\"}");
+        await PutAsync(collection, session, "f", "{\"name\":\"missing\"}");
+        await PutAsync(collection, session, "g", "{\"name\":\"null\",\"score\":null}");
+        await PutAsync(collection, session, "h", "{\"name\":\"bool\",\"score\":true}");
+        await PutAsync(collection, session, "i", "{\"name\":\"array\",\"score\":[2]}");
+        await PutAsync(collection, session, "j", "{\"name\":\"object\",\"score\":{\"value\":2}}");
         string query = $"SELECT name, score FROM items WHERE {predicate}";
         var parameters = new Dictionary<string, object?> { ["minimum"] = 2 };
-        var before = await Rows(session, query, parameters);
+        var before = await RowsAsync(session, query, parameters);
         await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
-        var plan = await Plan(database, query, parameters);
+        var plan = await PlanAsync(database, query, parameters);
         var seek = plan.Access.ShouldBeOfType<DocumentIndexPath>();
         seek.Index.Name.ShouldBe("by_score");
         if (equality) { seek.Lower.ShouldBe(seek.Upper); }
-        var after = await Rows(session, query, parameters);
+        var after = await RowsAsync(session, query, parameters);
         after.Select(row => row.GetString(0)).ShouldBe(before.Select(row => row.GetString(0)));
         after.ShouldNotBeEmpty();
         await session.ExecuteAsync("DROP INDEX by_score ON items");
-        (await Plan(database, query, parameters)).Access.ShouldBeOfType<DocumentScanPath>();
-        var afterDrop = await Rows(session, query, parameters);
+        (await PlanAsync(database, query, parameters)).Access.ShouldBeOfType<DocumentScanPath>();
+        var afterDrop = await RowsAsync(session, query, parameters);
         afterDrop.Select(row => row.GetString(0)).ShouldBe(before.Select(row => row.GetString(0)));
     }
 
@@ -170,21 +171,21 @@ public sealed class DocumentQueryTests
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE INDEX by_nested ON items (values[0].number)");
-        await Put(collection, session, "a", "{\"name\":\"a\",\"values\":[{\"number\":1}]}");
-        await Put(collection, session, "b", "{\"name\":\"b\",\"values\":[{\"number\":2}]}");
+        await PutAsync(collection, session, "a", "{\"name\":\"a\",\"values\":[{\"number\":1}]}");
+        await PutAsync(collection, session, "b", "{\"name\":\"b\",\"values\":[{\"number\":2}]}");
         const string query = "SELECT name FROM items AS d WHERE d.values[0].number = 2";
-        (await Plan(database, query)).Access.ShouldBeOfType<DocumentIndexPath>();
-        (await Rows(session, query)).Select(row => row.GetString(0)).ShouldBe(["b"]);
+        (await PlanAsync(database, query)).Access.ShouldBeOfType<DocumentIndexPath>();
+        (await RowsAsync(session, query)).Select(row => row.GetString(0)).ShouldBe(["b"]);
         await using (var transaction = await session.BeginTransactionAsync())
         {
-            await Put(collection, session, "a", "{\"name\":\"a\",\"values\":[{\"number\":2}]}");
+            await PutAsync(collection, session, "a", "{\"name\":\"a\",\"values\":[{\"number\":2}]}");
             await collection.DeleteAsync(session, "b");
-            (await Rows(session, query)).Select(row => row.GetString(0)).ShouldBe(["a"]);
+            (await RowsAsync(session, query)).Select(row => row.GetString(0)).ShouldBe(["a"]);
             await transaction.RollbackAsync();
         }
-        (await Rows(session, query)).Select(row => row.GetString(0)).ShouldBe(["b"]);
-        await Put(collection, session, "b", "{\"name\":\"b\",\"values\":[]}");
-        (await Rows(session, query)).ShouldBeEmpty();
+        (await RowsAsync(session, query)).Select(row => row.GetString(0)).ShouldBe(["b"]);
+        await PutAsync(collection, session, "b", "{\"name\":\"b\",\"values\":[]}");
+        (await RowsAsync(session, query)).ShouldBeEmpty();
     }
 
     [Fact]
@@ -194,16 +195,16 @@ public sealed class DocumentQueryTests
         var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
-        await Put(collection, session, "a", "{\"name\":\"match\",\"unusual.field\":{\"odd'name\":2}}");
-        await Put(collection, session, "b", "{\"name\":\"other\",\"unusual.field\":{\"odd'name\":3}}");
+        await PutAsync(collection, session, "a", "{\"name\":\"match\",\"unusual.field\":{\"odd'name\":2}}");
+        await PutAsync(collection, session, "b", "{\"name\":\"other\",\"unusual.field\":{\"odd'name\":3}}");
         const string query = "SELECT name FROM items WHERE \"unusual.field\"['odd''name'] = 2";
 
-        (await Plan(database, query)).Access.ShouldBeOfType<DocumentScanPath>();
+        (await PlanAsync(database, query)).Access.ShouldBeOfType<DocumentScanPath>();
         await session.ExecuteAsync("CREATE INDEX by_unusual ON items (\"unusual.field\"['odd''name'])");
 
-        (await Plan(database, query)).Access.ShouldBeOfType<DocumentIndexPath>()
+        (await PlanAsync(database, query)).Access.ShouldBeOfType<DocumentIndexPath>()
             .Index.Name.ShouldBe("by_unusual");
-        (await Rows(session, query)).Single().GetString(0).ShouldBe("match");
+        (await RowsAsync(session, query)).Single().GetString(0).ShouldBe("match");
     }
 
     [Fact]
@@ -218,7 +219,7 @@ public sealed class DocumentQueryTests
                 var seedDatabase = await engine.CreateDatabaseAsync("test");
                 var collection = await seedDatabase.CreateCollectionAsync("items");
                 await using var seedSession = await seedDatabase.CreateSessionAsync();
-                await Put(collection, seedSession, "a", "{\"name\":\"match\",\"postal-code\":2}");
+                await PutAsync(collection, seedSession, "a", "{\"name\":\"match\",\"postal-code\":2}");
                 await seedDatabase.RunAsync(null, async operation =>
                 {
                     await seedDatabase.LockWriterAsync(operation.Context, CancellationToken.None);
@@ -232,10 +233,10 @@ public sealed class DocumentQueryTests
             var database = await reopened.OpenDatabaseAsync("test");
             const string query = "SELECT name FROM items WHERE \"postal-code\" = 2";
 
-            (await Plan(database, query)).Access.ShouldBeOfType<DocumentIndexPath>()
+            (await PlanAsync(database, query)).Access.ShouldBeOfType<DocumentIndexPath>()
                 .Index.Name.ShouldBe("legacy_postal");
             await using var session = await database.CreateSessionAsync();
-            (await Rows(session, query)).Single().GetString(0).ShouldBe("match");
+            (await RowsAsync(session, query)).Single().GetString(0).ShouldBe("match");
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -250,17 +251,17 @@ public sealed class DocumentQueryTests
         var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
-        await Put(collection, session, "a", "{\"score\":\"a\"}");
-        await Put(collection, session, "b", "{\"score\":\"\\uD800\\uDC00\"}");
-        await Put(collection, session, "c", "{\"score\":\"\\uE000\"}");
-        await Put(collection, session, "d", "{\"score\":1}");
-        await Put(collection, session, "e", "{\"score\":true}");
+        await PutAsync(collection, session, "a", "{\"score\":\"a\"}");
+        await PutAsync(collection, session, "b", "{\"score\":\"\\uD800\\uDC00\"}");
+        await PutAsync(collection, session, "c", "{\"score\":\"\\uE000\"}");
+        await PutAsync(collection, session, "d", "{\"score\":1}");
+        await PutAsync(collection, session, "e", "{\"score\":true}");
         var parameters = new Dictionary<string, object?> { ["minimum"] = minimum };
         string query = $"SELECT score FROM items WHERE {predicate} ORDER BY score";
-        var before = await Rows(session, query, parameters);
+        var before = await RowsAsync(session, query, parameters);
         await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
-        (await Plan(database, query, parameters)).Access.ShouldBeOfType<DocumentIndexPath>();
-        var after = await Rows(session, query, parameters);
+        (await PlanAsync(database, query, parameters)).Access.ShouldBeOfType<DocumentIndexPath>();
+        var after = await RowsAsync(session, query, parameters);
         after.Select(row => row.GetString(0)).ShouldBe(before.Select(row => row.GetString(0)));
         after.ShouldNotBeEmpty();
     }
@@ -272,15 +273,15 @@ public sealed class DocumentQueryTests
         var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
-        await Put(collection, session, "a", "{\"score\":false}");
-        await Put(collection, session, "b", "{\"score\":true}");
-        await Put(collection, session, "c", "{\"score\":1}");
-        await Put(collection, session, "d", "{\"score\":\"true\"}");
+        await PutAsync(collection, session, "a", "{\"score\":false}");
+        await PutAsync(collection, session, "b", "{\"score\":true}");
+        await PutAsync(collection, session, "c", "{\"score\":1}");
+        await PutAsync(collection, session, "d", "{\"score\":\"true\"}");
         const string query = "SELECT score FROM items WHERE score > FALSE";
-        var before = await Rows(session, query);
+        var before = await RowsAsync(session, query);
         await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
-        (await Plan(database, query)).Access.ShouldBeOfType<DocumentIndexPath>();
-        var after = await Rows(session, query);
+        (await PlanAsync(database, query)).Access.ShouldBeOfType<DocumentIndexPath>();
+        var after = await RowsAsync(session, query);
         after.Select(row => row.GetValue(0)).ShouldBe(before.Select(row => row.GetValue(0)));
         after.Single().GetBoolean(0).ShouldBeTrue();
     }
@@ -292,15 +293,15 @@ public sealed class DocumentQueryTests
         var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
-        await Put(collection, session, "a", "{\"name\":\"null\",\"score\":null}");
-        await Put(collection, session, "b", "{\"name\":\"missing\"}");
-        await Put(collection, session, "c", "{\"name\":\"number\",\"score\":1}");
+        await PutAsync(collection, session, "a", "{\"name\":\"null\",\"score\":null}");
+        await PutAsync(collection, session, "b", "{\"name\":\"missing\"}");
+        await PutAsync(collection, session, "c", "{\"name\":\"number\",\"score\":1}");
         await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
         const string query = "SELECT name FROM items WHERE score IS NULL OR score = 1";
-        (await Plan(database, query)).Access.ShouldBeOfType<DocumentScanPath>();
-        (await Rows(session, query)).Select(row => row.GetString(0)).ShouldBe(["null", "missing", "number"]);
-        (await Rows(session, "SELECT name FROM items WHERE score = NULL")).ShouldBeEmpty();
-        (await Rows(session, "SELECT name FROM items WHERE NOT (score IS NULL)")).Single().GetString(0).ShouldBe("number");
+        (await PlanAsync(database, query)).Access.ShouldBeOfType<DocumentScanPath>();
+        (await RowsAsync(session, query)).Select(row => row.GetString(0)).ShouldBe(["null", "missing", "number"]);
+        (await RowsAsync(session, "SELECT name FROM items WHERE score = NULL")).ShouldBeEmpty();
+        (await RowsAsync(session, "SELECT name FROM items WHERE NOT (score IS NULL)")).Single().GetString(0).ShouldBe("number");
     }
 
     [Fact]
@@ -310,10 +311,10 @@ public sealed class DocumentQueryTests
         var database = await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
-        await Put(collection, session, "c", "[1,{\"a\":true}]");
-        await Put(collection, session, "b", "\"text\"");
-        await Put(collection, session, "a", "42");
-        var rows = await Rows(session, "SELECT * FROM items ORDER BY 1 DESC");
+        await PutAsync(collection, session, "c", "[1,{\"a\":true}]");
+        await PutAsync(collection, session, "b", "\"text\"");
+        await PutAsync(collection, session, "a", "42");
+        var rows = await RowsAsync(session, "SELECT * FROM items ORDER BY 1 DESC");
         rows[0].GetValue(0).ShouldBe(42m);
         rows[1].GetValue(0).ShouldBe("text");
         ((JsonElement)rows[2].GetValue(0)!)[1].GetProperty("a").GetBoolean().ShouldBeTrue();
@@ -345,10 +346,10 @@ public sealed class DocumentQueryTests
         exception.Message.ShouldContain("COHDBL001");
     }
 
-    private static ValueTask<Document> Put(DocumentCollection collection, DocumentDatabaseSession session, string id, string json)
+    private static ValueTask<Document> PutAsync(DocumentCollection collection, DocumentDatabaseSession session, string id, string json)
         => collection.PutAsync(session, id, Encoding.UTF8.GetBytes(json));
 
-    private static async Task<List<QueryRow>> Rows(DocumentDatabaseSession session, string query, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static async Task<List<QueryRow>> RowsAsync(DocumentDatabaseSession session, string query, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         var result = (QueryResultSet)await session.ExecuteAsync(DocumentQueryRequest.FromOql(query, parameters));
         await using (result)
@@ -359,7 +360,7 @@ public sealed class DocumentQueryTests
         }
     }
 
-    private static ValueTask<DocumentPlan> Plan(DocumentDatabase database, string query, IReadOnlyDictionary<string, object?>? parameters = null)
+    private static ValueTask<DocumentPlan> PlanAsync(DocumentDatabase database, string query, IReadOnlyDictionary<string, object?>? parameters = null)
         => database.RunAsync(null, operation => new ValueTask<DocumentPlan>(new DocumentPlanner(database.Catalog,
             operation.Context.Snapshot, parameters).Plan(
                 (OqlSelectExpression)DocumentQueryRequest.FromOql(query).Statement.OqlExpression)), CancellationToken.None);

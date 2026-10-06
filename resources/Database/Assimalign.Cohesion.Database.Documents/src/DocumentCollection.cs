@@ -105,6 +105,7 @@ public sealed class DocumentCollection
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBD002</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The document, the collection or its indexes changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
+    /// <exception cref="DocumentCatalogException">An indexed field of the document holds a scalar that encodes beyond the 1024-byte index key limit.</exception>
     public ValueTask<Document> PutAsync(DocumentDatabaseSession session, DocumentId id, ReadOnlyMemory<byte> content, DocumentVersion? expectedVersion = null, CancellationToken cancellationToken = default)
     {
         ValidateId(id);

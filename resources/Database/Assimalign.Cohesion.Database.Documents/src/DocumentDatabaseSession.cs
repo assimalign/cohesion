@@ -20,10 +20,12 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// base's</b> (<see cref="DatabaseSession"/>, §6.4 of the concrete-types plan): BEGIN is refused
 /// with "A transaction or operation is already active on this session." while the session's
 /// transaction is usable, while another BEGIN runs, or while a statement holds the session; a
-/// closed session refuses everything with "The session is closed."; and disposal ends the running
-/// statement, then rolls the open transaction back as the session's teardown. This type supplies
-/// the model's work: the isolation-level and offline refusals of BEGIN, the statements, and the
-/// translation of the kernel's exceptions at the model boundary.
+/// closed session refuses BEGIN and both execute seams with "The session is closed.", while its
+/// collection operations and a collection's document operations run in it check the database
+/// first (disposed, then offline) and then report the closed session with the same message; and
+/// disposal ends the running statement, then rolls the open transaction back as the session's
+/// teardown. This type supplies the model's work: the isolation-level and offline refusals of
+/// BEGIN, the statements, and the translation of the kernel's exceptions at the model boundary.
 /// </para>
 /// <para>
 /// <b>A failed statement aborts the explicit transaction (#1225, the contract #1188 set for
@@ -41,9 +43,10 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// <see cref="DropCollectionAsync"/>, <see cref="GetCollectionsAsync"/>), and
 /// <see cref="Database"/> is the unbound <see cref="DocumentDatabase"/>, whose own collection
 /// operations run in autocommit outside any session. Disposing the session closes the session;
-/// disposing its database closes the database. Before phase 4 the session's database was a
-/// session-bound view whose disposal closed the session, so <c>Dispose</c> meant two things on
-/// one type.
+/// disposing its database closes the database for every session, and the engine refuses to reopen
+/// it (<see cref="ObjectDisposedException"/>) until it is dropped or the engine is recreated.
+/// Before phase 4 the session's database was a session-bound view whose disposal closed the
+/// session, so <c>Dispose</c> meant two things on one type.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root base with
@@ -71,6 +74,15 @@ public sealed class DocumentDatabaseSession : DatabaseSession
     /// Gets the document database this session is scoped to: the unbound database, whose disposal
     /// closes the database, not the session (option B, §6.6 of the concrete-types plan).
     /// </summary>
+    /// <remarks>
+    /// The database's own collection operations run in autocommit, never in this session's
+    /// transaction. A write through it (<see cref="DocumentDatabase.CreateCollectionAsync(string, CancellationToken)"/>,
+    /// <see cref="DocumentDatabase.DropCollectionAsync(string, CancellationToken)"/>) while the
+    /// session's explicit transaction has written waits for that transaction's writer lock (the
+    /// engine has one writer at a time) until the transaction ends or the call's token is
+    /// canceled; inside a transaction, use the session's own collection operations
+    /// (<see cref="CreateCollectionAsync"/>, <see cref="DropCollectionAsync"/>).
+    /// </remarks>
     public new DocumentDatabase Database => _database;
 
     /// <summary>

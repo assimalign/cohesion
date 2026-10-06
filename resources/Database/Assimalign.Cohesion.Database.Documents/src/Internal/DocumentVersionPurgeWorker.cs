@@ -2,9 +2,9 @@ using System;
 using System.Diagnostics;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Database.Documents.Internal;
-
 using Assimalign.Cohesion.Database.Storage;
+
+namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 /// <summary>
 /// The engine-owned MVCC version-purge worker: per pass, per open database, it

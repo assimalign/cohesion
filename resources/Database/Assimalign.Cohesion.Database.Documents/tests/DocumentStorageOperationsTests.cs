@@ -129,7 +129,7 @@ public sealed class DocumentStorageOperationsTests
 
         var reopened = await engine.OpenDatabaseAsync("test");
         await using var observer = await reopened.CreateSessionAsync();
-        var ids = await Ids(observer);
+        var ids = await IdsAsync(observer);
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
@@ -331,13 +331,13 @@ public sealed class DocumentStorageOperationsTests
         // Assert: about 300 bytes a put is under 40 pages; a page per put was 1,009.
         long pages = database.DataStorage.PageManager.PageCount - pagesBefore;
         pages.ShouldBeLessThanOrEqualTo(puts / 10, $"{pages} data pages for {puts} puts of 180-byte documents");
-        (await Ids(session)).Count.ShouldBe(puts);
+        (await IdsAsync(session)).Count.ShouldBe(puts);
     }
 
     private static ReadOnlyMemory<byte> Doc(string id, string? members = null)
         => Encoding.UTF8.GetBytes(members is null ? $"{{\"id\":\"{id}\"}}" : $"{{\"id\":\"{id}\",{members}}}");
 
-    private static async Task<List<string>> Ids(DocumentDatabaseSession session)
+    private static async Task<List<string>> IdsAsync(DocumentDatabaseSession session)
     {
         var ids = new List<string>();
         var result = await session.ExecuteAsync("SELECT id FROM items");
