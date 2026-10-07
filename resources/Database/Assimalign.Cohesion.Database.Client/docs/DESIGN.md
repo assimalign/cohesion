@@ -84,42 +84,65 @@ catches its failure: a refused or unreachable endpoint (`SocketException`), an
 `IOException`, a TLS handshake failure (`AuthenticationException` from the TLS layer),
 a connect timeout. It throws `DatabaseClientException` with
 `ProtocolErrorCode.ConnectionFailure`, a message that names the endpoint
-(`Failed to connect to 127.0.0.1:5740: …`) and the factory's exception as
+(`Failed to connect to 127.0.0.1:5740: …`; a connection-string or resource-URI endpoint,
+a `DnsEndPoint`, reads `host:port`, with an IPv6 literal in brackets, not the
+`Unspecified/host:port` of its own text) and the factory's exception as
 `InnerException`. `ConnectionFailure` is the taxonomy's one client-local code; no
-server sends it (Protocol `DESIGN.md`). The catch is broad on purpose:
-`IConnectionFactory` is an open seam, and each transport throws its own types. Three
-exceptions pass through unchanged: `OperationCanceledException` when the caller's token
-is canceled, `ObjectDisposedException`, and `OutOfMemoryException`. A cancellation the
-caller did not request is the transport's own timeout (the TLS layer cancels a handshake
-that outlives `TlsClientOptions.HandshakeTimeout`), so it is wrapped like any other dial
-failure, with a message that says the attempt timed out. `RentAsync` then releases the
-pool slot, so an unreachable endpoint never exhausts the pool. The model clients
+server sends it (Protocol `DESIGN.md`), and the client holds peers to that: an error
+frame that carries it, in the handshake or in an exchange, is a `ProtocolViolation`
+that breaks the connection, so the code means a failed dial and nothing else (a
+malformed handshake error frame is a `ProtocolViolation` too). The catch is broad on
+purpose: `IConnectionFactory` is an open seam, and each transport throws its own types.
+Three exceptions pass through unchanged: `OperationCanceledException` when the caller's
+token is canceled, `ObjectDisposedException`, and `OutOfMemoryException`. Any other
+failure the transport reports once the caller's token is canceled (a socket the
+cancellation aborted, say) is the caller's cancellation as well: an
+`OperationCanceledException` for the caller's token with the failure inside. A
+cancellation the caller did not request is the transport's own timeout (the TLS layer
+cancels a handshake that outlives `TlsClientOptions.HandshakeTimeout`), so it is wrapped
+like any other dial failure, with a message that says the attempt timed out.
+`RentAsync` then releases the pool slot, so an unreachable endpoint never exhausts the
+pool. (A failed TLS upgrade still leaves its dialed TCP connection open inside the
+Connections layering, which never reaches this client; plan §12.) The model clients
 translate this exception as they translate a handshake rejection: SQL and Key-Value map
-the code to their `ConnectionFailure` kind, and Graph and Blob keep the code. A
-transport that breaks after the dial, during the handshake, still reports `Internal`.
+the code to their `ConnectionFailure` kind, and Graph and Blob keep the code.
+
+A transport that breaks after the dial, during the handshake, reports `Internal`, with
+the transport's exception inside when there is one: a peer that closes the connection
+gives "The server closed the connection mid-exchange.", and one that resets it gives the
+transport's error. The TCP transport completes the connection's input with the raw
+`SocketException` of a reset, and a `SocketException` is not an `IOException`, so the
+handshake and the exchanges translate `IOException`, `SocketException`,
+`ConnectionAbortedException` and `ConnectionResetException` alike; no transport
+exception leaves `RentAsync` or `ExecuteAsync` raw. Whether a handshake-phase break
+should report `ConnectionFailure` instead is an owner question (plan §12).
 
 ```mermaid
 flowchart TD
     Rent["RentAsync"] --> Dial["IConnectionFactory.ConnectAsync"]
     Dial -->|connected| Handshake["startup, authenticate, ready"]
-    Dial -->|"caller's token canceled"| Canceled["OperationCanceledException, unchanged"]
+    Dial -->|"caller's token canceled"| Canceled["OperationCanceledException for the caller's token, any transport failure inside"]
     Dial -->|ObjectDisposedException| Disposed["ObjectDisposedException, unchanged"]
     Dial -->|"any other failure, a transport timeout included"| Wrapped["DatabaseClientException: ConnectionFailure, endpoint, inner exception"]
+    Handshake -->|"transport closed or reset"| Broken["DatabaseClientException: Internal, transport exception inside"]
+    Handshake -->|"error frame with ConnectionFailure, or malformed"| Violation["DatabaseClientException: ProtocolViolation"]
     Handshake -->|error frame| Rejected["DatabaseClientException: the server's code"]
     Handshake -->|ready| Rented["DatabaseConnection"]
 ```
 
 The shape is Npgsql's connector open path (`npgsql/npgsql` at `9c472445`).
-`NpgsqlConnector.ConnectAsync` rethrows the caller's cancellation first
-(`src/Npgsql/Internal/NpgsqlConnector.cs:1373`), turns any other cancellation into a
-`TimeoutException` (`:1375-1376`) and throws
-`new NpgsqlException($"Failed to connect to {endpoint}", e)` (`:1383`). Its TLS
-negotiation wraps every failure but a cancellation in
+`NpgsqlConnector.ConnectAsync` catches every failure of a connect attempt
+(`src/Npgsql/Internal/NpgsqlConnector.cs:1362`), rethrows the caller's cancellation
+first (`:1373`), turns any other cancellation into a `TimeoutException` (`:1375-1376`)
+and throws `new NpgsqlException($"Failed to connect to {endpoint}", e)` (`:1383`). Its
+TLS negotiation wraps every failure but a cancellation in
 `NpgsqlException("Exception while performing SSL handshake", e)` (`:1194-1196`), and
 `NpgsqlException.IsTransient` reads the inner `IOException`, `SocketException` or
-`TimeoutException` (`src/Npgsql/NpgsqlException.cs:45-46`). One difference: Npgsql
-replaces a transport's cancellation with a new `TimeoutException`, while this client
-keeps the original exception as the inner exception.
+`TimeoutException` (`src/Npgsql/NpgsqlException.cs:45-46`). Two differences, both
+keeping the original exception: Npgsql replaces a transport's cancellation with a new
+`TimeoutException`, and its `ThrowIfCancellationRequested` drops the transport failure
+it found after the caller canceled, while this client keeps each as the inner
+exception.
 
 Only one exchange may use a connection at a time. An overlapping exchange is rejected
 before it writes any frames. Disposing a connection cancels and joins its current
@@ -299,6 +322,13 @@ The client core has no public interface left and no `Abstractions/` folder
   of 2026-10-07 wraps it with `ProtocolErrorCode.ConnectionFailure` ("Lifecycle and errors",
   above); the XML documentation of `RentAsync` and the four `ConnectAsync` members says so.
   `DatabaseClientDialFailureTests` pins the refused TCP dial (and that the slot is released),
-  five transport exception types, the TLS layer's handshake timeout and alert, and the
-  unwrapped caller cancellation and `ObjectDisposedException`; each model client's
-  `…ClientDialFailureTests` pins the refused dial and the canceled dial.
+  five transport exception types, the TLS layer's handshake timeout and alert, the
+  unwrapped caller cancellation and `ObjectDisposedException`, a transport failure after the
+  caller canceled, and the `host:port` naming of a connection-string endpoint; each model
+  client's `…ClientDialFailureTests` pins the refused dial and the canceled dial. The
+  decision's review closed the neighboring gap a peer reset left open, a raw
+  `SocketException` from the handshake: `DatabaseClientHandshakeFailureTests` pins the reset
+  (`Internal` with the socket error inside, the slot released), a handshake or exchange error
+  frame that carries the client-local code, and a malformed handshake error frame (each a
+  `ProtocolViolation`), and `SqlClientDialFailureTests` pins the reset's chain through
+  `SqlClient.ConnectAsync`.

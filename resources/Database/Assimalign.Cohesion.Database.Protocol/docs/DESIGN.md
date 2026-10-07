@@ -170,7 +170,8 @@ NotAuthorized=3, DatabaseNotFound=4, ParseFailure=5, ExecutionFailure=6,
 TransactionAborted=7, ProtocolViolation=8, Unavailable=9, ConnectionFailure=10. Statement failures can
 leave a session ready; framing, handshake, or ordering violations terminate it.
 `ConnectionFailure` is the one client-local code: the client core raises it when the transport
-dial fails, and no server sends it. It shares the taxonomy so a client exception carries one code
+dial fails, and no server sends it (the client core reads an error frame that carries it as a
+`ProtocolViolation`). It shares the taxonomy so a client exception carries one code
 type, as SQLSTATE class 08 holds `08001` (`sqlclient_unable_to_establish_sqlconnection`), which
 a client raises (PostgreSQL `src/backend/utils/errcodes.txt:108`; postgres_fdw raises it when it
 cannot reach its remote server, `contrib/postgres_fdw/connection.c:661-666`).

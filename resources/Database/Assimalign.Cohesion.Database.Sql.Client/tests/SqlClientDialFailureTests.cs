@@ -1,4 +1,5 @@
 using System;
+using System.IO.Pipelines;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -8,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
@@ -18,7 +20,9 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// Owner decision 39 of 2026-10-07: a failed transport dial reaches <see cref="SqlClient.ConnectAsync"/>
 /// callers as a <see cref="SqlClientException"/> of the <see cref="SqlClientErrorKind.ConnectionFailure"/>
 /// kind, translated from the core's <see cref="DatabaseClientException"/>, which keeps the transport's
-/// exception. A canceled dial still throws <see cref="OperationCanceledException"/>.
+/// exception. A canceled dial still throws <see cref="OperationCanceledException"/>, and a peer that
+/// resets the connection during the handshake gives the <see cref="SqlClientErrorKind.Internal"/>
+/// kind over the core exception and the socket error, never a raw <see cref="SocketException"/>.
 /// </summary>
 public sealed class SqlClientDialFailureTests
 {
@@ -59,6 +63,36 @@ public sealed class SqlClientDialFailureTests
 
         // Assert
         exception.CancellationToken.ShouldBe(cancellation.Token);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Connect: a peer reset during the handshake is the Internal kind over the core exception and the socket error")]
+    public async Task ConnectAsync_PeerResetsDuringHandshake_ShouldChainToSocketException()
+    {
+        // Arrange: the peer accepts the connection, reads the startup frame and resets it. The TCP
+        // transport completes the connection's input with the raw SocketException in that case,
+        // which the in-memory transport's abort reproduces.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var listener = new InMemoryConnectionListener();
+        await using var client = CreateClient(listener.CreateFactory(), listener.EndPoint);
+        Task server = Task.Run(async () =>
+        {
+            await using Connection connection = await listener.AcceptAsync(timeout.Token);
+            ReadResult startup = await connection.Input.ReadAsync(timeout.Token);
+            connection.Input.AdvanceTo(startup.Buffer.End);
+            connection.Abort(new SocketException((int)SocketError.ConnectionReset));
+        });
+
+        // Act
+        var exception = await Should.ThrowAsync<SqlClientException>(async () => await client.ConnectAsync(timeout.Token));
+        await server;
+
+        // Assert
+        exception.Kind.ShouldBe(SqlClientErrorKind.Internal);
+        exception.Code.ShouldBe(ProtocolErrorCode.Internal);
+        exception.ConnectionUsable.ShouldBeFalse();
+        var core = exception.InnerException.ShouldBeOfType<DatabaseClientException>();
+        core.Code.ShouldBe(ProtocolErrorCode.Internal);
+        core.InnerException.ShouldBeOfType<SocketException>().SocketErrorCode.ShouldBe(SocketError.ConnectionReset);
     }
 
     private static SqlClient CreateClient(IConnectionFactory factory, EndPoint endPoint)

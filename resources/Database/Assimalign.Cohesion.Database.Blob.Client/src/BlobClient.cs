@@ -48,7 +48,7 @@ public sealed class BlobClient : IAsyncDisposable
     /// <summary>Rents an authenticated connection, waiting for a free pool slot when necessary.</summary>
     /// <param name="cancellationToken">Cancellation token for pool acquisition and handshake.</param>
     /// <returns>A connection that returns its lease when disposed.</returns>
-    /// <exception cref="BlobClientException">The dial failed (<see cref="ProtocolErrorCode.ConnectionFailure"/>; the inner <see cref="DatabaseClientException"/> keeps the transport's exception) or the handshake failed.</exception>
+    /// <exception cref="BlobClientException">The dial failed (<see cref="ProtocolErrorCode.ConnectionFailure"/>; the inner <see cref="DatabaseClientException"/> keeps the transport's exception) or the handshake failed: the server's code, or <see cref="ProtocolErrorCode.Internal"/> when the transport broke during it (the inner <see cref="DatabaseClientException"/> keeps the transport's exception).</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> cancels the wait for a slot, the dial or the handshake.</exception>
     /// <exception cref="ObjectDisposedException">The client, or an object its connection factory needs, is disposed.</exception>
     public async ValueTask<BlobConnection> ConnectAsync(CancellationToken cancellationToken = default)

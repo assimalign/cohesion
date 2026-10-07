@@ -43,7 +43,8 @@ public enum ProtocolErrorCode : ushort
     /// <summary>
     /// The client could not connect to the server: the transport dial failed (a refused or
     /// unreachable endpoint, a TLS handshake failure, a connect timeout). Client-local: no server
-    /// sends it.
+    /// sends it; the client core reads an error frame that carries it as
+    /// <see cref="ProtocolViolation"/>.
     /// </summary>
     ConnectionFailure = 10,
 }

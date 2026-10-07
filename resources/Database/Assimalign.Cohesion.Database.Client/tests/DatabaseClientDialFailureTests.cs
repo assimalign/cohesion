@@ -103,6 +103,71 @@ public sealed class DatabaseClientDialFailureTests
         factory.Dials.ShouldBe(2);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Client] - Dial: a transport failure after the caller canceled is the caller's cancellation")]
+    public async Task RentAsync_TransportFailsAfterCallerCanceled_ShouldThrowOperationCanceledException()
+    {
+        // Arrange: the transport tears the socket down on the caller's cancellation and reports
+        // the aborted socket instead of a cancellation, as a third-party factory may.
+        using var cancellation = new CancellationTokenSource();
+        var aborted = new SocketException((int)SocketError.OperationAborted);
+        var factory = ScriptedConnectionFactory.Failing(() =>
+        {
+            cancellation.Cancel();
+            return aborted;
+        });
+        await using var client = CreateClient(factory, ScriptedEndPoint);
+
+        // Act: caught directly, because Should.ThrowAsync reports a canceled task with a new
+        // TaskCanceledException, which drops the inner exception.
+        OperationCanceledException? exception = null;
+        try
+        {
+            await client.RentAsync(cancellation.Token);
+        }
+        catch (OperationCanceledException caught)
+        {
+            exception = caught;
+        }
+
+        // The pool holds one connection: a second rent reaches the dial only if the first freed its
+        // slot. Under a live token the same transport failure is a dial failure.
+        var second = await Should.ThrowAsync<DatabaseClientException>(async () => await client.RentAsync(ClientTestHarness.Timeout()));
+
+        // Assert
+        exception.ShouldNotBeNull();
+        exception.CancellationToken.ShouldBe(cancellation.Token);
+        exception.InnerException.ShouldBeSameAs(aborted);
+        second.Code.ShouldBe(ProtocolErrorCode.ConnectionFailure);
+        second.InnerException.ShouldBeSameAs(aborted);
+        factory.Dials.ShouldBe(2);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Client] - Dial: a connection-string endpoint is named host:port in the message")]
+    [InlineData("db.example.com:5740", "db.example.com:5740")]
+    [InlineData("localhost", "localhost:5740")]
+    [InlineData("[::1]:6000", "[::1]:6000")]
+    public async Task RentAsync_ConnectionStringEndPoint_ShouldNameHostAndPort(string endpoint, string expected)
+    {
+        // Arrange: a connection string gives a DnsEndPoint, whose own text is
+        // "Unspecified/host:port".
+        var settings = DatabaseConnectionSettings.Parse($"Database={ClientTestHarness.DatabaseName};Principal=tester;Endpoint={endpoint};MaxPoolSize=1");
+        settings.EndPoint.ShouldBeOfType<DnsEndPoint>();
+        await using var client = DatabaseClient.Create(new DatabaseClientOptions
+        {
+            Settings = settings,
+            ConnectionFactory = ScriptedConnectionFactory.Failing(() => new SocketException((int)SocketError.ConnectionRefused)),
+            Family = SqlProtocol.Family,
+        });
+
+        // Act
+        var exception = await Should.ThrowAsync<DatabaseClientException>(async () => await client.RentAsync(ClientTestHarness.Timeout()));
+
+        // Assert
+        exception.Code.ShouldBe(ProtocolErrorCode.ConnectionFailure);
+        exception.Message.ShouldStartWith($"Failed to connect to {expected}: ", Case.Sensitive);
+        exception.Message.ShouldNotContain("Unspecified/", Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Client] - Dial: a TLS handshake timeout is the transport's cancellation and is wrapped")]
     public async Task RentAsync_TlsHandshakeTimeout_ShouldThrowConnectionFailure()
     {

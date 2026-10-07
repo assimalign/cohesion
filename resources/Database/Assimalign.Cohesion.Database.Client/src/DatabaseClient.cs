@@ -96,8 +96,8 @@ public sealed class DatabaseClient : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation, including the wait for a free slot.</param>
     /// <returns>An open connection; dispose it to return it to the pool.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when the client, or an object its connection factory needs, is disposed.</exception>
-    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> cancels the wait for a slot, the dial or the handshake.</exception>
-    /// <exception cref="DatabaseClientException">Thrown when the dial fails, with <see cref="ProtocolErrorCode.ConnectionFailure"/>, the endpoint in the message and the transport's exception (for example a <see cref="System.Net.Sockets.SocketException"/>, a TLS handshake failure or a connect timeout) as the inner exception; or when the server rejects the handshake, with the server's wire code.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> cancels the wait for a slot, the dial or the handshake; a dial failure the transport reports after the cancellation is its inner exception.</exception>
+    /// <exception cref="DatabaseClientException">Thrown when the dial fails, with <see cref="ProtocolErrorCode.ConnectionFailure"/>, the endpoint in the message and the transport's exception (for example a <see cref="System.Net.Sockets.SocketException"/>, a TLS handshake failure or a connect timeout) as the inner exception; when the transport breaks during the handshake (the peer resets or closes the connection), with <see cref="ProtocolErrorCode.Internal"/> and the transport's exception, if any, as the inner exception; or when the server rejects the handshake, with the server's wire code, or breaks the protocol, with <see cref="ProtocolErrorCode.ProtocolViolation"/>.</exception>
     public async ValueTask<DatabaseConnection> RentAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);

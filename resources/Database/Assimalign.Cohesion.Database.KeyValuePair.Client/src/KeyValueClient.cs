@@ -75,7 +75,7 @@ public sealed class KeyValueClient : IAsyncDisposable
     /// <returns>An open typed connection; dispose it to return it to the pool.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when the client, or an object its connection factory needs, is disposed.</exception>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> cancels the wait for a slot, the dial or the handshake.</exception>
-    /// <exception cref="KeyValueClientException">Thrown when the dial fails (<see cref="KeyValueClientErrorKind.ConnectionFailure"/> with <see cref="ProtocolErrorCode.ConnectionFailure"/>; the inner <see cref="DatabaseClientException"/> keeps the transport's exception) or the handshake fails.</exception>
+    /// <exception cref="KeyValueClientException">Thrown when the dial fails (<see cref="KeyValueClientErrorKind.ConnectionFailure"/> with <see cref="ProtocolErrorCode.ConnectionFailure"/>; the inner <see cref="DatabaseClientException"/> keeps the transport's exception) or the handshake fails: the server's code, or <see cref="KeyValueClientErrorKind.Internal"/> with <see cref="ProtocolErrorCode.Internal"/> when the transport breaks during it (the inner <see cref="DatabaseClientException"/> keeps the transport's exception).</exception>
     public async ValueTask<KeyValueConnection> ConnectAsync(CancellationToken cancellationToken = default)
     {
         try

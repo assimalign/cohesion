@@ -12,8 +12,12 @@ namespace Assimalign.Cohesion.Database.Client;
 /// Server-reported failures carry the wire's stable <see cref="ProtocolErrorCode"/>
 /// in <see cref="Code"/>. A failed dial uses <see cref="ProtocolErrorCode.ConnectionFailure"/>
 /// and keeps the transport's exception as <see cref="Exception.InnerException"/>; other
-/// client-local failures (settings, a transport broken after the dial) use
-/// <see cref="ProtocolErrorCode.Internal"/>.
+/// client-local failures (settings, a transport broken after the dial, in the handshake or in
+/// an exchange) use <see cref="ProtocolErrorCode.Internal"/>, and a broken transport keeps its
+/// exception (an <see cref="System.IO.IOException"/>, a
+/// <see cref="System.Net.Sockets.SocketException"/>, a connection reset or abort) as the inner
+/// exception too. No server sends <see cref="ProtocolErrorCode.ConnectionFailure"/>: an error
+/// frame that carries it is a <see cref="ProtocolErrorCode.ProtocolViolation"/>.
 /// </remarks>
 public class DatabaseClientException : DatabaseException
 {
