@@ -11,6 +11,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
@@ -267,6 +268,53 @@ public class WebApplicationServerDrainTests
         {
             await server.StopAsync(CancellationToken.None);
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server/Drain: Every exchange carries the drain signal, which fires when the stop begins and cancels nothing")]
+    public async Task StopAsync_WithExchangeInFlight_ShouldSignalTheDrainThroughTheExchangeFeature()
+    {
+        // Arrange — the handler parks with the drain feature it was given.
+        using CancellationTokenSource cancellation = new(_timeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        TaskCompletionSource<IWebServerDrainFeature?> entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken requestCancelled = default;
+
+        await using WebApplicationTestFactory factory = new();
+
+        factory.Application.Use(async (context, next) =>
+        {
+            IWebServerDrainFeature? drain = context.Features.Get<IWebServerDrainFeature>();
+            requestCancelled = context.RequestCancelled;
+            entered.TrySetResult(drain);
+            await release.Task.WaitAsync(cancellationToken);
+
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+            string state = drain is { Draining.IsCancellationRequested: true } ? "draining" : "serving";
+            await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(state), context.RequestCancelled);
+        });
+
+        using HttpClient client = factory.CreateClient();
+        Task<HttpResponseMessage> request = client.GetAsync("/long-lived", cancellationToken);
+        IWebServerDrainFeature? feature = await entered.Task.WaitAsync(cancellationToken);
+        feature.ShouldNotBeNull();
+        feature.Draining.IsCancellationRequested.ShouldBeFalse();
+
+        TaskCompletionSource drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = feature.Draining.Register(drained.SetResult);
+
+        // Act
+        Task stop = factory.StopAsync(CancellationToken.None);
+
+        // Assert — the signal fires while the exchange keeps running, and its response is delivered.
+        await drained.Task.WaitAsync(cancellationToken);
+        requestCancelled.IsCancellationRequested.ShouldBeFalse();
+        release.TrySetResult();
+
+        using HttpResponseMessage response = await request.WaitAsync(cancellationToken);
+        (await response.Content.ReadAsStringAsync(cancellationToken)).ShouldBe("draining");
+        await stop.WaitAsync(cancellationToken);
     }
 
     private static WebApplicationServer CreateServer(IWebApplicationPipeline pipeline, IHttpConnectionListener listener)

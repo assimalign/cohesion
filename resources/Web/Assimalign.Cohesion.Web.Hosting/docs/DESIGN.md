@@ -362,8 +362,19 @@ as the stop begins is handled the same way as the rest.
 
 | Signal | Fires | Carries |
 | --- | --- | --- |
-| `Draining` | when the stop begins | the accept loop, a bind still in progress, and every connection's graceful close |
+| `Draining` | when the stop begins | the accept loop, a bind still in progress, every connection's graceful close, and every exchange's `IWebServerDrainFeature` |
 | `Aborted` | when the budget runs out | every connection's open and receive, every exchange's pipeline and send, and every connection's abort |
+
+`Draining` also reaches the exchanges themselves. A graceful close ends a connection after its
+exchanges finish, but a long-lived exchange — a WebSocket, a server-sent event stream — would
+finish only when the budget cuts it off, without a close of its own. So the server installs one
+shared `IWebServerDrainFeature` (a Web-root contract, `Internal/WebServerDrainFeature`) on every
+exchange beside the response-completion feature, before the pipeline runs; its token is
+`Draining`. A long-lived exchange registers on it and ends its own work while the budget lasts:
+`UseWebSockets` (Web.WebSockets) closes each open socket with `1001 Going Away` (decision 16, Http
+ADR 1). Firing it cancels nothing; an exchange that ignores it is cancelled only when the budget
+runs out, like any other. The token is captured once, so it stays readable after the stop disposes
+its sources.
 
 The stop runs in order:
 
@@ -816,8 +827,9 @@ request in flight when the stop begins completes in full with `Connection: close
 that outlives the budget observes `RequestCancelled` and its client gets no response;
 and a raw prior-knowledge HTTP/2 client sees `GOAWAY(NO_ERROR)` naming its open stream
 as the last processed while that stream is still running, then the stream's full
-response. The per-version announcements are pinned in the transport's own suite
-(`HttpConnectionGracefulCloseTests`).
+response. An exchange in flight sees its `IWebServerDrainFeature` fire when the stop begins,
+while its `RequestCancelled` does not, and its response is still delivered. The per-version
+announcements are pinned in the transport's own suite (`HttpConnectionGracefulCloseTests`).
 
 The diagnostics (#147) are pinned by `WebApplicationServerDiagnosticsTests`, which records the
 entries through a real `LoggerFactoryBuilder`: a bind failure (`Critical`, with its cause), an

@@ -58,6 +58,10 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
     // Aborted cancels what is still in flight once the stop's budget runs out.
     private readonly WebApplicationServerDrain _drain = new();
 
+    // Publishes Draining to every exchange (IWebServerDrainFeature), so a long-lived exchange such
+    // as a WebSocket can end itself cleanly within the budget. One shared instance.
+    private readonly WebServerDrainFeature _drainFeature;
+
     // The server's own diagnostics: a bind or accept-loop failure, a connection fault, a drain the
     // budget cut short.
     private readonly WebApplicationServerLog _log;
@@ -90,6 +94,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         _listener = options.Listener
             ?? throw new ArgumentException("A listener must be configured on the server options.", nameof(options));
         _log = new WebApplicationServerLog(options.Logger);
+        _drainFeature = new WebServerDrainFeature(_drain.Draining);
 
         if (options.MaxConcurrentConnections is int limit)
         {
@@ -590,6 +595,7 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
         try
         {
             exchange.Features.Set(responseCompletion);
+            exchange.Features.Set(_drainFeature);
 
             await _pipeline.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false);
 

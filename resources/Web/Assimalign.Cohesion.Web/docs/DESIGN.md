@@ -125,6 +125,17 @@ in registration order after writing the response to the transport. Registration 
 throws `InvalidOperationException`. Custom servers may omit it; middleware must handle a missing
 feature. This lets a terminal defer lifecycle signals until its acknowledgement has been sent.
 
+`IWebServerDrainFeature` is the drain seam (decision 16, Http ADR 1). Its `Draining` token is
+cancelled when the server begins its lame-duck drain: the server stops accepting and lets the
+exchanges in flight finish within the stop's budget. An ordinary exchange finishes on its own; a
+long-lived one (a WebSocket, a stream of server-sent events) registers on the token and ends its
+own work cleanly, as `Web.WebSockets` does by closing each socket with `1001 Going Away`. The token
+is not the exchange's cancellation: the exchange keeps running and its response is delivered;
+`RequestCancelled` fires only if it is still running when the budget runs out. The default server
+installs one shared instance on every exchange; custom servers may omit it, and its consumers must
+handle that. It is a feature rather than a member of `IWebApplicationServer` because the consumer
+is code running inside an exchange, which sees the exchange's features and not the server.
+
 `IWebRequestIdFeature` is the request-id seam (#1064). Its `RequestId` is a BCL `ActivityTraceId`:
 the request id *is* the W3C trace id, so one value finds the request in the server's span, in logs
 and in anything returned to the caller. The default server installs it on every exchange before

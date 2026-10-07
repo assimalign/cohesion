@@ -11,6 +11,9 @@ against. It is contracts-first and feature-free by design.
 - **Response completion** — `IWebResponseCompletionFeature` registers callbacks that run in
   order after the response is written to the transport. The default server installs it per
   exchange; custom servers may omit it. Registration after completion throws.
+- **Drain signal** — `IWebServerDrainFeature.Draining` is cancelled when the server begins its
+  lame-duck drain, so a long-lived exchange (a WebSocket) can end itself cleanly within the stop's
+  budget. It cancels nothing. The default server installs it per exchange; custom servers may omit it.
 - **Request id** — `IWebRequestIdFeature.RequestId` is the request's W3C trace id: the server
   span's trace id when the server traces the request, otherwise the trace id of a valid
   `traceparent`, otherwise a random id generated on first read. The default server installs it

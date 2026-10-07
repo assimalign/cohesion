@@ -15,7 +15,9 @@ registers an `IHostService`. `Build()` closes registration and runs each service
 once; services start in registration order before servers and stop in reverse order after
 every server drains. The default server drains lame-duck style: it accepts nothing new, tells
 every peer the connection is closing (`Connection: close` or `GOAWAY`), lets the requests in
-flight finish within the host's shutdown budget, and cancels only what outlives it. It logs
+flight finish within the host's shutdown budget, and cancels only what outlives it. Each exchange
+sees the drain begin through `IWebServerDrainFeature`, so a long-lived one, such as a WebSocket,
+can end itself inside the budget. It logs
 its own failures — a listener that cannot bind, a connection fault, a drain the budget cut
 short — through `builder.Logging`, never with request content. Disposing the application
 disposes the service provider and every factory-created service.
