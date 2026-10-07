@@ -1425,20 +1425,32 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         Http2Frame frame = receivedFrame.Frame;
 
+        // RFC 9113 §6.2 — the frame reader removed the Pad Length octet and the PRIORITY fields, but
+        // the padding still trails the field block fragment, and only the fragment is HPACK. Padding
+        // that exceeds the octets left for the fragment is a connection error.
+        if (frame.HeadersPadLength > receivedFrame.Payload.Length)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 HEADERS frame on stream {frame.StreamId} declares {frame.HeadersPadLength} padding octets, more than the {receivedFrame.Payload.Length} left after its fixed fields (RFC 9113 §6.2).");
+        }
+
+        ReadOnlyMemory<byte> fragment = receivedFrame.Payload.AsMemory(0, receivedFrame.Payload.Length - frame.HeadersPadLength);
+
         Http2Stream? stream = OpenInboundStream(frame, out Http2StreamException? refusal);
 
         if (stream is null)
         {
             // A stream the server refuses, or one it reset while the peer was still sending (see
             // OpenInboundStream): its field block is decoded first, then refused or ignored.
-            ReceiveDiscardedHeaderBlock(frame.StreamId, receivedFrame.Payload, frame.HeadersEndHeaders, refusal);
+            ReceiveDiscardedHeaderBlock(frame.StreamId, fragment.Span, frame.HeadersEndHeaders, refusal);
             return null;
         }
 
         // Hand the HEADERS frame to the state machine — it folds the payload
         // into the accumulating header block AND updates the stream's
         // lifecycle state (idle → open or idle → half-closed-remote).
-        stream.ReceiveHeaders(receivedFrame.Payload, frame.HeadersEndHeaders, frame.HeadersEndStream);
+        stream.ReceiveHeaders(fragment.Span, frame.HeadersEndHeaders, frame.HeadersEndStream);
 
         if (!frame.HeadersEndHeaders)
         {

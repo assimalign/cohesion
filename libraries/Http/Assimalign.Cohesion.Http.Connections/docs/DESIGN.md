@@ -1507,7 +1507,12 @@ decoded sizes diverge:
   header-block bytes across a HEADERS frame and all its CONTINUATION frames. It
   trips *before* HPACK decode, so a CONTINUATION flood can never pin memory in
   the `MemoryStream` — the buffer is capped, replacing the previously-unbounded
-  growth. This is the CONTINUATION-flood defence.
+  growth. This is the CONTINUATION-flood defence. Only the field block fragment
+  counts: the frame reader strips a HEADERS frame's Pad Length octet and PRIORITY
+  fields, and `ProcessHeadersFrameAsync` strips the trailing padding before the
+  fragment reaches the stream, so the HPACK decoder never sees framing octets
+  (#1320). Padding longer than the octets left after the fixed fields is a
+  connection `PROTOCOL_ERROR` (RFC 9113 §6.2).
 - **Decoded size** (`HPackDecoder.DecodeRequestHeaders`) bounds the RFC 9113
   §10.5.1 header-list size — the running sum of `name-length + value-length + 32`
   across the fields. This catches HPACK *amplification*: a small encoded block of
