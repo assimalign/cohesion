@@ -1458,8 +1458,12 @@ they are reported differently:
 - **A decoded field breaks a field rule** — an empty or uppercase name, a connection-specific
   field, `TE` other than `trailers` (RFC 9113 §8.2), a pseudo-header field after a regular
   field, or one not defined for requests (§8.3). `HPackDecodedHeaders` throws
-  `InvalidDataException`, and `Http2Stream.CreateContextAsync` ends the connection with
-  `GOAWAY(PROTOCOL_ERROR)`. Decoding first means a block that breaks a rule and then fails to
+  `InvalidDataException`. The request is malformed, so `Http2Stream.CreateContextAsync` resets
+  its stream with `RST_STREAM(PROTOCOL_ERROR)` (RFC 9113 §8.1.1, #1332): the request never
+  reaches the application, and the connection keeps serving its other streams, which is safe
+  because the block was decoded to its end. Until #1332 this closed the connection, so one
+  client's malformed request took down every request multiplexed with it — a proxy's
+  connection, for one. Decoding first also means a block that breaks a rule and then fails to
   decode is reported as the decoding failure.
 
 Whether the pseudo-header fields make a complete request is judged afterwards, by
@@ -2062,9 +2066,10 @@ The shape follows from HPACK, and the alternatives fail on it:
   on the encoder stream, and a field section only references it, so an unread trailer
   section can be skipped. HPACK inserts inside the field blocks themselves, so the pump
   has to decode every block where it falls in the frame sequence.
-- **Validating while decoding, as the request-head path does.** Rejecting a field
-  mid-block abandons the rest of the block, so every violation would have to be a
-  connection error. Decoding first lets one malformed request cost only its stream.
+- **Validating while decoding, as the request-head path did before #1322.** Rejecting a
+  field mid-block abandons the rest of the block, so every violation would have to be a
+  connection error. Decoding first lets one malformed request cost only its stream; the
+  request head now works the same way (see "HTTP/2 request heads").
 - **Filling `Request.Trailers` from the pump.** The pump would write the collection
   while the application might read it on another thread. Publishing at the end of the
   body keeps a single writer and matches the HTTP/1.1 and HTTP/3 lifecycle.

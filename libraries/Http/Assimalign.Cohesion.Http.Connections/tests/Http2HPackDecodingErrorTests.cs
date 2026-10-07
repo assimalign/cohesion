@@ -1,4 +1,6 @@
 using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -14,8 +16,9 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 /// <summary>
 /// How a request head that HPACK cannot decode is reported (#1322): a field block that cannot be
 /// decompressed is a connection error of type <c>COMPRESSION_ERROR</c> (RFC 9113 §4.3), while a block
-/// that decodes but breaks a field rule stays a <c>PROTOCOL_ERROR</c>. The whole block is decoded before
-/// any field is judged, so a decoding failure is reported as one even after a malformed field.
+/// that decodes but breaks a field rule is a malformed request, reset on its stream alone with
+/// <c>PROTOCOL_ERROR</c> (#1332). The whole block is decoded before any field is judged, so a decoding
+/// failure is reported as one even after a malformed field.
 /// </summary>
 public class Http2HPackDecodingErrorTests
 {
@@ -52,10 +55,11 @@ public class Http2HPackDecodingErrorTests
         Http2TestSettings.AssertContainsGoAway(output, Http2ErrorCode.CompressionError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 HPACK Errors: A request head that breaks a field rule should keep PROTOCOL_ERROR")]
-    public async Task ReceiveAsync_OnDecodableHeadWithMalformedField_ShouldGoAwayProtocolError()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 HPACK Errors: A request head that breaks a field rule should reset its stream with PROTOCOL_ERROR")]
+    public async Task ReceiveAsync_OnDecodableHeadWithMalformedField_ShouldResetStreamWithProtocolError()
     {
-        // Arrange — the block decodes; RFC 9113 §8.2.1 rejects the uppercase name.
+        // Arrange — the block decodes; RFC 9113 §8.2.1 rejects the uppercase name. That makes the
+        // request malformed, not the block undecodable, so only the stream is reset (#1332).
         byte[] block = HPackTestEncoder.Block(
             HPackTestEncoder.RequestHead("GET", "/"),
             HPackTestEncoder.Literal("User-Agent", "tests"));
@@ -65,7 +69,10 @@ public class Http2HPackDecodingErrorTests
 
         // Assert
         dispatched.ShouldBe(0);
-        Http2TestSettings.AssertContainsGoAway(output, Http2ErrorCode.ProtocolError);
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp2Frames(output);
+        frames.ShouldContain(frame => frame.FrameType == 0x3
+            && BinaryPrimitives.ReadUInt32BigEndian(frame.Payload) == (uint)Http2ErrorCode.ProtocolError);
+        frames.ShouldNotContain(frame => frame.FrameType == 0x7);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 HPACK Errors: A block that breaks a field rule and then fails to decode should report COMPRESSION_ERROR")]

@@ -63,8 +63,8 @@ internal sealed class HPackDecodedHeaders
     /// <exception cref="InvalidDataException">
     /// The field breaks a field rule: an empty or uppercase name, a connection-specific field, a
     /// <c>TE</c> other than <c>trailers</c>, a pseudo-header after a regular field, or a pseudo-header
-    /// not defined for requests. The field was decoded, so this is not an HPACK failure; the stream
-    /// maps it to a connection-level <c>PROTOCOL_ERROR</c>.
+    /// not defined for requests. The field was decoded, so this is not an HPACK failure: the request is
+    /// malformed, and the stream resets itself with <c>PROTOCOL_ERROR</c> (RFC 9113 §8.1.1).
     /// </exception>
     public void Add(string name, string value)
     {

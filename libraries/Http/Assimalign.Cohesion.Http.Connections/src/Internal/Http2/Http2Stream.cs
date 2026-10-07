@@ -898,12 +898,13 @@ internal sealed class Http2Stream
     /// </exception>
     /// <exception cref="Http2StreamException">
     /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> for a malformed request, reset per stream
-    /// (RFC 9113 §8.1.1): a pseudo-header field that is repeated, a required one that is missing, an
-    /// empty <c>:path</c> (RFC 9113 §8.3.1), or a <c>:path</c> that does not decode to a legal path.
+    /// (RFC 9113 §8.1.1): a decoded field that breaks a field rule (RFC 9113 §8.2 / §8.3), a
+    /// pseudo-header field that is repeated, a required one that is missing, an empty <c>:path</c>
+    /// (RFC 9113 §8.3.1), or a <c>:path</c> that does not decode to a legal path.
     /// </exception>
     /// <exception cref="Http2ConnectionException">
-    /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> when a decoded field breaks a field rule
-    /// (RFC 9113 §8.2 / §8.3), or the head violates the extended CONNECT rules of RFC 8441 §4.
+    /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> when the head violates the extended
+    /// CONNECT rules of RFC 8441 §4.
     /// </exception>
     /// <exception cref="HPackDecodingException">
     /// The block is not valid HPACK, or its decoded list exceeds the advertised
@@ -932,7 +933,9 @@ internal sealed class Http2Stream
         // RFC 9113 §4.3 — the whole block is decoded before any field is judged. A block HPACK cannot
         // decode propagates as an HPackDecodingException, which the connection maps to
         // COMPRESSION_ERROR. A decoded field that breaks a field rule (RFC 9113 §8.2 / §8.3) is not a
-        // decompression failure: it keeps the connection-level PROTOCOL_ERROR.
+        // decompression failure: it makes the request malformed, a stream error (RFC 9113 §8.1.1,
+        // #1332). The block is fully decoded by then, so the HPACK state is intact and the connection
+        // keeps serving its other streams.
         HPackDecodedHeaders decodedHeaders;
         try
         {
@@ -940,14 +943,14 @@ internal sealed class Http2Stream
         }
         catch (InvalidDataException exception)
         {
-            throw new Http2ConnectionException(
-                Http2ErrorCode.ProtocolError,
-                $"HTTP/2 HEADERS frame on stream {StreamId} contained a malformed field section: {exception.Message}");
+            throw CreateMalformedRequestError($"carries a malformed field section: {exception.Message}");
         }
-
-        // A trailer section that follows the body is a field block of its own: it accumulates from an
-        // empty block, under its own size bound (ReceiveHeaders, ReceiveTrailers).
-        _headerBlock.SetLength(0);
+        finally
+        {
+            // A trailer section that follows the body is a field block of its own: it accumulates
+            // from an empty block, under its own size bound (ReceiveHeaders, ReceiveTrailers).
+            _headerBlock.SetLength(0);
+        }
 
         // RFC 9113 §8.3 — a repeated pseudo-header field makes the request malformed. The block is fully
         // decoded, so this is a stream error (RFC 9113 §8.1.1), as are the §8.3.1 checks below.

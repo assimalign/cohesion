@@ -1878,8 +1878,9 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// and the exchange never reaches the application.
     /// </para>
     /// <para>
-    /// A malformed request — a repeated, missing or empty pseudo-header field (RFC 9113 §8.3), or a
-    /// <c>:path</c> that does not decode — surfaces from <see cref="Http2Stream.CreateContextAsync"/> as
+    /// A malformed request — a decoded field that breaks a field rule (RFC 9113 §8.2 / §8.3), a
+    /// repeated, missing or empty pseudo-header field (RFC 9113 §8.3), or a <c>:path</c> that does not
+    /// decode — surfaces from <see cref="Http2Stream.CreateContextAsync"/> as
     /// an <see cref="Http2StreamException"/> carrying <c>PROTOCOL_ERROR</c>, which the pump's
     /// stream-error handler turns into an <c>RST_STREAM</c> for that stream alone (RFC 9113 §8.1.1) —
     /// the request never reaches the application, and the connection keeps serving its other streams.
@@ -1935,7 +1936,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // §10.5.1; the decode aborts before the list is fully materialised). Either way the
             // decoder state can no longer be trusted, so the connection ends. A decoded field that
             // breaks a field rule is not a decompression failure: the stream already reported it as
-            // a PROTOCOL_ERROR connection error.
+            // its own PROTOCOL_ERROR stream error.
             throw CreateFieldBlockDecodingError(stream.StreamId, error);
         }
         catch (HttpRequestRejectedException rejection)

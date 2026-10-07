@@ -1076,106 +1076,10 @@ public class Http2TransportTests
         await pump;
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject a request with the response-only :status pseudo-header")]
-    public async Task Http2_OnStatusPseudoHeaderInRequest_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.3 — :status is a response pseudo-header. Receiving
-        // it in a request field section is malformed and surfaces as a
-        // connection-level PROTOCOL_ERROR.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1, // END_HEADERS + END_STREAM
-            (":method", "GET"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"),
-            (":status", "200"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject pseudo-headers that appear after regular fields")]
-    public async Task Http2_OnPseudoHeaderAfterRegularField_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.3 — pseudo-header fields MUST appear in the field
-        // section BEFORE regular fields. A pseudo-header after a regular
-        // field is malformed.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":scheme", "https"),
-            ("user-agent", "tests"),       // regular field
-            (":path", "/"),                 // pseudo-header after regular — illegal
-            (":authority", "api.test"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject an unknown pseudo-header field")]
-    public async Task Http2_OnUnknownPseudoHeader_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.3 — pseudo-header names that aren't defined for the
-        // message type are malformed.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"),
-            (":foo", "bar"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
-    // A repeated pseudo-header field resets only its stream (RFC 9113 §8.1.1, #1321): see
-    // Http2RequestPseudoHeaderTests.
-
-    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject connection-specific header fields")]
-    [InlineData("connection", "close")]
-    [InlineData("proxy-connection", "keep-alive")]
-    [InlineData("keep-alive", "timeout=5")]
-    [InlineData("transfer-encoding", "chunked")]
-    [InlineData("upgrade", "h2c")]
-    public async Task Http2_OnConnectionSpecificHeader_ShouldGoAwayProtocolError(string name, string value)
-    {
-        // RFC 9113 §8.2.2 — these connection-specific header fields are
-        // forbidden in HTTP/2 because their semantics conflict with
-        // multiplexed framing.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"),
-            (name, value));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject TE field with value other than 'trailers'")]
-    public async Task Http2_OnTeFieldNotTrailers_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.2.2 — TE MAY appear with the single value
-        // 'trailers'. Any other value is malformed.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"),
-            ("te", "gzip"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
+    // A malformed request head resets only its stream (RFC 9113 §8.1.1): a repeated, missing or empty
+    // pseudo-header field (#1321, Http2RequestPseudoHeaderTests), and a field that breaks a field rule —
+    // an uppercase name, a connection-specific field, TE other than trailers, a pseudo-header that is
+    // unknown, response-only or after a regular field (#1332, Http2MalformedRequestHeadTests).
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should accept TE: trailers")]
     public async Task Http2_OnTeFieldTrailers_ShouldAcceptRequest()
@@ -1203,25 +1107,6 @@ public class Http2TransportTests
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
         httpContext.Request.Headers[new HttpHeaderKey("te")].Value.ShouldBe("trailers");
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject field names with uppercase letters")]
-    public async Task Http2_OnUppercaseFieldName_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.2.1 — HTTP/2 field names MUST be lowercase. The
-        // encoder is required to lower-case names before sending; a
-        // mixed-case name is malformed.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"),
-            ("User-Agent", "tests"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should coalesce multiple Cookie fields into one with '; ' separator")]
