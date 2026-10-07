@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 using Shouldly;
 
+using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Connections.Internal;
 
 namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
@@ -54,11 +55,17 @@ internal sealed class Http2TestPeer : IAsyncDisposable
     /// The client's <c>SETTINGS_INITIAL_WINDOW_SIZE</c> — the server's initial send window for every
     /// stream — or <see langword="null"/> to keep the RFC 9113 default of 65535.
     /// </param>
+    /// <param name="decorate">
+    /// Wraps the transport the server is handed (for example to observe or interfere with its
+    /// writes), or <see langword="null"/> to serve the transport as is. The peer keeps reading and
+    /// writing the undecorated transport.
+    /// </param>
     /// <returns>The connected peer.</returns>
     public static async Task<Http2TestPeer> ConnectAsync(
         HttpConnectionListenerOptions? options = null,
         Action<Http2ConnectionListenerOptions>? configure = null,
-        uint? initialWindowSize = null)
+        uint? initialWindowSize = null,
+        Func<Connection, Connection>? decorate = null)
     {
         byte[] settings = initialWindowSize is { } windowSize
             ? Http2TestSettings.SettingsPayload((Http2TestSettings.Parameter.InitialWindowSize, windowSize))
@@ -68,8 +75,9 @@ internal sealed class Http2TestPeer : IAsyncDisposable
             Http2TestSettings.RawFrame(0x4, 0, 0, settings));
 
         TestConnection transport = new(opening, completeInput: false);
+        Connection served = decorate?.Invoke(transport) ?? transport;
         options ??= new HttpConnectionListenerOptions();
-        options.UseHttp2(new TestConnectionListener(transport), configure ?? (_ => { }));
+        options.UseHttp2(new TestConnectionListener(served), configure ?? (_ => { }));
 
         HttpConnectionListener listener = new(options);
         IHttpConnection connection = await listener.AcceptOrListenAsync();

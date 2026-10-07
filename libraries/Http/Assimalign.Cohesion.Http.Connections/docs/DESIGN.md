@@ -1768,6 +1768,23 @@ because the peer never received those octets and will never credit them back.
 - **The pump exiting** still fails a waiting writer with `IOException`, because no
   credit can ever arrive.
 
+### A frame is written in one piece (#1326)
+
+`Http2FrameWriter` hands each frame to the connection's stream in a single write —
+its 9-octet header, its fixed fields, and its payload together — and writes a
+HEADERS frame and all of its CONTINUATION frames as one write as well. The reason is
+how a cancellation lands. The connection's pipe takes a write's octets before it
+waits for room, and a cancelled token cuts the wait short, not the copy. A frame
+written as a header write followed by a payload write could therefore be cut between
+the two: the header would reach the peer claiming a payload that never follows, and
+the peer would misread every later frame on the connection, tearing down all of its
+streams. A header block cut after its HEADERS frame breaks RFC 9113 §6.10 the same
+way, since no other frame may come between a HEADERS frame and its CONTINUATION
+frames. With one write per frame and per block, a caller's token — the streaming
+writer's, the buffered send's, the frame pump's — is observed only before a frame or
+block starts or after its last octet is handed over. The cost is one pooled buffer
+and one copy per frame.
+
 ### Each stream has one final-response owner
 
 RFC 9113 §8.1: a stream carries exactly one final response. `Http2Stream` records

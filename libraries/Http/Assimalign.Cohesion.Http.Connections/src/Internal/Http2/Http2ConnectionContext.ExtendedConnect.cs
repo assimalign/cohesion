@@ -62,10 +62,9 @@ internal sealed partial class Http2ConnectionContext
                 throw CreateTunnelUnwritableException(stream);
             }
 
-            // Written whole once begun: a frame cut short by a cancellation would corrupt the framing of
-            // every stream on the connection.
-            await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream: false, CancellationToken.None).ConfigureAwait(false);
-            await Stream.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+            // The block is written in one piece, so a cancellation lands before or after it (#1326).
+            await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream: false, cancellationToken).ConfigureAwait(false);
+            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -82,12 +81,13 @@ internal sealed partial class Http2ConnectionContext
     /// <remarks>
     /// Unlike a streamed response, which discards the rest of a write once its stream is reset
     /// (RFC 9113 §5.4.2), a tunnel write faults: its octets never reached the peer, and the application
-    /// must learn its tunnel is gone. Cancellation is honored only while waiting for credit or for the
-    /// gate; a frame, once begun, is written whole.
+    /// must learn its tunnel is gone. Cancellation is honored while waiting for credit, for the gate, or
+    /// for the transport to take a frame; each frame is written in one piece, so a cancellation never
+    /// cuts one short (#1326).
     /// </remarks>
     /// <param name="context">The exchange whose tunnel writes.</param>
     /// <param name="data">The octets to send.</param>
-    /// <param name="cancellationToken">A token that cancels waiting for credit or for the write gate.</param>
+    /// <param name="cancellationToken">A token that cancels waiting for credit, the write gate, or the transport.</param>
     /// <returns>A task that completes once every octet is on the wire.</returns>
     /// <exception cref="IOException">The stream was reset, or the connection closed.</exception>
     /// <exception cref="ObjectDisposedException">The end of the server's side was already written.</exception>
@@ -139,8 +139,8 @@ internal sealed partial class Http2ConnectionContext
 
                 Http2Frame frame = new();
                 frame.PrepareData(context.StreamId);
-                await Http2FrameWriter.WriteAsync(Stream, frame, data.Slice(offset, granted), CancellationToken.None).ConfigureAwait(false);
-                await Stream.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+                await Http2FrameWriter.WriteAsync(Stream, frame, data.Slice(offset, granted), cancellationToken).ConfigureAwait(false);
+                await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
             finally
             {

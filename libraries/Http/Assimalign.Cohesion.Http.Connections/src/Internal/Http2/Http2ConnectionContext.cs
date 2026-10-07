@@ -2091,46 +2091,10 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         }
     }
 
-    private async Task WriteHeaderBlockAsync(int streamId, byte[] headerBlock, bool endStream, CancellationToken cancellationToken)
-    {
-        int offset = 0;
-        bool firstFrame = true;
-
-        do
-        {
-            int remaining = headerBlock.Length - offset;
-            int chunkLength = remaining > 0 ? Math.Min((int)_remoteSettings.MaxFrameSize, remaining) : 0;
-            Http2Frame frame = new();
-
-            if (firstFrame)
-            {
-                Http2HeadersFrameFlags flags = remaining <= chunkLength ? Http2HeadersFrameFlags.EndHeaders : Http2HeadersFrameFlags.None;
-
-                if (endStream)
-                {
-                    flags |= Http2HeadersFrameFlags.EndStream;
-                }
-
-                frame.PrepareHeaders(flags, streamId);
-            }
-            else
-            {
-                frame.Type = Http2FrameType.Continuation;
-                frame.Flags = remaining <= chunkLength ? (byte)Http2HeadersFrameFlags.EndHeaders : (byte)0;
-                frame.StreamId = streamId;
-            }
-
-            await Http2FrameWriter.WriteAsync(
-                Stream,
-                frame,
-                chunkLength == 0 ? ReadOnlyMemory<byte>.Empty : headerBlock.AsMemory(offset, chunkLength),
-                cancellationToken).ConfigureAwait(false);
-
-            offset += chunkLength;
-            firstFrame = false;
-        }
-        while (offset < headerBlock.Length || firstFrame);
-    }
+    // RFC 9113 §6.10 — a HEADERS frame and its CONTINUATION frames are one header block no other frame
+    // may interrupt, so the block is written in one piece: a cancellation lands before or after it.
+    private Task WriteHeaderBlockAsync(int streamId, byte[] headerBlock, bool endStream, CancellationToken cancellationToken)
+        => Http2FrameWriter.WriteHeaderBlockAsync(Stream, streamId, headerBlock, endStream, (int)_remoteSettings.MaxFrameSize, cancellationToken);
 
     /// <summary>
     /// Writes a buffered response — the HEADERS block, then <paramref name="content"/> as DATA frames,
