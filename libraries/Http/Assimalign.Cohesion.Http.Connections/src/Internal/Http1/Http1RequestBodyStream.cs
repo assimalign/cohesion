@@ -141,6 +141,14 @@ internal sealed class Http1RequestBodyStream : Stream
         _owner = owner;
     }
 
+    /// <summary>
+    /// Whether the chunked framing or the trailer section turned out to be malformed — a read failed
+    /// with an <see cref="InvalidDataException"/>. Once set, the body is never read again: the
+    /// connection's framing is no longer known, so it is not drained for keep-alive, and the
+    /// exchange's response becomes a <c>400</c> when it has not started (#1333).
+    /// </summary>
+    internal bool IsMalformed { get; private set; }
+
     /// <inheritdoc />
     public override bool CanRead => !_disposed;
 
@@ -207,6 +215,12 @@ internal sealed class Http1RequestBodyStream : Stream
         // final response), and RFC 9110 §10.1.1 leaves it open whether the peer will transmit the
         // body anyway — the wire state is indeterminate. Close instead of reuse.
         if (_solicitContinue && !_started)
+        {
+            return false;
+        }
+
+        // A malformed body has no known end on the wire; the connection cannot be reused (#1333).
+        if (IsMalformed)
         {
             return false;
         }
@@ -316,6 +330,27 @@ internal sealed class Http1RequestBodyStream : Stream
     }
 
     private async ValueTask<int> ReadChunkedAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    {
+        // A body found malformed stays malformed. Where its framing broke, the octets that follow can
+        // read like a last chunk and then a new request, so nothing more is read from it: a later
+        // read fails again, and the drain gives up so the connection closes (#1333).
+        if (IsMalformed)
+        {
+            throw new InvalidDataException("RFC 9112 §7.1: the chunked request body is malformed and is not read further.");
+        }
+
+        try
+        {
+            return await ReadChunkedCoreAsync(buffer, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidDataException)
+        {
+            IsMalformed = true;
+            throw;
+        }
+    }
+
+    private async ValueTask<int> ReadChunkedCoreAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -436,14 +471,14 @@ internal sealed class Http1RequestBodyStream : Stream
                 return;
             }
 
-            int colon = line.IndexOf(':');
-            if (colon <= 0)
+            // RFC 9112 §5.1 / §7.1.2 — a trailer field line has the header section's syntax: the name
+            // is a token, with no whitespace before its colon and never empty (#1333).
+            if (!Http1FieldLine.TryParse(line, out string name, out string value))
             {
-                throw new InvalidDataException($"RFC 9112 §7.1.2: malformed trailer line '{line}'.");
+                throw new InvalidDataException(
+                    $"RFC 9112 §7.1.2: the trailer field line '{line}' has no colon, or a field name that is not a token.");
             }
 
-            string name = line[..colon].Trim();
-            string value = line[(colon + 1)..].Trim();
             HttpHeaderKey key = new(name);
 
             // RFC 9110 §6.5.1 / RFC 9112 §7.1.2 — the trailer section is held to the rules HTTP/2 and

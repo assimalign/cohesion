@@ -1246,6 +1246,16 @@ dropped anyway.
 it still degrades to the existing wire-level-drop path rather than faulting the
 host — belt-and-suspenders on top of the explicit catch.
 
+A field line whose name is not a token gets the same treatment with `400`
+(#1333): `Http1FieldLine` rejects whitespace before the colon, an empty name, a
+line that starts with whitespace (obsolete line folding, RFC 9112 §5.2), and a
+line with no colon, and the reader throws `Http1BadRequestException`, an
+`IOException` caught beside the limit rejection. RFC 9112 §5.1 makes the `400` a
+MUST for whitespace before the colon: a field name that one parser trims and
+another keeps is how requests are smuggled. The name is no longer trimmed, and an
+empty one used to throw `ArgumentException` out of `HttpHeaderKey`, past every
+catch here. A trailer section uses the same parser (see `Http1RequestBodyStream`).
+
 ### The two-phase read timeout
 
 `Http1ReadTimeout` reclaims idle and slow peers with a single
@@ -1363,9 +1373,22 @@ chunked). Load-bearing invariants:
   supported-but-empty `HttpTrailerCollection`; the stream fills that same
   collection from the trailer section when it reaches the terminating chunk. So
   `Request.Trailers` is populated only *after* the body is fully read — there is
-  no "trailers ready" signal before then. Each trailer field is held to the trailer
-  rule set HTTP/2 and HTTP/3 share (see "One trailer rule set for every version"); a
-  field it excludes fails the body read with an `InvalidDataException`.
+  no "trailers ready" signal before then. Each trailer field line has the header
+  section's syntax (`Http1FieldLine`: a token name, nothing between it and the colon)
+  and is held to the trailer rule set HTTP/2 and HTTP/3 share (see "One trailer rule
+  set for every version"); a line that breaks either fails the body read with an
+  `InvalidDataException`.
+- **A malformed body is rejected by the transport (#1333).** The first
+  `InvalidDataException` from the chunked decoder — a broken chunk framing or a
+  malformed trailer section — latches `IsMalformed`. The body is never read again,
+  so it is never drained (below), and `Http1ConnectionContext.SendAsync` answers
+  `400` with `Connection: close` in place of whatever the application staged, if
+  the response has not started; one already on the wire is finished, and the
+  connection still closes after it. That is HTTP/1.1's counterpart of the stream
+  reset HTTP/2 and HTTP/3 send for a malformed request, and RFC 9112 §5.1 requires
+  the `400` for whitespace before a colon. A body the application never read to
+  its end is found malformed by the drain instead, after its response, which then
+  closes the connection.
 - **Disposal never touches the connection.** The stream does not own the
   connection stream, so `Dispose` only bars further public reads; it does not
   close or drain the connection.
@@ -1381,6 +1404,12 @@ the same cap and data-rate enforcement. A drain that cannot complete cleanly
 (slow trickle, over-cap, malformed body, wire failure) returns `false` and the
 connection is closed instead of reused. Draining works after the body stream has
 been disposed (it operates on the connection stream, not the disposed wrapper).
+
+A body an application read into a framing error is never drained at all (#1333).
+The drain used to resume decoding where the read had failed, so the octets after a
+bad chunk-size line — `0`, an empty line, then `GET /next ...` — read like a last
+chunk and a fresh request, and the connection served a request the original framing
+never delimited. The `IsMalformed` latch makes the drain return `false` at once.
 
 ### Graceful close (`BeginGracefulClose`)
 
@@ -2087,12 +2116,15 @@ three versions, so a trailer section that one version accepts no version refuses
 - **HTTP/2 and HTTP/3** also reject a pseudo-header field and an uppercase name, two rules
   of their field-section syntax (`HttpTrailerFieldRules.AddReceivedFields`). HTTP/1.1 has
   no counterpart to apply: its field names are case-insensitive, and a line whose name
-  starts with `:` is not a field line, so its chunked reader rejects it as malformed.
+  starts with `:` is not a field line, so its chunked reader rejects it as malformed. Its
+  own syntax rule — a token name with nothing before the colon — is the header section's
+  (`Http1FieldLine`, #1333).
 
 Each version reports a violation through its own malformed-message path: a stream error
 of type `PROTOCOL_ERROR` on HTTP/2 (above), `H3_MESSAGE_ERROR` on HTTP/3, and on HTTP/1.1
 an `InvalidDataException` from the body read, the path every other chunked-framing
-violation takes. Before #1314, HTTP/3 rejected only connection-specific fields,
+violation takes, after which the transport answers `400` and closes the connection
+(#1333, see `Http1RequestBodyStream`). Before #1314, HTTP/3 rejected only connection-specific fields,
 `Content-Length`, and `Host`; before #1319, HTTP/1.1 rejected only `Content-Length`,
 `Transfer-Encoding`, and `Host` (RFC 9112 §7.1.2), so a trailer section carrying, say,
 `Authorization` or `Keep-Alive` was accepted over HTTP/1.1 and refused over HTTP/2 and

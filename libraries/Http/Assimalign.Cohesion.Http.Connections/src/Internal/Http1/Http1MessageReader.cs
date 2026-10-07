@@ -388,15 +388,15 @@ internal static class Http1MessageReader
                     $"The request contains more than the configured maximum of {limits.MaxRequestHeaderCount} header fields.");
             }
 
-            int separatorIndex = line.IndexOf(':');
-
-            if (separatorIndex <= 0)
+            // RFC 9112 §5.1 — the field name is a token: no whitespace before its colon, never empty. A
+            // server MUST answer such a request with 400, since an intermediary that reads the line
+            // differently would disagree about the message (#1333). The connection then closes.
+            if (!Http1FieldLine.TryParse(line, out string name, out string value))
             {
-                throw new InvalidDataException($"The HTTP header '{line}' is invalid.");
+                throw new Http1BadRequestException(
+                    $"RFC 9112 §5.1: the HTTP/1.1 header field line '{line}' has no colon, or a field name that is not a token.");
             }
 
-            string name = line[..separatorIndex].Trim();
-            string value = line[(separatorIndex + 1)..].Trim();
             HttpHeaderKey key = new(name);
 
             if (headers.TryGetValue(key, out HttpHeaderValue existingValue))

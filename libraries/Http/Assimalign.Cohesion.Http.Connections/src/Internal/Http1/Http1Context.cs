@@ -57,6 +57,13 @@ internal sealed class Http1Context : TransportHttpContext
         ResponseFinalized ? HttpExchangeDirective.TakeOver : base.ExchangeDirective;
 
     /// <summary>
+    /// Whether reading the request body found its chunked framing or trailer section malformed after
+    /// the head was dispatched. The transport then rejects the request itself: <c>400</c> in place of
+    /// a response that has not started, and the connection closes (RFC 9112 §5.1, #1333).
+    /// </summary>
+    public bool IsRequestBodyMalformed => _requestBody.IsMalformed;
+
+    /// <summary>
     /// Consumes and discards any request body the application did not read, so the connection
     /// realigns on the next request's framing before a keep-alive reuse. Enforces the same body-size
     /// cap and minimum data rate as a normal read; a violation, a malformed body, or a wire failure

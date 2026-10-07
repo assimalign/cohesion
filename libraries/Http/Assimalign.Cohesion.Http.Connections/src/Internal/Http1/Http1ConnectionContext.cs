@@ -165,6 +165,24 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             return;
         }
 
+        // RFC 9112 §5.1 / §7.1 — reading the body found the request malformed after its head was
+        // dispatched: a broken chunk framing, or a trailer field line whose name is not a token. The
+        // transport rejects the request itself, as HTTP/2 and HTTP/3 reset a malformed request's
+        // stream: a 400 in place of whatever the application staged, then the connection closes,
+        // since where the request ends on the wire is no longer known (#1333). A response already
+        // on the wire is finished as it is, and the connection still closes after it.
+        if (http1Context.IsRequestBodyMalformed)
+        {
+            http1Context.KeepAlive = false;
+
+            if (!http1Context.HasFinalResponseStarted)
+            {
+                http1Context.MarkFinalResponseStarted();
+                await TryWriteErrorResponseAsync(HttpStatusCode.BadRequest, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+        }
+
         // If a response feature streamed to the raw sink, the head and body are already on the
         // wire (the BeforeResponseHead hooks fired at the sink's head commit, which also injected
         // the Alt-Svc advertisement); finalize (emit the terminating zero-length chunk) rather
@@ -260,6 +278,13 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             // drop, so a conformant client learns why. Body-size (413) and data-rate (408)
             // violations surface after dispatch on the streamed body read, not here.
             await TryWriteErrorResponseAsync(rejection.StatusCode, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+        catch (Http1BadRequestException)
+        {
+            // RFC 9112 §5.1 — a field line whose name is not a token (whitespace before the colon, an
+            // empty name) MUST be answered with 400 before the connection is closed (#1333).
+            await TryWriteErrorResponseAsync(HttpStatusCode.BadRequest, cancellationToken).ConfigureAwait(false);
             return null;
         }
         catch (HttpRequestRejectedException rejection)
