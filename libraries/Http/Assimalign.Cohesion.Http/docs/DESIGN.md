@@ -60,11 +60,14 @@ and version (decision 18, `docs/libraries/Http/DECISIONS.md` ADR 2):
 | HTTP/3 | Supported | Supported: sent as a HEADERS frame before the stream's FIN |
 
 A supported request collection is filled once the body has been read to its
-end. A supported response collection also refuses, when they are added, the
-fields a trailer section cannot carry — pseudo-headers, connection-specific
-fields, and the `IsProhibitedInTrailers` set — with `ArgumentException`. A
-response to `HEAD` sends no trailers, and a `CONNECT` exchange reports the
-response collection unsupported, since its stream becomes a DATA-only tunnel.
+end. Every version holds a received trailer section to one rule set: a
+connection-specific field or a field in the `IsProhibitedInTrailers` set makes
+the request malformed. A supported response collection also refuses, when they
+are added, the fields a trailer section cannot carry — pseudo-headers,
+connection-specific fields, and the `IsProhibitedInTrailers` set — with
+`ArgumentException`. A response to `HEAD` sends no trailers, and a `CONNECT`
+exchange reports the response collection unsupported, since its stream becomes
+a DATA-only tunnel.
 
 ### Interface evolution via a default member
 
@@ -107,10 +110,12 @@ transports — they are stated once in `HttpFieldRules`.
 - `IsSetCookie` / `ProhibitsCombining` — the no-fold rule.
 - `IsProhibitedInTrailers` — the RFC 9110 §6.5.1 exclusion set (framing,
   routing, request modifiers, authentication, content-processing controls, and
-  the `Trailer` field itself). The HTTP/2 and HTTP/3 transports check it in both
-  directions, so framing/routing fields like `Content-Length` never travel in a
-  trailer section: a received trailer section carrying one is malformed, and a
-  response trailer collection refuses one when it is added.
+  the `Trailer` field itself). Every transport checks it on a received trailer
+  section, HTTP/1.1's chunked reader included, and HTTP/2 and HTTP/3 also check
+  it on a response trailer collection, so framing/routing fields like
+  `Content-Length` never travel in a trailer section: a received trailer section
+  carrying one is malformed, and a response trailer collection refuses one when
+  it is added.
 
 Keeping these rules in one place is what lets the cross-version normalization
 layer (the `.11` work) translate fields between HTTP/1.1, HTTP/2, and HTTP/3

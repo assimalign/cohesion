@@ -1362,7 +1362,9 @@ chunked). Load-bearing invariants:
   supported-but-empty `HttpTrailerCollection`; the stream fills that same
   collection from the trailer section when it reaches the terminating chunk. So
   `Request.Trailers` is populated only *after* the body is fully read — there is
-  no "trailers ready" signal before then.
+  no "trailers ready" signal before then. Each trailer field is held to the trailer
+  rule set HTTP/2 and HTTP/3 share (see "One trailer rule set for every version"); a
+  field it excludes fails the body read with an `InvalidDataException`.
 - **Disposal never touches the connection.** The stream does not own the
   connection stream, so `Dispose` only bars further public reads; it does not
   close or drain the connection.
@@ -2066,12 +2068,30 @@ The shape follows from HPACK, and the alternatives fail on it:
   while the application might read it on another thread. Publishing at the end of the
   body keeps a single writer and matches the HTTP/1.1 and HTTP/3 lifecycle.
 
-HTTP/3 applies the same validation: `Http3HeaderCodec.AddTrailers` delegates to
-`HttpTrailerFieldRules`. Before #1314 it rejected only connection-specific fields,
-`Content-Length`, and `Host`; it now rejects the rest of the RFC 9110 §6.5.1 set too,
-so both versions accept the same trailer sections. HTTP/1.1 keeps its narrower check:
-its chunked reader rejects the framing and routing fields a trailer could use to
-smuggle a request (`Content-Length`, `Transfer-Encoding`, `Host`; RFC 9112 §7.1.2).
+### One trailer rule set for every version
+
+`HttpTrailerFieldRules` is the single rule set for a received trailer section, on all
+three versions, so a trailer section that one version accepts no version refuses:
+
+- **Every version** rejects a connection-specific field (RFC 9113 §8.2.2, RFC 9114 §4.2)
+  and the fields RFC 9110 §6.5.1 excludes from trailers
+  (`HttpFieldRules.IsProhibitedInTrailers`: framing, routing, request modifiers,
+  authentication, response controls, content processing, `Trailer` itself, and the
+  cookie fields) — `HttpTrailerFieldRules.EnsureReceivable`.
+- **HTTP/2 and HTTP/3** also reject a pseudo-header field and an uppercase name, two rules
+  of their field-section syntax (`HttpTrailerFieldRules.AddReceivedFields`). HTTP/1.1 has
+  no counterpart to apply: its field names are case-insensitive, and a line whose name
+  starts with `:` is not a field line, so its chunked reader rejects it as malformed.
+
+Each version reports a violation through its own malformed-message path: a stream error
+of type `PROTOCOL_ERROR` on HTTP/2 (above), `H3_MESSAGE_ERROR` on HTTP/3, and on HTTP/1.1
+an `InvalidDataException` from the body read, the path every other chunked-framing
+violation takes. Before #1314, HTTP/3 rejected only connection-specific fields,
+`Content-Length`, and `Host`; before #1319, HTTP/1.1 rejected only `Content-Length`,
+`Transfer-Encoding`, and `Host` (RFC 9112 §7.1.2), so a trailer section carrying, say,
+`Authorization` or `Keep-Alive` was accepted over HTTP/1.1 and refused over HTTP/2 and
+HTTP/3. The same set governs response trailers in the other direction
+(`HttpTrailerFieldRules.EnsureSendable`, see "Response trailers").
 
 ### Trailers that arrive after the server reset the stream
 

@@ -428,6 +428,43 @@ public class Http1TransportTests
         await AssertBodyReadThrowsAsync<InvalidDataException>(payload);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject a trailer field the shared trailer rules exclude on the body read")]
+    [InlineData("Authorization", "Bearer secret")]   // RFC 9110 §6.5.1: authentication
+    [InlineData("Content-Type", "text/plain")]       // RFC 9110 §6.5.1: content processing
+    [InlineData("Trailer", "X-Checksum")]            // RFC 9110 §6.5.1: the declaration itself
+    [InlineData("Keep-Alive", "timeout=5")]          // connection-specific
+    [InlineData("Proxy-Connection", "keep-alive")]   // connection-specific
+    [InlineData("Upgrade", "h2c")]                   // connection-specific
+    public async Task Http1_OnChunkedBodyWithExcludedTrailer_ShouldThrow(string name, string value)
+    {
+        // RFC 9110 §6.5.1 — a chunked trailer section is held to the rules HTTP/2 and HTTP/3 apply
+        // (#1319): no field RFC 9110 excludes from trailers and no connection-specific field. The
+        // rejection surfaces on the body read, like the framing fields above.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "5\r\nhello\r\n"
+            + $"0\r\n{name}: {value}\r\n\r\n");
+
+        await AssertBodyReadThrowsAsync<InvalidDataException>(payload);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should surface a trailer field the shared trailer rules allow")]
+    public async Task Http1_OnChunkedBodyWithAllowedTrailer_ShouldSurfaceTrailer()
+    {
+        // RFC 9530 §2 — a representation digest is computed as the content is sent, so it is the
+        // field trailers exist for. HTTP/1.1 field names are case-insensitive: the lowercase rule of
+        // HTTP/2 and HTTP/3 field sections does not apply.
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request(
+            "POST /upload HTTP/1.1\r\nHost: api.test\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "5\r\nhello\r\n"
+            + "0\r\nRepr-Digest: sha-256=:abc=:\r\n\r\n");
+        IHttpContext httpContext = await ReceiveFirstContextAsync(payload);
+
+        using StreamReader reader = new(httpContext.Request.Body);
+        (await reader.ReadToEndAsync()).ShouldBe("hello");
+        httpContext.Request.Trailers[new HttpHeaderKey("repr-digest")].Value.ShouldBe("sha-256=:abc=:");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http1: Should reject malformed chunk sizes on the body read")]
     [InlineData("xyz")]    // non-hex
     [InlineData("-1")]     // signed

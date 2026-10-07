@@ -446,15 +446,11 @@ internal sealed class Http1RequestBodyStream : Stream
             string value = line[(colon + 1)..].Trim();
             HttpHeaderKey key = new(name);
 
-            // RFC 9112 §7.1.2 — framing-related fields are forbidden in the trailer section; letting
-            // them through would be a request-smuggling vector.
-            if (key.Equals(HttpHeaderKey.ContentLength)
-                || key.Equals(HttpHeaderKey.TransferEncoding)
-                || key.Equals(HttpHeaderKey.Host))
-            {
-                throw new InvalidDataException(
-                    $"RFC 9112 §7.1.2: trailer field '{name}' is forbidden in the trailer section.");
-            }
+            // RFC 9110 §6.5.1 / RFC 9112 §7.1.2 — the trailer section is held to the rules HTTP/2 and
+            // HTTP/3 apply (#1319): no field RFC 9110 excludes from trailers (the framing and routing
+            // fields among them, which would otherwise be a request-smuggling vector) and no
+            // connection-specific field. The InvalidDataException fails the body read as malformed.
+            HttpTrailerFieldRules.EnsureReceivable(key, "HTTP/1.1");
 
             if (_trailers.TryGetValue(key, out HttpHeaderValue existing))
             {
