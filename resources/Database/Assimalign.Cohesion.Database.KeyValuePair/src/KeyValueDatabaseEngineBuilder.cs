@@ -95,15 +95,27 @@ public sealed class KeyValueDatabaseEngineBuilder
     }
 
     /// <summary>
-    /// Gets or sets how many passes in a row a worker may fail on one database before the engine
-    /// takes it offline (<see cref="KeyValueDatabaseEngineOptions.WorkerFailureLimit"/>; one
-    /// hundred by default). Build validates it.
+    /// Gets or sets how long a worker's failures of one database must persist before the engine
+    /// takes it offline (<see cref="KeyValueDatabaseEngineOptions.WorkerFailureWindow"/>; one hundred seconds by
+    /// default). Build validates it.
     /// </summary>
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
-    public int WorkerFailureLimit
+    public TimeSpan WorkerFailureWindow
     {
-        get => _options.WorkerFailureLimit;
-        set { _state.EnsureMutable(); _options.WorkerFailureLimit = value; }
+        get => _options.WorkerFailureWindow;
+        set { _state.EnsureMutable(); _options.WorkerFailureWindow = value; }
+    }
+
+    /// <summary>
+    /// Gets or sets how many failed passes in a row a worker's failures of one database must span
+    /// before the engine takes it offline (<see cref="KeyValueDatabaseEngineOptions.WorkerFailureMinimumPasses"/>;
+    /// three by default). Build validates it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A build was attempted.</exception>
+    public int WorkerFailureMinimumPasses
+    {
+        get => _options.WorkerFailureMinimumPasses;
+        set { _state.EnsureMutable(); _options.WorkerFailureMinimumPasses = value; }
     }
 
     /// <summary>

@@ -49,14 +49,19 @@ namespace Assimalign.Cohesion.Database;
 /// <see cref="EngineState.Disposed"/> once disposal started, <see cref="EngineState.Faulted"/>
 /// while a worker holds a failure it has not worked off (<see cref="DatabaseEngineWorker.Fault"/>)
 /// or a worker's loop escaped, and <see cref="EngineState.Running"/> otherwise. An offline database
-/// is not a worker failure; <see cref="OfflineDatabases"/> lists it.
+/// is not a worker failure; <see cref="OfflineDatabases"/> lists it. A worker failure is either one
+/// database's or the engine's as a whole, and the engine tells the two apart (owner decision 42 of
+/// 2026-10-07): <see cref="HasFailingWorker"/> says whether a worker holds a failure of a named
+/// database, and <see cref="HasEngineWideFailure"/> whether one holds a failure no database owns,
+/// so a server can refuse only the database whose work fails.
 /// </para>
 /// <para>
-/// <b>Persistent worker failures take a database offline</b> (owner decision 25 of 2026-10-06).
-/// When a checkpoint, page write-back, write-ahead flush or version-purge worker fails on one
-/// database <see cref="WorkerFailureLimit"/> times in a row, or the database's journal passes the
-/// engine's cap while its checkpoints keep failing, the engine gives up on that database: the leaf
-/// takes it offline (<see cref="TakeDatabaseOfflineCore"/>) through the same machinery a failed
+/// <b>Persistent worker failures take a database offline</b> (owner decisions 25 of 2026-10-06 and
+/// 42 of 2026-10-07). When a checkpoint, page write-back, write-ahead flush or version-purge worker
+/// keeps failing on one database for at least <see cref="WorkerFailureWindow"/> and across at least
+/// <see cref="WorkerFailureMinimumPasses"/> failed passes in a row, or the database's journal passes
+/// the engine's cap while its checkpoints keep failing, the engine gives up on that database: the
+/// leaf takes it offline (<see cref="TakeDatabaseOfflineCore"/>) through the same machinery a failed
 /// durable flush uses (#1243), with a storage cause that names the worker or the cap, and every
 /// later operation on it is refused with the model's offline code until it is reopened. Neo4j
 /// panics a database the same way once its checkpoint fails ten times in a row
@@ -92,48 +97,26 @@ namespace Assimalign.Cohesion.Database;
 public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
 {
     /// <summary>
-    /// The worker failure limit an engine gets when its options state none: one hundred, the
-    /// window Neo4j tolerates checkpoint failures for, at this engine's worker backoff (owner
-    /// decision 35 of 2026-10-07).
+    /// The fewest failed passes in a row of one database that the engine gives up on when its
+    /// options state none: three (owner decision 42 of 2026-10-07). See
+    /// <see cref="WorkerFailureMinimumPasses"/>.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Neo4j panics a database after ten consecutive checkpoint failures
-    /// (<c>MAX_CONSECUTIVE_FAILURES_TOLERANCE</c>,
-    /// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42</c>),
-    /// and it checks for a checkpoint every ten seconds by default
-    /// (<c>DEFAULT_CHECKING_FREQUENCY_MILLIS</c>,
-    /// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointThreshold.java:40</c>),
-    /// so its ten failures span about a hundred seconds. The workers here retry a failing database
-    /// no sooner than a second later (<see cref="DatabaseEngineWorker.FailureBackoff"/>), so the
-    /// limit that keeps Neo4j's window is a hundred failures, not its count of ten. A device that
-    /// stops answering for less than that window (a storage path failover, say) therefore leaves
-    /// the databases it holds online, and a hosted application reopens one that went offline once
-    /// the device answers again (owner decision 22). An engine that must ride out longer outages
-    /// raises its limit; one that must give up sooner lowers it.
-    /// </para>
-    /// <para>
-    /// The limit counts failed passes, so the time it takes depends on how often a worker visits
-    /// a failing database. The checkpoint and page write-back workers, which poll once a second,
-    /// take a database offline about a hundred seconds after its first failure, or later when
-    /// each failed attempt itself takes time; a write-ahead flush worker, which runs when a commit
-    /// wakes it or its window passes, takes about as long while commits stay pending. A
-    /// version-purge worker's full pass runs once per maintenance interval (a minute by default),
-    /// so a pass that keeps failing takes about a hundred intervals, a hundred minutes at the
-    /// default; and a rolled-back writer's deferred undo, retried on its coordinator's schedule
-    /// (about 100 ms, doubling up to the maintenance interval, #1226), takes about an hour and a
-    /// half, while the writer keeps its locks. Throughout, the worker's
-    /// <see cref="DatabaseEngineWorker.Fault"/> is set from the first failure, so the engine
-    /// reports <see cref="EngineState.Faulted"/> and every failure is written to the event source;
-    /// a model whose server refuses work while its engine is not <see cref="EngineState.Running"/>
-    /// (Blob) refuses it for the whole window.
-    /// </para>
+    /// The window does the work at every worker's pace (<see cref="DefaultWorkerFailureWindow"/>);
+    /// the minimum is there for the slow ones. A worker that visits a failing database seldom, or
+    /// whose one attempt took long, can see the window pass after one or two failures: a version
+    /// purge whose full pass runs every few minutes, a checkpoint that hung on its lane for longer
+    /// than the window before it failed. Three failed passes in a row mean the failure was retried,
+    /// twice, before the database goes offline. The journal cap (owner decision 41) needs two
+    /// failed checkpoints in a row and is not held back by this minimum.
     /// </remarks>
-    public const int DefaultWorkerFailureLimit = 100;
+    public const int DefaultWorkerFailureMinimumPasses = 3;
 
     private readonly string _name;
     private readonly EngineModel _model;
-    private readonly int _workerFailureLimit;
+    private readonly TimeSpan _workerFailureWindow;
+    private readonly int _workerFailureMinimumPasses;
+    private readonly TimeProvider _timeProvider;
     private readonly object _sync = new();
     private readonly List<DatabaseEngineWorker> _workers = [];
     private readonly List<DatabaseServer> _servers = [];
@@ -158,25 +141,99 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     private int _disposed;
 
     /// <summary>
-    /// Initializes a new engine with its name, its data model and its worker failure limit.
+    /// Initializes a new engine with its name and its data model, and the default worker failure
+    /// window and minimum (<see cref="DefaultWorkerFailureWindow"/>,
+    /// <see cref="DefaultWorkerFailureMinimumPasses"/>), measured by the system clock.
     /// </summary>
     /// <param name="name">The logical name of the engine instance.</param>
     /// <param name="model">The data model the engine implements.</param>
-    /// <param name="workerFailureLimit">
-    /// How many times in a row a worker may fail on one database before the engine takes the
-    /// database offline (<see cref="WorkerFailureLimit"/>); <see cref="DefaultWorkerFailureLimit"/>
-    /// unless given.
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
+    protected DatabaseEngine(string name, EngineModel model)
+        : this(name, model, DefaultWorkerFailureWindow, DefaultWorkerFailureMinimumPasses)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new engine with its name, its data model, and when it gives up on a database
+    /// whose worker failures persist (owner decision 42 of 2026-10-07).
+    /// </summary>
+    /// <param name="name">The logical name of the engine instance.</param>
+    /// <param name="model">The data model the engine implements.</param>
+    /// <param name="workerFailureWindow">
+    /// How long a worker's failures of one database must persist before the engine takes the
+    /// database offline (<see cref="WorkerFailureWindow"/>): positive, and at most
+    /// <see cref="MaximumWorkerFailureWindow"/>.
+    /// </param>
+    /// <param name="workerFailureMinimumPasses">
+    /// How many failed passes in a row those failures must span at least
+    /// (<see cref="WorkerFailureMinimumPasses"/>): at least one.
+    /// </param>
+    /// <param name="timeProvider">
+    /// The clock that measures the window; <see cref="TimeProvider.System"/> when null. A model's
+    /// tests pass a clock they move by hand, so a test crosses the window without waiting for it.
     /// </param>
     /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="workerFailureLimit"/> is less than one.</exception>
-    protected DatabaseEngine(string name, EngineModel model, int workerFailureLimit = DefaultWorkerFailureLimit)
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="workerFailureWindow"/> is not positive or is longer than
+    /// <see cref="MaximumWorkerFailureWindow"/>; or <paramref name="workerFailureMinimumPasses"/> is
+    /// less than one.
+    /// </exception>
+    protected DatabaseEngine(string name, EngineModel model, TimeSpan workerFailureWindow, int workerFailureMinimumPasses, TimeProvider? timeProvider = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentOutOfRangeException.ThrowIfLessThan(workerFailureLimit, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(workerFailureWindow, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(workerFailureWindow, MaximumWorkerFailureWindow);
+        ArgumentOutOfRangeException.ThrowIfLessThan(workerFailureMinimumPasses, 1);
         _name = name;
         _model = model;
-        _workerFailureLimit = workerFailureLimit;
+        _workerFailureWindow = workerFailureWindow;
+        _workerFailureMinimumPasses = workerFailureMinimumPasses;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
+
+    /// <summary>
+    /// Gets how long a database's worker failures persist before an engine whose options state no
+    /// window gives up on it: one hundred seconds, the window Neo4j tolerates checkpoint failures
+    /// for (owner decisions 35 and 42 of 2026-10-07). See <see cref="WorkerFailureWindow"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Neo4j panics a database after ten consecutive checkpoint failures
+    /// (<c>MAX_CONSECUTIVE_FAILURES_TOLERANCE</c>,
+    /// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42</c>),
+    /// and it checks for a checkpoint every ten seconds by default
+    /// (<c>DEFAULT_CHECKING_FREQUENCY_MILLIS</c>,
+    /// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointThreshold.java:40</c>),
+    /// so its ten failures span about a hundred seconds. A device that stops answering for less
+    /// than that (a storage path failover, say) therefore leaves the databases it holds online,
+    /// and a hosted application reopens one that went offline once the device answers again (owner
+    /// decision 22). An engine that must ride out longer outages widens its window; one that must
+    /// give up sooner narrows it.
+    /// </para>
+    /// <para>
+    /// The window is time, not a count of passes, so every worker keeps it whatever its pace.
+    /// Owner decision 35 kept Neo4j's window as a hundred failed passes, which is a hundred seconds
+    /// only for a worker that visits a failing database once a second; a version purge's full
+    /// pass, once per maintenance interval, took about a hundred minutes to give up, and a
+    /// rolled-back writer's deferred undo, retried at 100 ms doubling up to that interval, about an
+    /// hour and a half while the writer kept its locks. Decision 42 measures the window instead: a
+    /// database goes offline at the first failed pass at least this long after its first, once
+    /// <see cref="DefaultWorkerFailureMinimumPasses"/> passes in a row failed. At the defaults
+    /// that is about a hundred seconds for the checkpoint, page write-back and write-ahead flush
+    /// workers, about 102 s for a deferred undo (its tenth retry) and two minutes for a failing
+    /// version purge's full pass (its third).
+    /// </para>
+    /// </remarks>
+    public static TimeSpan DefaultWorkerFailureWindow { get; } = TimeSpan.FromSeconds(100);
+
+    /// <summary>
+    /// Gets the longest <see cref="WorkerFailureWindow"/> an engine accepts:
+    /// <see cref="int.MaxValue"/> milliseconds (about 24.8 days), the bound the area puts on its
+    /// longest timers (<see cref="Storage.Storage.MaximumGroupCommitWindow"/>). An engine that
+    /// should never give up on a failing database by time alone sets this window, or a minimum of
+    /// passes no worker reaches.
+    /// </summary>
+    public static TimeSpan MaximumWorkerFailureWindow { get; } = TimeSpan.FromMilliseconds(int.MaxValue);
 
     /// <summary>
     /// Gets the logical name of this engine instance.
@@ -189,24 +246,56 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     public EngineModel Model => _model;
 
     /// <summary>
-    /// Gets how many times in a row a checkpoint, page write-back, write-ahead flush or
-    /// version-purge worker may fail on one database before the engine takes that database offline
-    /// (owner decision 25 of 2026-10-06), as the constructor set it from the engine's options.
+    /// Gets how long a checkpoint, page write-back, write-ahead flush or version-purge worker's
+    /// failures of one database must persist before the engine takes that database offline (owner
+    /// decisions 25 of 2026-10-06 and 42 of 2026-10-07), as the constructor set it from the
+    /// engine's options.
     /// </summary>
     /// <remarks>
-    /// A worker's failures on a database are counted from its first failure to the pass that
-    /// finishes the database's work again; a pass that skips the database while its failure backs
-    /// off counts neither way. A failure on a database already offline, or one its holder closed,
-    /// is not counted, and the count ends when the engine takes the database offline or the
-    /// database closes, so a reopened database counts from one.
+    /// <para>
+    /// The window is measured from the first failed pass of the database's current streak, on the
+    /// engine's clock; the engine gives up at the first failed pass at least this long after it,
+    /// once the streak also spans <see cref="WorkerFailureMinimumPasses"/> failed passes in a row.
+    /// A streak lasts from a worker's first failure on the database to the pass that finishes the
+    /// database's work again; a pass that skips the database while its failure backs off counts
+    /// neither way, and keeps the streak's start.
+    /// </para>
+    /// <para>
+    /// A failure on a database already offline, or one its holder closed, is not counted, and the
+    /// streak ends when the engine takes the database offline or the database closes, so a
+    /// reopened database starts a new one.
+    /// </para>
     /// </remarks>
-    public int WorkerFailureLimit => _workerFailureLimit;
+    public TimeSpan WorkerFailureWindow => _workerFailureWindow;
+
+    /// <summary>
+    /// Gets how many failed passes in a row a worker's failures of one database must span, besides
+    /// lasting <see cref="WorkerFailureWindow"/>, before the engine takes that database offline
+    /// (owner decision 42 of 2026-10-07), as the constructor set it from the engine's options.
+    /// </summary>
+    /// <remarks>
+    /// Several failures of one database that one pass reports (one per file set) count once, as a
+    /// failed pass.
+    /// </remarks>
+    public int WorkerFailureMinimumPasses => _workerFailureMinimumPasses;
+
+    /// <summary>
+    /// Gets the clock that measures <see cref="WorkerFailureWindow"/>, as the constructor set it.
+    /// </summary>
+    internal TimeProvider TimeProvider => _timeProvider;
 
     /// <summary>
     /// Gets the observational state of the engine: <see cref="EngineState.Running"/> from creation,
     /// <see cref="EngineState.Faulted"/> while a background worker keeps failing (the engine keeps
     /// serving), and <see cref="EngineState.Disposed"/> once disposal started.
     /// </summary>
+    /// <remarks>
+    /// <see cref="EngineState.Faulted"/> folds two kinds of failure: one database's
+    /// (<see cref="HasFailingWorker"/>) and the engine's as a whole
+    /// (<see cref="HasEngineWideFailure"/>). A component that refuses work for a failing worker
+    /// reads those, not the state, so a failure of one database refuses no other (owner decision 42
+    /// of 2026-10-07).
+    /// </remarks>
     public EngineState State
     {
         get
@@ -235,6 +324,89 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Gets whether the engine has failed as a whole: a worker holds a failure no database owns (a
+    /// pass that failed before it settled its databases, a trigger wait that failed, or a give-up
+    /// of a database the leaf could not complete), or a worker's loop escaped. A point-in-time read.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// While it is true the engine is <see cref="EngineState.Faulted"/>, and nothing tells which
+    /// databases the failing work concerns, so a server that refuses work for a failing worker
+    /// refuses it for every database (owner decision 42 of 2026-10-07): Blob's server refuses its
+    /// start, new connections, handshakes and exchanges. It turns false once the failing worker's
+    /// next pass runs to its end; an escaped loop keeps it true until the engine is disposed. It
+    /// does not read disposal: <see cref="State"/> says that.
+    /// </para>
+    /// <para>
+    /// A failure of one database is not the engine's as a whole: <see cref="HasFailingWorker"/>
+    /// reports it for that database alone.
+    /// </para>
+    /// </remarks>
+    public bool HasEngineWideFailure
+    {
+        get
+        {
+            if (Volatile.Read(ref _workerRunFault) is not null)
+            {
+                return true;
+            }
+
+            var workers = Volatile.Read(ref _workerView);
+            for (int index = 0; index < workers.Count; index++)
+            {
+                if (workers[index].HoldsOwnFailure)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Gets whether a background worker of the engine holds a failure of the named database that
+    /// it has not worked off yet: its work on the database failed, and no pass has finished that
+    /// work since (owner decision 42 of 2026-10-07). A point-in-time read over the workers' failure
+    /// records, the per-database part of <see cref="EngineState.Faulted"/>.
+    /// </summary>
+    /// <param name="name">The name of the database.</param>
+    /// <returns>
+    /// True while a worker holds a failure of the database; false once a pass finished the
+    /// database's work again, once the engine took the database offline or the database closed
+    /// (the engine then ends every worker's record of it), and for a database no worker failed on.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    /// <remarks>
+    /// <para>
+    /// A server that refuses work for a failing worker reads this for the database a session or
+    /// exchange targets, so it refuses that database alone while the engine's other databases are
+    /// served: Blob's server does, with its model's code, until the failure ends or the engine
+    /// gives up on the database, which is then refused as offline. A failure of the engine as a
+    /// whole is not a database's: <see cref="HasEngineWideFailure"/> reports it.
+    /// </para>
+    /// <para>
+    /// It does not check disposal, as <see cref="State"/> does not, so a server's gate can read it
+    /// beside the state without racing the engine's disposal; the disposal closes the databases,
+    /// which ends their records.
+    /// </para>
+    /// </remarks>
+    public bool HasFailingWorker(DatabaseName name)
+    {
+        ThrowIfEmpty(name);
+        var workers = Volatile.Read(ref _workerView);
+        for (int index = 0; index < workers.Count; index++)
+        {
+            if (workers[index].HoldsFailure(name))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Gets the engine-owned background workers, in the order they were attached: a point-in-time
     /// snapshot, for observability.
     /// </summary>
@@ -249,7 +421,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <summary>
     /// Gets the names of the open databases that are offline: a durable flush, a journal drain or a
     /// file header write of theirs failed, or the engine gave up on them after a worker's failures
-    /// persisted (<see cref="WorkerFailureLimit"/>), and every operation on them is refused until
+    /// persisted (<see cref="WorkerFailureWindow"/>), and every operation on them is refused until
     /// <see cref="OpenDatabaseAsync"/> reopens them. Empty while every open database is online; a
     /// point-in-time snapshot. <see cref="GetOfflineError"/> says what took one offline.
     /// </summary>
@@ -752,8 +924,10 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Takes an open database offline because the engine gave up on it (owner decision 25 of
-    /// 2026-10-06): a worker failed on it <see cref="WorkerFailureLimit"/> times in a row, or its
-    /// journal passed the engine's cap while its checkpoints kept failing. The leaf takes the
+    /// 2026-10-06): a worker's failures of it lasted <see cref="WorkerFailureWindow"/> across at
+    /// least <see cref="WorkerFailureMinimumPasses"/> failed passes in a row (owner decision 42 of
+    /// 2026-10-07), or its journal passed the engine's cap while its checkpoints kept failing. The
+    /// leaf takes the
     /// database's storages offline through
     /// <see cref="Storage.Storage.TakeOffline(StorageOfflineCause, string, Exception)"/>, so the
     /// database goes offline exactly as after a failed durable flush (#1243).
@@ -799,7 +973,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <remarks>
     /// <para>
     /// The worker's thread never runs the leaf's core (the core's remarks say why), so the pass that
-    /// reached the limit goes on to the engine's other databases at once. The database goes offline
+    /// gave up goes on to the engine's other databases at once. The database goes offline
     /// a moment later; until then the worker's record of it still backs it off, and a failure the
     /// worker reports meanwhile queues nothing more.
     /// </para>

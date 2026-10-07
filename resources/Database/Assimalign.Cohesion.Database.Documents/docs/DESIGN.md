@@ -417,15 +417,18 @@ journal fsync or a journal drain failing) gets COHDBD002 at once instead of wait
 database undoes nothing, so the writer holding the lock keeps it, and the coordinator ends every
 lock wait instead (`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook).
 
-**A failure that persists takes the database offline (owner decision 25 of 2026-10-06).** When
-the checkpoint, page write-back, write-ahead flush or version-purge worker fails on one database
-on `WorkerFailureLimit` passes in a row (an engine option, one hundred by default since owner
-decision 35 of 2026-10-07: the window of Neo4j's ten failed checkpoints,
+**A failure that persists takes the database offline (owner decisions 25 of 2026-10-06 and
+42 of 2026-10-07).** When
+the checkpoint, page write-back, write-ahead flush or version-purge worker keeps failing on one
+database for `WorkerFailureWindow` across at least `WorkerFailureMinimumPasses` failed passes in a
+row (engine options, 100 s and three by default since owner decision 42 of 2026-10-07, which
+replaced decision 35's count of a hundred passes: the window of Neo4j's ten failed checkpoints,
 `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`, at its
-ten-second checkpoint check, `CheckPointThreshold.java:40`, is a hundred passes at the one-second
-worker backoff, about a hundred seconds for a failing checkpoint or page write-back; a version-purge
-pass runs once per `MaintenanceInterval`, so a failing one takes about a hundred intervals, and a
-deferred undo about an hour and a half: the root `DESIGN.md`, "The window depends on the worker"),
+ten-second checkpoint check, `CheckPointThreshold.java:40`, measured on the engine's clock from
+the first failed pass, so every worker gives up about that long after its first failure: about
+100 s for a failing checkpoint, page write-back or write-ahead flush, 120 s for a version purge's
+full pass and about 102 s for a deferred undo, where the count took about 100 and 92 minutes;
+the root `DESIGN.md`, "Why time, not a count"),
 the root worker base asks the engine to give up on it, and
 `DocumentDatabaseEngine.TakeDatabaseOfflineCore` takes the database's storage offline with the
 `StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A second checkpoint in a row
@@ -440,16 +443,18 @@ so a give-up that waits for a hung fsync of that database holds back none of the
 finds the database in its published snapshot, without its registry lock, so it never waits for
 another's open. Once the database is offline, or whenever it closes, the engine ends every
 worker's failure record of it, so the engine reports `Running` at once and a reopened database
-counts its failures from one; a database already offline or closed is not counted.
-`DocumentWorkerResilienceTests` pins it: a checkpoint failure that never clears takes only its
-database offline after the limit of failed passes, a journal past the cap does on its second
+starts a new streak; a database already offline or closed is not counted.
+`DocumentWorkerResilienceTests` pins it: a checkpoint failure that persists takes only its
+database offline once it lasted the window across the minimum of passes (on a clock the test
+moves; the minimum of passes inside the window leaves it online), a journal past the cap does on its second
 failed checkpoint in a row, one transient failure of a journal already past the cap does not,
-and a transient failure under the limit does not (the count restarts once a checkpoint
+and a transient failure under the window does not (the window starts again once a checkpoint
 finishes). A database opened from a copied file set, whose storage carries the original's name
 in its file header, goes offline for its own write-back failures, never the original: the
 write-back and flush workers visit the engine's databases and report under the database's
 name, not the storage's (owner decision 25 review). The
-suite's other engines set both limits out of reach, since they keep a database failing on purpose.
+suite's other engines set the minimum of passes and the journal cap out of reach, since
+they keep a database failing on purpose.
 Disposal is idempotent: stop/join workers, dispose coordinators (rolling back open
 transactions), then durably flush and close each storage file set. Close errors
 are aggregated after attempting every database.

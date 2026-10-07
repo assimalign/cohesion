@@ -62,24 +62,38 @@ public sealed class KeyValueDatabaseEngineOptions
     public long CheckpointJournalSize { get; set; } = 256L * 1024 * 1024;
 
     /// <summary>
-    /// Gets or sets how many passes in a row the checkpoint, page write-back, write-ahead flush or
-    /// version-purge worker may fail on one database before the engine takes that database offline
-    /// (owner decision 25 of 2026-10-06). Defaults to <see cref="DatabaseEngine.DefaultWorkerFailureLimit"/>
-    /// (one hundred, owner decision 35 of 2026-10-07): a database whose checkpoints or page
-    /// write-backs keep failing, retried once a second, goes offline about a hundred seconds after
-    /// its first failure, the window Neo4j's ten failures span at its ten-second checkpoint check;
-    /// a version-purge pass, which runs once per <see cref="MaintenanceInterval"/>, takes about a
-    /// hundred intervals to give up (<see cref="DatabaseEngine.DefaultWorkerFailureLimit"/> lists
-    /// each worker's window). Raise it to ride out a longer device outage, or lower it to give up
-    /// sooner. Must be at least one.
+    /// Gets or sets how long the checkpoint, page write-back, write-ahead flush or version-purge
+    /// worker's failures of one database must persist before the engine takes that database offline
+    /// (owner decisions 25 of 2026-10-06 and 42 of 2026-10-07), across at least
+    /// <see cref="WorkerFailureMinimumPasses"/> failed passes in a row. Defaults to
+    /// <see cref="DatabaseEngine.DefaultWorkerFailureWindow"/> (one hundred seconds, the window
+    /// Neo4j's ten failures span at its ten-second checkpoint check). The window is time, measured
+    /// from the first failed pass of the database's current streak, so every worker gives up about
+    /// that long after its first failure whatever its pace: a failing checkpoint, page write-back or
+    /// write-ahead flush after about a hundred seconds, a deferred undo on its tenth retry (about
+    /// 102 s), and a version purge's full pass, once per <see cref="MaintenanceInterval"/>, on its
+    /// third (two minutes at the default). Widen it to ride out a longer device outage, or narrow it
+    /// to give up sooner. Must be positive and at most
+    /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>.
     /// </summary>
     /// <remarks>
     /// An offline database refuses every operation with <c>COHDBK002</c> until it is reopened
     /// (<see cref="KeyValueDatabaseEngine.OpenDatabaseAsync(DatabaseName, System.Threading.CancellationToken)"/>),
     /// whose recovery reads its journal; a hosted engine is reopened by the hosting module with
-    /// backoff. A pass that finishes the database's work clears the count.
+    /// backoff. A pass that finishes the database's work ends the streak, and the window starts
+    /// again at the next failure.
     /// </remarks>
-    public int WorkerFailureLimit { get; set; } = DatabaseEngine.DefaultWorkerFailureLimit;
+    public TimeSpan WorkerFailureWindow { get; set; } = DatabaseEngine.DefaultWorkerFailureWindow;
+
+    /// <summary>
+    /// Gets or sets how many failed passes in a row a worker's failures of one database must span,
+    /// besides lasting <see cref="WorkerFailureWindow"/>, before the engine takes that database
+    /// offline (owner decision 42 of 2026-10-07). Defaults to
+    /// <see cref="DatabaseEngine.DefaultWorkerFailureMinimumPasses"/> (three), so a worker that visits
+    /// a failing database seldom, or whose one attempt outlasted the window, retries it before the
+    /// engine gives up. Several failures one pass reports count once. Must be at least one.
+    /// </summary>
+    public int WorkerFailureMinimumPasses { get; set; } = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
 
     /// <summary>
     /// Gets or sets the hard cap, in bytes, on a file set's journal while its checkpoints keep
@@ -135,6 +149,13 @@ public sealed class KeyValueDatabaseEngineOptions
     /// Internal: tests that drive the purge pass themselves set it out of their way.
     /// </summary>
     internal TimeSpan DeferredUndoRetryDelay { get; set; } = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// Gets or sets the clock the engine measures <see cref="WorkerFailureWindow"/> on; the system
+    /// clock when null. Internal: this assembly's tests set a clock they move by hand, so a test
+    /// crosses the window without waiting for it (owner decision 42).
+    /// </summary>
+    internal TimeProvider? TimeProvider { get; set; }
 
     /// <summary>
     /// Gets or sets the root directory where per-database files are created.

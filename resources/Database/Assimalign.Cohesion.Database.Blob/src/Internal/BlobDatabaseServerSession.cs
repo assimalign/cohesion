@@ -182,9 +182,11 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
 
         SetNegotiatedVersion(negotiated);
 
-        if (_engine.State != EngineState.Running)
+        // Only a disposed engine, or one failed as a whole, refuses every database here; a worker's
+        // failure of one database refuses that database after authentication (owner decision 42).
+        if (_engine.RefusesEveryDatabase(out var state))
         {
-            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, $"The Blob engine is {_engine.State}.").ConfigureAwait(false);
+            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, $"The Blob engine is {state}.").ConfigureAwait(false);
             return false;
         }
 
@@ -226,6 +228,16 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
         if (!authenticated)
         {
             await TryWriteErrorAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.").ConfigureAwait(false);
+            return false;
+        }
+
+        // A database a worker of the engine is failing on is refused, with its code, until the
+        // failure ends or the engine gives up on it; the engine's other databases are served
+        // (owner decision 42). Checked after authentication, as the offline refusal is, so an
+        // unauthenticated peer learns nothing of a database's health.
+        if (database.GetWorkerFailureRefusal() is { } failing)
+        {
+            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, failing).ConfigureAwait(false);
             return false;
         }
 
@@ -311,11 +323,20 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
 
     private async Task<bool> ExecuteAsync(ProtocolFrame frame, CancellationToken cancellationToken)
     {
-        if (_engine.State != EngineState.Running)
+        if (_engine.RefusesEveryDatabase(out var state))
         {
-            await WriteErrorAsync(ProtocolErrorCode.Unavailable, $"The Blob engine is {_engine.State}.", cancellationToken).ConfigureAwait(false);
+            await WriteErrorAsync(ProtocolErrorCode.Unavailable, $"The Blob engine is {state}.", cancellationToken).ConfigureAwait(false);
             return false;
         }
+
+        // The session's database is refused while a worker of the engine is failing on it; an
+        // exchange for another database's session is served meanwhile (owner decision 42).
+        if (_databaseSession!.Database.GetWorkerFailureRefusal() is { } failing)
+        {
+            await WriteErrorAsync(ProtocolErrorCode.Unavailable, failing, cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
         try
         {
             var session = _databaseSession!;

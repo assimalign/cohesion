@@ -5,7 +5,12 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Database.Blob;
+using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Health;
 
 using Shouldly;
@@ -117,30 +122,122 @@ public sealed class DatabaseWorkerHealthTests
     }
 
     /// <summary>
-    /// A guided worker whose pass the test runs: each pass reports <see cref="Failure"/> for the
-    /// database <c>app</c> while it is set, and finishes that database's work otherwise. Its
-    /// one-hour interval keeps the engine's pump from running a pass the test did not ask for
-    /// after the first.
+    /// A worker failing on one database of a hosted Blob engine (owner decision 42 of 2026-10-07):
+    /// health is Degraded and names the failing worker, as for any failing worker, while the
+    /// engine's Blob server, which the application starts, serves the engine's healthy database
+    /// over the wire and refuses only the failing one, with <c>COHDBB003</c>. Before the decision
+    /// the server refused every database while its engine was Faulted.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a Blob worker failing on one database is degraded and named while the server serves the other databases")]
+    public async Task CheckAsync_BlobWorkerFailingOnOneDatabase_ShouldBeDegradedWhileTheServerServesTheOthers()
+    {
+        // Arrange: a Blob engine with a nested server and a guided worker that fails database
+        // "failing" while its failure is set; the engine's give-up is out of reach.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var token = deadline.Token;
+        var listener = new InMemoryConnectionListener();
+        ReportingWorker? registered = null;
+        var builder = BlobDatabaseEngine.CreateBuilder();
+        builder.EngineName = "blob";
+        builder.WorkerFailureMinimumPasses = int.MaxValue;
+        builder.AddWorker(_ => registered = new ReportingWorker("blob/probe", DatabaseEngineWorkerKind.Checkpoint, "failing"));
+        builder.AddServer(built => BlobDatabaseServer.Create(built, new() { Listener = listener }));
+        await using var engine = builder.Build();
+        var worker = registered.ShouldNotBeNull();
+        await engine.CreateDatabaseAsync("failing", token);
+        var healthy = await engine.CreateDatabaseAsync("healthy", token);
+        await using (var session = await healthy.CreateSessionAsync(token))
+        {
+            await session.CreateContainerAsync("files", token);
+        }
+
+        var options = new DatabaseApplicationOptions();
+        options.Engines.Add(engine);
+        await using var application = new DatabaseApplication(options);
+
+        // Act: the worker fails on "failing"; the application starts the engine's server.
+        worker.Failure = new IOException("Injected page write failure");
+        worker.RunIteration(token);
+        await ((IHost)application).StartAsync(token);
+        HealthContribution degraded = await application.Context.CheckAsync(token);
+        var served = await HandshakeAsync(listener, "healthy", listContainer: true, token);
+        var refused = await HandshakeAsync(listener, "failing", listContainer: false, token);
+        await ((IHost)application).StopAsync(token);
+
+        // Assert
+        engine.State.ShouldBe(EngineState.Faulted);
+        engine.HasFailingWorker("failing").ShouldBeTrue();
+        engine.HasFailingWorker("healthy").ShouldBeFalse();
+        degraded.Status.ShouldBe(HealthStatus.Degraded);
+        degraded.Description.ShouldNotBeNull().ShouldContain("blob/probe");
+        degraded.Description.ShouldContain("IOException");
+        served.ShouldBe((ProtocolMessageType.Ready, (ProtocolErrorCode?)null, (string?)null, (long?)0));
+        refused.Type.ShouldBe(ProtocolMessageType.Error);
+        refused.Code.ShouldBe(ProtocolErrorCode.Unavailable);
+        refused.Message.ShouldNotBeNull().ShouldStartWith("COHDBB003", Case.Sensitive);
+        refused.Listed.ShouldBeNull();
+    }
+
+    // Starts a session of the database on the Blob server behind the listener, and lists its
+    // container "files" once it is ready: the frame that ends the handshake, the error it carries,
+    // and the count the listing completed with.
+    private static async Task<(ProtocolMessageType Type, ProtocolErrorCode? Code, string? Message, long? Listed)> HandshakeAsync(
+        InMemoryConnectionListener listener, string database, bool listContainer, CancellationToken token)
+    {
+        await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, database, "tester").Encode()), token);
+        await channel.Writer.FlushAsync(token);
+        (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Authenticate);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.AuthenticateResponse, ReadOnlyMemory<byte>.Empty), token);
+        await channel.Writer.FlushAsync(token);
+        var ended = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
+        if (ended.Type == ProtocolMessageType.Error)
+        {
+            var error = ProtocolErrorMessage.Decode(ended.Payload.Span);
+            return (ended.Type, error.Code, error.Message, null);
+        }
+
+        long? listed = null;
+        if (listContainer)
+        {
+            await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)BlobProtocolMessageType.List, new BlobListMessage("files", "").Encode()), token);
+            await channel.Writer.FlushAsync(token);
+            var complete = (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
+            listed = BlobOperationCompleteMessage.Decode(complete.Payload.Span).Count;
+        }
+
+        return (ended.Type, null, null, listed);
+    }
+
+    /// <summary>
+    /// A guided worker whose pass the test runs: each pass reports <see cref="Failure"/> for its
+    /// database (<c>app</c> unless given) while it is set, and finishes that database's work
+    /// otherwise. Its one-hour interval keeps the engine's pump from running a pass the test did
+    /// not ask for after the first.
     /// </summary>
     private sealed class ReportingWorker : DatabaseEngineWorker
     {
-        public ReportingWorker(string name, DatabaseEngineWorkerKind kind)
+        private readonly string _database;
+
+        public ReportingWorker(string name, DatabaseEngineWorkerKind kind, string database = "app")
             : base(name, kind, TimeSpan.FromHours(1))
         {
+            _database = database;
         }
 
         public Exception? Failure { get; set; }
 
         protected override void RunIterationCore(CancellationToken cancellationToken)
         {
-            if (!BeginDatabase("app"))
+            if (!BeginDatabase(_database))
             {
                 return;
             }
 
             if (Failure is { } failure)
             {
-                ReportFailure("app", failure);
+                ReportFailure(_database, failure);
             }
         }
     }

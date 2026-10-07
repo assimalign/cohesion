@@ -12,9 +12,10 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// <para>
 /// The first three causes are the storage's own: a device operation failed in a way no retry may
 /// repair, and the cause tells an operator which one to investigate. The other five are its
-/// engine's: a background worker's work on the storage kept failing past the engine's limit, or the
-/// journal grew past the engine's hard cap while its checkpoints kept failing, so the engine gave
-/// up on the storage (owner decision 25 of 2026-10-06) and took it offline through
+/// engine's: a background worker's work on the storage kept failing past the engine's window
+/// (owner decision 42 of 2026-10-07), or the journal grew past the engine's hard cap while its
+/// checkpoints kept failing, so the engine gave up on the storage (owner decision 25 of
+/// 2026-10-06) and took it offline through
 /// <see cref="Storage.TakeOffline(StorageOfflineCause, string, Exception)"/>. Each names the
 /// worker whose work failed, or the journal cap, so an operator knows which work stopped.
 /// </para>
@@ -42,32 +43,35 @@ public enum StorageOfflineCause : byte
     HeaderWrite,
 
     /// <summary>
-    /// The engine's checkpoints of the storage kept failing: its checkpoint worker failed on the
-    /// storage's database as many times in a row as the engine's worker failure limit allows (owner
-    /// decision 25). The journal is no longer truncated, so it would grow until the device fills.
+    /// The engine's checkpoints of the storage kept failing: its checkpoint worker kept failing on
+    /// the storage's database for the engine's worker failure window, across its minimum of failed
+    /// passes (owner decisions 25 and 42). The journal is no longer truncated, so it would grow
+    /// until the device fills.
     /// </summary>
     CheckpointFailures,
 
     /// <summary>
-    /// The engine's page write-backs of the storage kept failing: its page write-back worker failed
-    /// on the storage's database as many times in a row as the engine's worker failure limit allows
-    /// (owner decision 25).
+    /// The engine's page write-backs of the storage kept failing: its page write-back worker kept
+    /// failing on the storage's database for the engine's worker failure window, across its minimum
+    /// of failed passes (owner decisions 25 and 42).
     /// </summary>
     PageWriteBackFailures,
 
     /// <summary>
     /// The engine's write-ahead flushes of the storage kept failing: its group-commit flush worker
-    /// failed on the storage's database as many times in a row as the engine's worker failure limit
-    /// allows (owner decision 25). A flush whose failure leaves the journal's tail unknown takes
-    /// the storage offline at once with <see cref="JournalFlush"/> instead.
+    /// kept failing on the storage's database for the engine's worker failure window, across its
+    /// minimum of failed passes (owner decisions 25 and 42). A flush whose failure leaves the
+    /// journal's tail unknown takes the storage offline at once with <see cref="JournalFlush"/>
+    /// instead.
     /// </summary>
     WriteAheadFlushFailures,
 
     /// <summary>
     /// The engine's version purge of the storage kept failing: its version-purge worker, which
-    /// retries the undo of a rolled-back writer and reclaims unreachable versions, failed on the
-    /// storage's database as many times in a row as the engine's worker failure limit allows (owner
-    /// decision 25). A writer whose undo keeps failing keeps its locks until the undo completes.
+    /// retries the undo of a rolled-back writer and reclaims unreachable versions, kept failing on
+    /// the storage's database for the engine's worker failure window, across its minimum of failed
+    /// passes (owner decisions 25 and 42). A writer whose undo keeps failing keeps its locks until
+    /// the undo completes.
     /// </summary>
     VersionPurgeFailures,
 

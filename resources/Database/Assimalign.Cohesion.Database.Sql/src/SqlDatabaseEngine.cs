@@ -88,7 +88,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     private const string defaultName = "sql-engine";
 
     private SqlDatabaseEngine(SqlDatabaseEngineOptions options)
-        : base(options.EngineName ?? defaultName, EngineModel.Sql, options.WorkerFailureLimit)
+        : base(options.EngineName ?? defaultName, EngineModel.Sql, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
     {
         _options = options;
         _signalCommitPending = _commitPendingSignal.Set;
@@ -216,7 +216,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// least 1 MiB; <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/> is negative;
     /// <see cref="SqlDatabaseEngineOptions.CheckpointInterval"/> or
     /// <see cref="SqlDatabaseEngineOptions.MaintenanceInterval"/> is not positive;
-    /// <see cref="SqlDatabaseEngineOptions.WorkerFailureLimit"/> is less than one; or
+    /// <see cref="SqlDatabaseEngineOptions.WorkerFailureWindow"/> is not positive or is longer than
+    /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>;
+    /// <see cref="SqlDatabaseEngineOptions.WorkerFailureMinimumPasses"/> is less than one; or
     /// <see cref="SqlDatabaseEngineOptions.JournalSizeLimit"/> is negative, or set and below
     /// <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/>.
     /// </exception>
@@ -260,8 +262,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.CheckpointInterval, TimeSpan.Zero, nameof(options.CheckpointInterval));
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaintenanceInterval, TimeSpan.Zero, nameof(options.MaintenanceInterval));
-        DatabaseWorkerLimits.Validate(options.WorkerFailureLimit, options.JournalSizeLimit, options.CheckpointJournalSize,
-            nameof(options.WorkerFailureLimit), nameof(options.JournalSizeLimit));
+        DatabaseWorkerLimits.Validate(options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.JournalSizeLimit, options.CheckpointJournalSize,
+            nameof(options.WorkerFailureWindow), nameof(options.WorkerFailureMinimumPasses), nameof(options.JournalSizeLimit));
 
         // Checked here, before any file is touched, rather than by the storage setter at database
         // create or open (owner decision 26 of 2026-10-06): the window is also the flush worker's

@@ -71,9 +71,9 @@ internal sealed class DatabaseEventSource : EventSource
 
     /// <summary>
     /// Writes that an engine took a database offline because it gave up on it (owner decision 25
-    /// of 2026-10-06): a worker's work on the database failed as many times in a row as the
-    /// engine's limit allows, or its journal passed the engine's cap while its checkpoints kept
-    /// failing.
+    /// of 2026-10-06): a worker's work on the database kept failing for the engine's window across
+    /// its minimum of failed passes (owner decision 42 of 2026-10-07), or its journal passed the
+    /// engine's cap while its checkpoints kept failing.
     /// </summary>
     /// <param name="engine">The engine that took the database offline.</param>
     /// <param name="worker">The worker whose work on the database kept failing.</param>

@@ -38,8 +38,10 @@ child-owned vocabulary the contracts speak (`TransactionId` and `TransactionStat
   diagnostics (name, kind, cadence). The `DatabaseEngineWorker` base never lets a failure end its
   loop: it records a database's failure (`Fault`), skips that database for `FailureBackoff` while
   the others keep the worker's pace, and retries; `Faulted` lasts exactly while a worker holds a
-  failure it has not worked off (#1268). A database whose work keeps failing for
-  `WorkerFailureLimit` passes in a row (one hundred by default, owner decision 35) is taken
+  failure it has not worked off (#1268); `HasFailingWorker(name)` and `HasEngineWideFailure`
+  tell one database's failure from the engine's own (owner decision 42). A database whose work
+  keeps failing for `WorkerFailureWindow` (100 s by default) across at least
+  `WorkerFailureMinimumPasses` failed passes (three by default, owner decision 42) is taken
   offline (owner decision 25). Failures, recoveries and give-ups are written to the
   `Assimalign.Cohesion.Database` event source.
 - **Server contracts** — `DatabaseServer` (start/stop lifecycle — "running" lives on the server,

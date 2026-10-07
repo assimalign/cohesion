@@ -32,8 +32,13 @@ internal sealed class TestEngine : DatabaseEngine
     private int _reopens;
     private int _takeOfflineCalls;
 
-    public TestEngine(string name = "test-engine", TestLog? log = null, int workerFailureLimit = DefaultWorkerFailureLimit)
-        : base(name, EngineModel.Sql, workerFailureLimit)
+    public TestEngine(
+        string name = "test-engine",
+        TestLog? log = null,
+        TimeSpan? workerFailureWindow = null,
+        int workerFailureMinimumPasses = DefaultWorkerFailureMinimumPasses,
+        TimeProvider? time = null)
+        : base(name, EngineModel.Sql, workerFailureWindow ?? DefaultWorkerFailureWindow, workerFailureMinimumPasses, time)
     {
         Log = log ?? new TestLog();
     }

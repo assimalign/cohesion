@@ -19,7 +19,8 @@ namespace Assimalign.Cohesion.Database;
 /// <para>
 /// The storage's <see cref="StorageOfflineException.Cause"/>, on the inner exception, says which:
 /// a device operation, or the background worker whose work the engine gave up on, or the journal
-/// cap (<see cref="DatabaseEngine.WorkerFailureLimit"/>, owner decision 25 of 2026-10-06).
+/// cap (<see cref="DatabaseEngine.WorkerFailureWindow"/>, owner decisions 25 of 2026-10-06 and 42
+/// of 2026-10-07).
 /// </para>
 /// <para>
 /// A failed fsync leaves every record written since the last successful one in an unknown
