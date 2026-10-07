@@ -34,7 +34,7 @@ this tree on 2026-10-04 or in a cited reference source. **[Likely]** means a str
 
 ### Owner decisions of 2026-10-06
 
-The owner accepted every open recommendation on 2026-10-06. They settle the questions this file
+The owner accepted every open recommendation on 2026-10-06, and decisions 35-41 on 2026-10-07. They settle the questions this file
 records as open or "pending owner confirmation" elsewhere; where an older paragraph says
 otherwise, this list wins.
 
@@ -48,6 +48,13 @@ otherwise, this list wins.
 | 32 | `DocumentDatabase`/`BlobDatabase` session-less collection and container operations (§6.6) | Removed: every model's operations take the session. |
 | 33 | Reopening a database closed outside its engine (#1289) | The engine forgets it, so a later open reopens it from disk. |
 | 34 | SQL's coded aborted-transaction error (§6.4) | `COHSQLT005`. |
+| 35 | `WorkerFailureLimit` default (decision 25) | 100: Neo4j's ~100 s window at the 1 s worker backoff, not its count of 10 (decided 2026-10-07). |
+| 36 | P5: the exchange bases' run entries | Stay internal (2026-10-07). |
+| 37 | P5: `DatabaseConnection.OpenAsync` | Stays internal (2026-10-07). |
+| 38 | P5: composing client observers | Not supported for now; a sealed composite observer per client only on demand (2026-10-07). |
+| 39 | P5: transport dial failures | Wrapped in `DatabaseClientException` with its connection-failure code, as Npgsql wraps socket errors (2026-10-07). |
+| 40 | Decision 22: how Hosting reports reopen attempts | Its internal `EventSource`, forwarded into logging (`event-source.md`) (2026-10-07). |
+| 41 | Decision 25: the journal cap | Needs two failed checkpoints in a row (2026-10-07). |
 
 Decisions 32 and 33, with decision 24 and #1272, landed on 2026-10-06 on
 `feat/owner-decisions-engines` (§6.4, §6.6, §7, §12).
