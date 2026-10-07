@@ -28,19 +28,39 @@ internal sealed class HPackDecoder
         _dynamicTable = new HPackDynamicTable(maxDynamicTableSize);
     }
 
+    /// <summary>
+    /// Decodes a request head and folds its field lines into an <see cref="HPackDecodedHeaders"/>. The
+    /// whole block is decoded before any field is judged, so a block that cannot be decompressed is
+    /// always reported as such (RFC 9113 §4.3), even when it also carries a field that breaks a rule.
+    /// </summary>
+    /// <param name="headerBlock">The complete field block (a HEADERS payload plus its CONTINUATION payloads).</param>
+    /// <returns>The decoded request head.</returns>
+    /// <exception cref="HPackDecodingException">The block is not a valid HPACK encoding.</exception>
+    /// <exception cref="HPackHeaderListSizeExceededException">
+    /// The decoded list exceeds the advertised <c>SETTINGS_MAX_HEADER_LIST_SIZE</c>; the decode stops there.
+    /// </exception>
+    /// <exception cref="System.IO.InvalidDataException">
+    /// The block decodes, but a field breaks an RFC 9113 §8.2 / §8.3 field rule (see <see cref="HPackDecodedHeaders.Add"/>).
+    /// </exception>
     public HPackDecodedHeaders DecodeRequestHeaders(ReadOnlySpan<byte> headerBlock)
     {
+        List<(string Name, string Value)> fieldLines = DecodeFieldLines(headerBlock);
         HPackDecodedHeaders decodedHeaders = new();
-        DecodeFieldBlock(headerBlock, decodedHeaders.Add);
+
+        foreach ((string name, string value) in fieldLines)
+        {
+            decodedHeaders.Add(name, value);
+        }
+
         return decodedHeaders;
     }
 
     /// <summary>
-    /// Decodes a field block into its field lines, in wire order, without applying the request-head
-    /// rules <see cref="DecodeRequestHeaders"/> enforces as it goes. Used for a trailer section, and
-    /// for a block that is decoded only to keep the dynamic table in step: the caller judges the
-    /// fields once the whole block has been processed, so a field the caller rejects never leaves
-    /// part of the block undecoded.
+    /// Decodes a field block into its field lines, in wire order, without applying any field rule.
+    /// Used for a request head (<see cref="DecodeRequestHeaders"/>), for a trailer section, and for a
+    /// block that is decoded only to keep the dynamic table in step: the caller judges the fields
+    /// once the whole block has been processed, so a field the caller rejects never leaves part of
+    /// the block undecoded.
     /// </summary>
     /// <param name="headerBlock">The complete field block (a HEADERS payload plus its CONTINUATION payloads).</param>
     /// <returns>The decoded field lines.</returns>
@@ -58,6 +78,7 @@ internal sealed class HPackDecoder
     private void DecodeFieldBlock(ReadOnlySpan<byte> headerBlock, Action<string, string> addField)
     {
         int index = 0;
+        bool fieldLineDecoded = false;
 
         // RFC 9113 §10.5.1 — the header-list size is accounted per field section, so reset the
         // running total for every decode. The dynamic-table state is intentionally connection-wide
@@ -67,6 +88,23 @@ internal sealed class HPackDecoder
         while (index < headerBlock.Length)
         {
             byte current = headerBlock[index];
+
+            if ((current & 0x20) != 0 && (current & 0xC0) == 0)
+            {
+                // RFC 7541 §4.2 — a dynamic table size update opens a field block: one that follows
+                // a field line is a decoding error.
+                if (fieldLineDecoded)
+                {
+                    throw new HPackDecodingException(
+                        "An HPACK dynamic table size update followed a field line; it must come at the beginning of the field block (RFC 7541 §4.2).");
+                }
+
+                int dynamicTableSize = DecodeInteger(headerBlock, ref index, 5);
+                ResizeDynamicTable(dynamicTableSize);
+                continue;
+            }
+
+            fieldLineDecoded = true;
 
             if ((current & 0x80) != 0)
             {
@@ -79,13 +117,6 @@ internal sealed class HPackDecoder
             if ((current & 0x40) != 0)
             {
                 DecodeLiteralHeaderField(headerBlock, ref index, 6, addField, indexHeader: true);
-                continue;
-            }
-
-            if ((current & 0x20) != 0)
-            {
-                int dynamicTableSize = DecodeInteger(headerBlock, ref index, 5);
-                ResizeDynamicTable(dynamicTableSize);
                 continue;
             }
 
@@ -202,7 +233,9 @@ internal sealed class HPackDecoder
         bool huffmanEncoded = (headerBlock[index] & 0x80) != 0;
         int length = DecodeInteger(headerBlock, ref index, 7);
 
-        if (index + length > headerBlock.Length)
+        // Compared against what is left, not as index + length: a length near 2^31 would overflow
+        // the sum and slip past the check.
+        if (length > headerBlock.Length - index)
         {
             throw new HPackDecodingException("The HPACK string literal length exceeded the available payload.");
         }

@@ -1438,11 +1438,26 @@ injected `TimeProvider`.
 
 ## HTTP/2 request heads (RFC 9113 §8.3)
 
-`HPackDecoder.DecodeRequestHeaders` folds each decoded field line into
-`HPackDecodedHeaders`, which applies the per-field rules as the line arrives: lowercase
-names, no connection-specific fields, `TE` only as `trailers` (RFC 9113 §8.2), and only
-the request pseudo-header fields, all ahead of the regular fields (§8.3). A violation of
-these closes the connection with `PROTOCOL_ERROR`.
+`HPackDecoder.DecodeRequestHeaders` decodes the whole field block first, then folds the
+field lines into `HPackDecodedHeaders` (#1322). Two kinds of failure come out of it, and
+they are reported differently:
+
+- **The block cannot be decompressed** — an index of zero or past the dynamic table, a
+  Huffman string with an EOS symbol or with padding that is longer than seven bits or not
+  all 1 bits, an integer over 31 bits, a string length past the end of the block, or a
+  dynamic table size update that follows a field line or exceeds the
+  `SETTINGS_HEADER_TABLE_SIZE` the server advertised (RFC 7541 §4.2, §5, §6.3). The decoder
+  throws `HPackDecodingException`, and the connection ends with `GOAWAY(COMPRESSION_ERROR)`
+  (RFC 9113 §4.3). Its decoder state can no longer be trusted. A decoded list over
+  `SETTINGS_MAX_HEADER_LIST_SIZE` is the one exception: `ENHANCE_YOUR_CALM` (see "The two
+  header-list caps"). The same mapping (`CreateFieldBlockDecodingError`) covers a trailer
+  section and the block of a refused or reset stream.
+- **A decoded field breaks a field rule** — an empty or uppercase name, a connection-specific
+  field, `TE` other than `trailers` (RFC 9113 §8.2), a pseudo-header field after a regular
+  field, or one not defined for requests (§8.3). `HPackDecodedHeaders` throws
+  `InvalidDataException`, and `Http2Stream.CreateContextAsync` ends the connection with
+  `GOAWAY(PROTOCOL_ERROR)`. Decoding first means a block that breaks a rule and then fails to
+  decode is reported as the decoding failure.
 
 Whether the pseudo-header fields make a complete request is judged afterwards, by
 `Http2Stream.CreateContextAsync`, with the whole block decoded (#1321). In order:
@@ -1557,9 +1572,10 @@ indeterminate, so the overflow is a **connection** error (GOAWAY), not a
 recoverable stream reset — the decoder is connection-global and cannot be
 trusted for subsequent streams once a decode was abandoned mid-block. The
 distinct `HPackHeaderListSizeExceededException` (a subclass of
-`HPackDecodingException`) lets `TryDispatchStream` map the size overflow to
-`ENHANCE_YOUR_CALM` while genuinely malformed field sections keep mapping to
-`PROTOCOL_ERROR`.
+`HPackDecodingException`) lets `CreateFieldBlockDecodingError` map the size overflow
+to `ENHANCE_YOUR_CALM`, while a block that cannot be decompressed maps to
+`COMPRESSION_ERROR` and a decoded field that breaks a field rule to `PROTOCOL_ERROR`
+(see "HTTP/2 request heads").
 
 A request's trailer section is a block of its own: both caps apply to it apart
 from the head, and its size overflow is the same `ENHANCE_YOUR_CALM` connection

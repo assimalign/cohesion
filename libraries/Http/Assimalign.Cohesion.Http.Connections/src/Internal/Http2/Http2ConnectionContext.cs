@@ -1651,12 +1651,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     }
 
     /// <summary>
-    /// Maps a failure to decode a field block that is judged only after it is decoded — a trailer
-    /// section, or a block on a reset stream — to its connection error. Either way the decoder state
-    /// can no longer be trusted, so the connection ends: a decoded list over the advertised
-    /// <c>SETTINGS_MAX_HEADER_LIST_SIZE</c> is <c>ENHANCE_YOUR_CALM</c>, as for a request head
-    /// (RFC 9113 §10.5.1), and a block that is not valid HPACK is <c>COMPRESSION_ERROR</c>
-    /// (RFC 9113 §4.3).
+    /// Maps a failure to decode a field block — a request head, a trailer section, or a block on a
+    /// refused or reset stream — to its connection error. The decoder state can no longer be trusted,
+    /// so the connection ends: a decoded list over the advertised
+    /// <c>SETTINGS_MAX_HEADER_LIST_SIZE</c> is <c>ENHANCE_YOUR_CALM</c> (RFC 9113 §10.5.1), and a block
+    /// that is not valid HPACK is <c>COMPRESSION_ERROR</c> (RFC 9113 §4.3).
     /// </summary>
     private static Http2ConnectionException CreateFieldBlockDecodingError(int streamId, HPackDecodingException error)
     {
@@ -1930,26 +1929,15 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 _requestInterceptors,
                 _http2Limits.MaxRequestBodySize).ConfigureAwait(false);
         }
-        catch (HPackHeaderListSizeExceededException error)
-        {
-            // RFC 9113 §10.5.1 — the decoded field list exceeded the advertised
-            // MAX_HEADER_LIST_SIZE. This is an excessive-load condition (the decode aborts before
-            // fully materialising the list), so escalate with ENHANCE_YOUR_CALM rather than the
-            // PROTOCOL_ERROR used for genuinely malformed field sections below.
-            throw new Http2ConnectionException(
-                Http2ErrorCode.EnhanceYourCalm,
-                $"HTTP/2 HEADERS frame exceeded the maximum header list size: {error.Message}");
-        }
         catch (HPackDecodingException error)
         {
-            // RFC 9113 §8.2 / §8.3 — malformed field sections (illegal
-            // pseudo-header order, forbidden connection-specific
-            // fields, etc.) are connection-level PROTOCOL_ERRORs. Wrap
-            // the HPack-level exception so the pump emits GOAWAY before
-            // tearing down.
-            throw new Http2ConnectionException(
-                Http2ErrorCode.ProtocolError,
-                $"HTTP/2 HEADERS frame contained a malformed field section: {error.Message}");
+            // RFC 9113 §4.3 — the request head could not be decompressed: COMPRESSION_ERROR. A decoded
+            // list over the advertised MAX_HEADER_LIST_SIZE is ENHANCE_YOUR_CALM instead (RFC 9113
+            // §10.5.1; the decode aborts before the list is fully materialised). Either way the
+            // decoder state can no longer be trusted, so the connection ends. A decoded field that
+            // breaks a field rule is not a decompression failure: the stream already reported it as
+            // a PROTOCOL_ERROR connection error.
+            throw CreateFieldBlockDecodingError(stream.StreamId, error);
         }
         catch (HttpRequestRejectedException rejection)
         {

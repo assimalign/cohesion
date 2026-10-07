@@ -96,6 +96,7 @@ internal static class HPackHuffmanDecoder
         int node = 0;
         int written = 0;
         int bitsSinceLastSymbol = 0;
+        bool onlyOnesSinceLastSymbol = true;
 
         foreach (byte b in source)
         {
@@ -103,6 +104,7 @@ internal static class HPackHuffmanDecoder
             {
                 int direction = (b >> bit) & 1;
                 bitsSinceLastSymbol++;
+                onlyOnesSinceLastSymbol &= direction == 1;
 
                 if (_isLeaf[node, direction])
                 {
@@ -122,6 +124,7 @@ internal static class HPackHuffmanDecoder
                     destination[written++] = (byte)symbol;
                     node = 0;
                     bitsSinceLastSymbol = 0;
+                    onlyOnesSinceLastSymbol = true;
                 }
                 else
                 {
@@ -132,7 +135,8 @@ internal static class HPackHuffmanDecoder
 
         // RFC 7541 §5.2 — trailing partial code MUST be ≤ 7 bits and
         // MUST be a prefix of the all-ones EOS code (i.e., every padding
-        // bit must be 1).
+        // bit must be 1). The bits themselves are checked: the node they
+        // reached says nothing about whether a 0 bit was among them.
         if (node != 0)
         {
             if (bitsSinceLastSymbol > 7)
@@ -141,21 +145,10 @@ internal static class HPackHuffmanDecoder
                     "HPACK Huffman-encoded string has trailing partial code longer than 7 bits.");
             }
 
-            // Walk the all-ones path from `node`. Reaching a leaf means
-            // a real symbol's code was a prefix of the EOS code — which
-            // would be a decoding error per §5.2.
-            int padNode = node;
-            int remaining = bitsSinceLastSymbol;
-            while (remaining > 0)
+            if (!onlyOnesSinceLastSymbol)
             {
-                if (_isLeaf[padNode, 1])
-                {
-                    throw new HPackDecodingException(
-                        "HPACK Huffman-encoded string padding does not match EOS prefix.");
-                }
-
-                padNode = _children[padNode, 1];
-                remaining--;
+                throw new HPackDecodingException(
+                    "HPACK Huffman-encoded string padding does not match EOS prefix.");
             }
         }
 

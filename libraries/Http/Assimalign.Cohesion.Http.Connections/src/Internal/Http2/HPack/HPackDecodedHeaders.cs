@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
@@ -10,11 +11,18 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// land in <see cref="Headers"/>.
 /// </summary>
 /// <remarks>
+/// <para>
+/// The section is folded only after the whole block is decoded (<see cref="HPackDecoder.DecodeRequestHeaders"/>),
+/// so a field rule broken here is reported as an <see cref="InvalidDataException"/>, never as an HPACK
+/// decoding failure.
+/// </para>
+/// <para>
 /// Whether the pseudo-header fields make a complete request — none missing, none repeated, no empty
 /// <c>:path</c> (RFC 9113 §8.3.1) — is judged by the stream once the section is folded, because a
 /// malformed request costs only its stream (RFC 9113 §8.1.1). A repeated pseudo-header is therefore
 /// recorded in <see cref="RepeatedPseudoHeader"/> rather than thrown, and an empty <c>:path</c> is kept
 /// as it arrived.
+/// </para>
 /// </remarks>
 internal sealed class HPackDecodedHeaders
 {
@@ -50,16 +58,19 @@ internal sealed class HPackDecodedHeaders
 
     /// <summary>
     /// Folds a decoded (name, value) pair into the accumulating field
-    /// section, applying the RFC 9113 §8 validation rules. Failures
-    /// surface as <see cref="HPackDecodingException"/>; the caller maps
-    /// these to a connection-level PROTOCOL_ERROR via
-    /// <c>Http2ConnectionException</c>.
+    /// section, applying the RFC 9113 §8 validation rules.
     /// </summary>
+    /// <exception cref="InvalidDataException">
+    /// The field breaks a field rule: an empty or uppercase name, a connection-specific field, a
+    /// <c>TE</c> other than <c>trailers</c>, a pseudo-header after a regular field, or a pseudo-header
+    /// not defined for requests. The field was decoded, so this is not an HPACK failure; the stream
+    /// maps it to a connection-level <c>PROTOCOL_ERROR</c>.
+    /// </exception>
     public void Add(string name, string value)
     {
         if (string.IsNullOrEmpty(name))
         {
-            throw new HPackDecodingException("The HTTP/2 field name cannot be empty.");
+            throw new InvalidDataException("The HTTP/2 field name cannot be empty.");
         }
 
         if (name[0] == ':')
@@ -101,7 +112,7 @@ internal sealed class HPackDecodedHeaders
         // section is malformed.
         if (_sawRegularField)
         {
-            throw new HPackDecodingException(
+            throw new InvalidDataException(
                 $"Pseudo-header field '{name}' appeared after regular fields; pseudo-headers MUST come first.");
         }
 
@@ -136,13 +147,13 @@ internal sealed class HPackDecodedHeaders
             case ":status":
                 // RFC 9113 §8.3 — :status is a response pseudo-header.
                 // Receiving it in a request field section is malformed.
-                throw new HPackDecodingException(
+                throw new InvalidDataException(
                     "Pseudo-header field ':status' is response-only and MUST NOT appear in a request.");
 
             default:
                 // RFC 9113 §8.3 — pseudo-header names that are not
                 // defined for the given message type are malformed.
-                throw new HPackDecodingException(
+                throw new InvalidDataException(
                     $"Unknown pseudo-header field '{name}'.");
         }
     }
@@ -171,7 +182,7 @@ internal sealed class HPackDecodedHeaders
         {
             if (c >= 'A' && c <= 'Z')
             {
-                throw new HPackDecodingException(
+                throw new InvalidDataException(
                     $"Field name '{name}' contains uppercase characters; HTTP/2 field names MUST be lowercase.");
             }
         }
@@ -186,7 +197,7 @@ internal sealed class HPackDecodedHeaders
         // HttpFieldNormalization so both versions reject the same set).
         if (HttpFieldNormalization.IsForbiddenInHttp2Or3(key))
         {
-            throw new HPackDecodingException(
+            throw new InvalidDataException(
                 $"Connection-specific header field '{name}' is forbidden in HTTP/2 (RFC 9113 §8.2.2).");
         }
 
@@ -195,7 +206,7 @@ internal sealed class HPackDecodedHeaders
         if (string.Equals(name, "te", StringComparison.OrdinalIgnoreCase)
             && !HttpFieldNormalization.IsTeValueValidInHttp2Or3(value))
         {
-            throw new HPackDecodingException(
+            throw new InvalidDataException(
                 $"HTTP/2 field 'TE' MUST carry only the value 'trailers'; got '{value}'.");
         }
     }

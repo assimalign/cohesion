@@ -903,8 +903,12 @@ internal sealed class Http2Stream
     /// empty <c>:path</c> (RFC 9113 §8.3.1), or a <c>:path</c> that does not decode to a legal path.
     /// </exception>
     /// <exception cref="Http2ConnectionException">
-    /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> when the head violates the extended
-    /// CONNECT rules of RFC 8441 §4.
+    /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> when a decoded field breaks a field rule
+    /// (RFC 9113 §8.2 / §8.3), or the head violates the extended CONNECT rules of RFC 8441 §4.
+    /// </exception>
+    /// <exception cref="HPackDecodingException">
+    /// The block is not valid HPACK, or its decoded list exceeds the advertised
+    /// <c>SETTINGS_MAX_HEADER_LIST_SIZE</c>. The caller maps it to a connection error.
     /// </exception>
     public async ValueTask<Http2Context> CreateContextAsync(
         HPackDecoder decoder,
@@ -929,7 +933,21 @@ internal sealed class Http2Stream
             ? RequestAborted
             : CancellationTokenSource.CreateLinkedTokenSource(connectionAborted, RequestAborted).Token;
 
-        HPackDecodedHeaders decodedHeaders = decoder.DecodeRequestHeaders(_headerBlock.ToArray());
+        // RFC 9113 §4.3 — the whole block is decoded before any field is judged. A block HPACK cannot
+        // decode propagates as an HPackDecodingException, which the connection maps to
+        // COMPRESSION_ERROR. A decoded field that breaks a field rule (RFC 9113 §8.2 / §8.3) is not a
+        // decompression failure: it keeps the connection-level PROTOCOL_ERROR.
+        HPackDecodedHeaders decodedHeaders;
+        try
+        {
+            decodedHeaders = decoder.DecodeRequestHeaders(_headerBlock.ToArray());
+        }
+        catch (InvalidDataException exception)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 HEADERS frame on stream {StreamId} contained a malformed field section: {exception.Message}");
+        }
 
         // A trailer section that follows the body is a field block of its own: it accumulates from an
         // empty block, under its own size bound (ReceiveHeaders, ReceiveTrailers).
