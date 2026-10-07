@@ -14,12 +14,14 @@ is the common case, and the reason the tunnel exists (`docs/libraries/Http/DECIS
 
 ```mermaid
 flowchart LR
-    App["Application / Http.WebSockets"]
+    App["Application"]
+    Sockets["Http.WebSockets"]
     Ext["Http.ExtendedConnect"]
     Core["Http (core)"]
     Conn["Http.Connections (transport)"]
     App --> Ext
     App --> Core
+    Sockets --> Core
     Ext --> Core
     Conn --> Core
 ```
@@ -42,7 +44,9 @@ ending the stream and framing `DATA` under the stream's flow control: only the t
 that, so the transport is the producer, and it references no feature package. The contract therefore
 lives in the core, beside `IHttpTlsConnectionFeature`, and the transport installs its own
 implementation on the exchange's feature collection. This package keeps the application-facing
-ergonomics, which is what `Http.WebSockets` references (ADR 1).
+ergonomics. `Http.WebSockets`, which bootstraps a WebSocket over the tunnel on HTTP/2 and HTTP/3,
+reads the core contract from the exchange's features and does not reference this package: ADR 1
+planned the reference before the contract moved to the core.
 
 Until the tunnel existed the feature only reported `:protocol`, and the transport published that
 string under an `IHttpContext.Items` key that this package turned into a feature on every read. A

@@ -7,9 +7,11 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Http.WebSockets.Tests.TestObjects;
 
 /// <summary>
-/// A configurable <see cref="IHttpContext"/> double with real header and feature collections. A
-/// handshake context also carries a <see cref="FakeProtocolUpgrade"/>, standing in for the
-/// protocol-upgrade interceptor, so <c>context.Upgrade</c> reads what the transport would surface.
+/// A configurable <see cref="IHttpContext"/> double with real header and feature collections. An
+/// HTTP/1.1 handshake context also carries a <see cref="FakeProtocolUpgrade"/>, standing in for the
+/// protocol-upgrade interceptor, so <c>context.Upgrade</c> reads what the transport would surface;
+/// an HTTP/2 or HTTP/3 one carries a <see cref="FakeExtendedConnect"/>, standing in for the
+/// transport's extended CONNECT feature.
 /// </summary>
 internal sealed class WebSocketTestContext : IHttpContext
 {
@@ -41,8 +43,28 @@ internal sealed class WebSocketTestContext : IHttpContext
         return context;
     }
 
+    /// <summary>
+    /// Creates a valid HTTP/2 or HTTP/3 opening handshake (RFC 8441 §5, RFC 9220 §3): an extended
+    /// CONNECT whose <c>:protocol</c> is <paramref name="protocol"/>, with version 13 and no key,
+    /// whose accept surrenders <paramref name="tunnel"/>.
+    /// </summary>
+    public static WebSocketTestContext CreateExtendedConnect(
+        Stream? tunnel = null,
+        string protocol = "websocket",
+        HttpVersion version = HttpVersion.Http20)
+    {
+        WebSocketTestContext context = new(HttpMethod.Connect, version);
+        context.Request.Headers[HttpHeaderKey.SecWebSocketVersion] = "13";
+        context.ExtendedConnect = new FakeExtendedConnect(protocol, tunnel ?? new MemoryStream(), context.Response);
+        context.Features.Set(context.ExtendedConnect);
+        return context;
+    }
+
     /// <summary>Gets the upgrade the context surfaces, when one was installed.</summary>
     public FakeProtocolUpgrade? Upgrade { get; private set; }
+
+    /// <summary>Gets the extended CONNECT the context surfaces, when one was installed.</summary>
+    public FakeExtendedConnect? ExtendedConnect { get; private set; }
 
     public HttpVersion Version { get; }
 

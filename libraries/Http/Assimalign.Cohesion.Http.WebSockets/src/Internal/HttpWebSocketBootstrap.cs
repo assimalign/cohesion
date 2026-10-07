@@ -18,12 +18,12 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// with <c>101</c> and <c>Sec-WebSocket-Accept</c> (<see cref="Http1WebSocketBootstrap"/>).
 /// HTTP/2 and HTTP/3 bootstrap it with extended CONNECT (RFC 8441, RFC 9220): a <c>CONNECT</c>
 /// whose <c>:protocol</c> is <c>websocket</c>, answered with <c>200</c>, with no key or accept
-/// value, and with no connection-specific fields in any response.
+/// value, and with no connection-specific fields in any response
+/// (<see cref="ExtendedConnectWebSocketBootstrap"/>).
 /// </para>
 /// <para>
-/// Only HTTP/1.1 is implemented. Supporting HTTP/2 and HTTP/3 (#765 phase 2, after #1316 adds the
-/// tunnel's accept call to <c>IHttpExtendedConnectFeature</c>) means one more subclass and one more
-/// branch in <see cref="Select"/>; nothing public changes.
+/// Both bootstraps hand over a duplex stream, and the framing that runs over it is the same on
+/// every protocol; only the opening differs.
 /// </para>
 /// </remarks>
 internal abstract class HttpWebSocketBootstrap
@@ -44,7 +44,8 @@ internal abstract class HttpWebSocketBootstrap
 
     /// <summary>
     /// Stages the protocol's own fields of an accepted handshake on the response, such as
-    /// HTTP/1.1's <c>Sec-WebSocket-Accept</c>.
+    /// HTTP/1.1's <c>Sec-WebSocket-Accept</c>, and removes the handshake fields the protocol does
+    /// not carry.
     /// </summary>
     /// <param name="responseHeaders">The exchange's response headers.</param>
     public abstract void ApplyAcceptFields(IHttpHeaderCollection responseHeaders);
@@ -57,8 +58,9 @@ internal abstract class HttpWebSocketBootstrap
     public abstract void ApplyUpgradeRequiredFields(IHttpHeaderCollection responseHeaders);
 
     /// <summary>
-    /// Completes the protocol switch: sends the success response with the staged headers and
-    /// returns the duplex stream the WebSocket framing runs over.
+    /// Completes the protocol switch: sends the success response (<c>101</c> on HTTP/1.1,
+    /// <c>200</c> on HTTP/2 and HTTP/3) with the staged headers and returns the duplex stream the
+    /// WebSocket framing runs over.
     /// </summary>
     /// <param name="cancellationToken">A token that cancels the switch.</param>
     /// <returns>The stream; the WebSocket that wraps it owns it.</returns>
@@ -82,8 +84,17 @@ internal abstract class HttpWebSocketBootstrap
             return new Http1WebSocketBootstrap(context.Request, upgrade);
         }
 
-        // HTTP/2 and HTTP/3 (phase 2): an extended CONNECT whose :protocol is websocket is selected
-        // here once the transports can accept it as a tunnel. Until then it is an ordinary request.
+        // HTTP/2 and HTTP/3 (RFC 8441 §4, RFC 9220 §3): an extended CONNECT whose :protocol names
+        // websocket. The transport installs the feature only on a valid extended CONNECT, so its
+        // presence is the pseudo-header check; the method test first keeps the feature lookup off
+        // every other request. An extended CONNECT for another protocol is not a WebSocket attempt.
+        if (context.Request.Method == HttpMethod.Connect
+            && context.Features.Get<IHttpExtendedConnectFeature>() is { } extendedConnect
+            && string.Equals(extendedConnect.Protocol, HttpWebSocketHandshake.ProtocolToken, StringComparison.OrdinalIgnoreCase))
+        {
+            return new ExtendedConnectWebSocketBootstrap(context.Request, extendedConnect);
+        }
+
         return null;
     }
 }

@@ -30,6 +30,11 @@ if (context.ExtendedConnect is { Protocol: "websocket" } extendedConnect)
 Set any response headers (for example `sec-websocket-protocol`) before accepting; they travel on the
 `200`.
 
+For a WebSocket, use `context.WebSockets` (`Assimalign.Cohesion.Http.WebSockets`) instead: it
+validates the RFC 8441 / RFC 9220 handshake (`sec-websocket-version: 13`), negotiates the
+subprotocol and permessage-deflate, and accepts through this feature, with the same calls as on
+HTTP/1.1.
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Http` — the protocol core, which owns the `IHttpExtendedConnectFeature`

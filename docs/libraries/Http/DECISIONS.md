@@ -42,7 +42,7 @@ A real-time hub framework (SignalR-style) waits on this decision, but it is a se
      - permessage-deflate negotiation (RFC 7692), mapped onto `WebSocketDeflateOptions`;
      - the request surface: `IsWebSocketRequest`, the requested subprotocols, and an accept call that returns the `WebSocket`.
 
-     It references Http, Http.ProtocolUpgrade and Http.ExtendedConnect.
+     It references Http, Http.ProtocolUpgrade and Http.ExtendedConnect. *(As built: Http and Http.ProtocolUpgrade only. #1316 moved `IHttpExtendedConnectFeature` into Http, so the HTTP/2 and HTTP/3 handshake reads it from the exchange's features without Http.ExtendedConnect.)*
    - `Assimalign.Cohesion.Web.WebSockets` (resources/Web) owns the policy: `UseWebSockets(options)` middleware for the origin policy, the keep-alive interval, and closing open WebSockets with `1001` when the server drains.
 4. **The extended CONNECT tunnel ships in the transports.** `IHttpExtendedConnectFeature` gains an accept call on HTTP/2 and HTTP/3. It sends `200` and returns a duplex `Stream`:
    - reads deliver the client's DATA;

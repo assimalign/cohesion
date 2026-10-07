@@ -11,10 +11,12 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.WebSockets" />
 		<!-- Test-only: the end-to-end suite serves the policy from the real runtime over loopback
-		     TCP. Tests are exempt from the hosting-isolation rule (COHRES001); the library is not. -->
+		     TCP (HTTP/1.1, HTTP/2) and the in-memory multiplexed driver (HTTP/3). Tests are exempt
+		     from the hosting-isolation rule (COHRES001); the library is not. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

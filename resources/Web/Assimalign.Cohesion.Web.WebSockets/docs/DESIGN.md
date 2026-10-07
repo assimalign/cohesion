@@ -138,13 +138,36 @@ So the close output is claimed once, by whichever side asks first:
   peer's remaining messages and then its close.
 
 The registration is released when the socket is disposed or aborted, and when the pipeline returns
-(the exchange, and its connection, end then). A socket accepted after the drain began is closed at
-once. A custom server that omits the drain feature gets the BCL socket unwrapped, and its sockets
-end when it ends them.
+(the exchange ends then, and with it the HTTP/1.1 connection or the HTTP/2 or HTTP/3 stream). A
+socket accepted after the drain began is closed at once. A custom server that omits the drain
+feature gets the BCL socket unwrapped, and its sockets end when it ends them.
 
 The drain close runs on the thread that stops the server, inside the token's callback, so it only
 starts the close frame's write. A peer that never answers the close is cut off when the budget runs
 out, as any exchange is.
+
+## Protocols
+
+Nothing in the policy depends on the protocol. `Http.WebSockets` detects the handshake on each one
+(the HTTP/1.1 upgrade, the HTTP/2 and HTTP/3 extended CONNECT) and reports one `HandshakeStatus`,
+so the middleware's decisions are the same everywhere:
+
+- the origin check reads the effective scheme and host, which an HTTP/2 or HTTP/3 request takes from
+  `:scheme` and `:authority`;
+- the refusals are `Http.WebSockets`' own, so an HTTP/2 or HTTP/3 `426` carries no `Upgrade` or
+  `Connection` field, which those protocols prohibit;
+- the drain close is a WebSocket close frame inside the socket, so it travels in the stream's `DATA`
+  like any message. On HTTP/2 and HTTP/3 the server's drain also sends `GOAWAY`, which stops new
+  streams and leaves the open socket's stream to finish its close handshake within the budget.
+
+The end-to-end suites run the echo, the cross-site refusal, the `426` and the `1001` drain over all
+three protocols: the BCL client over loopback TCP for HTTP/1.1 and prior-knowledge HTTP/2, and a
+minimal HTTP/3 client over the in-memory multiplexed driver, since the BCL client has no HTTP/3
+WebSockets.
+
+Routing is the one thing an application changes for HTTP/2 and HTTP/3: the handshake's method is
+`CONNECT`, so a WebSocket route mapped for `GET` only does not match it, the same as in ASP.NET
+Core. Map the endpoint for `CONNECT` as well.
 
 ## Ordering
 
@@ -175,5 +198,3 @@ publishes the middleware and runs a WebSocket echo and a refused cross-site hand
   needs more checks `Origin` itself before accepting.
 - **A hub or message layer** (SignalR-style). A separate decision (Http ADR 1).
 - **Message-size limits.** Recorded as "to revisit" in Http ADR 1.
-- **HTTP/2 and HTTP/3.** The policy is protocol-neutral and applies to them unchanged once
-  `Http.WebSockets` phase 2 accepts extended CONNECT.

@@ -6,8 +6,9 @@ namespace Assimalign.Cohesion.Http;
 /// <remarks>
 /// A request is a handshake <em>attempt</em> when it asks to switch to the WebSocket protocol: on
 /// HTTP/1.1, an upgrade (<c>Connection: Upgrade</c>) whose <c>Upgrade</c> header names
-/// <c>websocket</c>. An attempt that breaks the handshake's rules is refused rather than served as
-/// an ordinary request (<see cref="IHttpWebSocketFeature.RejectHandshake"/>).
+/// <c>websocket</c>; on HTTP/2 and HTTP/3, an extended CONNECT whose <c>:protocol</c> is
+/// <c>websocket</c> (RFC 8441, RFC 9220). An attempt that breaks the handshake's rules is refused
+/// rather than served as an ordinary request (<see cref="IHttpWebSocketFeature.RejectHandshake"/>).
 /// </remarks>
 public enum HttpWebSocketHandshakeStatus
 {
@@ -23,9 +24,10 @@ public enum HttpWebSocketHandshakeStatus
     Valid = 1,
 
     /// <summary>
-    /// The request asks for a WebSocket, but its handshake is malformed: it is not a <c>GET</c> or
-    /// carries content, its <c>Sec-WebSocket-Key</c> is missing or is not the base64 encoding of 16
-    /// bytes, or its <c>Sec-WebSocket-Protocol</c> is not a list of tokens. The server refuses it
+    /// The request asks for a WebSocket, but its handshake is malformed: its
+    /// <c>Sec-WebSocket-Protocol</c> is not a list of tokens, or, on HTTP/1.1, it is not a
+    /// <c>GET</c>, carries content, or its <c>Sec-WebSocket-Key</c> is missing or is not the base64
+    /// encoding of 16 bytes (an extended CONNECT carries no key, RFC 8441 §5). The server refuses it
     /// with <c>400 Bad Request</c>.
     /// </summary>
     Invalid = 2,

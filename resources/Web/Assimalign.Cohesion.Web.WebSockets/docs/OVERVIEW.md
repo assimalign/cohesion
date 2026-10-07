@@ -10,6 +10,8 @@ endpoint accepts through `context.WebSockets` (`Assimalign.Cohesion.Http.WebSock
   `AllowedOrigins` is refused with `403`. A handshake without `Origin` passes.
 - **RFC 6455 refusals.** A malformed handshake gets `400`; one for another version gets `426` with
   `Sec-WebSocket-Version: 13`.
+- **Every protocol.** The same policy applies to the HTTP/1.1 upgrade and to the HTTP/2 and HTTP/3
+  extended CONNECT.
 - **Accept defaults.** Every accept downstream takes the keep-alive interval and timeout, and the
   compression switch, unless it sets its own. Compression stays off unless enabled.
 - **Drain close.** When the default server begins its drain, every open socket is closed with
@@ -47,6 +49,11 @@ app.MapGet("/chat", async (IHttpContext context) =>
 
 The endpoint's own `CloseAsync` or `CloseOutputAsync` keeps working after a drain close: the policy
 coordinates the two, so a receive loop written the usual way ends cleanly.
+
+The policy applies on every protocol the server speaks. Over HTTP/2 and HTTP/3 the handshake is an
+extended CONNECT (RFC 8441, RFC 9220), not a `GET`, so a route mapped with `MapGet` does not match
+it: map the same handler for `CONNECT` too (`app.Map(HttpMethod.Connect, "/chat", handler)`), or
+serve the socket from middleware that does not route on the method.
 
 ## Options
 

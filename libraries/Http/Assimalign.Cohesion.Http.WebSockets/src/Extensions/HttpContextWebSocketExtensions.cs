@@ -27,7 +27,9 @@ public static class HttpContextWebSocketExtensions
         /// <para>
         /// On HTTP/1.1 the attempt is detected through <c>context.Upgrade</c>, which needs the
         /// protocol-upgrade interceptor (<c>HttpProtocolUpgrade.CreateInterceptor()</c>) on the
-        /// listener. Without it, every request reads as an ordinary one.
+        /// listener; without it, every HTTP/1.1 request reads as an ordinary one. On HTTP/2 and
+        /// HTTP/3 it is detected through the transport's <see cref="IHttpExtendedConnectFeature"/>,
+        /// which needs nothing registered.
         /// </para>
         /// </remarks>
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
