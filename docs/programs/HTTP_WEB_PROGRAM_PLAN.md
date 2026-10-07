@@ -260,7 +260,7 @@ Commits, behavior changes and follow-ups are in §5.
 
 ### Stage 10 — Gated
 
-**Status:** started 2026-10-07. Three ADRs clear three of the gates, and those items are in progress: [`docs/libraries/Http/DECISIONS.md`](../libraries/Http/DECISIONS.md) for WebSockets and trailers, and [`docs/resources/Web/DECISIONS.md`](../resources/Web/DECISIONS.md) for the rewrite seam (§7.4, decisions 16–18). #829 and #830 stay with the IdentityModel program, and #806–#808 stay post-v1.
+**Status:** delivered 2026-10-07 on the Phase 2 branch and in owner review. Three ADRs cleared three gates (§7.4, decisions 16–18): WebSockets (#765), Web.Rewrite (#782) and trailers (#1314, #1315) are built. Defects found along the way were fixed in the same stage, among them an HTTP/1.1 request-smuggling desync in 10.0.0-preview.1 (#1333). #829 and #830 stay with the IdentityModel program, and #806–#808 stay post-v1. Commits, behavior changes and follow-ups are in §5.
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
@@ -518,6 +518,86 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
     - #1311: a QUIC handshake-timeout option.
     - #1312: back-off when an accept fails for want of descriptors or buffers.
   - **Release.** #1290: nuget.org promotion in hourly batches (decision 13).
+- **Stage 10 delivered (2026-10-07), awaiting owner review.** Stage 10 was the gated stage. Three of its gates were decisions, and the integrator made them as ADRs under the owner's standing delegation (§7.4, decisions 16–18). The two others stay closed, for reasons outside this program: #829 and #830 belong to the IdentityModel program, and #806–#808 are post-v1. Agent sessions built the cleared items in parallel worktrees, and each item was reviewed, integrated, verified and pushed as it landed.
+  - **Decisions** (`1cadb215`): [Http ADR 1](../libraries/Http/DECISIONS.md#adr-1-server-websockets) covers server WebSockets, [Http ADR 2](../libraries/Http/DECISIONS.md#adr-2-trailers-decided-apart-from-grpc) covers trailers apart from gRPC, and [Web ADR 1](../resources/Web/DECISIONS.md#adr-1-how-a-rewrite-changes-the-request-for-the-rest-of-the-pipeline) covers the request view behind rewrite.
+  - **#782 `20679f05`: Web.Rewrite.**
+    - `UseRewrite(rules => ...)` hands the rest of the pipeline a request view. `IWebRewriteFeature` keeps the client's original path and query.
+    - Rules: internal rewrites, 301/302/307/308 redirects, regex rules (interpreted, `NonBacktracking` or source-generated, with a 1 s timeout) and predicate rules.
+    - Canonicalization helpers cover HTTPS, `www`/non-`www`, trailing slash and lowercase. The number of rule passes is bounded.
+    - Captures are percent-encoded for the part of the URL they land in, so `/go//evil.example` cannot redirect off-site.
+  - **#765: WebSockets on HTTP/1.1, HTTP/2 and HTTP/3**, with framing from the BCL.
+    - `312254a3`, `bcffc6ec`: `Http.WebSockets` (handshakes, subprotocols, permessage-deflate) and `Web.WebSockets` (`UseWebSockets`).
+      - Cross-origin handshakes are refused unless their origin is allowed.
+      - The keep-alive interval is configurable.
+      - A drain closes open sockets with `1001` through the new Web-root `IWebServerDrainFeature`.
+      - Web.Hosting installs the HTTP/1.1 upgrade interceptor by default.
+    - `f30e4b42`: the same sockets over extended CONNECT (RFC 8441, RFC 9220).
+    - #1316 `127c68bd`: the tunnel. `IHttpExtendedConnectFeature.AcceptAsync` turns an extended CONNECT into a duplex stream on HTTP/2 and HTTP/3. The feature contract moved from Http.ExtendedConnect to core Http.
+    - `8e4bb5ec`: the default upgrade interceptor had put a response sink on every request on every protocol. A new per-exchange response hook (`AddResponseInterceptor`) restores the fast path, and a plain GET is back to the allocation baseline.
+    - `586cc318`: the output cache never serves or stores a protocol switch.
+    - #1336 `fc87ae02`: `MapWebSocket` maps one endpoint for both handshake shapes. A `MapGet` endpoint works over HTTP/1.1, so in local testing, and fails for every browser on a `UseHttps` endpoint, because those browsers handshake over HTTP/2.
+  - **Trailers.**
+    - #1314 `2e5a34a2`: HTTP/2 decodes request trailers, which keeps HPACK in step. The same work ended a phantom `GET /` that a late trailer section could cause.
+    - #1315 `99ee89fb`: response trailers on HTTP/2 and HTTP/3.
+  - **Transport conformance and integrity, found while building the stage:**
+    - `a15c89a0`–`32ab6117`, HTTP/2 and HTTP/1.1:
+      - #1317: a refused stream's header block is decoded.
+      - #1318: frames on a stream the server reset are ignored, with their flow control credited back.
+      - #1320: HEADERS padding is stripped.
+      - #1321: a request missing a required pseudo-header is reset instead of being served as `GET /`.
+      - #1322: HPACK decoding failures are `COMPRESSION_ERROR`. The work also found three HPACK errors the decoder had never detected.
+      - #1319: HTTP/1.1 trailers follow the shared trailer rule set.
+      - #1323: an unnamed query parameter is skipped instead of failing the connection, which had also let any client write Error-level logs.
+      - #1307: dead linked-token code is removed.
+      - #1332: a malformed HTTP/2 head resets only its stream.
+      - #1333: whitespace before an HTTP/1.1 field's colon is answered `400`.
+    - **#1333 closed an HTTP/1.1 request-smuggling desync that is in 10.0.0-preview.1.** After an application read a chunked body into a framing error, the keep-alive drain resumed past the bad line and served whatever followed as a new request. The advisory is drafted privately as GHSA-m7g7-r8qf-qxxw, following decision 14's practice.
+    - #1326–#1329 `c034fa15`, `ea826d0e`, `1be500ec`, `a7347f20`:
+      - HTTP/2 frames are written atomically.
+      - A reset request body faults instead of ending cleanly.
+      - Connection-specific fields are dropped from HTTP/2 and HTTP/3 response heads.
+      - An HTTP/3 client reset fires `RequestCancelled`. A QUIC or in-memory stream's `ConnectionClosed` now fires when the peer abandons the stream.
+  - **Housekeeping.** `c1c36c4c` removes 258 stale `Web.Results` lines from two solution files, and `a122a953` fixes a drain test that passed on a hang.
+  - **Docs site** ([cohesion-docs#1](https://github.com/assimalign/cohesion-docs/pull/1)): `455b95b` through `0109cfe` add the Http.WebSockets, Web.WebSockets and Web.Rewrite pages and the WebSockets and rewrite guides. They also sync every page Stage 10 changed, including the 17 area framework tables that now list Http.Cookies and Http.ProtocolUpgrade.
+
+  Verification (final code tip `32ab6117`):
+  - **Final run, 77 suites, 0 failures.**
+    - **Http family (16):** Http (1,253), Http.Connections (757), Http.WebSockets (101), Http.Cookies (79), Http.DigestFields (66), Http.Sessions (50), Http.Forms (35), Http.Antiforgery (31), Http.ClientFactory (30), Http.ProtocolUpgrade (22), Http.ServerSentEvents (12), Http.InterimResponses (8), Http.Streaming (8), Http.ExtendedConnect (5), Http.RequestLimits (5), Http.Forwarded (5).
+    - **Connections (7):** Connections (49), Tcp (46), Security (41), InMemory (30), NamedPipes (30), Quic (28), Udp (19).
+    - **All 36 Web suites,** among them Web.Routing (352), Web.Hosting (216), Web.StaticFiles (175), Web.Cors (153), Web.Rewrite (147), Web.SecurityHeaders (143), Web.WebSockets (106) and Web.CookiePolicy (106).
+    - **App.Runtime and the 17 area Hosting suites.**
+  - **Per item.** Each item was also verified when it was integrated. Every new regression test failed before its fix.
+  - **Checks.** The guard passes 36/36 smoke checks under JIT. The release inventory (219 libraries and resources) and the dependency graph check pass.
+  - **NativeAOT.** The guard publishes for win-arm64 at `32ab6117` with no trim or AOT warnings, and the native binary passes 36/36 smoke checks.
+
+  Behavior changes for the review:
+  - **WebSockets.**
+    - Web.Hosting installs the HTTP/1.1 upgrade interceptor on every listener. A request that no application accepts is served as before.
+    - A cross-origin WebSocket handshake is refused by default (`AllowedOrigins`, `AllowAnyOrigin`).
+    - A `MapGet` WebSocket endpoint misses HTTP/2 and HTTP/3 handshakes; use `MapWebSocket`.
+  - **Request trailers.** HTTP/3 request trailers follow the HTTP/2 rule set (`IsProhibitedInTrailers`), and HTTP/1.1 chunked trailers follow it too. A violation resets the stream, or fails the body read on HTTP/1.1.
+  - **Breaking:** `IHttpExtendedConnectFeature` moved from `Assimalign.Cohesion.Http.ExtendedConnect` to core `Assimalign.Cohesion.Http`. Source compiles unchanged, but binaries built against preview.1 must be rebuilt.
+  - **Connections:** `IConnection.ConnectionClosed` on a multiplexed stream also fires when the peer abandons the stream (QUIC `RESET_STREAM`/`STOP_SENDING`).
+  - **HTTP/2 conformance.**
+    - A request missing `:method`, `:scheme` or `:path` is reset instead of being served as `GET /`.
+    - Padded HEADERS are accepted.
+    - HPACK decoding failures are `COMPRESSION_ERROR`.
+    - A malformed request head resets only its stream (#1332).
+  - **Queries:** a query parameter with an empty name is skipped instead of failing the connection. Web.Rewrite still refuses one in a rule target.
+  - **HTTP/1.1:** whitespace between a field name and its colon is answered `400` (#1333).
+
+  Questions for the review:
+  - **Decisions.** Decisions 16–18 were made under the standing delegation. Confirm them, or reopen any.
+  - **Breaking contract move.** Accept moving `IHttpExtendedConnectFeature` to core Http during the previews? The alternative was a reference from Http.Connections to Http.ExtendedConnect, which would have pulled Http.ExtendedConnect into all 18 area frameworks.
+  - **Connections contract.** Accept the `ConnectionClosed` change (the in-memory driver documented it as local-only before)?
+  - **Smuggling advisory.** Publish GHSA-m7g7-r8qf-qxxw (#1333, HTTP/1.1 request smuggling, medium) with the first preview that ships the fix, as decision 14 does for #1304 and #1308?
+
+  Scope-creep filed:
+  - **Web.** #1324 (redirect `Location` encoding in HttpsPolicy and StaticFiles), #1325 (HTTP logging downcasts the request).
+  - **HTTP/2 and HTTP/3 conformance.** #1334 (classic CONNECT and asterisk-form validation), #1335 (repeated query keys).
+  - **Performance.** #1337 (allocating feature lookups), #1338 (an HTTP/3 thread-pool hop per request).
+  - **QUIC.** #1330 (half-close).
+  - **HTTP/1.1 and Web.** #1339 (413 and 408 after dispatch are answered as 500), #1340 (a malformed body is logged as an application defect), #1341 (field values trimmed of Unicode whitespace).
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
@@ -620,6 +700,10 @@ What works end to end:
   Their advisories are drafted (GHSA-r9cf-3952-rg7f, GHSA-r66x-xgrx-gh8m). Every connection driver now follows one rule, documented on `IConnectionListener.AcceptAsync`: a listener contains each connection's failure.
 - Still open: D12 (#806–#808).
 
+**After Stage 10 (2026-10-07):**
+- Found and fixed: an HTTP/1.1 request-smuggling desync in 10.0.0-preview.1 (#1333). After an application read a chunked body into a framing error, the keep-alive drain resumed past the bad line and served what followed as a new request. Its advisory is drafted privately as GHSA-m7g7-r8qf-qxxw.
+- Still open: D12 (#806–#808).
+
 ### 7.3 Missing capabilities
 
 | Capability | Status | Tracking |
@@ -637,12 +721,12 @@ What works end to end:
 | Server telemetry (`ActivitySource`, `Meter`, `traceparent`, request ID) | Delivered in Stage 9: a server span and the HTTP server metrics from `Assimalign.Cohesion.Web.Hosting`, W3C trace context, a request id (`IWebRequestIdFeature`) and `http.route` | #1064 |
 | Hosting diagnostics; lame-duck drain | Delivered in Stage 9: bind failures, accept-loop faults, connection faults and cut-short drains are logged through `builder.Logging`, and a stop drains lame-duck style, cancelling only what outlives its budget | #147; #146 |
 | mTLS (client certificates visible to handlers); multi-protocol ALPN endpoints; config for HTTP/3, limits and the connection cap | Delivered in Stage 9: client certificates and the session's TLS details reach handlers (`IHttpTlsConnectionFeature`), `UseHttps` serves HTTP/2 and HTTP/1.1 per connection, and configuration binds HTTP/3, certificate files, the connection cap and the HTTP/2 limits. Authenticating a user from a client certificate is #1305 | #1065; #1063 |
-| HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Body cap delivered in Stage 5 on both protocols (#1048, #1066). HTTP/3 now surfaces request trailers. HTTP/2 and HTTP/3 timeouts and data rates are still absent. | #1085; HTTP/2 request trailers deferred along with gRPC |
+| HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Body cap delivered in Stage 5 on both protocols (#1048, #1066). Trailers delivered in Stage 10: HTTP/2 decodes and exposes request trailers like HTTP/1.1 and HTTP/3, and HTTP/2 and HTTP/3 send response trailers. HTTP/2 and HTTP/3 timeouts and data rates are still absent. | #1085; #1314, #1315; gRPC hosting stays outside the program |
 | Security headers (CSP, nosniff, Referrer-Policy, frame-ancestors) | Delivered in Stage 7 (`Web.SecurityHeaders`): safe defaults on every response; opt-in CSP with per-request nonces, Permissions-Policy and the cross-origin isolation fields; per-endpoint overrides | #1058 |
 | A representative Web app AOT-published in CI | Delivered in Stage 5: `Web.AotGuard` is published NativeAOT and smoke-tested by the `resource-web.yml` `aot-guard` job | #1052 |
 | OIDC handler; JWT Bearer authority/JWKS discovery | Absent | blocked on IdentityModel #829/#830 |
-| WebSockets | Absent. The HTTP/1.1 Upgrade and extended CONNECT bootstrap exist | #765 (needs an ADR) |
-| URL rewrite | Absent | #782 (needs the request-mutation seam decision) |
+| WebSockets | Delivered in Stage 10. `Http.WebSockets` and `Web.WebSockets` (`UseWebSockets`, `MapWebSocket`) run over HTTP/1.1 Upgrade and over HTTP/2 and HTTP/3 extended CONNECT, with framing from the BCL. Cross-origin handshakes are refused by default, and a drain closes open sockets with `1001` | #765, #1316, #1336; a hub framework stays a separate decision |
+| URL rewrite | Delivered in Stage 10 (`Web.Rewrite`): rewrites hand the rest of the pipeline a request view; redirects, regex and predicate rules, canonicalization helpers | #782 |
 
 ### 7.4 Owner decisions
 

@@ -88,12 +88,12 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectValidation" />
 
         <!-- App-facing HTTP capabilities delivered deliberately even though no Web
-             assembly references them: incremental response streaming, the
-             Server-Sent Events primitives, 1xx interim responses (100 Continue,
-             103 Early Hints), RFC 9530 digest fields and the HTTP/2 / HTTP/3
-             extended CONNECT model ride the transport interceptor seam or the
-             transport's exchange items and are consumed directly by application
-             handlers. -->
+             assembly references them, and consumed directly by application handlers.
+             Incremental response streaming, the Server-Sent Events primitives, 1xx
+             interim responses (100 Continue, 103 Early Hints) and RFC 9530 digest
+             fields ride the transport interceptor seam. Http.ExtendedConnect holds the
+             context.ExtendedConnect accessors over IHttpExtendedConnectFeature, which
+             the transports install in core Http since #1316. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ExtendedConnect" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Streaming" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ServerSentEvents" />
