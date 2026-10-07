@@ -22,11 +22,17 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// connection rented from a <see cref="SqlClient"/> returns to its pool on dispose (with its
 /// authenticated session intact when it is still healthy).
 /// </para>
+/// <para>
+/// Disposal is final for this instance: the pool may rent the session to another caller, so every
+/// later command, and a second <see cref="DisposeAsync"/> or <see cref="AbortAsync"/>, is refused or
+/// ignored here instead of reaching that caller's rental.
+/// </para>
 /// </remarks>
 public sealed class SqlConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
     private readonly SqlClientObserver? _observer;
+    private int _disposed;
 
     internal SqlConnection(DatabaseConnection connection, SqlClientObserver? observer)
     {
@@ -42,17 +48,24 @@ public sealed class SqlConnection : IAsyncDisposable
     /// <summary>
     /// Gets a value indicating whether the connection is open and usable. A
     /// statement-level failure leaves the connection open; a protocol or transport
-    /// failure marks it broken.
+    /// failure marks it broken, and disposal or abort closes it for this instance.
     /// </summary>
-    public bool IsOpen => _connection.IsOpen;
+    public bool IsOpen => Volatile.Read(ref _disposed) == 0 && _connection.IsOpen;
 
-    /// <summary>Discards this connection's rental and closes its session.</summary>
+    /// <summary>Discards this connection's rental and closes its session. Idempotent, and a no-op after
+    /// <see cref="DisposeAsync"/>.</summary>
     /// <returns>The asynchronous transport teardown operation.</returns>
     /// <remarks>Use after an uncertain transaction outcome or failed session cleanup. The connection
     /// is never returned to the pool for reuse. This cannot reverse an already committed transaction
     /// and does not establish the outcome of an unacknowledged COMMIT. This operation is deliberately
     /// not cancellable so an unsafe rental cannot survive cancellation of cleanup.</remarks>
-    public ValueTask AbortAsync() => _connection.AbortAsync();
+    public async ValueTask AbortAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            await _connection.AbortAsync().ConfigureAwait(false);
+        }
+    }
 
     /// <summary>
     /// Executes a row-returning command and materializes the full result set.
@@ -61,6 +74,9 @@ public sealed class SqlConnection : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The materialized result set: typed columns and rows.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="command"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed or aborted.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="SqlClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<SqlResultSet> QueryAsync(SqlCommand command, CancellationToken cancellationToken = default)
     {
@@ -79,6 +95,9 @@ public sealed class SqlConnection : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The materialized result set: typed columns and rows.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="commandText"/> is null or whitespace.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed or aborted.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="SqlClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public ValueTask<SqlResultSet> QueryAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {
@@ -93,6 +112,9 @@ public sealed class SqlConnection : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The number of records the command affected.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="command"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed or aborted.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="SqlClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<long> ExecuteAsync(SqlCommand command, CancellationToken cancellationToken = default)
     {
@@ -111,6 +133,9 @@ public sealed class SqlConnection : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The number of records the command affected.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="commandText"/> is null or whitespace.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed or aborted.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="SqlClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<long> ExecuteAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {
@@ -129,6 +154,9 @@ public sealed class SqlConnection : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The first column of the first row cast to <typeparamref name="T"/>, or default.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="command"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed or aborted.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="SqlClientException">Thrown when the server reports an error, the connection breaks, or the value cannot be cast to <typeparamref name="T"/>.</exception>
     public async ValueTask<T?> ExecuteScalarAsync<T>(SqlCommand command, CancellationToken cancellationToken = default)
     {
@@ -148,10 +176,16 @@ public sealed class SqlConnection : IAsyncDisposable
 
     /// <summary>
     /// Returns the connection to its pool, with its authenticated session intact when it is still
-    /// healthy.
+    /// healthy. Idempotent, and a no-op after <see cref="AbortAsync"/>.
     /// </summary>
     /// <returns>A task that completes when the rental is returned.</returns>
-    public ValueTask DisposeAsync() => _connection.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            await _connection.DisposeAsync().ConfigureAwait(false);
+        }
+    }
 
     private async ValueTask<SqlResultSet> QueryCoreAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
@@ -165,6 +199,9 @@ public sealed class SqlConnection : IAsyncDisposable
     /// </summary>
     private async ValueTask<DatabaseClientResult> ExecuteCoreAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
+        // The pooled connection may already serve another caller's rental; never reach it.
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+
         NotifyExecuting(commandText, parameters?.Count ?? 0);
 
         long startTimestamp = Stopwatch.GetTimestamp();

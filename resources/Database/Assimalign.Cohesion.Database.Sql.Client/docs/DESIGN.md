@@ -117,5 +117,15 @@ The package has no public interface left and no `Abstractions/` folder
 - **What changed for a caller.** `ISqlClient` and `ISqlConnection` become `SqlClient` and
   `SqlConnection` (the Sdk.ApplicationModel `EnabledWeb` fixture and Studio's SQL workspace were
   retyped), and an observer overrides `protected` hooks instead of implementing public ones.
+  An observer cannot forward to another observer instance: outside this assembly the hooks are
+  protected (CS1540), so an application that needs several sinks fans out inside one subclass
+  (plan §7, "P5, as landed", owner review 38).
   The sealed `SqlConnection` shares its name with `Microsoft.Data.SqlClient.SqlConnection`; a
   file that imports both namespaces aliases one (plan §11, R11).
+- **Disposal is final for the instance.** The pool rents the same core `DatabaseConnection` to
+  the next caller, so `SqlConnection` keeps its own disposed flag, as `GraphConnection` and
+  `BlobConnection` do: after `DisposeAsync` or `AbortAsync` every command throws
+  `ObjectDisposedException` before the observer runs, and a second dispose or an abort does
+  nothing. Before the P5 review a stale `SqlConnection` ran its commands on whichever caller had
+  rented the session next, and a second dispose returned that caller's rental
+  (`SqlClientTests.QueryAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException`).

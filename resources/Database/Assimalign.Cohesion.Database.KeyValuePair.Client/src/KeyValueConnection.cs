@@ -29,11 +29,17 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 /// concurrency conflicts with other transactions surface as <see cref="KeyValueClientException"/>
 /// with <see cref="KeyValueClientErrorKind.ExecutionFailure"/> (retryable).
 /// </para>
+/// <para>
+/// Disposal is final for this instance: the pool may rent the session to another caller, so every
+/// later command is refused, and a second <see cref="DisposeAsync"/> is ignored, instead of reaching
+/// that caller's rental.
+/// </para>
 /// </remarks>
 public sealed class KeyValueConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
     private readonly KeyValueClientObserver? _observer;
+    private int _disposed;
 
     internal KeyValueConnection(DatabaseConnection connection, KeyValueClientObserver? observer)
     {
@@ -49,9 +55,9 @@ public sealed class KeyValueConnection : IAsyncDisposable
     /// <summary>
     /// Gets a value indicating whether the connection is open and usable. A
     /// command-level failure leaves the connection open; a protocol or transport
-    /// failure marks it broken.
+    /// failure marks it broken, and disposal closes it for this instance.
     /// </summary>
-    public bool IsOpen => _connection.IsOpen;
+    public bool IsOpen => Volatile.Read(ref _disposed) == 0 && _connection.IsOpen;
 
     /// <summary>
     /// Reads the entry for a key.
@@ -59,6 +65,9 @@ public sealed class KeyValueConnection : IAsyncDisposable
     /// <param name="key">The key to read.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The entry, or null when the key has no visible entry.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<KeyValueClientEntry?> GetAsync(ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
@@ -82,6 +91,9 @@ public sealed class KeyValueConnection : IAsyncDisposable
     /// <param name="value">The value to store.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The entry's new etag.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="KeyValueClientException">Thrown when the server reports an error (including a retryable write-write conflict) or the connection breaks mid-exchange.</exception>
     public async ValueTask<long> PutAsync(ReadOnlyMemory<byte> key, ReadOnlyMemory<byte> value, CancellationToken cancellationToken = default)
     {
@@ -109,6 +121,9 @@ public sealed class KeyValueConnection : IAsyncDisposable
     /// <param name="condition">The write condition.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The outcome: whether the write applied, and the new (or current) etag.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<KeyValueWriteResult> PutAsync(ReadOnlyMemory<byte> key, ReadOnlyMemory<byte> value, KeyValueWriteCondition condition, CancellationToken cancellationToken = default)
     {
@@ -135,6 +150,9 @@ public sealed class KeyValueConnection : IAsyncDisposable
     /// <param name="key">The key to delete.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>True when an entry was deleted; false when none was visible.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<bool> TryDeleteAsync(ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
@@ -154,6 +172,9 @@ public sealed class KeyValueConnection : IAsyncDisposable
     /// <param name="expectedETag">The etag the current entry must carry.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>True when the entry was deleted; false when none was visible or the etag did not match.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<bool> TryDeleteAsync(ReadOnlyMemory<byte> key, long expectedETag, CancellationToken cancellationToken = default)
     {
@@ -171,6 +192,9 @@ public sealed class KeyValueConnection : IAsyncDisposable
     /// <param name="key">The key to probe.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>True when the key has a visible entry; otherwise false.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<bool> ExistsAsync(ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
@@ -196,6 +220,9 @@ public sealed class KeyValueConnection : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The matching entries in ascending key order, materialized; empty, never null, when nothing matches.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="range"/> combines a prefix with explicit start or end bounds.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
     /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<IReadOnlyList<KeyValueClientEntry>> ScanAsync(KeyValueScanRange? range = null, CancellationToken cancellationToken = default)
     {
@@ -251,10 +278,16 @@ public sealed class KeyValueConnection : IAsyncDisposable
 
     /// <summary>
     /// Returns the connection to its pool, with its authenticated session intact when it is still
-    /// healthy.
+    /// healthy. Idempotent.
     /// </summary>
     /// <returns>A task that completes when the rental is returned.</returns>
-    public ValueTask DisposeAsync() => _connection.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            await _connection.DisposeAsync().ConfigureAwait(false);
+        }
+    }
 
     /// <summary>
     /// Decodes the model's entry row shape: <c>[key (byte[]), value (byte[]), etag (long)]</c>.
@@ -295,6 +328,9 @@ public sealed class KeyValueConnection : IAsyncDisposable
     /// </summary>
     private async ValueTask<KeyValueProtocolResult> ExecuteCoreAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
+        // The pooled connection may already serve another caller's rental; never reach it.
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+
         NotifyExecuting(commandText, parameters?.Count ?? 0);
 
         long startTimestamp = Stopwatch.GetTimestamp();

@@ -24,6 +24,13 @@ namespace Assimalign.Cohesion.Database.Client;
 /// Connections are not thread-safe: one exchange at a time, mirroring the engine-session contract on
 /// the server side. An overlapping exchange is rejected before it writes any frame.
 /// </para>
+/// <para>
+/// The pool hands out this same instance on every rental of its session, so a reference kept after
+/// <see cref="DisposeAsync"/> is not a lease: once the pool rents the instance again, calls through the
+/// stale reference act on the new caller's rental, and a second dispose returns it. Drop the reference
+/// when you dispose it. The model clients' connections wrap the rental and refuse every call after
+/// their own disposal.
+/// </para>
 /// </remarks>
 public sealed class DatabaseConnection : IAsyncDisposable
 {
@@ -158,7 +165,8 @@ public sealed class DatabaseConnection : IAsyncDisposable
     /// <exception cref="ArgumentNullException">The exchange is null.</exception>
     /// <exception cref="ArgumentException">The exchange belongs to a different family.</exception>
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
-    /// <exception cref="ObjectDisposedException">The rental has already been returned.</exception>
+    /// <exception cref="ObjectDisposedException">The rental has been returned and the pool has not rented this instance again.</exception>
+    /// <exception cref="OperationCanceledException">The exchange is canceled, which marks the connection broken.</exception>
     /// <exception cref="DatabaseClientException">The server reports an error or the connection fails.</exception>
     /// <remarks>
     /// A non-virtual generic method on a sealed type, because NativeAOT never devirtualizes a generic
@@ -246,7 +254,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
     /// <exception cref="DatabaseClientException">The server rejects the operation or the connection fails.</exception>
     /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
-    /// <exception cref="ObjectDisposedException">The rental has already been returned.</exception>
+    /// <exception cref="ObjectDisposedException">The rental has been returned and the pool has not rented this instance again.</exception>
     /// <remarks>
     /// Dispose the returned stream. Early disposal or cancellation aborts the exchange and returns its
     /// unusable rental. Verified completion retains this connection's lease for subsequent operations;

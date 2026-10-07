@@ -37,6 +37,8 @@ public sealed class GraphConnection : IAsyncDisposable
     /// <returns>The columns, rows, and affected count.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
     /// <exception cref="ObjectDisposedException">The connection is disposed.</exception>
+    /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
+    /// <exception cref="OperationCanceledException">The exchange is canceled, which marks the connection broken.</exception>
     /// <exception cref="GraphClientException">The server rejected the statement or the exchange failed.</exception>
     public async ValueTask<GraphResultSet> QueryAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null,
         CancellationToken cancellationToken = default)
@@ -60,6 +62,8 @@ public sealed class GraphConnection : IAsyncDisposable
     /// <returns>The affected count, or -1 for a row-returning statement.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
     /// <exception cref="ObjectDisposedException">The connection is disposed.</exception>
+    /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
+    /// <exception cref="OperationCanceledException">The exchange is canceled, which marks the connection broken.</exception>
     /// <exception cref="GraphClientException">The server rejected the statement or the exchange failed.</exception>
     public async ValueTask<long> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null,
         CancellationToken cancellationToken = default)
@@ -72,6 +76,8 @@ public sealed class GraphConnection : IAsyncDisposable
     /// <returns>Paths retaining node and relationship identities, labels, types, and properties.</returns>
     /// <exception cref="ArgumentException">The statement is empty.</exception>
     /// <exception cref="ObjectDisposedException">The connection is disposed.</exception>
+    /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
+    /// <exception cref="OperationCanceledException">The exchange is canceled, which marks the connection broken.</exception>
     /// <exception cref="GraphClientException">The query or stream failed; its connection is discarded.</exception>
     /// <remarks>Enumerate to completion to verify the server's terminal path count. Disposing an
     /// unfinished enumeration cancels the exchange and prevents reuse of that session.</remarks>

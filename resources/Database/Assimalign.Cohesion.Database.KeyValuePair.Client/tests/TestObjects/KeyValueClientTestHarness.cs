@@ -34,7 +34,8 @@ internal sealed class KeyValueClientTestHarness : IAsyncDisposable
 
     public static async Task<KeyValueClientTestHarness> StartAsync(
         Action<KeyValueDatabaseServerOptions>? configureServer = null,
-        KeyValueClientObserver? observer = null)
+        KeyValueClientObserver? observer = null,
+        Action<DatabaseConnectionSettings>? configureSettings = null)
     {
         var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-typed-client-e2e" });
         await engine.CreateDatabaseAsync(DatabaseName);
@@ -47,14 +48,18 @@ internal sealed class KeyValueClientTestHarness : IAsyncDisposable
         var server = KeyValueDatabaseServer.Create(engine, serverOptions);
         await server.StartAsync();
 
+        var settings = new DatabaseConnectionSettings
+        {
+            Database = DatabaseName,
+            Principal = "tester",
+            EndPoint = listener.EndPoint,
+        };
+
+        configureSettings?.Invoke(settings);
+
         var client = KeyValueClient.Create(new KeyValueClientOptions
         {
-            Settings = new DatabaseConnectionSettings
-            {
-                Database = DatabaseName,
-                Principal = "tester",
-                EndPoint = listener.EndPoint,
-            },
+            Settings = settings,
             ConnectionFactory = listener.CreateFactory(),
             Observer = observer,
         });

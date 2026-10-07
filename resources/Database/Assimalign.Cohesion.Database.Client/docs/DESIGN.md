@@ -241,3 +241,16 @@ The client core has no public interface left and no `Abstractions/` folder
   instead, as these tests do. An exchange passes its family to the base constructor, overrides
   `ExecuteCoreAsync` (or `OpenCoreAsync` and `CopyToCoreAsync`), and calls
   `MarkResponseComplete()` where it used to set `IsResponseComplete`.
+- **A returned `DatabaseConnection` is not a lease (known limit).** The pool hands out the same
+  instance on every rental of its session, and its rented flag is per instance, so a reference
+  kept after `DisposeAsync` reaches the next caller's rental once the pool rents it again: its
+  calls run on that rental and a second dispose returns it. `ObjectDisposedException` fires only
+  between the return and the next rent. The four model connections wrap the rental with their
+  own disposed flag (the Sql and Key-Value ones since the P5 review), so their callers are safe;
+  a direct caller of `RentAsync` drops the reference when it disposes. A per-rental lease or
+  generation token is a design change left to P8 (plan §12).
+- **Exceptions not wrapped.** `RentAsync` wraps handshake failures in `DatabaseClientException`,
+  but a transport dial failure (for example a `SocketException` from `TcpConnectionFactory`)
+  propagates unchanged from the connection factory, through each model's `ConnectAsync` as well.
+  The XML documentation says so; wrapping it is a behavior change left to the owner (plan §7,
+  "P5, as landed", owner review 39).

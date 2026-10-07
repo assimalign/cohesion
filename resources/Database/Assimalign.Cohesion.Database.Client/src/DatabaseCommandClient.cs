@@ -64,6 +64,9 @@ public sealed class DatabaseCommandClient : IDisposable
     /// <returns>The observed status and provider detail.</returns>
     /// <exception cref="ArgumentNullException">The command is null.</exception>
     /// <exception cref="HttpRequestException">The endpoint cannot be reached.</exception>
+    /// <exception cref="JsonException">The response declares <c>application/json</c> but its body is malformed.</exception>
+    /// <exception cref="OperationCanceledException">The request or the response read is canceled.</exception>
+    /// <exception cref="ObjectDisposedException">The transport is disposed: this client created it and was disposed, or the caller disposed its own.</exception>
     public ValueTask<ResourceCommandObservation> SendCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default) =>
         SendAsync(command, HttpMethod.Post, cancellationToken);
 
@@ -73,6 +76,9 @@ public sealed class DatabaseCommandClient : IDisposable
     /// <returns>The observed status and provider detail.</returns>
     /// <exception cref="ArgumentNullException">The command is null.</exception>
     /// <exception cref="HttpRequestException">The endpoint cannot be reached.</exception>
+    /// <exception cref="JsonException">The response declares <c>application/json</c> but its body is malformed.</exception>
+    /// <exception cref="OperationCanceledException">The request or the response read is canceled.</exception>
+    /// <exception cref="ObjectDisposedException">The transport is disposed: this client created it and was disposed, or the caller disposed its own.</exception>
     public ValueTask<ResourceCommandObservation> DeleteCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default) =>
         SendAsync(command, HttpMethod.Delete, cancellationToken);
 

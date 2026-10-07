@@ -84,5 +84,7 @@ public abstract class DatabaseProtocolExchange<TResult>
     /// <param name="cancellationToken">Cancellation token for the exchange.</param>
     /// <returns>The model-owned result.</returns>
     /// <exception cref="DatabaseClientException">The server rejects the operation or its response is invalid.</exception>
+    /// <exception cref="ProtocolException">The model response is malformed; the connection maps it to a <see cref="DatabaseClientException"/> and discards the session.</exception>
+    /// <exception cref="OperationCanceledException">The exchange is canceled.</exception>
     protected abstract ValueTask<TResult> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken);
 }

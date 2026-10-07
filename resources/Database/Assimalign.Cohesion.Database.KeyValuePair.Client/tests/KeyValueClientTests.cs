@@ -146,8 +146,30 @@ public class KeyValueClientTests
         harness.Server.Sessions.Count.ShouldBe(1);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Pooling: a disposed connection refuses commands after the pool rents its session again")]
+    public async Task GetAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException()
+    {
+        // Arrange: one pooled session, so the second connect re-rents the first's.
+        await using var harness = await KeyValueClientTestHarness.StartAsync(configureSettings: settings => settings.MaxPoolSize = 1);
+        var first = await harness.Client.ConnectAsync(KeyValueClientTestHarness.Timeout());
+        await first.PutAsync(Bytes("k"), Bytes("v"), KeyValueClientTestHarness.Timeout());
+        await first.DisposeAsync();
+        await using var second = await harness.Client.ConnectAsync(KeyValueClientTestHarness.Timeout());
+
+        // Act: the stale handle is refused, and a second dispose must not return the new rental.
+        await Should.ThrowAsync<ObjectDisposedException>(async () =>
+            await first.GetAsync(Bytes("k"), KeyValueClientTestHarness.Timeout()));
+        await first.DisposeAsync();
+
+        // Assert: the second rental still owns the one session.
+        first.IsOpen.ShouldBeFalse();
+        second.IsOpen.ShouldBeTrue();
+        Text((await second.GetAsync(Bytes("k"), KeyValueClientTestHarness.Timeout()))!.Value.Value).ShouldBe("v");
+        harness.Server.Sessions.Count.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Telemetry: the observer sees command text, counts, and failures")]
-    public async Task Observer_AroundCommands_ShouldRecordOutcomes()
+    public async Task PutAsync_WithRecordingObserver_ShouldRecordOutcomes()
     {
         // Arrange
         var observer = new RecordingObserver();
@@ -169,7 +191,7 @@ public class KeyValueClientTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Telemetry: an observer overrides only the hooks it needs, and a throwing hook faults no command")]
-    public async Task Observer_PartialAndThrowing_ShouldNotFaultCommands()
+    public async Task PutAsync_WithPartialThrowingObserver_ShouldNotFaultCommands()
     {
         // Arrange
         var observer = new ExecutedOnlyObserver();

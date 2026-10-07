@@ -9,12 +9,15 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
-// Test-only consumer of the generic client seam; a shipped Graph client remains separate work.
-internal static class GraphCatalogTestExtensions
+// Test-only exchange over the shared DatabaseProtocolExchange base; Graph.Client's own
+// GraphExecuteExchange is internal, so the catalog tests keep this double.
+internal static partial class GraphCatalogTestExtensions
 {
-    internal static ValueTask<GraphCatalogTestResult> ExecuteAsync(this DatabaseConnection connection,
-        string statement, CancellationToken cancellationToken = default)
-        => connection.ExecuteAsync(new GraphCatalogTestExchange(statement), cancellationToken);
+    extension(DatabaseConnection connection)
+    {
+        internal ValueTask<GraphCatalogTestResult> ExecuteAsync(string statement, CancellationToken cancellationToken = default)
+            => connection.ExecuteAsync(new GraphCatalogTestExchange(statement), cancellationToken);
+    }
 }
 
 internal sealed record GraphCatalogTestResult(

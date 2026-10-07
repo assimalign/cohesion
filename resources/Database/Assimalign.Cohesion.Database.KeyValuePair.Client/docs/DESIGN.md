@@ -96,11 +96,21 @@ The package has no public interface left and no `Abstractions/` folder
 - **Why the observer is abstract.** It is an inverted seam (`database-area.md`, rule 2): the
   application supplies it through `KeyValueClientOptions.Observer` and the connection fires it; no
   observer ships. Its constructor is protected (rule 3), and it carries the deviation marker.
-  `KeyValueClientTests.Observer_PartialAndThrowing_ShouldNotFaultCommands` covers a one-hook
-  observer that throws.
+  `KeyValueClientTests.PutAsync_WithPartialThrowingObserver_ShouldNotFaultCommands` covers a
+  one-hook observer that throws.
 - **Result collections.** `ScanAsync` returns an array, empty when nothing matches, never null
   (rule 9). `GetAsync` returns null for a key with no visible entry: null means absent there, which
   the rule leaves alone.
 - **What changed for a caller.** `IKeyValueClient` and `IKeyValueConnection` become
   `KeyValueClient` and `KeyValueConnection` (Studio's key-value workspace was retyped), and an
-  observer overrides `protected` hooks instead of implementing public ones.
+  observer overrides `protected` hooks instead of implementing public ones. An observer cannot
+  forward to another observer instance: outside this assembly the hooks are protected (CS1540),
+  so an application that needs several sinks fans out inside one subclass (plan §7, "P5, as
+  landed", owner review 38).
+- **Disposal is final for the instance.** The pool rents the same core `DatabaseConnection` to
+  the next caller, so `KeyValueConnection` keeps its own disposed flag, as `GraphConnection` and
+  `BlobConnection` do: after `DisposeAsync` every command throws `ObjectDisposedException` before
+  the observer runs, and a second dispose does nothing. Before the P5 review a stale
+  `KeyValueConnection` ran its commands on whichever caller had rented the session next, and a
+  second dispose returned that caller's rental
+  (`KeyValueClientTests.GetAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException`).

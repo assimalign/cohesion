@@ -11,9 +11,11 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 /// <para>
 /// The hooks run synchronously on the executing path. Each has an empty body, so an observer overrides
 /// only what it records. They are <c>protected internal</c>: the owning
-/// <see cref="KeyValueConnection"/> fires them, and no other code can. A hook that throws does not
-/// fault the command it observes, nor mask its failure: the connection discards the observer's
-/// exception (an <see cref="OutOfMemoryException"/> still propagates).
+/// <see cref="KeyValueConnection"/> fires them, and code outside this assembly reaches them only by
+/// overriding. An observer therefore cannot forward to another observer instance (CS1540); an
+/// application with several sinks fans out inside one subclass. A hook that throws does not fault the
+/// command it observes, nor mask its failure: the connection discards the observer's exception (an
+/// <see cref="OutOfMemoryException"/> still propagates).
 /// </para>
 /// <para>
 /// The hooks take primitives (not event objects), so instrumenting a client allocates nothing per

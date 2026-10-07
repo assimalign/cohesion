@@ -96,7 +96,8 @@ public sealed class DatabaseClient : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation, including the wait for a free slot.</param>
     /// <returns>An open connection; dispose it to return it to the pool.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when the client is disposed.</exception>
-    /// <exception cref="DatabaseClientException">Thrown when dialing or the handshake fails.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when the wait for a slot, the dial or the handshake is canceled.</exception>
+    /// <exception cref="DatabaseClientException">Thrown when the handshake fails; a transport dial failure propagates from the connection factory.</exception>
     public async ValueTask<DatabaseConnection> RentAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);

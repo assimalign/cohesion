@@ -46,7 +46,9 @@ public sealed class GraphClient : IAsyncDisposable
     /// <summary>Rents an authenticated connection bound to the configured database.</summary>
     /// <param name="cancellationToken">Cancellation token for connecting.</param>
     /// <returns>The rented connection; dispose it to return its session.</returns>
-    /// <exception cref="GraphClientException">The handshake or transport failed.</exception>
+    /// <exception cref="ObjectDisposedException">The client is disposed.</exception>
+    /// <exception cref="OperationCanceledException">The wait for a slot, the dial or the handshake is canceled.</exception>
+    /// <exception cref="GraphClientException">The handshake failed; a transport dial failure propagates from the connection factory.</exception>
     public async ValueTask<GraphConnection> ConnectAsync(CancellationToken cancellationToken = default)
     {
         try

@@ -224,6 +224,28 @@ public class SqlClientTests
         harness.Server.Sessions.ShouldHaveSingleItem();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Pooling: a disposed connection refuses commands after the pool rents its session again")]
+    public async Task QueryAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException()
+    {
+        // Arrange: one pooled session, so the second connect re-rents the first's.
+        await using var harness = await SqlClientTestHarness.StartAsync(configureSettings: settings => settings.MaxPoolSize = 1);
+        var first = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await first.DisposeAsync();
+        await using var second = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act: the stale handle is refused, and neither a second dispose nor an abort may reach the new rental.
+        await Should.ThrowAsync<ObjectDisposedException>(async () =>
+            await first.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout()));
+        await first.DisposeAsync();
+        await first.AbortAsync();
+
+        // Assert: the second rental still owns the one session.
+        first.IsOpen.ShouldBeFalse();
+        second.IsOpen.ShouldBeTrue();
+        (await second.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout())).Count.ShouldBe(2);
+        harness.Server.Sessions.ShouldHaveSingleItem();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Options: creation validates settings and factory")]
     public void Create_WithIncompleteOptions_ShouldThrow()
     {
