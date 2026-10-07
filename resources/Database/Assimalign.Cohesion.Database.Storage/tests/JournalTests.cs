@@ -2,6 +2,8 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+
+using Assimalign.Cohesion.FileSystem;
 using Shouldly;
 using Xunit;
 
@@ -17,7 +19,7 @@ public sealed class JournalTests
     public void ReadSequential_EarlyDisposalRestoresPositionAndAllowsNextAppend()
     {
         using var stream = new MemoryStream();
-        using var journal = new StorageJournal(stream, leaveOpen: true);
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
         journal.AppendBegin(7);
         journal.AppendOperation(7, new byte[8192]);
         journal.AppendCommit(7);
@@ -42,7 +44,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StorageJournal(stream, leaveOpen: true);
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
 
         // Act
         long begin = journal.AppendBegin(7);
@@ -67,7 +69,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StorageJournal(stream, leaveOpen: true);
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
         var image = new byte[Units.Page.Size];
         image[100] = 0xAB;
         image[Units.Page.LsnFieldOffset] = 0x07;
@@ -98,7 +100,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StorageJournal(stream, leaveOpen: true);
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
 
         // Act / Assert
         Should.Throw<ArgumentOutOfRangeException>(
@@ -114,7 +116,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StorageJournal(stream, leaveOpen: true);
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
 
         long lsn = journal.AppendBegin(1);
         journal.DurableLsn.ShouldBe(0L);
@@ -133,7 +135,7 @@ public sealed class JournalTests
         // Arrange
         using var stream = new MemoryStream();
 
-        using (var journal = new StorageJournal(stream, leaveOpen: true))
+        using (var journal = StorageJournal.Create(stream, leaveOpen: true))
         {
             journal.AppendBegin(1);
             journal.AppendCommit(1);
@@ -143,7 +145,7 @@ public sealed class JournalTests
         }
 
         // Act
-        using var reopened = new StorageJournal(stream, leaveOpen: true);
+        using var reopened = StorageJournal.Create(stream, leaveOpen: true);
         long next = reopened.AppendBegin(2);
 
         // Assert
@@ -156,7 +158,7 @@ public sealed class JournalTests
         // Arrange: write two full records, then truncate the stream mid-record.
         using var stream = new MemoryStream();
 
-        using (var journal = new StorageJournal(stream, leaveOpen: true))
+        using (var journal = StorageJournal.Create(stream, leaveOpen: true))
         {
             journal.AppendBegin(1);
             journal.AppendOperation(1, Encoding.UTF8.GetBytes("keep"));
@@ -167,7 +169,7 @@ public sealed class JournalTests
         stream.SetLength(stream.Length - 5); // tear the last frame
 
         // Act
-        using var reopened = new StorageJournal(stream, leaveOpen: true);
+        using var reopened = StorageJournal.Create(stream, leaveOpen: true);
         var records = reopened.ReadAll();
 
         // Assert
@@ -181,7 +183,7 @@ public sealed class JournalTests
         // Arrange
         using var stream = new MemoryStream();
 
-        using (var journal = new StorageJournal(stream, leaveOpen: true))
+        using (var journal = StorageJournal.Create(stream, leaveOpen: true))
         {
             journal.AppendBegin(1);
             journal.AppendOperation(1, Encoding.UTF8.GetBytes("payload"));
@@ -193,7 +195,7 @@ public sealed class JournalTests
         buffer[(int)stream.Length - 6] ^= 0xFF;
 
         // Act
-        using var reopened = new StorageJournal(stream, leaveOpen: true);
+        using var reopened = StorageJournal.Create(stream, leaveOpen: true);
         var records = reopened.ReadAll();
 
         // Assert
@@ -206,7 +208,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StorageJournal(stream, leaveOpen: true);
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
 
         journal.AppendBegin(1);
         journal.AppendCommit(1);
@@ -231,7 +233,7 @@ public sealed class JournalTests
     {
         // Arrange
         using var stream = new MemoryStream();
-        using var journal = new StorageJournal(stream, leaveOpen: true);
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
 
         // Act
         // #1018: a correctly encoded checkpoint still needs an explicit durable backing.
@@ -244,5 +246,30 @@ public sealed class JournalTests
         BitConverter.ToInt64(records[0].Payload.Span).ShouldBe(5L);
         BitConverter.ToInt64(records[0].Payload.Span[8..]).ShouldBe(9L);
         journal.DurableLsn.ShouldBe(0L);
+    }
+
+    /// <summary>
+    /// The journal's construction surface is its static factories (rule 1, owner decision 27 of
+    /// 2026-10-06): no public constructor, and each <c>Create</c> overload refuses a null medium
+    /// and a stream it cannot read, write and seek before it builds anything.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: the factories are the only way in and validate their medium")]
+    public void Create_InvalidMedium_ShouldThrowAndExposeNoPublicConstructor()
+    {
+        // Arrange
+        using var forwardOnly = new ForwardOnlyStream();
+
+        // Act / Assert
+        typeof(StorageJournal).GetConstructors().ShouldBeEmpty();
+        Should.Throw<ArgumentNullException>(() => StorageJournal.Create((Stream)null!)).ParamName.ShouldBe("stream");
+        Should.Throw<ArgumentNullException>(() => StorageJournal.Create((StorageStream)null!)).ParamName.ShouldBe("stream");
+        Should.Throw<ArgumentNullException>(() => StorageJournal.Create((IFileSystemFileHandle)null!)).ParamName.ShouldBe("handle");
+        Should.Throw<ArgumentException>(() => StorageJournal.Create(forwardOnly)).ParamName.ShouldBe("stream");
+        Should.Throw<ArgumentNullException>(() => StorageJournal.FromFile("journal.log", null!)).ParamName.ShouldBe("fileSystem");
+    }
+
+    private sealed class ForwardOnlyStream : MemoryStream
+    {
+        public override bool CanSeek => false;
     }
 }

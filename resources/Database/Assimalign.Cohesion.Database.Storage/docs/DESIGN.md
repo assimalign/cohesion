@@ -30,9 +30,13 @@ and phase 2 replaced the remaining six with sealed types.
   and no test or other assembly derived from it, so the audit phase 2 owed it (after #1236's
   journal format settled) found no second variant to justify a base. The leaf was folded in:
   the medium operations (frame writes, flushes, the read scan, truncation, the positional read
-  of a spilled pre-image) are private members, and the former leaf's constructors (over a
-  `Stream`, a `StorageStream` or an `IFileSystemFileHandle`) and file factories
-  (`StorageJournal.FromFile`) are the journal's own. Its deviation marker went with the base.
+  of a spilled pre-image) are private members. Its deviation marker went with the base. It has
+  **no public constructor** (rule 1, owner decision 27 of 2026-10-06): the former leaf's three
+  constructors became `StorageJournal.Create` overloads over a `Stream`, a `StorageStream` or an
+  `IFileSystemFileHandle`, each refusing a null medium and a stream it cannot read, write and
+  seek, and the file factories keep their `StorageJournal.FromFile` name, which says what they
+  open, as `StorageStream.FromFile` does. `Storage` builds its own journal through
+  `Create(Journal, leaveOpen: true)`.
 - **The sub-components a public `Storage` member returns are sealed public types** with
   internal constructors: `StoragePageManager` (`Storage.PageManager`), `StorageFreeSpaceMap`
   (`Storage.FreeSpaceMap`), `StorageUnitIterator` (`Storage.GetUnitIterator`) and the
@@ -1502,6 +1506,72 @@ backing handles, and the resolved value is visible through `CommitDurability`.
 The policy is applied after the commit record exists; `EnsureCommitDurable` also
 lets an outer logical transaction apply the same policy to its later commit
 record. MVCC visibility, joins, and constraint enforcement do not read this setting.
+
+**Changing the setting (owner decision 26 of 2026-10-06).** Each model storage's
+`Create`/`Open` resolves the setting through `ConfigureCommitDurability` before it initializes
+the storage. The Sql and KeyValuePair engines apply the same option again to the initialized
+storage in `ConfigureStorage`; that second call never changes the value, so the `None` refusal
+below cannot fire on it. The public setter is the low-level path, and it is validated:
+
+- **An undefined value is refused.** `CommitDurability` throws `ArgumentOutOfRangeException`
+  (parameter `value`) for anything but the three modes and keeps the setting, as
+  `ConfigureCommitDurability` already did (parameter `durability`). `GroupCommitWindow` throws it
+  for a negative window or one past `Storage.MaximumGroupCommitWindow` (`int.MaxValue`
+  milliseconds, the longest `Monitor.Wait` timeout): a longer window used to fail the waiting
+  commit inside the gate after its record was journaled, leaving it unconfirmed. Zero is allowed
+  (every grouped commit flushes inline). All five engines refuse a non-positive window, or one
+  past `Storage.MaximumGroupCommitWindow`, at engine `Create`, before any file is touched: the
+  window is also their flush worker's wake cadence. Before the kernel review the Sql and
+  KeyValuePair engines did not check it, so an out-of-range window failed every database create
+  or open from this setter, with the parameter name `value`, and left the created file set on
+  disk (`SqlEngineGroupCommitWindowTests`, `KeyValueEngineGroupCommitWindowTests`).
+- **Between the two durable modes, a change while transactions are active is allowed**, as
+  PostgreSQL allows `synchronous_commit` to change at any time (`PGC_USERSET`,
+  `src/backend/utils/misc/guc_parameters.dat:2973`): "the behavior for any one transaction is
+  determined by the setting in effect when it commits" (`doc/src/sgml/config.sgml:3458-3460`;
+  `RecordTransactionCommit` reads it once, `src/backend/access/transam/xact.c:1540-1542`).
+  `Synchronous` and `Grouped` flush the data file and the journal alike and differ only in who
+  issues a commit's fsync, so every checkpoint stays durable whichever is set, and a committer
+  waiting in the gate when the mode leaves `Grouped` still flushes itself within its window. The
+  storage could not refuse on the ground of active transactions anyway: a logical transaction's
+  statement brackets end between statements, so the storage sees no active transaction while one
+  is open.
+- **A commit reads one value.** `CommitTransaction` reads the setting once, when the bracket
+  starts to commit, and uses it for both the #1018 check and the wait after the commit record;
+  `EnsureCommitDurable` reads it once for a logical commit's later record. A change made while a
+  commit journals applies from the next commit (`StorageCommitDurabilitySettingTests`).
+- **A checkpoint reads one value.** The setter takes the transaction lock, which a checkpoint
+  holds from its header write to its journal truncation, so a change waits for a running
+  checkpoint, and the header's data flushes, its page write-backs and the truncation's flush all
+  see the same mode. The checkpoint still reads the value once for its truncation and its
+  publication to the gate.
+- **`None` is fixed once the storage is initialized.** A change into it or out of it throws
+  `InvalidOperationException`, also through `ConfigureCommitDurability`; setting the current value
+  again is allowed. `None` is PostgreSQL's `fsync = off`, not `synchronous_commit = off`: unlike
+  the latter, which "does not create any risk of database inconsistency"
+  (`config.sgml:3412-3418`), a checkpoint under `None` truncates the journal without flushing the
+  data file durably, so the truncation can reach the media ahead of the pages it stands for.
+  - *Entering it* exposes every commit acknowledged durable before the change to that
+    truncation, and a logical commit already waiting in the gate under `Grouped` (the
+    `TransactionCoordinator` path, whose statement brackets committed without waiting and so
+    left the storage free to checkpoint) makes the truncation durable with its own self-help
+    fsync while the pages stay volatile. The kernel review reproduced it: after a switch to
+    `None` and a checkpoint during that wait, a power loss lost both the waiting commit, which had
+    been acknowledged, and an earlier commit acknowledged under `Synchronous`.
+  - *Leaving it*, the first durable journal flush does the same to a truncation made under
+    `None`.
+
+  PostgreSQL changes `fsync` only through its configuration file (`PGC_SIGHUP`,
+  `guc_parameters.dat:1117`; `config.sgml:3375-3376`), warns that turning it off risks
+  "unrecoverable data corruption" (`config.sgml:3339-3341`), and forces all modified buffers to
+  durable storage before it is turned back on (`config.sgml:3360-3365`). The equivalent here is a
+  reopen with the new mode configured before the open; a durable open's recovery checkpoint
+  flushes the data file durably before it truncates the journal. With `None` fixed, every
+  checkpoint a durable wait can meet flushed the data file durably first, which is what the
+  wait's self-help fsync and `TransactionCoordinator.AppendCommitAsync` rely on
+  (`StorageCommitDurabilitySettingTests`, the switch-to-`None` case).
+- **The setter does not check the backing store.** A durable mode on a journal that cannot flush
+  durably is still refused at commit, before anything is journaled (below).
 
 **A bracket whose commit record is in the journal ends committed (#1018, #1253 review).**
 Recovery redoes a bracket whenever its commit record reaches the media, so the bracket's pages

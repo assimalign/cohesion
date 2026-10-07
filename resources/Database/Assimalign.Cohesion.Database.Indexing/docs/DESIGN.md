@@ -82,7 +82,9 @@ index structure the engine ships, so phase 2 of the concrete-types program
   `IIndexManager` and `IIndexRegistry` interfaces and their internal implementation, so a
   catalog calls `ExportRegistrations()` without casting.
 - **`BTreeRecordVersionIndex`** derives from the Transactions `RecordVersionIndex` base (the
-  shared undo binding, below).
+  shared undo binding, below). It has no public constructor: the Sql and KeyValuePair executors
+  that bind their indexes build it with `BTreeRecordVersionIndex.Create(index)` (rule 1, owner
+  decision 27 of 2026-10-06), which refuses a null index.
 
 ### Resolving the storage transaction
 
@@ -567,7 +569,8 @@ transaction context — they run where no statement bracket exists:
 (an abstract base since #1258, an interface before; the adapter itself was named
 `RecordVersionIndex` until that name passed to the base) by forwarding encoded key bytes
 to the existing `BTreeIndex.EraseAsync` and `ClearDeleterAsync` operations. Engines supply this bridge to the shared
-`RecordSpaceVersionStore` ledger. Index key construction and stamp verification
+`RecordSpaceVersionStore` ledger, one `BTreeRecordVersionIndex.Create(index)` per bound index
+(`BTreeRecordVersionIndexTests`). Index key construction and stamp verification
 remain in Indexing; Transactions needs no Indexing or area-root reference.
 Open-time index scrubbing still uses `BTreeIndexManager.PurgeWritersAsync` between
 the coordinator's record scrub and its final checkpoint.

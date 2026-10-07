@@ -32,7 +32,7 @@ public sealed class JournalBufferTests
     {
         // Arrange
         var medium = new RecordingHandle();
-        using var journal = new StorageJournal(new StorageStream(medium));
+        using var journal = StorageJournal.Create(new StorageStream(medium));
 
         // Act
         long first = journal.AppendBegin(1);
@@ -59,7 +59,7 @@ public sealed class JournalBufferTests
     {
         // Arrange: a medium with room, and a buffer already grown to its maximum.
         var medium = new RecordingHandle(new MemoryStream(capacity: 64 * 1024 * 1024));
-        using var journal = new StorageJournal(new StorageStream(medium));
+        using var journal = StorageJournal.Create(new StorageStream(medium));
         for (int i = 0; i < 200; i++)
         {
             journal.AppendPageImage(i, (PageId)1L, JournalRecordType.CommittedPageImage, Image);
@@ -97,7 +97,7 @@ public sealed class JournalBufferTests
     {
         // Arrange
         var medium = new RecordingHandle();
-        using var journal = new StorageJournal(new StorageStream(medium));
+        using var journal = StorageJournal.Create(new StorageStream(medium));
         var capacities = new List<int>();
 
         // Act: 2.5 MiB of page images.
@@ -129,7 +129,8 @@ public sealed class JournalBufferTests
     {
         // Arrange
         var medium = new RecordingHandle();
-        using var journal = new StorageJournal(new StorageStream(medium)) { MaximumBufferBytes = 4096 };
+        using var journal = StorageJournal.Create(new StorageStream(medium));
+        journal.MaximumBufferBytes = 4096;
         var large = new byte[10_000];
         new Random(7).NextBytes(large);
 
@@ -154,7 +155,7 @@ public sealed class JournalBufferTests
     {
         // Arrange
         var medium = new RecordingHandle();
-        using var journal = new StorageJournal(new StorageStream(medium));
+        using var journal = StorageJournal.Create(new StorageStream(medium));
         journal.AppendBegin(1);
         journal.AppendCommit(1);
 
@@ -177,7 +178,7 @@ public sealed class JournalBufferTests
     {
         // Arrange
         var medium = new RecordingHandle();
-        var journal = new StorageJournal(new StorageStream(medium), leaveOpen: true);
+        var journal = StorageJournal.Create(new StorageStream(medium), leaveOpen: true);
         journal.AppendBegin(1);
         journal.AppendCommit(1);
 
@@ -193,7 +194,7 @@ public sealed class JournalBufferTests
     {
         // Arrange
         var medium = new RecordingHandle();
-        using var journal = new StorageJournal(new StorageStream(medium));
+        using var journal = StorageJournal.Create(new StorageStream(medium));
         journal.AppendBegin(1);
         journal.AppendCommit(1);
         journal.Flush();
@@ -216,7 +217,7 @@ public sealed class JournalBufferTests
 
         // Arrange: a healthy journal drains its buffer, then truncates.
         var healthy = new RecordingHandle();
-        using var other = new StorageJournal(new StorageStream(healthy));
+        using var other = StorageJournal.Create(new StorageStream(healthy));
         other.AppendBegin(1);
         other.Flush();
         other.AppendBegin(2);
@@ -348,7 +349,7 @@ public sealed class JournalBufferTests
         var medium = new RecordingHandle();
         var writes = new List<byte[]>();
         medium.OnWrite = (_, bytes) => writes.Add(bytes.ToArray());
-        using var journal = new StorageJournal(new StorageStream(medium));
+        using var journal = StorageJournal.Create(new StorageStream(medium));
         journal.AppendBegin(1);
         journal.AppendPageImage(1, (PageId)3L, JournalRecordType.FullPageImage, Image);
         journal.AppendOperation(1, [1, 2, 3]);
@@ -396,7 +397,7 @@ public sealed class JournalBufferTests
         {
             // Arrange: appenders hammering the journal before the close starts.
             var medium = new RecordingHandle();
-            var journal = new StorageJournal(new StorageStream(medium), leaveOpen: true);
+            var journal = StorageJournal.Create(new StorageStream(medium), leaveOpen: true);
             var lsns = new List<long>[appenders];
             int started = 0;
             var threads = new Thread[appenders];
@@ -453,7 +454,7 @@ public sealed class JournalBufferTests
     }
 
     private static IReadOnlyList<JournalRecord> Reopen(RecordingHandle medium)
-        => new StorageJournal(new MemoryStream(medium.ToArray())).ReadAll();
+        => StorageJournal.Create(new MemoryStream(medium.ToArray())).ReadAll();
 
     private static byte[] CreateImage()
     {

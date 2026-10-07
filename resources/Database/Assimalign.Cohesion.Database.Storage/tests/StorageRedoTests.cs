@@ -681,8 +681,7 @@ public sealed class StorageRedoTests
     {
         // Arrange: a None-mode commit whose page reaches the data file while its journal records
         // stay in the operating system's cache, then a power loss.
-        var storage = TornStorage.Create(journalWriteThrough: false, journalDurableFlushesOnly: true); // abandoned: a crash
-        storage.CommitDurability = StorageCommitDurability.None;
+        var storage = TornStorage.Create(journalWriteThrough: false, journalDurableFlushesOnly: true, durability: StorageCommitDurability.None); // abandoned: a crash
         var (pageId, slot) = storage.Insert("v1");
         storage.PageManager.FlushAll();
         long pageLsn = storage.PageLsn(pageId);

@@ -246,7 +246,7 @@ public sealed class CrashRecoveryTests
 
         // Assert: everything is in the data file; the journal carries only a checkpoint.
         reopened.ScanText().ShouldBe(new[] { "persisted" });
-        using var journalReader = new StorageJournal(new MemoryStream(shutdownJournal), leaveOpen: false);
+        using var journalReader = StorageJournal.Create(new MemoryStream(shutdownJournal), leaveOpen: false);
         var records = journalReader.ReadAll();
         records.Count.ShouldBe(1);
         records[0].Type.ShouldBe(JournalRecordType.Checkpoint);

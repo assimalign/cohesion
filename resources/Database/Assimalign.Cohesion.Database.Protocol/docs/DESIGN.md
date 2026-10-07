@@ -33,7 +33,7 @@ unsigned 8-bit message type. The payload starts at byte 5, and the declared leng
 counts only those payload bytes, not the header. Payloads are limited to 16,777,216
 bytes. Readers check the length before allocation, require the entire declared
 payload, distinguish clean EOF between frames from truncation, and reject oversized
-declarations. Writers apply the same bound. Framing imposes no logical-object
+declarations. Every writer applies the same bound before it writes anything (below). Framing imposes no logical-object
 buffering or transfer policy. The packet view below shows the two fixed header fields.
 
 ```mermaid
@@ -97,7 +97,7 @@ envelope; every other leaf decorates one of them:
 
 | Leaf | Assembly | Adds |
 | --- | --- | --- |
-| stream reader / writer (internal) | Database.Protocol | the envelope and the payload bound |
+| stream reader / writer (internal) | Database.Protocol | the envelope; on the reader, the declared-length bound |
 | `ProtocolChannel`'s family reader / writer (private) | Database.Protocol | the family check in both directions |
 | `ClientFrameReader` / `ClientFrameWriter` (internal) | Database.Client | a closed pipe's `InvalidOperationException` becomes `IOException` |
 | Blob's error reader / frame writer (private) | Database.Blob.Client | closed pipes, and on the reader Error frames, become `DatabaseClientException` |
@@ -107,11 +107,24 @@ members (`ReadFrameAsync`, `WriteFrameAsync`, `FlushAsync`, `DisposeAsync`) are
 non-virtual and call `protected abstract` cores (`ReadFrameCoreAsync`,
 `WriteFrameCoreAsync`, `FlushCoreAsync`); `DisposeAsyncCore` is a `protected virtual`
 lifecycle hook whose default does nothing, so a view over a shared reader or writer
-(Blob's) does not override it. The public members add no check of their own: the
-payload bound stays in the stream writer's core, the one writer that encodes the
-envelope, so a decorating writer that rejects a frame for another reason (the
-family check) keeps rejecting it first. The `Create` factories replace the former
+(Blob's) does not override it. The `Create` factories replace the former
 `ProtocolFraming` static class, the `Aes.Create()` shape.
+
+**The writer's payload bound is the base's (owner decision 29 of 2026-10-06).** The public,
+non-virtual `WriteFrameAsync` refuses a payload longer than
+`ProtocolFrameHeader.MaxPayloadLength` with a `ProtocolException` before it calls the core
+(rule 4: public members own argument validation), so every writer refuses an oversized payload
+the same way and before anything reaches the transport: the stream writer, the channel's family
+writer, the client decorators, and any leaf another assembly adds. Until then the check sat in
+the stream writer's core, the one writer that encodes the envelope, which a leaf that did not
+forward to it skipped. The bound now runs before every core, so the error order is fixed: **a
+frame that fails both the bound and `ProtocolChannel`'s family check reports the bound**; a frame
+that fails only the family check still reports the family. The bound is thrown by the call
+itself, not through the returned task, as the channel's family check is. `ProtocolFramingTests` pins both
+(`WriteFrame_OversizedPayload_EveryWriterShouldRefuseBeforeItsCore`,
+`Channel_OversizedPayloadOutsideTheFamily_ShouldReportTheBoundFirst`). The reader's bound stays
+in the stream reader's core, where the declared length is decoded. The other public members add
+no check of their own.
 
 ## Shared exchange and payloads
 

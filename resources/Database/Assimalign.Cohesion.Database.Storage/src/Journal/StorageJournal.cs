@@ -22,8 +22,10 @@ using Assimalign.Cohesion.FileSystem;
 /// <b>One sealed type (#1258).</b> The journal used to be an abstract base with one leaf,
 /// <c>StreamJournal</c>, in this assembly. A base with a single implementation meets none of
 /// <c>database-area.md</c>'s cases for an abstract type, so phase 2 of the concrete-first
-/// program folded the leaf into it: the medium operations below are private members, and the
-/// constructors and file factories are the former leaf's.
+/// program folded the leaf into it: the medium operations below are private members. The
+/// former leaf's public constructors became the <see cref="Create(Stream, bool)"/> overloads
+/// beside its <see cref="FromFile(string)"/> factories, and the journal has no public
+/// constructor (owner decision 27 of 2026-10-06).
 /// </para>
 /// <para>
 /// <b>Write ordering rules.</b> Appends are serialized: log sequence numbers (LSNs)
@@ -201,46 +203,52 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     // its only writer), so a write needs no length query.
     private bool _tailUnchecked;
 
+    // The one constructor: every public way in is a static factory (database-area.md, rule 1;
+    // owner decision 27 of 2026-10-06), so the journal's construction surface is the factory set
+    // below and nothing else.
+    private StorageJournal(Stream stream, IFileSystemFileHandle handle, bool leaveOpen)
+    {
+        _stream = stream;
+        _handle = handle;
+        _leaveOpen = leaveOpen;
+    }
+
     /// <summary>
-    /// Initializes a non-durable stream-backed journal. Use a handle or
+    /// Creates a non-durable journal over a stream. Use a handle or a
     /// <see cref="StorageStream"/> to supply an explicit durability contract.
     /// </summary>
     /// <param name="stream">Readable, writable, seekable stream.</param>
     /// <param name="leaveOpen">When true, the stream is not disposed with the journal.</param>
+    /// <returns>The journal.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="stream"/> is null.</exception>
     /// <exception cref="ArgumentException">The stream does not support read, write, and seek.</exception>
-    public StorageJournal(Stream stream, bool leaveOpen = false)
-        : this(stream, new StorageStream(stream), leaveOpen)
+    public static StorageJournal Create(Stream stream, bool leaveOpen = false)
     {
+        ValidateStream(stream);
+        return new StorageJournal(stream, new StorageStream(stream), leaveOpen);
     }
 
-    /// <summary>Initializes a journal that retains the storage stream's durability contract.</summary>
+    /// <summary>Creates a journal that retains the storage stream's durability contract.</summary>
     /// <param name="stream">Readable, writable, seekable storage stream.</param>
     /// <param name="leaveOpen">When true, the stream is not disposed with the journal.</param>
-    public StorageJournal(StorageStream stream, bool leaveOpen = false)
-        : this(stream, stream, leaveOpen)
+    /// <returns>The journal.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="stream"/> is null.</exception>
+    /// <exception cref="ArgumentException">The stream does not support read, write, and seek.</exception>
+    public static StorageJournal Create(StorageStream stream, bool leaveOpen = false)
     {
+        ValidateStream(stream);
+        return new StorageJournal(stream, stream, leaveOpen);
     }
 
-    /// <summary>Initializes a journal backed by an explicit random-access file handle.</summary>
+    /// <summary>Creates a journal backed by an explicit random-access file handle.</summary>
     /// <param name="handle">The file handle providing I/O and durability.</param>
     /// <param name="leaveOpen">When true, the handle is not disposed with the journal.</param>
-    public StorageJournal(IFileSystemFileHandle handle, bool leaveOpen = false)
-        : this(new StorageStream(handle), leaveOpen)
+    /// <returns>The journal.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="handle"/> is null.</exception>
+    public static StorageJournal Create(IFileSystemFileHandle handle, bool leaveOpen = false)
     {
-    }
-
-    private StorageJournal(Stream stream, IFileSystemFileHandle handle, bool leaveOpen)
-    {
-        ArgumentNullException.ThrowIfNull(stream);
-
-        if (!stream.CanRead || !stream.CanWrite || !stream.CanSeek)
-        {
-            throw new ArgumentException("Journal stream must support read, write, and seek.", nameof(stream));
-        }
-
-        _stream = stream;
-        _handle = handle;
-        _leaveOpen = leaveOpen;
+        ArgumentNullException.ThrowIfNull(handle);
+        return Create(new StorageStream(handle), leaveOpen);
     }
 
     /// <summary>
@@ -250,7 +258,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// <returns>Created journal instance.</returns>
     public static StorageJournal FromFile(string path)
     {
-        return new StorageJournal(StorageFileSystem.OpenHandle(path, null, FileShare.Read));
+        return Create(StorageFileSystem.OpenHandle(path, null, FileShare.Read));
     }
 
     /// <summary>Creates a journal through the supplied file system.</summary>
@@ -261,7 +269,17 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     public static StorageJournal FromFile(string path, IFileSystem fileSystem)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
-        return new StorageJournal(StorageFileSystem.OpenHandle(path, fileSystem, FileShare.Read));
+        return Create(StorageFileSystem.OpenHandle(path, fileSystem, FileShare.Read));
+    }
+
+    private static void ValidateStream(Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        if (!stream.CanRead || !stream.CanWrite || !stream.CanSeek)
+        {
+            throw new ArgumentException("Journal stream must support read, write, and seek.", nameof(stream));
+        }
     }
 
     /// <summary>

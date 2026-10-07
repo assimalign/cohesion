@@ -93,7 +93,7 @@ public sealed class StorageFormatTests
 
         // Act
         var refusal = Should.Throw<StorageFormatException>(() => TornStorage.Open(data, journal));
-        var frameRefusal = Should.Throw<StorageFormatException>(() => new StorageJournal(new MemoryStream(journalBytes)).ReadAll());
+        var frameRefusal = Should.Throw<StorageFormatException>(() => StorageJournal.Create(new MemoryStream(journalBytes)).ReadAll());
 
         // Assert
         refusal.Message.ShouldStartWith(StorageFormatException.ErrorCode + ":");
@@ -285,7 +285,7 @@ public sealed class StorageFormatTests
 
         // Act
         var refusal = Should.Throw<StorageFormatException>(() => TornStorage.Open(images));
-        var direct = Should.Throw<StorageFormatException>(() => new StorageJournal(new MemoryStream(journal)).ReadAll());
+        var direct = Should.Throw<StorageFormatException>(() => StorageJournal.Create(new MemoryStream(journal)).ReadAll());
 
         // Assert
         refusal.FoundVersion.ShouldBe(version);
@@ -378,7 +378,7 @@ public sealed class StorageFormatTests
         }
 
         using var recovered = TornStorage.Open(afterUpdate);
-        var records = new StorageJournal(new MemoryStream(afterUpdate.Journal)).ReadAll();
+        var records = StorageJournal.Create(new MemoryStream(afterUpdate.Journal)).ReadAll();
         var image = records.Single(record => record.Type == JournalRecordType.FullPageImage);
         var delta = records.Single(record => record.Type == JournalRecordType.PageDelta);
 
@@ -696,7 +696,7 @@ public sealed class StorageFormatTests
         point.CrashWhen = (stream, operation, _, count) => stream == "journal" && operation == "Write" && count > 2 * CrashSimulationStream.SectorSize;
         SimulatedPowerLossException.ShouldBeThrownBy(() => storage.Log.Flush());
         var images = storage.CaptureDurable();
-        int verifiedFrames = new StorageJournal(new MemoryStream(images.Journal)).ReadAll().Count;
+        int verifiedFrames = StorageJournal.Create(new MemoryStream(images.Journal)).ReadAll().Count;
 
         // Act: reopen without the open-time checkpoint, commit, and lose power again.
         (byte[] Data, byte[] Journal) second;
@@ -722,7 +722,7 @@ public sealed class StorageFormatTests
         recovered.Read(pageId, slot).ShouldBe("v3");
         recovered.Log.ReadAll().Count(record => record.Type == JournalRecordType.CommitTransaction).ShouldBe(1);
         recovered.Log.ReadAll().Take(verifiedFrames).Select(record => record.Lsn)
-            .ShouldBe(new StorageJournal(new MemoryStream(images.Journal)).ReadAll().Select(record => record.Lsn));
+            .ShouldBe(StorageJournal.Create(new MemoryStream(images.Journal)).ReadAll().Select(record => record.Lsn));
     }
 
     /// <summary>
@@ -772,7 +772,7 @@ public sealed class StorageFormatTests
 
         // Assert
         images.Journal.Length.ShouldBe(CrashSimulationStream.SectorSize);
-        new StorageJournal(new MemoryStream(images.Journal)).ReadAll().ShouldBeEmpty();
+        StorageJournal.Create(new MemoryStream(images.Journal)).ReadAll().ShouldBeEmpty();
         recovered.Read(pageId, slot).ShouldBe("v2");
         recovered.CheckpointActiveTransactions.ShouldBe(writers);
     }

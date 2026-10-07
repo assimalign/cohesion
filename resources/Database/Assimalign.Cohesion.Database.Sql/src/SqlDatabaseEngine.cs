@@ -247,6 +247,12 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.CheckpointInterval, TimeSpan.Zero, nameof(options.CheckpointInterval));
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaintenanceInterval, TimeSpan.Zero, nameof(options.MaintenanceInterval));
+
+        // Checked here, before any file is touched, rather than by the storage setter at database
+        // create or open (owner decision 26 of 2026-10-06): the window is also the flush worker's
+        // wake cadence, so it must be positive, and a monitor wait takes no longer timeout.
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.GroupCommitWindow, TimeSpan.Zero, nameof(options.GroupCommitWindow));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(options.GroupCommitWindow, Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow, nameof(options.GroupCommitWindow));
         return new SqlDatabaseEngine(options);
     }
 

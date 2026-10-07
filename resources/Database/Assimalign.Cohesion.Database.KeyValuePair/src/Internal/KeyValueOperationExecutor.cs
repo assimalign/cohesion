@@ -104,7 +104,7 @@ internal sealed class KeyValueOperationExecutor
         _catalog = catalog;
         _storage = storage;
         _primaryIndex = primaryIndex;
-        _primaryIndexVersions = new BTreeRecordVersionIndex(primaryIndex);
+        _primaryIndexVersions = BTreeRecordVersionIndex.Create(primaryIndex);
     }
 
     /// <summary>
