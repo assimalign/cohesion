@@ -80,9 +80,12 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
         context.Features.Set<IOutputCacheFeature>(_feature);
 
         // Only safe, cacheable-by-definition methods participate. QUERY (RFC 10008) is deliberately not
-        // included — see the package DESIGN.md (no request-content key seam yet).
+        // included — see the package DESIGN.md (no request-content key seam yet). A CONNECT is excluded
+        // by method, and with it a tunnel (RFC 9110 §9.3.6) and an HTTP/2 or HTTP/3 extended CONNECT
+        // WebSocket (RFC 8441, RFC 9220). A GET that asks to switch protocols, an HTTP/1.1 WebSocket
+        // handshake among them, is excluded too: neither served from the cache nor stored.
         HttpMethod method = context.Request.Method;
-        if (method != HttpMethod.Get && method != HttpMethod.Head)
+        if ((method != HttpMethod.Get && method != HttpMethod.Head) || AsksToSwitchProtocols(context.Request))
         {
             await next.Invoke(context).ConfigureAwait(false);
             return;
@@ -346,6 +349,28 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
 
     private static bool HasAuthorization(IHttpRequest request)
         => request.Headers.TryGetValue(HttpHeaderKey.Authorization, out HttpHeaderValue value) && !value.IsEmpty;
+
+    /// <summary>
+    /// Gets whether the request asks to switch protocols (RFC 9110 §7.8): it carries an
+    /// <c>Upgrade</c> field.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Such a request is never answered from the cache: the endpoint may accept the switch, so a
+    /// stored response would refuse it (a WebSocket handshake answered with a cached <c>200</c> fails).
+    /// Nor is its outcome stored: an exchange the endpoint took over with a <c>101</c> leaves no
+    /// response behind, only the status the application never set, and storing that empty <c>200</c>
+    /// would answer every later request for the URL with it.
+    /// </para>
+    /// <para>
+    /// The field alone decides. HTTP/2 and HTTP/3 prohibit it (their switch is an extended CONNECT,
+    /// excluded by its method), and on HTTP/1.1 an <c>Upgrade</c> without the <c>upgrade</c>
+    /// connection option is a request the server may serve as an ordinary one, which costs it only
+    /// its caching here.
+    /// </para>
+    /// </remarks>
+    private static bool AsksToSwitchProtocols(IHttpRequest request)
+        => request.Headers.ContainsKey(HttpHeaderKey.Upgrade);
 
     private static bool IsResponseStarted(IHttpContext context)
         => context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true };

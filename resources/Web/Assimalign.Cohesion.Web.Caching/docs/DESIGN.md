@@ -169,6 +169,7 @@ their own encoding (precompressed static assets) or move behind compression too.
 | Condition | Behavior |
 | --- | --- |
 | Method not `GET`/`HEAD` | passthrough (no caching) |
+| Request carries `Upgrade` (asks to switch protocols, RFC 9110 §7.8) | passthrough |
 | No applicable/enabled policy | passthrough |
 | Endpoint metadata `Disabled` | passthrough |
 | Request `Cache-Control: no-store` or `no-cache` | passthrough (conservative) |
@@ -185,6 +186,17 @@ their own encoding (precompressed static assets) or move behind compression too.
 | Body exceeds the per-entry cap | not stored (streamed through untouched) |
 | Effective time-to-live ≤ 0 | not stored |
 | Entry larger than the store's whole `SizeLimit` | declined by the store |
+
+**Protocol switches are never cached.** A WebSocket handshake is a `GET` on HTTP/1.1 (an upgrade,
+RFC 6455) and a `CONNECT` on HTTP/2 and HTTP/3 (an extended CONNECT, RFC 8441 and RFC 9220), and it
+often shares its URL with a cacheable page. A `CONNECT` is excluded by method. A `GET` carrying an
+`Upgrade` field is excluded before the lookup and before the buffering: answered from the cache, the
+handshake would get the page's `200` instead of the `101` its endpoint gives, and the socket would fail
+to open; stored, the exchange an endpoint took over would leave only the default status it never set,
+an empty `200` that every later request for the URL would receive. The field alone decides: HTTP/2 and
+HTTP/3 prohibit it, and an HTTP/1.1 request with an `Upgrade` but no `upgrade` connection option, which
+a server may serve as an ordinary request, loses only its caching. The suites pin both directions, the
+cache-first and the socket-first order, over HTTP/1.1 and (for the cache-first order) HTTP/2.
 
 **Why only `200`:** the conservative default caches exactly `200 OK`. Other 2xx (`204`/`206`) and the
 "heuristically cacheable" statuses (`203`, `300`, `301`, `308`, `404`, `410`, …) are deliberately excluded —
@@ -311,7 +323,9 @@ Unit tests cover the in-memory store (round-trip, miss, absolute time-to-live ov
 eviction and the re-tag safety, oversized decline), the key builder (query order-independence, `VaryBy`
 partitioning, the response-`Vary` variant partition), and the middleware bypass matrix over an in-memory
 context double (hit skips downstream + stamps `Age`, authenticated/`Set-Cookie`/`no-store`/non-200/over-cap
-bypass, non-cacheable method). Middleware tests also publish a fake route match ahead of the middleware,
+bypass, non-cacheable method, a WebSocket handshake never served from the cache, a taken-over exchange
+never stored, an extended CONNECT neither). `tests/OutputCacheWebSocketTests.cs` runs a cached page and a
+WebSocket echo on one URL end to end (the test project references `Http.WebSockets`). Middleware tests also publish a fake route match ahead of the middleware,
 as `UseRouting` does: the published endpoint's metadata decides while the exchange's router feature throws
 on access (so a second match would fail the test), a published `Disabled` bypasses the base policy, and
 published route values partition `VaryByRouteValue`. End-to-end tests over `WebApplicationTestFactory`

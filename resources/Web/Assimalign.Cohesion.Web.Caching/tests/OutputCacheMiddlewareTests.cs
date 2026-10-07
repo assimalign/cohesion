@@ -219,6 +219,84 @@ public class OutputCacheMiddlewareTests
         counter.Count.ShouldBe(2);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: A WebSocket handshake is never answered from the cache")]
+    public async Task Invoke_WebSocketHandshake_ShouldNotBeServedFromCache()
+    {
+        // Arrange — a plain GET stored the URL's representation.
+        OutputCacheMiddleware middleware = CreateMiddleware(out _);
+        Counter counter = new();
+        await RunAsync(middleware, new OutputCacheTestContext(), Handler(counter, "plain"));
+
+        // Act — the HTTP/1.1 handshake for the same URL (RFC 6455 §4.1).
+        OutputCacheTestContext handshake = new();
+        WebSocketHandshake(handshake);
+        await RunAsync(middleware, handshake, Handler(counter, "handshake"));
+
+        // Assert — the endpoint answered it, not the cache.
+        counter.Count.ShouldBe(2);
+        handshake.Response.Headers.ContainsKey(HttpHeaderKey.Age).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: An exchange taken over by a protocol switch is not stored")]
+    public async Task Invoke_TakenOverHandshake_ShouldNotStore()
+    {
+        // Arrange — an endpoint that accepts the switch writes the 101 through the takeover, so the
+        // exchange's own response stays the untouched default: a 200 with no body.
+        OutputCacheMiddleware middleware = CreateMiddleware(out _);
+        Counter counter = new();
+        WebApplicationMiddleware acceptsTheSwitch = context =>
+        {
+            counter.Count++;
+            return Task.CompletedTask;
+        };
+
+        // Act
+        OutputCacheTestContext handshake = new();
+        WebSocketHandshake(handshake);
+        await RunAsync(middleware, handshake, acceptsTheSwitch);
+        OutputCacheTestContext plain = new();
+        string body = await RunAsync(middleware, plain, Handler(counter, "plain"));
+
+        // Assert — the next request for the URL reached the endpoint instead of an empty stored 200.
+        body.ShouldBe("plain");
+        counter.Count.ShouldBe(2);
+        plain.Response.Headers.ContainsKey(HttpHeaderKey.Age).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: An extended CONNECT is neither served from nor stored to the cache")]
+    public async Task Invoke_ExtendedConnect_ShouldBypass()
+    {
+        // Arrange — the HTTP/2 and HTTP/3 WebSocket handshake (RFC 8441, RFC 9220) is a CONNECT.
+        OutputCacheMiddleware middleware = CreateMiddleware(out _);
+        Counter counter = new();
+
+        static void ExtendedConnect(OutputCacheTestContext ctx)
+        {
+            ctx.Request.Method = HttpMethod.Connect;
+            ctx.Request.Headers[HttpHeaderKey.SecWebSocketVersion] = "13";
+        }
+
+        // Act
+        OutputCacheTestContext c1 = new();
+        ExtendedConnect(c1);
+        await RunAsync(middleware, c1, Handler(counter, "a"));
+        OutputCacheTestContext c2 = new();
+        ExtendedConnect(c2);
+        await RunAsync(middleware, c2, Handler(counter, "b"));
+
+        // Assert
+        counter.Count.ShouldBe(2);
+        c2.Response.Headers.ContainsKey(HttpHeaderKey.Age).ShouldBeFalse();
+    }
+
+    private static void WebSocketHandshake(OutputCacheTestContext context)
+    {
+        context.Request.Headers[HttpHeaderKey.Connection] = "Upgrade";
+        context.Request.Headers[HttpHeaderKey.Upgrade] = "websocket";
+        context.Request.Headers[HttpHeaderKey.SecWebSocketKey] = "dGhlIHNhbXBsZSBub25jZQ==";
+        context.Request.Headers[HttpHeaderKey.SecWebSocketVersion] = "13";
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: The published endpoint's metadata should decide without running the route matcher")]
     public async Task Invoke_PublishedEndpointMetadata_ShouldCacheWithoutMatchingAgain()
     {

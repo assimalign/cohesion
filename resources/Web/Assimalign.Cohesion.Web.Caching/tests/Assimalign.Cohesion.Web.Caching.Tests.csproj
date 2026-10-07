@@ -12,6 +12,9 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+		<!-- Test-only: a WebSocket endpoint on a cached URL proves the cache never answers or stores a
+		     protocol switch. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.WebSockets" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Caching" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Caching.InMemory" />
 		<CohesionPackageReference Include="coverlet.collector" />

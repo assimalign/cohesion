@@ -13,7 +13,8 @@ primitives from `Assimalign.Cohesion.Http` (#755) — it re-implements no header
   per-endpoint overrides through a sealed metadata carrier read from the endpoint `UseRouting` publishes.
 - **Correct cache-or-bypass decisions** via the #755 typed `Cache-Control` primitives: bypass on
   `no-store`/`private`/`Set-Cookie`, on non-safe methods, and on non-`200` responses; never cache
-  authenticated responses by default.
+  authenticated responses by default; never answer or store a protocol switch (a WebSocket handshake
+  on any protocol), so a cached page and a WebSocket can share a URL.
 - **Vary-correct**: the stored response's own `Vary` header partitions the cache key (RFC 9111 §4.1), so
   a compressed or content-negotiated variant is never served to a client that cannot accept it.
 - **Tag-based invalidation** reachable from application code.
