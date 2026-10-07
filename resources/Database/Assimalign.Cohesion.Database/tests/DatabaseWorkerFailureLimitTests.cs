@@ -311,34 +311,62 @@ public sealed class DatabaseWorkerFailureLimitTests
         }, name: WorkerName);
         engine.Attach(worker);
         int workerThread = -1;
+        Exception? passFailure = null;
+        using var passesDone = new ManualResetEventSlim(false);
+        using var releasePump = new ManualResetEventSlim(false);
 
-        // Act: both passes run on one thread, as the worker's pump runs them.
-        var passes = Task.Run(() =>
+        // Act: both passes run on one dedicated thread, as the worker's pump runs them. The thread
+        // stays alive until the assertions ran: the runtime reuses a managed thread id once its
+        // thread ends, and a pool thread that ran the passes would pick up the queued give-up next.
+        var pump = new Thread(() =>
         {
             workerThread = Environment.CurrentManagedThreadId;
-            worker.RunIteration(CancellationToken.None);
-            worker.RunIteration(CancellationToken.None);
-        });
-        bool returned = await Task.WhenAny(passes, Task.Delay(TimeSpan.FromSeconds(10))) == passes;
-        bool entered = await Eventually(() => engine.TakeOfflineCalls == 1);
-        var takenWhileBlocked = engine.TakenOffline;
+            try
+            {
+                worker.RunIteration(CancellationToken.None);
+                worker.RunIteration(CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                // Any failure of a pass is handed to the test thread, which asserts there was none.
+                passFailure = exception;
+            }
 
-        gate.Set();
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
-        await passes.WaitAsync(Timeout);
+            passesDone.Set();
+            releasePump.Wait();
+        })
+        { IsBackground = true, Name = "test worker pump" };
+        pump.Start();
 
-        // Assert: the passes returned while the core was blocked, b was visited by both, the
-        // second pass's failure of a queued nothing, and a went offline once, on another thread.
-        returned.ShouldBeTrue();
-        entered.ShouldBeTrue();
-        takenWhileBlocked.ShouldBeEmpty();
-        Volatile.Read(ref bVisits).ShouldBe(2);
-        taken.ShouldBeTrue();
-        engine.TakeOfflineCalls.ShouldBe(1);
-        engine.GiveUps.ShouldHaveSingleItem().Taken.ShouldBeTrue();
-        lock (engine.TakeOfflineThreads)
+        try
         {
-            engine.TakeOfflineThreads.ShouldNotContain(workerThread);
+            bool returned = passesDone.Wait(TimeSpan.FromSeconds(10));
+            bool entered = await Eventually(() => engine.TakeOfflineCalls == 1);
+            var takenWhileBlocked = engine.TakenOffline;
+
+            gate.Set();
+            bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+
+            // Assert: the passes returned while the core was blocked, b was visited by both, the
+            // second pass's failure of a queued nothing, and a went offline once, on another thread.
+            returned.ShouldBeTrue();
+            passFailure.ShouldBeNull();
+            entered.ShouldBeTrue();
+            takenWhileBlocked.ShouldBeEmpty();
+            Volatile.Read(ref bVisits).ShouldBe(2);
+            taken.ShouldBeTrue();
+            engine.TakeOfflineCalls.ShouldBe(1);
+            engine.GiveUps.ShouldHaveSingleItem().Taken.ShouldBeTrue();
+            lock (engine.TakeOfflineThreads)
+            {
+                engine.TakeOfflineThreads.ShouldNotContain(workerThread);
+            }
+        }
+        finally
+        {
+            gate.Set();
+            releasePump.Set();
+            pump.Join(Timeout);
         }
     }
 
