@@ -57,7 +57,7 @@ jobs:
             'Assimalign.Cohesion.Web.Testing'
         ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         name: "Checkout: ${{ matrix.projects }}"
 
       - uses: ./.github/actions/build
@@ -74,8 +74,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: ['Assimalign.Cohesion.Web.HttpsHost']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
       - run: dotnet build build/Tasks -c Release
