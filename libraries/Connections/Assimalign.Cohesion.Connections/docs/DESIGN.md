@@ -25,7 +25,11 @@ One generic composition unit:
 - `IConnectionLayer` — a connection-to-connection arrow (`UpgradeAsync(IConnection) → IConnection`),
   applied once per connection at establishment via `listener.Use(layer)` / `factory.Use(layer)`.
   TLS (in `Assimalign.Cohesion.Security`) is the first implementation; proxy-protocol handling,
-  traffic accounting, throttling, and connection-level compression are the same shape.
+  traffic accounting, throttling, and connection-level compression are the same shape. A layer
+  whose upgrade fails leaves the connection to its caller, which disposes it. The layered listener
+  does so for a connection it accepted (see "Layered Listeners", below), and the layered factory
+  for a connection it dialed. A TLS layer that fails releases only its own stream, so before #1309
+  a failed client handshake left the dialed connection open.
 
 Selection is by **capability**, not protocol identity: `ConnectionCapabilities` (delivery mode,
 reliability, ordering, multiplexing, security) is what consumers gate on; `ConnectionProtocol` is
