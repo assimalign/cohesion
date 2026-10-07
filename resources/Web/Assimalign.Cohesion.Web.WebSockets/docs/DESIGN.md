@@ -190,7 +190,8 @@ feature contract, which is how the policy reaches the server's lifecycle without
 
 No reflection and no runtime code generation: span parsing for origins, delegate composition for
 the middleware, and a `WebSocket` subclass that forwards to the BCL socket. The Web NativeAOT guard
-publishes the middleware and runs a WebSocket echo and a refused cross-site handshake.
+publishes the middleware and runs a WebSocket echo over HTTP/1.1 and over HTTP/2, and a refused
+cross-site handshake.
 
 ## Non-goals
 

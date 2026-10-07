@@ -33,7 +33,7 @@ internal static class GuardSmoke
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
-    public static async Task<int> RunAsync(int port, byte[] signingKey, CancellationToken cancellationToken)
+    public static async Task<int> RunAsync(int port, int http2Port, byte[] signingKey, CancellationToken cancellationToken)
     {
         using var handler = new SocketsHttpHandler { AutomaticDecompression = DecompressionMethods.None };
         using var client = new HttpClient(handler) { BaseAddress = new Uri($"http://127.0.0.1:{port}/") };
@@ -391,6 +391,39 @@ internal static class GuardSmoke
                 && buffer.AsSpan(0, received).SequenceEqual(message)
                 && extensions is not null
                 && extensions.StartsWith("permessage-deflate", StringComparison.Ordinal)
+                && socket.CloseStatus == WebSocketCloseStatus.NormalClosure;
+        });
+
+        failures += await CheckAsync("a WebSocket echoes a compressed message over an HTTP/2 extended CONNECT", async () =>
+        {
+            // RFC 8441: the BCL client sends a CONNECT with :protocol websocket over prior-knowledge
+            // HTTP/2, and the server answers 200; the framing and zlib inside the stream are the same.
+            using var http2 = new HttpMessageInvoker(new SocketsHttpHandler());
+            using var socket = new ClientWebSocket();
+            socket.Options.HttpVersion = HttpVersion.Version20;
+            socket.Options.HttpVersionPolicy = HttpVersionPolicy.RequestVersionExact;
+            socket.Options.DangerousDeflateOptions = new WebSocketDeflateOptions();
+            socket.Options.CollectHttpResponseDetails = true;
+            await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{http2Port}/ws/echo"), http2, cancellationToken);
+
+            byte[] message = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("echo over h2 through the AOT guard; ", 32)));
+            await socket.SendAsync(message, WebSocketMessageType.Text, endOfMessage: true, cancellationToken);
+
+            byte[] buffer = new byte[message.Length + 64];
+            int received = 0;
+            ValueWebSocketReceiveResult result;
+            do
+            {
+                result = await socket.ReceiveAsync(buffer.AsMemory(received), cancellationToken);
+                received += result.Count;
+            }
+            while (!result.EndOfMessage);
+
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", cancellationToken);
+
+            return socket.HttpStatusCode == HttpStatusCode.OK
+                && result.MessageType == WebSocketMessageType.Text
+                && buffer.AsSpan(0, received).SequenceEqual(message)
                 && socket.CloseStatus == WebSocketCloseStatus.NormalClosure;
         });
 

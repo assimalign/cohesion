@@ -243,7 +243,8 @@ them, after the BCL sent the close frame RFC 6455 prescribes (`1002`, `1007`).
 
 No reflection and no runtime code generation. The handshake is header parsing over spans,
 `SHA1.HashData` and `Convert`; the framing is the BCL's, which is NativeAOT-compatible. The Web
-NativeAOT guard publishes and runs a compressed WebSocket echo.
+NativeAOT guard publishes and runs a compressed WebSocket echo over HTTP/1.1 and over an HTTP/2
+extended CONNECT.
 
 ## Non-goals
 

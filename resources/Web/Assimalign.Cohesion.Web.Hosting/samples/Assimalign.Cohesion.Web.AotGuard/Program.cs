@@ -37,8 +37,14 @@ using Assimalign.Cohesion.Web.WebSockets;
 bool smoke = Array.IndexOf(args, "--smoke") >= 0;
 byte[] signingKey = RandomNumberGenerator.GetBytes(32);
 int port = smoke ? GuardSmoke.GetFreeTcpPort() : 0;
+int http2Port = smoke ? GuardSmoke.GetFreeTcpPort() : 0;
 string[] hostArgs = smoke
-    ? ["--Http:Endpoints:Main:Host=127.0.0.1", $"--Http:Endpoints:Main:Port={port}"]
+    ?
+    [
+        "--Http:Endpoints:Main:Host=127.0.0.1", $"--Http:Endpoints:Main:Port={port}",
+        // Prior-knowledge cleartext HTTP/2, for the extended CONNECT WebSocket (RFC 8441).
+        "--Http:Endpoints:H2:Protocol=Http2", "--Http:Endpoints:H2:Host=127.0.0.1", $"--Http:Endpoints:H2:Port={http2Port}",
+    ]
     : args;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(hostArgs);
@@ -207,10 +213,39 @@ application.MapPost("/upload", async (IHttpFormFile file, IHttpContext context) 
     await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"{file.FileName}:{file.Length}"), context.RequestCancelled);
 }).DisableAntiforgery();
 
-// A WebSocket echo over the HTTP/1.1 upgrade the default server installs (#765): permessage-deflate is
-// accepted when the client offers it, so the guard exercises zlib under NativeAOT too. The socket
-// outlives any request timeout, so the endpoint disables it.
-application.MapGet("/ws/echo", async (IHttpContext context) =>
+// A WebSocket echo (#765): over the HTTP/1.1 upgrade the default server installs, and over the HTTP/2
+// extended CONNECT (RFC 8441), whose handshake is a CONNECT, so the endpoint is mapped for both methods.
+// permessage-deflate is accepted when the client offers it, so the guard exercises zlib under NativeAOT
+// too. The socket outlives any request timeout, so the endpoint disables it.
+application.MapGet("/ws/echo", (IHttpContext context) => EchoWebSocketAsync(context)).DisableRequestTimeout();
+application.Map(HttpMethod.Connect, "/ws/echo", (IHttpContext context) => EchoWebSocketAsync(context)).DisableRequestTimeout();
+
+// The OpenAPI document (#152): built once from the typed endpoints' metadata and the source-generated
+// JSON contracts, then served with an ETag.
+application.MapOpenApi();
+
+// A single-page application's client routes; a path that names a file is never answered with it.
+application.MapFallbackToFile("index.html");
+
+if (!smoke)
+{
+    await application.RunAsync();
+    return 0;
+}
+
+IWebApplication web = application;
+using CancellationTokenSource cancellation = new(TimeSpan.FromMinutes(2));
+await web.StartAsync(cancellation.Token);
+try
+{
+    return await GuardSmoke.RunAsync(port, http2Port, signingKey, cancellation.Token);
+}
+finally
+{
+    await web.StopAsync(CancellationToken.None);
+}
+
+static async Task EchoWebSocketAsync(IHttpContext context)
 {
     IHttpWebSocketFeature webSockets = context.WebSockets;
     if (!webSockets.IsWebSocketRequest)
@@ -232,29 +267,4 @@ application.MapGet("/ws/echo", async (IHttpContext context) =>
     }
 
     await socket.CloseAsync(result.CloseStatus ?? WebSocketCloseStatus.NormalClosure, result.CloseStatusDescription, CancellationToken.None);
-}).DisableRequestTimeout();
-
-// The OpenAPI document (#152): built once from the typed endpoints' metadata and the source-generated
-// JSON contracts, then served with an ETag.
-application.MapOpenApi();
-
-// A single-page application's client routes; a path that names a file is never answered with it.
-application.MapFallbackToFile("index.html");
-
-if (!smoke)
-{
-    await application.RunAsync();
-    return 0;
-}
-
-IWebApplication web = application;
-using CancellationTokenSource cancellation = new(TimeSpan.FromMinutes(2));
-await web.StartAsync(cancellation.Token);
-try
-{
-    return await GuardSmoke.RunAsync(port, signingKey, cancellation.Token);
-}
-finally
-{
-    await web.StopAsync(CancellationToken.None);
 }
