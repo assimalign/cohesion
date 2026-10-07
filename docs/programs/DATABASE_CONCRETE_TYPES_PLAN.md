@@ -37,7 +37,7 @@ this tree on 2026-10-04 or in a cited reference source. **[Likely]** means a str
 
 ### Owner decisions of 2026-10-06
 
-The owner accepted every open recommendation on 2026-10-06, and decisions 35-41 on 2026-10-07. They settle the questions this file
+The owner accepted every open recommendation on 2026-10-06, and decisions 35-42 on 2026-10-07. They settle the questions this file
 records as open or "pending owner confirmation" elsewhere; where an older paragraph says
 otherwise, this list wins.
 
@@ -58,6 +58,7 @@ otherwise, this list wins.
 | 39 | P5: transport dial failures | Wrapped in `DatabaseClientException` with its connection-failure code, as Npgsql wraps socket errors (2026-10-07). **Landed** on `feat/database-client-dial-failures`, with the client-local code `ProtocolErrorCode.ConnectionFailure`, and reviewed on `feat/database-client-dial-failures-review`, which also stops a handshake-phase reset's `SocketException` escaping raw (§7, "P5, as landed", owner review 39 and its "Review, as applied"; §12). |
 | 40 | Decision 22: how Hosting reports reopen attempts | Its internal `EventSource`, forwarded into logging (`event-source.md`) (2026-10-07). |
 | 41 | Decision 25: the journal cap | Needs two failed checkpoints in a row (2026-10-07). |
+| 42 | Decision 35's pass count gives slow workers a much longer window (a version purge ~100 maintenance intervals), and Blob's server refuses every database while one worker fails | Time-based give-up: offline once a database's failures have persisted at least 100 s and spanned at least 3 passes (supersedes 35's count); and Blob's server refuses only the failing database (2026-10-07). |
 
 Decisions 32 and 33, with decision 24 and #1272, landed on 2026-10-06 on
 `feat/owner-decisions-engines` (§6.4, §6.6, §7, §12).
