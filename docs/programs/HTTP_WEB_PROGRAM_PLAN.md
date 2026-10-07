@@ -242,6 +242,13 @@ The audit behind these stages is §7. Within each stage, rows are in the recomme
 
 ### Stage 9 — Server and operations
 
+**Status:** delivered 2026-10-06 on the Phase 2 branch and in owner review. Defects found along the way were fixed in the same stage:
+- the ObjectValidation defects #1291 and #1292;
+- two denial-of-service holes in the released 10.0.0-preview.1, #1304 (TLS handshakes) and #1308 (TCP resets before the accept);
+- #1309 and #1310.
+
+Commits, behavior changes and follow-ups are in §5.
+
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
 | #1063 | D/A | HTTP/1.1 and HTTP/2 on one TLS endpoint via ALPN; complete server config binding (D9) | #1049 (soft) |
@@ -422,6 +429,93 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - #1210, #1211: `UseForms()` failures and repeated multipart fields.
   - #1212–#1216, #1218: root deletion, aggregate mounts, file watching, an IsolatedStorage flake, `Parse` of `/..`, and isolated-storage containment.
   - #1217: `security: []` on an operation. #1219: database names escape the data root. #1220: Configuration's trim and AOT warnings.
+- **Stage 9 delivered (2026-10-06), awaiting owner review.** Agent sessions built it in parallel worktrees: one per lane, and one more for #1304. Each item was reviewed, integrated on the Phase 2 branch, verified and pushed to PR #1094 as it landed:
+  - **Validation order.** #1221 `b6354464` (decision 11): ObjectValidation evaluates chained rules and members in declaration order. The validation context also listed errors on a stack, so fixing only the queues would have left nested errors reversed.
+  - **Validation defects.** #1221's session found both, and the integrator fixed them:
+    - #1291 `bec8dbd0` removes an unsynchronized static object pool that could hand a concurrent validation `null`, and reports timings in `TimeSpan` ticks.
+    - #1292 `ff198072` makes a nested profile's rule, or a custom rule, that throws fault the validation instead of letting the value pass.
+  - **Telemetry.**
+    - #1064 `fb98d10f`: a server span and the HTTP server metrics from the `ActivitySource` and `Meter` named `Assimalign.Cohesion.Web.Hosting`, W3C trace context, `IWebRequestIdFeature`, and `http.route` through `IWebEndpointFeature.RouteTemplate`.
+    - #1039 `82b4b65b` deletes the empty `HttpTransportEventSource`.
+  - **TLS.**
+    - #1063 `d8e7b9a6`: HTTP/1.1 and HTTP/2 on one TLS endpoint, chosen per connection from ALPN, with configuration for HTTP/3, certificate files, the connection cap and the HTTP/2 limits.
+    - #1065 `66b32828`: client certificates, and the connection's TLS details through `IHttpTlsConnectionFeature` and `ITlsConnectionInfo`.
+  - **Shutdown and diagnostics.**
+    - #146 `16ab03e4`: lame-duck drain. Every connection begins a graceful close (`Connection: close`, or GOAWAY on HTTP/2 and HTTP/3), and in-flight exchanges are cancelled only when the budget expires.
+    - #147 `f03ddafe`: bind failures, accept-loop faults, connection faults and cut-short drains are logged through `builder.Logging`.
+  - **#1304 (P001, security) `17e2f652`, found by the TLS lane.** A failed or stalled TLS handshake stopped an HTTPS listener: handshakes ran one at a time inside `AcceptAsync`, and the accept loop treated their failure as fatal. Now:
+    - A TLS-layered listener runs each handshake on its own task, at most `TlsServerOptions.MaxConcurrentHandshakes` (512) at once.
+    - A failed handshake closes only its connection and is reported by the new internal `Assimalign.Cohesion.Connections` event source.
+    - The QUIC driver drops a failed inbound handshake instead of ending its accept.
+    - `IConnectionListener.AcceptAsync` now documents the rule every driver follows: a listener contains each connection's failure.
+  - **#1308 (P001, security) `cdb81ed6`, found while reviewing #1304.** A client that connected and then reset before the accept made `TcpConnectionListener.AcceptAsync` throw on Windows, and the HTTP accept loop stopped the endpoint. One reset was enough, on plain and TLS endpoints alike. The listener now skips such a connection and reports `AcceptSkipped`.
+  - **Two more gaps behind #1304, fixed by the integrator.**
+    - #1309 `20a924b8`: a layered factory leaked the dialed connection when its TLS client handshake failed.
+    - #1310 `28f1c679`: the Web server's accept loop read a cancellation it had not requested as its own drain, so a transport fault surfacing as one ended the endpoint without the #147 log.
+  - **Advisories.** Both #1304 and #1308 are in the released 10.0.0-preview.1. Following decision 8's practice, they are drafted privately: GHSA-r9cf-3952-rg7f (#1304) and GHSA-r66x-xgrx-gh8m (#1308).
+  - **Housekeeping.**
+    - `38967a3a` documents the Web root's `Use` verb.
+    - `31f06877` corrects stale Http.Connections and Http contract docs.
+    - `a13f8046` corrects the test factory's stop docs and records why fault logs keep the peer address.
+  - **Docs site** ([cohesion-docs#1](https://github.com/assimalign/cohesion-docs/pull/1)):
+    - `6418907`, `dca7fab`, `89c5efb` and `53ce31e` sync the pages Stage 9 changed and add an observability guide.
+    - `bfbcf28` covers where handshakes run, resets before accept, and the fault-log rules.
+
+  Verification (final code tip `28f1c679`):
+  - **Full run at `cdb81ed6`, 33 suites:**
+    - Connections family: Connections (48), Tcp (46), Security (41), Quic (27), NamedPipes (30), Udp (19).
+    - Http: Http (1,244), Http.Connections (547).
+    - Web: Web (20), Web.Hosting (210), Web.Hosting.Resources (19), Web.Routing (352), Web.Testing (19), Web.Validation (37).
+    - Hosting.Telemetry (16) and ObjectValidation (250).
+    - The 17 area Hosting suites: ApiManager (11), ConfigurationStore (18), Database (50), EmailHub (11), EventHub (11), IdentityHub (27), IoTHub (11), LoadBalancer (11), LogSpace (39), MediaHub (11), MessageHub (11), NatGateway (11), NotificationHub (11), Rezolvr (12), Scheduler (20), SecretStore (23), VpnGateway (11).
+  - **After #1309 and #1310, at `28f1c679`:** Connections (49), Security (41), Http.Connections (547), Web.Hosting (211), Web.Hosting.Resources (19), Web.Testing (19).
+  - **Each regression test fails without its fix.**
+    - #1308: the Tcp test failed on its first run, and the Web.Hosting end-to-end tests failed in 9 of 10 runs.
+    - #1309 and #1310: each test fails with its fix reverted.
+  - **Checks.** The guard passes 29/29 smoke checks under JIT, and the release-inventory and dependency-graph checks pass.
+  - **NativeAOT.** The guard publishes for win-arm64 at `28f1c679` with no trim or AOT warnings, and the native binary passes 29/29 smoke checks.
+
+  Behavior changes for the review:
+  - **ObjectValidation reports in declaration order.**
+    - A chain's message is its first failing rule's.
+    - `Stop` reports the first failing member.
+    - The `errors` map follows declaration order.
+    - A rule that throws, in a nested profile or as a custom rule, faults the validation.
+  - **TLS endpoints.**
+    - `Protocol: Https` endpoints and the ambient `https` endpoint serve HTTP/2 as well as HTTP/1.1.
+    - Every TLS exchange carries `IHttpTlsConnectionFeature`.
+  - **Graceful close.**
+    - `IHttpConnectionContext` gains `BeginGracefulClose()`, a source break for an outside implementer.
+    - `StopAsync` no longer throws when its budget runs out.
+    - `WebApplicationTestFactory.DisposeAsync` cancels in-flight requests.
+  - **Request id.** Every exchange carries `IWebRequestIdFeature`.
+  - **Layered listeners.**
+    - A layered listener (`Use(layer)`, `UseTls`) returns connections in the order their upgrades complete and holds at most 512 at once. A new overload `Use(layer, maxConcurrentUpgrades)` and `TlsServerOptions.MaxConcurrentHandshakes` set the bound.
+    - A failed upgrade no longer comes out of `AcceptAsync`.
+  - **Accept failures.**
+    - A TCP accept that fails with `ConnectionReset` or `ConnectionAborted` is skipped.
+    - A layered factory disposes the connection it dialed when the upgrade fails.
+
+  Questions for the review:
+  - **Advisories.** #1304 and #1308 are denial-of-service holes in the released 10.0.0-preview.1. Publish GHSA-r9cf-3952-rg7f and GHSA-r66x-xgrx-gh8m with the first preview that ships the fixes, as decision 8 does for GHSA-5jrr-79fc-fc98?
+  - **Source break.** `IHttpConnectionContext.BeginGracefulClose()` is a required member, not a default one. Accept the source break during the previews?
+
+  Scope-creep filed:
+  - **ObjectValidation (#1293–#1296).** The built-in rules' catches, a test flake, an indexer bound, and `AddProfile(IValidationProfile)` registering no rules.
+  - **Telemetry and transport (#1297–#1303):**
+    - logging the server span's ids;
+    - a redacted `url.query`;
+    - future-version `traceparent`;
+    - transport rejection diagnostics;
+    - case-sensitive methods;
+    - `Shared/` folders dropped from resource builds;
+    - missing `OVERVIEW.md` files.
+  - **TLS (#1305–#1307).** Client-certificate authentication, HTTP/3 requests after GOAWAY, and an undisposed HTTP/2 token source.
+  - **Connections.**
+    - #1309 and #1310 are fixed in this stage.
+    - #1311: a QUIC handshake-timeout option.
+    - #1312: back-off when an accept fails for want of descriptors or buffers.
+  - **Release.** #1290: nuget.org promotion in hourly batches (decision 13).
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
@@ -515,6 +609,15 @@ What works end to end:
 - Fixed: D11's placeholder half. `Web.Cors`, `Web.Authorization` and `Web.CookiePolicy` are real.
 - D12, in part: `AddAntiforgery(dataProtectionProvider)` makes antiforgery tokens survive restarts and validate on every instance that shares the key repository. Without a provider the per-process key is still the default, now documented as development-only, and the key ring's default location is unchanged (#806–#808).
 
+**After Stage 9 (2026-10-06):**
+- Fixed: D9 (#1063). `UseHttps` serves HTTP/2 and HTTP/1.1 per connection from ALPN, and so does the ambient orchestration endpoint.
+- Found and fixed: two denial-of-service holes the audit missed, both in the released 10.0.0-preview.1.
+  - #1304: a failed or stalled TLS handshake stopped an HTTPS listener.
+  - #1308: a client that reset before the accept stopped any TCP listener.
+
+  Their advisories are drafted (GHSA-r9cf-3952-rg7f, GHSA-r66x-xgrx-gh8m). Every connection driver now follows one rule, documented on `IConnectionListener.AcceptAsync`: a listener contains each connection's failure.
+- Still open: D12 (#806–#808).
+
 ### 7.3 Missing capabilities
 
 | Capability | Status | Tracking |
@@ -524,14 +627,14 @@ What works end to end:
 | Authorization (policies, `RequireAuthorization`, `UseAuthorization`) | Delivered in Stage 7 (`Web.Authorization`): policies over `ClaimsPrincipal`, `RequireAuthorization`/`AllowAnonymous`, a fallback policy, per-endpoint schemes | #155; the #828 adapter later |
 | Cookie-policy enforcement | Delivered in Stage 7 (`Web.CookiePolicy`): consent, `Secure`/`HttpOnly`/`SameSite` floors, the `__Host-` and `__Secure-` prefixes, the 400-day cap | #156 |
 | Antiforgery in the pipeline | Delivered in Stage 7 (`Web.Antiforgery`): enforced per endpoint and automatically on `[FromForm]` endpoints; tokens are sealed with data protection when a provider is passed | #1057 |
-| OpenAPI for Web endpoints | Absent. OpenApi.Attributes, Generation, Integration and Versioning are unreleased and excluded from CI, and the release rule blocks an adapter that depends on them | #152, #1062 |
-| Handler return values (`Task<T>`); generator diagnostics | Only `void`/`Task`/`ValueTask`. Unsupported handler shapes compile and then throw at runtime | #1059 |
-| Validation problem responses | Absent (descoped from #796) | #1060 |
-| File binding (`IHttpFormFile`); file and stream results | Absent | #1061 |
+| OpenAPI for Web endpoints | Delivered in Stage 8 (`Web.OpenApi`, NuGet-only): OpenAPI 3.0, 3.1 and 3.2 documents from endpoint metadata and the app's source-generated JSON contracts, with security from each endpoint's authorization policy. The five OpenApi packages are built, tested and released | #152, #1062 |
+| Handler return values (`Task<T>`); generator diagnostics | Delivered in Stage 8: typed handlers return `T`, `Task<T>` or `ValueTask<T>`, written with content negotiation, and unsupported shapes fail the build (`COHWEB0001`–`COHWEB0007`) | #1059 |
+| Validation problem responses | Delivered in Stage 8 (`Web.Validation`): a registered validator runs on a bound body model before the handler, and an invalid body is answered 400 problem+json keyed by member path | #1060 |
+| File binding (`IHttpFormFile`); file and stream results | Delivered in Stage 8: uploaded files bind in typed handlers (413 over the limit, 400 when malformed), and `SendFileAsync`/`WriteStreamAsync` answer conditional and single-range requests | #1061 |
 | Pipeline branching (`Map(path)`, `MapWhen`, `UseWhen`, `Run`); fallback routes (`MapFallbackToFile`) | Delivered in Stage 6. A path branch publishes an effective path and path base instead of rewriting the request, which stays gated on #782 | #1056 |
-| Server telemetry (`ActivitySource`, `Meter`, `traceparent`, request ID) | Absent in both Web and Http | #1064 |
-| Hosting diagnostics; lame-duck drain | Absent | #147; #146 |
-| mTLS (client certificates visible to handlers); multi-protocol ALPN endpoints; config for HTTP/3, limits and the connection cap | Absent | #1065; #1063 |
+| Server telemetry (`ActivitySource`, `Meter`, `traceparent`, request ID) | Delivered in Stage 9: a server span and the HTTP server metrics from `Assimalign.Cohesion.Web.Hosting`, W3C trace context, a request id (`IWebRequestIdFeature`) and `http.route` | #1064 |
+| Hosting diagnostics; lame-duck drain | Delivered in Stage 9: bind failures, accept-loop faults, connection faults and cut-short drains are logged through `builder.Logging`, and a stop drains lame-duck style, cancelling only what outlives its budget | #147; #146 |
+| mTLS (client certificates visible to handlers); multi-protocol ALPN endpoints; config for HTTP/3, limits and the connection cap | Delivered in Stage 9: client certificates and the session's TLS details reach handlers (`IHttpTlsConnectionFeature`), `UseHttps` serves HTTP/2 and HTTP/1.1 per connection, and configuration binds HTTP/3, certificate files, the connection cap and the HTTP/2 limits. Authenticating a user from a client certificate is #1305 | #1065; #1063 |
 | HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Body cap delivered in Stage 5 on both protocols (#1048, #1066). HTTP/3 now surfaces request trailers. HTTP/2 and HTTP/3 timeouts and data rates are still absent. | #1085; HTTP/2 request trailers deferred along with gRPC |
 | Security headers (CSP, nosniff, Referrer-Policy, frame-ancestors) | Delivered in Stage 7 (`Web.SecurityHeaders`): safe defaults on every response; opt-in CSP with per-request nonces, Permissions-Policy and the cross-origin isolation fields; per-endpoint overrides | #1058 |
 | A representative Web app AOT-published in CI | Delivered in Stage 5: `Web.AotGuard` is published NativeAOT and smoke-tested by the `resource-web.yml` `aot-guard` job | #1052 |
