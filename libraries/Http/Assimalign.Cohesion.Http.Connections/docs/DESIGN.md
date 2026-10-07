@@ -1474,7 +1474,7 @@ a listener is protected out of the box:
 
 | Limit | Default | Enforced by | Vector |
 |---|---|---|---|
-| `MaxStreamsPerConnection` | 100 | advertised `SETTINGS_MAX_CONCURRENT_STREAMS`; `OpenInboundStream` refuses excess with `RST_STREAM(REFUSED_STREAM)` | concurrency exhaustion |
+| `MaxStreamsPerConnection` | 100 | advertised `SETTINGS_MAX_CONCURRENT_STREAMS`; `OpenInboundStream` refuses excess with `RST_STREAM(REFUSED_STREAM)`, once the refused stream's header block is decoded (see "Refused streams") | concurrency exhaustion |
 | `MaxRequestHeaderListSize` | 16 KB | advertised `SETTINGS_MAX_HEADER_LIST_SIZE`; raw-byte cap in `Http2Stream.AppendHeaderBytes`; decoded-size cap in `HPackDecoder` | CONTINUATION flood + header-list amplification |
 | `MaxResetStreamsPerWindow` | 200 | `ProcessRstStreamFrameAsync` via `Http2FloodGuard` | rapid reset (CVE-2023-44487) |
 | `MaxSettingsFramesPerWindow` | 100 | `ProcessSettingsFrameAsync` via `Http2FloodGuard` | SETTINGS flood |
@@ -1527,6 +1527,24 @@ distinct `HPackHeaderListSizeExceededException` (a subclass of
 A request's trailer section is a block of its own: both caps apply to it apart
 from the head, and its size overflow is the same `ENHANCE_YOUR_CALM` connection
 error (see "Trailers on HTTP/2 and HTTP/3").
+
+### Refused streams
+
+A stream is refused when it would exceed `SETTINGS_MAX_CONCURRENT_STREAMS`, or when
+it arrives after a graceful close began. Refusal does not skip the stream's header
+block. HPACK is stateful, and a refused request's head can add entries to the dynamic
+table that later requests reference, so the block, CONTINUATION frames included, is
+decoded first (RFC 9113 §4.3). `RST_STREAM(REFUSED_STREAM)` goes out once that decode
+is done (#1317). Before #1317 a refused head was never decoded, so every later request
+on the connection could decode against a stale table.
+
+The refused id also counts as seen (RFC 9113 §5.1.1). The client may already have sent
+DATA or a trailer section on the stream, and those frames now land on a closed stream
+rather than an idle one, which was a connection `PROTOCOL_ERROR`. A refused stream
+whose head did not end the stream is remembered with the streams the server reset, so
+those frames are handled like any frame on such a stream (see "Trailers that arrive
+after the server reset the stream"). GOAWAY still announces the highest *accepted*
+stream (RFC 9113 §6.8), so the peer may retry every refused stream.
 
 ### The flood detectors are sliding windows
 
@@ -2077,16 +2095,17 @@ no host did, and then performs the rest, in order:
 
 1. **Refuse new streams.** Setting `_gracefulCloseStarted` (an interlocked
    one-shot, set by `BeginGracefulClose`) makes `OpenInboundStream` answer any
-   HEADERS opening a *new* stream with `RST_STREAM(REFUSED_STREAM)`. The
+   HEADERS opening a *new* stream with `RST_STREAM(REFUSED_STREAM)`, after its
+   header block is decoded (see "Refused streams"). The
    connection stays alive and keeps draining; the client may retry the refused
-   request on a fresh connection (RFC 9113 §8.1.4). Refused streams never bump
-   the observed last-stream-id, which is what makes the GOAWAY snapshot below
+   request on a fresh connection (RFC 9113 §8.1.4). Refused streams never raise
+   the last *accepted* stream id, which is what makes the GOAWAY snapshot below
    exact. The same call completes the ready-context channel, so the receive
    enumeration ends once its queued contexts are read; a stream whose header
    block was still arriving is refused (`REFUSED_STREAM`) when the pump finds it
    can no longer queue it, rather than left unanswered.
-2. **Emit `GOAWAY(NO_ERROR)`** carrying the highest inbound stream ID
-   observed (snapshotted under the stream-table lock — the pump is still
+2. **Emit `GOAWAY(NO_ERROR)`** carrying the highest stream ID accepted
+   (snapshotted under the stream-table lock — the pump is still
    processing frames concurrently), so the peer learns exactly which streams
    will still be processed. It is written once, in the background
    (`_gracefulGoAwayClaimed`), and only after the connection preface was

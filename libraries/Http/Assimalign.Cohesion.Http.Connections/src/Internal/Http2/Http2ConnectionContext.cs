@@ -79,9 +79,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     // frames). Guarded by _syncRoot.
     private const int maxRecentlyResetStreams = 128;
     private readonly Queue<int> _recentlyResetStreams = new();
-    // The field block of a HEADERS frame for a recently reset stream, while its CONTINUATION frames
-    // arrive; decoded once complete, then discarded. Pump-only.
+    // The field block of a HEADERS frame for a recently reset or a refused stream, while its
+    // CONTINUATION frames arrive; decoded once complete, then discarded. Pump-only.
     private MemoryStream? _discardedHeaderBlock;
+    // The RST_STREAM(REFUSED_STREAM) owed for the discarded block, sent once the block is decoded
+    // (RFC 9113 §4.3); null when the block belongs to a stream the server already reset. Pump-only.
+    private Http2StreamException? _discardedHeaderBlockRefusal;
     // Ready request heads produced by the frame pump and consumed by ReceiveAsync.
     // The pump dispatches a context as soon as a stream's header block is complete
     // (RFC 9113 lets the server respond before the body arrives), then keeps
@@ -108,7 +111,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     private Http2Stream? _continuationStream;
     private bool _initialized;
     private bool _receivedClientSettings;
+    // The highest client stream id a HEADERS frame has used, refused streams included (RFC 9113
+    // §5.1.1): frames on an id at or below it are frames on a closed stream, not an idle one.
     private int _lastInboundStreamId;
+    // The highest client stream id the server accepted, which GOAWAY announces (RFC 9113 §6.8): a
+    // refused stream is not one the server will act on. Both ids are guarded by _syncRoot.
+    private int _lastAcceptedStreamId;
     // RFC 9113 §6.8 — set once a graceful close begins (BeginGracefulClose, or GracefulCloseAsync at
     // teardown). From then on a HEADERS frame that opens a new stream is refused with
     // RST_STREAM(REFUSED_STREAM), and the receive enumeration ends once its queued contexts are read.
@@ -1410,12 +1418,13 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         Http2Frame frame = receivedFrame.Frame;
 
-        Http2Stream? stream = OpenInboundStream(frame);
+        Http2Stream? stream = OpenInboundStream(frame, out Http2StreamException? refusal);
 
         if (stream is null)
         {
-            // The server reset this stream while the peer was still sending (see OpenInboundStream).
-            ReceiveDiscardedHeaderBlock(frame.StreamId, receivedFrame.Payload, frame.HeadersEndHeaders);
+            // A stream the server refuses, or one it reset while the peer was still sending (see
+            // OpenInboundStream): its field block is decoded first, then refused or ignored.
+            ReceiveDiscardedHeaderBlock(frame.StreamId, receivedFrame.Payload, frame.HeadersEndHeaders, refusal);
             return null;
         }
 
@@ -1438,12 +1447,19 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// Validates, admission-controls, and materializes the inbound stream a HEADERS
     /// frame targets, under the stream-table lock.
     /// </summary>
+    /// <param name="frame">The HEADERS frame.</param>
+    /// <param name="refusal">
+    /// When the stream is refused, the <c>RST_STREAM(REFUSED_STREAM)</c> to send once its field block
+    /// has been decoded; otherwise <see langword="null"/>.
+    /// </param>
     /// <returns>
-    /// The stream, or <see langword="null"/> when the frame belongs to a stream the server reset while
-    /// the peer was still sending — the caller decodes its field block and discards it.
+    /// The stream, or <see langword="null"/> when the frame belongs to a stream the server refuses or
+    /// reset while the peer was still sending — the caller decodes its field block and discards it.
     /// </returns>
-    private Http2Stream? OpenInboundStream(Http2Frame frame)
+    private Http2Stream? OpenInboundStream(Http2Frame frame, out Http2StreamException? refusal)
     {
+        refusal = null;
+
         lock (_syncRoot)
         {
             // RFC 9113 §5.1 — after resetting a stream, the server ignores the frames the peer sent
@@ -1469,26 +1485,44 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 // safely retry these on a fresh connection (RFC §8.1.4).
                 if (Volatile.Read(ref _gracefulCloseStarted) == 1)
                 {
-                    throw new Http2StreamException(
+                    refusal = new Http2StreamException(
                         frame.StreamId,
                         Http2ErrorCode.RefusedStream,
                         $"HTTP/2 stream {frame.StreamId} refused: server is closing the connection.");
                 }
-
                 // RFC 9113 §5.1.2 — endpoints MUST NOT exceed
                 // SETTINGS_MAX_CONCURRENT_STREAMS. We advertise this in our
                 // local settings; new streams beyond the cap are refused so
                 // the client can back off.
-                if (_streams.Count >= _localSettings.MaxConcurrentStreams)
+                else if (_streams.Count >= _localSettings.MaxConcurrentStreams)
                 {
-                    throw new Http2StreamException(
+                    refusal = new Http2StreamException(
                         frame.StreamId,
                         Http2ErrorCode.RefusedStream,
                         $"HTTP/2 stream {frame.StreamId} refused: server's SETTINGS_MAX_CONCURRENT_STREAMS ({_localSettings.MaxConcurrentStreams}) reached.");
                 }
+
+                // RFC 9113 §5.1.1 — the peer has used the id even when the stream is refused, so the
+                // highest id seen advances: the peer's later frames on it are then frames on a closed
+                // stream, not on an idle one (a connection error).
+                _lastInboundStreamId = Math.Max(_lastInboundStreamId, frame.StreamId);
+
+                if (refusal is not null)
+                {
+                    // RFC 9113 §4.3 — the refused stream's field block is still decoded before the
+                    // refusal goes out (ReceiveDiscardedHeaderBlock). A peer still sending on the stream
+                    // is then ignored like any stream the server reset.
+                    if (!frame.HeadersEndStream)
+                    {
+                        RememberResetStreamLocked(frame.StreamId);
+                    }
+
+                    return null;
+                }
+
+                _lastAcceptedStreamId = Math.Max(_lastAcceptedStreamId, frame.StreamId);
             }
 
-            _lastInboundStreamId = Math.Max(_lastInboundStreamId, frame.StreamId);
             return GetOrCreateStreamLocked(frame.StreamId);
         }
     }
@@ -1504,7 +1538,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         if (_discardedHeaderBlock is not null)
         {
-            // The block continues a HEADERS frame for a recently reset stream.
+            // The block continues a HEADERS frame for a refused or recently reset stream.
             ReceiveDiscardedHeaderBlock(receivedFrame.Frame.StreamId, receivedFrame.Payload, receivedFrame.Frame.HeadersEndHeaders);
             return null;
         }
@@ -1529,21 +1563,37 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     }
 
     /// <summary>
-    /// Takes one HEADERS or CONTINUATION payload of a field block sent on a stream the server reset
-    /// while the peer was still sending. Once the block is complete it is decoded — keeping the HPACK
-    /// decoder in step (RFC 9113 §4.3) — and its fields are discarded: RFC 9113 §5.1 has the server
-    /// ignore frames that arrive on a stream after it sent RST_STREAM.
+    /// Takes one HEADERS or CONTINUATION payload of a field block sent on a stream the server refuses,
+    /// or on one it reset while the peer was still sending. Once the block is complete it is decoded —
+    /// keeping the HPACK decoder in step (RFC 9113 §4.3) — and its fields are discarded. A refused
+    /// stream is then answered with <c>RST_STREAM(REFUSED_STREAM)</c>; a reset one gets no reply,
+    /// since RFC 9113 §5.1 has the server ignore frames that arrive on a stream after it sent
+    /// RST_STREAM.
     /// </summary>
-    /// <param name="streamId">The reset stream.</param>
+    /// <param name="streamId">The refused or reset stream.</param>
     /// <param name="payload">The frame's field-block fragment.</param>
     /// <param name="endHeaders">Whether the frame carried END_HEADERS.</param>
+    /// <param name="refusal">
+    /// For the HEADERS frame of a refused stream, the refusal to raise once the block is decoded;
+    /// <see langword="null"/> otherwise (CONTINUATION frames keep the refusal their HEADERS frame set).
+    /// </param>
     /// <exception cref="Http2ConnectionException">
     /// The block exceeds the header-block size bound, is not valid HPACK, or decodes past the
     /// advertised <c>SETTINGS_MAX_HEADER_LIST_SIZE</c>.
     /// </exception>
-    private void ReceiveDiscardedHeaderBlock(int streamId, ReadOnlySpan<byte> payload, bool endHeaders)
+    /// <exception cref="Http2StreamException">
+    /// The block, now decoded, belongs to a refused stream: the pump's stream-error handler sends the
+    /// <c>RST_STREAM(REFUSED_STREAM)</c>.
+    /// </exception>
+    private void ReceiveDiscardedHeaderBlock(int streamId, ReadOnlySpan<byte> payload, bool endHeaders, Http2StreamException? refusal = null)
     {
-        MemoryStream block = _discardedHeaderBlock ??= new MemoryStream();
+        if (_discardedHeaderBlock is null)
+        {
+            _discardedHeaderBlock = new MemoryStream();
+            _discardedHeaderBlockRefusal = refusal;
+        }
+
+        MemoryStream block = _discardedHeaderBlock;
 
         // RFC 9113 §6.10 / §10.5.1 — the CONTINUATION-flood bound applies here as to any header block.
         if (block.Length + payload.Length > _http2Limits.MaxRequestHeaderListSize)
@@ -1563,6 +1613,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         _continuationStreamId = null;
         _discardedHeaderBlock = null;
+        Http2StreamException? pendingRefusal = _discardedHeaderBlockRefusal;
+        _discardedHeaderBlockRefusal = null;
 
         try
         {
@@ -1571,6 +1623,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         catch (HPackDecodingException error)
         {
             throw CreateFieldBlockDecodingError(streamId, error);
+        }
+
+        if (pendingRefusal is not null)
+        {
+            throw pendingRefusal;
         }
     }
 
@@ -2675,7 +2732,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// <summary>
     /// Emits a <c>GOAWAY</c> frame on stream 0 carrying
     /// <paramref name="errorCode"/> and the highest stream ID we have
-    /// observed so far (RFC 9113 §6.8). The pump then propagates the
+    /// accepted so far (RFC 9113 §6.8). The pump then propagates the
     /// exception so the listener can tear the connection down.
     /// </summary>
     private async Task EmitGoAwayAsync(Http2ErrorCode errorCode, CancellationToken cancellationToken)
@@ -2685,13 +2742,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // Snapshot under the stream-table lock: during a graceful close the
             // pump is still processing HEADERS concurrently with this write, and
             // announcing an id lower than a stream we actually accepted would
-            // invite the client to retry a request we are about to answer. Any
-            // stream arriving after _gracefulCloseStarted is refused without
-            // bumping _lastInboundStreamId, so the locked read is exact.
+            // invite the client to retry a request we are about to answer. A
+            // refused stream — every stream arriving after _gracefulCloseStarted
+            // is one — never raises _lastAcceptedStreamId, so the locked read is
+            // exact, and the peer may retry every stream above it.
             int lastStreamId;
             lock (_syncRoot)
             {
-                lastStreamId = _lastInboundStreamId;
+                lastStreamId = _lastAcceptedStreamId;
             }
 
             Http2Frame goAway = new();
@@ -2841,8 +2899,8 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // one stop signal, and no connection's write may hold up the others.
             await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
 
-            // The snapshot of the last stream id is exact: a stream opened after the close began is
-            // refused without raising it (OpenInboundStream).
+            // The snapshot of the last accepted stream id is exact: a stream opened after the close
+            // began is refused without raising it (OpenInboundStream).
             await EmitGoAwayAsync(Http2ErrorCode.NoError, CancellationToken.None).ConfigureAwait(false);
         }
         finally
