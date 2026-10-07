@@ -69,4 +69,5 @@ configuration binding are `*.Hosting` concerns one layer up.
 
 Per-project `docs/OVERVIEW.md`, `docs/DESIGN.md`, and `docs/Assembly/` live beside each project's
 `src/`. Start at [Assimalign.Cohesion.Http/docs/DESIGN.md](Assimalign.Cohesion.Http/docs/DESIGN.md)
-for the root abstractions and the feature-collection model.
+for the root abstractions and the feature-collection model. Decisions that span more than one package
+(server WebSockets, trailers) are in [docs/libraries/Http/DECISIONS.md](../../docs/libraries/Http/DECISIONS.md).

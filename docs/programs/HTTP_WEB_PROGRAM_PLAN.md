@@ -260,12 +260,14 @@ Commits, behavior changes and follow-ups are in §5.
 
 ### Stage 10 — Gated
 
+**Status:** started 2026-10-07. Three ADRs clear three of the gates, and those items are in progress: [`docs/libraries/Http/DECISIONS.md`](../libraries/Http/DECISIONS.md) for WebSockets and trailers, and [`docs/resources/Web/DECISIONS.md`](../resources/Web/DECISIONS.md) for the rewrite seam (§7.4, decisions 16–18). #829 and #830 stay with the IdentityModel program, and #806–#808 stay post-v1.
+
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
-| #765 | A/E | WebSockets (RFC 6455) | an ADR |
-| #782 | E | `Web.Rewrite` | the request-mutation seam decision |
+| #765 | A/E | WebSockets (RFC 6455) on HTTP/1.1, HTTP/2 and HTTP/3 | cleared by decision 16 |
+| #782 | E | `Web.Rewrite` | cleared by decision 17 |
 | #829, #830 | C | OIDC discovery/JWKS runtime and keyed token crypto in IdentityModel; after those, an OIDC handler and JWT Bearer `Authority` discovery | the IdentityModel program |
-| — | A | HTTP/2 and HTTP/3 trailers | a gRPC ADR |
+| #1314, #1315 | A | HTTP/2 request trailers decoded (a defect); response trailers on HTTP/2 and HTTP/3 | cleared by decision 18 |
 | #806–#808 | C | Distributed data-protection key storage; distributed session and output-cache stores get filed alongside | post-v1 |
 
 ### Post-v1 follow-ups (filed, not scheduled)
@@ -644,7 +646,7 @@ What works end to end:
 
 ### 7.4 Owner decisions
 
-Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decisions 8–13 were adopted in the Stage 8 review on 2026-10-06, and decisions 14–15 in the Stage 9 review on 2026-10-07. In both reviews the owner adopted every recommendation. Decision 5 is open.
+Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decisions 8–13 were adopted in the Stage 8 review on 2026-10-06, and decisions 14–15 in the Stage 9 review on 2026-10-07. In both reviews the owner adopted every recommendation. The integrator made decisions 16–18 on 2026-10-07 to clear Stage 10's gates, under the owner's standing delegation, and they are reviewed with Stage 10. Decision 5 is open.
 
 1. **Which claim model authorization runs on.**
    - Web: authenticates onto BCL `ClaimsPrincipal` by a recorded decision (`Web.Authentication/docs/DESIGN.md:157-167`).
@@ -654,7 +656,7 @@ Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved t
 3. **Forwarded headers: read the effective values, or rewrite the request.** Recommendation: keep the documented model where middleware read the effective values, and make every consumer read them (D7).
 4. **Security-headers middleware in v1?** Recommendation: yes; it is small, P3.
 5. **The Web v1 date.** `DELIVERY_ROADMAP.md` ends L3.1 on 2026-10-15, and Stages 5–7 alone are about 20 items. Either move the date or cut v1 at the end of Stage 7.
-6. **Standing gates, open since July:** the WebSockets ADR (#765) and the request-mutation seam for rewrite (#782).
+6. **Standing gates, open since July:** the WebSockets ADR (#765) and the request-mutation seam for rewrite (#782). Resolved 2026-10-07 by decisions 16 and 17.
 7. **How authorization combines `AllowAnonymous` with requirements (raised by Stage 7, adopted 2026-10-01).**
    - Stage 7 first shipped ASP.NET Core's rule: `AllowAnonymous` anywhere on an endpoint wins. A route that required authorization inside an anonymous group therefore ran anonymously, while routing's last-wins dispatch check still treated it as protected and demanded `UseAuthorization`.
    - Adopted: the most specific item wins, so `AllowAnonymous` clears only the requirements declared before it. That fails closed for the inner requirement and matches the dispatch check (`e451032b`).
@@ -670,6 +672,18 @@ Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved t
     - [GHSA-r9cf-3952-rg7f](https://github.com/assimalign/cohesion/security/advisories/GHSA-r9cf-3952-rg7f) for #1304 names `Assimalign.Cohesion.Http.Connections`, `.Connections` and `.Connections.Quic`.
     - [GHSA-r66x-xgrx-gh8m](https://github.com/assimalign/cohesion/security/advisories/GHSA-r66x-xgrx-gh8m) for #1308 names `Assimalign.Cohesion.Connections.Tcp`.
 15. **`IHttpConnectionContext.BeginGracefulClose()` as a required member (raised by Stage 9, adopted 2026-10-07).** Adopted: the member stays abstract, with no default implementation, and the source break for an implementer outside this repository is accepted during the previews.
+16. **Server WebSockets (#765, decided 2026-10-07; [Http ADR 1](../libraries/Http/DECISIONS.md#adr-1-server-websockets)).** Adopted: WebSockets on HTTP/1.1, HTTP/2 and HTTP/3.
+    - **Framing:** the BCL's RFC 6455 implementation (`WebSocket.CreateFromStream`). Cohesion writes no codec, which supersedes #765's codec criteria.
+    - **Packages:** `Http.WebSockets` owns the handshakes and negotiation, and `Web.WebSockets` owns the origin policy and the drain.
+    - **Transport:** an extended CONNECT tunnel on HTTP/2 and HTTP/3. Browsers use RFC 8441 on the HTTP/2 connections `UseHttps` negotiates.
+    - **Defaults:** HTTP/1.1 upgrade is on by default in Web.Hosting. A cross-origin handshake is refused unless its origin is allowed, and a drain closes open sockets with `1001`.
+17. **The request seam for rewrite (#782, decided 2026-10-07; [Web ADR 1](../resources/Web/DECISIONS.md#adr-1-how-a-rewrite-changes-the-request-for-the-rest-of-the-pipeline)).** Adopted: a rewrite hands the rest of the pipeline a request view whose path and query are rewritten, and the original values stay readable through `IWebRewriteFeature`.
+    - This follows Web.Compression and Web.RequestTimeouts.
+    - An effective-path feature was rejected: 20 readers and the endpoint generator would have to migrate, and a reader that was missed would silently ignore the rewrite.
+18. **Trailers, decided apart from gRPC (decided 2026-10-07; [Http ADR 2](../libraries/Http/DECISIONS.md#adr-2-trailers-decided-apart-from-grpc)).** Adopted:
+    - **Request trailers:** HTTP/2 decodes them, which fixes an HPACK desynchronization, and exposes them.
+    - **Response trailers:** HTTP/2 and HTTP/3 send them through `IHttpResponse.Trailers`. HTTP/1.1 does not.
+    - **gRPC hosting** stays outside this program and needs its own ADR on serialization.
 
 ### 7.5 Lineup
 

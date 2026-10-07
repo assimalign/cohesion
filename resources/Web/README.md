@@ -10,7 +10,9 @@ The area's architecture record lives in
 [docs/resources/Web/OVERVIEW.md](../../docs/resources/Web/OVERVIEW.md); this README is the project
 map and the dependency rule. The full reference graph for every Cohesion assembly is in
 [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md). The order to register the area's middleware in is
-[docs/resources/Web/MIDDLEWARE_ORDER.md](../../docs/resources/Web/MIDDLEWARE_ORDER.md).
+[docs/resources/Web/MIDDLEWARE_ORDER.md](../../docs/resources/Web/MIDDLEWARE_ORDER.md). Decisions that span
+more than one package (such as how a rewrite changes the request) are in
+[docs/resources/Web/DECISIONS.md](../../docs/resources/Web/DECISIONS.md).
 
 ## The dependency rule
 
