@@ -46,6 +46,36 @@ public class HttpRequestInterceptorTests
         Should.Throw<InvalidOperationException>(() => context.MaxRequestBodySize = 5);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: No response interceptor is added to an exchange by default")]
+    public void Context_ResponseInterceptors_ShouldStartEmpty()
+    {
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
+
+        context.ResponseInterceptors.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: Added response interceptors keep their order and are added once each")]
+    public void Context_AddResponseInterceptor_ShouldKeepOrderAndIgnoreDuplicates()
+    {
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
+        IHttpExchangeInterceptor first = new NoOverrideInterceptor();
+        IHttpExchangeInterceptor second = new NoOverrideInterceptor();
+
+        context.AddResponseInterceptor(first);
+        context.AddResponseInterceptor(second);
+        context.AddResponseInterceptor(first);
+
+        context.ResponseInterceptors.ShouldBe(new[] { first, second });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - InterceptorContext: Adding a null response interceptor throws")]
+    public void Context_AddResponseInterceptor_OnNull_ShouldThrow()
+    {
+        HttpExchangeInterceptorRequestContext context = CreateContext(maxRequestBodySize: null);
+
+        Should.Throw<ArgumentNullException>(() => context.AddResponseInterceptor(null!));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http] - Interceptor: The base class virtual defaults should no-op and pass the body stream through")]
     public void Interceptor_Defaults_ShouldPassThrough()
     {

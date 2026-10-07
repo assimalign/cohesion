@@ -135,6 +135,43 @@ internal abstract class TransportHttpContext : HttpContext
         CancelRequested ? HttpExchangeDirective.Abort : HttpExchangeDirective.Continue;
 
     /// <summary>
+    /// The response interceptors a request-parse hook added to this exchange alone
+    /// (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>), carried from the
+    /// parse context to the exchange's setup; <see langword="null"/> when none was added.
+    /// </summary>
+    internal IReadOnlyList<IHttpExchangeInterceptor>? AddedResponseInterceptors { get; init; }
+
+    /// <summary>
+    /// Resolves the response interceptors that take part in this exchange: the listener's
+    /// <paramref name="registered"/> ones, then any a request-parse hook added to this exchange, in
+    /// the order added, each at most once. Returns <paramref name="registered"/> itself, allocating
+    /// nothing, unless a hook added one, so an exchange no hook claimed keeps the fast path when the
+    /// listener registered no response interceptor.
+    /// </summary>
+    /// <param name="registered">The listener's snapshotted response interceptors.</param>
+    /// <returns>The interceptors to run the response phase with; empty for the buffered fast path.</returns>
+    internal IHttpExchangeInterceptor[] ResolveResponseInterceptors(IHttpExchangeInterceptor[] registered)
+    {
+        if (AddedResponseInterceptors is not { Count: > 0 } added)
+        {
+            return registered;
+        }
+
+        List<IHttpExchangeInterceptor> effective = new(registered.Length + added.Count);
+        effective.AddRange(registered);
+
+        foreach (IHttpExchangeInterceptor interceptor in added)
+        {
+            if (!effective.Contains(interceptor))
+            {
+                effective.Add(interceptor);
+            }
+        }
+
+        return effective.Count == registered.Length ? registered : [.. effective];
+    }
+
+    /// <summary>
     /// Runs the registered response interceptors' <see cref="IHttpExchangeInterceptor.BeforeResponse"/>
     /// hooks, exposing the transport's raw response body <paramref name="sink"/> and per-exchange
     /// <paramref name="control"/> so feature packages can wrap them and install typed response

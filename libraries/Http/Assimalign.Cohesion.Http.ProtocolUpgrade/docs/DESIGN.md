@@ -29,10 +29,12 @@ seams (the same seams `Http.RequestLimits` and `Http.Streaming` consume):
    CONNECT` (the transport's `HttpRequestTarget` parser already enforces CONNECT ⇒
    authority-form); an upgrade requires **both** a `Connection: upgrade` token and a non-empty
    `Upgrade` header (a bare `Upgrade` header is not actionable, per §7.8). CONNECT takes
-   precedence — §7.8 requires ignoring `Upgrade` on CONNECT.
-2. **Materialization** — an `IHttpExchangeInterceptor`. `BeforeResponse` runs per exchange at
-   exchange setup — after the head is parsed, before the application handler — sharing the same
-   feature collection. It consumes the candidate and, when the transport's **exchange control**
+   precedence — §7.8 requires ignoring `Upgrade` on CONNECT. A matched transition also adds the
+   interceptor to that exchange's response phase
+   (`HttpExchangeInterceptorRequestContext.AddResponseInterceptor`), which is what step 2 runs in.
+2. **Materialization** — an `IHttpExchangeInterceptor`. `BeforeResponse` runs at the setup of
+   each exchange step 1 joined — after the head is parsed, before the application handler —
+   sharing the same feature collection. It consumes the candidate and, when the transport's **exchange control**
    (`HttpExchangeInterceptorResponseContext.Control`, the generic core `IHttpExchangeControl` surface)
    can surrender the connection (`CanTakeOver`), installs the public
    `IHttpProtocolUpgradeFeature` wrapping an `Http1ProtocolUpgrade`. A missing control, or a
@@ -68,6 +70,19 @@ as a transition, which token wins, what the response looks like) in one reviewab
 transport keeps only what is physically transport's: CONNECT body-framing at parse time
 (RFC-mandated wire behavior) and the raw-stream surrender machinery.
 
+### The cost of a default-on interceptor
+
+Step 2 needs the exchange control, and the transport builds an exchange's response sink and
+exchange control only when some interceptor takes part in its response phase. Declaring
+`HttpInterceptorScopes.All` would make that every exchange, on every protocol version, because
+the Web host registers this interceptor on every listener. So the interceptor declares
+`HttpInterceptorScopes.Request` and joins the response phase only of the exchange whose head asked
+for a transition (step 1). An ordinary HTTP/1.1 request, and every HTTP/2 and HTTP/3 request
+(including an extended CONNECT WebSocket, which the transport's own feature carries), costs one
+version check and, on HTTP/1.1, a method check and a `Connection` header lookup. The transport's
+`HttpExchangeResponseInterceptorTests` pin the fast path on all three versions and the takeover
+on an upgrade; the Web.Hosting DESIGN records the measured allocations.
+
 ## Shape
 
 - `IHttpProtocolUpgrade` — the public contract for an available transition: `Kind`
@@ -79,8 +94,9 @@ transport keeps only what is physically transport's: CONNECT body-framing at par
   interceptors install the feature eagerly, so the accessor allocates nothing and never throws
   for ordinary exchanges).
 - `HttpProtocolUpgrade` — the public entry point: `CreateInterceptor()` (mirrors
-  `HttpResponseStreaming.CreateInterceptor()`); the one instance participates in
-  both phases (`HttpInterceptorScopes.All`).
+  `HttpResponseStreaming.CreateInterceptor()`); the one instance declares the request
+  scope (`HttpInterceptorScopes.Request`) and joins the response phase of a transition's
+  exchange only (see "The cost of a default-on interceptor").
 - Internal: `HttpProtocolUpgradeInterceptor` (both hooks), `HttpProtocolUpgradeCandidate`
   (parse-time marker), `Http1ProtocolUpgrade` (accept path), `HttpProtocolUpgradeFeature`
   (feature holder). Interface-first: all implementations are internal.

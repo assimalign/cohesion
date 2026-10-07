@@ -4,14 +4,17 @@ namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// The exchange interceptor that makes HTTP/1.1 protocol upgrades and <c>CONNECT</c> tunnelling
-/// available on an exchange. One stateless instance participates in both phases:
+/// available on an exchange. One stateless instance takes part in the request phase of every
+/// exchange, and in the response phase of the exchanges that ask for a transition only:
 /// </summary>
 /// <remarks>
 /// <list type="number">
 ///   <item><description><see cref="AfterRequestHead"/> detects the RFC 9110 §7.8 upgrade signal
 ///   (<c>Connection: upgrade</c> token <b>and</b> a non-empty <c>Upgrade</c> header) or the
-///   §9.3.6 <c>CONNECT</c> shape on the parsed head, and records it as an internal
-///   <see cref="HttpProtocolUpgradeCandidate"/> feature.</description></item>
+///   §9.3.6 <c>CONNECT</c> shape on the parsed head, records it as an internal
+///   <see cref="HttpProtocolUpgradeCandidate"/> feature, and adds itself to that exchange's
+///   response phase
+///   (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>).</description></item>
 ///   <item><description><see cref="BeforeResponse"/> consumes the candidate and, when the
 ///   transport's exchange control can surrender the connection
 ///   (<see cref="HttpExchangeInterceptorResponseContext.Control"/> with
@@ -19,6 +22,14 @@ namespace Assimalign.Cohesion.Http.Internal;
 ///   <see cref="IHttpProtocolUpgradeFeature"/> wrapping an <see cref="Http1ProtocolUpgrade"/> —
 ///   the object <c>context.Upgrade</c> surfaces to the application.</description></item>
 /// </list>
+/// <para>
+/// The scope is <see cref="HttpInterceptorScopes.Request"/>, not
+/// <see cref="HttpInterceptorScopes.All"/>: a response-scoped interceptor makes the transport build a
+/// response sink and an exchange control for every exchange on every protocol, and an upgrade needs
+/// them only for the rare HTTP/1.1 request that asks for one. Every other exchange, including every
+/// HTTP/2 and HTTP/3 one, keeps the transport's fast path, which matters because the Web host
+/// registers this interceptor by default.
+/// </para>
 /// <para>
 /// Detection is HTTP/1.1-only by design: HTTP/2 and HTTP/3 removed the <c>Upgrade</c> mechanism
 /// (RFC 9113 §8.6, RFC 9114 §4.2), and their <c>CONNECT</c> shapes (including extended CONNECT)
@@ -34,6 +45,9 @@ namespace Assimalign.Cohesion.Http.Internal;
 internal sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
 {
     /// <inheritdoc />
+    public override HttpInterceptorScopes Scopes => HttpInterceptorScopes.Request;
+
+    /// <inheritdoc />
     public override void AfterRequestHead(HttpExchangeInterceptorRequestContext context)
     {
         if (context.Version != HttpVersion.Http11)
@@ -47,7 +61,7 @@ internal sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
             // method/form pairing), so the method alone identifies a tunnel request here.
             // RFC 9110 §7.8 requires a server to ignore an Upgrade header on CONNECT, hence the
             // return before upgrade detection.
-            context.Features.Set(new HttpProtocolUpgradeCandidate(HttpProtocolUpgradeKind.Connect, protocol: null));
+            Claim(context, new HttpProtocolUpgradeCandidate(HttpProtocolUpgradeKind.Connect, protocol: null));
             return;
         }
 
@@ -58,8 +72,18 @@ internal sealed class HttpProtocolUpgradeInterceptor : HttpExchangeInterceptor
             && context.Headers.TryGetValue(HttpHeaderKey.Upgrade, out HttpHeaderValue upgradeValue)
             && FirstToken(upgradeValue.Value) is { } protocol)
         {
-            context.Features.Set(new HttpProtocolUpgradeCandidate(HttpProtocolUpgradeKind.Upgrade, protocol));
+            Claim(context, new HttpProtocolUpgradeCandidate(HttpProtocolUpgradeKind.Upgrade, protocol));
         }
+    }
+
+    /// <summary>
+    /// Records the detected transition and takes part in this exchange's response phase, whose
+    /// exchange control the upgrade needs; no other exchange pays for it.
+    /// </summary>
+    private void Claim(HttpExchangeInterceptorRequestContext context, HttpProtocolUpgradeCandidate candidate)
+    {
+        context.Features.Set(candidate);
+        context.AddResponseInterceptor(this);
     }
 
     /// <inheritdoc />

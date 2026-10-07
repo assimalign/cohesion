@@ -704,6 +704,16 @@ Three contract mechanics carry the design:
   request-only interceptor (e.g. `Http.RequestLimits`, default-installed by
   Web.Hosting) is never the reason a response sink and exchange control are
   constructed.
+- **A request hook can claim one exchange's response phase.** A response-scoped
+  interceptor costs every exchange its response sink and exchange control. An
+  interceptor that needs them for a few exchanges only declares `Request` and,
+  from a request-parse hook, adds itself (or any interceptor) to that exchange
+  alone: `HttpExchangeInterceptorRequestContext.AddResponseInterceptor`. The
+  transport then runs the response phase for that exchange with the listener's
+  response interceptors first and the added ones after, each at most once, and
+  every other exchange keeps the fast path. `Http.ProtocolUpgrade`, which
+  Web.Hosting installs by default and which needs the exchange control only for
+  an HTTP/1.1 upgrade or `CONNECT`, is the case it exists for.
 - **The sync/async split encodes pump safety.** The four parse-path hooks are
   `void` and must be CPU-only — on HTTP/2 they run on the connection's single
   frame pump, where a stalled hook stalls every multiplexed stream; the two

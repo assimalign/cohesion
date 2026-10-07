@@ -279,13 +279,18 @@ internal static class Http1MessageReader
 
             bool keepAlive = !HeaderContainsToken(headers, HttpHeaderKey.Connection, "close");
 
+            // A head hook that needs this exchange's response phase added itself to it; the
+            // connection runs those hooks when it sets the exchange up.
             return new Http1Context(
                 requestHead,
                 connectionInfo,
                 connectionToken,
                 keepAlive,
                 requestBody,
-                features);
+                features)
+            {
+                AddedResponseInterceptors = interception is { ResponseInterceptors.Count: > 0 } ? interception.ResponseInterceptors : null,
+            };
         }
         catch when (features is not null)
         {

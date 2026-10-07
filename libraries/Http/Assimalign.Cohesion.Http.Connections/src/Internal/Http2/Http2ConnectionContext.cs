@@ -293,10 +293,12 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                     // capability (100 Continue / 103 Early Hints) rides the same seam; its
                     // emission goes through the connection write gate so an interim HEADERS
                     // block never interleaves with the pump's frames (RFC 9113 §4.1).
-                    if (_responseInterceptors.Length > 0)
+                    IHttpExchangeInterceptor[] responseInterceptors = processed.Context.ResolveResponseInterceptors(_responseInterceptors);
+
+                    if (responseInterceptors.Length > 0)
                     {
                         processed.Context.RunResponseInterceptors(
-                            _responseInterceptors,
+                            responseInterceptors,
                             new Http2ResponseBodyStream(this, processed.Context),
                             new Http2ExchangeControl(this, processed.Context));
                     }

@@ -360,7 +360,14 @@ once at construction and partitions it by each interceptor's declared
 `HttpInterceptorScopes` — request-scoped hooks and response-scoped machinery are
 invoked only for interceptors that declared that phase, which keeps the zero-cost
 fast paths scope-exact (a request-only default like `Http.RequestLimits` never
-causes a response sink or exchange control to be constructed):
+causes a response sink or exchange control to be constructed). A request-parse hook
+can also add an interceptor to its own exchange's response phase
+(`HttpExchangeInterceptorRequestContext.AddResponseInterceptor`): each transport
+resolves the exchange's response interceptors at setup
+(`TransportHttpContext.ResolveResponseInterceptors`: the listener's, then the added
+ones, each once) and builds the sink and control only when that list is non-empty,
+so the default protocol-upgrade interceptor costs an ordinary exchange nothing on
+any version:
 
 ```csharp
 HttpConnectionListenerOptions options = new();

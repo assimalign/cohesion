@@ -1453,7 +1453,10 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
             streamConnection,
             requestStreamId,
             body,
-            interception.Features);
+            interception.Features)
+        {
+            AddedResponseInterceptors = interception.ResponseInterceptors,
+        };
         body.AttachOwner(context);
 
         if (_tlsConnection is not null)
@@ -1478,10 +1481,12 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
         // transport depending on any of those packages. The control's interim writes emit an
         // additional HEADERS frame on this request stream ahead of the final one (RFC 9114 §4.1);
         // its abort resets this stream, leaving the QUIC connection's other streams intact.
-        if (_responseInterceptors.Length > 0)
+        IHttpExchangeInterceptor[] responseInterceptors = context.ResolveResponseInterceptors(_responseInterceptors);
+
+        if (responseInterceptors.Length > 0)
         {
             context.RunResponseInterceptors(
-                _responseInterceptors,
+                responseInterceptors,
                 new Http3ResponseBodyStream(context),
                 new Http3ExchangeControl(this, context));
         }

@@ -150,8 +150,13 @@ internal static class HttpRequestInterceptorPipeline
 
             // Unless the body is lazy, the knob was frozen after the head hooks, so this is the value
             // the transport enforces for the rest of the exchange. A lazy body resolves and enforces
-            // its own value at its first read.
-            return new HttpRequestInterceptionResult(features, context.MaxRequestBodySize, body);
+            // its own value at its first read. Response interceptors a hook added to this exchange
+            // travel with the result to the exchange's setup.
+            return new HttpRequestInterceptionResult(
+                features,
+                context.MaxRequestBodySize,
+                body,
+                context.ResponseInterceptors.Count > 0 ? context.ResponseInterceptors : null);
         }
         catch
         {

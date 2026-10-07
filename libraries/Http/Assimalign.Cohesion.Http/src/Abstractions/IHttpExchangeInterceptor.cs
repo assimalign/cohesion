@@ -21,7 +21,10 @@ namespace Assimalign.Cohesion.Http;
 /// before the application handler) → <see cref="BeforeResponseHeadAsync"/> (the final head is
 /// about to commit) → <see cref="AfterResponseAsync"/> (the final response is fully written).
 /// <see cref="Scopes"/> declares which phases the interceptor participates in, so the transport
-/// invokes it only where it is needed and its zero-cost fast paths are preserved exactly.
+/// invokes it only where it is needed and its zero-cost fast paths are preserved exactly. A
+/// request-parse hook can also add an interceptor to the response phase of its own exchange only
+/// (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>), which keeps the fast
+/// path for every exchange that does not need it.
 /// </para>
 /// <para>
 /// <b>Implement by deriving from <see cref="HttpExchangeInterceptor"/></b> — the guided abstract
@@ -147,7 +150,8 @@ public interface IHttpExchangeInterceptor
     /// exposed on the context, and may capture <see cref="HttpExchangeInterceptorResponseContext.Control"/>
     /// into a feature for later use; nothing has been written to the wire yet, so the response
     /// status and headers are still fully mutable by the application afterward. Requires
-    /// <see cref="HttpInterceptorScopes.Response"/>.
+    /// <see cref="HttpInterceptorScopes.Response"/>, or the interceptor being added to the exchange by
+    /// a request-parse hook (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>).
     /// </summary>
     /// <remarks>
     /// Runs inline while the exchange is being set up — on HTTP/2 that is the connection's single
@@ -163,7 +167,8 @@ public interface IHttpExchangeInterceptor
     /// which the response status and <see cref="HttpExchangeInterceptorResponseContext.Headers"/> can be
     /// mutated (content negotiation, compression headers, security headers) or an interim
     /// (<c>1xx</c>) response emitted through <see cref="HttpExchangeInterceptorResponseContext.Control"/>.
-    /// Requires <see cref="HttpInterceptorScopes.Response"/>.
+    /// Requires <see cref="HttpInterceptorScopes.Response"/>, or the interceptor being added to the
+    /// exchange (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>).
     /// </summary>
     /// <remarks>
     /// Runs on the exchange's send path (never the HTTP/2 frame pump), so awaiting is safe. Not
@@ -185,7 +190,8 @@ public interface IHttpExchangeInterceptor
     /// transport — the buffered response flushed, or the streamed response finalized with its wire
     /// terminator. Implementations observe the completed exchange (access logging, metrics,
     /// digests); the response is already on the wire, so mutations here have no effect on it.
-    /// Requires <see cref="HttpInterceptorScopes.Response"/>.
+    /// Requires <see cref="HttpInterceptorScopes.Response"/>, or the interceptor being added to the
+    /// exchange (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>).
     /// </summary>
     /// <remarks>
     /// Runs on the exchange's send path, so awaiting is safe. Not invoked when the exchange was

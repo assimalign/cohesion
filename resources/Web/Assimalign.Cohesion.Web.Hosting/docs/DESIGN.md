@@ -1133,13 +1133,16 @@ There are two, in this order:
    `Http.ProtocolUpgrade` for this, a reference outside the Web area (COHRES002 is about same-area
    references).
 
-The upgrade interceptor participates in the response phase (it needs the exchange control's
-takeover), and a response-scoped interceptor is what makes a transport build the per-exchange
-response sink and exchange control. With it installed, every exchange, on every protocol version,
-pays for those two small objects and the hook calls, where before the default composition was on
-the transports' zero-interceptor fast path. That is the price decision 16 accepted for default-on
-WebSockets; an application that wants the fast path back removes the interceptor in its own
-`UseServer` callback.
+The upgrade interceptor needs the exchange control's takeover, and a response-scoped interceptor
+is what makes a transport build the per-exchange response sink and exchange control for every
+exchange. So it declares the request scope only and joins the response phase of the exchanges
+that ask for a transition: its `AfterRequestHead` adds it to an HTTP/1.1 upgrade's or `CONNECT`'s
+exchange (`HttpExchangeInterceptorRequestContext.AddResponseInterceptor`). Every other exchange,
+and every HTTP/2 and HTTP/3 one, stays on the transports' fast path, so default-on WebSockets cost
+an ordinary request a version and header check. Measured with the two default interceptors and a
+loopback `HttpClient` in one process, a plain `GET` allocates 12,552 B over HTTP/1.1 and 9,842 B
+over HTTP/2, the same as with no upgrade interceptor; the interceptor in every response phase cost
+12,912 B and 10,125 B.
 
 The max-request-body-size interceptor occupies slot 0 of the interceptor
 order so every request carries the typed `IHttpMaxRequestBodySizeFeature` and

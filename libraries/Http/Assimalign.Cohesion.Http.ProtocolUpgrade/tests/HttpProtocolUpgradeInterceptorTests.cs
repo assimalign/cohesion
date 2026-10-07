@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -251,10 +252,60 @@ public class HttpProtocolUpgradeInterceptorTests
         context.Upgrade.ShouldBeSameAs(context.Upgrade);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Interceptor: It declares the request scope only, so it is never in every exchange's response phase")]
+    public void Scopes_ShouldBeRequestOnly()
+    {
+        // A response-scoped interceptor makes the transport build a response sink and an exchange
+        // control for every exchange; the upgrade needs them only for the exchanges that ask.
+        HttpProtocolUpgrade.CreateInterceptor().Scopes.ShouldBe(HttpInterceptorScopes.Request);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Interceptor: An h1 upgrade or CONNECT joins that exchange's response phase")]
+    [InlineData("GET", true)]
+    [InlineData("CONNECT", false)]
+    public void AfterRequestHead_OnTransition_ShouldJoinTheExchangesResponsePhase(string method, bool upgradeHeaders)
+    {
+        // Arrange
+        HttpHeaderCollection headers = new();
+        if (upgradeHeaders)
+        {
+            headers[HttpHeaderKey.Connection] = "Upgrade";
+            headers[HttpHeaderKey.Upgrade] = "websocket";
+        }
+
+        IHttpExchangeInterceptor interceptor = HttpProtocolUpgrade.CreateInterceptor();
+        HttpExchangeInterceptorRequestContext headContext = CreateHeadContext(new FakeHttpContext(), HttpVersion.Http11, new HttpMethod(method), headers);
+
+        // Act
+        interceptor.AfterRequestHead(headContext);
+
+        // Assert
+        headContext.ResponseInterceptors.ShouldBe(new[] { interceptor });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.ProtocolUpgrade] - Interceptor: An ordinary h1 request, and any h2 or h3 request, stays out of the response phase")]
+    [InlineData(HttpVersion.Http11, "GET")]
+    [InlineData(HttpVersion.Http11, "POST")]
+    [InlineData(HttpVersion.Http20, "GET")]
+    [InlineData(HttpVersion.Http20, "CONNECT")]
+    [InlineData(HttpVersion.Http30, "CONNECT")]
+    public void AfterRequestHead_OnOrdinaryOrMultiplexedRequest_ShouldStayOutOfTheResponsePhase(HttpVersion version, string method)
+    {
+        // Arrange — the h2 and h3 CONNECTs are the shape an extended CONNECT WebSocket takes.
+        HttpExchangeInterceptorRequestContext headContext = CreateHeadContext(new FakeHttpContext(), version, new HttpMethod(method), new HttpHeaderCollection());
+
+        // Act
+        HttpProtocolUpgrade.CreateInterceptor().AfterRequestHead(headContext);
+
+        // Assert
+        headContext.ResponseInterceptors.ShouldBeEmpty();
+    }
+
     /// <summary>
-    /// Drives the interceptor pair the way a transport does: the request hook over a parse-time
-    /// head context, then the response hook over a response-setup context sharing the same
-    /// feature collection.
+    /// Drives the interceptor the way a transport does: the request hook over a parse-time head
+    /// context, then the response hook of every interceptor the exchange's response phase runs — the
+    /// interceptor's own scope, or the request hook adding it to the exchange — over a response-setup
+    /// context sharing the same feature collection.
     /// </summary>
     private static void RunInterceptors(
         FakeHttpContext context,
@@ -272,18 +323,7 @@ public class HttpProtocolUpgradeInterceptorTests
         IHttpExchangeControl? control,
         out HttpHeaderCollection responseHeaders)
     {
-        HttpExchangeInterceptorRequestContext headContext = new()
-        {
-            Version = version,
-            Method = method,
-            Path = new HttpPath("/chat"),
-            Scheme = HttpScheme.Http,
-            Host = new HttpHost("api.test"),
-            Headers = requestHeaders.AsReadOnly(),
-            Features = context.Features,
-            ConnectionInfo = HttpConnectionInfo.Empty,
-            MaxRequestBodySize = null,
-        };
+        HttpExchangeInterceptorRequestContext headContext = CreateHeadContext(context, version, method, requestHeaders);
         IHttpExchangeInterceptor interceptor = HttpProtocolUpgrade.CreateInterceptor();
         interceptor.AfterRequestHead(headContext);
 
@@ -297,6 +337,44 @@ public class HttpProtocolUpgradeInterceptorTests
             ResponseBody = Stream.Null,
             Control = control,
         };
-        interceptor.BeforeResponse(responseContext);
+
+        List<IHttpExchangeInterceptor> responsePhase = new();
+        if ((interceptor.Scopes & HttpInterceptorScopes.Response) != 0)
+        {
+            responsePhase.Add(interceptor);
+        }
+
+        foreach (IHttpExchangeInterceptor added in headContext.ResponseInterceptors)
+        {
+            if (!responsePhase.Contains(added))
+            {
+                responsePhase.Add(added);
+            }
+        }
+
+        foreach (IHttpExchangeInterceptor participant in responsePhase)
+        {
+            participant.BeforeResponse(responseContext);
+        }
+    }
+
+    private static HttpExchangeInterceptorRequestContext CreateHeadContext(
+        FakeHttpContext context,
+        HttpVersion version,
+        HttpMethod method,
+        HttpHeaderCollection requestHeaders)
+    {
+        return new HttpExchangeInterceptorRequestContext
+        {
+            Version = version,
+            Method = method,
+            Path = new HttpPath("/chat"),
+            Scheme = HttpScheme.Http,
+            Host = new HttpHost("api.test"),
+            Headers = requestHeaders.AsReadOnly(),
+            Features = context.Features,
+            ConnectionInfo = HttpConnectionInfo.Empty,
+            MaxRequestBodySize = null,
+        };
     }
 }

@@ -74,13 +74,17 @@ internal sealed class Http1ConnectionContext : HttpStreamConnectionContext
             // Expose the raw chunked response body sink and the exchange control to registered
             // response interceptors so feature packages (streaming / SSE, protocol upgrade / CONNECT
             // tunnelling, interim responses) can wrap them and install typed response features —
-            // without this transport depending on any of those packages. Zero interceptors → buffered
-            // fast path. An HTTP/1.1 exchange owns its whole connection, so its control offers the
-            // full surface: interim (1xx) writes, the raw-stream takeover, and the exchange abort.
-            if (_responseInterceptors.Length > 0)
+            // without this transport depending on any of those packages. Zero interceptors (none
+            // registered for the response phase, none added to this exchange by a request hook) →
+            // buffered fast path. An HTTP/1.1 exchange owns its whole connection, so its control
+            // offers the full surface: interim (1xx) writes, the raw-stream takeover, and the
+            // exchange abort.
+            IHttpExchangeInterceptor[] responseInterceptors = context.ResolveResponseInterceptors(_responseInterceptors);
+
+            if (responseInterceptors.Length > 0)
             {
                 context.RunResponseInterceptors(
-                    _responseInterceptors,
+                    responseInterceptors,
                     new Http1ResponseBodyStream(Stream, context, _limits.MinResponseDataRate, _timeProvider, _altSvcHeaderValue),
                     new Http1ExchangeControl(context, Stream));
             }

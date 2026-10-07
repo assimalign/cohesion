@@ -1041,6 +1041,7 @@ internal sealed class Http2Stream
         {
             ExtendedConnectProtocol = decodedHeaders.Protocol,
             RequestBody = body,
+            AddedResponseInterceptors = interception.ResponseInterceptors,
         };
 
         return context;

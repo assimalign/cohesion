@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Http;
 
@@ -30,6 +31,7 @@ namespace Assimalign.Cohesion.Http;
 public sealed class HttpExchangeInterceptorRequestContext
 {
     private long? _maxRequestBodySize;
+    private List<IHttpExchangeInterceptor>? _responseInterceptors;
 
     /// <summary>
     /// Gets the HTTP version of the exchange.
@@ -125,5 +127,55 @@ public sealed class HttpExchangeInterceptorRequestContext
     public void FreezeMaxRequestBodySize()
     {
         IsMaxRequestBodySizeReadOnly = true;
+    }
+
+    /// <summary>
+    /// Gets the interceptors a request-parse hook added to this exchange's response phase
+    /// (<see cref="AddResponseInterceptor"/>), in the order they were added. Empty when none was.
+    /// </summary>
+    /// <remarks>
+    /// The transport reads this once, when it sets up the exchange after the request-parse hooks
+    /// have run.
+    /// </remarks>
+    public IReadOnlyList<IHttpExchangeInterceptor> ResponseInterceptors
+        => (IReadOnlyList<IHttpExchangeInterceptor>?)_responseInterceptors ?? Array.Empty<IHttpExchangeInterceptor>();
+
+    /// <summary>
+    /// Adds <paramref name="interceptor"/> to this exchange's response phase only: its
+    /// <see cref="IHttpExchangeInterceptor.BeforeResponse"/>,
+    /// <see cref="IHttpExchangeInterceptor.BeforeResponseHeadAsync"/> and
+    /// <see cref="IHttpExchangeInterceptor.AfterResponseAsync"/> hooks run for this exchange as
+    /// though it had declared <see cref="HttpInterceptorScopes.Response"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The response phase costs every exchange it runs for: the transport constructs the raw response
+    /// body sink and the exchange control (<see cref="HttpExchangeInterceptorResponseContext"/>)
+    /// before the application handler runs. An interceptor declared
+    /// <see cref="HttpInterceptorScopes.Response"/> pays that on every exchange. One that needs the
+    /// response phase for some exchanges only, such as an HTTP/1.1 protocol upgrade, declares
+    /// <see cref="HttpInterceptorScopes.Request"/> and adds itself from a request-parse hook when the
+    /// request asks for it, so every other exchange keeps the fast path.
+    /// </para>
+    /// <para>
+    /// Added interceptors run after the listener's response interceptors, in the order they were
+    /// added, for every response hook of the exchange. An interceptor takes part at most once per
+    /// exchange: adding one that already takes part (registered with the response scope, or added
+    /// before) has no further effect. Only a call from a request-parse hook takes effect; the
+    /// transport has set up the exchange by the time the application runs.
+    /// </para>
+    /// </remarks>
+    /// <param name="interceptor">The interceptor whose response hooks run for this exchange.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="interceptor"/> is <see langword="null"/>.</exception>
+    public void AddResponseInterceptor(IHttpExchangeInterceptor interceptor)
+    {
+        ArgumentNullException.ThrowIfNull(interceptor);
+
+        _responseInterceptors ??= new List<IHttpExchangeInterceptor>(1);
+
+        if (!_responseInterceptors.Contains(interceptor))
+        {
+            _responseInterceptors.Add(interceptor);
+        }
     }
 }

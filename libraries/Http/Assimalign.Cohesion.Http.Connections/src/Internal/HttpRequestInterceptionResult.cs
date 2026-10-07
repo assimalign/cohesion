@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
@@ -24,4 +25,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// body unchanged on the zero-interceptor fast path and for a CONNECT. The transport builds the
 /// exchange's request with it (<see cref="TransportHttpRequestHead.Body"/>).
 /// </param>
-internal readonly record struct HttpRequestInterceptionResult(HttpFeatureCollection? Features, long? MaxRequestBodySize, Stream Body);
+/// <param name="ResponseInterceptors">
+/// The response interceptors the hooks added to this exchange alone
+/// (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>), or
+/// <see langword="null"/> when none was added; the transport hands them to the exchange
+/// (<see cref="TransportHttpContext.AddedResponseInterceptors"/>).
+/// </param>
+internal readonly record struct HttpRequestInterceptionResult(
+    HttpFeatureCollection? Features,
+    long? MaxRequestBodySize,
+    Stream Body,
+    IReadOnlyList<IHttpExchangeInterceptor>? ResponseInterceptors = null);

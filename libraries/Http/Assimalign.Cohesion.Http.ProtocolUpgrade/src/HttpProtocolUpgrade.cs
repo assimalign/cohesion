@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Http;
 /// options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
 /// </code>
 /// <para>
-/// One interceptor participates in both phases of the exchange: its
+/// One interceptor covers both phases of the exchange: its
 /// <see cref="IHttpExchangeInterceptor.AfterRequestHead"/> hook detects the wire-level transition
 /// signal on the parsed request head, and its
 /// <see cref="IHttpExchangeInterceptor.BeforeResponse"/> hook converts that detection into an
@@ -26,6 +26,13 @@ namespace Assimalign.Cohesion.Http;
 /// connection). A handler then reads <c>context.Upgrade</c> and accepts the transition to receive
 /// the raw duplex stream. The instance is stateless and shared, so the detection state crosses
 /// between its hooks through the exchange's feature collection.
+/// </para>
+/// <para>
+/// It declares <see cref="HttpInterceptorScopes.Request"/> and joins the response phase only of an
+/// exchange that asks for a transition
+/// (<see cref="HttpExchangeInterceptorRequestContext.AddResponseInterceptor"/>), so registering it
+/// costs an ordinary exchange, and every HTTP/2 and HTTP/3 exchange, a version and header check and
+/// nothing more: the transport builds no response sink or exchange control for them on its account.
 /// </para>
 /// </remarks>
 public static class HttpProtocolUpgrade
