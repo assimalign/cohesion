@@ -401,7 +401,7 @@ public sealed class SqlAggregateWireTests
         row["maximum"].ShouldBe(maximum);
     }
 
-    private static async Task SeedAsync(ISqlConnection connection)
+    private static async Task SeedAsync(SqlConnection connection)
     {
         await connection.ExecuteAsync("CREATE TABLE sales (id INT PRIMARY KEY, region TEXT, category TEXT, amount INT, absent INT)",
             cancellationToken: SqlClientTestHarness.Timeout());

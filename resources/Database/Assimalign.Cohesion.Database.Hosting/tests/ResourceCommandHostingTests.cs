@@ -67,7 +67,7 @@ public sealed class ResourceCommandHostingTests
                 catch (HttpRequestException) when (!cancellation.IsCancellationRequested) { }
                 await Task.Delay(20, cancellation.Token);
             }
-            using IDatabaseCommandClient client = DatabaseCommandClient.Create(new Uri(endpoint, "/cohesion/v1"), token);
+            using DatabaseCommandClient client = DatabaseCommandClient.Create(new Uri(endpoint, "/cohesion/v1"), token);
             byte[] payload = Encoding.UTF8.GetBytes("""{"database":"orders","engine":"commands"}""");
             var command = new ClientCommand("create-orders", "database.add-database", "appa", "commands/orders", payload);
 

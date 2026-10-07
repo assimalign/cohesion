@@ -9,18 +9,21 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
-// Test-only consumer of the generic client seam; a shipped Graph client remains separate work.
-internal static class GraphCatalogTestExtensions
+// Test-only exchange over the shared DatabaseProtocolExchange base; Graph.Client's own
+// GraphExecuteExchange is internal, so the catalog tests keep this double.
+internal static partial class GraphCatalogTestExtensions
 {
-    internal static ValueTask<GraphCatalogTestResult> ExecuteAsync(this IDatabaseConnection connection,
-        string statement, CancellationToken cancellationToken = default)
-        => connection.ExecuteAsync(new GraphCatalogTestExchange(statement), cancellationToken);
+    extension(DatabaseConnection connection)
+    {
+        internal ValueTask<GraphCatalogTestResult> ExecuteAsync(string statement, CancellationToken cancellationToken = default)
+            => connection.ExecuteAsync(new GraphCatalogTestExchange(statement), cancellationToken);
+    }
 }
 
 internal sealed record GraphCatalogTestResult(
     IReadOnlyList<(string Name, DatabaseType Type)> Columns, IReadOnlyList<object?[]> Rows, long AffectedCount);
 
-internal sealed class GraphCatalogTestExchange : IDatabaseProtocolExchange<GraphCatalogTestResult>
+internal sealed class GraphCatalogTestExchange : DatabaseProtocolExchange<GraphCatalogTestResult>
 {
     private readonly string _statement;
 
@@ -29,18 +32,14 @@ internal sealed class GraphCatalogTestExchange : IDatabaseProtocolExchange<Graph
     /// </summary>
     /// <param name="statement">The catalog statement sent in the Graph execute message.</param>
     public GraphCatalogTestExchange(string statement)
+        : base(GraphProtocol.Family)
     {
         _statement = statement;
     }
 
-    public ProtocolMessageFamily Family => GraphProtocol.Family;
-
-    public bool IsResponseComplete { get; private set; }
-
-    public async ValueTask<GraphCatalogTestResult> ExecuteAsync(ProtocolFrameReader reader,
-        ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+    protected override async ValueTask<GraphCatalogTestResult> ExecuteCoreAsync(ProtocolFrameReader reader,
+        ProtocolFrameWriter writer, CancellationToken cancellationToken)
     {
-        IsResponseComplete = false;
         await writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.Execute,
             GraphProtocolExecuteMessage.Create(_statement).Encode()), cancellationToken);
         await writer.FlushAsync(cancellationToken);
@@ -66,14 +65,16 @@ internal sealed class GraphCatalogTestExchange : IDatabaseProtocolExchange<Graph
                     break;
                 case (ProtocolMessageType)GraphProtocolMessageType.ResultComplete:
                     var complete = GraphProtocolResultCompleteMessage.Decode(frame.Payload.Span);
-                    IsResponseComplete = true;
                     return new(columns, rows, complete.AffectedCount);
                 case ProtocolMessageType.Error:
                     var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
                     // The Graph server rejects catalog statements before emitting results,
                     // then returns to its ready loop. Errors after results do not certify that boundary.
-                    IsResponseComplete = !hasResultFrames &&
-                        error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure;
+                    if (!hasResultFrames &&
+                        error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure)
+                    {
+                        MarkResponseComplete();
+                    }
                     throw new DatabaseClientException(error.Code, error.Message);
                 default:
                     throw new ProtocolException("Unexpected catalog response.");

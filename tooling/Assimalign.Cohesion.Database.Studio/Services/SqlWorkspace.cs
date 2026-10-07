@@ -19,8 +19,8 @@ namespace Assimalign.Cohesion.Database.Studio;
 /// <summary>SQL: embedded <c>IDatabaseSession</c> or the typed <c>Sql.Client</c> over TCP.</summary>
 internal sealed class SqlWorkspace : LanguageWorkspace
 {
-    private ISqlClient? _client;
-    private ISqlConnection? _connection;
+    private SqlClient? _client;
+    private SqlConnection? _connection;
     private string? _wireDatabase;
     private bool _wireTransaction;
 
@@ -31,7 +31,7 @@ internal sealed class SqlWorkspace : LanguageWorkspace
 
     public override string LanguageName => "SQL";
 
-    protected override string ClientName => "Sql.Client ISqlConnection";
+    protected override string ClientName => "Sql.Client SqlConnection";
 
     /// <summary>SQL supports BEGIN/COMMIT/ROLLBACK statements, so the buttons also work over the wire.</summary>
     public override bool SupportsSessionTransactions => true;
@@ -97,7 +97,7 @@ internal sealed class SqlWorkspace : LanguageWorkspace
             return;
         }
 
-        ISqlConnection connection = await EnsureConnectionAsync(cancellationToken).ConfigureAwait(false);
+        SqlConnection connection = await EnsureConnectionAsync(cancellationToken).ConfigureAwait(false);
         string keyword = ScriptSplitter.FirstKeyword(outcome.Statement);
 
         try
@@ -110,12 +110,12 @@ internal sealed class SqlWorkspace : LanguageWorkspace
                 outcome.Table = ToTable(
                     set.Columns.Select(column => (column.Name, column.Type.ToString())),
                     set.Select(row => (IReadOnlyList<object?>)Enumerable.Range(0, row.FieldCount).Select(row.GetValue).ToArray()));
-                outcome.Note = "ISqlConnection.QueryAsync (the typed client exposes no affected count here)";
+                outcome.Note = "SqlConnection.QueryAsync (the typed client exposes no affected count here)";
             }
             else
             {
                 outcome.AffectedCount = await connection.ExecuteAsync(outcome.Statement, null, cancellationToken).ConfigureAwait(false);
-                outcome.Note = "ISqlConnection.ExecuteAsync (the typed client returns no rows here)";
+                outcome.Note = "SqlConnection.ExecuteAsync (the typed client returns no rows here)";
                 _wireTransaction = keyword switch
                 {
                     "BEGIN" => true,
@@ -132,7 +132,7 @@ internal sealed class SqlWorkspace : LanguageWorkspace
         }
     }
 
-    private async Task<ISqlConnection> EnsureConnectionAsync(CancellationToken cancellationToken)
+    private async Task<SqlConnection> EnsureConnectionAsync(CancellationToken cancellationToken)
     {
         if (_connection is { IsOpen: true } open)
         {

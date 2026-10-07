@@ -130,7 +130,7 @@ public sealed class GraphCatalogClientTests
         engine.TryGetDatabase("own", out _).ShouldBeTrue();
     }
 
-    private static IDatabaseClient CreateClient(TcpConnectionListener listener, string database)
+    private static DatabaseClient CreateClient(TcpConnectionListener listener, string database)
         => DatabaseClient.Create(new DatabaseClientOptions
         {
             Family = GraphProtocol.Family,

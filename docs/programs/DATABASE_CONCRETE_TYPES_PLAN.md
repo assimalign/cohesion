@@ -13,7 +13,8 @@ choices pending owner confirmation (§7, §6.4, §6.5, §6.6, §6.9); the Sql mo
 of P4 (#1260, the fifth and last) re-verified and implemented on 2026-10-06, with the
 closed-database fix and the worker's release hook (§7, §6.4, §6.5, §6.7, §6.9); owner decisions
 22 and 25 (the hosted reopen and the worker failure escalation) landed on 2026-10-06 and their
-review was applied on 2026-10-07 (§7) ·
+review was applied on 2026-10-07 (§7); phase 5 (#1261, clients) re-verified and implemented on
+2026-10-06 and reviewed on 2026-10-07, with two new owner-review items (§7, §6.9, §8, §12) ·
 **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
 · **Owner decision:** O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md` · **Supersedes:** #1232
@@ -308,18 +309,18 @@ interface is deleted in P6.
 | 45 | `IVersionStore` | Transactions `:17` | child root | abstract | `public abstract class VersionStore`, with a `private protected` constructor, because both leaves (`RecordSpaceVersionStore` and `Internal/InMemoryVersionStore`) live in Transactions. It absorbs `public static class VersionStore` (`VersionStore.cs:8`) as `public static VersionStore CreateInMemory()`. **At P2:** landed. The base's public members carry the checks both leaves made (a canceled token on append and read, a null snapshot on read); prune and purge check nothing in the base, because the two stores observe cancellation at different points. | P2 |
 | 46 | `IReplicationCoordinator` | Replication (unshipped) | other | delete | The project is deleted with the other Replication placeholders (D6). | P1 |
 | 47 | `ISqlReplicationSource` | Sql.Replication (unshipped) | model child | delete | The project is deleted. | P1 |
-| 48 | `IDatabaseClient` | Client `:17` | client | sealed | `public sealed class DatabaseClient`. It absorbs the static class (`DatabaseClient.cs:10`). | P5 |
-| 49 | `IDatabaseCommandClient` | Client `:8` | client | sealed | `public sealed class DatabaseCommandClient`. It absorbs the static class (`DatabaseCommandClient.cs:9`). | P5 |
-| 50 | `IDatabaseConnection` | Client `:19` | client | sealed | `public sealed class DatabaseConnection`, with an internal constructor. `ExecuteAsync<TResult>` (`IDatabaseConnection.cs:73`) is a generic virtual call today, and becomes a non-virtual generic method. | P5 |
-| 51 | `IDatabaseProtocolExchange<TResult>` | Client `:12` | client | abstract | `public abstract class DatabaseProtocolExchange<TResult>`, with a protected constructor. The NVI `ExecuteAsync` resets the base-owned `IsResponseComplete` and then calls `ExecuteCoreAsync`; a leaf reports completion through a protected method. This replaces the default interface member (`:24`) and the three hand-written resets in the Sql, KeyValuePair and Graph exchanges. | P5 |
-| 52 | `IDatabaseStreamingExchange` | Client `:16` | client | abstract | `public abstract class DatabaseStreamingExchange`, with a protected constructor and NVI. | P5 |
+| 48 | `IDatabaseClient` | Client `:17` | client | sealed | `public sealed class DatabaseClient`. It absorbs the static class (`DatabaseClient.cs:10`). **At P5 (re-verified):** landed as planned, with the internal `DefaultDatabaseClient` folded in: `Create(DatabaseClientOptions)` over a private constructor, `RentAsync` returning the sealed `DatabaseConnection`, and the folded `ExecuteStreamingAsync` (§5.2). | P5 |
+| 49 | `IDatabaseCommandClient` | Client `:8` | client | sealed | `public sealed class DatabaseCommandClient`. It absorbs the static class (`DatabaseCommandClient.cs:9`). **At P5 (re-verified):** landed as planned, with the internal `HttpDatabaseCommandClient` folded in behind a private constructor; both `Create` overloads, their validation and the transport ownership are unchanged. Hosting's `ResourceCommandHostingTests` was retyped. | P5 |
+| 50 | `IDatabaseConnection` | Client `:19` | client | sealed | `public sealed class DatabaseConnection`, with an internal constructor. `ExecuteAsync<TResult>` (`IDatabaseConnection.cs:73`) is a generic virtual call today, and becomes a non-virtual generic method. **At P5 (re-verified):** landed as planned; the internal `PooledDatabaseConnection` became the public type (moved out of `Internal/`). One more member changed: the interface's public `OpenAsync` (`:59`) is internal. Only the client called it, before the first rental, and a public call on a broken connection dialed a second transport over the first without releasing it. `ExecuteStreamingAsync` takes the abstract `DatabaseStreamingExchange` (row 52). **P5 review:** a reference kept after `DisposeAsync` is not a lease (the pool rents the same instance again), which the type's remarks now say; a per-rental lease is §12's follow-up. | P5 |
+| 51 | `IDatabaseProtocolExchange<TResult>` | Client `:12` | client | abstract | `public abstract class DatabaseProtocolExchange<TResult>`, with a protected constructor. The NVI `ExecuteAsync` resets the base-owned `IsResponseComplete` and then calls `ExecuteCoreAsync`; a leaf reports completion through a protected method. This replaces the default interface member (`:24`) and the three hand-written resets in the Sql, KeyValuePair and Graph exchanges. **At P5 (re-verified):** landed, with one choice the row left open: the run entry is `internal`, not public. Database.Client runs every exchange (the connection, and the download stream's carrier exchange), so `internal ValueTask<TResult> ExecuteAsync(reader, writer, token)` clears the base-owned evidence and calls `protected abstract ExecuteCoreAsync`; the evidence is an `internal` getter the connection reads; a leaf records it with `protected void MarkResponseComplete()`. A public entry would let code run an exchange over another reader and writer, outside the connection's lock and health handling, the reasoning the Sql P4 review applied to the worker's release (row 7). `Family` is a constructor argument behind a non-virtual getter (rule 6). A fourth hand-written reset, in Graph.Tests' `GraphCatalogTestExchange` (§6.9), went too, and the success-path `IsResponseComplete = true` assignments went with them: a successful return needs no evidence. `DatabaseExchangeHealthTests.ExecuteAsync_ReusedExchangeWithoutNewEvidence_ShouldDiscardSession` pins the reset (with the reset removed it fails). | P5 |
+| 52 | `IDatabaseStreamingExchange` | Client `:16` | client | abstract | `public abstract class DatabaseStreamingExchange`, with a protected constructor and NVI. **At P5 (re-verified):** landed on row 51's terms: `internal` `OpenAsync` and `CopyToAsync` entries over `protected abstract OpenCoreAsync` and `CopyToCoreAsync`, and the family as a constructor argument. It has two shipped leaves now, not one: Blob.Client's download exchange and Graph.Client's path exchange (`GraphPathsExchange`, #1013, which landed after the plan's count), so §8's case becomes V and S. | P5 |
 | 53 | `IBlobContainer` | Blob `:18` | model | sealed | `public sealed class BlobContainer`, with an internal constructor. **At P4 (re-verified, then landed):** promoted from `Internal/BlobContainer.cs` to `src/BlobContainer.cs` in the `RootNamespace`, with the interface's documentation on its members and their exceptions; the internal `BlobGuardedStream` that file also declared moved to its own file in `Internal/`, unchanged. `GetOwnershipAsync` is a member of the type (§5.2). Read with the code: a container is bound to the session that returned it (each of its operations is an operation of that session) and unbound when the database returned it (each runs in autocommit), which the type keeps; its operations take no session parameter, so no typed parameter changed. | P4 |
 | 54 | `IBlobDatabase` | Blob `:11` | model | sealed | `public sealed class BlobDatabase : DatabaseInstance`, with option B (§6.6). `BlobSessionDatabase` (`Internal/BlobDatabaseSession.cs:216`) is deleted. **At P4 (re-verified, then landed):** promoted from `Internal/BlobDatabaseInstance.cs` to `src/BlobDatabase.cs` in the `RootNamespace`, with an internal constructor that takes the typed engine (the former one took `IDatabaseEngine` and type-tested it for the engine's options); the base owns the name, the engine (re-exposed with `new` over a typed field) and the disposed flag, and the model's `Dispose`/`DisposeAsync` became `DisposeCore`/`DisposeAsyncCore` (the async one now awaits the coordinator's and the storage's `DisposeAsync`). `CreateSessionAsync` is a typed `new` member over the base's NVI member (offline refusal in the core). The interface's four container operations stay on the database and run in autocommit outside any session, as they did (interim decision 32, pending owner confirmation, §7); `BlobSessionDatabase` was at `:223`, not `:216`, and is deleted, and the session exposes the four session-bound ones (option B, §6.6). The model's session and transaction became public sealed leaves too (`BlobDatabaseSession : DatabaseSession`, `BlobDatabaseTransaction : DatabaseTransaction`, rows 12 and 13), its server derives from `DatabaseServer` (row 9), and its server session is an internal sealed `DatabaseServerSession` leaf (row 11). | P4 |
 | 55 | `IBlobDatabaseEngineBuilder` | Blob `:10` | model | sealed | `public sealed class BlobDatabaseEngineBuilder`, with an internal constructor and typed `AddServer` and `AddWorker`. **At P4:** landed with the typed factories of row 6, moved out of `Internal/`, with the deviation marker (§8). Its `StorageStrategy` became internal with the option's (row 56). The engine, builder, options, strategy and four workers were, before this PR, the Documents engine's pre-P4 files with the model's names (a diff with the names mapped differs only in namespaces and the verb's name), so they follow the Documents landing with them (§6.5). | P4 |
 | 56 | `IBlobStorageStrategy` | Blob `:10` | model | abstract *(internal)* | `internal abstract class BlobStorageStrategy`. The option and builder properties become internal; it is a test seam through the existing grant. **At P4:** landed in `Internal/` (rule 11), with `public abstract` members like the other models' strategies; the option's and the builder's `StorageStrategy` became internal. It has no shipped leaf (the engine's own file-set and in-memory storage are not strategies), so the base is the test seam D9 kept: the fault-injecting double (durable or not) and the builder tests' recording strategy derive through the existing Blob → Blob.Tests grant. | P4 |
 | 57 | `IBlobCatalog` | Blob.Catalog `:16` | model child | sealed | `public sealed class BlobCatalog`. It absorbs the static class (`BlobCatalog.cs:10`, `Open` at `:18`). **At P4 (re-verified, then landed):** the internal `DefaultBlobCatalog` was folded in as `BlobCatalog.cs`, with the interface's documentation on its public members; the constructor is private behind `Open`, and the internal `CatalogRecord` it declared moved to its own file in `Internal/`, which keeps it and the codec. The project's `Abstractions/` folder is gone. Read with the code: every member already checked its reference arguments, so no behavior changed (unlike the Documents catalog's index members, row 64). Blob.Catalog has no `InternalsVisibleTo` and needed none. The stale-page handling of `Find` (#1287) is untouched. | P4 |
-| 58 | `IBlobClient` | Blob.Client `:10` | client | sealed | `public sealed class BlobClient`. It absorbs the static class (`BlobClient.cs:8`). | P5 |
-| 59 | `IBlobConnection` | Blob.Client `:15` | client | sealed | `public sealed class BlobConnection`, with an internal constructor. | P5 |
+| 58 | `IBlobClient` | Blob.Client `:10` | client | sealed | `public sealed class BlobClient`. It absorbs the static class (`BlobClient.cs:8`). **At P5 (re-verified):** landed as planned, with the internal `DefaultBlobClient` folded in behind a private constructor. | P5 |
+| 59 | `IBlobConnection` | Blob.Client `:15` | client | sealed | `public sealed class BlobConnection`, with an internal constructor. **At P5 (re-verified):** landed as planned; the internal implementation moved out of `Internal/`. Its private `BlobExchange<TResult>` and `BlobDownloadExchange` derive from the exchange bases, and `BlobExchange` never marks a failed response complete, as before. | P5 |
 | 60 | `IDocumentCollection` | Documents `:16` | model | sealed | `public sealed class DocumentCollection`, with an internal constructor. **At P4 (re-verified, then landed):** promoted from `Internal/DocumentCollection.cs` to `src/DocumentCollection.cs` in the `RootNamespace`, with the interface's documentation on its members. `GetAsync`, `PutAsync` and `DeleteAsync` take `DocumentDatabaseSession` instead of `IDatabaseSession`, so a session of another model no longer compiles; a null session stays an `ArgumentNullException`, and a session of another database, or another session than the one a session-bound collection belongs to, stays the model's `DatabaseException` (`DocumentDatabaseScopeTests`). Read with the code: a collection is bound to the session that returned it and unbound when the database returned it, which the type keeps. | P4 |
 | 61 | `IDocumentDatabase` | Documents `:10` | model | sealed | `public sealed class DocumentDatabase : DatabaseInstance`, with option B (§6.6). `DocumentSessionDatabase` (`Internal/DocumentDatabaseSession.cs:264`) is deleted. **At P4 (re-verified, then landed):** promoted from `Internal/DocumentDatabaseInstance.cs` to `src/DocumentDatabase.cs` in the `RootNamespace`, with an internal constructor that takes the typed engine; the base owns the name, the engine (re-exposed with `new` over a typed field) and the disposed flag, and the model's `Dispose`/`DisposeAsync` became `DisposeCore`/`DisposeAsyncCore`. `CreateSessionAsync` is a typed `new` member over the base's NVI member (offline refusal in the core). The interface's four collection operations stay on the database and run in autocommit outside any session, as they did; `DocumentSessionDatabase` was at `:271`, not `:264`, and is deleted, and the session exposes the four session-bound ones (option B, §6.6). The model's session and transaction became public sealed leaves too (`DocumentDatabaseSession : DatabaseSession`, `DocumentDatabaseTransaction : DatabaseTransaction`, rows 12 and 13). Documents has no wire server, so rows 9, 10 and 11 have no Documents leaf. | P4 |
 | 62 | `IDocumentDatabaseEngineBuilder` | Documents `:10` | model | sealed | `public sealed class DocumentDatabaseEngineBuilder`, with an internal constructor. **At P4:** landed with the typed factories of row 6, moved out of `Internal/`, with the deviation marker (§8). Its `StorageStrategy` became internal with the option's (row 63). | P4 |
@@ -331,16 +332,16 @@ interface is deleted in P6.
 | 68 | `IGraphStorageStrategy` | Graph `:10` | model | abstract *(internal)* | `internal abstract class GraphStorageStrategy`. The fault-injection double derives through the test grant. **At P4:** landed in `Internal/` (rule 11), with `public abstract` members like `KeyValueStorageStrategy`'s; the option's and the builder's `StorageStrategy` became internal. It has no shipped leaf (the engine's own file-set and in-memory storage are not strategies), so the base is the test seam D9 kept: the fault-injecting double and the builder tests' recording strategy derive through the existing Graph → Graph.Tests grant. | P4 |
 | 69 | `IGraphCatalog` | Graph.Catalog `:15` | model child | sealed | `public sealed class GraphCatalog`. It absorbs the static class (`GraphCatalog.cs:10`). **At P4 (re-verified, then landed):** the internal `DefaultGraphCatalog` was folded in, with the interface's documentation on its public members; the constructor is private behind `Open`, and the internal `CatalogRecord` it declared moved to its own file in `Internal/`, which keeps it and the codec. The project's `Abstractions/` folder is gone. Graph.Catalog has no `InternalsVisibleTo` and needed none: its tests use `Open` and the public members. | P4 |
 | 70 | `IGraphStore` | Graph.Storage `:9` | model child | sealed | `public sealed class GraphStore`. It absorbs the static class (`GraphStore.cs:10`). **At P4 (re-verified, then landed):** the internal `DefaultGraphStore` (two partial files) was folded in as `GraphStore.cs` and `GraphStore.Indexes.cs`, with the interface's documentation; the constructor is private behind `Open`, and `EnsureIndexFormat` stays a public static on the type. The project's `Abstractions/` folder is gone (`Internal/` keeps the record codec). | P4 |
-| 71 | `IGraphClient` | Graph.Client `:10` | client | sealed | `public sealed class GraphClient`. It absorbs the static class (`GraphClient.cs:9`). | P5 |
-| 72 | `IGraphConnection` | Graph.Client `:11` | client | sealed | `public sealed class GraphConnection`, with an internal constructor. | P5 |
+| 71 | `IGraphClient` | Graph.Client `:10` | client | sealed | `public sealed class GraphClient`. It absorbs the static class (`GraphClient.cs:9`). **At P5 (re-verified):** landed as planned, with the internal `DefaultGraphClient` folded in behind a private constructor. | P5 |
+| 72 | `IGraphConnection` | Graph.Client `:11` | client | sealed | `public sealed class GraphConnection`, with an internal constructor. **At P5 (re-verified):** landed as planned; the internal implementation moved out of `Internal/` (its constructor was public on the internal class, and is internal now). | P5 |
 | 73 | `IKeyValueDatabase` | KeyValuePair `:23` | model | sealed | `public sealed class KeyValueDatabase : DatabaseInstance`. **At P4 (re-verified, then landed):** promoted from `Internal/KeyValueDatabaseInstance.cs` to `src/KeyValueDatabase.cs` in the `RootNamespace`, with an internal constructor that takes the typed engine; the base owns the name, the engine (re-exposed with `new` over a typed field) and the disposed flag, and the model's `Dispose`/`DisposeAsync` became `DisposeCore`/`DisposeAsyncCore`. `CreateSessionAsync` is a typed `new` member over the base's NVI member (offline refusal in the core). The five typed operations (`GetAsync`, `PutAsync`, `TryDeleteAsync`, `ExistsAsync`, `ScanAsync`) take `KeyValueDatabaseSession` instead of `IDatabaseSession`. The model's session and transaction became public sealed leaves too (`KeyValueDatabaseSession : DatabaseSession`, `KeyValueDatabaseTransaction : DatabaseTransaction`, rows 12 and 13), its server derives from `DatabaseServer` (row 9), and its server session is an internal sealed `DatabaseServerSession` leaf (row 11). | P4 |
 | 74 | `IKeyValueDatabaseEngineBuilder` | KeyValuePair `:9` | model | sealed | `public sealed class KeyValueDatabaseEngineBuilder`, with an internal constructor. **At P4:** landed with the typed factories of row 6, moved out of `Internal/`, with the deviation marker (§8). | P4 |
 | 75 | `IKeyValueStorageStrategy` | KeyValuePair `:13` | model | abstract *(internal)* | `internal abstract class KeyValueStorageStrategy`. It has two real variants plus the durability doubles, which derive through the existing grant. The option property becomes internal. **At P4:** landed in `Internal/` (rule 11), with `public abstract` members like `TransactionLog`'s; the builder's `StorageStrategy` became internal with the option's. The two test strategies (`FaultInjectingJournalStorageStrategy`, `KeyValueStorageDurabilityPolicyTests`' `NonDurableStorageStrategy`) override the members. | P4 |
 | 76 | `IKeyValueCatalog` | KeyValuePair.Catalog `:27` | model child | sealed | `public sealed class KeyValueCatalog`. It absorbs the static class (`KeyValueCatalog.cs:12`), and `CaptureSnapshot` (`:41`) becomes an instance method. **At P4:** landed; the internal `DefaultKeyValueCatalog` was folded in, the constructor is private behind `Open`, and the project's `Abstractions/` and `Internal/` folders are gone. | P4 |
 | 77 | `IKeyValueCatalogSnapshot` | KeyValuePair.Catalog `:14` | model child | sealed | `public sealed class KeyValueCatalogSnapshot`, with an internal constructor. **At P4:** landed as a class, not the former internal positional record, which would expose a public constructor and `with` (the row 81 reasoning). | P4 |
-| 78 | `IKeyValueClient` | KeyValuePair.Client `:20` | client | sealed | `public sealed class KeyValueClient`. It absorbs the static class (`KeyValueClient.cs:11`). | P5 |
-| 79 | `IKeyValueClientObserver` | KeyValuePair.Client `:18` | client | abstract | `public abstract class KeyValueClientObserver`, with a protected constructor. Its hooks are `protected internal virtual` with empty bodies. | P5 |
-| 80 | `IKeyValueConnection` | KeyValuePair.Client `:24` | client | sealed | `public sealed class KeyValueConnection`, with an internal constructor. | P5 |
+| 78 | `IKeyValueClient` | KeyValuePair.Client `:20` | client | sealed | `public sealed class KeyValueClient`. It absorbs the static class (`KeyValueClient.cs:11`). **At P5 (re-verified):** landed as planned, with the internal `DefaultKeyValueClient` folded in behind a private constructor. | P5 |
+| 79 | `IKeyValueClientObserver` | KeyValuePair.Client `:18` | client | abstract | `public abstract class KeyValueClientObserver`, with a protected constructor. Its hooks are `protected internal virtual` with empty bodies. **At P5 (re-verified):** landed as planned. The connection's guarded calls are unchanged: a hook that throws still neither faults the command nor masks its failure (the interface's remark that one "would fault an otherwise successful command" was wrong and is gone). | P5 |
+| 80 | `IKeyValueConnection` | KeyValuePair.Client `:24` | client | sealed | `public sealed class KeyValueConnection`, with an internal constructor. **At P5 (re-verified):** landed as planned; the internal implementation moved out of `Internal/`. `ScanAsync` returns an array, empty and never null (rule 9). **P5 review:** it keeps its own disposed flag, as the Graph and Blob connections do, so a disposed instance refuses commands instead of reaching the next rental of its session. | P5 |
 | 81 | `ISqlAggregateExpression` | Sql `:9` | model | sealed | `public sealed class SqlAggregateExpression`, with get-only `SourceType`, `Selector` and `Predicate` and an internal constructor. Not a record: the current type is a positional record (`Internal/SqlAggregateExpression.cs:9`), and a public one would expose a public `with` that clones around validation (C7). `Sql.Sum` (`Sql.cs:23`) returns it. **At P4 (re-verified, then landed):** the interface was `Abstractions/ISqlAggregateExpression.cs` over the internal positional record, as listed. The record became `src/SqlAggregateExpression.cs`, a public sealed class with the three get-only properties and an internal constructor; `Sql.Sum` (now `Sql.cs:21`) returns it (§5.2), and its consumers read the same three properties. | P4 |
 | 82 | `ISqlDatabase` | Sql `:6` | model | sealed | `public sealed class SqlDatabase : DatabaseInstance`, which passes `supportsSchemaProvisioning: true` to the base constructor and overrides `ApplySchemaCoreAsync`. Until P6 it also lists `IDatabaseSchemaProvisioner` (row 8). **At P4 (re-verified, then landed):** promoted from `Internal/SqlDatabaseInstance.cs` (internal sealed, implementing `ISqlDatabase : IDatabase, IDatabaseSchemaProvisioner`) to `src/SqlDatabase.cs` in the `RootNamespace`, with an internal constructor that takes the typed engine; the base owns the name, the engine (re-exposed typed with `new`) and the disposed flag, and the model's `Dispose`/`DisposeAsync` became `DisposeCore`/`DisposeAsyncCore`. `CreateSessionAsync` is a typed `new` member over the base's NVI member (the offline refusal in the core), and `IsClosed` (internal) reads the disposed flag for the closed-database fix (§6.4). The session and transaction became public sealed leaves (`SqlDatabaseSession : DatabaseSession`, `SqlDatabaseTransaction : DatabaseTransaction`, rows 12 and 13), the server derives from `DatabaseServer` (row 9), and the server session is an internal sealed leaf (row 11). | P4 |
 | 83 | `ISqlDatabaseEngineBuilder` | Sql `:10` | model | sealed | `public sealed class SqlDatabaseEngineBuilder`, with an internal constructor and a typed `AddServer(Func<SqlDatabaseEngine, DatabaseServer>)` (D5). `ExternalEngineBuilder` (`tests/SqlExpressionDepthExecutionTests.cs:1230`) is deleted, and its `ExpressionNestingLimit` cases (32 to 4096, checked in `Build()`) are retested against the sealed builder. **At P4 (re-verified, then landed):** `ExternalEngineBuilder` was at `:1230`, as listed, and is deleted with the interface. The builder left `Internal/` with the typed factories of row 6 and the deviation marker (§8); its `StorageStrategy` became internal with the option's (row 84). The retests in `SqlExpressionDepthExecutionTests`: `Create_LimitOutOfRange_ShouldThrow` drives the sealed builder too (its `Build()` refuses `int.MinValue`, 0, 31, 4097 and `int.MaxValue` with the engine's `ArgumentOutOfRangeException`, and a failed build freezes the builder), `Build_LimitAtTheRangeEnds_ShouldBuildAnEngineThatParsesWithIt` (32 and 4096) and `Builder_Limit_ShouldDefaultToTheEnginesAndReachTheEngineThroughBuild`. | P4 |
@@ -362,9 +363,9 @@ interface is deleted in P6.
 | 99 | `ISqlSchemaPrincipal` | Sql.Schema `:6` | model child | delete | The internal record (`:285`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
 | 100 | `ISqlSchemaReference` | Sql.Schema `:6` | model child | delete | The internal record (`:237`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
 | 101 | `ISqlSchemaTrigger` | Sql.Schema `:7` | model child | delete | The internal record (`:245`) stays internal. **At P4:** landed; the records live in `Internal/SqlSchemaDeclaration.cs` (the renamed `Internal/SqlSchemaBuilder.cs`), beside `SqlSchemaDeclaration`, the former `SqlSchemaModel`. | P4 |
-| 102 | `ISqlClient` | Sql.Client `:19` | client | sealed | `public sealed class SqlClient`. It absorbs the static class (`SqlClient.cs:11`). | P5 |
-| 103 | `ISqlClientObserver` | Sql.Client `:16` | client | abstract | `public abstract class SqlClientObserver`, with a protected constructor and `protected internal virtual` hooks with empty bodies. | P5 |
-| 104 | `ISqlConnection` | Sql.Client `:18` | client | sealed | `public sealed class SqlConnection`, with an internal constructor. | P5 |
+| 102 | `ISqlClient` | Sql.Client `:19` | client | sealed | `public sealed class SqlClient`. It absorbs the static class (`SqlClient.cs:11`). **At P5 (re-verified):** landed as planned, with the internal `DefaultSqlClient` folded in behind a private constructor. The Sdk.ApplicationModel `EnabledWeb` fixture, Studio's SQL workspace, and Sql.Tests' and Database.Testing's wire tests were retyped. | P5 |
+| 103 | `ISqlClientObserver` | Sql.Client `:16` | client | abstract | `public abstract class SqlClientObserver`, with a protected constructor and `protected internal virtual` hooks with empty bodies. **At P5 (re-verified):** landed as planned, on row 79's terms. | P5 |
+| 104 | `ISqlConnection` | Sql.Client `:18` | client | sealed | `public sealed class SqlConnection`, with an internal constructor. **At P5 (re-verified):** landed as planned; the internal implementation moved out of `Internal/`. **P5 review:** it keeps its own disposed flag (row 80), and `AbortAsync` after dispose does nothing. | P5 |
 | 105 | `IDatabaseResourceDescriptor` | ApplicationModel `:6` | applicationmodel | keep | Unchanged. It extends the library-owned `IResourceCommandDescriptor`, following the 17-area pattern. | — |
 | 106 | `IDatabaseApplicationTestFactory` | Testing `:20` | other | keep | Unchanged. It matches Web.Testing's `IWebApplicationTestFactory`. | — |
 
@@ -396,15 +397,15 @@ decision.
 | The five composition verbs `AddSql`, `AddKeyValue`, `AddGraph`, `AddDocuments` and `AddBlob` (`Extensions/SqlDatabaseApplicationExtensions.cs:16`, `KeyValueDatabaseApplicationExtensions.cs:16`, `GraphDatabaseApplicationExtensions.cs:17`, `DocumentDatabaseApplicationExtensions.cs:17`, `BlobDatabaseApplicationExtensions.cs:17`) | take `Action<IDatabaseApplicationContext, I<Model>DatabaseEngineBuilder>` | Retyped to the sealed builder in each model's PR. They stay `extension(IDatabaseApplicationBuilder)` members on the kept seam. The templates call them with untyped lambdas (`cohesion-database/Program.cs:11`), so they compile unchanged. **KeyValuePair at P4:** `AddKeyValue(Action<IDatabaseApplicationContext, KeyValueDatabaseEngineBuilder>)`; a server factory inside it needs no cast. **Graph at P4:** `AddGraph(Action<IDatabaseApplicationContext, GraphDatabaseEngineBuilder>)`. **Documents at P4:** `AddDocuments(Action<IDatabaseApplicationContext, DocumentDatabaseEngineBuilder>)`; Hosting's `DatabaseCompositionTests` call it with an untyped lambda and compile unchanged. **Blob at P4:** `AddBlob(Action<IDatabaseApplicationContext, BlobDatabaseEngineBuilder>)`; no Hosting, Embedded or Studio code calls it, and the Blob builder tests call it with untyped lambdas. **Sql at P4:** `AddSql(Action<IDatabaseApplicationContext, SqlDatabaseEngineBuilder>)`. The templates, the SampleHost fixture and Hosting's tests call it with untyped lambdas and compile unchanged; the `(SqlDatabaseEngine)engine` casts inside their `AddServer` factories are identity casts now (§7). | P4 |
 | `SqlDatabaseEngineFactory` (`Sql/src/SqlDatabaseEngineFactory.cs:8`) | `public static class` that forwards to `SqlDatabaseEngine.Create(options)` (`SqlDatabaseEngine.cs:163`) | Deleted in the Sql PR: rule 1 puts the factory on the type itself, which already has it. No code calls it. Its `(rootPath, engineName)` overload is not carried over, and the two doc mentions (`Database.Sql/docs/DESIGN.md:634`, `docs/programs/DATABASE_HOSTING_DESIGN.md:61`) change with it. **At P4 (landed):** deleted as planned, with its `(rootPath, engineName)` overload; no code called it. The Sql `DESIGN.md` mention went with the nesting-limit paragraph's rewrite, and the hosting design (now `:62`) says the factory was deleted. | P4 |
 | `BlobContainerExtensions.GetOwnershipAsync` (`Blob/src/Extensions/BlobContainerExtensions.cs:13`) | `extension(IBlobContainer)` that casts to the internal implementation and throws for anything else | Folded into the sealed `BlobContainer` as an instance method, and the extension container is deleted. It existed only to avoid widening the interface, and a type in the same assembly needs no extension of itself. **At P4 (landed):** `BlobContainer.GetOwnershipAsync(CancellationToken)` is an instance member with the extension's body, its token check first included; `Extensions/BlobContainerExtensions.cs` is deleted. The extension's two refusals cannot be reached any more, so they went with it: a null container (`ArgumentNullException`) and a foreign implementation of the interface ("This blob container does not support ownership discovery."). `BlobOwnershipIntrospectionTests` and Studio's `BlobWorkspace` call the member unchanged. | P4 |
-| `DatabaseClientStreamingExtensions.ExecuteStreamingAsync` (`Client/src/Extensions/DatabaseClientStreamingExtensions.cs:13`, parameter at `:30`) | `extension(IDatabaseClient)`, taking `IDatabaseStreamingExchange` | Folded into the sealed `DatabaseClient` as an instance method taking `DatabaseStreamingExchange`, for the same reason. The extension container is deleted. | P5 |
-| `SqlProtocolConnectionExtensions.ExecuteAsync` (`Sql.Client/src/Extensions/SqlProtocolConnectionExtensions.cs:24`) | old-style `this IDatabaseConnection` extension | Stays an extension, because `DatabaseConnection` lives in Database.Client. It is retyped to `DatabaseConnection` and moves into an `extension(DatabaseConnection connection)` block (`general-rules.md`, extension containers). | P5 |
+| `DatabaseClientStreamingExtensions.ExecuteStreamingAsync` (`Client/src/Extensions/DatabaseClientStreamingExtensions.cs:13`, parameter at `:30`) | `extension(IDatabaseClient)`, taking `IDatabaseStreamingExchange` | Folded into the sealed `DatabaseClient` as an instance method taking `DatabaseStreamingExchange`, for the same reason. The extension container is deleted. **At P5 (landed):** as planned, with the extension's body and one change: the instance member knows the pool's family, so it rejects an exchange of another family (`ArgumentException`) before it rents; the extension rented first (dialing when no connection was idle) and then returned the rental (`DatabaseStreamingExchangeTests.ExecuteStreamingAsync_DifferentFamily_ShouldRejectBeforeRenting`). Its null check on the client went with the extension. | P5 |
+| `SqlProtocolConnectionExtensions.ExecuteAsync` (`Sql.Client/src/Extensions/SqlProtocolConnectionExtensions.cs:24`) | old-style `this IDatabaseConnection` extension | Stays an extension, because `DatabaseConnection` lives in Database.Client. It is retyped to `DatabaseConnection` and moves into an `extension(DatabaseConnection connection)` block (`general-rules.md`, extension containers). **At P5 (landed):** as planned; the container is `public static partial`, as `general-rules.md` asks of extension members. Callers bind it unchanged: the instance `ExecuteAsync<TResult>` does not apply to a string, so `connection.ExecuteAsync("…")` still reaches the extension. | P5 |
 | `SqlCatalog.CaptureSnapshot` (`:72`), `KeyValueCatalog.CaptureSnapshot` (`:41`) | static, taking the catalog interface | Instance methods on the sealed catalogs. **KeyValuePair at P4:** landed (row 76). **Sql at P4:** landed with the sealed catalog (row 85); its one caller, the SQL executor's `CaptureCatalogSnapshot`, calls the instance member. | P4 |
 | `BTreeIndexManager.EnsureFormat` (`Indexing/src/BTreeIndexManager.cs:55`) | takes `IStorage` | Takes `Storage`. | P1 |
 | `BTreeIndexManagerOptions.Storage` (`Indexing/src/BTreeIndexManagerOptions.cs:16`) | `IStorage` (found at P1; the review missed it) | `Storage`. | P1 |
 | The five model storages' `WriteAheadJournal` (`SqlStorage`, `KeyValueStorage`, `GraphStorage`, `DocumentStorage`, `BlobStorage`) | return `IStorageJournal` (found at P1) | Return `StorageJournal`. Their engines pass it to the coordinator, so no call site changes. | P1 |
 | `TransactionCoordinator(IStorage, IStorageJournal, ITransactionRecordSpace)` and `TransactionCoordinator.Manager` | take the storage interfaces, expose `ITransactionManager` | Take `Storage` and `StorageJournal`, expose the sealed `TransactionManager`. `IsStorageOffline` and `AnalyzeAndScrub` lose their `is Storage` type tests, and `TransactionRecovery` its `ReadAll` fallback for non-`StorageJournal` journals. | P1 |
 | `EmbeddedDatabase.Engines`, `TryGetEngine(string, …)` and `TryGetEngine(EngineModel, …)` (`Embedded/src/EmbeddedDatabase.cs:32`, `:75`, `:95`; the field at `:21-24`) | typed `IDatabaseEngine` | Typed `DatabaseEngine`. | P6 |
-| The 15 triplet factories: `DatabaseClient`, `DatabaseCommandClient`, `BlobCatalog`, `BlobClient`, `DocumentCatalog`, `GraphCatalog`, `GraphClient`, `GraphSchema`, `GraphStore`, `KeyValueCatalog`, `KeyValueClient`, `SqlCatalog`, `SqlClient`, `BTreeIndexManager`, `DatabaseAuthenticator` | `public static class` + interface + internal implementation | Each collapses into one sealed type of the same name. `DatabaseAuthenticator` becomes abstract, with `AllowAll`. | per row |
+| The 15 triplet factories: `DatabaseClient`, `DatabaseCommandClient`, `BlobCatalog`, `BlobClient`, `DocumentCatalog`, `GraphCatalog`, `GraphClient`, `GraphSchema`, `GraphStore`, `KeyValueCatalog`, `KeyValueClient`, `SqlCatalog`, `SqlClient`, `BTreeIndexManager`, `DatabaseAuthenticator` | `public static class` + interface + internal implementation | Each collapses into one sealed type of the same name. `DatabaseAuthenticator` becomes abstract, with `AllowAll`. **At P5:** the six client triplets (`DatabaseClient`, `DatabaseCommandClient`, `BlobClient`, `GraphClient`, `KeyValueClient`, `SqlClient`) collapsed, each keeping its `Create` factories over a private constructor (rows 48, 49, 58, 71, 78, 102). | per row |
 
 ### 5.3 Existing public abstract types, audited in the phase that touches them
 
@@ -1913,8 +1914,19 @@ Documents.Language, Blob and Hosting.
   - `DatabaseProtocolExchangeTests.cs:58` and `:82`;
   - `DatabaseExchangeHealthTests.cs:85` and `:107`;
   - Graph `TestObjects/GraphCatalogTestExchange.cs:23`.
+
+  **Landed at P5:** all seven, at the lines named. Each passes its family to the base
+  constructor and overrides the protected core (`ExecuteCoreAsync`, or `OpenCoreAsync` and
+  `CopyToCoreAsync`); the two that certified a complete response (`DatabaseExchangeHealthTests`'
+  `CompleteResponseExchange` and Graph's `GraphCatalogTestExchange`) call `MarkResponseComplete`
+  instead of setting a property, and Graph's drops its hand-written reset. Graph's
+  `GraphCatalogTestExtensions` extends the sealed `DatabaseConnection`. No grant was needed: the
+  doubles reach only the protected surface. For the two new tests of the base,
+  `DatabaseExchangeHealthTests` gained a `CompleteOnceExchange` double and the streaming harness's
+  `DocumentExchange` an optional family (§7, "P5, as landed").
 - **Observer doubles** (`RecordingObserver` in Sql.Client.Tests and KeyValuePair.Client.Tests)
-  derive from the observer bases (P5).
+  derive from the observer bases (P5). **Landed at P5:** both override the three hooks as
+  `protected override`; each suite gained a private one-hook observer that throws.
 - **Model builder-test doubles** derive in their model PR (P4), because typed `AddWorker` and
   `AddServer` need the bases. They are `RecordingWorker` and `RecordingServer` in the Blob,
   Documents and Graph `*ApplicationBuilderTests.cs` (`:232`/`:259`, `:234`/`:263`, `:234`/`:263`),
@@ -3239,6 +3251,164 @@ tests against refreshed canonical packs, and the SampleHost provisioning test.
 
 *Gate:* the client suites over the wire, the Studio build, and the Sdk.ApplicationModel tests.
 
+**P5, as landed (re-verified 2026-10-06 against the code at `c818adac`, after P4 and owner
+decisions 24, 32 and 33).** One commit on `refactor/L03.02.01.56.06-concrete-types-p5`, based on
+the integration branch's `c818adac`. The core and the four model clients land together: a model
+client cannot compile against the core between the two. Every row held against the code, with the
+readings their entries record:
+
+- *Re-verification.* The rows' line references held (`IDatabaseConnection.cs:73`, the default
+  member at `IDatabaseProtocolExchange.cs:24`, each static factory's line, §5.2's two extension
+  lines, §6.9's seven exchange doubles and two observer doubles, `SqlClientOptions.cs:29`,
+  `KeyValueClientOptions.cs:29`, `EnabledWeb/Program.cs:20`). Three readings moved: a fourth
+  hand-written reset lives in Graph.Tests' `GraphCatalogTestExchange` (row 51); the streaming
+  exchange has two shipped leaves since #1013, Graph.Client's path exchange among them (row 52,
+  §8); and the connection's public `OpenAsync` was called only by the client (row 50).
+- *Core* (rows 48 to 52). `DatabaseClient`, `DatabaseCommandClient` and `DatabaseConnection` are
+  public sealed; the first two keep their `Create` factories over private constructors, and the
+  connection, formerly the internal `PooledDatabaseConnection`, keeps an internal constructor.
+  `DatabaseProtocolExchange<TResult>` and `DatabaseStreamingExchange` are abstract with protected
+  constructors that take the family. Their run entries are internal over protected abstract cores,
+  and the protocol exchange owns the completion evidence (`MarkResponseComplete`).
+- *Model clients* (rows 58, 59, 71, 72, 78 to 80, 102 to 104). Each static factory, interface and
+  internal implementation collapsed into one sealed client with its `Create` factory; each
+  connection left `Internal/` as a public sealed type with an internal constructor; the two
+  observers are abstract with protected constructors and `protected internal virtual` hooks with
+  empty bodies. The exchanges are internal sealed leaves of the bases.
+- *Extension containers* (§5.2). `ExecuteStreamingAsync` is a `DatabaseClient` instance member;
+  `SqlProtocolConnectionExtensions` is an `extension(DatabaseConnection)` block.
+- *Rules.* No generic virtual method remains (rule 5): `DatabaseConnection.ExecuteAsync<TResult>`
+  and `SqlConnection.ExecuteScalarAsync<T>` are non-virtual on sealed types. No `new` member was
+  needed (rule 7): the model clients compose the core rather than derive from it, so the typed
+  surface is the sealed return types, and no client, Studio workspace or test casts. Result
+  collections are never null (rule 9): `DatabaseClientResult`, `SqlResultSet`, `GraphResultSet` and
+  `KeyValueConnection.ScanAsync` return empty collections; `KeyValueConnection.GetAsync` and
+  `BlobConnection.GetPropertiesAsync` keep null for an absent entry. The five `Abstractions/`
+  folders are gone (rule 11). No grant was added.
+- *Behavior.* Two changes: `DatabaseClient.ExecuteStreamingAsync` rejects an exchange of another
+  family before it rents (§5.2, with a test), and `DatabaseConnection.OpenAsync` is no longer
+  public (row 50). Exchange health is unchanged: the base clears the evidence the three
+  model exchanges used to clear by hand, and a new test pins the reset (row 51).
+- *Deleted:* the 15 client interfaces, `DatabaseClientStreamingExtensions`, and the six internal
+  implementations folded into their sealed types (`DefaultDatabaseClient`,
+  `HttpDatabaseCommandClient`, `DefaultSqlClient`, `DefaultKeyValueClient`, `DefaultGraphClient`,
+  `DefaultBlobClient`).
+- *Markers* (§8): the four P5 bases.
+- *Docs.* Each client's `DESIGN.md` gains a "Concrete types" section and loses the interface
+  names, as do the `OVERVIEW.md` files and Blob.Client's `docs/Assembly` page (a P8 item, done
+  with its owner); the Blob and Graph model `DESIGN.md` files name the exchange bases.
+- *Outside the clients:* call-site retypes in Graph.Tests (`GraphCatalogClientTests`,
+  `GraphCatalogTestExchange`), Hosting.Tests (`ResourceCommandHostingTests`,
+  `DatabaseHostTestHarness`), Sql.Tests (`SqlComparisonWireTests`), Database.Testing's
+  `DatabaseSampleHostEndToEndTests`, the four Studio client workspaces and Studio's README, the
+  Sdk.ApplicationModel `EnabledWeb` fixture and its README, and the `SqlClient` example in
+  `docs/DEVELOPER_EXPERIENCE_DESIGN.md`.
+- *Owner review.*
+  36. **The exchanges' run entries are internal** (rows 51 and 52). The alternative was a public
+      NVI `ExecuteAsync`, `OpenAsync` and `CopyToAsync`, which would let code run an exchange over
+      another reader and writer, outside the connection's lock and health handling. The cost of
+      internal: an exchange author cannot unit-test a leaf without a connection, so model tests run
+      exchanges over an in-process server, as these suites do.
+  37. **`DatabaseConnection.OpenAsync` is internal** (row 50). A caller can no longer reopen a
+      broken rental; it disposes it and rents another, which is what the pool already did.
+  38. **Observers cannot be composed** (rows 79 and 103; added by the P5 review). Outside
+      Sql.Client and KeyValuePair.Client the `protected internal virtual` hooks are only
+      `protected`, so a fan-out or decorating observer cannot call an inner observer's hook
+      (CS1540, reproduced by the review). The interfaces allowed it, and the options carry one
+      `Observer`, so an application with two sinks fans out inside one subclass. Rule 4 sanctions
+      the shape; the DESIGN files and the observers' remarks say so. The alternative, if the owner
+      wants composite observers, is a public non-virtual entry per hook over a protected core
+      (NVI), or a sealed composite observer in each client.
+  39. **Dial failures are not wrapped** (rows 48 and 58, 71, 78, 102; added by the P5 review).
+      `DatabaseClient.RentAsync` and each model's `ConnectAsync` translate handshake failures, but
+      `DatabaseConnection.OpenAsync` calls the connection factory without a catch, so a transport
+      dial failure (`SocketException` from `TcpConnectionFactory`) reaches the caller unchanged.
+      The XML documentation now says so. Wrapping it in `DatabaseClientException` (and so in each
+      model's exception) is a behavior change, left to the owner.
+
+  *Gate, as run:* a no-incremental build of every Database project but Database.Testing's tests,
+  the SampleHost fixture and the stray `Cache/src` test csproj, plus Sdk.Database, has no Database
+  warning but CS2008 on Database.Refs (the only other warnings are the DependencyInjection and
+  Configuration libraries' own); Database.Testing's test project builds clean too. Every Database
+  suite passes at its baseline (root 112, Language 105, Types 93, Storage 307, Transactions 108,
+  Indexing 77, Execution 2, Protocol 23, Security 5, Sql 1138, Sql.Language 999, Sql.Catalog 47,
+  Sql.Schema 39, Sql.Storage 14, Documents 195, Documents.Language 288, Documents.Catalog 9,
+  Documents.Storage 31, Graph 402, Graph.Language 387, Graph.Catalog 19, Graph.Storage 17,
+  Graph.Client 57, Blob 171, Blob.Catalog 5, Blob.Storage 14, Blob.Client 21, KeyValuePair 198,
+  KeyValuePair.Catalog 4, KeyValuePair.Storage 3, Hosting 54, Embedded 4, ApplicationModel 15,
+  Sdk.Database 18) apart from three that grow: Client from 41 to 43 (the evidence reset and the
+  early family check), Sql.Client from 314 to 315 and KeyValuePair.Client from 10 to 11 (a one-hook
+  observer that throws). The client suites run over the wire, against live engines behind their
+  model servers on the in-memory transport and, in `KeyValueApplicationEndToEndTests` and Graph's
+  `GraphCatalogClientTests`, over TCP. Studio builds clean (to an output folder under `%TEMP%`) and
+  its `--smoke` run gives 83 passed, 0 failed, 1 skipped, every model's wire steps among them; the
+  dependency graph check passes; the Database runtime producer packs. Against refreshed canonical
+  packs (`Install-Local.ps1 -UseCanonicalVersion -SkipLibraries -Rids win-arm64`, 60 packages at
+  `10.0.0-preview.1`, none left in the global NuGet cache, then `dotnet pack` of the 41 library
+  packages `sdk-smoke.yml`'s `gateway-packages` job packs, into the worktree's `_out/packages`),
+  Sdk.ApplicationModel's tests pass 69 of 71, among them
+  `Build_EnabledWebReferencesEnabledDatabase_GeneratesValidManifestsAndTypedAccessor`, which
+  compiles the retyped `EnabledWeb` fixture against the packed sealed `SqlClient`. The two failures
+  are environmental: the Linux image-publish tests restore `App*.Runtime.linux-x64` and
+  `linux-arm64` packs this win-arm64 run does not produce (NU1101). Database.Testing's suite passes
+  5 of 5 against the same packs, among them the SampleHost test, which seeds and re-reads its database over TCP through `SqlClient`.
+- *Review, as applied (2026-10-07),* on `refactor/L03.02.01.56.06-concrete-types-p5-review`, on
+  top of the P5 commit. Three reviews approved with minor findings only. Every finding was
+  applied; none was rejected.
+  - *A disposed `SqlConnection` or `KeyValueConnection` reached the next rental (minor, one
+    review; the one behavior fix).* Both forwarded every call to the pooled `DatabaseConnection`
+    after their own disposal, and the pool rents that same instance again, so a stale handle ran
+    statements on another caller's session (inside its explicit transaction, if it had one), and
+    a second dispose, or `SqlConnection.AbortAsync`, returned or aborted that caller's rental. The
+    internal implementations behaved the same before P5; P5 made the types public. Both now keep
+    their own disposed flag, as `GraphConnection` and `BlobConnection` already did: `DisposeAsync`
+    and `AbortAsync` forward once (`Interlocked.Exchange`), every command throws
+    `ObjectDisposedException` before the observer runs, and `IsOpen` is false after disposal.
+    `SqlClientTests.QueryAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException` and
+    `KeyValueClientTests.GetAsync_AfterDisposeAndReRent_ShouldThrowObjectDisposedException`
+    (pool size 1: dispose, re-rent, use the stale handle, dispose it again) fail with the guard
+    removed (the stale query returns its rows) and pass with it. The core `DatabaseConnection`
+    has the same gap for a direct caller of `RentAsync`; closing it needs a per-rental lease,
+    so its remarks and `ObjectDisposedException` text state the limit and §12 carries the fix
+    (rows 50, 80 and 104).
+  - *Exception documentation (minor, one review).* The public members now list what they throw:
+    `OperationCanceledException` on `RentAsync` and each `ConnectAsync`, and
+    `ObjectDisposedException` on the three model `ConnectAsync` members that lacked it;
+    `InvalidOperationException` (another exchange is active) and `OperationCanceledException` on
+    `DatabaseConnection.ExecuteAsync`, the Sql extension and every Sql, Key-Value and Graph
+    connection operation, plus `ObjectDisposedException` on the Sql and Key-Value ones;
+    `ProtocolException` and `OperationCanceledException` on `ExecuteCoreAsync`; and
+    `JsonException`, `OperationCanceledException` and `ObjectDisposedException` on both
+    `DatabaseCommandClient` send members. The `DatabaseClientException` line on `RentAsync` and
+    each model's line on `ConnectAsync` said dialing failures were wrapped; they are not (owner
+    review 39), and the lines now say a dial failure propagates from the connection factory.
+  - *Observer composition (minor, one review).* Recorded as owner review 38; the Sql.Client and
+    KeyValuePair.Client `DESIGN.md` files say an observer cannot forward to another, and the two
+    observers' remarks no longer claim that no other code can call the hooks (code inside the
+    assembly can).
+  - *Minor, applied.* Row 50 called the streaming exchange sealed; it is abstract (row 52).
+    Graph.Tests' `GraphCatalogTestExtensions` uses an `extension(DatabaseConnection)` block instead
+    of the legacy `this` syntax (`general-rules.md`), and its stale comment ("a shipped Graph
+    client remains separate work") names why the double stays. Two Key-Value test names lead
+    with the method (`PutAsync_WithPartialThrowingObserver_ShouldNotFaultCommands`,
+    `PutAsync_WithRecordingObserver_ShouldRecordOutcomes`). §12 records the area's unsealed
+    exception leaves, `DatabaseClientException` among them, for P8.
+  - *Gate, as rerun after the review:* a no-incremental build of the Database solution has no
+    Database warning but CS2008 on Database.Refs (the others are DependencyInjection's 198 and
+    Configuration's 4 lines). Every Database suite passes at its P5 count (root 112, Language 105,
+    Types 93, Storage 307, Transactions 108, Indexing 77, Execution 2, Protocol 23, Security 5,
+    Sql 1138, Sql.Language 999, Sql.Catalog 47, Sql.Schema 39, Sql.Storage 14, Documents 195,
+    Documents.Language 288, Documents.Catalog 9, Documents.Storage 31, Graph 402, Graph.Language
+    387, Graph.Catalog 19, Graph.Storage 17, Graph.Client 57, Blob 171, Blob.Catalog 5,
+    Blob.Storage 14, Blob.Client 21, KeyValuePair 198, KeyValuePair.Catalog 4, KeyValuePair.Storage
+    3, Client 43, Hosting 54, Embedded 4, ApplicationModel 15, Sdk.Database 18) but two that grow by
+    their stale-handle test: Sql.Client 316 and KeyValuePair.Client 12. Studio builds with no
+    warning to an output folder under `%TEMP%`, and its `--smoke` run gives 83 passed, 0 failed,
+    1 skipped; the dependency graph check passes; the Database runtime producer packs. The
+    Sdk.ApplicationModel and Database.Testing suites were not rerun: they need refreshed canonical
+    packs, the refresh prunes the shared global NuGet cache a parallel track builds from, and the
+    review changed no public signature the `EnabledWeb` fixture or SampleHost compiles against.
+
 **P6, #1262: composition retype and root interface removal.**
 
 - **Retypes.** Rows 3 and 4. In Hosting: `DatabaseApplicationContext`, `DatabaseApplicationBuilder`
@@ -3322,7 +3492,7 @@ it). [Certain] The implementers were counted with rg on 2026-10-04.
 | `ProtocolFrameWriter` | V | four, in the same three assemblies | `protected` | P2 |
 | `DatabaseAuthenticator` | S | one shipped (`AllowAll`); the model servers call it and the application supplies its own | `protected` | P2 |
 | `DatabaseProtocolExchange<TResult>` | V, S | the Sql, KeyValuePair, Graph and Blob exchanges and Database.Client's streaming exchange; `Database.Client` runs them | `protected` | P5 |
-| `DatabaseStreamingExchange` | S | one shipped (Blob.Client's download exchange); `Database.Client` runs it | `protected` | P5 |
+| `DatabaseStreamingExchange` | V, S | two shipped (Blob.Client's download exchange and Graph.Client's path exchange; the plan counted one, before #1013); `Database.Client` runs them | `protected` | P5 |
 | `SqlClientObserver` | S | none shipped; the application sets one through `SqlClientOptions` (`SqlClientOptions.cs:29`) | `protected` | P5 |
 | `KeyValueClientObserver` | S | none shipped; set through `KeyValueClientOptions` (`KeyValueClientOptions.cs:29`) | `protected` | P5 |
 
@@ -3333,6 +3503,14 @@ writes its type, or, for `Storage`, strips its interface.
 **At P3:** the seven P3 markers landed: the six root bases and `DatabaseEngineWorker`. The case
 column holds for each as written; `DatabaseServerSession`'s leaves (one per model server) still
 implement the interface until their model's P4 PR. `CompiledSchema` carries none (§5.3).
+
+**At P5:** the four P5 markers landed, on `DatabaseProtocolExchange<TResult>`,
+`DatabaseStreamingExchange`, `SqlClientObserver` and `KeyValueClientObserver`, completing the 28.
+The case column was re-counted: the protocol exchange holds as written (the four model exchanges
+and the download stream's carrier), and the streaming exchange is V and S, not S alone, since
+Graph.Client's path exchange landed (row 52). The observers have no shipped leaf; the application
+supplies one. The new sealed leaves (`DatabaseClient`, `DatabaseCommandClient`,
+`DatabaseConnection`, and each model's client and connection) carry none.
 
 **At P4, Sql:** the model's two markers landed, on `SqlDatabaseEngine` and
 `SqlDatabaseEngineBuilder`, completing the five engine and five builder markers. Its other new
@@ -3529,3 +3707,19 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never
   name a type that does not exist.
+- Public exception leaves are not sealed yet: `DatabaseClientException`
+  (`Client/src/Exceptions/DatabaseClientException.cs:16`, no derived type, found at P5),
+  `KeyValueCatalogException`, the root's `DatabaseNotFoundException`, `DatabaseOfflineException`,
+  `DatabaseParseException`, `DatabaseTransactionCommitUnconfirmedException` and
+  `DatabaseTransactionDeadlockException`, and Transactions' `TransactionCommitUnconfirmedException`
+  and `TransactionDeadlockException` (the two `…AbortedException` types have derived types and stay
+  open). Rule 1 seals each leaf that has no derived type; left to P8 so one PR settles the area's
+  exception hierarchy.
+- A returned `DatabaseConnection` is not a lease (found by the P5 review; §7, "P5, as landed",
+  "Review, as applied"). The pool rents the same instance on every rental of its session and its
+  rented flag is per instance, so a direct caller of `DatabaseClient.RentAsync` that keeps the
+  reference after `DisposeAsync` reaches the next caller's rental, and a second dispose returns
+  it. The model connections guard themselves; the core needs a per-rental lease (a thin public
+  lease over the pooled session) or a generation token checked on every call. A design change,
+  left to P8 under #1261, with a test that disposes, re-rents at pool size 1 and asserts
+  `ObjectDisposedException` on the stale reference.

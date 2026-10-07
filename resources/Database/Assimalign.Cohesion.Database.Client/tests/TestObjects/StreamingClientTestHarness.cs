@@ -51,18 +51,19 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
         _accepting = AcceptAsync();
     }
 
-    internal IDatabaseClient Client { get; }
+    internal DatabaseClient Client { get; }
     internal byte[] Payload { get; }
     internal int AcceptedConnections => Volatile.Read(ref _acceptedConnections);
     internal TaskCompletionSource ContinueResponse { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal TaskCompletionSource FirstChunkSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal TaskCompletionSource TransferSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    internal static IDatabaseStreamingExchange CreateExchange() => new DocumentExchange();
-    internal static IDatabaseStreamingExchange CreateUntokenedExchange(bool synchronous,
+    internal static DatabaseStreamingExchange CreateExchange() => new DocumentExchange();
+    internal static DatabaseStreamingExchange CreateExchange(ProtocolMessageFamily family) => new DocumentExchange(family: family);
+    internal static DatabaseStreamingExchange CreateUntokenedExchange(bool synchronous,
         TaskCompletionSource writeStarted, TaskCompletionSource writeCompleted)
         => new DocumentExchange(synchronous, writeStarted, writeCompleted);
-    internal static IDatabaseProtocolExchange<ProtocolMessageType> CreatePing() => new PingExchange();
+    internal static DatabaseProtocolExchange<ProtocolMessageType> CreatePing() => new PingExchange();
 
     public async ValueTask DisposeAsync()
     {
@@ -181,7 +182,7 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
         return frame;
     }
 
-    private sealed class DocumentExchange : IDatabaseStreamingExchange
+    private sealed class DocumentExchange : DatabaseStreamingExchange
     {
         private readonly bool? _synchronousUntokenedWrite;
         private readonly TaskCompletionSource? _writeStarted;
@@ -195,17 +196,18 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
         /// </param>
         /// <param name="writeStarted">Signaled when a content chunk write starts, or <see langword="null"/>.</param>
         /// <param name="writeCompleted">Signaled when a content chunk write completes, or <see langword="null"/>.</param>
+        /// <param name="family">The family the exchange declares, or <see langword="null"/> for the harness's own.</param>
         public DocumentExchange(bool? synchronousUntokenedWrite = null,
-            TaskCompletionSource? writeStarted = null, TaskCompletionSource? writeCompleted = null)
+            TaskCompletionSource? writeStarted = null, TaskCompletionSource? writeCompleted = null,
+            ProtocolMessageFamily? family = null)
+            : base(family ?? StreamingClientTestHarness.Family)
         {
             _synchronousUntokenedWrite = synchronousUntokenedWrite;
             _writeStarted = writeStarted;
             _writeCompleted = writeCompleted;
         }
 
-        public ProtocolMessageFamily Family => StreamingClientTestHarness.Family;
-
-        public async ValueTask OpenAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+        protected override async ValueTask OpenCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken)
         {
             await WriteAsync(writer, request, ReadOnlyMemory<byte>.Empty, cancellationToken);
             var frame = await ReadAsync(reader, cancellationToken);
@@ -216,7 +218,7 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
             _length = BinaryPrimitives.ReadInt32LittleEndian(frame.Payload.Span);
         }
 
-        public async ValueTask CopyToAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, Stream destination, CancellationToken cancellationToken = default)
+        protected override async ValueTask CopyToCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, Stream destination, CancellationToken cancellationToken)
         {
             int received = 0;
             while (true)
@@ -251,11 +253,15 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
         }
     }
 
-    private sealed class PingExchange : IDatabaseProtocolExchange<ProtocolMessageType>
+    private sealed class PingExchange : DatabaseProtocolExchange<ProtocolMessageType>
     {
-        public ProtocolMessageFamily Family => StreamingClientTestHarness.Family;
+        /// <summary>Initializes a new instance of the <see cref="PingExchange"/> class.</summary>
+        public PingExchange()
+            : base(StreamingClientTestHarness.Family)
+        {
+        }
 
-        public async ValueTask<ProtocolMessageType> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+        protected override async ValueTask<ProtocolMessageType> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken)
         {
             await WriteAsync(writer, ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty, cancellationToken);
             return (await ReadAsync(reader, cancellationToken)).Type;

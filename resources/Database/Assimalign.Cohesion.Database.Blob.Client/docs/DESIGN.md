@@ -3,8 +3,8 @@
 ## Ownership and family
 
 The typed client binds `Database.Client` to the exact `BlobProtocol.Family` instance.
-`IBlobClient.ConnectAsync` rents an authenticated shared connection and wraps its lease in
-`IBlobConnection`. Database selection happens in the shared handshake and is immutable;
+`BlobClient.ConnectAsync` rents an authenticated shared connection and wraps its lease in
+the sealed `BlobConnection`. Database selection happens in the shared handshake and is immutable;
 Blob requests carry container and object names only. The client never chooses a concrete
 transport and owns no parallel handshake, frame parser, or connection pool.
 
@@ -28,7 +28,7 @@ flowchart LR
 | `Assimalign.Cohesion.Database.Protocol` | Family validation, frame envelope, startup and error vocabulary |
 | `Assimalign.Cohesion.Connections` | Transport-neutral connection factory |
 
-Public APIs are client interfaces, a static factory, options, and a typed exception.
+Public APIs are a sealed client with its `Create` factory, a sealed connection, options, and a typed exception.
 Blob consumes the shared streaming exchange contract without changing its own caller-facing
 connection contract or its model's wire protocol. Explicit codecs and ordinary generic
 delegates keep the implementation compatible with `net10.0` and NativeAOT without reflection.
@@ -56,9 +56,9 @@ return is stronger: it confirms receipt of the matching publication acknowledgem
 
 ## Streaming downloads and bounded memory
 
-Downloads implement `IDatabaseStreamingExchange`. Its `OpenAsync` phase sends the Blob read
+Downloads derive from `DatabaseStreamingExchange`. Its `OpenCoreAsync` phase sends the Blob read
 request and validates `TransferStart`; `DownloadAsync` returns only after that validation,
-so errors before startup fail the method itself. Its `CopyToAsync` phase passes the metadata,
+so errors before startup fail the method itself. Its `CopyToCoreAsync` phase passes the metadata,
 frame adapters, and borrowed destination stream to `BlobProtocolTransfer.ReceiveAsync`, which
 verifies chunks, counts, acknowledgements, and terminal completion. This is Blob-specific wire
 work. The shared client runs the producer and owns the content stream and its lifetime.
@@ -109,7 +109,7 @@ are unsupported even when the server declared a length.
 ## Cancellation, disposal, and pooled leases
 
 Each connection allows only one exchange. Starting another while one is active fails promptly
-with `InvalidOperationException`. Downloads call `IDatabaseConnection.ExecuteStreamingAsync`,
+with `InvalidOperationException`. Downloads call `DatabaseConnection.ExecuteStreamingAsync`,
 so a healthy typed connection retains its caller-owned shared pool lease until connection
 disposal; a background producer cannot accidentally return that lease while using frames.
 Normal verified completion releases the operation slot, even if some verified bytes remain
@@ -179,3 +179,20 @@ future Documents and Graph clients can supply their own startup and content prot
 copying Blob's former queue, producer, cancellation, or rental-release machinery. Listings
 remain a Blob-owned bounded typed enumeration: they produce metadata items rather than a
 content stream and validate Blob-specific prefix and item-count rules.
+
+## Concrete types (concrete-types plan, phase 5, #1261)
+
+The package has no public interface left and no `Abstractions/` folder
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7, "P5, as landed").
+
+| Type | Shape | Was |
+|---|---|---|
+| `BlobClient` | sealed; `Create(BlobClientOptions)` over a private constructor | the static `BlobClient` factory, `IBlobClient` and the internal `DefaultBlobClient` |
+| `BlobConnection` | sealed; internal constructor; moved out of `Internal/` | `IBlobConnection` and the internal `BlobConnection` |
+
+The connection's private exchanges are leaves of the shared bases: the materialized operations'
+`BlobExchange<TResult>` of `DatabaseProtocolExchange<TResult>`, and the download's
+`BlobDownloadExchange` of `DatabaseStreamingExchange`. `BlobExchange` never calls
+`MarkResponseComplete`, so every failed Blob exchange still discards its connection: a transfer
+can leave unread frames even when its error code is `ExecutionFailure`. Studio's Blob workspace
+was retyped to the sealed types.

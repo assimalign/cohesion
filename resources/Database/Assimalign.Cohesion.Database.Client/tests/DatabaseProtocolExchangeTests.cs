@@ -55,21 +55,18 @@ public class DatabaseProtocolExchangeTests
         (await replacement.ExecuteAsync(new PingExchange(SqlProtocol.Family), ClientTestHarness.Timeout())).ShouldBe(ProtocolMessageType.Pong);
     }
 
-    private sealed class PingExchange : IDatabaseProtocolExchange<ProtocolMessageType>
+    private sealed class PingExchange : DatabaseProtocolExchange<ProtocolMessageType>
     {
-        private readonly ProtocolMessageFamily _family;
-
         /// <summary>Initializes a new instance of the <see cref="PingExchange"/> class.</summary>
         /// <param name="family">The protocol message family the exchange declares.</param>
         public PingExchange(ProtocolMessageFamily family)
+            : base(family)
         {
-            _family = family;
         }
 
-        public ProtocolMessageFamily Family => _family;
         internal bool Started { get; private set; }
 
-        public async ValueTask<ProtocolMessageType> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+        protected override async ValueTask<ProtocolMessageType> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken)
         {
             Started = true;
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty), cancellationToken);
@@ -79,20 +76,19 @@ public class DatabaseProtocolExchangeTests
         }
     }
 
-    private sealed class InterruptedExchange : IDatabaseProtocolExchange<bool>
+    private sealed class InterruptedExchange : DatabaseProtocolExchange<bool>
     {
         private readonly CancellationTokenSource _cancellation;
 
         /// <summary>Initializes a new instance of the <see cref="InterruptedExchange"/> class.</summary>
         /// <param name="cancellation">The cancellation source the exchange cancels after sending its request.</param>
         public InterruptedExchange(CancellationTokenSource cancellation)
+            : base(SqlProtocol.Family)
         {
             _cancellation = cancellation;
         }
 
-        public ProtocolMessageFamily Family => SqlProtocol.Family;
-
-        public async ValueTask<bool> ExecuteAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken = default)
+        protected override async ValueTask<bool> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken cancellationToken)
         {
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty), cancellationToken);
             await writer.FlushAsync(cancellationToken);

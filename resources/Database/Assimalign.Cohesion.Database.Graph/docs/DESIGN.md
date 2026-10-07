@@ -875,7 +875,7 @@ Node labels and relationship types remain model strings; no fake table schema is
 After Ready, the path client sends ExecutePaths and consumes zero or more Path messages followed
 by one PathsComplete, or a shared Error with no completion. Requests are serialized. The completion
 count must match received paths; zero matches requires count zero. Each path fits one frame.
-The client enumerates those frames through `IDatabaseStreamingExchange` and
+The client enumerates those frames through a `DatabaseStreamingExchange` and
 `ExecuteStreamingAsync`, keeping the shared connection lease until enumeration completes or is
 disposed. Consuming PathsComplete or a terminal statement Error permits reuse; cancellation or
 early disposal before terminal consumption leaves the exchange incomplete and discards the

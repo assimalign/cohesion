@@ -124,7 +124,7 @@ public sealed class SqlJoinWireTests
             cancellationToken: SqlClientTestHarness.Timeout())).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
 
-    private static async Task SeedAsync(ISqlConnection connection)
+    private static async Task SeedAsync(SqlConnection connection)
     {
         await connection.ExecuteAsync("CREATE TABLE usr.Users (Id INT PRIMARY KEY, FirstName TEXT, LastName TEXT)",
             cancellationToken: SqlClientTestHarness.Timeout());

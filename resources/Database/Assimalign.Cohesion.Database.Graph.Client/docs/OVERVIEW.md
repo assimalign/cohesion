@@ -2,16 +2,16 @@
 
 `Assimalign.Cohesion.Database.Graph.Client` is the pooled, transport-independent client for
 `GraphDatabaseServer`. It ships as a NuGet package outside the App.Database shared framework.
-Create an `IGraphClient` through `GraphClient.Create`, supplying `GraphClientOptions` with shared
+Create the sealed `GraphClient` through `GraphClient.Create`, supplying `GraphClientOptions` with shared
 database settings and a Connections transport factory.
 
 ```mermaid
 flowchart LR
-    Caller --> IGraphClient
-    IGraphClient --> IGraphConnection
-    IGraphConnection -->|scalar statements| GraphResultSet
-    IGraphConnection -->|streamed entity projections| GraphPath
-    IGraphConnection --> Core[Database.Client pool]
+    Caller --> GraphClient
+    GraphClient --> GraphConnection
+    GraphConnection -->|scalar statements| GraphResultSet
+    GraphConnection -->|streamed entity projections| GraphPath
+    GraphConnection --> Core[Database.Client pool]
     Core --> Server[GraphDatabaseServer]
 ```
 

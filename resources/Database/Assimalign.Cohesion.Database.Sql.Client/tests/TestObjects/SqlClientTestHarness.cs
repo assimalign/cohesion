@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 internal sealed class SqlClientTestHarness : IAsyncDisposable
 {
-    private SqlClientTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, SqlDatabaseServer server, ISqlClient client)
+    private SqlClientTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, SqlDatabaseServer server, SqlClient client)
     {
         Engine = engine;
         Listener = listener;
@@ -28,14 +28,14 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
 
     public SqlDatabaseServer Server { get; }
 
-    public ISqlClient Client { get; }
+    public SqlClient Client { get; }
 
     public const string DatabaseName = "app";
 
     public static async Task<SqlClientTestHarness> StartAsync(
         Action<SqlDatabaseServerOptions>? configureServer = null,
         Action<DatabaseConnectionSettings>? configureSettings = null,
-        ISqlClientObserver? observer = null,
+        SqlClientObserver? observer = null,
         Action<SqlDatabaseEngineOptions>? configureEngine = null)
     {
         var engineOptions = new SqlDatabaseEngineOptions { EngineName = "sql-typed-client-e2e" };

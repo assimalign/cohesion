@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
 internal sealed class BlobClientTestHarness : IAsyncDisposable
 {
     private BlobClientTestHarness(BlobDatabaseEngine engine, BlobDatabase database, BlobDatabaseSession session, BlobContainer container,
-        InMemoryConnectionListener listener, BlobDatabaseServer server, RecordingConnectionFactory factory, IBlobClient client)
+        InMemoryConnectionListener listener, BlobDatabaseServer server, RecordingConnectionFactory factory, BlobClient client)
     {
         Engine = engine;
         Database = database;
@@ -36,7 +36,7 @@ internal sealed class BlobClientTestHarness : IAsyncDisposable
     internal InMemoryConnectionListener Listener { get; }
     internal BlobDatabaseServer Server { get; }
     internal RecordingConnectionFactory Factory { get; }
-    internal IBlobClient Client { get; }
+    internal BlobClient Client { get; }
 
     internal static async Task<BlobClientTestHarness> StartAsync(CancellationToken token)
     {

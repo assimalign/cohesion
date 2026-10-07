@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 /// </summary>
 internal sealed class DatabaseHostTestHarness : IAsyncDisposable
 {
-    private DatabaseHostTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, SqlDatabaseServer server, DatabaseApplication application, IDatabaseClient client)
+    private DatabaseHostTestHarness(SqlDatabaseEngine engine, InMemoryConnectionListener listener, SqlDatabaseServer server, DatabaseApplication application, DatabaseClient client)
     {
         Engine = engine;
         Listener = listener;
@@ -35,7 +35,7 @@ internal sealed class DatabaseHostTestHarness : IAsyncDisposable
 
     public DatabaseApplication Application { get; }
 
-    public IDatabaseClient Client { get; }
+    public DatabaseClient Client { get; }
 
     public const string DatabaseName = "app";
 
