@@ -2226,7 +2226,12 @@ the contract HTTP/1.1 and HTTP/3 already had, whose exchanges link their
 `RequestCancelled` to the enumeration token directly. HTTP/2 passes no connection
 token into each exchange, because a linked source per stream registered on a
 connection-lifetime token would accumulate until the connection closes; acting
-once, when the pump stops, needs no per-stream registration.
+once, when the pump stops, needs no per-stream registration. Since #1307
+`Http2Stream.CreateContextAsync` takes no connection token at all (it used to accept
+one, always `None`, and would have leaked the linked source it built from it), so
+the abort token an exchange observes is its stream's own. `Http2ExchangeTokenTests`
+pins the bound: after many sequential exchanges on one connection, cancelling the
+connection's token reaches none of the completed ones.
 
 The drain tracks an interlocked `_activeExchangeCount` rather than reading
 the `_streams` table from the close thread. A stream is counted by the pump

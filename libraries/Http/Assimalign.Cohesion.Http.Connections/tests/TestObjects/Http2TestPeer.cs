@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -27,13 +28,18 @@ internal sealed class Http2TestPeer : IAsyncDisposable
     private readonly IAsyncEnumerator<IHttpContext> _contexts;
     private long _nextPing;
 
-    private Http2TestPeer(TestConnection transport, HttpConnectionListener listener, IHttpConnection connection, IHttpConnectionContext connectionContext)
+    private Http2TestPeer(
+        TestConnection transport,
+        HttpConnectionListener listener,
+        IHttpConnection connection,
+        IHttpConnectionContext connectionContext,
+        CancellationToken receiveToken)
     {
         Transport = transport;
         _listener = listener;
         _connection = connection;
         ConnectionContext = connectionContext;
-        _contexts = connectionContext.ReceiveAsync().GetAsyncEnumerator();
+        _contexts = connectionContext.ReceiveAsync(receiveToken).GetAsyncEnumerator();
         Output = new Http2FrameCollector(transport);
     }
 
@@ -60,12 +66,17 @@ internal sealed class Http2TestPeer : IAsyncDisposable
     /// writes), or <see langword="null"/> to serve the transport as is. The peer keeps reading and
     /// writing the undecorated transport.
     /// </param>
+    /// <param name="receiveToken">
+    /// The token the peer passes to <see cref="IHttpConnectionContext.ReceiveAsync"/>, standing in for
+    /// the host's token for the connection; cancelling it is the host giving up on the connection.
+    /// </param>
     /// <returns>The connected peer.</returns>
     public static async Task<Http2TestPeer> ConnectAsync(
         HttpConnectionListenerOptions? options = null,
         Action<Http2ConnectionListenerOptions>? configure = null,
         uint? initialWindowSize = null,
-        Func<Connection, Connection>? decorate = null)
+        Func<Connection, Connection>? decorate = null,
+        CancellationToken receiveToken = default)
     {
         byte[] settings = initialWindowSize is { } windowSize
             ? Http2TestSettings.SettingsPayload((Http2TestSettings.Parameter.InitialWindowSize, windowSize))
@@ -82,7 +93,7 @@ internal sealed class Http2TestPeer : IAsyncDisposable
         HttpConnectionListener listener = new(options);
         IHttpConnection connection = await listener.AcceptOrListenAsync();
         IHttpConnectionContext connectionContext = await connection.OpenAsync();
-        return new Http2TestPeer(transport, listener, connection, connectionContext);
+        return new Http2TestPeer(transport, listener, connection, connectionContext, receiveToken);
     }
 
     /// <summary>The request fields of a plain <c>GET</c> to <paramref name="path"/>.</summary>
@@ -122,6 +133,27 @@ internal sealed class Http2TestPeer : IAsyncDisposable
         bool dispatched = await _contexts.MoveNextAsync().AsTask().WaitAsync(_timeout);
         dispatched.ShouldBeTrue("the server should have dispatched another request");
         return _contexts.Current;
+    }
+
+    /// <summary>
+    /// Waits for the server's receive enumeration to end — once the receive token is cancelled, its
+    /// frame pump has stopped and aborted whatever it was going to abort — and asserts it dispatched
+    /// nothing more.
+    /// </summary>
+    public async Task WaitForReceiveEndAsync()
+    {
+        bool dispatched;
+
+        try
+        {
+            dispatched = await _contexts.MoveNextAsync().AsTask().WaitAsync(_timeout);
+        }
+        catch (OperationCanceledException)
+        {
+            dispatched = false;
+        }
+
+        dispatched.ShouldBeFalse("the server should have stopped receiving");
     }
 
     /// <summary>Sends a HEADERS frame (END_HEADERS, plus END_STREAM when requested).</summary>

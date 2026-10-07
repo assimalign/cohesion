@@ -1924,7 +1924,6 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 _headerDecoder,
                 ConnectionInfo,
                 GetScheme(),
-                CancellationToken.None,
                 OnRequestBodyConsumedAsync,
                 _requestInterceptors,
                 _http2Limits.MaxRequestBodySize).ConfigureAwait(false);

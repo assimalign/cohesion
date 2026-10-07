@@ -889,7 +889,6 @@ internal sealed class Http2Stream
     /// <param name="decoder">The connection's HPACK decoder.</param>
     /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
     /// <param name="fallbackScheme">The connection scheme used when the request omits <c>:scheme</c>.</param>
-    /// <param name="connectionAborted">The connection-teardown token linked into the request's abort token.</param>
     /// <param name="onBodyConsumed">The consume callback crediting body flow-control cost back to the peer.</param>
     /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
     /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
@@ -914,7 +913,6 @@ internal sealed class Http2Stream
         HPackDecoder decoder,
         HttpConnectionInfo connectionInfo,
         HttpScheme fallbackScheme,
-        CancellationToken connectionAborted,
         Func<int, int, CancellationToken, ValueTask> onBodyConsumed,
         IHttpExchangeInterceptor[] interceptors,
         long? maxRequestBodySize)
@@ -924,14 +922,12 @@ internal sealed class Http2Stream
             throw new InvalidOperationException("The HTTP/2 stream is not ready to create a request context.");
         }
 
-        // RFC 9113 §5.4.2 — RequestAborted fires when either the connection
-        // is being torn down (connectionAborted token) OR this specific
-        // stream is reset (our internal _abortedSource via RequestAborted).
-        // Link them so the application sees a single token that fires on
-        // either condition.
-        CancellationToken requestAborted = connectionAborted == default
-            ? RequestAborted
-            : CancellationTokenSource.CreateLinkedTokenSource(connectionAborted, RequestAborted).Token;
+        // RFC 9113 §5.4.2 — the exchange is aborted through this stream's own token alone: the stream
+        // fires it when it is reset, and the frame pump fires it for every exchange still in flight
+        // when the connection stops (AbortOnShutdown / AbortOnCancellation). No connection-scoped
+        // token is linked in (#1307): a linked source per exchange would stay registered on the
+        // connection's token for the connection's life, one per exchange the connection served.
+        CancellationToken requestAborted = RequestAborted;
 
         // RFC 9113 §4.3 — the whole block is decoded before any field is judged. A block HPACK cannot
         // decode propagates as an HPackDecodingException, which the connection maps to
