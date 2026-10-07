@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -267,10 +269,7 @@ internal static class SqlSamples
             );
             CREATE INDEX IF NOT EXISTS ix_orders_customer ON orders (customer_id);
             """),
-        new("2. Insert rows", """
-            INSERT INTO customers (id, name, city) VALUES (1, 'Ada', 'London'), (2, 'Grace', 'Arlington'), (3, 'Linus', 'Helsinki');
-            INSERT INTO orders (id, customer_id, item, amount) VALUES (10, 1, 'engine', 120.50), (11, 1, 'gears', 15.25), (12, 2, 'compiler', 99.99), (13, 3, 'kernel', 42.00);
-            """),
+        new("2. Insert rows", InsertRowsScript()),
         new("3. Query: filter, join, group", """
             SELECT id, name, city FROM customers WHERE city = 'LONDON' ORDER BY id;
             SELECT c.name, o.item, o.amount FROM customers AS c INNER JOIN orders AS o ON c.id = o.customer_id ORDER BY o.amount DESC;
@@ -298,4 +297,39 @@ internal static class SqlSamples
             DROP TABLE IF EXISTS customers;
             """),
     ];
+
+    // Sample 2 inserts 1,000 customers and 1,000 orders, one multi-row INSERT per table. The rows
+    // are generated so this file stays readable; the script the editor shows is plain SQL. The
+    // original rows keep their ids and values (customers 1-3, orders 10-13), so samples 3 and 4
+    // still find Ada in London and update customer 1. Lower-case 'london' rows exercise the
+    // city column's case_insensitive collation in sample 3's WHERE city = 'LONDON'.
+    private static string InsertRowsScript()
+    {
+        const int rowCount = 1_000;
+        string[] firstNames = ["Ada", "Grace", "Linus", "Barbara", "Edsger", "Margaret", "Alan", "Frances", "Donald", "Radia"];
+        string[] lastNames = ["Lovelace", "Hopper", "Torvalds", "Liskov", "Dijkstra", "Hamilton", "Turing", "Allen", "Knuth", "Perlman"];
+        string[] cities = ["London", "Arlington", "Helsinki", "Paris", "Berlin", "Tokyo", "london", "Oslo"];
+        string[] items = ["engine", "gears", "compiler", "kernel", "parser", "router", "sensor", "cable"];
+
+        var script = new StringBuilder();
+        script.Append("INSERT INTO customers (id, name, city) VALUES\n");
+        script.Append("    (1, 'Ada', 'London'),\n    (2, 'Grace', 'Arlington'),\n    (3, 'Linus', 'Helsinki')");
+        for (int id = 4; id <= rowCount; id++)
+        {
+            string name = $"{firstNames[id % firstNames.Length]} {lastNames[id / firstNames.Length % lastNames.Length]}";
+            script.Append(CultureInfo.InvariantCulture, $",\n    ({id}, '{name}', '{cities[id % cities.Length]}')");
+        }
+
+        script.Append(";\n\nINSERT INTO orders (id, customer_id, item, amount) VALUES\n");
+        script.Append("    (10, 1, 'engine', 120.50),\n    (11, 1, 'gears', 15.25),\n    (12, 2, 'compiler', 99.99),\n    (13, 3, 'kernel', 42.00)");
+        for (int id = 14; id < 10 + rowCount; id++)
+        {
+            int customerId = id * 7 % rowCount + 1;
+            decimal amount = id * 1237 % 100_000 / 100m;
+            script.Append(CultureInfo.InvariantCulture, $",\n    ({id}, {customerId}, '{items[id % items.Length]}', {amount:0.00})");
+        }
+
+        script.Append(";\n");
+        return script.ToString();
+    }
 }
