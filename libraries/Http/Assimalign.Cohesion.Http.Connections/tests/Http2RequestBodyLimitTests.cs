@@ -211,8 +211,8 @@ public class Http2RequestBodyLimitTests
         headers["content-length"].ShouldBe("0");
         frames.ShouldNotContain(frame => frame.IsData);
 
-        // Only the first reset is asserted: DATA the peer had already sent draws follow-up
-        // RST_STREAM(STREAM_CLOSED)s on the retired stream.
+        // The first reset is the one asserted. DATA the peer had already sent arrives on a stream the
+        // server reset and is ignored (RFC 9113 §5.1, #1318), so it draws no reset of its own.
         Http2WireFrame reset = frames.First(frame => frame.IsRstStream);
         reset.GetRstStreamErrorCode().ShouldBe(resetCode);
         frames.ToList().IndexOf(reset).ShouldBeGreaterThan(frames.ToList().IndexOf(head));

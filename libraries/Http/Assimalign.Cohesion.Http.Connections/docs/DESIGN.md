@@ -1669,8 +1669,13 @@ octets to the peer:
 
 - **Recently-closed discard.** DATA that arrives for a stream we have already
   retired is discarded, but its connection-window cost is credited back
-  (RFC 9113 §6.9) before the stream error is raised, so a benign close race
-  does not shrink the window.
+  (RFC 9113 §6.9), so a benign close race does not shrink the window. What
+  follows depends on how the stream ended. A stream the server reset (or
+  refused) while the peer was still sending ignores the frame with no reply,
+  since the peer sent it before the reset reached it (RFC 9113 §5.1, #1318);
+  a WINDOW_UPDATE on such a stream is ignored too, even a zero increment that
+  would be a stream error on a live stream. Any other retired stream answers
+  `RST_STREAM(STREAM_CLOSED)`.
 - **Removal reclaim.** When a stream is removed while buffered body sits
   unconsumed (an ignored body, a reset, an abandoned upload), its outstanding
   receive debt — exactly `InitialReceiveWindow - ReceiveWindow.Available` — is
@@ -2035,8 +2040,9 @@ Other HEADERS frames for a retired stream keep their connection error, the order
 `PROTOCOL_ERROR` of RFC 9113 §5.1.1: a stream both sides ended, one the peer reset, or
 one dropped from the bounded record. That now includes the highest stream id seen so
 far. Before #1314, a late trailer section on that stream re-opened it and was
-dispatched as a new request. DATA on a retired stream still draws
-`RST_STREAM(STREAM_CLOSED)` (see "Recently-closed discard").
+dispatched as a new request. DATA and WINDOW_UPDATE frames on a stream the server
+reset are ignored the same way, and DATA is still credited back to the connection
+window (#1318, see "Recently-closed discard").
 
 ### Response trailers
 

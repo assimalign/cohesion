@@ -978,6 +978,13 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         int increment = receivedFrame.Frame.WindowUpdateSizeIncrement;
 
+        // RFC 9113 §5.1 — a WINDOW_UPDATE on a stream the server reset while the peer was still
+        // sending is ignored, whatever its increment: the peer sent it before the reset reached it.
+        if (receivedFrame.Frame.StreamId != 0 && IsResetByServer(receivedFrame.Frame.StreamId))
+        {
+            return;
+        }
+
         // RFC 9113 §6.9 — an increment of 0 is a protocol error:
         // connection-level when delivered on stream 0, stream-level
         // when delivered on a specific stream.
@@ -1665,6 +1672,19 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         _recentlyResetStreams.Enqueue(streamId);
     }
 
+    /// <summary>
+    /// Whether the server reset <paramref name="streamId"/> (or refused it) while the peer was still
+    /// sending, and still remembers doing so (see <see cref="RememberResetStreamLocked"/>). Frames the
+    /// peer sends on such a stream are ignored (RFC 9113 §5.1).
+    /// </summary>
+    private bool IsResetByServer(int streamId)
+    {
+        lock (_syncRoot)
+        {
+            return _recentlyResetStreams.Contains(streamId);
+        }
+    }
+
     private async Task<Http2Context?> ProcessDataFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
     {
         // RFC 9113 §6.1 — DATA frames MUST be associated with a stream;
@@ -1697,6 +1717,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
 
         Http2Stream? stream;
         bool recentlyClosed = false;
+        bool resetByServer = false;
         lock (_syncRoot)
         {
             if (flowControlLength > 0 && !_connectionReceiveWindow.TryConsume(flowControlLength))
@@ -1720,6 +1741,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 }
 
                 recentlyClosed = true;
+                resetByServer = _recentlyResetStreams.Contains(receivedFrame.Frame.StreamId);
             }
             else if (flowControlLength > 0 && !stream.ReceiveWindow.TryConsume(flowControlLength))
             {
@@ -1737,8 +1759,7 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
             // We consumed the connection window above but are discarding this
             // DATA (the stream is gone). RFC 9113 §6.9 — credit the connection
             // window back so the peer's connection-level accounting does not
-            // permanently shrink, then surface the stream error so a RST_STREAM
-            // tells the peer to stop.
+            // permanently shrink.
             if (flowControlLength > 0)
             {
                 lock (_syncRoot)
@@ -1749,6 +1770,14 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
                 await EmitWindowUpdateAsync(0, flowControlLength, cancellationToken).ConfigureAwait(false);
             }
 
+            // RFC 9113 §5.1 — the server reset this stream while the peer was still sending, and
+            // the peer sent this frame before the reset reached it: ignore it, with no reply.
+            if (resetByServer)
+            {
+                return null;
+            }
+
+            // Any other retired stream: surface the stream error so a RST_STREAM tells the peer to stop.
             throw new Http2StreamException(
                 receivedFrame.Frame.StreamId,
                 Http2ErrorCode.StreamClosed,
