@@ -167,7 +167,7 @@ public sealed class SqlComparisonWireTests
         }
     }
 
-    private static async Task<object?[]> IdsAsync(ISqlConnection connection, string sql, Dictionary<string, object?> parameters)
+    private static async Task<object?[]> IdsAsync(SqlConnection connection, string sql, Dictionary<string, object?> parameters)
         => (await connection.QueryAsync(sql, parameters, TestTimeout.Token())).Select(row => row["id"]).ToArray();
 
     /// <summary>
@@ -182,7 +182,7 @@ public sealed class SqlComparisonWireTests
         return databaseSession.LastStatementMetrics.ShouldNotBeNull().AccessPath;
     }
 
-    private static ISqlClient CreateClient(ServerTestHarness harness)
+    private static SqlClient CreateClient(ServerTestHarness harness)
         => SqlClient.Create(new SqlClientOptions
         {
             Settings = new DatabaseConnectionSettings

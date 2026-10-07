@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Tests;
 /// A telemetry observer that records the executing / executed / failed callbacks
 /// it receives, for asserting the telemetry hook fires around commands.
 /// </summary>
-internal sealed class RecordingObserver : IKeyValueClientObserver
+internal sealed class RecordingObserver : KeyValueClientObserver
 {
     public List<string> Executing { get; } = new();
 
@@ -15,11 +15,11 @@ internal sealed class RecordingObserver : IKeyValueClientObserver
 
     public List<(string CommandText, KeyValueClientErrorKind Kind)> Failed { get; } = new();
 
-    public void OnExecuting(string commandText, int parameterCount) => Executing.Add(commandText);
+    protected override void OnExecuting(string commandText, int parameterCount) => Executing.Add(commandText);
 
-    public void OnExecuted(string commandText, long rowCount, long affectedCount, TimeSpan elapsed)
+    protected override void OnExecuted(string commandText, long rowCount, long affectedCount, TimeSpan elapsed)
         => Executed.Add((commandText, rowCount, affectedCount));
 
-    public void OnFailed(string commandText, KeyValueClientException exception, TimeSpan elapsed)
+    protected override void OnFailed(string commandText, KeyValueClientException exception, TimeSpan elapsed)
         => Failed.Add((commandText, exception.Kind));
 }

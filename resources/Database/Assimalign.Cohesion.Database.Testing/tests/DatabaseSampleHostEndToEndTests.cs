@@ -374,8 +374,8 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         Uri endpoint,
         CancellationToken cancellationToken)
     {
-        await using ISqlClient client = CreateSqlClient(endpoint);
-        await using ISqlConnection connection = await client.ConnectAsync(cancellationToken);
+        await using SqlClient client = CreateSqlClient(endpoint);
+        await using SqlConnection connection = await client.ConnectAsync(cancellationToken);
 
         await connection.ExecuteAsync(
             "INSERT INTO orders (Id, Item) VALUES (1, 'widget'), (2, 'gadget')",
@@ -392,8 +392,8 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         Uri endpoint,
         CancellationToken cancellationToken)
     {
-        await using ISqlClient client = CreateSqlClient(endpoint);
-        await using ISqlConnection connection = await client.ConnectAsync(cancellationToken);
+        await using SqlClient client = CreateSqlClient(endpoint);
+        await using SqlConnection connection = await client.ConnectAsync(cancellationToken);
 
         SqlResultSet rows = await connection.QueryAsync(
             "SELECT Id, Item FROM orders ORDER BY Id",
@@ -402,7 +402,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         rows[1].GetString("Item").ShouldBe("gadget");
     }
 
-    private static ISqlClient CreateSqlClient(Uri endpoint)
+    private static SqlClient CreateSqlClient(Uri endpoint)
     {
         return SqlClient.Create(new SqlClientOptions
         {

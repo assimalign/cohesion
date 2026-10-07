@@ -168,6 +168,26 @@ public class KeyValueClientTests
         observer.Failed.ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Telemetry: an observer overrides only the hooks it needs, and a throwing hook faults no command")]
+    public async Task Observer_PartialAndThrowing_ShouldNotFaultCommands()
+    {
+        // Arrange
+        var observer = new ExecutedOnlyObserver();
+        await using var harness = await KeyValueClientTestHarness.StartAsync(observer: observer);
+        await using var connection = await harness.Client.ConnectAsync(KeyValueClientTestHarness.Timeout());
+
+        // Act
+        long etag = await connection.PutAsync(Bytes("k"), Bytes("v"), KeyValueClientTestHarness.Timeout());
+        KeyValueClientEntry? entry = await connection.GetAsync(Bytes("k"), KeyValueClientTestHarness.Timeout());
+
+        // Assert: the base's empty hooks ran for the rest, and the throwing hook changed no result.
+        entry.ShouldNotBeNull();
+        entry.Value.ETag.ShouldBe(etag);
+        Text(entry.Value.Value).ShouldBe("v");
+        observer.Executed.ShouldBe(2);
+        connection.IsOpen.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Errors: an authentication rejection maps to AuthenticationFailure")]
     public async Task ConnectAsync_WithRejectingAuthenticator_ShouldMapAuthenticationFailure()
     {
@@ -203,5 +223,17 @@ public class KeyValueClientTests
     {
         protected override ValueTask<bool> AuthenticateCoreAsync(string database, string principal, ReadOnlyMemory<byte> evidence, System.Threading.CancellationToken cancellationToken)
             => ValueTask.FromResult(false);
+    }
+
+    // Overrides one hook; the base's empty bodies cover the other two.
+    private sealed class ExecutedOnlyObserver : KeyValueClientObserver
+    {
+        internal int Executed { get; private set; }
+
+        protected override void OnExecuted(string commandText, long rowCount, long affectedCount, TimeSpan elapsed)
+        {
+            Executed++;
+            throw new InvalidOperationException("The observer failed.");
+        }
     }
 }

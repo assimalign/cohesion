@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database.KeyValuePair.Client — Overview
 
-The typed key-value client: `IKeyValueClient`/`IKeyValueConnection`, a
+The typed key-value client: the sealed `KeyValueClient` and `KeyValueConnection`, a
 point/range surface (get/put/delete/exists/scan with etag-conditional writes)
 over the shared `Database.Client` pooling core.
 
@@ -18,11 +18,11 @@ the stable `KeyValueClientErrorKind` taxonomy with the wire code preserved.
 
 ## Scope
 
-- `KeyValueClient.Create(options)` → pooling `IKeyValueClient`; rented
-  `IKeyValueConnection`s return to the pool on dispose.
+- `KeyValueClient.Create(options)` → the sealed, pooling `KeyValueClient`; rented
+  `KeyValueConnection`s return to the pool on dispose.
 - `KeyValueClientEntry` (key/value/etag), `KeyValueWriteResult` (applied/etag),
   `KeyValueWriteCondition` (IfAbsent / IfETagMatches), `KeyValueScanRange`.
-- `IKeyValueClientObserver` — the per-command telemetry hook (grammar text and
+- `KeyValueClientObserver` — the abstract per-command telemetry hook (grammar text and
   counts only; key/value bytes never reach the observer).
 - `KeyValueClientException` + `KeyValueClientErrorKind` — the error surface,
   with `ConnectionUsable` distinguishing command-level failures from broken

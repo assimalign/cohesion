@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 
 /// <summary>
 /// A SQL command: statement text plus its bound parameters, executed against an
-/// <see cref="ISqlConnection"/>.
+/// <see cref="SqlConnection"/>.
 /// </summary>
 /// <remarks>
 /// A command is a mutable, reusable request object separate from any internal plan

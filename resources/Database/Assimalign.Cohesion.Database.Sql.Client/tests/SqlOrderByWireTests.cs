@@ -316,7 +316,7 @@ public sealed class SqlOrderByWireTests
         (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("ada");
     }
 
-    private static async Task SeedAsync(ISqlConnection connection)
+    private static async Task SeedAsync(SqlConnection connection)
     {
         await ExecuteAsync(connection, "CREATE TABLE ordering_rows (id INT PRIMARY KEY, age INT, years INT, priority INT)");
         await ExecuteAsync(connection, "INSERT INTO ordering_rows VALUES (40, 24, 100, 2), (10, 42, 500, NULL), (30, 18, 200, 1), (20, 35, 400, 2), (50, 29, 300, NULL)");
@@ -324,7 +324,7 @@ public sealed class SqlOrderByWireTests
 
     private static object?[][] ProjectedRows() => [[24, 40], [42, 10], [18, 30], [35, 20], [29, 50]];
 
-    private static async Task AssertOrderedAsync(ISqlConnection connection, string projection, string ordering,
+    private static async Task AssertOrderedAsync(SqlConnection connection, string projection, string ordering,
         object?[][] insertionOrder, object?[][] expected, string pagination = "")
     {
         var scanned = await QueryAsync(connection, $"{projection} {pagination}");
@@ -345,9 +345,9 @@ public sealed class SqlOrderByWireTests
     private static bool SameRows(IReadOnlyList<object?[]> left, IReadOnlyList<object?[]> right)
         => left.Count == right.Count && left.Zip(right).All(pair => pair.First.SequenceEqual(pair.Second));
 
-    private static Task<long> ExecuteAsync(ISqlConnection connection, string sql)
+    private static Task<long> ExecuteAsync(SqlConnection connection, string sql)
         => connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()).AsTask();
 
-    private static Task<SqlResultSet> QueryAsync(ISqlConnection connection, string sql)
+    private static Task<SqlResultSet> QueryAsync(SqlConnection connection, string sql)
         => connection.QueryAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()).AsTask();
 }

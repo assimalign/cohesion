@@ -28,13 +28,15 @@ Other model clients do not depend on this package.
 ## SQL-owned exchange
 
 `SqlClient.Create` binds the pool to `SqlProtocol.Family`.
-`SqlExecuteExchange` implements `IDatabaseProtocolExchange<DatabaseClientResult>`:
+`SqlExecuteExchange` derives from `DatabaseProtocolExchange<DatabaseClientResult>`:
 it encodes parameters with `DatabaseValueCodec`, writes the execute request,
 consumes SQL's header/data/completion exchange, and materializes values.
 `SqlConnection` projects this result into `SqlResultSet`.
 
-`SqlProtocolConnectionExtensions.ExecuteAsync` provides the same operation on a
-rented `IDatabaseConnection` bound to SQL's exact family instance.
+`SqlProtocolConnectionExtensions`, an `extension(DatabaseConnection)` block, provides
+the same operation as `ExecuteAsync` on a rented `DatabaseConnection` bound to SQL's
+exact family instance. It stays an extension because the connection lives in
+Database.Client, which references no model package.
 `DatabaseClientResult` and `DatabaseClientColumn` moved to this package's
 namespace. Typed SQL APIs and protocol 1.0 wire behavior are unchanged.
 
@@ -58,7 +60,7 @@ wire. SQL parsing remains the server's responsibility.
 Disposing a typed connection returns its shared authenticated session; disposing
 the client closes its pool. Connections support one exchange at a time.
 
-`ISqlConnection.AbortAsync` discards a rental and closes its session instead of
+`SqlConnection.AbortAsync` discards a rental and closes its session instead of
 returning it to the pool. Use it when SQL session state cannot be reset, including
 a failed ROLLBACK or uncertain COMMIT. It delegates to the shared client's discard
 operation and is not cancellable. Discarding prevents session leakage; it cannot
@@ -79,7 +81,9 @@ keep the connection reusable.
 
 Observers receive synchronous primitive callbacks before execution, on completion,
 and on failure. Observer exceptions are swallowed so telemetry cannot change the
-command outcome.
+command outcome. An observer derives from the abstract `SqlClientObserver`, whose
+three hooks are `protected internal virtual` with empty bodies: an observer overrides
+only the hooks it records, and only the owning `SqlConnection` fires them.
 
 ## AOT and non-goals
 
@@ -88,3 +92,30 @@ generation. Transports are typed options, never string-named plugins. Full resul
 materialization is SQL client policy; an incremental API can be added here
 independently. Parsing, ORM behavior, retries, and explicit wire transactions
 remain outside the current surface.
+
+## Concrete types (concrete-types plan, phase 5, #1261)
+
+The package has no public interface left and no `Abstractions/` folder
+([plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) §7, "P5, as landed").
+
+| Type | Shape | Was |
+|---|---|---|
+| `SqlClient` | sealed; `Create(SqlClientOptions)` over a private constructor | the static `SqlClient` factory, `ISqlClient` and the internal `DefaultSqlClient` |
+| `SqlConnection` | sealed; internal constructor; moved out of `Internal/` | `ISqlConnection` and the internal `SqlConnection` |
+| `SqlClientObserver` | abstract; protected constructor; `protected internal virtual` hooks with empty bodies | `ISqlClientObserver` |
+| `SqlProtocolConnectionExtensions` | `extension(DatabaseConnection)` block | an old-style `this IDatabaseConnection` extension |
+
+- **Why the observer is abstract.** It is an inverted seam (`database-area.md`, rule 2): the
+  application supplies it through `SqlClientOptions.Observer` and the connection fires it; no
+  observer ships. Its constructor is protected because applications derive from it (rule 3),
+  and it carries the deviation marker. Because the hooks have empty bodies, an observer overrides
+  only what it records; one that implemented the interface had to implement all three.
+  `SqlClientTests.QueryAsync_WithPartialThrowingObserver_ShouldKeepEachCommandOutcome` covers a
+  one-hook observer that throws.
+- **Typed surface.** `ConnectAsync` returns the sealed `SqlConnection`, which wraps the core's
+  sealed `DatabaseConnection`; nothing casts. `Settings` reads the core's settings.
+- **What changed for a caller.** `ISqlClient` and `ISqlConnection` become `SqlClient` and
+  `SqlConnection` (the Sdk.ApplicationModel `EnabledWeb` fixture and Studio's SQL workspace were
+  retyped), and an observer overrides `protected` hooks instead of implementing public ones.
+  The sealed `SqlConnection` shares its name with `Microsoft.Data.SqlClient.SqlConnection`; a
+  file that imports both namespaces aliases one (plan §11, R11).

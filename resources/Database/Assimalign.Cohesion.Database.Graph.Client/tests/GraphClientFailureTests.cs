@@ -144,7 +144,7 @@ public sealed class GraphClientFailureTests
         await server.WaitAsync(timeout.Token);
     }
 
-    private static IGraphClient CreateClient(InMemoryConnectionListener listener)
+    private static GraphClient CreateClient(InMemoryConnectionListener listener)
         => GraphClient.Create(new()
         {
             Settings = new DatabaseConnectionSettings { Database = "graph", EndPoint = listener.EndPoint, MaxPoolSize = 1 },

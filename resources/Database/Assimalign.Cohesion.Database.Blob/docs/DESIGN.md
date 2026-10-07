@@ -494,7 +494,7 @@ cancels a sender waiting for acknowledgement. Callers should supply cancellation
 requests, commits destination storage, sends the final publication acknowledgement, closes the
 channel, or disposes caller streams. `ReceiveAsync` returns the content type and verified actual
 length, replacing an initially unknown length. Reader/writer overloads consume the shared
-`IDatabaseProtocolExchange` frame endpoints without requiring ownership of its ProtocolChannel.
+`DatabaseProtocolExchange` frame endpoints without requiring ownership of its ProtocolChannel.
 The overload accepting pre-read metadata resumes immediately after a validated TransferStart;
 the server uses it to open storage with the declared content type before accepting content.
 The caller must retain exclusive access throughout and discard the exchange after failure.

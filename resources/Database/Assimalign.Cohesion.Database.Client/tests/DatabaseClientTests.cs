@@ -127,7 +127,7 @@ public class DatabaseClientTests
         var first = await harness.Client.RentAsync(ClientTestHarness.Timeout());
 
         // Act: the second rent blocks until the first connection returns
-        Task<IDatabaseConnection> pending = harness.Client.RentAsync(ClientTestHarness.Timeout()).AsTask();
+        Task<DatabaseConnection> pending = harness.Client.RentAsync(ClientTestHarness.Timeout()).AsTask();
         await Task.Delay(100);
         pending.IsCompleted.ShouldBeFalse();
 

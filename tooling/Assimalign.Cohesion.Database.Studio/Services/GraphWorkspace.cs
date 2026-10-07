@@ -19,8 +19,8 @@ namespace Assimalign.Cohesion.Database.Studio;
 /// <summary>Graph (GQL): embedded session or <c>Graph.Client</c>, with row and path dispatch.</summary>
 internal sealed partial class GraphWorkspace : LanguageWorkspace
 {
-    private IGraphClient? _client;
-    private IGraphConnection? _connection;
+    private GraphClient? _client;
+    private GraphConnection? _connection;
     private string? _wireDatabase;
 
     public GraphWorkspace(ConnectionMode mode, StudioEngines engines, EndPoint? wireEndPoint)
@@ -30,7 +30,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
 
     public override string LanguageName => "GQL";
 
-    protected override string ClientName => "Graph.Client IGraphConnection";
+    protected override string ClientName => "Graph.Client GraphConnection";
 
     public override bool SupportsGraphResultMode => true;
 
@@ -118,7 +118,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
             return;
         }
 
-        IGraphConnection connection = await EnsureConnectionAsync(cancellationToken).ConfigureAwait(false);
+        GraphConnection connection = await EnsureConnectionAsync(cancellationToken).ConfigureAwait(false);
         if (paths)
         {
             var list = new List<GraphPath>();
@@ -128,7 +128,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
             }
 
             SetPaths(outcome, list);
-            outcome.Note = "IGraphConnection.QueryPathsAsync (ExecutePaths exchange)";
+            outcome.Note = "GraphConnection.QueryPathsAsync (ExecutePaths exchange)";
             return;
         }
 
@@ -139,7 +139,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
             outcome.Table = ToTable(set.Columns.Select(column => (column.Name, column.Type.ToString())), set.Select(row => (IReadOnlyList<object?>)row.ToArray()));
         }
 
-        outcome.Note = "IGraphConnection.QueryAsync (Execute exchange)";
+        outcome.Note = "GraphConnection.QueryAsync (Execute exchange)";
     }
 
     private static void SetPaths(StatementOutcome outcome, IReadOnlyList<GraphPath> paths)
@@ -155,7 +155,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
         outcome.Table = table;
     }
 
-    private async Task<IGraphConnection> EnsureConnectionAsync(CancellationToken cancellationToken)
+    private async Task<GraphConnection> EnsureConnectionAsync(CancellationToken cancellationToken)
     {
         if (_connection is { IsOpen: true } open)
         {

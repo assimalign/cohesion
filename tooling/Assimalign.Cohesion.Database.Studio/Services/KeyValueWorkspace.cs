@@ -43,13 +43,13 @@ internal sealed record KeyValueScan(byte[]? Prefix, byte[]? Start, byte[]? End, 
 
 /// <summary>
 /// Key-value: typed <see cref="KeyValueRequest"/> commands on an embedded session, or
-/// <see cref="IKeyValueConnection"/> over TCP. KEYSPACES has no client verb, so it always runs on an
+/// <see cref="KeyValueConnection"/> over TCP. KEYSPACES has no client verb, so it always runs on an
 /// engine session (embedded / loopback only).
 /// </summary>
 internal sealed class KeyValueWorkspace : ModelWorkspace
 {
-    private IKeyValueClient? _client;
-    private IKeyValueConnection? _connection;
+    private KeyValueClient? _client;
+    private KeyValueConnection? _connection;
     private string? _wireDatabase;
 
     public KeyValueWorkspace(ConnectionMode mode, StudioEngines engines, EndPoint? wireEndPoint)
@@ -57,7 +57,7 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
     {
     }
 
-    protected override string ClientName => "KeyValuePair.Client IKeyValueConnection";
+    protected override string ClientName => "KeyValuePair.Client KeyValueConnection";
 
     protected override async Task OpenWireAsync(string database, EndPoint endPoint, CancellationToken cancellationToken)
     {
@@ -85,7 +85,7 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
         }
     }
 
-    private async Task<IKeyValueConnection> ConnectionAsync(CancellationToken cancellationToken)
+    private async Task<KeyValueConnection> ConnectionAsync(CancellationToken cancellationToken)
     {
         if (_connection is { IsOpen: true } open)
         {
@@ -144,7 +144,7 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
                 return (result.AffectedCount > 0, null);
             }
 
-            IKeyValueConnection connection = await ConnectionAsync(token).ConfigureAwait(false);
+            KeyValueConnection connection = await ConnectionAsync(token).ConfigureAwait(false);
             if (condition == KeyValueCondition.None)
             {
                 long etag = await connection.PutAsync(key, value, token).ConfigureAwait(false);
@@ -173,7 +173,7 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
                 return result.AffectedCount > 0;
             }
 
-            IKeyValueConnection connection = await ConnectionAsync(token).ConfigureAwait(false);
+            KeyValueConnection connection = await ConnectionAsync(token).ConfigureAwait(false);
             return expectedETag is { } etag
                 ? await connection.TryDeleteAsync(key, etag, token).ConfigureAwait(false)
                 : await connection.TryDeleteAsync(key, token).ConfigureAwait(false);

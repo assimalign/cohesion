@@ -166,7 +166,7 @@ The csproj carries the opt-in and only what the gateway must know; everything th
 
 ```csharp
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);                   // a plain .NET exe; endpoints, mounts, settings, environment, signals and the bootstrap credential arrive through ResourceRuntime.Current
-ISqlClient orders = SqlClient.Create(new SqlClientOptions
+SqlClient orders = SqlClient.Create(new SqlClientOptions
 {
     Settings          = DatabaseConnectionSettings.For(Resource.References.AppADatabase.Db.Url, database: "orders", principal: Resource.Name),
     ConnectionFactory = Resource.References.AppADatabase.Db.ConnectionFactory(),       // TCP; in-process resolves to loopback too

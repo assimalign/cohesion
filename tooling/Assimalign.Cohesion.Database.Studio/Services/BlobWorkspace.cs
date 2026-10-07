@@ -39,14 +39,14 @@ internal sealed record BlobItem(BlobProperties Properties)
 }
 
 /// <summary>
-/// Blob: <see cref="BlobDatabaseSession"/> (its container operations) embedded, or <see cref="IBlobConnection"/>
+/// Blob: <see cref="BlobDatabaseSession"/> (its container operations) embedded, or <see cref="BlobConnection"/>
 /// over TCP. The blob wire has no container verbs, so container list/create/drop use an engine
 /// session (embedded / loopback only); against an external server the container name is typed in.
 /// </summary>
 internal sealed class BlobWorkspace : ModelWorkspace
 {
-    private IBlobClient? _client;
-    private IBlobConnection? _connection;
+    private BlobClient? _client;
+    private BlobConnection? _connection;
     private string? _wireDatabase;
 
     public BlobWorkspace(ConnectionMode mode, StudioEngines engines, EndPoint? wireEndPoint)
@@ -54,7 +54,7 @@ internal sealed class BlobWorkspace : ModelWorkspace
     {
     }
 
-    protected override string ClientName => "Blob.Client IBlobConnection";
+    protected override string ClientName => "Blob.Client BlobConnection";
 
     public bool CanManageContainers => Mode != ConnectionMode.WireExternal;
 
@@ -88,7 +88,7 @@ internal sealed class BlobWorkspace : ModelWorkspace
         }
     }
 
-    private async Task<IBlobConnection> ConnectionAsync(CancellationToken cancellationToken)
+    private async Task<BlobConnection> ConnectionAsync(CancellationToken cancellationToken)
     {
         if (_connection is { IsOpen: true } open)
         {
@@ -166,7 +166,7 @@ internal sealed class BlobWorkspace : ModelWorkspace
                 return items;
             }
 
-            IBlobConnection connection = await ConnectionAsync(token).ConfigureAwait(false);
+            BlobConnection connection = await ConnectionAsync(token).ConfigureAwait(false);
             await foreach (BlobProperties properties in connection.GetBlobsAsync(container, prefix, token).ConfigureAwait(false))
             {
                 items.Add(new BlobItem(properties));

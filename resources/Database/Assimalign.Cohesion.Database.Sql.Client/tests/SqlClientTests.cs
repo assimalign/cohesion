@@ -185,6 +185,26 @@ public class SqlClientTests
         observer.Failed.ShouldHaveSingleItem().Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Telemetry: an observer overrides only the hooks it needs, and a throwing hook changes no outcome")]
+    public async Task QueryAsync_WithPartialThrowingObserver_ShouldKeepEachCommandOutcome()
+    {
+        // Arrange
+        var observer = new FailureOnlyObserver();
+        await using var harness = await SqlClientTestHarness.StartAsync(observer: observer);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        SqlResultSet rows = await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout());
+        var failure = await Should.ThrowAsync<SqlClientException>(
+            async () => await connection.QueryAsync("SELECT id FROM missing_table", cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Assert: the base's empty hooks ran for the success, and the throwing failure hook masked nothing.
+        rows.Count.ShouldBe(2);
+        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        observer.Failures.ShouldBe(1);
+        connection.IsOpen.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Pooling: reconnecting reuses the authenticated session")]
     public async Task ConnectAsync_AfterDispose_ShouldReuseSession()
     {
@@ -214,5 +234,17 @@ public class SqlClientTests
         {
             Settings = new DatabaseConnectionSettings { Database = "app" }, // no factory
         }));
+    }
+
+    // Overrides one hook; the base's empty bodies cover the other two.
+    private sealed class FailureOnlyObserver : SqlClientObserver
+    {
+        internal int Failures { get; private set; }
+
+        protected override void OnFailed(string commandText, SqlClientException exception, TimeSpan elapsed)
+        {
+            Failures++;
+            throw new InvalidOperationException("The observer failed.");
+        }
     }
 }

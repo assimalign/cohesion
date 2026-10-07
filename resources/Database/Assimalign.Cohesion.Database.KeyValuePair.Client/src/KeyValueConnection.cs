@@ -5,35 +5,61 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 
 /// <summary>
-/// The default typed key-value connection: wraps one pooled
-/// <see cref="IDatabaseConnection"/>, builds the command grammar
-/// (<c>docs/COMMANDS.md</c> in the model package) with byte parameters, decodes
-/// the model's result shapes, maps failures onto the key-value error surface,
-/// and drives the telemetry observer.
+/// One typed key-value connection: point operations (get/put/delete/exists) and ordered, bounded
+/// scans against the bound database, with per-entry etags for conditional writes.
 /// </summary>
-internal sealed class KeyValueConnection : IKeyValueConnection
+/// <remarks>
+/// <para>
+/// It wraps one pooled <see cref="DatabaseConnection"/>, builds the command grammar
+/// (<c>docs/COMMANDS.md</c> in the model package) with byte parameters, decodes the model's result
+/// shapes, maps failures onto the key-value error surface, and fires the client's
+/// <see cref="KeyValueClientObserver"/> around every command.
+/// </para>
+/// <para>
+/// Connections are not thread-safe: one command at a time, mirroring the engine-session contract. A
+/// connection rented from a <see cref="KeyValueClient"/> returns to its pool on dispose (with its
+/// authenticated session intact when it is still healthy). Conditional misses (compare-and-swap) are
+/// first-class outcomes (<see cref="KeyValueWriteResult"/>, a false return), never exceptions;
+/// concurrency conflicts with other transactions surface as <see cref="KeyValueClientException"/>
+/// with <see cref="KeyValueClientErrorKind.ExecutionFailure"/> (retryable).
+/// </para>
+/// </remarks>
+public sealed class KeyValueConnection : IAsyncDisposable
 {
-    private readonly IDatabaseConnection _connection;
-    private readonly IKeyValueClientObserver? _observer;
+    private readonly DatabaseConnection _connection;
+    private readonly KeyValueClientObserver? _observer;
 
-    internal KeyValueConnection(IDatabaseConnection connection, IKeyValueClientObserver? observer)
+    internal KeyValueConnection(DatabaseConnection connection, KeyValueClientObserver? observer)
     {
         _connection = connection;
         _observer = observer;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the database this connection is bound to.
+    /// </summary>
     public string Database => _connection.Database;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets a value indicating whether the connection is open and usable. A
+    /// command-level failure leaves the connection open; a protocol or transport
+    /// failure marks it broken.
+    /// </summary>
     public bool IsOpen => _connection.IsOpen;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Reads the entry for a key.
+    /// </summary>
+    /// <param name="key">The key to read.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The entry, or null when the key has no visible entry.</returns>
+    /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<KeyValueClientEntry?> GetAsync(ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
         KeyValueProtocolResult result = await ExecuteCoreAsync(
@@ -49,7 +75,14 @@ internal sealed class KeyValueConnection : IKeyValueConnection
         return DecodeEntry("GET @k", result.Rows[0]);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Writes the entry for a key unconditionally, inserting or replacing.
+    /// </summary>
+    /// <param name="key">The key to write.</param>
+    /// <param name="value">The value to store.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The entry's new etag.</returns>
+    /// <exception cref="KeyValueClientException">Thrown when the server reports an error (including a retryable write-write conflict) or the connection breaks mid-exchange.</exception>
     public async ValueTask<long> PutAsync(ReadOnlyMemory<byte> key, ReadOnlyMemory<byte> value, CancellationToken cancellationToken = default)
     {
         const string command = "PUT @k @v";
@@ -66,7 +99,17 @@ internal sealed class KeyValueConnection : IKeyValueConnection
         return outcome.ETag ?? throw MalformedResult(command, "an applied write must carry its new etag");
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Writes the entry for a key under a condition (insert-only or
+    /// compare-and-swap). A conditional miss is a first-class outcome, never an
+    /// exception.
+    /// </summary>
+    /// <param name="key">The key to write.</param>
+    /// <param name="value">The value to store.</param>
+    /// <param name="condition">The write condition.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The outcome: whether the write applied, and the new (or current) etag.</returns>
+    /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<KeyValueWriteResult> PutAsync(ReadOnlyMemory<byte> key, ReadOnlyMemory<byte> value, KeyValueWriteCondition condition, CancellationToken cancellationToken = default)
     {
         string command;
@@ -86,7 +129,13 @@ internal sealed class KeyValueConnection : IKeyValueConnection
         return DecodeWriteOutcome(command, result);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Deletes the entry for a key.
+    /// </summary>
+    /// <param name="key">The key to delete.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>True when an entry was deleted; false when none was visible.</returns>
+    /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<bool> TryDeleteAsync(ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
         KeyValueProtocolResult result = await ExecuteCoreAsync(
@@ -97,7 +146,15 @@ internal sealed class KeyValueConnection : IKeyValueConnection
         return result.AffectedCount > 0;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Deletes the entry for a key only when its current etag matches
+    /// (compare-and-swap). A mismatch is a false return, never an exception.
+    /// </summary>
+    /// <param name="key">The key to delete.</param>
+    /// <param name="expectedETag">The etag the current entry must carry.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>True when the entry was deleted; false when none was visible or the etag did not match.</returns>
+    /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<bool> TryDeleteAsync(ReadOnlyMemory<byte> key, long expectedETag, CancellationToken cancellationToken = default)
     {
         KeyValueProtocolResult result = await ExecuteCoreAsync(
@@ -108,7 +165,13 @@ internal sealed class KeyValueConnection : IKeyValueConnection
         return result.AffectedCount > 0;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Probes whether a key has a visible entry.
+    /// </summary>
+    /// <param name="key">The key to probe.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>True when the key has a visible entry; otherwise false.</returns>
+    /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<bool> ExistsAsync(ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
         const string command = "EXISTS @k";
@@ -126,7 +189,14 @@ internal sealed class KeyValueConnection : IKeyValueConnection
         return exists;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Scans entries in ascending key order, bounded by the given range.
+    /// </summary>
+    /// <param name="range">Scan bounds and limits, or null to scan the whole key space.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The matching entries in ascending key order, materialized; empty, never null, when nothing matches.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="range"/> combines a prefix with explicit start or end bounds.</exception>
+    /// <exception cref="KeyValueClientException">Thrown when the server reports an error or the connection breaks mid-exchange.</exception>
     public async ValueTask<IReadOnlyList<KeyValueClientEntry>> ScanAsync(KeyValueScanRange? range = null, CancellationToken cancellationToken = default)
     {
         var command = "SCAN";
@@ -179,7 +249,11 @@ internal sealed class KeyValueConnection : IKeyValueConnection
         return entries;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Returns the connection to its pool, with its authenticated session intact when it is still
+    /// healthy.
+    /// </summary>
+    /// <returns>A task that completes when the rental is returned.</returns>
     public ValueTask DisposeAsync() => _connection.DisposeAsync();
 
     /// <summary>

@@ -4,19 +4,30 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Database.Client.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Client.Internal;
+namespace Assimalign.Cohesion.Database.Client;
 
 /// <summary>
-/// A pooled protocol connection: dials the transport, runs the
-/// startup/authenticate/ready handshake, and runs model-owned framed exchanges.
-/// Disposing while rented returns it to the owning pool with its authenticated
-/// server session intact.
+/// One authenticated client connection: a protocol session bound to a database on the server and
+/// one immutable model message family.
 /// </summary>
-internal sealed class PooledDatabaseConnection : IDatabaseConnection
+/// <remarks>
+/// <para>
+/// <see cref="DatabaseClient.RentAsync(CancellationToken)"/> returns a connection that has dialed its
+/// transport and run the startup, authenticate and ready handshake. It runs model-owned framed
+/// exchanges. Disposing it returns the rental to its pool with the authenticated server session intact
+/// when it is still healthy.
+/// </para>
+/// <para>
+/// Connections are not thread-safe: one exchange at a time, mirroring the engine-session contract on
+/// the server side. An overlapping exchange is rejected before it writes any frame.
+/// </para>
+/// </remarks>
+public sealed class DatabaseConnection : IAsyncDisposable
 {
-    private readonly DefaultDatabaseClient _owner;
+    private readonly DatabaseClient _owner;
     private readonly IConnectionFactory _connectionFactory;
     private readonly DatabaseConnectionSettings _settings;
 
@@ -31,7 +42,7 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
     private TaskCompletionSource? _exchangeCompletion;
     private Task? _returnTask;
 
-    internal PooledDatabaseConnection(DefaultDatabaseClient owner, IConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
+    internal DatabaseConnection(DatabaseClient owner, IConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
     {
         _owner = owner;
         _connectionFactory = connectionFactory;
@@ -41,19 +52,31 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         Principal = _settings.Principal;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the database this connection is bound to.
+    /// </summary>
     public string Database { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the principal this connection authenticated as.
+    /// </summary>
     public string Principal { get; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets the protocol version negotiated with the server.
+    /// </summary>
     public ProtocolVersion ServerVersion { get; private set; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Gets a value indicating whether the connection is open and usable.
+    /// </summary>
+    /// <remarks>
+    /// An exchange failure that certified its complete response leaves the connection open; a
+    /// protocol or transport failure, a cancellation, or an unfinished response marks it broken.
+    /// </remarks>
     public bool IsOpen => _isOpen && _connection is { State: ConnectionState.Open or ConnectionState.Opening };
 
-    /// <inheritdoc />
+    /// <summary>Gets the message family fixed when the owning pool was created.</summary>
     public ProtocolMessageFamily Family { get; }
 
     internal void MarkRented()
@@ -65,8 +88,13 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         }
     }
 
-    /// <inheritdoc />
-    public async ValueTask OpenAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Opens the connection: dials the transport and runs the startup, authenticate and ready
+    /// handshake. The owning client calls it once, before the first rental.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <exception cref="DatabaseClientException">Thrown when the server rejects the handshake (version, authentication, unknown database, capacity).</exception>
+    internal async ValueTask OpenAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_isClosed, this);
 
@@ -120,8 +148,23 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         _isOpen = true;
     }
 
-    /// <inheritdoc />
-    public async ValueTask<TResult> ExecuteAsync<TResult>(IDatabaseProtocolExchange<TResult> exchange, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Executes one complete model-owned framed exchange.
+    /// </summary>
+    /// <typeparam name="TResult">The model's result type.</typeparam>
+    /// <param name="exchange">The operation, bound to this connection's exact family instance.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The model-owned result.</returns>
+    /// <exception cref="ArgumentNullException">The exchange is null.</exception>
+    /// <exception cref="ArgumentException">The exchange belongs to a different family.</exception>
+    /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
+    /// <exception cref="ObjectDisposedException">The rental has already been returned.</exception>
+    /// <exception cref="DatabaseClientException">The server reports an error or the connection fails.</exception>
+    /// <remarks>
+    /// A non-virtual generic method on a sealed type, because NativeAOT never devirtualizes a generic
+    /// virtual call.
+    /// </remarks>
+    public async ValueTask<TResult> ExecuteAsync<TResult>(DatabaseProtocolExchange<TResult> exchange, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(exchange);
         if (!ReferenceEquals(Family, exchange.Family))
@@ -194,11 +237,31 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         }
     }
 
-    /// <inheritdoc />
-    public ValueTask<Stream> ExecuteStreamingAsync(IDatabaseStreamingExchange exchange, CancellationToken cancellationToken = default)
+    /// <summary>Starts a bounded download while its framed exchange remains active.</summary>
+    /// <param name="exchange">The model operation, bound to this connection's exact family instance.</param>
+    /// <param name="cancellationToken">Cancels startup and the entire returned stream's lifetime.</param>
+    /// <returns>A sequential readable stream after the model validates its opening response.</returns>
+    /// <exception cref="ArgumentNullException">The exchange is null.</exception>
+    /// <exception cref="ArgumentException">The exchange belongs to another family.</exception>
+    /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
+    /// <exception cref="DatabaseClientException">The server rejects the operation or the connection fails.</exception>
+    /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
+    /// <exception cref="ObjectDisposedException">The rental has already been returned.</exception>
+    /// <remarks>
+    /// Dispose the returned stream. Early disposal or cancellation aborts the exchange and returns its
+    /// unusable rental. Verified completion retains this connection's lease for subsequent operations;
+    /// dispose the connection to return it to the pool. Disposing the connection cancels and joins any
+    /// active exchange. Later failures surface from stream reads and cannot appear as successful EOF.
+    /// </remarks>
+    public ValueTask<Stream> ExecuteStreamingAsync(DatabaseStreamingExchange exchange, CancellationToken cancellationToken = default)
         => DatabaseDownloadStream.CreateAsync(this, exchange, cancellationToken);
 
-    /// <inheritdoc />
+    /// <summary>Discards this rental and closes its session instead of returning it to the pool.</summary>
+    /// <returns>The asynchronous transport teardown operation.</returns>
+    /// <remarks>Use when application-level session state cannot be reset safely. Aborting cancels
+    /// and joins an active exchange. It cannot undo a transaction already committed by the server
+    /// or determine an unacknowledged command's outcome. This operation is deliberately not cancellable:
+    /// an unsafe rental must not survive cleanup merely because its caller cancelled.</remarks>
     public ValueTask AbortAsync()
     {
         lock (_exchangeLock)
@@ -211,7 +274,12 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Returns the rental to its pool, after canceling and joining an active exchange. A healthy
+    /// connection keeps its authenticated server session for the next rental; a broken one closes.
+    /// Idempotent for the current rental.
+    /// </summary>
+    /// <returns>A task that completes when the rental is returned.</returns>
     public ValueTask DisposeAsync()
     {
         lock (_exchangeLock)

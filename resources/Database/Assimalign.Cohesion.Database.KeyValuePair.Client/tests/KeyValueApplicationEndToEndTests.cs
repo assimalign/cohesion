@@ -77,7 +77,7 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
         throw new TimeoutException("The TCP listener did not bind within the budget.");
     }
 
-    private static IKeyValueClient CreateClient(int port)
+    private static KeyValueClient CreateClient(int port)
         => KeyValueClient.Create(new KeyValueClientOptions
         {
             Settings = new DatabaseConnectionSettings

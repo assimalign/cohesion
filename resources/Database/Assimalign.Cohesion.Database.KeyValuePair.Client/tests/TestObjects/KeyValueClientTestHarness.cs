@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Tests;
 /// </summary>
 internal sealed class KeyValueClientTestHarness : IAsyncDisposable
 {
-    private KeyValueClientTestHarness(KeyValueDatabaseEngine engine, InMemoryConnectionListener listener, KeyValueDatabaseServer server, IKeyValueClient client)
+    private KeyValueClientTestHarness(KeyValueDatabaseEngine engine, InMemoryConnectionListener listener, KeyValueDatabaseServer server, KeyValueClient client)
     {
         Engine = engine;
         Listener = listener;
@@ -28,13 +28,13 @@ internal sealed class KeyValueClientTestHarness : IAsyncDisposable
 
     public KeyValueDatabaseServer Server { get; }
 
-    public IKeyValueClient Client { get; }
+    public KeyValueClient Client { get; }
 
     public const string DatabaseName = "kv";
 
     public static async Task<KeyValueClientTestHarness> StartAsync(
         Action<KeyValueDatabaseServerOptions>? configureServer = null,
-        IKeyValueClientObserver? observer = null)
+        KeyValueClientObserver? observer = null)
     {
         var engine = KeyValueDatabaseEngine.Create(new KeyValueDatabaseEngineOptions { EngineName = "kv-typed-client-e2e" });
         await engine.CreateDatabaseAsync(DatabaseName);

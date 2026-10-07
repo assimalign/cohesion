@@ -70,9 +70,9 @@ Documents is **embedded only**: there is no Documents server, and `Documents.Cli
 - `session.ExecuteAsync(string)` throws `DatabaseParseException` carrying only the first error for SQL,
   OQL and GQL (`FromSql`/`FromOql`/`FromGql` throw); a `SqlQueryRequest` built from the parser's
   statement instead returns every diagnostic in `QueryResult.Diagnostics`.
-- `ISqlConnection.QueryAsync` drops the affected count and `ExecuteAsync` drops rows, so a consumer
+- `SqlConnection.QueryAsync` drops the affected count and `ExecuteAsync` drops rows, so a consumer
   has to know the statement kind in advance. The wire client reports no diagnostics, only
-  `SqlClientException` kind/code/message. `IGraphConnection.QueryAsync` returns both.
+  `SqlClientException` kind/code/message. `GraphConnection.QueryAsync` returns both.
 - A missing database over the wire is reported nondeterministically: the servers write
   `DatabaseNotFound` and then close, and the client sometimes surfaces that code and sometimes
   `Internal: The server closed the connection mid-exchange`. Seen for SQL, Graph and Key-Value
@@ -82,5 +82,5 @@ Documents is **embedded only**: there is no Documents server, and `Documents.Cli
 - `KeyValueScanRange` / `KeyValueScanOptions` use `ReadOnlyMemory<byte>?`: assigning a null `byte[]`
   yields an empty but *present* bound, which then trips "A prefix scan cannot combine with explicit
   start/end bounds".
-- No KEYSPACES verb on `IKeyValueConnection`; no container verbs on `IBlobConnection`.
+- No KEYSPACES verb on `KeyValueConnection`; no container verbs on `BlobConnection`.
 - OQL `COUNT(*)` is typed `Decimal`, while SQL `COUNT(*)` is `Int64`.
