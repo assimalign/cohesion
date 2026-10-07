@@ -640,7 +640,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             : HPackEncoder.EncodeResponseHeaders(http2Context.Response.StatusCode, http2Context.Response.Headers, bodyBytes.Length);
         ReadOnlyMemory<byte> content = isHead ? ReadOnlyMemory<byte>.Empty : bodyBytes;
 
-        if (!await WriteBufferedResponseAsync(http2Context, headerBlock, content, cancellationToken).ConfigureAwait(false))
+        // RFC 9113 §8.1 — staged trailers follow the content as a HEADERS frame that ends the stream.
+        // A response to HEAD carries none: it has no content for them to follow, and RFC 9110 §9.3.2
+        // lets a server omit the fields it determines while generating content.
+        byte[]? trailerBlock = !isHead && http2Context.Response.StagedTrailers is { } trailers
+            ? HPackEncoder.EncodeTrailers(trailers)
+            : null;
+
+        if (!await WriteBufferedResponseAsync(http2Context, headerBlock, content, trailerBlock, cancellationToken).ConfigureAwait(false))
         {
             // RFC 9113 §5.4.2 — the stream was reset before the response finished (the peer's
             // RST_STREAM, or the transport's own rejection of the request body). No further frame
@@ -649,8 +656,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             return;
         }
 
-        // RFC 9113 §5.1 — every server response ends with END_STREAM (either
-        // on a body-less HEADERS frame or on the trailing DATA frame). After
+        // RFC 9113 §5.1 — every server response ends with END_STREAM (on a
+        // body-less HEADERS frame, the last DATA frame, or the HEADERS frame
+        // of the trailer section). After
         // a successful send the stream's local half is closed; if the peer
         // already closed its half (the normal request/response case) the
         // stream transitions to Closed.
@@ -2116,9 +2124,10 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     }
 
     /// <summary>
-    /// Writes a buffered response — the HEADERS block, then <paramref name="content"/> as DATA frames
-    /// with <c>END_STREAM</c> on the last frame (or on the HEADERS when there is no content) — under
-    /// RFC 9113 flow control.
+    /// Writes a buffered response — the HEADERS block, then <paramref name="content"/> as DATA frames,
+    /// then the trailer section when there is one — under RFC 9113 flow control. <c>END_STREAM</c>
+    /// rides the last frame: the trailer section's HEADERS frame, else the last DATA frame, else the
+    /// HEADERS frame of a response with neither.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -2140,13 +2149,17 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// <param name="context">The exchange whose response is written.</param>
     /// <param name="headerBlock">The HPACK-encoded response field section.</param>
     /// <param name="content">The response content; empty for a HEADERS-only response.</param>
+    /// <param name="trailerBlock">
+    /// The HPACK-encoded trailer section, or <see langword="null"/> when the response has none
+    /// (RFC 9113 §8.1). HEADERS frames are not flow-controlled, so it needs no credit.
+    /// </param>
     /// <param name="cancellationToken">A token that abandons the write, including a wait for credit.</param>
     /// <returns>
     /// <see langword="true"/> when the whole response, <c>END_STREAM</c> included, is on the wire;
     /// <see langword="false"/> when the stream was reset first (RFC 9113 §5.4.2), in which case the
     /// rest of the response was abandoned.
     /// </returns>
-    private async Task<bool> WriteBufferedResponseAsync(Http2Context context, byte[] headerBlock, ReadOnlyMemory<byte> content, CancellationToken cancellationToken)
+    private async Task<bool> WriteBufferedResponseAsync(Http2Context context, byte[] headerBlock, ReadOnlyMemory<byte> content, byte[]? trailerBlock, CancellationToken cancellationToken)
     {
         Http2Stream stream = context.Stream;
 
@@ -2161,7 +2174,8 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 return false;
             }
 
-            await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream: content.IsEmpty, cancellationToken).ConfigureAwait(false);
+            bool endsWithTrailers = trailerBlock is not null;
+            await WriteHeaderBlockAsync(context.StreamId, headerBlock, endStream: content.IsEmpty && !endsWithTrailers, cancellationToken).ConfigureAwait(false);
 
             int offset = 0;
             while (offset < content.Length)
@@ -2209,13 +2223,25 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 Http2Frame frame = new();
                 frame.PrepareData(context.StreamId);
 
-                if (offset + granted == content.Length)
+                if (offset + granted == content.Length && !endsWithTrailers)
                 {
                     frame.DataFlags |= Http2DataFrameFlags.EndStream;
                 }
 
                 await Http2FrameWriter.WriteAsync(Stream, frame, content.Slice(offset, granted), cancellationToken).ConfigureAwait(false);
                 offset += granted;
+            }
+
+            if (trailerBlock is not null)
+            {
+                // RFC 9113 §8.1 — the trailer section ends the stream after the last DATA frame. The
+                // peer may have reset the stream while the content went out.
+                if (!stream.CanWriteResponse)
+                {
+                    return false;
+                }
+
+                await WriteHeaderBlockAsync(context.StreamId, trailerBlock, endStream: true, cancellationToken).ConfigureAwait(false);
             }
 
             // RFC 9113 §6.8 / #686 — the caller MUST observe a guarantee that the response bytes
@@ -2425,17 +2451,20 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     }
 
     /// <summary>
-    /// Finalizes a streamed response: emits an empty DATA frame carrying
-    /// <c>END_STREAM</c> (RFC 9113 §5.1), applies the local-half-close transition, and
-    /// then performs the same cleanup as the buffered <see cref="SendAsync"/> — the
-    /// fully-closed stream is removed (reclaiming any undrained receive-window debt),
-    /// while a stream whose peer half is still open is reset with <c>NO_ERROR</c> to
-    /// stop the remaining request body and reclaim the concurrency slot.
+    /// Finalizes a streamed response: emits the frame that carries <c>END_STREAM</c>
+    /// (RFC 9113 §5.1) — the trailer section's HEADERS frame when the application staged
+    /// trailers (RFC 9113 §8.1), otherwise an empty DATA frame — applies the
+    /// local-half-close transition, and then performs the same cleanup as the buffered
+    /// <see cref="SendAsync"/> — the fully-closed stream is removed (reclaiming any
+    /// undrained receive-window debt), while a stream whose peer half is still open is
+    /// reset with <c>NO_ERROR</c> to stop the remaining request body and reclaim the
+    /// concurrency slot.
     /// </summary>
     /// <remarks>
     /// A response to HEAD already carried <c>END_STREAM</c> on its HEADERS frame, so only the cleanup
-    /// runs. A stream that was reset — or answered by the transport itself — before the response
-    /// completed gets no terminator at all (RFC 9113 §5.4.2); the reset path already removed it.
+    /// runs, and staged trailers are not sent. A stream that was reset — or answered by the transport
+    /// itself — before the response completed gets no terminator at all (RFC 9113 §5.4.2); the reset
+    /// path already removed it.
     /// </remarks>
     internal async Task CompleteStreamingAsync(Http2Context context, CancellationToken cancellationToken)
     {
@@ -2443,6 +2472,10 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
         if (!stream.IsResponseCompleted)
         {
+            byte[]? trailerBlock = context.Response.StagedTrailers is { } trailers
+                ? HPackEncoder.EncodeTrailers(trailers)
+                : null;
+
             await AcquireResponseWriteAsync(context, cancellationToken).ConfigureAwait(false);
             try
             {
@@ -2451,10 +2484,18 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                     return;
                 }
 
-                Http2Frame frame = new();
-                frame.PrepareData(context.StreamId);
-                frame.DataFlags |= Http2DataFrameFlags.EndStream;
-                await Http2FrameWriter.WriteAsync(Stream, frame, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+                if (trailerBlock is null)
+                {
+                    Http2Frame frame = new();
+                    frame.PrepareData(context.StreamId);
+                    frame.DataFlags |= Http2DataFrameFlags.EndStream;
+                    await Http2FrameWriter.WriteAsync(Stream, frame, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await WriteHeaderBlockAsync(context.StreamId, trailerBlock, endStream: true, cancellationToken).ConfigureAwait(false);
+                }
+
                 await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
             finally

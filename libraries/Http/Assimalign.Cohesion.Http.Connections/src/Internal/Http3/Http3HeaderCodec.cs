@@ -268,6 +268,24 @@ internal static class Http3HeaderCodec
         return QPackFieldSectionEncoder.Encode(fields);
     }
 
+    /// <summary>
+    /// Encodes a response's trailer section (RFC 9114 §4.1): the staged fields with no pseudo-header
+    /// field (RFC 9114 §4.3), written as a HEADERS frame after the last DATA frame.
+    /// </summary>
+    /// <param name="trailers">The staged trailer fields, already checked when they were added.</param>
+    /// <returns>The QPACK-encoded field section.</returns>
+    public static byte[] EncodeTrailers(IHttpHeaderCollection trailers)
+    {
+        List<(string Name, string Value)> fields = new();
+
+        foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> field in trailers)
+        {
+            fields.Add((field.Key.Value, field.Value.Value));
+        }
+
+        return QPackFieldSectionEncoder.Encode(fields);
+    }
+
     public static byte[] EncodeResponseHeaders(Http3Context context, byte[] bodyBytes)
     {
         HttpHeaderCollection headers = context.Response.Headers;

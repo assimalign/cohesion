@@ -1764,6 +1764,13 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             await WriteFrameAsync(stream, Http3FrameType.Data, bodyBytes, cancellationToken).ConfigureAwait(false);
         }
 
+        // RFC 9114 §4.1 — staged trailers follow the content as a HEADERS frame, before the FIN that
+        // ends the response. A response to HEAD carries none, as on HTTP/2.
+        if (!isHead && http3Context.Response.StagedTrailers is { } trailers)
+        {
+            await WriteFrameAsync(stream, Http3FrameType.Headers, Http3HeaderCodec.EncodeTrailers(trailers), cancellationToken).ConfigureAwait(false);
+        }
+
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
 
         // Let a nearly finished upload complete before the response ends (see TryDrainAsync): on the QUIC
@@ -1817,15 +1824,17 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
 
     /// <summary>
     /// Replaces the application's staged (uncommitted) response with a bodyless one carrying
-    /// <paramref name="statusCode"/>: the headers are cleared and the staged body is released.
+    /// <paramref name="statusCode"/>: the headers and trailers are cleared and the staged body is
+    /// released.
     /// </summary>
     private static async ValueTask ReplaceWithStatusOnlyResponseAsync(Http3Context http3Context, HttpStatusCode statusCode)
     {
-        HttpResponse response = http3Context.Response;
+        TransportHttpResponse response = http3Context.Response;
         Stream staged = response.Body;
 
         response.StatusCode = statusCode;
         response.Headers.Clear();
+        response.StagedTrailers?.Clear();
         response.Body = new MemoryStream();
 
         // The exchange disposes only the body it ends up holding, so release the one it no longer holds.

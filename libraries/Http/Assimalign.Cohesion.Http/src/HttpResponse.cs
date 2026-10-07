@@ -29,7 +29,8 @@ public abstract class HttpResponse : IHttpResponse
     /// <summary>
     /// Gets the response trailer section (RFC 9110 §6.5). Defaults to the
     /// shared unsupported (empty, read-only) collection; transports that emit
-    /// trailers override this with a supported collection.
+    /// trailers override this with a supported collection (see
+    /// <see cref="IHttpResponse.Trailers"/>).
     /// </summary>
     public virtual HttpTrailerCollection Trailers => HttpTrailerCollection.Unsupported;
 

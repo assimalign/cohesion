@@ -13,8 +13,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// The sink holds no wire state of its own — it forwards to the owning
 /// <see cref="Http2ConnectionContext"/>, which owns the write lock, the HPACK encoder, and the
 /// send-window accounting. Each body write already flushes the underlying transport, so the flush
-/// hook is a no-op. A response to HEAD (RFC 9110 §9.3.2) commits a HEADERS frame carrying
-/// <c>END_STREAM</c> and discards every body write, matching the HTTP/1.1 sink.
+/// hook is a no-op. Completion ends the stream with the trailer section's HEADERS frame when the
+/// application staged trailers (RFC 9113 §8.1), and with an empty DATA frame otherwise. A response
+/// to HEAD (RFC 9110 §9.3.2) commits a HEADERS frame carrying <c>END_STREAM</c> and discards every
+/// body write and its trailers, matching the HTTP/1.1 sink.
 /// </remarks>
 internal sealed class Http2ResponseBodyStream : HttpResponseBodyStream
 {

@@ -60,6 +60,24 @@ internal static partial class HPackEncoder
     }
 
     /// <summary>
+    /// Encodes a response's trailer section (RFC 9113 §8.1): the staged fields, lowercased, with no
+    /// pseudo-header field — a trailer section carries none.
+    /// </summary>
+    /// <param name="trailers">The staged trailer fields, already checked when they were added.</param>
+    /// <returns>The HPACK-encoded field block.</returns>
+    public static byte[] EncodeTrailers(IHttpHeaderCollection trailers)
+    {
+        using MemoryStream buffer = new();
+
+        foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> field in trailers)
+        {
+            WriteHeader(buffer, field.Key.Value.ToLowerInvariant(), field.Value.Value);
+        }
+
+        return buffer.ToArray();
+    }
+
+    /// <summary>
     /// Encodes the field section for an <em>interim</em> (<c>1xx</c>) response: the <c>:status</c>
     /// pseudo-header set to the interim code followed by the supplied fields verbatim, with <b>no</b>
     /// <c>Content-Length</c> (an interim response carries no body — RFC 9110 §15.2). The resulting

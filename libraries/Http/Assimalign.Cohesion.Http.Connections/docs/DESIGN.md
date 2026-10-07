@@ -751,8 +751,9 @@ ends the connection after the exchange, h2 `RST_STREAM(CANCEL)`, h3 stream
 abort). Otherwise,
 if a response feature wrote to the raw sink (`ResponseBodySink is { HasStarted: true }`),
 `SendAsync` **finalizes** the sink — emitting the terminating zero-length chunk
-(HTTP/1.1) or the empty `END_STREAM` DATA frame (HTTP/2) — instead of writing a
-second buffered response. If the sink was never written (or none exists), the
+(HTTP/1.1), the empty `END_STREAM` DATA frame or the staged trailer section (HTTP/2),
+or the staged trailer section and the FIN (HTTP/3) — instead of writing a second
+buffered response. If the sink was never written (or none exists), the
 buffered path fires the `BeforeResponseHead` hooks, re-reads the directive (a hook
 may have aborted or taken over), and only then writes. The wire terminator is thus
 emitted by the transport when it finalizes the exchange, not by the feature, and the
@@ -770,16 +771,19 @@ emitted by the transport when it finalizes the exchange, not by the feature, and
   **without** a synthesized `Content-Length` (the body is delimited by
   `END_STREAM`); each write emits one or more DATA frames split on the peer's
   `MAX_FRAME_SIZE`, each flushed through the transport; finalize emits an empty DATA
-  frame carrying `END_STREAM`. A response to HEAD commits a HEADERS frame that
-  carries `END_STREAM` itself; every body write is discarded and finalize only
-  performs the stream cleanup (RFC 9110 §9.3.2), matching the HTTP/1.1 sink.
+  frame carrying `END_STREAM`, or the trailer section's HEADERS frame when the
+  application staged trailers (see "Response trailers"). A response to HEAD commits a
+  HEADERS frame that carries `END_STREAM` itself; every body write and any staged
+  trailer is discarded, and finalize only performs the stream cleanup (RFC 9110
+  §9.3.2), matching the HTTP/1.1 sink.
 - **HTTP/3 — incremental DATA frames (RFC 9114).** Same shape over the QUIC request
   stream (a HEADERS frame with no `Content-Length`, then DATA frames). The body is
   delimited by the QUIC stream **end** (RFC 9114 §4.1), so when the response completes
   the transport ends the request stream's write side — a graceful QUIC FIN via the
   `IConnection` half-close contract (`Output.Complete()`). This happens for both the
-  buffered `SendAsync` path (after the HEADERS + optional DATA frame) and the streaming
-  sink's finalize; see "Ending the request stream at response completion" below for why
+  buffered `SendAsync` path (after the HEADERS + optional DATA frame and any trailer
+  section's HEADERS frame) and the streaming sink's finalize (which writes the trailer
+  section first); see "Ending the request stream at response completion" below for why
   a missing FIN manifests as `H3_CLOSED_CRITICAL_STREAM` at the client. A HEAD response
   (RFC 9110 §9.3.2) commits its HEADERS frame and writes no DATA frame on either path;
   as on HTTP/2, the buffered path keeps a `Content-Length` the application set and
@@ -1727,8 +1731,9 @@ sequence, and the RFC 9218 scheduler still orders whole responses under contenti
 (see "The write scheduler"). When a frame finds a window exhausted, the writer
 flushes, releases the gate, waits in `AcquireSendWindowAsync` for a
 `WINDOW_UPDATE`, then re-acquires the gate at its priority for the rest.
-`END_STREAM` rides the last DATA frame, or the HEADERS frame when there is no
-content.
+`END_STREAM` rides the trailer section's HEADERS frame when the response has
+trailers, else the last DATA frame, else the HEADERS frame when there is no
+content (see "Response trailers").
 
 The writer never parks while holding the gate: the frame pump needs the gate to
 write the SETTINGS and PING acknowledgements that precede the credit it is waiting
@@ -1800,7 +1805,8 @@ An empty HEAD body gets none, because RFC 9110 §8.6 forbids a `content-length` 
 differs from what GET would send, and the transport cannot know that value. (The
 HTTP/1.1 writer still synthesizes `Content-Length: 0` in that case; aligning it is
 outside this change.) The streaming sink ends the stream on its HEADERS frame and
-discards body writes.
+discards body writes. Neither path sends staged trailers for HEAD (see "Response
+trailers").
 
 ### The request-body cap (413)
 
@@ -1863,7 +1869,8 @@ Every version surfaces a request's trailer section on `Request.Trailers`, a supp
 collection that stays empty until the body has been read to its end: HTTP/1.1 for a
 chunked request (see "HTTP/1.1 request-body streaming and data rates"), HTTP/3 from a
 trailing HEADERS frame (see "Request streams: dispatch at HEADERS, lazy body"), and
-HTTP/2 as described here.
+HTTP/2 as described here. HTTP/2 and HTTP/3 also send response trailers (see "Response
+trailers" below); HTTP/1.1 does not.
 
 ### HTTP/2 request trailers: every field block is decoded
 
@@ -1945,6 +1952,52 @@ one dropped from the bounded record. That now includes the highest stream id see
 far. Before #1314, a late trailer section on that stream re-opened it and was
 dispatched as a new request. DATA on a retired stream still draws
 `RST_STREAM(STREAM_CLOSED)` (see "Recently-closed discard").
+
+### Response trailers
+
+`Response.Trailers` is supported on HTTP/2 and HTTP/3 (#1315). The fields an
+application stages before the response completes go out after the body, on the
+buffered and the streaming path alike:
+
+| Path | HTTP/2 (RFC 9113 §8.1) | HTTP/3 (RFC 9114 §4.1) |
+|---|---|---|
+| Buffered `SendAsync` | HEADERS, DATA frames without `END_STREAM`, then the trailer HEADERS [+ CONTINUATION] block carrying `END_STREAM`. With no content: HEADERS, then the trailer block. | HEADERS, DATA, then a HEADERS frame, then the FIN. |
+| Streaming sink | The trailer HEADERS block carries `END_STREAM` in place of the empty DATA frame. | A HEADERS frame after the last DATA frame, then the FIN. |
+
+- **No trailers, no change.** `TransportHttpResponse` creates the collection on first
+  access, and the send path writes a trailer section only when the collection holds a
+  field (`StagedTrailers`). A response that never staged one, or staged one and removed
+  it, goes out byte for byte as before.
+- **Refused when added.** The collection's store, `TransportHttpTrailerFields`, applies
+  `HttpTrailerFieldRules.EnsureSendable`. A pseudo-header, a connection-specific field,
+  or a field RFC 9110 §6.5.1 prohibits in trailers throws `ArgumentException` from `Add`
+  or the indexer, where the mistake is made, instead of producing a malformed section on
+  the wire.
+- **Encoding.** The section is encoded like a response head without `:status`: HPACK
+  literals on HTTP/2 (`HPackEncoder.EncodeTrailers`) and the static-only QPACK encoder on
+  HTTP/3 (`Http3HeaderCodec.EncodeTrailers`), with lowercased names. HEADERS frames are
+  not flow-controlled, so on HTTP/2 the trailer section needs no send-window credit; it
+  follows the last DATA frame, which did.
+- **When the trailers are read.** The buffered path reads them at `SendAsync`, the
+  streaming path when the sink completes, so a field added after that is not sent. The
+  transport adds no `Trailer` header: RFC 9110 §6.6.2 makes declaring trailers a SHOULD
+  for the sender, and on the streaming path the head is usually on the wire before the
+  trailers are known. An application that wants the declaration sets the header itself.
+- **HEAD.** A response to HEAD sends no trailer section. On HTTP/2 its HEADERS frame keeps
+  carrying `END_STREAM`, and on HTTP/3 the HEADERS frame stays the only frame. Trailers
+  describe content, which a HEAD response never carries, and RFC 9110 §9.3.2 lets a
+  server omit the fields it determines while generating the content. The collection stays
+  supported, so a handler shared with GET stages trailers without branching on the method.
+- **Replaced responses.** When HTTP/3 replaces the application's staged response with a
+  bodyless `413` (the request body crossed its cap), the staged trailers are dropped with
+  it. The HTTP/2 transport's own `413` never carries them.
+- **CONNECT.** A CONNECT exchange reports the collection unsupported: once the tunnel is
+  up, the stream carries only DATA (RFC 9113 §8.5, RFC 9114 §4.4), so a trailer section
+  could never be sent, and adding one fails loudly instead.
+- **HTTP/1.1 keeps `IsSupported = false`** (decision 18). A buffered HTTP/1.1 response
+  carries `Content-Length`, so it has no chunked trailer section to fill, and HTTP/1.1
+  clients rarely consume chunked trailers. Kestrel makes the same call. To be revisited if
+  a consumer appears.
 
 ## HTTP/2 graceful close (GOAWAY + stream drain)
 
@@ -2312,8 +2365,8 @@ happen before the FIN, not after. Putting `H3_NO_ERROR` on the wire needs a
 per-direction abort with an application error code on `IConnection`, which is
 tracked follow-up work in `Assimalign.Cohesion.Connections`.
 
-A **HEAD** response carries its HEADERS frame and no DATA frame, on the buffered
-and the streaming path alike (RFC 9110 §9.3.2). The buffered path synthesizes a
+A **HEAD** response carries its HEADERS frame and no DATA frame or trailer
+section, on the buffered and the streaming path alike (RFC 9110 §9.3.2). The buffered path synthesizes a
 `Content-Length` only from a staged body, never `0` for an empty one — the rule
 the HTTP/2 path follows (see "HTTP/2 response flow control, HEAD, and the
 request-body cap"). A **CONNECT** request is
@@ -2353,8 +2406,9 @@ stays in its response-content read until it observes the stream FIN, even for a
 zero-length body. So when a response completes, the engine ends the request stream's
 write side — the graceful QUIC FIN, signalled through the `IConnection` half-close
 contract by completing the stream's `Output` (`PipeWriter`). Both response paths do
-this: the buffered `SendAsync` after it flushes the HEADERS (+ optional DATA) frame,
-and the streaming sink's `CompleteFramedAsync` after its final flush. Completion is
+this: the buffered `SendAsync` after it flushes the HEADERS (+ optional DATA) frame
+and any trailer section, and the streaming sink's `CompleteFramedAsync` after it
+writes any trailer section and flushes. Completion is
 best-effort — the response bytes are already flushed, so a teardown race that disposed
 the stream underneath the completion is swallowed (a `QuicException` is an
 `IOException`).

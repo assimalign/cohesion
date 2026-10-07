@@ -18,8 +18,9 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// end (RFC 9114 §4.1): completion flushes the last <c>DATA</c> frame and then ends the request
 /// stream's write side (a graceful FIN via the <see cref="IConnection"/> half-close contract), so a
 /// real HTTP/3 client observes the streamed body terminate rather than waiting on connection
-/// teardown (which it would surface as <c>H3_CLOSED_CRITICAL_STREAM</c>). A response to <c>HEAD</c>
-/// commits its HEADERS frame but no DATA frame (RFC 9110 §9.3.2).
+/// teardown (which it would surface as <c>H3_CLOSED_CRITICAL_STREAM</c>). Staged trailers go out as a
+/// HEADERS frame just before that end (RFC 9114 §4.1). A response to <c>HEAD</c> commits its HEADERS
+/// frame but no DATA frame and no trailers (RFC 9110 §9.3.2).
 /// </remarks>
 internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
 {
@@ -64,6 +65,13 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
 
     protected override async ValueTask CompleteFramedAsync(CancellationToken cancellationToken)
     {
+        // RFC 9114 §4.1 — staged trailers ride a HEADERS frame after the last DATA frame, before the
+        // FIN. A response to HEAD carries none, as on HTTP/2.
+        if (!_suppressBody && _context.Response.StagedTrailers is { } trailers)
+        {
+            await WriteFrameAsync(Http3FrameType.Headers, Http3HeaderCodec.EncodeTrailers(trailers), cancellationToken).ConfigureAwait(false);
+        }
+
         await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
 
         // RFC 9114 §4.1 — the streamed body is delimited by the request stream's end. End the write

@@ -44,12 +44,27 @@ rendering logic, the `HttpFieldRules` classifier, etc.).
 ### `IsSupported` and failing loudly
 
 `IsSupported` is a **capability** signal: whether this exchange surfaces a
-trailer section (HTTP/1.1 chunked, or HTTP/2 / HTTP/3 → yes; a non-chunked
-HTTP/1.1 message → no). When `false`, `HttpTrailerCollection` is empty and
+trailer section. When `false`, `HttpTrailerCollection` is empty and
 **mutation throws** `InvalidOperationException`, so a server that adds trailers
 to an exchange that physically cannot transmit them fails at the point of
 addition rather than silently dropping them on the wire. The shared
 `HttpTrailerCollection.Unsupported` singleton is the default.
+
+The `Assimalign.Cohesion.Http.Connections` transports report it per direction
+and version (decision 18, `docs/libraries/Http/DECISIONS.md` ADR 2):
+
+| Version | `Request.Trailers` | `Response.Trailers` |
+|---|---|---|
+| HTTP/1.1 | Supported for a chunked request; unsupported otherwise | Unsupported |
+| HTTP/2 | Supported | Supported: sent as a HEADERS frame that ends the stream |
+| HTTP/3 | Supported | Supported: sent as a HEADERS frame before the stream's FIN |
+
+A supported request collection is filled once the body has been read to its
+end. A supported response collection also refuses, when they are added, the
+fields a trailer section cannot carry — pseudo-headers, connection-specific
+fields, and the `IsProhibitedInTrailers` set — with `ArgumentException`. A
+response to `HEAD` sends no trailers, and a `CONNECT` exchange reports the
+response collection unsupported, since its stream becomes a DATA-only tunnel.
 
 ### Interface evolution via a default member
 
@@ -62,7 +77,8 @@ bases override it with a concrete `HttpTrailerCollection` property (and explicit
 interface mapping), and the transports override *that* where they actually
 surface trailers — HTTP/1.1 for a chunked request, HTTP/2 and HTTP/3 for every
 request, each attaching a supported collection it fills from the parsed trailer
-section once the body has been read to its end.
+section once the body has been read to its end — and where they emit them:
+HTTP/2 and HTTP/3 return a supported response collection.
 
 ### Repeated fields, combining, and `Set-Cookie`
 
@@ -91,9 +107,10 @@ transports — they are stated once in `HttpFieldRules`.
 - `IsSetCookie` / `ProhibitsCombining` — the no-fold rule.
 - `IsProhibitedInTrailers` — the RFC 9110 §6.5.1 exclusion set (framing,
   routing, request modifiers, authentication, content-processing controls, and
-  the `Trailer` field itself). A transport draining `response.Trailers` (or a
-  caller staging them) checks this so framing/routing fields like
-  `Content-Length` never leak into a trailer section.
+  the `Trailer` field itself). The HTTP/2 and HTTP/3 transports check it in both
+  directions, so framing/routing fields like `Content-Length` never travel in a
+  trailer section: a received trailer section carrying one is malformed, and a
+  response trailer collection refuses one when it is added.
 
 Keeping these rules in one place is what lets the cross-version normalization
 layer (the `.11` work) translate fields between HTTP/1.1, HTTP/2, and HTTP/3
@@ -109,12 +126,13 @@ dictionaries. Fully AOT/trim safe.
 
 - **Trailer emission / per-version surfacing.** The core models the trailer
   collection; whether a given transport surfaces or emits it is the transport's
-  concern, and `IsSupported` reports the truth per exchange. The HTTP/1.1
-  (chunked), HTTP/2 (trailing HEADERS frame, #1314) and HTTP/3 (trailing
-  HEADERS frame, #1066) transports surface inbound request trailers; outbound
-  response-trailer emission is wired by the version transports — the model
-  makes each a drop-in (`IsSupported = true` + a populated
-  `HttpTrailerCollection`).
+  concern, and `IsSupported` reports the truth per exchange (the table above).
+  The HTTP/1.1 (chunked), HTTP/2 (#1314) and HTTP/3 (#1066) transports surface
+  request trailers, and HTTP/2 and HTTP/3 send response trailers (#1315).
+  HTTP/1.1 response trailers stay out (decision 18): a buffered HTTP/1.1
+  response carries `Content-Length`, and HTTP/1.1 clients rarely consume chunked
+  trailers. If a consumer appears, the model makes it a drop-in
+  (`IsSupported = true` + a populated `HttpTrailerCollection`).
 - **Per-field parsers.** `HttpFieldRules` classifies field *names*; it does not
   parse field *values* (dates, cache-control directives, etc.). Value parsing
   belongs to the field-specific consumer, and the shared toolkit those consumers

@@ -25,7 +25,8 @@ request verifier.
   reset on HTTP/3). A malformed field is a pre-dispatch `400` on every protocol.
 - **Response stamping:** `IHttpResponse.SetContentDigest(...)` computes and stamps `Content-Digest`,
   honoring the request's `Want-Content-Digest` preference ordering; `HttpContentDigester` is the
-  incremental "hash as you write" primitive for the trailer-borne streamed case.
+  incremental "hash as you write" primitive for the trailer-borne streamed case: its field can be
+  staged on `Response.Trailers`, which HTTP/2 and HTTP/3 send (HTTP/1.1 has no response trailers).
 
 Usage:
 

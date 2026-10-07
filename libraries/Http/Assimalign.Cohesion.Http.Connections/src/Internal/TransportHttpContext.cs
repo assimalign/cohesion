@@ -31,9 +31,14 @@ internal abstract class TransportHttpContext : HttpContext
     {
         Version = version;
         // The request and response only store the reference; neither calls back into this context
-        // while it is still being constructed.
+        // while it is still being constructed. HTTP/2 and HTTP/3 send response trailers as a trailing
+        // HEADERS frame (RFC 9113 §8.1, RFC 9114 §4.1); HTTP/1.1 does not (decision 18), and neither
+        // does a CONNECT exchange, whose stream carries only DATA once the tunnel is up (RFC 9113
+        // §8.5, RFC 9114 §4.4).
         Request = new TransportHttpRequest(this, requestHead);
-        Response = new TransportHttpResponse(this);
+        Response = new TransportHttpResponse(
+            this,
+            supportsTrailers: (version is HttpVersion.Http20 or HttpVersion.Http30) && requestHead.Method != HttpMethod.Connect);
         ConnectionInfo = connectionInfo;
         _abortedSource = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
         // The parser pre-populates the feature collection when request-parse interceptors

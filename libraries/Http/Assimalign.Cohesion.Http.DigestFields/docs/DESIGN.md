@@ -84,8 +84,10 @@ reflection" mandate literally:
   further appends. This is the primitive behind the **trailer-borne** case: for a streamed body the
   digest is not known until the body is written, so it is emitted in the trailer section. RFC 9530
   permits digest fields as trailers, and `HttpFieldRules.IsProhibitedInTrailers` does **not** list
-  them (a guard test locks this) — so the field is trailer-eligible today even though wiring the
-  actual trailer emission into a streaming response writer rides on the streaming write path (#769).
+  them (a guard test locks this). The transports send response trailers on HTTP/2 and HTTP/3
+  (decision 18): a caller stages `ToField().Serialize()` under `Content-Digest` on
+  `Response.Trailers` before the response completes, after checking `Trailers.IsSupported`. On
+  HTTP/1.1 the collection is unsupported, so the digest has to go in the header section instead.
 
 ## Server-side verification (the interceptor)
 
@@ -207,9 +209,10 @@ one `IncrementalHash` per supported entry — and **no body copy at all** — on
 ## Non-goals and honest gaps
 
 - **Repr-Digest enforcement** — modeled, not verified (see above).
-- **Trailer emission into a streaming response** — the `HttpContentDigester` primitive and the
-  trailer-eligibility guarantee exist; wiring the emitted field into the response trailer section
-  rides on the streaming write path (#769).
+- **A trailer-stamping helper** — `SetContentDigest` stamps the header section only. Sending the
+  digest as a trailer needs no package support any more: the caller stages the
+  `HttpContentDigester` result on `Response.Trailers`, which HTTP/2 and HTTP/3 send (decision 18).
+  A helper that hashes a streamed body and stages the trailer itself is a possible follow-up.
 - **HTTP Message Signatures** — RFC 9530 digests are a building block for signatures covering
   content; the signature layer itself is out of scope.
 - **Client-side response-digest verification** — this package's verifier is a server-side request

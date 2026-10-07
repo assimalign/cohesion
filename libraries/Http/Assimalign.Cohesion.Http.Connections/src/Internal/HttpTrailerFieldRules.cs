@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 
@@ -5,23 +6,55 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// The trailer-section rules the HTTP/2 and HTTP/3 transports share: which fields a received trailer
-/// section may carry.
+/// section may carry, and which fields an application may stage in a response's trailer section.
 /// </summary>
 /// <remarks>
 /// <para>
-/// One rule set for both versions. A trailer section carries no pseudo-header field (RFC 9113 §8.1,
-/// RFC 9114 §4.3), no connection-specific field (RFC 9113 §8.2.2, RFC 9114 §4.2), and none of the
-/// fields RFC 9110 §6.5.1 excludes from trailers (<see cref="HttpFieldRules.IsProhibitedInTrailers"/>:
-/// framing, routing, request modifiers, authentication, response controls, content processing, and
-/// <c>Trailer</c> itself).
+/// One rule set for both versions, in both directions. A trailer section carries no pseudo-header
+/// field (RFC 9113 §8.1, RFC 9114 §4.3), no connection-specific field (RFC 9113 §8.2.2, RFC 9114
+/// §4.2), and none of the fields RFC 9110 §6.5.1 excludes from trailers
+/// (<see cref="HttpFieldRules.IsProhibitedInTrailers"/>: framing, routing, request modifiers,
+/// authentication, response controls, content processing, and <c>Trailer</c> itself).
 /// </para>
 /// <para>
 /// HTTP/1.1 does not use these rules: its chunked request reader rejects only the framing and routing
-/// fields a trailer could use to smuggle a request (RFC 9112 §7.1.2).
+/// fields a trailer could use to smuggle a request (RFC 9112 §7.1.2), and it sends no response
+/// trailers.
 /// </para>
 /// </remarks>
 internal static class HttpTrailerFieldRules
 {
+    /// <summary>
+    /// Rejects a field an application stages in a response's trailer section when HTTP/2 and HTTP/3
+    /// cannot send it there, so the mistake surfaces where it is made rather than on the wire.
+    /// </summary>
+    /// <param name="key">The field name being added.</param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="key"/> is empty, a pseudo-header field, a connection-specific field, or a field
+    /// prohibited in trailers.
+    /// </exception>
+    public static void EnsureSendable(HttpHeaderKey key)
+    {
+        if (key.IsEmpty)
+        {
+            throw new ArgumentException("A trailer field name cannot be empty.", nameof(key));
+        }
+
+        if (key.Value[0] == ':')
+        {
+            throw new ArgumentException(
+                $"'{key.Value}' is a pseudo-header field, and a trailer section carries none (RFC 9113 §8.1, RFC 9114 §4.3).",
+                nameof(key));
+        }
+
+        if (IsExcluded(key))
+        {
+            throw new ArgumentException(
+                $"The field '{key.Value}' cannot be sent in a trailer section (RFC 9110 §6.5.1, RFC 9113 §8.2.2, RFC 9114 §4.2).",
+                nameof(key));
+        }
+    }
+
     /// <summary>
     /// Validates the decoded field lines of a received trailer section and adds them to
     /// <paramref name="trailers"/>, combining a repeated field as a header section does.
