@@ -396,9 +396,11 @@ internal sealed class WebApplicationServer : IWebApplicationServer, IHostService
                 }
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // The drain began: the server accepts nothing new.
+            // The drain began: the server accepts nothing new. Any other cancellation is the listener's
+            // failure (it reports a transport fault with the transport's own exception), so it falls
+            // through to the fault log below instead of ending the accepts unnoticed (#1310).
         }
         catch (ObjectDisposedException)
         {

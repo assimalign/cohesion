@@ -84,6 +84,31 @@ public class WebApplicationServerDiagnosticsTests
         await server.StopAsync();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A cancellation the server did not request is logged as an accept-loop fault")]
+    public async Task AcceptLoop_WhenTheListenerFaultsWithACancellation_ShouldLogCritical()
+    {
+        // Arrange — the listener reports a transport fault whose exception is a cancellation the server never
+        // requested (#1310). Before the fix the accept loop read it as the drain and ended without a log.
+        RecordingLoggerProvider recorded = new();
+        using ILoggerFactory loggerFactory = CreateLoggerFactory(recorded);
+        OperationCanceledException failure = new("The transport canceled its own accept.");
+        FakeHttpConnectionListener listener = new()
+        {
+            AcceptHandler = _ => Task.FromException<IHttpConnection>(failure),
+        };
+        WebApplicationServer server = CreateServer(new FakePipeline(), listener, loggerFactory);
+
+        // Act
+        await server.StartAsync();
+        ILoggerEntry entry = await WaitForEntryAsync(recorded, LogLevel.Critical);
+
+        // Assert
+        entry.Category.ShouldBe(WebApplicationServerLog.Category);
+        entry.Exception.ShouldBeSameAs(failure);
+
+        await server.StopAsync();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server/Diagnostics: A connection fault is logged as Error with the connection's id, endpoints and protocol only")]
     public async Task ServeConnection_WhenTheResponseCannotBeSent_ShouldLogErrorWithTheConnectionIdentity()
     {
