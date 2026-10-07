@@ -447,17 +447,18 @@ public sealed class SqlDatabase : DatabaseInstance, IDatabaseSchemaProvisioner
     /// <see cref="DatabaseTransactionCommitUnconfirmedException"/> when the work may survive the
     /// reopen: a storage commit record was written before its flush failed
     /// (<see cref="StorageOfflineException.CommitRecordWritten"/>), or the operation is a
-    /// self-committing statement that had already committed a durable bracket of its own. Both
-    /// lead with <see cref="OfflineCode"/>. An unconfirmed commit that already has its own type is
-    /// returned unchanged, and so is any other failure.
+    /// self-committing statement that had already committed a catalog change a reopened database
+    /// shows. Both lead with <see cref="OfflineCode"/>. An unconfirmed commit that already has its
+    /// own type is returned unchanged, and so is any other failure.
     /// </summary>
     /// <param name="error">The failure to translate.</param>
     /// <param name="selfCommitted">
-    /// True for a self-committing statement (DDL) that committed at least one durable bracket, in
-    /// the catalog or the data file set, before the failure: that part survives the reopen, so it
-    /// is never reported as refused. A DDL statement that met the offline storage before it
-    /// committed anything passes false and is reported as refused, exactly as any other statement
-    /// (#1272).
+    /// True for a self-committing statement (DDL) that committed at least one catalog change a
+    /// reopened database shows (a published, altered or removed definition) before the failure:
+    /// that part survives the reopen, so it is never reported as refused. A DDL statement that met
+    /// the offline storage before it committed such a change passes false and is reported as
+    /// refused, exactly as any other statement (#1272), even when it had durably committed work
+    /// nothing can reach: a reserved table identity, or index trees no catalog entry describes.
     /// </param>
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error, bool selfCommitted = false)

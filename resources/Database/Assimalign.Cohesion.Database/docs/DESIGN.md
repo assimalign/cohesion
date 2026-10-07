@@ -175,12 +175,28 @@ layer through the interfaces the bases implement. Every base carries the deviati
     a bounded `Monitor.TryEnter` loop (10 ms attempts) and rereads the snapshot between attempts,
     and under the lock it removes the database only if the registry still holds that same
     instance.
+  - **The close chain never captures a synchronization context.** A second `Dispose` blocks on
+    the close in flight, and the engines' drop and offline reopen call `Dispose` under the leaf's
+    lock, so every await from a leaf's `DisposeAsyncCore` down to the storage streams uses
+    `ConfigureAwait(false)` (`Storage.DisposeAsync` and `StorageStream.DisposeAsync` included).
+    One continuation posted to a UI context (Studio is MAUI) would deadlock a drop made on that
+    thread while a holder's close runs.
+  - **A stalled close stalls the engine's registry.** A drop and an offline reopen wait for a
+    holder's close while holding the leaf's lock, as the drop's own close always did. A close that
+    stalls (a data fsync that does not answer) therefore blocks every registry operation of that
+    engine until it ends: create, open, drop, a lookup that takes the lock, enumeration, a wire
+    server's handshake and the engine's disposal. The drop's cancellation token is not observed
+    during that wait. Moving the wait out of the lock (a `_dropping` set that open and create
+    refuse, the close awaited with the token, the files deleted under the lock again) is the
+    remedy if the stall matters; it is not done, because the exposure predates decision 33.
   - **Engine-initiated closes are unchanged**: a drop, an offline reopen and the engine's disposal
     remove the database first, so its forget finds nothing to do.
 
   In-memory databases reopen with their data too (#1272): `shared/DatabaseMemoryFiles` keeps each
-  in-memory file set's streams for the engine's lifetime, and an open copies the closed streams'
-  bytes into new streams (a `MemoryStream` keeps its buffer after it closes) and runs the same
+  in-memory file set's streams until it is dropped or the engine is disposed (the disposal
+  releases every file set, so a disposed engine still referenced holds none of its databases), and
+  an open copies the closed streams' bytes into new streams outside its lock, each allocated once
+  at its final size (a `MemoryStream` keeps its buffer after it closes), and runs the same
   recovery a file reopen runs; it refuses a file set whose storage still has a stream open. The
   root suite pins the base's part with a test leaf (`TestEngine`) whose close a gate holds: an
   open, a canceled open, a drop and the engine's disposal during a holder's close, the refusal

@@ -426,17 +426,21 @@ are aggregated after attempting every database.
 tells the engine (`DocumentDatabaseEngine.ForgetClosedDatabaseCore`, through the root's shared
 `DatabaseRegistry.Forget`), which stops tracking it, so a later `OpenDatabaseAsync` opens it again
 from its files: a new instance with every committed document. An in-memory database reopens with
-its documents too, because the engine keeps each in-memory file set's streams for its lifetime
-(`DatabaseMemoryFiles`) and the open copies the closed streams' bytes and runs the same recovery
-over them (#1272); before #1272 an in-memory reopen got empty storage. While the close runs, an
-open waits for it (the root `DatabaseEngine.OpenDatabaseAsync`), `TryGetDatabase` does not report
+its documents too, because the engine keeps each in-memory file set's streams until its own
+disposal releases them (`DatabaseMemoryFiles`) and the open copies the closed streams' bytes and
+runs the same recovery over them (#1272); before #1272 an in-memory reopen got empty storage.
+While the close runs, an open waits for it (the root `DatabaseEngine.OpenDatabaseAsync`),
+`TryGetDatabase` does not report
 the database, a create of its name is refused as existing, and a drop or the engine's disposal
 waits for the close, so nothing reuses the files under it. Before decision 33 the database stayed
 registered until it was dropped, and the open refused it with `ObjectDisposedException`. The
 forget reads the engine's lock-free instance snapshot and takes the engine's lock only through a
 bounded `Monitor.TryEnter` loop. A drop, an offline reopen and the engine's disposal remove a
 database from the snapshot and dispose it while holding that lock, and that disposal waits for a
-close a holder started, so a forget that blocked on the lock would deadlock with them.
+close a holder started, so a forget that blocked on the lock would deadlock with them. The same
+wait means a holder's close that stalls (a fsync that does not answer) stalls the engine's other
+registry operations until it ends, and a drop's token is not observed meanwhile (root
+`DESIGN.md`, "A stalled close stalls the engine's registry").
 
 For the window between the close and the forget the workers skip the database:
 `DocumentDatabase.IsClosed` reads the base's disposed flag, `DocumentDatabaseEngine.IsOpen` is

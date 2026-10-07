@@ -33,9 +33,11 @@ internal sealed partial class SqlPlanExecutor
         await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
         // Rebind after waiting: a parent definition might have changed while acquiring its lock.
         constraints = BindConstraints(provisional, plan.Constraints);
-        var table = await SelfCommitAsync(statement, _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
+        // Durable, but not a self-commit the session counts (#1272): the reservation persists only
+        // the object-id counter, and the table stays invisible until the publish.
+        var table = await _catalog.ReserveTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
             statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-            statement.ProvisioningSchema, cancellationToken)).ConfigureAwait(false);
+            statement.ProvisioningSchema, cancellationToken).ConfigureAwait(false);
 
         // Bind the persisted definitions of the version about to be published, from their
         // stored text, so no write to the new table ever parses them.
@@ -113,7 +115,9 @@ internal sealed partial class SqlPlanExecutor
         {
             if (indexes.Count > 0)
             {
-                await SelfCommitAsync(statement, statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
+                // Durable, but not a self-commit the session counts (#1272): the trees are orphaned
+                // pages until the publish below describes them.
+                await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
                 {
                     foreach (var metadata in indexes)
                     {
@@ -135,7 +139,7 @@ internal sealed partial class SqlPlanExecutor
                         }
                     }
                     return true;
-                }, durable: true, cancellationToken)).ConfigureAwait(false);
+                }, durable: true, cancellationToken).ConfigureAwait(false);
             }
             await SelfCommitAsync(statement, _catalog.PublishTableAsync(table, indexes, _indexManager.ExportRegistrations(),
                 replaceExisting, cancellationToken)).ConfigureAwait(false);

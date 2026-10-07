@@ -208,8 +208,8 @@ public sealed class SqlDatabaseSession : DatabaseSession
         {
             // A statement that met the offline storage (#1243) gets the coded refusal, unless its
             // work may survive the reopen: a self-committing DDL statement that already committed a
-            // durable bracket of its own, or a bracket whose commit record was written, is
-            // unconfirmed instead (#1272). The unconfirmed commit that took the database offline
+            // catalog change a reopened database shows, or a bracket whose commit record was
+            // written, is unconfirmed instead (#1272). The unconfirmed commit that took the database offline
             // keeps its own type. Both lead with COHSQLT004.
             throw translated;
         }
@@ -242,16 +242,18 @@ public sealed class SqlDatabaseSession : DatabaseSession
 
     /// <summary>
     /// Reports whether a failed request is a self-committing statement that had committed at
-    /// least one durable bracket of its own when it failed: the executor records each catalog
-    /// self-commit and durably committed data bracket on the statement's metrics once its commit
-    /// returned. Such a statement's failure on an offline storage is unconfirmed, because what it
-    /// committed survives the reopen; a DDL statement that committed nothing is refused, like any
-    /// other statement (#1272). Before #1272 every DDL statement that met an offline storage was
-    /// reported as unconfirmed, even one a concurrent failure refused before it wrote anything.
+    /// least one catalog change a reopened database shows when it failed: the executor records
+    /// each catalog self-commit that publishes, alters or removes a definition on the statement's
+    /// metrics once its commit returned. Such a statement's failure on an offline storage is
+    /// unconfirmed, because what it committed survives the reopen; a DDL statement that committed
+    /// no such change is refused, like any other statement (#1272), even after durable steps
+    /// nothing can reach (CREATE TABLE's identity reservation, index trees no catalog entry
+    /// describes yet). Before #1272 every DDL statement that met an offline storage was reported as
+    /// unconfirmed, even one a concurrent failure refused before it wrote anything.
     /// </summary>
     /// <param name="request">The failed request.</param>
     /// <param name="previousMetrics">The session's last metrics before the request ran.</param>
-    /// <returns>True when the statement committed a durable bracket before it failed.</returns>
+    /// <returns>True when the statement committed a visible catalog change before it failed.</returns>
     private bool SelfCommitted(QueryRequest request, SqlStatementMetrics? previousMetrics)
         => IsSelfCommitting(request)
             && _lastStatementMetrics is { SelfCommits: > 0 } metrics

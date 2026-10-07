@@ -65,4 +65,10 @@ internal sealed class InMemoryKeyValueStorageStrategy : KeyValueStorageStrategy
 
     /// <inheritdoc />
     public override bool StorageExists(string databaseName) => _files.Exists(databaseName);
+
+    /// <summary>
+    /// Releases every file set's bytes, once the engine that owns the strategy closed its databases
+    /// at its disposal: nothing opens them again.
+    /// </summary>
+    internal void Release() => _files.Clear();
 }

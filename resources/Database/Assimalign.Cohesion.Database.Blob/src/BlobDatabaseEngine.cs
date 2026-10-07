@@ -394,7 +394,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// Closes every open database once the base disposed the servers, stopped the worker pumps
     /// and disposed the workers: each database durably flushes according to its storage's
     /// durability policy, and an offline one closes without writing. A close a holder started is
-    /// waited for. Then the engine's worker signals are released.
+    /// waited for. Then the engine's worker signals, and an in-memory engine's files, are released.
     /// </summary>
     /// <returns>A task that completes once every database is closed.</returns>
     protected override async ValueTask DisposeAsyncCore()
@@ -423,6 +423,9 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
         _commitPending.Dispose();
         _checkpointNeeded.Dispose();
         _undoDeferred.Dispose();
+
+        // An in-memory engine's files go with it: nothing opens them again (#1272).
+        _memory?.Clear();
 
         // The base reports this step's failure among the engine's components: one database's
         // failure as itself, several together.

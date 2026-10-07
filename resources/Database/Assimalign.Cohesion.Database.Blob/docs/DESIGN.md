@@ -92,17 +92,21 @@ one that commits after the fault gets the unconfirmed commit of #1243 instead of
 close then tells the engine (`BlobDatabaseEngine.ForgetClosedDatabaseCore`, through the root's
 shared `DatabaseRegistry.Forget`), which stops tracking it, so a later `OpenDatabaseAsync` opens
 it again from its files: a new instance with every committed blob. An in-memory database reopens
-with its blobs too, because the engine keeps each in-memory file set's streams for its lifetime
-(`DatabaseMemoryFiles`) and the open copies the closed streams' bytes and runs the same recovery
-over them (#1272); before #1272 an in-memory reopen got empty storage. While the close runs, the
-engine still tracks the closing database, so the workers' closed-database skips ("Concrete
-types", option B) still cover it; an open waits for the close, `TryGetDatabase` does not report
+with its blobs too, because the engine keeps each in-memory file set's streams until its own
+disposal releases them (`DatabaseMemoryFiles`) and the open copies the closed streams' bytes and
+runs the same recovery over them (#1272); before #1272 an in-memory reopen got empty storage.
+While the close runs, the engine still tracks the closing database, so the workers'
+closed-database skips ("Concrete types", option B) still cover it; an open waits for the close,
+`TryGetDatabase` does not report
 the database, and a drop or the engine's disposal waits for it, so nothing reuses the files under
 the close. Before decision 33 the database stayed registered until it was dropped, and the open
 refused it with `ObjectDisposedException`. The forget reads the engine's lock-free instance
 snapshot and takes the engine's lock only through a bounded `Monitor.TryEnter` loop, because a
 drop, an offline reopen and the engine's disposal dispose a database while holding that lock,
-and that disposal waits for a close a holder started.
+and that disposal waits for a close a holder started. The same wait means a holder's close that
+stalls (a fsync that does not answer) stalls the engine's other registry operations, the wire
+server's handshake among them, until it ends, and a drop's token is not observed meanwhile (root
+`DESIGN.md`, "A stalled close stalls the engine's registry").
 `BlobEngineTests.OpenDatabaseAsync_DatabaseClosedOutsideTheEngine_ShouldReopenItWithItsBlobs`
 closes a database both ways, in memory and on disk, with an upload of an uncommitted transaction:
 the reopened instance is new, holds the committed blobs (a small one and a 100,000-byte one)

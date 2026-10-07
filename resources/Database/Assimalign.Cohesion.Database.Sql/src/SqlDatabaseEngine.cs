@@ -618,7 +618,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// Closes every open database once the base disposed the servers, stopped the worker pumps
     /// and disposed the workers: each database durably flushes according to its storage's
     /// durability policy, and an offline one closes without writing. A close a holder started is
-    /// waited for. Then the engine's worker signals are released.
+    /// waited for. Then the engine's worker signals, and an in-memory engine's files, are released.
     /// </summary>
     /// <returns>A task that completes once every database is closed.</returns>
     protected override async ValueTask DisposeAsyncCore()
@@ -648,6 +648,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         _commitPendingSignal.Dispose();
         _checkpointNeededSignal.Dispose();
         _undoDeferredSignal.Dispose();
+
+        // An in-memory engine's files go with it: nothing opens them again (#1272).
+        (_strategy as InMemorySqlStorageStrategy)?.Release();
 
         // The base reports this step's failure among the engine's components: one database's
         // failure as itself, several together.

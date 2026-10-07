@@ -17,17 +17,23 @@ namespace Assimalign.Cohesion.Database;
 /// <remarks>
 /// <para>
 /// A storage disposes its streams when it closes, and a <see cref="MemoryStream"/> keeps its bytes
-/// after that (<see cref="MemoryStream.ToArray"/> reads a closed stream). An open copies them into
-/// new streams, so the reopened storage never shares a buffer with the one that closed, and a
-/// write the closed storage could still attempt fails on its own disposed stream rather than
-/// changing the reopened database. Before this type, an in-memory reopen got fresh empty streams
-/// and silently lost every row (#1272).
+/// after that (<see cref="MemoryStream.TryGetBuffer"/> and <see cref="MemoryStream.ToArray"/> read
+/// a closed stream). An open copies them into new streams, outside the lock, so the reopened
+/// storage never shares a buffer with the one that closed, and a write the closed storage could
+/// still attempt fails on its own disposed stream rather than changing the reopened database.
+/// Before this type, an in-memory reopen got fresh empty streams and silently lost every row
+/// (#1272).
 /// </para>
 /// <para>
 /// An engine reopens a database only after its close ended (the root engine base waits for a
 /// holder's close, and an engine's own disposal of a database waits for one in flight), so the
 /// open refuses a file set whose last storage still has a stream open: that is a defect of the
 /// caller, reported instead of copying bytes a running storage still writes.
+/// </para>
+/// <para>
+/// The bytes live until the file set is dropped or the owning engine is disposed
+/// (<see cref="Clear"/>): an engine's disposal releases them, so a disposed engine something
+/// still references holds none of its databases.
 /// </para>
 /// <para>
 /// Compiled into each model assembly from the root's <c>shared</c> folder, because each model
@@ -102,27 +108,54 @@ internal sealed class DatabaseMemoryFiles
     /// <exception cref="InvalidOperationException">The file set's last storage has not closed.</exception>
     internal bool TryOpen(string name, out StorageStream data, out StorageStream journal, out StorageStream backup)
     {
-        Files reopened;
+        Files? closed;
         lock (_sync)
         {
-            if (!_files.TryGetValue(name, out var closed))
+            if (!_files.TryGetValue(name, out closed))
             {
                 data = journal = backup = null!;
                 return false;
             }
 
-            if (closed.Data.CanRead || closed.Journal.CanRead || closed.Backup.CanRead)
+            ThrowIfOpen(name, closed);
+        }
+
+        // Copied outside the lock, so the copy of a large database never blocks a lookup or a
+        // create of another name. The closed streams cannot change any more, and the copy is
+        // published only if no other open, and no drop and create, replaced them meanwhile; the
+        // engines serialize their opens, so that is a defect of the caller, reported.
+        var reopened = new Files(Copy(closed.Data), Copy(closed.Journal), Copy(closed.Backup));
+        lock (_sync)
+        {
+            if (!_files.TryGetValue(name, out var current))
             {
-                throw new InvalidOperationException(
-                    $"The in-memory file set '{name}' is still open: its database's storage has not closed, so it cannot be opened again.");
+                data = journal = backup = null!;
+                return false;
             }
 
-            reopened = new Files(Copy(closed.Data), Copy(closed.Journal), Copy(closed.Backup));
+            if (!ReferenceEquals(current, closed))
+            {
+                throw new InvalidOperationException(
+                    $"The in-memory file set '{name}' was opened or created again while an open copied it.");
+            }
+
             _files[name] = reopened;
         }
 
         (data, journal, backup) = reopened.Open();
         return true;
+    }
+
+    /// <summary>
+    /// Releases every file set's bytes: the engine that owns the files was disposed, and nothing
+    /// opens them again.
+    /// </summary>
+    internal void Clear()
+    {
+        lock (_sync)
+        {
+            _files.Clear();
+        }
     }
 
     /// <summary>
@@ -138,11 +171,23 @@ internal sealed class DatabaseMemoryFiles
         }
     }
 
-    // A closed stream's bytes in a new, growable stream positioned at its start.
+    // Refuses a file set whose last storage still has a stream open.
+    private static void ThrowIfOpen(string name, Files files)
+    {
+        if (files.Data.CanRead || files.Journal.CanRead || files.Backup.CanRead)
+        {
+            throw new InvalidOperationException(
+                $"The in-memory file set '{name}' is still open: its database's storage has not closed, so it cannot be opened again.");
+        }
+    }
+
+    // A closed stream's bytes in a new, growable stream positioned at its start. A closed
+    // MemoryStream still exposes its buffer, so each copy allocates once, at its final size.
     private static MemoryStream Copy(MemoryStream closed)
     {
-        var copy = new MemoryStream();
-        copy.Write(closed.ToArray());
+        ReadOnlySpan<byte> bytes = closed.TryGetBuffer(out var buffer) ? buffer.AsSpan() : closed.ToArray();
+        var copy = new MemoryStream(bytes.Length);
+        copy.Write(bytes);
         copy.Position = 0;
         return copy;
     }

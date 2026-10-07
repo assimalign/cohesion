@@ -1305,10 +1305,11 @@ model carried move into the root bases or the root's shared source, once (rule 8
   and KeyValuePair's create, open and drop check the engine's disposal under the lock.
 - *An in-memory database reopens with its data (#1272's third item).* An in-memory reopen built
   fresh storage and silently lost every row. The shared `shared/DatabaseMemoryFiles` keeps each
-  in-memory file set's streams for the engine's lifetime, and an open copies the closed streams'
-  bytes into new streams and runs the same recovery a file reopen runs. Sql's and KeyValuePair's
-  in-memory strategies and the Documents, Graph and Blob engines (whose in-memory case has no
-  strategy) use it.
+  in-memory file set's streams until it is dropped or the engine is disposed (the disposal
+  releases them all), and an open copies the closed streams' bytes into new streams, outside its
+  lock, and runs the same recovery a file reopen runs. Sql's and KeyValuePair's in-memory
+  strategies and the Documents, Graph and Blob engines (whose in-memory case has no strategy) use
+  it.
 - *Every unconfirmed-commit message leads with the model's code (decision 24, #1272).* The
   kernel path (`TransactionCommitUnconfirmedException`) reached callers with the kernel's message
   alone in every model, on the explicit commit and on an automatic statement's own commit. The
@@ -1318,8 +1319,11 @@ model carried move into the root bases or the root's shared source, once (rule 8
   model's translation calls it: Sql and KeyValuePair through `CreateUnconfirmedCommit`, Documents,
   Graph and Blob through `TranslateKernelFailure`, now an instance member so it knows the
   database. SQL's self-commit classification is exact as well: a DDL statement is unconfirmed only
-  if it committed a durable bracket of its own (`SqlStatementMetrics.SelfCommits`, recorded per
-  statement) or its failing bracket wrote its commit record; otherwise it is offline.
+  if it committed a catalog change a reopened database shows (a published, altered or removed
+  definition; `SqlStatementMetrics.SelfCommits`, recorded per statement) or its failing bracket
+  wrote its commit record; otherwise it is offline. CREATE TABLE's identity reservation and the
+  index trees built before a catalog commit are durable but unreachable, so they do not count
+  (the engines-track review's finding; §7).
 - *Decision 32* removes the Documents and Blob session-less operations (§6.6).
 
 Asserted: the refused-reopen tests became per-model reopen theories, in memory and on disk,
@@ -2993,6 +2997,42 @@ the code had moved, the row now says what landed:
     and Documents.Client test projects hold no tests. Studio's `--smoke` run gives 83 passed,
     0 failed, 1 skipped; the dependency graph check passes; and the Database runtime producer
     packs. Database.Testing and the SampleHost were not run (out of this landing's scope).
+  - *Review fixes (`feat/owner-decisions-engines-review`).* Two reviews approved with minor
+    findings only; every one was applied, two of them as documentation:
+    - *The close chain captured the caller's context.* `Storage.DisposeAsync` and
+      `StorageStream.DisposeAsync` awaited without `ConfigureAwait(false)`, though a second
+      `Dispose` and the engines' drop and offline reopen block on that chain. Latent (today's
+      streams finish their disposal synchronously), fixed, and recorded as a rule in the root
+      `DESIGN.md`.
+    - *SQL counted unreachable brackets.* CREATE TABLE's identity reservation and the index trees
+      built before a catalog commit made a statement unconfirmed although a reopen cannot show
+      the table or index. Only catalog commits that publish, alter or remove a definition count
+      now. A new test fails CREATE TABLE between its reservation and its tree build: refused with
+      `COHSQLT004`, the table absent after the reopen, the reserved identity skipped (re-wrapping
+      the reservation fails it).
+    - *In-memory bytes outlived the engine, and the reopen copied under the lock.* The engines'
+      disposal now releases `DatabaseMemoryFiles` (Sql and KeyValuePair through their in-memory
+      strategy's `Release`), and an open copies outside the lock into streams allocated once at
+      their final size, publishing the copy only if nothing replaced the file set meanwhile.
+      `DatabaseMemoryFilesTests` (Sql suite, 3 tests) pins the copy, the refusal of open files
+      and the release.
+    - *A stalled holder close stalls the engine's registry*, because a drop and an offline reopen
+      wait for it under the leaf's lock and the drop's token is not observed. Documented in the
+      root and every model `DESIGN.md` rather than restructured: the drop's own close already
+      ran under that lock before decision 33, and moving the wait out of the lock touches five
+      engines' create, open and drop.
+    - *Blob's crash test cleanup was flaky* (2 of 16 runs in review: `blob.bak` held by another
+      process). The test now disposes its engine in the body, so a failed close fails the test
+      itself, and the cleanup retries a refused delete for about two seconds. The process suite
+      then passed 12 of 12 consecutive runs.
+
+    Gate after the fixes: a no-incremental build of the Database solution has no Database warning
+    but CS2008 on Database.Refs, and Studio builds with none. Sql.Tests 1132 (1128 + 4: the
+    reservation test and the three memory-file tests); every other suite as above (root 112,
+    Documents 195, Graph 402, Blob 171, KeyValuePair 192, the clients, Hosting, Embedded,
+    ApplicationModel, Sdk.Database and the child roots at their recorded counts). Studio's smoke
+    gives 83 passed, 0 failed, 1 skipped; the dependency graph check passes; the runtime producer
+    packs.
 
 The template, fixture and example casts `(SqlDatabaseEngine)engine` become identity casts and
 still compile. *Gate:* each model's suites, including its #1188, #1225 and #1226 suites in
@@ -3274,8 +3314,10 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
 - #1272: **Done** by the same landing. Every unconfirmed-commit message leads with the model's
   code on every path (decision 24): the explicit commit, an automatic statement's own commit and a
   flagged storage bracket. SQL's self-commit DDL classification is exact (unconfirmed only after a
-  durable bracket of its own committed, otherwise offline). An in-memory database reopens with its
-  data in all five models. Closing #1272 is the integration merge's step.
+  catalog change a reopened database shows committed, otherwise offline; an identity reservation
+  or index trees not yet described do not count). An in-memory database reopens with its data in
+  all five models, and an engine's disposal releases the bytes. Closing #1272 is the integration
+  merge's step.
 - `general-rules.md` still uses `IDatabase` in its XML-documentation example and its naming table,
   and `services.AddSingleton<IDatabase, Database>()` in the `extension(...)` example. Those
   examples teach unrelated rules; replace them in P6, when `IDatabase` is deleted, so they never

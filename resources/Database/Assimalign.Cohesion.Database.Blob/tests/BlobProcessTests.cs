@@ -112,6 +112,10 @@ public sealed class BlobProcessTests
                 throw new InvalidDataException($"Uncommitted blob survived: {unexpected.Name}.");
             }
             reopened.State.ShouldBe(EngineState.Running);
+
+            // Closed here, not at the end of the scope, so a failed close fails the test itself
+            // rather than hiding behind the cleanup's IOException.
+            await reopened.DisposeAsync();
         }
         finally { DeleteRoot(root); }
     }
@@ -182,11 +186,25 @@ public sealed class BlobProcessTests
     private static string NewRoot()
         => Path.Combine(Path.GetTempPath(), "cohesion-blob-process", Guid.NewGuid().ToString("N"));
 
+    // Retries a delete another process's brief hold on a file refuses (an antivirus scan of the
+    // files the fixture and the engine just closed), for about two seconds before it gives up.
     private static void DeleteRoot(string root)
     {
-        if (Directory.Exists(root))
+        for (int attempt = 1; ; attempt++)
         {
-            Directory.Delete(root, recursive: true);
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException && attempt < 20)
+            {
+                Thread.Sleep(100);
+            }
         }
     }
 }

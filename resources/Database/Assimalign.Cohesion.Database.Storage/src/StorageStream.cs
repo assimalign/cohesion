@@ -302,7 +302,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
     /// <inheritdoc />
     public override async ValueTask DisposeAsync()
     {
-        await _inner.DisposeAsync();
-        await base.DisposeAsync();
+        await _inner.DisposeAsync().ConfigureAwait(false);
+        await base.DisposeAsync().ConfigureAwait(false);
     }
 }

@@ -448,6 +448,77 @@ public sealed class SqlStorageOperationsTests
     }
 
     /// <summary>
+    /// A DDL statement whose only durable steps leave nothing a reopened database shows is refused,
+    /// not unconfirmed (#1272): here <c>CREATE TABLE</c> has committed its table's identity
+    /// reservation, which persists only the object-id counter, and waits for the statement apply
+    /// gate to build its primary-key tree when the database goes offline. The table could never
+    /// be published, so the caller is told the statement was refused and may retry it. The
+    /// reservation did commit: the next table created after the reopen skips its identity.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Offline: a CREATE TABLE refused after its identity reservation and before its publish is offline, not unconfirmed")]
+    public async Task Ddl_OfflineAfterTheReservationBeforeThePublish_ShouldBeOfflineNotUnconfirmed()
+    {
+        // Arrange: a table whose identity the test measures from, and a second database whose
+        // failed fsync supplies the offline error.
+        const string name = "ddl";
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        var database = await engine.CreateDatabaseAsync(name);
+        await using (var setup = await database.CreateSessionAsync())
+        {
+            await setup.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
+        }
+
+        database.Catalog.TryGetTable("dbo", "t", out var existing).ShouldBeTrue();
+        var failed = await engine.CreateDatabaseAsync("failed");
+        await using (var setup = await failed.CreateSessionAsync())
+        {
+            await setup.ExecuteAsync("CREATE TABLE f (id INT NOT NULL)");
+            using var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, storageName: "failed");
+            await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await setup.ExecuteAsync("INSERT INTO f (id) VALUES (1)"));
+        }
+
+        var offlineError = failed.DataStorage.OfflineError.ShouldNotBeNull();
+
+        // Another statement holds the database's apply gate, so the create reserves its table's
+        // identity in the catalog and then waits to build the primary-key tree.
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var released = new Release(() => release.TrySetResult());
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holder = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var holding = database.Coordinator.ApplyStatementAsync<bool>(holder, async _ =>
+        {
+            entered.SetResult();
+            await release.Task;
+            return true;
+        }, durable: false).AsTask();
+        await entered.Task.WaitAsync(Timeout);
+        await using var ddl = await database.CreateSessionAsync();
+        var create = ddl.ExecuteAsync("CREATE TABLE u (id INT PRIMARY KEY)").AsTask();
+        bool createWaited = !await CompletesWithin(create, TimeSpan.FromMilliseconds(200));
+
+        // Act: the database goes offline while the create waits; then the gate is released.
+        database.DataStorage.TakeOffline(offlineError);
+        release.SetResult();
+        await Record.ExceptionAsync(async () => await holding.WaitAsync(Timeout));
+        var refused = await Should.ThrowAsync<DatabaseException>(async () => await create.WaitAsync(Timeout));
+        await Record.ExceptionAsync(async () => await database.Coordinator.RollbackAsync(holder));
+        var reopened = await engine.OpenDatabaseAsync(name);
+        await using var observer = await reopened.CreateSessionAsync();
+        await observer.ExecuteAsync("CREATE TABLE v (id INT NOT NULL)");
+
+        // Assert: refused with the offline code, the table absent after the reopen, and the
+        // reservation's identity never reused.
+        createWaited.ShouldBeTrue();
+        var offline = refused.ShouldBeOfType<DatabaseOfflineException>();
+        offline.Code.ShouldBe("COHSQLT004");
+        offline.Message.ShouldStartWith("COHSQLT004: Database 'ddl' is offline", Case.Sensitive);
+        (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'u'")).ShouldBe(0L);
+        reopened.Catalog.TryGetTable("dbo", "v", out var next).ShouldBeTrue();
+        next.ObjectId.ShouldBe(existing.ObjectId + 2);
+    }
+
+    /// <summary>
     /// One database's statement holds its apply gate while another database of the engine is
     /// written well past its checkpoint size. The checkpoint worker does not wait for the busy
     /// gate: it defers that database's checkpoint to the statement's end and keeps checkpointing

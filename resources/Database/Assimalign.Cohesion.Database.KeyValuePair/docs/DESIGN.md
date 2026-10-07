@@ -396,8 +396,9 @@ instance) stays registered only until its close ends. The close then tells the e
 (`KeyValueDatabaseEngine.ForgetClosedDatabaseCore`, through the root's shared
 `DatabaseRegistry.Forget`), which stops tracking it, so a later `OpenDatabaseAsync` opens it again
 from its file sets: a new instance with every committed entry. An in-memory database reopens with
-its entries too: `InMemoryKeyValueStorageStrategy` keeps both file sets' streams for the engine's
-lifetime (`DatabaseMemoryFiles`), and the open copies the closed streams' bytes and runs the same
+its entries too: `InMemoryKeyValueStorageStrategy` keeps both file sets' streams until the
+engine's disposal releases them (`DatabaseMemoryFiles`, `InMemoryKeyValueStorageStrategy.Release`),
+and the open copies the closed streams' bytes and runs the same
 recovery over them without the open's checkpoint (#1272); before #1272 an in-memory reopen got
 empty storage. While the close runs, an open waits for it (the root
 `DatabaseEngine.OpenDatabaseAsync`), `TryGetDatabase` and `GetDatabasesAsync` do not report the
@@ -410,7 +411,10 @@ bounded `Monitor.TryEnter` loop: a drop, an offline reopen and the engine's disp
 database while holding that lock, and that disposal waits for a close a holder started, so a
 forget that blocked on the lock would deadlock with them. The engine's create, open and drop now
 also check its disposal under the lock, so none of them registers or drops a database after the
-engine's disposal has taken its snapshot.
+engine's disposal has taken its snapshot. Because a drop and an offline reopen wait for a holder's
+close under that lock, a close that stalls (a fsync that does not answer) stalls the engine's
+other registry operations until it ends, and a drop's token is not observed meanwhile (root
+`DESIGN.md`, "A stalled close stalls the engine's registry").
 
 For the window between the close and the forget the workers skip the database:
 `KeyValueDatabase.IsClosed` reads the base's disposed flag, `KeyValueDatabaseEngine.IsOpen` is
