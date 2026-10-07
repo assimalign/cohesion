@@ -47,7 +47,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using (var engine = CreateEngine())
         {
             SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-            var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+            database.SupportsSchemaProvisioning.ShouldBeTrue();
+            var provisioner = database;
             SchemaMigrationResult result = await provisioner.ApplySchemaAsync(schema);
 
             result.FromHash.ShouldBeNull();
@@ -65,7 +66,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using (var reopenedEngine = CreateEngine())
         {
             SqlDatabase reopened = await reopenedEngine.OpenDatabaseAsync("orders");
-            var provisioner = reopened.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+            reopened.SupportsSchemaProvisioning.ShouldBeTrue();
+            var provisioner = reopened;
             SchemaMigrationResult result = await provisioner.ApplySchemaAsync(schema);
 
             result.FromHash.ShouldBe(schema.Hash);
@@ -81,7 +83,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // Arrange
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+        database.SupportsSchemaProvisioning.ShouldBeTrue();
+        var provisioner = database;
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             []);
@@ -117,7 +120,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // duplicate live values after the preceding ADD COLUMN has completed.
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+        database.SupportsSchemaProvisioning.ShouldBeTrue();
+        var provisioner = database;
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             [],
@@ -165,7 +169,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // Arrange
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+        database.SupportsSchemaProvisioning.ShouldBeTrue();
+        var provisioner = database;
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             [new CompiledSchemaIndex("ix_orders_id", ["id"])]);
@@ -197,7 +202,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // Arrange
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+        database.SupportsSchemaProvisioning.ShouldBeTrue();
+        var provisioner = database;
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             []);
@@ -222,7 +228,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // Arrange
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+        database.SupportsSchemaProvisioning.ShouldBeTrue();
+        var provisioner = database;
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: true)],
             []);
@@ -246,7 +253,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         // Arrange
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+        database.SupportsSchemaProvisioning.ShouldBeTrue();
+        var provisioner = database;
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             [new CompiledSchemaIndex("ix_orders_id", ["id"])]);
@@ -281,7 +289,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
 
         // Act / Assert
         await Should.ThrowAsync<ObjectDisposedException>(
-            async () => await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema));
+            async () => await database.ApplySchemaAsync(schema));
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Ownership: session-created objects remain mutable")]
@@ -319,7 +327,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
     {
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+        database.SupportsSchemaProvisioning.ShouldBeTrue();
+        var provisioner = database;
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false),
              new CompiledSchemaColumn("note", DatabaseType.String, true)],
@@ -377,7 +386,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false),
              new CompiledSchemaColumn("note", DatabaseType.String, true)],
             [new CompiledSchemaIndex("ix_orders_id", ["id"])]);
-        await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema);
+        await database.ApplySchemaAsync(schema);
         await holdingTransaction.CommitAsync();
 
         DatabaseObjectLockedException exception = await Should.ThrowAsync<DatabaseObjectLockedException>(
@@ -393,7 +402,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         replacement.FindColumn("extra").ShouldBeNull();
         catalog.TryGetIndex(replacement.ObjectId, "ix_orders_id", out var index).ShouldBeTrue();
         index.Owner.ShouldBe(DatabaseObjectOwner.Schema);
-        (await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema))
+        (await database.ApplySchemaAsync(schema))
             .WasAlreadyApplied.ShouldBeTrue();
     }
 
@@ -441,7 +450,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using (var engine = CreateEngine())
         {
             SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-            await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema);
+            await database.ApplySchemaAsync(schema);
             await using SqlDatabaseSession session = await database.CreateSessionAsync();
             await session.ExecuteAsync("CREATE TABLE scratch (id BIGINT);");
         }
@@ -464,7 +473,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await Should.ThrowAsync<DatabaseObjectLockedException>(
             async () => await reopenedSession.ExecuteAsync("DROP INDEX ix_orders_id ON orders;"));
         await reopenedSession.ExecuteAsync("DROP TABLE scratch;");
-        (await reopened.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema))
+        (await reopened.ApplySchemaAsync(schema))
             .WasAlreadyApplied.ShouldBeTrue();
     }
 
@@ -473,7 +482,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
     {
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
-        var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+        database.SupportsSchemaProvisioning.ShouldBeTrue();
+        var provisioner = database;
         await provisioner.ApplySchemaAsync(OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false),
              new CompiledSchemaColumn("note", DatabaseType.String, true)],
@@ -505,7 +515,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
         await using SqlDatabaseSession session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE scratch (id BIGINT);");
-        var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+        database.SupportsSchemaProvisioning.ShouldBeTrue();
+        var provisioner = database;
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false)], []);
         await provisioner.ApplySchemaAsync(initial);
@@ -535,7 +546,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false)], []);
 
         await Should.ThrowAsync<SqlSchemaMigrationException>(
-            async () => await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema));
+            async () => await database.ApplySchemaAsync(schema));
 
         database.ShouldBeOfType<SqlDatabase>().Catalog.SchemaState.ShouldBeNull();
         await session.ExecuteAsync("DROP TABLE orders;");

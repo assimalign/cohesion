@@ -35,7 +35,7 @@ internal sealed class DatabaseHostingEventSource : EventSource
     /// <param name="cause">What took it offline, or null when the engine does not say.</param>
     /// <param name="delay">How long the application waits before its first reopen.</param>
     [NonEvent]
-    public void OfflineDatabaseFound(IDatabaseEngine engine, string database, StorageOfflineCause? cause, TimeSpan delay)
+    public void OfflineDatabaseFound(DatabaseEngine engine, string database, StorageOfflineCause? cause, TimeSpan delay)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
@@ -50,7 +50,7 @@ internal sealed class DatabaseHostingEventSource : EventSource
     /// <param name="database">The database's name.</param>
     /// <param name="attempt">The attempt's number for this database, from one.</param>
     [NonEvent]
-    public void ReopenAttempted(IDatabaseEngine engine, string database, int attempt)
+    public void ReopenAttempted(DatabaseEngine engine, string database, int attempt)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
@@ -65,7 +65,7 @@ internal sealed class DatabaseHostingEventSource : EventSource
     /// <param name="database">The database's name.</param>
     /// <param name="attempts">How many attempts it took.</param>
     [NonEvent]
-    public void ReopenSucceeded(IDatabaseEngine engine, string database, int attempts)
+    public void ReopenSucceeded(DatabaseEngine engine, string database, int attempts)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
@@ -82,7 +82,7 @@ internal sealed class DatabaseHostingEventSource : EventSource
     /// <param name="exception">The failure.</param>
     /// <param name="retryDelay">How long the application waits before the next attempt.</param>
     [NonEvent]
-    public void ReopenFailed(IDatabaseEngine engine, string database, int attempt, Exception exception, TimeSpan retryDelay)
+    public void ReopenFailed(DatabaseEngine engine, string database, int attempt, Exception exception, TimeSpan retryDelay)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
@@ -104,7 +104,7 @@ internal sealed class DatabaseHostingEventSource : EventSource
     /// <param name="database">The database's name.</param>
     /// <param name="reason">Why.</param>
     [NonEvent]
-    public void ReopenAbandoned(IDatabaseEngine engine, string database, string reason)
+    public void ReopenAbandoned(DatabaseEngine engine, string database, string reason)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {

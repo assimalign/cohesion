@@ -93,7 +93,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
 
         if (Mode == ConnectionMode.Embedded)
         {
-            IDatabaseSession session = RequireSession();
+            DatabaseSession session = RequireSession();
             if (paths)
             {
                 QueryResult result = await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(outcome.Statement), cancellationToken).ConfigureAwait(false);
@@ -109,7 +109,7 @@ internal sealed partial class GraphWorkspace : LanguageWorkspace
                     await FillFromQueryResultAsync(outcome, result, cancellationToken).ConfigureAwait(false);
                 }
 
-                outcome.Note = "IDatabaseSession.ExecuteAsync(GraphPathsQueryRequest)";
+                outcome.Note = "DatabaseSession.ExecuteAsync(GraphPathsQueryRequest)";
                 return;
             }
 

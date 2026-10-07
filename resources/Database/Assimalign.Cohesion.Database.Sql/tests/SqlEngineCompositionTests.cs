@@ -310,7 +310,7 @@ public sealed class SqlEngineCompositionTests
     public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
     {
         // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
-        var state = new DatabaseEngineBuilderState<SqlDatabaseEngine, DatabaseEngineWorker, DatabaseServer>();
+        var state = new DatabaseEngineBuilderState<SqlDatabaseEngine>();
         var engine = SqlDatabaseEngine.CreateUncomposed(new SqlDatabaseEngineOptions { EngineName = "contract" });
         List<RecordingWorker> workers = [];
         List<RecordingServer> servers = [];
@@ -517,8 +517,6 @@ public sealed class SqlEngineCompositionTests
         public int Stops => Volatile.Read(ref _stops);
 
         public override IReadOnlyCollection<DatabaseServerSession> Sessions => [];
-
-        public override IDatabaseServerContext Context => throw new NotSupportedException();
 
         protected override Task StartCoreAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 

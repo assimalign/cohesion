@@ -108,7 +108,7 @@ internal sealed class BlobWorkspace : ModelWorkspace
             return await action(BlobSession, cancellationToken).ConfigureAwait(false);
         }
 
-        IDatabaseSession admin = await OpenAdminSessionAsync(cancellationToken).ConfigureAwait(false);
+        DatabaseSession admin = await OpenAdminSessionAsync(cancellationToken).ConfigureAwait(false);
         await using (admin.ConfigureAwait(false))
         {
             return await action((BlobDatabaseSession)admin, cancellationToken).ConfigureAwait(false);

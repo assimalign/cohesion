@@ -39,8 +39,6 @@ internal sealed class TestServer : DatabaseServer
 
     public override IReadOnlyCollection<DatabaseServerSession> Sessions => _sessions.AsReadOnly();
 
-    public override IDatabaseServerContext Context => new TestServerContext(Engine, _sessions);
-
     protected override Task StartCoreAsync(CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _starts);
@@ -53,20 +51,5 @@ internal sealed class TestServer : DatabaseServer
         Interlocked.Increment(ref _stops);
         Log.Add($"{_name}:stop");
         return StopFailure is { } failure ? Task.FromException(failure) : Task.CompletedTask;
-    }
-
-    private sealed class TestServerContext : IDatabaseServerContext
-    {
-        private readonly List<DatabaseServerSession> _sessions;
-
-        public TestServerContext(DatabaseEngine engine, List<DatabaseServerSession> sessions)
-        {
-            Engine = engine;
-            _sessions = sessions;
-        }
-
-        public IDatabaseEngine Engine { get; }
-
-        public IReadOnlyCollection<IDatabaseServerSession> Sessions => _sessions.AsReadOnly();
     }
 }

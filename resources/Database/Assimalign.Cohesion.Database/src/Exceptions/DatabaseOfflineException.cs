@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database;
 /// gave up on it because a background worker's work on it kept failing or its journal passed the
 /// engine's cap (owner decision 25). Nothing more is written to the database, and
 /// every later operation, in process and over every wire server, is refused with this
-/// exception until the database is reopened (<see cref="IDatabaseEngine.OpenDatabaseAsync"/>),
+/// exception until the database is reopened (<see cref="DatabaseEngine.OpenDatabaseAsync"/>),
 /// whose recovery reads the journal and decides the outcome of every commit that was not
 /// confirmed.
 /// </summary>

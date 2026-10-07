@@ -33,7 +33,7 @@ One engine per model runs in-process under `<data root>\<model>` (default
 
 | Mode | What the page talks to |
 | --- | --- |
-| Embedded | The engine through `IDatabaseSession` (explicit Begin/Commit/Rollback with an isolation level). |
+| Embedded | The engine through `DatabaseSession` (explicit Begin/Commit/Rollback with an isolation level). |
 | Wire (loopback) | The Studio starts that model's server on `127.0.0.1:<port>` (0 = OS-assigned) over the same engine and uses the real client (`Sql/Graph/KeyValuePair/Blob.Client`). Database list/create/drop, KEYSPACES and blob containers still go through the engine: the wire has no management verbs. |
 | Wire (external) | The real client against an already-running server (for example the SampleHost fixture). Type the database name; nothing can be listed or created. |
 

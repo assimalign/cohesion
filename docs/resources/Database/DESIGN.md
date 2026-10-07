@@ -22,7 +22,7 @@ The platform runs in two modes, matching Cohesion's identity:
 | # | Requirement | Where it lands |
 |---|---|---|
 | R1 | **ACID compliance for every model.** Atomicity and durability via WAL + recovery; isolation via MVCC snapshots with pessimistic locks where required; consistency via per-model constraint enforcement. | `Database.Storage` (WAL, recovery), `Database.Transactions` (MVCC, locks, isolation levels), per-model catalogs (constraints) |
-| R2 | **Every model has its own independent engine.** One `IDatabaseEngine` implementation per model (`SqlDatabaseEngine`, `DocumentDatabaseEngine`, `GraphDatabaseEngine`, `BlobDatabaseEngine`, `KeyValueDatabaseEngine`). Engines compose kernel subsystems internally; no engine depends on another engine. | `Database.{Model}` root projects |
+| R2 | **Every model has its own independent engine.** One `DatabaseEngine` leaf per model (`SqlDatabaseEngine`, `DocumentDatabaseEngine`, `GraphDatabaseEngine`, `BlobDatabaseEngine`, `KeyValueDatabaseEngine`). Engines compose kernel subsystems internally; no engine depends on another engine. | `Database.{Model}` root projects |
 | R3 | **Every model builds on the shared kernel.** Storage, journaling, transactions, and indexing are reused, never duplicated per model. A model may bring a model-specific storage *layout* (e.g. graph adjacency pages) but it lives on the shared page/WAL substrate. *(Assumption: the original requirement statement was cut short — "every model should utilize …" — and has been read as "…the shared core engine", consistent with the existing backlog language and issue #31. Flag if wrong.)* | kernel projects (§4.1) |
 | R4 | **Hosting via `libraries/Hosting`.** The database host is a `Host<DatabaseApplicationContext>` whose composed services follow the per-service execution menu: provisioning and the private HTTP default-control-plane service run as additional host services; each wire-protocol endpoint is adapted directly to `IHostService`, so its `StartAsync` bind must complete before the host reports `Started`. Additional services start before servers, so provisioning precedes accept; concurrent lifecycle options are rejected and post-build mutation cannot weaken that order. No second lifecycle model. The Lane-H dedicated-thread guardrail (WAL flush and page write-back on dedicated threads, immune to pool starvation) is satisfied *inside the engine* — the engine spawns and owns those threads for its whole life (2026-07-13; engines are data machines, see §3.5). | `Database.Hosting` (composition, provisioning, admin control plane), engines (durability threads) |
 | R5 | **Orchestration via the ApplicationModel.** `Database.ApplicationModel` supplies a manifest-backed `DatabaseResource : PlannedResource`, `AddDatabase(manifest, options)`, the platform-neutral Database planner, and the Database default-control-plane factory. It never references the runtime host; the runtime host never references it. An enabled customer executable's generated code connects both sides through the `Hosting.Resources` `ResourceRuntime`. | `Database.ApplicationModel` |
@@ -66,13 +66,13 @@ These are permanent commitments, not MVP scoping — features that contradict th
 │ Hosting            Database.Hosting (Host<TContext> composition,    │
 │                    DI/Config/Logging seam — the ONLY DI seam;       │
 │                    before-accept provisioning + private HTTP admin  │
-│                    plane; wraps IDatabaseServer instances as        │
+│                    plane; wraps DatabaseServer instances as         │
 │                    endpoint host services)                          │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Service surface    Database.Client                                  │
 │                    (servers are per-model and live in the model     │
 │                    packages, each carrying its own copy of the      │
-│                    server machinery — the root's IDatabaseServer    │
+│                    server machinery — the root's DatabaseServer     │
 │                    contract is the only area-wide server            │
 │                    requirement)                                     │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -96,7 +96,7 @@ Dependency direction is strictly downward. Model engines depend on kernel projec
 
 ### 3.2 The kernel
 
-- **`Database`** — the public area root: `IDatabase`, `IDatabaseEngine`, `IDatabaseSession`, `IDatabaseTransaction` and, since phase 3 of the concrete-types plan (#1259), the abstract bases that replace them (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`, beside the existing `DatabaseEngineWorker`; each still implements its interface until phase 6), `DatabaseException`, `DatabaseNotFoundException`, `DatabaseName`, lifecycle enums, model-agnostic `CompiledSchema` identity/canonical-document hash, `IDatabaseSchemaProvisioner`, `SchemaMigrationResult`, and the `DatabaseObjectOwner`/`DatabaseObjectLockedException` ownership contract. It rolls up the child roots so their common vocabulary arrives transitively. A shape that differs by model belongs in that model family, never here. A3 moved the former relational declaration/compiler/serializer/migration model into `Database.Sql.Schema`; that thin package is shared by SQL and SDK Tasks without referencing the SQL engine or Hosting.
+- **`Database`** — the public area root: the abstract bases of the concrete-first rule (`DatabaseEngine`, `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`, `DatabaseServerSession`, `DatabaseEngineWorker`; added beside the interfaces in phase 3 of the concrete-types plan, #1259, which phase 6, #1262, deleted), the kept composition seams (`IDatabaseApplication`, `IDatabaseApplicationBuilder`, `IDatabaseApplicationContext`), `DatabaseException`, `DatabaseNotFoundException`, `DatabaseName`, lifecycle enums, model-agnostic `CompiledSchema` identity/canonical-document hash, the schema capability on `DatabaseInstance` (`SupportsSchemaProvisioning`, `ApplySchemaAsync`), `SchemaMigrationResult`, and the `DatabaseObjectOwner`/`DatabaseObjectLockedException` ownership contract. It rolls up the child roots so their common vocabulary arrives transitively. A shape that differs by model belongs in that model family, never here. A3 moved the former relational declaration/compiler/serializer/migration model into `Database.Sql.Schema`; that thin package is shared by SQL and SDK Tasks without referencing the SQL engine or Hosting.
 - **`Database.Storage`** — the physical layer: slotted pages, buffer pool with pin/evict, free-space map, journal (WAL) streams, backup/recovery seams. Owns `PageId`, `JournalRecord`, CRC integrity. The WAL contract is ARIES-shaped: append redo/undo records under an LSN discipline, checkpoint, replay on open. Durability policy (fsync cadence, group commit) is an engine-level option surfaced through storage. Data pages carry an owner tag driving **per-owner record chains** (2026-07-14): owner-scoped inserts, iteration, and transactional chain release, so a model's "scan one object" costs O(object) instead of O(storage) — the SQL engine keys chains by table object id.
 - **`Database.Transactions`** — the ACID heart (new): `TransactionManager` (begin/commit/rollback under an `IsolationLevel`; sealed, composed per database by `TransactionCoordinator`), `TransactionSnapshot` (MVCC visibility: xmin/xmax/active-set), `LockManager` (shared/update/exclusive + intent modes, deadlock detection), and an internal transaction log (the seam that binds transaction lifecycle to the WAL). Engines *use* the manager; sessions *expose* the resulting `IDatabaseTransaction`.
 - **`Database.Indexing`** — shared index infrastructure: order-preserving byte-comparable `IndexKey` encoding, `BTreeIndex` (point/range search, insert/delete), `BTreeCursor` streaming iteration, B+Tree first and hash later, built on shared pages so index updates ride the same WAL/transaction path as data. **SQL was the first live consumer** (2026-07-14); Documents now uses the same package for OQL `CREATE INDEX`/`DROP INDEX`, transactional write-path maintenance, planner seeks, and recovery. Graph adjacency lookups and the KV primary structure follow the same seams.
@@ -244,7 +244,7 @@ sequenceDiagram
 ### 3.5 Hosting and orchestration
 
 `Database.Hosting` remains **composition-only** with respect to the Database area: its only
-same-area reference is the root, it wraps composed `IDatabaseServer` instances generically as
+same-area reference is the root, it wraps composed `DatabaseServer` instances generically as
 endpoint host services (started last, drained first), and the per-model server machinery remains
 inside each model package (§3.4). The module also owns the resource-host concerns that belong at
 the composition seam: before-accept provisioning and the Database default control plane. Its
@@ -273,7 +273,8 @@ services before all server wrappers**; because the host starts in registration o
 precedes accept regardless of the order in which application verbs appear in `Program.cs`.
 The provisioner creates only after `OpenDatabaseAsync` throws the root's exact
 `DatabaseNotFoundException`, then applies the compiled schema through the model database's
-`IDatabaseSchemaProvisioner`; every other open, validation, or migration failure propagates and
+`DatabaseInstance.ApplySchemaAsync`, refusing a database whose `SupportsSchemaProvisioning` is
+false; every other open, validation, or migration failure propagates and
 aborts startup.
 Engines still own their background loops unconditionally and the customer composition root owns
 their disposal, preserving the embedded/hosted equivalence from R10.

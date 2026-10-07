@@ -28,8 +28,8 @@ using Assimalign.Cohesion.Hosting.Health;
 public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicationContext, IHealthContributor
 {
     private readonly IHostEnvironment _environment;
-    private IReadOnlyList<IDatabaseEngine> _engines;
-    private IReadOnlyList<IDatabaseServer> _servers;
+    private IReadOnlyList<DatabaseEngine> _engines;
+    private IReadOnlyList<DatabaseServer> _servers;
     private IReadOnlyList<IHostService> _hostedServices = [];
 
     internal DatabaseApplicationContext(DatabaseApplicationOptions options, IConfiguration configuration, IServiceProvider services)
@@ -40,8 +40,8 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         {
             ContentRootPath = options.ContentRootPath,
         };
-        _engines = new ReadOnlyCollection<IDatabaseEngine>(options.Engines);
-        _servers = new ReadOnlyCollection<IDatabaseServer>(options.Servers);
+        _engines = new ReadOnlyCollection<DatabaseEngine>(options.Engines);
+        _servers = new ReadOnlyCollection<DatabaseServer>(options.Servers);
     }
 
     /// <summary>
@@ -55,10 +55,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     public override IEnumerable<IHostService> HostedServices => _hostedServices;
 
     /// <inheritdoc />
-    public IReadOnlyList<IDatabaseEngine> Engines => _engines;
+    public IReadOnlyList<DatabaseEngine> Engines => _engines;
 
     /// <inheritdoc />
-    public IReadOnlyList<IDatabaseServer> Servers => _servers;
+    public IReadOnlyList<DatabaseServer> Servers => _servers;
 
     /// <summary>Gets loaded configuration; mutations do not recompose engine options.</summary>
     public IConfiguration Configuration { get; }
@@ -67,10 +67,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     public IServiceProvider Services { get; }
 
     /// <inheritdoc />
-    public IDatabaseEngine GetEngine(string name)
+    public DatabaseEngine GetEngine(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        foreach (IDatabaseEngine engine in _engines)
+        foreach (DatabaseEngine engine in _engines)
         {
             if (string.Equals(engine.Name, name, StringComparison.Ordinal))
             {
@@ -116,10 +116,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// </remarks>
     public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
     {
-        var engines = new List<IDatabaseEngine>(_engines.Count + _servers.Count);
-        var observedEngines = new HashSet<IDatabaseEngine>(ReferenceEqualityComparer.Instance);
+        var engines = new List<DatabaseEngine>(_engines.Count + _servers.Count);
+        var observedEngines = new HashSet<DatabaseEngine>(ReferenceEqualityComparer.Instance);
 
-        foreach (IDatabaseEngine engine in _engines)
+        foreach (DatabaseEngine engine in _engines)
         {
             if (observedEngines.Add(engine))
             {
@@ -127,9 +127,9 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
             }
         }
 
-        foreach (IDatabaseServer server in _servers)
+        foreach (DatabaseServer server in _servers)
         {
-            IDatabaseEngine engine = server.Context.Engine;
+            DatabaseEngine engine = server.Engine;
             if (observedEngines.Add(engine))
             {
                 engines.Add(engine);
@@ -142,10 +142,6 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         };
         var faultedEngines = new List<string>();
         var failingWorkers = new List<string>();
-
-        // Faulted engines none of whose guided workers holds a failure: a registered worker's loop
-        // failed, which the engine reports until it is disposed.
-        var latchedEngines = new List<string>();
         var unavailableEngines = new List<string>();
         var offlineDatabases = new List<string>();
         int workerCount = 0;
@@ -158,40 +154,36 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            IDatabaseEngine engine = engines[engineIndex];
+            DatabaseEngine engine = engines[engineIndex];
             EngineState state = engine.State;
-            IReadOnlyList<IDatabaseEngineWorker> workers = engine.Workers;
+            IReadOnlyList<DatabaseEngineWorker> workers = engine.Workers;
 
             data[$"engine.{engineIndex}.name"] = engine.Name;
             data[$"engine.{engineIndex}.model"] = engine.Model.ToString();
             data[$"engine.{engineIndex}.state"] = state.ToString();
             data[$"engine.{engineIndex}.workerCount"] = workers.Count;
-            int failingInEngine = 0;
 
             for (int workerIndex = 0; workerIndex < workers.Count; workerIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                IDatabaseEngineWorker worker = workers[workerIndex];
+                DatabaseEngineWorker worker = workers[workerIndex];
                 string prefix = $"engine.{engineIndex}.worker.{workerIndex}";
                 data[$"{prefix}.name"] = worker.Name;
                 data[$"{prefix}.kind"] = worker.Kind.ToString();
                 data[$"{prefix}.intervalMilliseconds"] = worker.Interval.TotalMilliseconds;
+                data[$"{prefix}.failureCount"] = worker.FailureCount;
                 workerCount++;
 
                 // A worker that keeps failing keeps running; its record says which, and what kind of
                 // failure (the event source carries the rest).
-                if (worker is DatabaseEngineWorker guided)
+                if (worker.Fault is { } fault)
                 {
-                    data[$"{prefix}.failureCount"] = guided.FailureCount;
-                    if (guided.Fault is { } fault)
-                    {
-                        string kind = DescribeFault(fault);
-                        data[$"{prefix}.consecutiveFailures"] = guided.ConsecutiveFailures;
-                        data[$"{prefix}.fault"] = kind;
-                        failingWorkers.Add($"{worker.Name} ({guided.ConsecutiveFailures} failed pass(es); {kind})");
-                        failingInEngine++;
-                    }
+                    string kind = DescribeFault(fault);
+                    int consecutiveFailures = worker.ConsecutiveFailures;
+                    data[$"{prefix}.consecutiveFailures"] = consecutiveFailures;
+                    data[$"{prefix}.fault"] = kind;
+                    failingWorkers.Add($"{worker.Name} ({consecutiveFailures} failed pass(es); {kind})");
                 }
             }
 
@@ -201,11 +193,6 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     break;
                 case EngineState.Faulted:
                     faultedEngines.Add(engine.Name);
-                    if (failingInEngine == 0)
-                    {
-                        latchedEngines.Add(engine.Name);
-                    }
-
                     break;
                 case EngineState.Disposed:
                 default:
@@ -298,17 +285,9 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
             var description = new StringBuilder($"Database engines with worker faults: {string.Join(", ", faultedEngines)}.");
             if (failingWorkers.Count > 0)
             {
-                description.Append($" Failing workers: {string.Join("; ", failingWorkers)}. They keep running and retry");
-                description.Append(latchedEngines.Count == 0
-                    ? "; each engine returns to Running once its workers complete the work their failures left."
-                    : ".");
-            }
-
-            if (latchedEngines.Count > 0)
-            {
                 description.Append(
-                    $" A registered worker's loop failed on {string.Join(", ", latchedEngines)}; the engine runs it again and " +
-                    "reports Faulted until it is disposed.");
+                    $" Failing workers: {string.Join("; ", failingWorkers)}. They keep running and retry; each engine " +
+                    "returns to Running once its workers complete the work their failures left.");
             }
 
             contribution = HealthContribution.Degraded(description.ToString(), data);
@@ -336,7 +315,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
             : fault.GetType().Name;
 
     // The reopen service's record of a database, if it has one.
-    private static ReopenState? FindPending(IReadOnlyList<ReopenState> reopening, IDatabaseEngine engine, string database)
+    private static ReopenState? FindPending(IReadOnlyList<ReopenState> reopening, DatabaseEngine engine, string database)
     {
         foreach (ReopenState pending in reopening)
         {
@@ -358,8 +337,8 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         => _hostedServices = hostedServices;
 
     internal void FreezeRegistries(
-        IEnumerable<IDatabaseEngine> engines,
-        IEnumerable<IDatabaseServer> servers)
+        IEnumerable<DatabaseEngine> engines,
+        IEnumerable<DatabaseServer> servers)
     {
         _engines = Array.AsReadOnly([.. engines]);
         _servers = Array.AsReadOnly([.. servers]);

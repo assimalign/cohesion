@@ -36,7 +36,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class KeyValueDatabaseEngineBuilder
 {
-    private readonly DatabaseEngineBuilderState<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer> _state = new();
+    private readonly DatabaseEngineBuilderState<KeyValueDatabaseEngine> _state = new();
     private readonly KeyValueDatabaseEngineOptions _options = new();
 
     internal KeyValueDatabaseEngineBuilder()
@@ -96,8 +96,8 @@ public sealed class KeyValueDatabaseEngineBuilder
 
     /// <summary>
     /// Gets or sets how many passes in a row a worker may fail on one database before the engine
-    /// takes it offline (<see cref="KeyValueDatabaseEngineOptions.WorkerFailureLimit"/>; ten by
-    /// default). Build validates it.
+    /// takes it offline (<see cref="KeyValueDatabaseEngineOptions.WorkerFailureLimit"/>; one
+    /// hundred by default). Build validates it.
     /// </summary>
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
     public int WorkerFailureLimit

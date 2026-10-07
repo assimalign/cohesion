@@ -1,14 +1,23 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Storage;
+
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
-internal sealed class ProvisioningEngine : IDatabaseEngine
+/// <summary>
+/// An engine of the root base with one database, which the provisioning tests open, create and
+/// apply a schema to, recording each call into a shared log. It implements only the protected
+/// cores; the base makes the name, disposal and cancellation checks.
+/// </summary>
+internal sealed class ProvisioningEngine : DatabaseEngine
 {
     private readonly List<string> _log;
     private readonly DatabaseException? _openException;
+    private readonly bool _supportsSchemaProvisioning;
     private ProvisioningDatabase? _database;
     private bool _databaseIsOpen;
     private bool _databaseExists;
@@ -16,42 +25,30 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
     internal ProvisioningEngine(
         List<string> log,
         bool databaseExists = false,
-        DatabaseException? openException = null)
+        DatabaseException? openException = null,
+        bool supportsSchemaProvisioning = true)
+        : base("provisioning-engine", EngineModel.Sql)
     {
         _log = log;
         _databaseExists = databaseExists;
         _openException = openException;
+        _supportsSchemaProvisioning = supportsSchemaProvisioning;
     }
 
-    public string Name => "provisioning-engine";
+    /// <inheritdoc />
+    public override IReadOnlyList<DatabaseName> OfflineDatabases => [];
 
-    public EngineModel Model => EngineModel.Sql;
-
-    public EngineState State { get; private set; } = EngineState.Running;
-
-    public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
-
-    public IReadOnlyList<DatabaseName> OfflineDatabases => Array.Empty<DatabaseName>();
-
-    public IReadOnlyList<IDatabaseServer> Servers => Array.Empty<IDatabaseServer>();
-
-    public ValueTask<IDatabase> CreateDatabaseAsync(
-        DatabaseName name,
-        CancellationToken cancellationToken = default)
+    protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
         _log.Add("engine:create");
         _databaseExists = true;
         _databaseIsOpen = true;
-        _database = new ProvisioningDatabase(name, this, _log);
-        return ValueTask.FromResult<IDatabase>(_database);
+        _database = new ProvisioningDatabase(name, this, _log, _supportsSchemaProvisioning);
+        return ValueTask.FromResult<DatabaseInstance>(_database);
     }
 
-    public ValueTask<IDatabase> OpenDatabaseAsync(
-        DatabaseName name,
-        CancellationToken cancellationToken = default)
+    protected override ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
         _log.Add("engine:open");
 
         if (_openException is not null)
@@ -65,42 +62,44 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
         }
 
         _databaseIsOpen = true;
-        _database ??= new ProvisioningDatabase(name, this, _log);
-        return ValueTask.FromResult<IDatabase>(_database);
+        _database ??= new ProvisioningDatabase(name, this, _log, _supportsSchemaProvisioning);
+        return ValueTask.FromResult<DatabaseInstance>(_database);
     }
 
-    public ValueTask DropDatabaseAsync(
-        DatabaseName name,
-        CancellationToken cancellationToken = default)
+    protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
+        => throw new NotSupportedException();
+
+    protected override IAsyncEnumerable<DatabaseInstance> GetDatabasesCore(CancellationToken cancellationToken)
+        => throw new NotSupportedException();
+
+    protected override bool TryGetDatabaseCore(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database)
     {
-        throw new NotSupportedException();
+        database = _database;
+        return _databaseIsOpen && database is not null;
     }
 
-    public IAsyncEnumerable<IDatabase> GetDatabasesAsync(
-        CancellationToken cancellationToken = default)
+    protected override void ForgetClosedDatabaseCore(DatabaseInstance database)
     {
-        throw new NotSupportedException();
+        if (ReferenceEquals(database, _database))
+        {
+            _databaseIsOpen = false;
+            _database = null;
+        }
     }
 
-    public bool TryGetDatabase(DatabaseName name, out IDatabase database)
-    {
-        database = _database!;
-        return _databaseIsOpen && _database is not null;
-    }
+    protected override StorageOfflineException? GetOfflineErrorCore(DatabaseName name) => null;
 
-    public void Dispose()
-    {
-        State = EngineState.Disposed;
-    }
+    protected override bool TakeDatabaseOfflineCore(DatabaseName name, StorageOfflineCause cause, string reason, Exception failure)
+        => false;
 
-    public ValueTask DisposeAsync()
-    {
-        Dispose();
-        return ValueTask.CompletedTask;
-    }
+    protected override ValueTask DisposeAsyncCore() => ValueTask.CompletedTask;
 }
 
-internal sealed class ProvisioningDatabase : IDatabase, IDatabaseSchemaProvisioner
+/// <summary>
+/// The provisioning engine's database: it records the schema the hosting provisioner applies,
+/// through the root base's capability flag and schema core.
+/// </summary>
+internal sealed class ProvisioningDatabase : DatabaseInstance
 {
     private readonly List<string> _log;
 
@@ -110,38 +109,34 @@ internal sealed class ProvisioningDatabase : IDatabase, IDatabaseSchemaProvision
     /// <param name="name">The name of the database.</param>
     /// <param name="engine">The engine that owns the database.</param>
     /// <param name="log">The shared call log that records schema application.</param>
+    /// <param name="supportsSchemaProvisioning">Whether the database provisions schemas.</param>
     public ProvisioningDatabase(
         DatabaseName name,
-        IDatabaseEngine engine,
-        List<string> log)
+        DatabaseEngine engine,
+        List<string> log,
+        bool supportsSchemaProvisioning)
+        : base(name, engine, supportsSchemaProvisioning)
     {
-        Name = name;
-        Engine = engine;
         _log = log;
     }
 
-    public DatabaseName Name { get; }
-
-    public IDatabaseEngine Engine { get; }
-
     public CompiledSchema? AppliedSchema { get; private set; }
 
-    public ValueTask<SchemaMigrationResult> ApplySchemaAsync(
+    protected override ValueTask<SchemaMigrationResult> ApplySchemaCoreAsync(
         CompiledSchema schema,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
         _log.Add("engine:apply");
         AppliedSchema = schema;
         return ValueTask.FromResult(new SchemaMigrationResult(null, schema.Hash, 1, false));
     }
 
-    public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
+    protected override ValueTask<DatabaseSession> CreateSessionCoreAsync(CancellationToken cancellationToken)
         => throw new NotSupportedException();
 
-    public void Dispose()
+    protected override void DisposeCore()
     {
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    protected override ValueTask DisposeAsyncCore() => ValueTask.CompletedTask;
 }

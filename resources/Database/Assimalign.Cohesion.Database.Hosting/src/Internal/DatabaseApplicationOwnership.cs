@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 internal sealed class DatabaseApplicationOwnership
 {
     internal readonly List<object> Infrastructure = [];
-    internal readonly List<IDatabaseEngine> Engines = [];
+    internal readonly List<DatabaseEngine> Engines = [];
     internal readonly List<object> Services = [];
 
     internal async Task DisposeAsync(List<Exception> failures)

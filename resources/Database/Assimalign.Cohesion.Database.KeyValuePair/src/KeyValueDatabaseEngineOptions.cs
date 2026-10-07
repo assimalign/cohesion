@@ -65,10 +65,10 @@ public sealed class KeyValueDatabaseEngineOptions
     /// Gets or sets how many passes in a row the checkpoint, page write-back, write-ahead flush or
     /// version-purge worker may fail on one database before the engine takes that database offline
     /// (owner decision 25 of 2026-10-06). Defaults to <see cref="DatabaseEngine.DefaultWorkerFailureLimit"/>
-    /// (ten, Neo4j's tolerance of failed checkpoints). At the workers' one-second retry a database
-    /// whose work keeps failing goes offline about ten seconds after its first failure, ten times
-    /// sooner than Neo4j's ten failures at its ten-second checkpoint check; raise it to ride out a
-    /// longer device outage. Must be at least one.
+    /// (one hundred, owner decision 35 of 2026-10-07): at the workers' one-second retry a database
+    /// whose work keeps failing goes offline about a hundred seconds after its first failure, the
+    /// window Neo4j's ten failures span at its ten-second checkpoint check; raise it to ride out a
+    /// longer device outage, or lower it to give up sooner. Must be at least one.
     /// </summary>
     /// <remarks>
     /// An offline database refuses every operation with <c>COHDBK002</c> until it is reopened

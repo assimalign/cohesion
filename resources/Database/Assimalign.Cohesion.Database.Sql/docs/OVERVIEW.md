@@ -96,7 +96,7 @@ builder.AddSql((context, engine) =>
     });
 });
 await using var application = builder.Build();
-var orders = (SqlDatabaseEngine)application.Context.GetEngine("orders"); // typed lookup arrives in phase 6
+SqlDatabaseEngine orders = application.Context.GetEngine<SqlDatabaseEngine>("orders");
 ```
 
 The `Listen` helper ships in `Database.Sql.Tcp`. Omit `AddServer` for embedded

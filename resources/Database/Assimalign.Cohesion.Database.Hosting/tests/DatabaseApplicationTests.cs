@@ -126,7 +126,7 @@ public class DatabaseApplicationTests
         services[0].ShouldBeSameAs(harness.Application.Context.ReopenService);
         harness.Application.Context.Servers.ShouldHaveSingleItem().ShouldBeSameAs(harness.Server);
         harness.Application.Context.Engines.ShouldHaveSingleItem().ShouldBeSameAs(harness.Engine);
-        harness.Server.Context.Engine.ShouldBeSameAs(harness.Engine);
+        harness.Server.Engine.ShouldBeSameAs(harness.Engine);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: services start before the servers and stop after they drain")]
@@ -199,9 +199,8 @@ public class DatabaseApplicationTests
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
     }
 
-    private sealed class ControlledStartServer : IDatabaseServer
+    private sealed class ControlledStartServer : DatabaseServer
     {
-        private readonly RecordingServer _inner = new([], "controlled");
         private readonly TaskCompletionSource<bool> _bindStarted;
         private readonly TaskCompletionSource<bool> _accepting;
 
@@ -211,25 +210,23 @@ public class DatabaseApplicationTests
         public ControlledStartServer(
             TaskCompletionSource<bool> bindStarted,
             TaskCompletionSource<bool> accepting)
+            : base(new RecordingEngine())
         {
             _bindStarted = bindStarted;
             _accepting = accepting;
         }
 
-        public IDatabaseServerContext Context => _inner.Context;
+        public override IReadOnlyCollection<DatabaseServerSession> Sessions => [];
 
-        public Task StartAsync(CancellationToken cancellationToken = default)
+        internal void Accept() => _accepting.TrySetResult(true);
+
+        protected override Task StartCoreAsync(CancellationToken cancellationToken)
         {
             _bindStarted.TrySetResult(true);
             return _accepting.Task.WaitAsync(cancellationToken);
         }
 
-        public Task StopAsync(CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-        internal void Accept() => _accepting.TrySetResult(true);
+        protected override Task StopCoreAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class ControlledStartService : IHostService

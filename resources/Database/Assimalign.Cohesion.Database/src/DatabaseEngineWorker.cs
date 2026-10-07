@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The public contract (<see cref="IDatabaseEngineWorker"/>) includes the engine's pump seam.
+/// The public surface includes the engine's pump seam.
 /// Members on this base — <see cref="Run"/>, <see cref="RunIteration"/>,
 /// <see cref="WaitForTrigger"/> — exist for the <em>owning engine</em>, which spawns one dedicated
 /// thread per worker at engine creation and cancels it on dispose. The <see cref="Run"/> loop
@@ -115,7 +115,7 @@ namespace Assimalign.Cohesion.Database;
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
-public abstract class DatabaseEngineWorker : IDatabaseEngineWorker
+public abstract class DatabaseEngineWorker
 {
     // The worker's lifetime: free until an engine claims it at attach, then owned by that engine,
     // and released once, by the owning engine (ReleaseAsync) or, for a worker no engine owns, by

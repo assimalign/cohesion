@@ -21,8 +21,8 @@ namespace Assimalign.Cohesion.Database.Studio;
 /// </summary>
 internal sealed class StudioEngines : IAsyncDisposable
 {
-    private readonly Dictionary<StudioModel, IDatabaseEngine> _engines = [];
-    private readonly Dictionary<StudioModel, (IDatabaseServer Server, TcpConnectionListener Listener)> _servers = [];
+    private readonly Dictionary<StudioModel, DatabaseEngine> _engines = [];
+    private readonly Dictionary<StudioModel, (DatabaseServer Server, TcpConnectionListener Listener)> _servers = [];
 
     private StudioEngines(string dataRoot)
     {
@@ -41,7 +41,7 @@ internal sealed class StudioEngines : IAsyncDisposable
 
     public BlobDatabaseEngine Blob => (BlobDatabaseEngine)_engines[StudioModel.Blob];
 
-    public IDatabaseEngine Get(StudioModel model) => _engines[model];
+    public DatabaseEngine Get(StudioModel model) => _engines[model];
 
     public string GetModelRoot(StudioModel model) => System.IO.Path.Combine(DataRoot, model.FolderName);
 
@@ -112,7 +112,7 @@ internal sealed class StudioEngines : IAsyncDisposable
 
         TcpConnectionListener listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, port));
         TimeSpan drain = TimeSpan.FromSeconds(2);
-        IDatabaseServer server = model switch
+        DatabaseServer server = model switch
         {
             StudioModel.Sql => SqlDatabaseServer.Create(Sql, new SqlDatabaseServerOptions { Listener = listener, Authenticator = null, ShutdownDrainTimeout = drain }),
             StudioModel.Graph => GraphDatabaseServer.Create(Graph, new GraphDatabaseServerOptions { Listener = listener, Authenticator = null, ShutdownDrainTimeout = drain }),
@@ -172,7 +172,7 @@ internal sealed class StudioEngines : IAsyncDisposable
             await StopServerAsync(model).ConfigureAwait(false);
         }
 
-        foreach (IDatabaseEngine engine in _engines.Values)
+        foreach (DatabaseEngine engine in _engines.Values)
         {
             try
             {

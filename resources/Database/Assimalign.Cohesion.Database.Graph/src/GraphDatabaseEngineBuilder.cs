@@ -37,7 +37,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class GraphDatabaseEngineBuilder
 {
-    private readonly DatabaseEngineBuilderState<GraphDatabaseEngine, DatabaseEngineWorker, DatabaseServer> _state = new();
+    private readonly DatabaseEngineBuilderState<GraphDatabaseEngine> _state = new();
     private readonly GraphDatabaseEngineOptions _options = new();
 
     internal GraphDatabaseEngineBuilder()

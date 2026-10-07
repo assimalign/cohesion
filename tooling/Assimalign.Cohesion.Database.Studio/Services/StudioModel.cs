@@ -20,7 +20,7 @@ internal enum StudioModel
 /// <summary>How a model workspace reaches its engine.</summary>
 internal enum ConnectionMode
 {
-    /// <summary>Direct <c>IDatabaseSession</c> on the in-process engine.</summary>
+    /// <summary>Direct <c>DatabaseSession</c> on the in-process engine.</summary>
     Embedded,
 
     /// <summary>The Studio starts the model's server on 127.0.0.1 and talks to it through the real client.</summary>

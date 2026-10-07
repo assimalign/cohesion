@@ -188,23 +188,6 @@ public class DatabaseInstanceTests
         engine.Forgets.ShouldBe(2);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Database: the interface view is the same database, engine and session type")]
-    public async Task InterfaceBridge_IDatabase_ShouldExposeTheSameObjects()
-    {
-        // Arrange
-        var engine = new TestEngine();
-        IDatabase bridged = new TestDatabase("appdb", engine);
-
-        // Act
-        var session = await bridged.CreateSessionAsync();
-
-        // Assert
-        bridged.Name.ShouldBe(new DatabaseName("appdb"));
-        bridged.Engine.ShouldBeSameAs(engine);
-        session.ShouldBeOfType<TestSession>().Database.ShouldBeSameAs(bridged);
-        bridged.ShouldNotBeAssignableTo<IDatabaseSchemaProvisioner>();
-    }
-
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
 
     private static async Task<bool> CompletesWithin(Task task, TimeSpan wait)

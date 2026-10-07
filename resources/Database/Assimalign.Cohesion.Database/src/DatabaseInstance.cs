@@ -43,13 +43,13 @@ namespace Assimalign.Cohesion.Database;
 /// <para>
 /// <b>Shape (concrete-types plan, phase 3, #1259).</b> The leaves live in the model assemblies,
 /// so the constructor is <c>protected</c>. The name is <c>DatabaseInstance</c>, never
-/// <c>Database</c>, so code in a namespace such as <c>Acme.Database</c> can name it (D4). Until
-/// phase 6 the base also implements <see cref="IDatabase"/>; it does not implement
-/// <see cref="IDatabaseSchemaProvisioner"/>, which only the SQL leaf lists until phase 6.
+/// <c>Database</c>, so code in a namespace such as <c>Acme.Database</c> can name it (D4). The
+/// hosting layer provisions a schema through <see cref="SupportsSchemaProvisioning"/> and
+/// <see cref="ApplySchemaAsync"/>, not through a capability interface (phase 6, #1262).
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
-public abstract class DatabaseInstance : IDatabase
+public abstract class DatabaseInstance : IAsyncDisposable, IDisposable
 {
     private readonly DatabaseName _name;
     private readonly DatabaseEngine _engine;
@@ -267,9 +267,4 @@ public abstract class DatabaseInstance : IDatabase
             _closure.TrySetResult();
         }
     }
-
-    IDatabaseEngine IDatabase.Engine => _engine;
-
-    async ValueTask<IDatabaseSession> IDatabase.CreateSessionAsync(CancellationToken cancellationToken)
-        => await CreateSessionAsync(cancellationToken).ConfigureAwait(false);
 }

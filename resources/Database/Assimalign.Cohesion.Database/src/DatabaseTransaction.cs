@@ -52,12 +52,11 @@ namespace Assimalign.Cohesion.Database;
 /// and rollback with its own exception translation (<see cref="CommitCoreAsync"/>,
 /// <see cref="RollbackCoreAsync"/>), its offline refusal and its coded aborted error. The leaves
 /// live in the model assemblies, so the constructor is <c>protected</c>; the identity and
-/// isolation level are fixed by it. Until phase 6 the base also implements
-/// <see cref="IDatabaseTransaction"/> (concrete-types plan, phase 3, #1259; §6.4).
+/// isolation level are fixed by it (concrete-types plan, phase 3, #1259; §6.4).
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
-public abstract class DatabaseTransaction : IDatabaseTransaction
+public abstract class DatabaseTransaction : IAsyncDisposable
 {
     private readonly TransactionId _id;
     private readonly IsolationLevel _isolationLevel;

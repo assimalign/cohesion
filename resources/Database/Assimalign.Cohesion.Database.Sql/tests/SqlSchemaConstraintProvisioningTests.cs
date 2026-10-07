@@ -23,7 +23,8 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
         await using (var engine = CreateEngine())
         {
             var database = await engine.CreateDatabaseAsync("app");
-            var provisioner = database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
+            database.SupportsSchemaProvisioning.ShouldBeTrue();
+            var provisioner = database;
             (await provisioner.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeFalse();
             (await provisioner.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
             await using var session = await database.CreateSessionAsync();
@@ -47,7 +48,7 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
         await using (var reopenedEngine = CreateEngine())
         {
             var database = await reopenedEngine.OpenDatabaseAsync("app");
-            (await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema))
+            (await database.ApplySchemaAsync(schema))
                 .WasAlreadyApplied.ShouldBeTrue();
             await using var session = await database.CreateSessionAsync();
             (await CountAsync(session, "a_child")).ShouldBe(1);
@@ -78,7 +79,7 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
 
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("app");
-        await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema);
+        await database.ApplySchemaAsync(schema);
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT INTO a_left VALUES (1, NULL)");
         await session.ExecuteAsync("INSERT INTO z_right VALUES (2, 1)");

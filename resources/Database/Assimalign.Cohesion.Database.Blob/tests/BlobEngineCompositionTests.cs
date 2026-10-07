@@ -308,7 +308,7 @@ public sealed class BlobEngineCompositionTests
     public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
     {
         // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
-        var state = new DatabaseEngineBuilderState<BlobDatabaseEngine, DatabaseEngineWorker, DatabaseServer>();
+        var state = new DatabaseEngineBuilderState<BlobDatabaseEngine>();
         var engine = BlobDatabaseEngine.CreateUncomposed(new BlobDatabaseEngineOptions { EngineName = "contract" });
         List<RecordingWorker> workers = [];
         List<RecordingServer> servers = [];

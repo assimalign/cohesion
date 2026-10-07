@@ -26,13 +26,10 @@ public class DatabaseTransactionTests
     {
         // Arrange / Act
         var transaction = new TestTransaction(IsolationLevel.ReadCommitted);
-        IDatabaseTransaction bridged = transaction;
 
         // Assert
         transaction.IsolationLevel.ShouldBe(IsolationLevel.ReadCommitted);
         transaction.Id.Value.ShouldNotBe(Guid.Empty);
-        bridged.Id.ShouldBe(transaction.Id);
-        bridged.IsolationLevel.ShouldBe(IsolationLevel.ReadCommitted);
         transaction.State.ShouldBe(TransactionState.Active);
         transaction.Open.ShouldBeTrue();
         transaction.Usable.ShouldBeTrue();

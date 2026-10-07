@@ -30,7 +30,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     private readonly string[] _args;
     private readonly DatabaseConfigurationRegistrations _configuration;
     private readonly DatabaseServiceRegistrations _services;
-    private readonly List<(IDatabaseEngine? Instance, string? Name, Func<DatabaseApplicationContext, IDatabaseEngine>? Factory)> _engines = [];
+    private readonly List<(DatabaseEngine? Instance, string? Name, Func<DatabaseApplicationContext, DatabaseEngine>? Factory)> _engines = [];
     private readonly List<(IHostService? Instance, Func<DatabaseApplicationContext, IHostService>? Factory)> _serviceRegistrations = [];
     private readonly List<IHealthContributor> _healthContributors = [];
     private readonly List<CompiledSchema> _schemas = [];
@@ -88,7 +88,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <summary>Registers a caller-owned engine.</summary>
     /// <param name="engine">The borrowed engine.</param>
     /// <returns>This builder.</returns>
-    public DatabaseApplicationBuilder AddEngine(IDatabaseEngine engine)
+    public DatabaseApplicationBuilder AddEngine(DatabaseEngine engine)
     {
         EnsureMutable();
         ArgumentNullException.ThrowIfNull(engine);
@@ -100,7 +100,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <summary>Defers owned engine construction until Build.</summary>
     /// <param name="configure">The dependency-free factory, observing preceding engines.</param>
     /// <returns>This builder.</returns>
-    public DatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, IDatabaseEngine> configure)
+    public DatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine> configure)
     {
         EnsureMutable();
         ArgumentNullException.ThrowIfNull(configure);
@@ -112,7 +112,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="name">The ordinal engine name, which must match the factory product.</param>
     /// <param name="factory">The ownership-transferring factory.</param>
     /// <returns>This builder.</returns>
-    public DatabaseApplicationBuilder AddEngine(string name, Func<DatabaseApplicationBuildContext, IDatabaseEngine> factory)
+    public DatabaseApplicationBuilder AddEngine(string name, Func<DatabaseApplicationBuildContext, DatabaseEngine> factory)
     {
         EnsureMutable();
         ArgumentNullException.ThrowIfNull(factory);
@@ -147,7 +147,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="engine">The registered engine.</param>
     /// <param name="schema">The compiled schema.</param>
     /// <returns>This builder.</returns>
-    public DatabaseApplicationBuilder Provision(IDatabaseEngine engine, CompiledSchema schema)
+    public DatabaseApplicationBuilder Provision(DatabaseEngine engine, CompiledSchema schema)
     {
         EnsureMutable();
         ArgumentNullException.ThrowIfNull(engine);
@@ -176,7 +176,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         _schemas.Add(schema);
         return AddService(context =>
         {
-            IDatabaseEngine engine = context.GetEngine(engineName);
+            DatabaseEngine engine = context.GetEngine(engineName);
             ValidateSchema(engine, schema);
             return new DefaultDatabaseProvisioner(engine, schema);
         });
@@ -187,7 +187,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="name">The name matching the compiled schema.</param>
     /// <param name="schema">The compiled schema.</param>
     /// <returns>The same compiled schema.</returns>
-    public CompiledSchema AddDatabase(IDatabaseEngine engine, string name, CompiledSchema schema)
+    public CompiledSchema AddDatabase(DatabaseEngine engine, string name, CompiledSchema schema)
     {
         ValidateDatabaseName(name, schema);
         Provision(engine, schema);
@@ -266,25 +266,25 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             var context = new DatabaseApplicationContext(options, configuration, services);
 
             var products = new HashSet<object>(ReferenceEqualityComparer.Instance);
-            var registeredEngines = new HashSet<IDatabaseEngine>(ReferenceEqualityComparer.Instance);
+            var registeredEngines = new HashSet<DatabaseEngine>(ReferenceEqualityComparer.Instance);
             var names = new HashSet<string>(StringComparer.Ordinal);
-            var borrowedEngines = new List<IDatabaseEngine>(options.Engines);
+            var borrowedEngines = new List<DatabaseEngine>(options.Engines);
             borrowedEngines.AddRange(_engines.Where(registration => registration.Instance is not null).Select(registration => registration.Instance!));
-            borrowedEngines.AddRange(options.Servers.Select(server => server.Context.Engine));
-            foreach (IDatabaseEngine engine in borrowedEngines)
+            borrowedEngines.AddRange(options.Servers.Select(server => server.Engine));
+            foreach (DatabaseEngine engine in borrowedEngines)
             {
                 products.Add(engine);
-                foreach (IDatabaseServer server in engine.Servers)
+                foreach (DatabaseServer server in engine.Servers)
                 {
                     products.Add(server);
                 }
 
-                foreach (IDatabaseEngineWorker worker in engine.Workers)
+                foreach (DatabaseEngineWorker worker in engine.Workers)
                 {
                     products.Add(worker);
                 }
             }
-            foreach (IDatabaseServer server in options.Servers)
+            foreach (DatabaseServer server in options.Servers)
             {
                 products.Add(server);
             }
@@ -304,7 +304,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
             var inputEngines = options.Engines.ToArray();
             options.Engines.Clear();
-            void RegisterEngine(IDatabaseEngine engine)
+            void RegisterEngine(DatabaseEngine engine)
             {
                 if (!registeredEngines.Add(engine))
                 {
@@ -325,7 +325,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 options.Engines.Add(engine);
                 context.FreezeRegistries(options.Engines, []);
             }
-            foreach (IDatabaseEngine engine in inputEngines)
+            foreach (DatabaseEngine engine in inputEngines)
             {
                 RegisterEngine(engine);
             }
@@ -333,19 +333,19 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             foreach (var registration in _engines)
             {
                 if (registration.Instance is not null) { RegisterEngine(registration.Instance); continue; }
-                IDatabaseEngine engine = registration.Factory!(context) ?? throw new InvalidOperationException("An engine factory returned null.");
+                DatabaseEngine engine = registration.Factory!(context) ?? throw new InvalidOperationException("An engine factory returned null.");
                 if (!products.Add(engine))
                 {
                     throw new InvalidOperationException("An engine factory returned an already registered product.");
                 }
 
                 ownership.Engines.Add(engine);
-                foreach (IDatabaseServer server in engine.Servers)
+                foreach (DatabaseServer server in engine.Servers)
                 {
                     products.Add(server);
                 }
 
-                foreach (IDatabaseEngineWorker worker in engine.Workers)
+                foreach (DatabaseEngineWorker worker in engine.Workers)
                 {
                     products.Add(worker);
                 }
@@ -357,33 +357,27 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
                 RegisterEngine(engine);
             }
-            foreach (IDatabaseServer server in options.Servers)
+            foreach (DatabaseServer server in options.Servers)
             {
-                RegisterEngine(server.Context.Engine);
+                RegisterEngine(server.Engine);
             }
 
             var borrowedServers = options.Servers.ToArray();
             options.Servers.Clear();
-            var registeredServers = new HashSet<IDatabaseServer>(ReferenceEqualityComparer.Instance);
-            foreach (IDatabaseEngine engine in options.Engines)
+            var registeredServers = new HashSet<DatabaseServer>(ReferenceEqualityComparer.Instance);
+            foreach (DatabaseEngine engine in options.Engines)
             {
-                foreach (IDatabaseServer server in engine.Servers)
+                // The engine base attaches only a server that fronts it, and each server once, so
+                // a nested server belongs to exactly one registered engine (phase 6 of the
+                // concrete-types plan retired the checks the root interface needed here).
+                foreach (DatabaseServer server in engine.Servers)
                 {
-                    if (!ReferenceEquals(server.Context.Engine, engine))
-                    {
-                        throw new InvalidOperationException("A nested server must front its owning engine.");
-                    }
-
-                    if (!registeredServers.Add(server))
-                    {
-                        throw new InvalidOperationException("A server was registered more than once.");
-                    }
-
+                    registeredServers.Add(server);
                     products.Add(server);
                     options.Servers.Add(server);
                 }
             }
-            foreach (IDatabaseServer server in borrowedServers)
+            foreach (DatabaseServer server in borrowedServers)
             {
                 if (!registeredServers.Add(server))
                 {
@@ -477,12 +471,12 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             ReopenInitialDelay = options.ReopenInitialDelay,
             ReopenMaximumDelay = options.ReopenMaximumDelay,
         };
-        foreach (IDatabaseEngine engine in options.Engines)
+        foreach (DatabaseEngine engine in options.Engines)
         {
             snapshot.Engines.Add(engine);
         }
 
-        foreach (IDatabaseServer server in options.Servers)
+        foreach (DatabaseServer server in options.Servers)
         {
             snapshot.Servers.Add(server);
         }
@@ -513,7 +507,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         }
     }
 
-    private static void ValidateSchema(IDatabaseEngine engine, CompiledSchema schema)
+    private static void ValidateSchema(DatabaseEngine engine, CompiledSchema schema)
     {
         ArgumentNullException.ThrowIfNull(schema);
         if (engine.Model != schema.Model)
@@ -532,8 +526,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         }
     }
 
-    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddEngine(IDatabaseEngine engine) => AddEngine(engine);
-    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddEngine(Func<IDatabaseApplicationContext, IDatabaseEngine> configure) => AddEngine(configure);
+    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddEngine(DatabaseEngine engine) => AddEngine(engine);
+    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine> configure) => AddEngine(configure);
     IDatabaseApplication IDatabaseApplicationBuilder.Build() => Build();
 
     private static object? CreateConnectionFactory(string protocol) => string.Equals(protocol, "tcp", StringComparison.OrdinalIgnoreCase) ? new TcpConnectionFactory() : null;

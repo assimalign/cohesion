@@ -25,11 +25,9 @@ public class DatabaseServerTests
 
         // Act
         var server = new TestServer(engine);
-        IDatabaseServer bridged = server;
 
         // Assert
         server.Engine.ShouldBeSameAs(engine);
-        bridged.Context.Engine.ShouldBeSameAs(engine);
         server.Running.ShouldBeFalse();
         Should.Throw<ArgumentNullException>(() => new TestServer(null!));
     }
@@ -125,7 +123,6 @@ public class DatabaseServerTests
         // Arrange
         var session = new TestServerSession();
         var other = new TestServerSession();
-        IDatabaseServerSession bridged = session;
         var id = session.Id;
 
         // Act
@@ -142,22 +139,19 @@ public class DatabaseServerTests
         principalBefore.ShouldBeNull();
         session.ProtocolVersion.ShouldBe(new ProtocolVersion(1, 0));
         session.Principal.ShouldBe("svc-user");
-        bridged.Principal.ShouldBe("svc-user");
-        bridged.ProtocolVersion.ShouldBe(new ProtocolVersion(1, 0));
         Should.Throw<InvalidOperationException>(() => session.Negotiate(new ProtocolVersion(1, 0)));
         Should.Throw<InvalidOperationException>(() => session.Authenticate("other-user"));
         Should.Throw<ArgumentNullException>(() => other.Authenticate(null!));
         session.Principal.ShouldBe("svc-user");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Server session: the engine session is the leaf's, through the interface too, and disposal reaches the core")]
+    [Fact(DisplayName = "Cohesion Test [Database] - Server session: the engine session is the leaf's, and disposal reaches the core")]
     public async Task ServerSession_EngineSessionAndDisposal_ShouldBeTheLeafs()
     {
         // Arrange
         var engineSession = new TestSession(new TestDatabase("appdb", new TestEngine()));
         var session = new TestServerSession();
-        IDatabaseServerSession bridged = session;
-        var before = bridged.DatabaseSession;
+        var before = session.DatabaseSession;
 
         // Act
         session.Session = engineSession;
@@ -166,7 +160,6 @@ public class DatabaseServerTests
         // Assert
         before.ShouldBeNull();
         session.DatabaseSession.ShouldBeSameAs(engineSession);
-        bridged.DatabaseSession.ShouldBeSameAs(engineSession);
         session.DisposeCores.ShouldBe(1);
     }
 }

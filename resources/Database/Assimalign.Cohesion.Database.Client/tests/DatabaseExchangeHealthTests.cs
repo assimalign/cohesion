@@ -35,7 +35,7 @@ public sealed class DatabaseExchangeHealthTests
         exception.Code.ShouldBe(code);
         next.ShouldBeSameAs(first);
         result.Rows.ShouldHaveSingleItem().ShouldBe([1]);
-        harness.Server.Context.Sessions.ShouldHaveSingleItem();
+        harness.Server.Sessions.ShouldHaveSingleItem();
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Client] - Exchange health: statement-like codes cannot make an unread response reusable")]

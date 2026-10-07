@@ -86,7 +86,7 @@ internal sealed class WorkspacePage : ContentPage
         apply.TextColor = Colors.White;
 
         var help = Ui.Text(
-            "Embedded: the page talks to the in-process engine through IDatabaseSession.\n" +
+            "Embedded: the page talks to the in-process engine through DatabaseSession.\n" +
             "Wire (loopback): the Studio starts that model's server on 127.0.0.1 (port 0 = OS-assigned) over the SAME engine and talks to it through the real client (Sql/Graph/KeyValuePair/Blob.Client). " +
             "Database create/drop/list and KEYSPACES/containers still go through the engine, because the wire carries no management verbs.\n" +
             "Wire (external): the real client against an already-running server, e.g. the SampleHost fixture (SQL on its Db endpoint). Type the database name on the model page; nothing is listed.\n" +

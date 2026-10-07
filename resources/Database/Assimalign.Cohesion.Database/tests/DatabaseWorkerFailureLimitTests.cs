@@ -496,7 +496,7 @@ public sealed class DatabaseWorkerFailureLimitTests
         engine.GiveUps.ShouldHaveSingleItem().Taken.ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Engine: the worker failure limit is the constructor's, ten by default, and at least one")]
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: the worker failure limit is the constructor's, one hundred by default, and at least one")]
     public async Task Constructor_WorkerFailureLimit_ShouldBeTheConstructorsAndPositive()
     {
         // Act
@@ -504,9 +504,10 @@ public sealed class DatabaseWorkerFailureLimitTests
         await using var five = new TestEngine(EngineName, workerFailureLimit: 5);
         var zero = Should.Throw<ArgumentOutOfRangeException>(() => new TestEngine(EngineName, workerFailureLimit: 0));
 
-        // Assert
-        DatabaseEngine.DefaultWorkerFailureLimit.ShouldBe(10);
-        defaulted.WorkerFailureLimit.ShouldBe(10);
+        // Assert: owner decision 35 of 2026-10-07, Neo4j's window of about a hundred seconds at the
+        // workers' one-second backoff.
+        DatabaseEngine.DefaultWorkerFailureLimit.ShouldBe(100);
+        defaulted.WorkerFailureLimit.ShouldBe(100);
         five.WorkerFailureLimit.ShouldBe(5);
         zero.ParamName.ShouldBe("workerFailureLimit");
     }

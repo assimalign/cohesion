@@ -362,48 +362,9 @@ public class DatabaseEngineTests
     {
         // Arrange
         await using var engine = new TestEngine { Offline = [new DatabaseName("appdb")] };
-        IDatabaseEngine bridged = engine;
 
         // Act / Assert
         engine.OfflineDatabases.ShouldHaveSingleItem().ShouldBe(new DatabaseName("appdb"));
-        bridged.OfflineDatabases.ShouldBeSameAs(engine.OfflineDatabases);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Database] - Engine: the interface view is the same engine, workers, servers and databases")]
-    public async Task InterfaceBridge_IDatabaseEngine_ShouldExposeTheSameObjects()
-    {
-        // Arrange
-        var engine = new TestEngine();
-        var worker = new ScriptedWorker((_, _) => { });
-        var server = new TestServer(engine);
-        engine.Attach(worker);
-        engine.Attach(server);
-        IDatabaseEngine bridged = engine;
-
-        // Act
-        var created = await bridged.CreateDatabaseAsync("appdb");
-        var opened = await bridged.OpenDatabaseAsync("appdb");
-        bool found = bridged.TryGetDatabase("appdb", out var fetched);
-        bool missing = bridged.TryGetDatabase("missing", out var absent);
-        var listed = new List<IDatabase>();
-        await foreach (var database in bridged.GetDatabasesAsync())
-        {
-            listed.Add(database);
-        }
-
-        // Assert
-        bridged.Name.ShouldBe(engine.Name);
-        bridged.Model.ShouldBe(engine.Model);
-        bridged.Workers.ShouldHaveSingleItem().ShouldBeSameAs(worker);
-        bridged.Servers.ShouldHaveSingleItem().ShouldBeSameAs(server);
-        opened.ShouldBeSameAs(created);
-        found.ShouldBeTrue();
-        fetched.ShouldBeSameAs(created);
-        missing.ShouldBeFalse();
-        absent.ShouldBeNull();
-        listed.ShouldHaveSingleItem().ShouldBeSameAs(created);
-        await bridged.DisposeAsync();
-        bridged.State.ShouldBe(EngineState.Disposed);
     }
 
     /// <summary>

@@ -233,10 +233,10 @@ internal sealed class KeyValueWorkspace : ModelWorkspace
     public Task<TabularResult> KeySpacesAsync(CancellationToken cancellationToken = default)
         => RunExclusiveAsync(async token =>
         {
-            IDatabaseSession? admin = null;
+            DatabaseSession? admin = null;
             try
             {
-                IDatabaseSession session = Mode == ConnectionMode.Embedded
+                DatabaseSession session = Mode == ConnectionMode.Embedded
                     ? RequireSession()
                     : admin = await OpenAdminSessionAsync(token).ConfigureAwait(false);
                 QueryResult result = await session.ExecuteAsync(new KeyValueKeySpacesRequest(), token).ConfigureAwait(false);

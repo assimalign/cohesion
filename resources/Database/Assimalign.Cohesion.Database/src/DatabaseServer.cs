@@ -33,13 +33,12 @@ namespace Assimalign.Cohesion.Database;
 /// <see cref="StopCoreAsync"/>; <see cref="Sessions"/> is the one abstract public member, state the
 /// leaf owns, which a leaf may override covariantly. A leaf re-exposes its typed engine with a
 /// <c>new</c> property over a typed field of its own. The leaves live in the model assemblies, so
-/// the constructor is <c>protected</c>. Until phase 6 the base also implements
-/// <see cref="IDatabaseServer"/>, and <see cref="Context"/> stays as a temporary abstract member,
-/// because the hosting layer reads a server's engine through it until then.
+/// the constructor is <c>protected</c>. The engine and the sessions the server context carried
+/// before the bases are <see cref="Engine"/> and <see cref="Sessions"/> (phase 6, #1262).
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
-public abstract class DatabaseServer : IDatabaseServer
+public abstract class DatabaseServer : IAsyncDisposable
 {
     private const int created = 0;
     private const int running = 1;
@@ -70,13 +69,6 @@ public abstract class DatabaseServer : IDatabaseServer
     /// empty while no session is active (rule 9 of <c>database-area.md</c>).
     /// </summary>
     public abstract IReadOnlyCollection<DatabaseServerSession> Sessions { get; }
-
-    /// <summary>
-    /// Gets the composed state of the server through the phase-6 bridge: the engine it fronts and
-    /// its active sessions. Phase 6 deletes it with <see cref="IDatabaseServerContext"/>; read
-    /// <see cref="Engine"/> and <see cref="Sessions"/> instead.
-    /// </summary>
-    public abstract IDatabaseServerContext Context { get; }
 
     /// <summary>
     /// Gets whether the server is running: started, and not yet stopped.

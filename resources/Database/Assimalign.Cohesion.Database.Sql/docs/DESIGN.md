@@ -65,9 +65,10 @@ for the exact supported forms and semantics.
 `SqlDatabase` provisions compiled schemas: it passes `supportsSchemaProvisioning: true` to
 the root `DatabaseInstance` and overrides `ApplySchemaCoreAsync`, behind the base's
 `ApplySchemaAsync` (which checks disposal, a null schema and the token first; the offline
-refusal, `COHSQLT004`, comes after them). Until phase 6 of the concrete-types plan it also lists
-the root `IDatabaseSchemaProvisioner`, implemented by that inherited member, because the hosting
-provisioner still finds a provisionable database by that type test. Before a
+refusal, `COHSQLT004`, comes after them). The hosting provisioner reads the base's
+`SupportsSchemaProvisioning` and calls `ApplySchemaAsync`; until phase 6 of the concrete-types
+plan the database also listed the root `IDatabaseSchemaProvisioner`, which the provisioner tested
+for, and phase 6 deleted it. Before a
 schema is applied, the provisioner requires `EngineModel.Sql`, the same logical
 database name, and a shape the shipped SQL DDL surface can represent. It then
 reconstructs or reads the last canonical catalog state, uses
@@ -100,7 +101,8 @@ gap rather than hidden behind the content hash.
 ### Object ownership and the schema package
 
 The area root carries only `CompiledSchema` identity and canonical content, the
-`IDatabaseSchemaProvisioner` seam, and model-independent ownership contracts.
+`DatabaseInstance` schema seam (`SupportsSchemaProvisioning` and `ApplySchemaAsync`), and
+model-independent ownership contracts.
 `Database.Sql.Schema` owns SQL declarations, compiled tables/indexes/constraints,
 validation, serialization, and migration plans. The engine references this thin
 package; the schema package never references the engine or its storage/transport.
@@ -1115,8 +1117,11 @@ left the journal at 332,278 bytes ten seconds after the fault cleared.
 
 **A failure that persists takes the database offline (owner decision 25 of 2026-10-06).** When
 the checkpoint, page write-back, write-ahead flush or version-purge worker fails on one database
-on `WorkerFailureLimit` passes in a row (an engine option, ten by default: Neo4j's tolerance of
-failed checkpoints, `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`;
+on `WorkerFailureLimit` passes in a row (an engine option, one hundred by default since owner
+decision 35 of 2026-10-07: the window of Neo4j's ten failed checkpoints,
+`community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`, at its
+ten-second checkpoint check, `CheckPointThreshold.java:40`, is a hundred passes at the one-second
+worker backoff;
 a pass that fails both file sets counts once), the root worker base asks the engine to give up on
 it, and `SqlDatabaseEngine.TakeDatabaseOfflineCore` takes the data file set offline with the
 `StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A second checkpoint in a row
@@ -1397,7 +1402,7 @@ mechanism may be used to fake the independence. The prediction-vs-evidence
 table from the extraction is preserved in the area `DESIGN.md` §3.10. The root
 bases (`DatabaseServer`/`DatabaseServerSession`, which every model's server derives from since
 phase 4 of the concrete-types plan; the `IDatabaseServer`, `IDatabaseServerContext` and
-`IDatabaseServerSession` contracts they still implement go at its phase 6) remain the **only
+`IDatabaseServerSession` contracts they implemented went at its phase 6) remain the **only
 area-wide requirement** — every model derives from them its own
 way against `Connections` and the `Database.Protocol` child root (via the
 root's rollup).
@@ -2185,7 +2190,7 @@ sealed leaves; it has no public interface left, and no `Abstractions/` folder.
 | Type | Base | Was |
 |---|---|---|
 | `SqlDatabaseEngine` | `DatabaseEngine` | a sealed `IDatabaseEngine` |
-| `SqlDatabase` | `DatabaseInstance` (and `IDatabaseSchemaProvisioner` until phase 6) | `ISqlDatabase` and the internal `SqlDatabaseInstance` |
+| `SqlDatabase` | `DatabaseInstance` (and `IDatabaseSchemaProvisioner` until phase 6 deleted it) | `ISqlDatabase` and the internal `SqlDatabaseInstance` |
 | `SqlDatabaseSession` | `DatabaseSession` | an internal `IDatabaseSession` |
 | `SqlDatabaseTransaction` | `DatabaseTransaction` | an internal `IDatabaseTransaction` |
 | `SqlDatabaseServer` | `DatabaseServer` | a sealed `IDatabaseServer` |

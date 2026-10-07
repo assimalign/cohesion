@@ -14,4 +14,4 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 /// <param name="Attempts">The reopen attempts so far.</param>
 /// <param name="LastFailure">The last attempt's failure, or null before a failed attempt.</param>
 /// <param name="NextDelay">The delay chosen before the next attempt.</param>
-internal sealed record ReopenState(IDatabaseEngine Engine, string Name, StorageOfflineCause? Cause, int Attempts, Exception? LastFailure, TimeSpan NextDelay);
+internal sealed record ReopenState(DatabaseEngine Engine, string Name, StorageOfflineCause? Cause, int Attempts, Exception? LastFailure, TimeSpan NextDelay);

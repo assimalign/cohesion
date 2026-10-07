@@ -26,9 +26,9 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 /// (D9). The worker half still runs on a real SQL engine: a guided worker registered through the
 /// typed <see cref="SqlDatabaseEngineBuilder.AddWorker"/> fails a pass the test runs, and the root
 /// engine base folds the engine's state from it. The offline half here drives the engine double,
-/// which reports the offline databases the test sets, through the root interface the double
-/// implements. A real engine's database goes offline in <c>DatabaseReopenTests</c>: since owner
-/// decision 25 such a registered worker takes it offline once its failures reach the engine's limit.
+/// a leaf of the root engine base that reports the offline databases the test sets. A real
+/// engine's database goes offline in <c>DatabaseReopenTests</c>: since owner decision 25 such a
+/// registered worker takes it offline once its failures reach the engine's limit.
 /// </remarks>
 public sealed class DatabaseWorkerHealthTests
 {
@@ -109,36 +109,11 @@ public sealed class DatabaseWorkerHealthTests
         unhealthy.Data.ShouldNotBeNull()["engine.0.state"].ShouldBe(nameof(EngineState.Running));
         unhealthy.Data["engine.0.offline.0.name"].ShouldBe("app");
 
-        // An engine of the root interface does not say what took the database offline.
+        // The double holds no storage, so its engine reports no storage error and health names
+        // no cause; a real engine's cause is read in DatabaseReopenTests.
         unhealthy.Data.ContainsKey("engine.0.offline.0.cause").ShouldBeFalse();
 
         reopened.Status.ShouldBe(HealthStatus.Healthy);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a registered worker whose loop failed is degraded until disposal, and says so")]
-    public async Task CheckAsync_RegisteredWorkerLoopFailed_ShouldSayTheEngineStaysFaultedUntilDisposed()
-    {
-        // Arrange: a Faulted engine none of whose workers is a guided worker holding a failure, as
-        // an engine reports after a registered worker's loop escaped (since phase 4 of the
-        // concrete-types plan only an engine of the root interface can register such a worker).
-        var engine = new RecordingEngine(
-            "escaping-engine",
-            EngineState.Faulted,
-            [new RecordingEngineWorker("escaping", DatabaseEngineWorkerKind.IndexMaintenance, TimeSpan.FromSeconds(1))]);
-        var options = new DatabaseApplicationOptions();
-        options.Engines.Add(engine);
-        await using var application = new DatabaseApplication(options);
-
-        // Act
-        HealthContribution degraded = await application.Context.CheckAsync(CancellationToken.None);
-
-        // Assert: no guided worker holds a failure, so the description does not promise a return
-        // to Running; it says the engine stays Faulted until it is disposed.
-        degraded.Status.ShouldBe(HealthStatus.Degraded);
-        degraded.Description.ShouldNotBeNull().ShouldContain("A registered worker's loop failed on");
-        degraded.Description.ShouldContain("until it is disposed");
-        degraded.Description.ShouldNotContain("returns to Running");
-        degraded.Description.ShouldNotContain("Failing workers");
     }
 
     /// <summary>

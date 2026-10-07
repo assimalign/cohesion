@@ -63,7 +63,7 @@ public class KeyValueServerTests
         var session = harness.Server.Sessions.ShouldHaveSingleItem();
         session.Principal.ShouldBe("ada");
         session.DatabaseSession.ShouldNotBeNull();
-        harness.Server.Context.Engine.ShouldBeSameAs(harness.Engine);
+        harness.Server.Engine.ShouldBeSameAs(harness.Engine);
         harness.Server.Engine.Model.ShouldBe(EngineModel.KeyValueStore);
     }
 

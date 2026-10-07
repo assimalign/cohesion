@@ -12,13 +12,13 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 /// <summary>
 /// The application's reopen of offline databases (owner decision 22 of 2026-10-06): while the
 /// application runs, a database an engine reports offline is reopened through the engine's own
-/// offline-reopen path, <see cref="IDatabaseEngine.OpenDatabaseAsync"/>, with exponential backoff
+/// offline-reopen path, <see cref="DatabaseEngine.OpenDatabaseAsync"/>, with exponential backoff
 /// and jitter, until the reopen succeeds or the application stops.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>What it reopens.</b> The service polls every engine of the application's frozen registry
-/// for <see cref="IDatabaseEngine.OfflineDatabases"/>, at most once a second (or once per
+/// for <see cref="DatabaseEngine.OfflineDatabases"/>, at most once a second (or once per
 /// <see cref="DatabaseApplicationOptions.ReopenInitialDelay"/> when that is shorter). A database it
 /// finds is reopened after a random delay between half the initial delay and the initial delay.
 /// The engine's reopen closes the offline instance, which writes nothing, and opens the database
@@ -76,7 +76,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     // How often the engines are polled at most: an offline database is found within a second.
     private static readonly TimeSpan _pollInterval = TimeSpan.FromSeconds(1);
 
-    private readonly IReadOnlyList<IDatabaseEngine> _engines;
+    private readonly IReadOnlyList<DatabaseEngine> _engines;
     private readonly TimeSpan _initialDelay;
     private readonly TimeSpan _maximumDelay;
     private readonly TimeSpan _poll;
@@ -96,7 +96,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     /// <param name="engines">The engines to supervise.</param>
     /// <param name="initialDelay">The first step of the backoff; validated by the builder.</param>
     /// <param name="maximumDelay">The longest step of the backoff; validated by the builder.</param>
-    internal DatabaseReopenService(IReadOnlyList<IDatabaseEngine> engines, TimeSpan initialDelay, TimeSpan maximumDelay)
+    internal DatabaseReopenService(IReadOnlyList<DatabaseEngine> engines, TimeSpan initialDelay, TimeSpan maximumDelay)
     {
         _engines = engines;
         _initialDelay = initialDelay;
@@ -109,11 +109,11 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     public ServiceId Id { get; }
 
     /// <summary>
-    /// Gets or sets the reopen the service runs: the engine's <see cref="IDatabaseEngine.OpenDatabaseAsync"/>.
+    /// Gets or sets the reopen the service runs: the engine's <see cref="DatabaseEngine.OpenDatabaseAsync"/>.
     /// Internal, set before the application starts: this assembly's tests wrap it to fail attempts
     /// and to count them (the hook is on the type that makes the call, <c>database-area.md</c>).
     /// </summary>
-    internal Func<IDatabaseEngine, DatabaseName, CancellationToken, ValueTask> Reopen { get; set; } = OpenAsync;
+    internal Func<DatabaseEngine, DatabaseName, CancellationToken, ValueTask> Reopen { get; set; } = OpenAsync;
 
     /// <summary>
     /// Starts the reopen loop and returns at once. Idempotent; the application starts it once.
@@ -231,7 +231,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     }
 
     // The engine's own offline-reopen path; what the reopen returns is the engine's to track.
-    private static async ValueTask OpenAsync(IDatabaseEngine engine, DatabaseName name, CancellationToken cancellationToken)
+    private static async ValueTask OpenAsync(DatabaseEngine engine, DatabaseName name, CancellationToken cancellationToken)
         => await engine.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
 
     private async Task RunAsync(CancellationToken stopping)
@@ -330,7 +330,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
             _reopened.RemoveAll(reopened => Stopwatch.GetElapsedTime(reopened.At, now) > _maximumDelay);
         }
 
-        foreach (IDatabaseEngine engine in _engines)
+        foreach (DatabaseEngine engine in _engines)
         {
             IReadOnlyList<DatabaseName>? listed = null;
             try
@@ -599,7 +599,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     }
 
     // Under the lock.
-    private OfflineDatabase? Find(IDatabaseEngine engine, string name)
+    private OfflineDatabase? Find(DatabaseEngine engine, string name)
     {
         foreach (var entry in _offline)
         {
@@ -613,7 +613,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     }
 
     // Under the lock.
-    private ReopenedDatabase? FindReopened(IDatabaseEngine engine, string name)
+    private ReopenedDatabase? FindReopened(DatabaseEngine engine, string name)
     {
         foreach (var reopened in _reopened)
         {
@@ -640,14 +640,15 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     }
 
     /// <summary>
-    /// Gets what took a database offline, when its engine says: an engine of the root base reports
-    /// the storage's cause (<see cref="DatabaseEngine.GetOfflineError"/>).
+    /// Gets what took a database offline: the cause of the storage error the engine reports for it
+    /// (<see cref="DatabaseEngine.GetOfflineError"/>), or null when the engine reports none (the
+    /// database is online again, not open, or the engine was disposed meanwhile).
     /// </summary>
-    internal static StorageOfflineCause? GetCause(IDatabaseEngine engine, DatabaseName name)
+    internal static StorageOfflineCause? GetCause(DatabaseEngine engine, DatabaseName name)
     {
         try
         {
-            return engine is DatabaseEngine typed ? typed.GetOfflineError(name)?.Cause : null;
+            return engine.GetOfflineError(name)?.Cause;
         }
         catch (ObjectDisposedException)
         {
@@ -655,17 +656,8 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
         }
     }
 
-    private static bool IsDisposed(IDatabaseEngine engine)
-    {
-        try
-        {
-            return engine.State == EngineState.Disposed;
-        }
-        catch (ObjectDisposedException)
-        {
-            return true;
-        }
-    }
+    // The engine base folds its state from its own disposal flag, so reading it never throws.
+    private static bool IsDisposed(DatabaseEngine engine) => engine.State == EngineState.Disposed;
 
     // A random delay between half the step and the step.
     private static TimeSpan Jitter(TimeSpan step)
@@ -675,9 +667,9 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     /// A database the service found offline: what took it offline, its reopen attempts, and the
     /// attempt or check running for it.
     /// </summary>
-    private sealed class OfflineDatabase(IDatabaseEngine engine, string name, StorageOfflineCause? cause, int level)
+    private sealed class OfflineDatabase(DatabaseEngine engine, string name, StorageOfflineCause? cause, int level)
     {
-        public IDatabaseEngine Engine { get; } = engine;
+        public DatabaseEngine Engine { get; } = engine;
 
         public string Name { get; } = name;
 
@@ -706,5 +698,5 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     /// A database the service reopened, remembered for the maximum delay so that a database that
     /// goes offline again keeps its backoff.
     /// </summary>
-    private sealed record ReopenedDatabase(IDatabaseEngine Engine, string Name, int Level, long At);
+    private sealed record ReopenedDatabase(DatabaseEngine Engine, string Name, int Level, long At);
 }

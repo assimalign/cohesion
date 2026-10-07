@@ -177,7 +177,7 @@ public sealed class SqlComparisonWireTests
     /// </summary>
     private static string ServerAccessPath(ServerTestHarness harness)
     {
-        var session = harness.Server.GetSessionsSnapshot().ShouldHaveSingleItem().ShouldBeOfType<SqlDatabaseServerSession>();
+        var session = harness.Server.Sessions.ShouldHaveSingleItem().ShouldBeOfType<SqlDatabaseServerSession>();
         var databaseSession = session.DatabaseSession.ShouldBeOfType<SqlDatabaseSession>();
         return databaseSession.LastStatementMetrics.ShouldNotBeNull().AccessPath;
     }

@@ -35,9 +35,6 @@ internal sealed class RecordingServer : DatabaseServer
 
     public override IReadOnlyCollection<DatabaseServerSession> Sessions => [];
 
-    // The phase-6 bridge the base still requires: the engine the hosting layer reads.
-    public override IDatabaseServerContext Context => new RecordingServerContext(Engine);
-
     protected override Task StartCoreAsync(CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _starts);
@@ -48,17 +45,5 @@ internal sealed class RecordingServer : DatabaseServer
     {
         Interlocked.Increment(ref _stops);
         return StopFailure is { } failure ? Task.FromException(failure) : Task.CompletedTask;
-    }
-
-    private sealed class RecordingServerContext : IDatabaseServerContext
-    {
-        public RecordingServerContext(DatabaseEngine engine)
-        {
-            Engine = engine;
-        }
-
-        public IDatabaseEngine Engine { get; }
-
-        public IReadOnlyCollection<IDatabaseServerSession> Sessions => [];
     }
 }

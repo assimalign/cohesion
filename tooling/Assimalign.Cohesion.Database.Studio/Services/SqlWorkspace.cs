@@ -16,7 +16,7 @@ using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Studio;
 
-/// <summary>SQL: embedded <c>IDatabaseSession</c> or the typed <c>Sql.Client</c> over TCP.</summary>
+/// <summary>SQL: embedded <c>DatabaseSession</c> or the typed <c>Sql.Client</c> over TCP.</summary>
 internal sealed class SqlWorkspace : LanguageWorkspace
 {
     private SqlClient? _client;

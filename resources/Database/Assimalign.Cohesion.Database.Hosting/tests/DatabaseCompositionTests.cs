@@ -37,11 +37,11 @@ public sealed class DatabaseCompositionTests
         application.Context.GetEngine("orders").Model.ShouldBe(EngineModel.Sql);
         application.Context.GetEngine("analytics").Model.ShouldBe(EngineModel.Sql);
         application.Context.GetEngine("catalog").Model.ShouldBe(EngineModel.Document);
-        foreach (IDatabaseEngine engine in application.Context.Engines)
+        foreach (DatabaseEngine engine in application.Context.Engines)
         {
-            IDatabase database = await engine.CreateDatabaseAsync("app");
+            DatabaseInstance database = await engine.CreateDatabaseAsync("app");
             database.Engine.ShouldBeSameAs(engine);
-            engine.TryGetDatabase("app", out IDatabase found).ShouldBeTrue();
+            engine.TryGetDatabase("app", out DatabaseInstance? found).ShouldBeTrue();
             found.ShouldBeSameAs(database);
         }
     }
@@ -111,7 +111,7 @@ public sealed class DatabaseCompositionTests
 
         borrowed.DisposeCount.ShouldBe(0);
         owned.DisposeCount.ShouldBe(1);
-        server.DisposeCount.ShouldBe(1);
+        server.Stops.ShouldBe(1);
         dependency.DisposeCount.ShouldBe(1);
         configuration.DisposeCount.ShouldBe(1);
         Should.Throw<InvalidOperationException>(() => builder.Build());
@@ -133,8 +133,10 @@ public sealed class DatabaseCompositionTests
 
         var actual = Should.Throw<AggregateException>(() => builder.Build());
 
+        // The engine base reports a failure of its own disposal inside its aggregate, so the
+        // cleanup failure is one level down.
         actual.InnerExceptions.ShouldContain(constructionFailure);
-        actual.InnerExceptions.ShouldContain(cleanupFailure);
+        actual.Flatten().InnerExceptions.ShouldContain(cleanupFailure);
         first.DisposeCount.ShouldBe(1);
         second.DisposeCount.ShouldBe(1);
     }
@@ -172,22 +174,26 @@ public sealed class DatabaseCompositionTests
         borrowed.DisposeCount.ShouldBe(0);
     }
 
-    /// <summary>Verifies nested servers cannot front another engine.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: rejects a nested server with a different engine")]
-    public void Build_WhenNestedServerFrontsAnotherEngine_ShouldRejectComposition()
+    /// <summary>
+    /// Verifies a nested server cannot also be registered as a borrowed server. A nested server
+    /// that fronts another engine cannot be composed at all since phase 6 of the concrete-types
+    /// plan: the engine base refuses it when it is attached (<c>DatabaseEngineTests</c>).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: rejects a nested server also registered as a borrowed server")]
+    public void Build_WhenNestedServerIsAlsoBorrowed_ShouldRejectComposition()
     {
         var owner = new RecordingEngine("owner");
-        var other = new RecordingEngine("other");
-        var server = new RecordingServer([], engine: other);
+        var server = new RecordingServer([], engine: owner);
         owner.AddServer(_ => server);
         var builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(_ => owner);
+        builder.AddEngine(owner);
+        builder.Options.Servers.Add(server);
 
-        Should.Throw<InvalidOperationException>(() => builder.Build());
+        Should.Throw<InvalidOperationException>(() => builder.Build())
+            .Message.ShouldBe("A server was registered more than once.");
 
-        owner.DisposeCount.ShouldBe(1);
-        other.DisposeCount.ShouldBe(0);
-        server.DisposeCount.ShouldBe(1);
+        owner.DisposeCount.ShouldBe(0);
+        server.Stops.ShouldBe(0);
     }
 
     /// <summary>Verifies a nested server cannot also be registered as an independent lifecycle service.</summary>
@@ -229,10 +235,10 @@ public sealed class DatabaseCompositionTests
         await ((IAsyncDisposable)application).DisposeAsync();
 
         owned.DisposeCount.ShouldBe(1);
-        ownedServer.DisposeCount.ShouldBe(1);
+        ownedServer.Stops.ShouldBe(1);
         ownedService.DisposeCount.ShouldBe(1);
         borrowed.DisposeCount.ShouldBe(0);
-        borrowedServer.DisposeCount.ShouldBe(0);
+        borrowedServer.Stops.ShouldBe(0);
         borrowedService.DisposeCount.ShouldBe(0);
         configuration.DisposeCount.ShouldBe(1);
     }
@@ -306,7 +312,9 @@ public sealed class DatabaseCompositionTests
             observed.Services.ShouldBeSameAs(application.Context.Services);
             application.Context.Services.GetRequiredService<IConfiguration>().ShouldBeSameAs(application.Context.Configuration);
             application.Context.GetEngine("custom").ShouldBeOfType<SqlDatabaseEngine>();
-            application.Context.Servers.ShouldHaveSingleItem().Context.Engine
+            application.Context.Servers.ShouldHaveSingleItem().Engine
+                .ShouldBeSameAs(application.Context.GetEngine("custom"));
+            application.Context.GetEngine<SqlDatabaseEngine>("custom")
                 .ShouldBeSameAs(application.Context.GetEngine("custom"));
         }
         finally
@@ -389,22 +397,20 @@ public sealed class DatabaseCompositionTests
         public ValueTask DisposeAsync() { DisposeCount++; return ValueTask.CompletedTask; }
     }
 
-    private sealed class ServerService : IDatabaseServer, IHostService
+    // A server that is also a lifecycle service: the base's public start and stop implement both.
+    private sealed class ServerService : DatabaseServer, IHostService
     {
-        private readonly RecordingServer _server;
-
         /// <summary>Initializes a new instance of the <see cref="ServerService"/> class.</summary>
-        /// <param name="engine">The engine the wrapped recording server fronts.</param>
-        public ServerService(IDatabaseEngine engine)
+        /// <param name="engine">The engine the server fronts.</param>
+        public ServerService(DatabaseEngine engine)
+            : base(engine)
         {
-            _server = new([], engine: engine);
         }
 
         public ServiceId Id { get; } = ServiceId.New();
-        public IDatabaseServerContext Context => _server.Context;
-        public Task StartAsync(CancellationToken cancellationToken = default) => _server.StartAsync(cancellationToken);
-        public Task StopAsync(CancellationToken cancellationToken = default) => _server.StopAsync(cancellationToken);
-        public ValueTask DisposeAsync() => _server.DisposeAsync();
+        public override IReadOnlyCollection<DatabaseServerSession> Sessions => [];
+        protected override Task StartCoreAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        protected override Task StopCoreAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class TestConfigurationProvider : ConfigurationProvider

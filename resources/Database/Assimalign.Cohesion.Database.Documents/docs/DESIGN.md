@@ -419,8 +419,11 @@ lock wait instead (`TransactionCoordinator.AbandonLockWaits`, wired to the stora
 
 **A failure that persists takes the database offline (owner decision 25 of 2026-10-06).** When
 the checkpoint, page write-back, write-ahead flush or version-purge worker fails on one database
-on `WorkerFailureLimit` passes in a row (an engine option, ten by default: Neo4j's tolerance of
-failed checkpoints, `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`),
+on `WorkerFailureLimit` passes in a row (an engine option, one hundred by default since owner
+decision 35 of 2026-10-07: the window of Neo4j's ten failed checkpoints,
+`community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`, at its
+ten-second checkpoint check, `CheckPointThreshold.java:40`, is a hundred passes at the one-second
+worker backoff),
 the root worker base asks the engine to give up on it, and
 `DocumentDatabaseEngine.TakeDatabaseOfflineCore` takes the database's storage offline with the
 `StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A second checkpoint in a row

@@ -32,7 +32,7 @@ public sealed class SqlSystemViewTests
                 [new("id", DatabaseType.Int32, false), new("label", DatabaseType.String, true)],
                 new CompiledSchemaKey("pk_managed", ["id"]),
                 [new CompiledSchemaIndex("ix_managed_label", ["label"])], [])], [], [], [], []);
-        await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema);
+        await database.ApplySchemaAsync(schema);
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE adhoc (id INT PRIMARY KEY, label VARCHAR(20))");
         await session.ExecuteAsync("CREATE INDEX ix_adhoc_label ON adhoc(label)");
