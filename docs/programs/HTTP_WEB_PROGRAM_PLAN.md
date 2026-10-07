@@ -242,7 +242,7 @@ The audit behind these stages is §7. Within each stage, rows are in the recomme
 
 ### Stage 9 — Server and operations
 
-**Status:** delivered 2026-10-06 on the Phase 2 branch and in owner review. Defects found along the way were fixed in the same stage:
+**Status:** delivered 2026-10-06 on the Phase 2 branch. It was approved 2026-10-07 with both recommendations adopted (§7.4, decisions 14–15). Defects found along the way were fixed in the same stage:
 - the ObjectValidation defects #1291 and #1292;
 - two denial-of-service holes in the released 10.0.0-preview.1, #1304 (TLS handshakes) and #1308 (TCP resets before the accept);
 - #1309 and #1310.
@@ -429,7 +429,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - #1210, #1211: `UseForms()` failures and repeated multipart fields.
   - #1212–#1216, #1218: root deletion, aggregate mounts, file watching, an IsolatedStorage flake, `Parse` of `/..`, and isolated-storage containment.
   - #1217: `security: []` on an operation. #1219: database names escape the data root. #1220: Configuration's trim and AOT warnings.
-- **Stage 9 delivered (2026-10-06), awaiting owner review.** Agent sessions built it in parallel worktrees: one per lane, and one more for #1304. Each item was reviewed, integrated on the Phase 2 branch, verified and pushed to PR #1094 as it landed:
+- **Stage 9 delivered (2026-10-06) and approved (2026-10-07); both recommendations in "Questions for the review" were adopted (§7.4, decisions 14–15).** Agent sessions built it in parallel worktrees: one per lane, and one more for #1304. Each item was reviewed, integrated on the Phase 2 branch, verified and pushed to PR #1094 as it landed:
   - **Validation order.** #1221 `b6354464` (decision 11): ObjectValidation evaluates chained rules and members in declaration order. The validation context also listed errors on a stack, so fixing only the queues would have left nested errors reversed.
   - **Validation defects.** #1221's session found both, and the integrator fixed them:
     - #1291 `bec8dbd0` removes an unsynchronized static object pool that could hand a concurrent validation `null`, and reports timings in `TimeSpan` ticks.
@@ -644,7 +644,7 @@ What works end to end:
 
 ### 7.4 Owner decisions
 
-Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01, and decisions 8–13 in the Stage 8 review on 2026-10-06, where the owner adopted every recommendation. Decision 5 is open.
+Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decisions 8–13 were adopted in the Stage 8 review on 2026-10-06, and decisions 14–15 in the Stage 9 review on 2026-10-07. In both reviews the owner adopted every recommendation. Decision 5 is open.
 
 1. **Which claim model authorization runs on.**
    - Web: authenticates onto BCL `ClaimsPrincipal` by a recorded decision (`Web.Authentication/docs/DESIGN.md:157-167`).
@@ -666,6 +666,10 @@ Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved t
 13. **Two program-level items (raised by Stage 8, adopted 2026-10-06).**
     - Every Cohesion assembly carries `RequiresPreviewFeatures`, so a consumer on the plain .NET SDK gets CA2252 until it enables preview features. Adopted: accept it through the previews and decide before GA.
     - The release is about 389 packages, above nuget.org's 350-per-hour push ceiling. Adopted: promote in hourly batches (#1290).
+14. **Publishing the #1304 and #1308 advisories (raised by Stage 9, adopted 2026-10-07).** Both holes are in 10.0.0-preview.1 and earlier. Adopted: as decision 8 does for #1180, both advisories stay private drafts and are published with the first preview that ships the fixes:
+    - [GHSA-r9cf-3952-rg7f](https://github.com/assimalign/cohesion/security/advisories/GHSA-r9cf-3952-rg7f) for #1304 names `Assimalign.Cohesion.Http.Connections`, `.Connections` and `.Connections.Quic`.
+    - [GHSA-r66x-xgrx-gh8m](https://github.com/assimalign/cohesion/security/advisories/GHSA-r66x-xgrx-gh8m) for #1308 names `Assimalign.Cohesion.Connections.Tcp`.
+15. **`IHttpConnectionContext.BeginGracefulClose()` as a required member (raised by Stage 9, adopted 2026-10-07).** Adopted: the member stays abstract, with no default implementation, and the source break for an implementer outside this repository is accepted during the previews.
 
 ### 7.5 Lineup
 
