@@ -613,18 +613,27 @@ on `WorkerFailureLimit` passes in a row (an engine option, ten by default: Neo4j
 failed checkpoints, `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`),
 the root worker base asks the engine to give up on it, and
 `GraphDatabaseEngine.TakeDatabaseOfflineCore` takes the database's storage offline with the
-`StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A checkpoint
+`StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A second checkpoint in a row
 that fails while the database's journal holds `JournalSizeLimit` bytes (an engine option; zero, the
-default, means four times `CheckpointJournalSize`, 1 GiB at its default) takes it offline at once
-with `JournalSizeLimit`. Either way the database goes offline through the #1243 machinery: every
+default, means four times `CheckpointJournalSize`, 1 GiB at its default) takes it offline with
+`JournalSizeLimit`; one failure of a journal that reached the cap with no failure at all (#1283)
+is retried like any other. Either way the database goes offline through the #1243 machinery: every
 operation is refused with `COHDBG012`, its lock waits end, nothing more is written to it, and the
 engine lists it in `OfflineDatabases` until `OpenDatabaseAsync` reopens it (a hosted engine's
-application reopens it with backoff, owner decision 22). The engine finds the database in its
-published snapshot, without its registry lock, so a worker that gives up on one database never
-waits for another's open; a database already offline or closed is not counted.
+application reopens it with backoff, owner decision 22). The engine takes it offline on a thread-pool thread, never the worker's,
+so a give-up that waits for a hung fsync of that database holds back none of the others, and it
+finds the database in its published snapshot, without its registry lock, so it never waits for
+another's open. Once the database is offline, or whenever it closes, the engine ends every
+worker's failure record of it, so the engine reports `Running` at once and a reopened database
+counts its failures from one; a database already offline or closed is not counted.
 `GraphWorkerResilienceTests` pins it: a checkpoint failure that never clears takes only its
-database offline after the limit of failed passes, a journal past the cap does at once, and a
-transient failure under the limit does not (the count restarts once a checkpoint finishes). The
+database offline after the limit of failed passes, a journal past the cap does on its second
+failed checkpoint in a row, one transient failure of a journal already past the cap does not,
+and a transient failure under the limit does not (the count restarts once a checkpoint
+finishes). A database opened from a copied file set, whose storage carries the original's name
+in its file header, goes offline for its own write-back failures, never the original: the
+write-back and flush workers visit the engine's databases and report under the database's
+name, not the storage's (owner decision 25 review). The
 suite's other engines set both limits out of reach, since they keep a database failing on purpose.
 
 **A database closed outside the engine is skipped, then forgotten** (owner decision 33 of
@@ -650,16 +659,18 @@ registry operations until it ends, and a drop's token is not observed meanwhile 
 
 For the window between the close and the forget the workers skip the database:
 `GraphDatabase.IsClosed` reads the base's disposed flag, `GraphDatabaseEngine.IsOpen` is false
-for the closed database and for its storage, the version-purge worker skips it in its pass and
+for the closed database, the version-purge worker skips it in its pass and
 in its trigger wait, and the checkpointer skips it
 through the model's `IsCheckpointDue`, which is false for a closed database (the pass is the
 engines' shared one, and its `IsOpen` check covers only a checkpoint that raced the close). A
 close that was not idle leaves the journal untruncated: when its retry of a deferred undo still
 fails, the close keeps that writer in flight (#1226), so the closed storage stays due for a
-checkpoint it refuses. The flush and write-back workers visit storages, not databases, so they
-still visit the closed database's storage, whose close flushed it: write-back writes nothing for a
-disposed storage, and an `ObjectDisposedException` from it is tolerated through
-`IsOpen(GraphStorage)` rather than recorded. Before the skips, the version-purge worker failed on
+checkpoint it refuses. The flush and write-back workers skip it too (`GraphDatabase.IsClosed`), and
+an `ObjectDisposedException` from a close that raced their visit is tolerated through
+`IsOpen(GraphDatabase)` rather than recorded. Until owner decision 25's review they visited the
+engine's storages rather than its databases, and reported under the storage's name, which a
+storage reads from its file header: a database opened from a copied file set carries the
+original's, so its persistent failures would have taken the original offline. Before the skips, the version-purge worker failed on
 the closed database's disposed coordinator every pass (21 failed passes in half a second at 20 ms
 intervals); and when the checkpointer had a failure recorded for a database whose close was not
 idle, every poll handed a lane the refused checkpoint, which kept the failure recorded. Either way

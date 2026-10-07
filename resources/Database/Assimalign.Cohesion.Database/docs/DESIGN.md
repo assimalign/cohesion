@@ -408,22 +408,55 @@ layer through the interfaces the bases implement. Every base carries the deviati
     count. Index-maintenance workers never escalate: their work costs space, not durability.
     At the one-second backoff a database whose checkpoints keep failing goes offline about
     ten seconds after its first failure; a deferred undo, retried on its coordinator's
-    doubling schedule, after about a hundred.
-  - *The journal cap.* A checkpoint that fails while one of the database's journals holds
-    the engine's `JournalSizeLimit` (an engine option; zero, the default, resolves to four
-    times `CheckpointJournalSize`, 1 GiB at its default and PostgreSQL's `max_wal_size`
-    default, or to 1 GiB with the size trigger off; `shared/DatabaseWorkerLimits.cs`) takes
-    the database offline at once with `StorageOfflineCause.JournalSizeLimit`, through the
-    worker base's `protected TakeDatabaseOffline`: under load the journal would fill the
-    device long before the failure limit. Only a failure counts: a checkpoint deferred to a
-    running statement or refused by a busy storage (#1283) never takes a database offline,
-    however long its journal grows.
+    doubling schedule, after about a hundred. The count is Neo4j's but the window is not:
+    Neo4j checks for a checkpoint every ten seconds by default
+    (`community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointThreshold.java:40`),
+    so its ten failures span about a hundred seconds. A device that stops answering for
+    longer than about ten seconds therefore takes the databases on it offline, and a hosted
+    application reopens each once the device answers; an engine that must ride out longer
+    outages raises its limit (owner review item, recorded in the plan).
+  - *The journal cap.* A checkpoint that fails for the second pass or more in a row while one
+    of the database's journals holds the engine's `JournalSizeLimit` (an engine option; zero,
+    the default, resolves to four times `CheckpointJournalSize`, 1 GiB at its default and
+    PostgreSQL's `max_wal_size` default, or to 1 GiB with the size trigger off;
+    `shared/DatabaseWorkerLimits.cs`) takes the database offline with
+    `StorageOfflineCause.JournalSizeLimit`, through the worker base's
+    `protected TakeDatabaseOffline`: under load the journal would fill the device long before
+    the failure limit. One failure is not enough, because a journal reaches the cap with no
+    failure at all: a checkpoint deferred to a running statement or refused by a busy storage
+    (#1283), or a write burst, never takes a database offline by itself, however long its
+    journal grows, and a single transient failure of such a journal is retried like any
+    other. The second failure in a row, a backoff later, is what says the checkpoints keep
+    failing (`ReportFailure` returns the database's count of failed passes in a row; the
+    shared checkpointer's `JournalSizeLimitFailures` is two). PostgreSQL's `max_wal_size` is a
+    soft limit the WAL may pass under heavy load (`doc/src/sgml/config.sgml:4010-4014`).
+  - *The give-up never runs on a worker's thread.* Taking a storage offline latches its
+    journal under the journal's lock, which a durable flush holds through its fsync. A worker
+    that gave up on its own thread would wait out a hung fsync of that database, and so would
+    every other database the worker serves, the stall the checkpoint lanes isolate (#1268).
+    `GiveUpOnDatabase` therefore queues the leaf's `TakeDatabaseOfflineCore` to the thread pool,
+    at most one per database at a time, and the pass goes on; until the database is offline the
+    worker's record of it still backs it off. A failure of the leaf's core is recorded on the
+    worker as a failure of its own (`Fault`, until its next pass runs to its end), and the
+    database's next failure asks again. The engine's disposal waits for a give-up still running
+    before the leaf closes its databases.
   - *What does not count.* A failure of a database already offline or closed (the workers
     skip both, and the leaf refuses them), a worker no engine owns, and an engine whose
     disposal started. Only the failing database goes offline; the workers keep serving the
-    engine's other databases, and the offline one's failure record ends with the next pass,
-    which does not begin it, so the engine reports `Running` again. Each give-up is written to
-    the event source (event 3, "Diagnostics" below).
+    engine's other databases. Once the leaf took the database offline the engine ends every
+    worker's failure record of it (internal `DatabaseEngineWorker.ForgetDatabase`), and it does
+    the same whenever a database of the engine closes (`ForgetClosedDatabase`, whoever closed
+    it: a holder, a drop, a reopen after going offline, the engine's disposal). The engine
+    reports `Running` again at once, and a reopened database counts its failures from one:
+    before the review a record outlived the reopen, so the engine stayed `Faulted` (hosted
+    health `Degraded`) after a successful reopen, and the reopened database went offline on its
+    first transient failure. A record a pass no longer visits still ends with that pass. Each
+    give-up is written to the event source (event 3, "Diagnostics" below).
+  - *Each worker reports under the database's name in the engine.* The Blob, Documents and
+    Graph write-back and flush workers visited the engine's storages and reported under the
+    storage's name, which a storage reads from its file header: a database opened from a copied
+    file set carries the original's, so its persistent failures took the original offline. They
+    visit the engine's open databases now, as the Sql and KeyValuePair workers do.
   - *The way back.* `OpenDatabaseAsync` reopens the database, whose recovery reads its
     journal. A hosted engine's database is reopened by `Database.Hosting` with backoff (owner
     decision 22; Hosting `DESIGN.md`, "Reopening offline databases").
@@ -698,9 +731,11 @@ No counters: a worker's counts are on the worker (`FailureCount`, `ConsecutiveFa
 the hosting health aggregate reports them. The health output names a failing worker and the
 type of its failure only, because the health endpoint is unauthenticated and an exception's
 message can carry file paths; the event carries the message. An engine that gives up on a
-database (owner decision 25) writes event 3 once, from the worker base, which is in the root: the
-worker's failure count reached the engine's limit, or the checkpointer found the journal past the
-cap. A database a device failure took offline is not a worker event: the engines report it
+database (owner decision 25) writes event 3 once, from the root engine base, on the thread-pool
+thread that took the database offline: the worker's failure count reached the engine's limit, or
+the checkpointer found the journal past the cap on a second failed checkpoint in a row. A give-up
+the leaf fails is written as event 1 of the worker that asked, with the database's name. A
+database a device failure took offline is not a worker event: the engines report it
 through `IDatabaseEngine.OfflineDatabases` and health, and every refusal carries the failure that
 took it offline (`DatabaseOfflineException`'s inner `StorageOfflineException`, its `Cause` and its
 I/O error). This source does not write that transition, and cannot without breaking the

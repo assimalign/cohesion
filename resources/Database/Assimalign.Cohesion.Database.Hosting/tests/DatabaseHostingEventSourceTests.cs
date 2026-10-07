@@ -98,10 +98,17 @@ public sealed class DatabaseHostingEventSourceTests
         };
         using var recorder = new HostingEventRecorder(EventLevel.Informational);
 
-        // Act
+        // Act: the engine takes the database offline on a thread-pool thread, a moment after the
+        // failed pass.
         worker.ShouldNotBeNull().RunIteration(CancellationToken.None);
-        await ((IHost)application).StartAsync(CancellationToken.None);
         var watch = Stopwatch.StartNew();
+        while (engine.OfflineDatabases.Count == 0)
+        {
+            watch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30));
+            await Task.Delay(10);
+        }
+
+        await ((IHost)application).StartAsync(CancellationToken.None);
         while (engine.OfflineDatabases.Count > 0 || service.GetPendingReopens().Count > 0)
         {
             watch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30));
@@ -126,9 +133,10 @@ public sealed class DatabaseHostingEventSourceTests
         found.EventId.ShouldBe(1);
         found.Level.ShouldBe(EventLevel.Warning);
         found.PayloadNames.ShouldBe(["engineName", "database", "cause", "delayMilliseconds"]);
-        found.Payload![1].ShouldBe(App);
-        found.Payload[2].ShouldBe("CheckpointFailures");
-        ((long)found.Payload[3]!).ShouldBeInRange(10L, 20L);
+        var foundPayload = found.Payload.ShouldNotBeNull();
+        foundPayload[1].ShouldBe(App);
+        foundPayload[2].ShouldBe("CheckpointFailures");
+        ((long)foundPayload[3]!).ShouldBeInRange(10L, 20L);
 
         events[1].EventId.ShouldBe(2);
         events[1].PayloadNames.ShouldBe(["engineName", "database", "attempt"]);
@@ -138,8 +146,9 @@ public sealed class DatabaseHostingEventSourceTests
         failed.EventId.ShouldBe(4);
         failed.Level.ShouldBe(EventLevel.Warning);
         failed.PayloadNames.ShouldBe(["engineName", "database", "attempt", "exceptionType", "exceptionMessage", "retryMilliseconds"]);
-        failed.Payload!.Take(5).ShouldBe([engineName, App, 1, typeof(IOException).FullName, "Injected reopen failure"]);
-        ((long)failed.Payload[5]!).ShouldBeInRange(20L, 40L);
+        var failedPayload = failed.Payload.ShouldNotBeNull();
+        failedPayload.Take(5).ShouldBe([engineName, App, 1, typeof(IOException).FullName, "Injected reopen failure"]);
+        ((long)failedPayload[5]!).ShouldBeInRange(20L, 40L);
 
         events[3].Payload.ShouldBe([engineName, App, 2]);
 
@@ -174,8 +183,14 @@ public sealed class DatabaseHostingEventSourceTests
 
         // Act
         worker.ShouldNotBeNull().RunIteration(CancellationToken.None);
-        await ((IHost)application).StartAsync(CancellationToken.None);
         var watch = Stopwatch.StartNew();
+        while (engine.OfflineDatabases.Count == 0)
+        {
+            watch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30));
+            await Task.Delay(10);
+        }
+
+        await ((IHost)application).StartAsync(CancellationToken.None);
         while (service.GetPendingReopens().Count == 0)
         {
             watch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30));

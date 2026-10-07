@@ -1,7 +1,6 @@
 using System;
 using System.Threading;
 
-using Assimalign.Cohesion.Database.Blob.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Blob.Internal;
@@ -9,8 +8,8 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// <summary>
 /// The engine-owned write-ahead-log group-commit flusher: woken when a grouped
 /// commit registers on any open storage's durability gate, it performs one durable
-/// flush per storage that covers every pending commit, so concurrent commits share a
-/// single fsync.
+/// flush per open database that covers every pending commit, so concurrent commits
+/// share a single fsync.
 /// </summary>
 /// <remarks>
 /// Signal-driven: <see cref="WaitForTrigger"/> waits on the engine's commit-pending
@@ -22,10 +21,17 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// A drain of the journal's append buffer (#1252) or a durable flush (#1243) that fails takes
 /// its database offline: the storage releases the committers waiting on it, each gets the
 /// refusal from its own flush, and the worker keeps
-/// flushing the engine's other databases. Any other failure of one storage is reported for its
-/// database and the pass goes on to the next (#1268); the database is flushed again after
+/// flushing the engine's other databases. Any other failure of one database is reported for it
+/// and the pass goes on to the next (#1268); the database is flushed again after
 /// <see cref="DatabaseEngineWorker.FailureBackoff"/>, and its committers self-help within their
 /// window meanwhile, as they do whenever the worker is late.
+/// </para>
+/// <para>
+/// The pass visits the engine's open databases and reports under the database's name in the
+/// engine, never its storage's, which is read from the file header and is the original's for a
+/// database opened from a copied file set (<see cref="BlobPageWriteBackWorker"/>). A database the
+/// engine is still opening is not served: a commit its open makes flushes itself after its window,
+/// as in the other models.
 /// </para>
 /// </remarks>
 internal sealed class BlobWriteAheadFlushWorker : DatabaseEngineWorker
@@ -63,39 +69,40 @@ internal sealed class BlobWriteAheadFlushWorker : DatabaseEngineWorker
         // again and is picked up by the next pass instead of being lost.
         _commitPending.Reset();
 
-        foreach (BlobStorage storage in _engine.GetStorageSnapshot())
+        foreach (BlobDatabase database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {
                 break;
             }
 
-            // A storage names its database. An offline one is not begun: nothing of it is written
-            // (#1243), the engine reports it, and a failure the worker recorded for it ends.
-            if (storage.IsOffline || !BeginDatabase(storage.Name))
+            // An offline database flushes nothing (#1243): its waiting committers were released
+            // when it went offline, and each gets the refusal from its own flush. Nor does a
+            // database its holder closed: the engine keeps it registered until its close ends, then
+            // forgets it, and its disposed storage has no committers left to serve.
+            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;
             }
 
             try
             {
-                storage.FlushPendingCommits();
+                database.DataStorage.FlushPendingCommits();
             }
-            catch (ObjectDisposedException) when (!_engine.IsOpen(storage))
+            catch (ObjectDisposedException) when (!_engine.IsOpen(database))
             {
                 // The snapshot can race a database drop; a disposed storage has no
                 // committers left to serve.
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                // The committers waiting on this storage self-help within their window; the next
-                // pass flushes it again. An offline storage's refusal is not the worker's failure.
-                if (!storage.IsOffline)
+                // The committers waiting on this database self-help within their window; the next
+                // pass flushes it again. An offline database's refusal is not the worker's failure.
+                if (!database.IsOffline)
                 {
-                    ReportFailure(storage.Name, exception);
+                    ReportFailure(database.Name, exception);
                 }
             }
         }
     }
 }
-

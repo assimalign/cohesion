@@ -749,7 +749,8 @@ public sealed class GraphWorkerResilienceTests
 
     /// <summary>
     /// A journal that grows past the engine's cap while its checkpoints fail takes the database
-    /// offline at once (owner decision 25), long before the failure limit, with
+    /// offline on its second failed checkpoint in a row (owner decision 25 and its review), long
+    /// before the failure limit, with
     /// <see cref="StorageOfflineCause.JournalSizeLimit"/>, and only that database: under load the
     /// journal would otherwise fill the device first.
     /// </summary>
@@ -784,6 +785,7 @@ public sealed class GraphWorkerResilienceTests
 
         bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
         long failedPasses = worker.FailureCount;
+        bool failedTwice = await Eventually(() => worker.FailureCount >= 2);
         var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
 
         // The other database is still checkpointed by size.
@@ -796,15 +798,105 @@ public sealed class GraphWorkerResilienceTests
         // Assert
         offline.ShouldBeTrue();
         failedPasses.ShouldBeLessThan(DatabaseEngine.DefaultWorkerFailureLimit);
+        failedTwice.ShouldBeTrue();
         refusal.Code.ShouldBe("COHDBG012");
         refusal.Message.ShouldContain("its journal grew past its engine's limit while its checkpoints kept failing");
         var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
         cause.Cause.ShouldBe(StorageOfflineCause.JournalSizeLimit);
         cause.Message.ShouldContain($"past the engine's limit of {options.JournalSizeLimit} bytes");
         cause.Message.ShouldContain($"'{worker.Name}'");
+        cause.Message.ShouldContain("passes in a row");
         engine.OfflineDatabases.ShouldBe([(DatabaseName)Failing]);
         healthy.IsOffline.ShouldBeFalse();
         strategy.Faults(Healthy).HeaderWrites.ShouldBeGreaterThan(checkpoints);
+    }
+
+    /// <summary>
+    /// A journal that reached the engine's cap with no failure at all (a starved checkpointer,
+    /// #1283) is not taken offline by one transient checkpoint failure (owner decision 25 review):
+    /// the cap needs a second failed checkpoint in a row. Here the journal grows past the cap while
+    /// no checkpoint is due, one checkpoint then fails, the fault clears before the worker's retry,
+    /// and the retried checkpoint truncates the journal.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Workers: one transient checkpoint failure of a journal already past the cap leaves the database online")]
+    public async Task CheckpointWorker_JournalPastTheCapOneTransientFailure_ShouldLeaveTheDatabaseOnline()
+    {
+        // Arrange: no checkpoint is due (no size trigger, an hour's time backstop) while the journal
+        // grows past a cap of four times the pace size, with no fault.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.CheckpointJournalSize = 0;
+        options.JournalSizeLimit = 4 * PaceJournalSize;
+        await using var engine = GraphDatabaseEngine.Create(options);
+        var database = await engine.CreateDatabaseAsync(Failing);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+        for (int id = 0; database.DataStorage.JournalLength < options.JournalSizeLimit; id += 10)
+        {
+            await InsertAsync(database, id, 10);
+        }
+
+        long grown = database.DataStorage.JournalLength;
+
+        // Act: the size trigger is armed and the first checkpoint fails; the fault clears before
+        // the worker retries the database a backoff later.
+        faults.FailPageWrites = true;
+        database.DataStorage.CheckpointJournalSize = PaceJournalSize;
+        bool failed = await Eventually(() => worker.FailureCount >= 1);
+        faults.FailPageWrites = false;
+        bool truncated = await Eventually(() => worker.Fault is null && database.DataStorage.JournalLength < grown);
+
+        // Assert
+        grown.ShouldBeGreaterThanOrEqualTo(options.JournalSizeLimit);
+        failed.ShouldBeTrue();
+        truncated.ShouldBeTrue();
+        worker.FailureCount.ShouldBe(1);
+        database.IsOffline.ShouldBeFalse();
+        engine.OfflineDatabases.ShouldBeEmpty();
+        engine.GetOfflineError(Failing).ShouldBeNull();
+        engine.State.ShouldBe(EngineState.Running);
+    }
+
+    /// <summary>
+    /// A database opened from a copied file set carries the original's name in its file header
+    /// (a storage reads its name from there when it opens). The page write-back worker reports and
+    /// escalates under the database's name in the engine, so the copy's persistent page write
+    /// failures take only the copy offline, with its own cause (owner decision 25 review). Reported
+    /// under the storage's name, they took the original offline and left the copy failing.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Workers: a database opened from a copied file set goes offline for its own write-back failures, never the original")]
+    public async Task PageWriteBackWorker_CopiedFileSet_ShouldTakeOnlyTheCopyOffline()
+    {
+        // Arrange: the page writer runs every 50 ms; the engine gives up after three failed passes.
+        const string Copy = "copy";
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy, writeBack: TimeSpan.FromMilliseconds(50));
+        options.WorkerFailureLimit = 3;
+        await using var engine = GraphDatabaseEngine.Create(options);
+        var original = await engine.CreateDatabaseAsync(Failing);
+        await InsertAsync(original, 0, 10);
+        await original.DisposeAsync();
+        strategy.CopyDatabase(Failing, Copy);
+        original = await engine.OpenDatabaseAsync(Failing);
+        var copy = await engine.OpenDatabaseAsync(Copy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.PageWriteBack);
+
+        // Act: every page write of the copy fails while it has dirty pages.
+        strategy.Faults(Copy).FailPageWrites = true;
+        await InsertAsync(copy, 100, 20);
+        bool offline = await Eventually(() => engine.OfflineDatabases.Count > 0 && worker.Fault is null);
+        var error = engine.GetOfflineError(Copy);
+        strategy.Faults(Copy).FailPageWrites = false;
+
+        // Assert
+        ((string)copy.DataStorage.Name).ShouldBe(Failing);
+        offline.ShouldBeTrue();
+        engine.OfflineDatabases.ShouldBe([(DatabaseName)Copy]);
+        error.ShouldNotBeNull().Cause.ShouldBe(StorageOfflineCause.PageWriteBackFailures);
+        error.Message.ShouldContain($"database '{Copy}'");
+        original.IsOffline.ShouldBeFalse();
+        engine.GetOfflineError(Failing).ShouldBeNull();
+        (await CountAsync(original)).ShouldBe(10);
     }
 
     /// <summary>

@@ -67,7 +67,6 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     // engine's lifetime so a closed in-memory database reopens with its data (#1272); null otherwise.
     private readonly DatabaseMemoryFiles? _memory;
     private GraphDatabase[] _instances = [];
-    private GraphStorage[] _storages = [];
 
     private GraphDatabaseEngine(GraphDatabaseEngineOptions options)
         : base(options.EngineName ?? defaultName, EngineModel.Graph, options.WorkerFailureLimit)
@@ -118,7 +117,6 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// </summary>
     internal long JournalSizeLimit { get; }
 
-    internal GraphStorage[] GetStorageSnapshot() => Volatile.Read(ref _storages);
     internal GraphDatabase[] GetInstanceSnapshot() => Volatile.Read(ref _instances);
 
     /// <summary>
@@ -143,26 +141,6 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// </summary>
     /// <param name="database">The database a worker pass visited.</param>
     internal bool IsOpen(GraphDatabase database) => !database.IsClosed && Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
-
-    /// <summary>
-    /// Reports whether <paramref name="storage"/> still belongs to one of the engine's open
-    /// databases (see <see cref="IsOpen(GraphDatabase)"/>): false once its database was closed,
-    /// whoever closed it.
-    /// </summary>
-    /// <param name="storage">The storage a worker pass visited.</param>
-    internal bool IsOpen(GraphStorage storage)
-    {
-        foreach (var database in GetInstanceSnapshot())
-        {
-            if (ReferenceEquals(database.DataStorage, storage))
-            {
-                return !database.IsClosed;
-            }
-        }
-
-        // A storage the engine is still opening has no database yet.
-        return Array.IndexOf(GetStorageSnapshot(), storage) >= 0;
-    }
 
     /// <summary>Creates a dependency-free builder for an engine and its deferred workers and servers.</summary>
     /// <returns>A one-shot model builder; constructing the builder starts no components.</returns>
@@ -547,7 +525,6 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 storage.BufferPoolCapacity = Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(_options.BufferPoolCapacity, nameof(_options.BufferPoolCapacity));
                 storage.CheckpointJournalSize = _options.CheckpointJournalSize;
                 storage.OnCheckpointNeeded = _checkpointNeeded.Set;
-                Volatile.Write(ref _storages, [.. _storages, storage]);
                 var database = new GraphDatabase(name, this, storage, recover: !create);
                 _databases.Add(name, database);
                 return new ValueTask<DatabaseInstance>(database);
@@ -652,6 +629,5 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     private void RebuildSnapshot()
     {
         Volatile.Write(ref _instances, [.. _databases.Values]);
-        Volatile.Write(ref _storages, _databases.Values.Select(database => database.DataStorage).ToArray());
     }
 }

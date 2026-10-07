@@ -62,9 +62,10 @@ public sealed class GraphDatabaseEngineOptions
     /// Gets or sets how many passes in a row the checkpoint, page write-back, write-ahead flush or
     /// version-purge worker may fail on one database before the engine takes that database offline
     /// (owner decision 25 of 2026-10-06). Defaults to <see cref="DatabaseEngine.DefaultWorkerFailureLimit"/>
-    /// (ten, Neo4j's tolerance of failed checkpoints); at the workers' one-second retry a database
-    /// whose work keeps failing goes offline about ten seconds after its first failure. Must be at
-    /// least one.
+    /// (ten, Neo4j's tolerance of failed checkpoints). At the workers' one-second retry a database
+    /// whose work keeps failing goes offline about ten seconds after its first failure, ten times
+    /// sooner than Neo4j's ten failures at its ten-second checkpoint check; raise it to ride out a
+    /// longer device outage. Must be at least one.
     /// </summary>
     /// <remarks>
     /// An offline database refuses every operation with <c>COHDBG012</c> until it is reopened
@@ -76,16 +77,17 @@ public sealed class GraphDatabaseEngineOptions
 
     /// <summary>
     /// Gets or sets the hard cap, in bytes, on a database's journal while its checkpoints keep
-    /// failing (owner decision 25 of 2026-10-06): a checkpoint that fails while the journal holds
-    /// this much takes the database offline at once, before the journal fills the device. Zero,
+    /// failing (owner decision 25 of 2026-10-06): the second checkpoint in a row that fails while the journal holds
+    /// this much takes the database offline, before the journal fills the device. Zero,
     /// the default, sets it to four times <see cref="CheckpointJournalSize"/> (1 GiB at the default
     /// size, PostgreSQL's <c>max_wal_size</c> default), or to 1 GiB when that is zero. Must not be
     /// negative, and when set, not below <see cref="CheckpointJournalSize"/>.
     /// </summary>
     /// <remarks>
-    /// Only a failed checkpoint is compared with the cap: a journal that grows while its checkpoints
-    /// are deferred to running statements, or wait for a busy storage, never takes the database
-    /// offline.
+    /// Only failed checkpoints are compared with the cap, and one is not enough: a journal that grows
+    /// while its checkpoints are deferred to running statements, or wait for a busy storage, never
+    /// takes the database offline by itself, and one transient failure of such a journal is retried
+    /// like any other.
     /// </remarks>
     public long JournalSizeLimit { get; set; }
 

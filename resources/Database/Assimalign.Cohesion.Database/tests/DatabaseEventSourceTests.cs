@@ -128,11 +128,21 @@ public sealed class DatabaseEventSourceTests
         engine.Attach(worker);
         using var recorder = new DatabaseEventRecorder(EventLevel.Informational);
 
-        // Act: the second pass takes a offline; the third asks again and the leaf refuses.
+        // Act: the second pass gives up on a; the engine takes it offline on a thread-pool thread
+        // and writes the event there. The third pass counts from one again, or finds the give-up
+        // still running; either way it takes nothing offline.
         for (int pass = 1; pass <= 3; pass++)
         {
             worker.RunIteration(CancellationToken.None);
         }
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (!recorder.Events.Any(e => e.EventId == 3 && Equals(e.Payload?[0], engineName)) && watch.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            await Task.Delay(10);
+        }
+
+        await Task.Delay(100);
 
         // Assert
         recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");

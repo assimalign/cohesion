@@ -30,6 +30,7 @@ internal sealed class TestEngine : DatabaseEngine
     private int _coreCalls;
     private int _forgets;
     private int _reopens;
+    private int _takeOfflineCalls;
 
     public TestEngine(string name = "test-engine", TestLog? log = null, int workerFailureLimit = DefaultWorkerFailureLimit)
         : base(name, EngineModel.Sql, workerFailureLimit)
@@ -66,6 +67,21 @@ internal sealed class TestEngine : DatabaseEngine
 
     /// <summary>Gets the names the offline-error core was asked about, in order.</summary>
     public List<string> OfflineErrorLookups { get; } = [];
+
+    /// <summary>
+    /// Gets or sets a gate the take-offline core waits on before it acts, as a storage whose
+    /// journal lock a hung fsync holds would make it wait.
+    /// </summary>
+    public ManualResetEventSlim? TakeOfflineGate { get; set; }
+
+    /// <summary>Gets or sets a failure the take-offline core throws once past its gate.</summary>
+    public Exception? TakeOfflineFailure { get; set; }
+
+    /// <summary>Gets how many calls entered the take-offline core.</summary>
+    public int TakeOfflineCalls => Volatile.Read(ref _takeOfflineCalls);
+
+    /// <summary>Gets the threads the take-offline core ran on.</summary>
+    public List<int> TakeOfflineThreads { get; } = [];
 
     public TestLog Log { get; }
 
@@ -223,6 +239,18 @@ internal sealed class TestEngine : DatabaseEngine
     /// </summary>
     protected override bool TakeDatabaseOfflineCore(DatabaseName name, StorageOfflineCause cause, string reason, Exception failure)
     {
+        Interlocked.Increment(ref _takeOfflineCalls);
+        lock (TakeOfflineThreads)
+        {
+            TakeOfflineThreads.Add(Environment.CurrentManagedThreadId);
+        }
+
+        TakeOfflineGate?.Wait();
+        if (TakeOfflineFailure is { } thrown)
+        {
+            throw thrown;
+        }
+
         bool taken;
         TestDatabase[] snapshot = Volatile.Read(ref _snapshot);
         lock (_giveUps)

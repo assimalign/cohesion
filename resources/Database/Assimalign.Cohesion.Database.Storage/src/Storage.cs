@@ -441,9 +441,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <exception cref="ArgumentException"><paramref name="reason"/> is null, empty or white space.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="failure"/> is null.</exception>
     /// <remarks>
-    /// Called on the engine's worker thread, outside every storage lock; like
-    /// <see cref="TakeOffline(StorageOfflineException)"/> it returns at once on a storage already
-    /// offline, without the journal's lock.
+    /// Called outside every storage lock. It latches the error under the journal's lock, which a
+    /// durable flush holds through its fsync, so it waits for a flush in progress; an engine
+    /// therefore calls it on a thread of its own, never on a background worker's, whose other
+    /// databases would wait with it. Like <see cref="TakeOffline(StorageOfflineException)"/> it
+    /// returns at once on a storage already offline, without the journal's lock.
     /// </remarks>
     public bool TakeOffline(StorageOfflineCause cause, string reason, Exception failure)
     {

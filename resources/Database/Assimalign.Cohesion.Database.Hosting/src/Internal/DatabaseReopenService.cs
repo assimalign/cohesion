@@ -37,17 +37,33 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 /// all of <c>min(maximum, initial × 2^n)</c>, so a reopen that keeps failing is retried less and
 /// less often, and two databases that failed together do not retry in lockstep. A failed reopen
 /// leaves the database closed and the engine no longer lists it, so the service keeps it as its own
-/// until a reopen succeeds: health stays unhealthy for it all along. RavenDB's database landlord
-/// retries a database whose start failed the same way, after a randomized delay
+/// until a reopen succeeds: health stays unhealthy for it all along. Until then each poll also
+/// checks, off the loop's thread, whether someone else opened the database again, online, and
+/// then lets it go, so health turns healthy without waiting out the backoff. RavenDB's database
+/// landlord retries a database whose start failed the same way, after a randomized delay
 /// (<c>src/Raven.Server/Documents/DatabasesLandlord.cs:1504-1510</c>), and drops a faulted load so
 /// the next access tries again (<c>:831-835</c>).
 /// </para>
 /// <para>
-/// <b>Stop never waits for it.</b> Every wait observes the stop signal, and an attempt runs on the
-/// thread pool and is awaited until the stop signal only: a stop during a backoff returns at once,
-/// and a stop during an attempt returns without it. The attempt then finishes on its own (an open
-/// runs to its end under the engine's lock, and the engine's disposal waits for that lock), and its
-/// outcome is still written to the event source.
+/// <b>A database that flaps keeps its backoff.</b> A database found offline again within
+/// <see cref="DatabaseApplicationOptions.ReopenMaximumDelay"/> of a successful reopen does not
+/// start over at the initial delay: its first attempt waits the step after the last one its
+/// previous episode reached, so a fault the reopen does not clear (a version purge, a page
+/// write-back) is reopened less and less often instead of every few seconds, each time with a full
+/// recovery under the engine's lock.
+/// </para>
+/// <para>
+/// <b>Databases are reopened side by side.</b> Each database's attempt, and each check, runs on
+/// the thread pool, and the loop goes on without waiting for it: an attempt that hangs (a recovery
+/// stuck in its device) holds back that database only, and the loop keeps finding and reopening
+/// the others. One attempt or check per database runs at a time.
+/// </para>
+/// <para>
+/// <b>Stop never waits for it.</b> Every wait observes the stop signal, and an attempt or a check
+/// is awaited until that signal only: a stop during a backoff returns at once, and a stop during
+/// an attempt returns without it. The attempt then finishes on its own (an open runs to its end
+/// under the engine's lock, and the engine's disposal waits for that lock), and its outcome is
+/// still written to the event source.
 /// </para>
 /// <para>
 /// Every finding, attempt and outcome is written to the <c>Assimalign.Cohesion.Database.Hosting</c>
@@ -65,9 +81,11 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     private readonly TimeSpan _maximumDelay;
     private readonly TimeSpan _poll;
 
-    // Guards everything below. The loop is the only writer; health reads a snapshot.
+    // Guards everything below. Health reads a snapshot.
     private readonly object _sync = new();
     private readonly List<OfflineDatabase> _offline = [];
+    private readonly List<Task> _operations = [];
+    private readonly List<ReopenedDatabase> _reopened = [];
     private CancellationTokenSource? _stopping;
     private Task _loop = Task.CompletedTask;
     private bool _disposed;
@@ -201,11 +219,14 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     /// Gets the backoff step after <paramref name="failedAttempts"/> failed attempts:
     /// <c>min(maximum, initial × 2^failedAttempts)</c>.
     /// </summary>
-    /// <param name="failedAttempts">The failed attempts so far; zero before the first attempt.</param>
+    /// <param name="failedAttempts">
+    /// The failed attempts so far; zero before the first attempt. A database that went offline
+    /// again soon after a reopen counts the attempts of its earlier episodes too.
+    /// </param>
     /// <returns>The step; the delay is a random time between half the step and the step.</returns>
     internal TimeSpan GetBackoffStep(int failedAttempts)
     {
-        double step = _initialDelay.Ticks * Math.Pow(2, Math.Min(failedAttempts, 62));
+        double step = _initialDelay.Ticks * Math.Pow(2, Math.Clamp(failedAttempts, 0, 62));
         return step >= _maximumDelay.Ticks ? _maximumDelay : TimeSpan.FromTicks((long)step);
     }
 
@@ -220,11 +241,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
             TimeSpan wait;
             try
             {
-                wait = await PassAsync(stopping).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (stopping.IsCancellationRequested)
-            {
-                return;
+                wait = Pass(stopping);
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
@@ -240,43 +257,59 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
             }
             catch (OperationCanceledException)
             {
-                return;
+                break;
             }
         }
+
+        // Each attempt and check in flight awaits the stop signal, so each ends at once; the stop
+        // signal is released only after them.
+        Task[] operations;
+        lock (_sync)
+        {
+            operations = [.. _operations];
+        }
+
+        await Task.WhenAll(operations).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
 
     /// <summary>
-    /// Finds the offline databases, runs the attempts that are due, and returns how long to wait
-    /// for the next poll or attempt.
+    /// Finds the offline databases, starts the attempts that are due and the checks that are
+    /// needed, and returns how long to wait for the next poll or attempt. Never waits on an
+    /// engine: every engine call it makes reads a published snapshot.
     /// </summary>
-    private async Task<TimeSpan> PassAsync(CancellationToken stopping)
+    private TimeSpan Pass(CancellationToken stopping)
     {
         Discover();
 
-        OfflineDatabase[] due;
-        long now = Stopwatch.GetTimestamp();
-        lock (_sync)
-        {
-            due = _offline.FindAll(entry => entry.NextAttemptAt <= now).ToArray();
-        }
-
-        foreach (var entry in due)
-        {
-            stopping.ThrowIfCancellationRequested();
-            await AttemptAsync(entry, stopping).ConfigureAwait(false);
-        }
-
-        // Until the next poll, or the next attempt when it is sooner.
         TimeSpan wait = _poll;
-        now = Stopwatch.GetTimestamp();
+        long now = Stopwatch.GetTimestamp();
         lock (_sync)
         {
             foreach (var entry in _offline)
             {
-                TimeSpan until = entry.NextAttemptAt <= now ? TimeSpan.Zero : Stopwatch.GetElapsedTime(now, entry.NextAttemptAt);
-                if (until < wait)
+                if (entry.Operation is not null)
                 {
-                    wait = until;
+                    continue;
+                }
+
+                // A database a failed attempt left closed is checked for an open by someone else at
+                // every poll; one that is due is attempted (after the check, when it needs one).
+                bool check = entry.LastFailure is not null && !entry.Listed;
+                bool attempt = entry.NextAttemptAt <= now;
+                if (check || attempt)
+                {
+                    var operation = Task.Run(() => RunEntryAsync(entry, check, attempt, stopping), CancellationToken.None);
+                    entry.Operation = operation;
+                    _operations.Add(operation);
+                }
+
+                if (!attempt)
+                {
+                    TimeSpan until = Stopwatch.GetElapsedTime(now, entry.NextAttemptAt);
+                    if (until < wait)
+                    {
+                        wait = until;
+                    }
                 }
             }
         }
@@ -290,6 +323,13 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     /// </summary>
     private void Discover()
     {
+        long now = Stopwatch.GetTimestamp();
+        lock (_sync)
+        {
+            // A reopen remembered past the window no longer carries its backoff over.
+            _reopened.RemoveAll(reopened => Stopwatch.GetElapsedTime(reopened.At, now) > _maximumDelay);
+        }
+
         foreach (IDatabaseEngine engine in _engines)
         {
             IReadOnlyList<DatabaseName>? listed = null;
@@ -315,11 +355,18 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
                         continue;
                     }
 
+                    entry.Listed = listed is not null && Contains(listed, entry.Name);
+                    if (entry.Operation is not null)
+                    {
+                        // Its attempt or check settles it.
+                        continue;
+                    }
+
                     if (listed is null)
                     {
                         (letGo ??= []).Add(entry);
                     }
-                    else if (entry.LastFailure is null && !Contains(listed, entry.Name))
+                    else if (entry.LastFailure is null && !entry.Listed)
                     {
                         // Never attempted, and no longer offline: not this service's to reopen.
                         (letGo ??= []).Add(entry);
@@ -364,20 +411,93 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
                 }
 
                 StorageOfflineCause? cause = GetCause(engine, name);
-                TimeSpan delay = Jitter(GetBackoffStep(0));
-                var entry = new OfflineDatabase(engine, name, cause)
-                {
-                    NextAttemptAt = Stopwatch.GetTimestamp() + (long)(delay.TotalSeconds * Stopwatch.Frequency),
-                    NextDelay = delay,
-                };
-
+                OfflineDatabase entry;
                 lock (_sync)
                 {
+                    // Found offline again soon after a reopen: the backoff goes on from where the
+                    // last episode left it (the remarks).
+                    int level = 0;
+                    if (FindReopened(engine, name) is { } reopened)
+                    {
+                        level = reopened.Level;
+                        _reopened.Remove(reopened);
+                    }
+
+                    TimeSpan delay = Jitter(GetBackoffStep(level));
+                    entry = new OfflineDatabase(engine, name, cause, level)
+                    {
+                        Listed = true,
+                        NextAttemptAt = Stopwatch.GetTimestamp() + (long)(delay.TotalSeconds * Stopwatch.Frequency),
+                        NextDelay = delay,
+                    };
                     _offline.Add(entry);
                 }
 
-                DatabaseHostingEventSource.Log.OfflineDatabaseFound(engine, name, cause, delay);
+                DatabaseHostingEventSource.Log.OfflineDatabaseFound(engine, name, cause, entry.NextDelay);
             }
+        }
+    }
+
+    /// <summary>
+    /// Runs one database's check and attempt, off the loop's thread, and records the outcome.
+    /// </summary>
+    private async Task RunEntryAsync(OfflineDatabase entry, bool check, bool attempt, CancellationToken stopping)
+    {
+        try
+        {
+            if (check && await IsOpenAgainAsync(entry, stopping).ConfigureAwait(false))
+            {
+                Remove(entry);
+                DatabaseHostingEventSource.Log.ReopenAbandoned(entry.Engine, entry.Name, "it was reopened elsewhere");
+                return;
+            }
+
+            if (attempt)
+            {
+                await AttemptAsync(entry, stopping).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+        {
+            // The application stops.
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            DatabaseHostingEventSource.Log.ReopenLoopFailed(exception);
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                _operations.Remove(entry.Operation!);
+                entry.Operation = null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks whether a database a failed attempt left closed is open again, and online, because
+    /// someone else reopened it: the engine holds it open and does not list it offline. The check
+    /// waits for the engine's registry lock, which an open holds through its recovery, so it runs
+    /// on a thread of its own and is awaited until the stop signal only.
+    /// </summary>
+    private static async Task<bool> IsOpenAgainAsync(OfflineDatabase entry, CancellationToken stopping)
+    {
+        var check = Task.Run(() => entry.Engine.TryGetDatabase(entry.Name, out _) && !Contains(entry.Engine.OfflineDatabases, entry.Name), CancellationToken.None);
+        try
+        {
+            return await check.WaitAsync(stopping).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Its engine was disposed: the next poll lets the database go.
+            return false;
+        }
+        catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+        {
+            // The check finishes on its own; its failure, if any, is observed and dropped.
+            _ = check.ContinueWith(static task => _ = task.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            throw;
         }
     }
 
@@ -427,7 +547,7 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            TimeSpan delay = Jitter(GetBackoffStep(attempt));
+            TimeSpan delay = Jitter(GetBackoffStep(entry.Level + attempt));
             lock (_sync)
             {
                 entry.LastFailure = exception;
@@ -439,7 +559,20 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
             return;
         }
 
-        Remove(entry);
+        lock (_sync)
+        {
+            _offline.Remove(entry);
+
+            // Remembered for the window: a database that goes offline again within it goes on from
+            // the step after the last one this episode reached.
+            if (FindReopened(entry.Engine, entry.Name) is { } earlier)
+            {
+                _reopened.Remove(earlier);
+            }
+
+            _reopened.Add(new ReopenedDatabase(entry.Engine, entry.Name, entry.Level + attempt, Stopwatch.GetTimestamp()));
+        }
+
         DatabaseHostingEventSource.Log.ReopenSucceeded(entry.Engine, entry.Name, attempt);
     }
 
@@ -473,6 +606,20 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
             if (ReferenceEquals(entry.Engine, engine) && string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase))
             {
                 return entry;
+            }
+        }
+
+        return null;
+    }
+
+    // Under the lock.
+    private ReopenedDatabase? FindReopened(IDatabaseEngine engine, string name)
+    {
+        foreach (var reopened in _reopened)
+        {
+            if (ReferenceEquals(reopened.Engine, engine) && string.Equals(reopened.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return reopened;
             }
         }
 
@@ -525,15 +672,20 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
         => TimeSpan.FromTicks(step.Ticks / 2 + (long)(Random.Shared.NextDouble() * (step.Ticks - step.Ticks / 2)));
 
     /// <summary>
-    /// A database the service found offline: what took it offline, and its reopen attempts.
+    /// A database the service found offline: what took it offline, its reopen attempts, and the
+    /// attempt or check running for it.
     /// </summary>
-    private sealed class OfflineDatabase(IDatabaseEngine engine, string name, StorageOfflineCause? cause)
+    private sealed class OfflineDatabase(IDatabaseEngine engine, string name, StorageOfflineCause? cause, int level)
     {
         public IDatabaseEngine Engine { get; } = engine;
 
         public string Name { get; } = name;
 
         public StorageOfflineCause? Cause { get; } = cause;
+
+        // The backoff steps earlier episodes reached: zero unless the database went offline again
+        // soon after a reopen.
+        public int Level { get; } = level;
 
         public int Attempts { get; set; }
 
@@ -542,5 +694,17 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
         public long NextAttemptAt { get; set; }
 
         public TimeSpan NextDelay { get; set; }
+
+        // Whether its engine listed it offline at the last poll.
+        public bool Listed { get; set; }
+
+        // The attempt or check running for it, or null.
+        public Task? Operation { get; set; }
     }
+
+    /// <summary>
+    /// A database the service reopened, remembered for the maximum delay so that a database that
+    /// goes offline again keeps its backoff.
+    /// </summary>
+    private sealed record ReopenedDatabase(IDatabaseEngine Engine, string Name, int Level, long At);
 }

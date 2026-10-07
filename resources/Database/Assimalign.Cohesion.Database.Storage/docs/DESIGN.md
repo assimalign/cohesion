@@ -1052,6 +1052,12 @@ Exception)` is that entry point:
   back. Nothing about the media is unknown here, unlike after a failed fsync, so the reopen's
   recovery replays an intact journal; the latch is the same so that no engine path can write to a
   database it gave up on. A storage already offline returns `false` and keeps its first error.
+- **The engine calls it on a thread of its own, never a background worker's.** The latch is
+  taken under the journal's lock, which a durable flush holds through its fsync, so the call
+  waits for a flush in progress. Called on a worker's thread it would hold back every other
+  database the worker serves for as long as one database's fsync hangs, the stall #1268's
+  checkpoint lanes isolate; the root engine base queues it to the thread pool instead (owner
+  decision 25 review).
 
 Neo4j gives up the same way, through its database's `DatabaseHealth.panic`, once its checkpoint
 failed ten times in a row (`community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-75`);

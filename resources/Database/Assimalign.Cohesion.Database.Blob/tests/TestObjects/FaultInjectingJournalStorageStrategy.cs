@@ -108,6 +108,26 @@ internal sealed class FaultInjectingJournalStorageStrategy : BlobStorageStrategy
     }
 
     /// <summary>
+    /// Copies a database's file set to another database name, as copying its directory would: the
+    /// copy's file header still names the original, so a storage opened over it carries the
+    /// original's name (owner decision 25 review). Device faults are armed per database name, so
+    /// the copy's faults are its own.
+    /// </summary>
+    /// <param name="source">The database whose files are copied; its storage should be closed.</param>
+    /// <param name="target">The name the copy is opened under.</param>
+    internal void CopyDatabase(string source, string target)
+    {
+        lock (_sync)
+        {
+            var files = _databases[source];
+            _databases[target] = new Files(
+                Copy(files.Data, new MemoryStream()),
+                Copy(files.Journal, new FaultInjectingStream()),
+                Copy(files.Backup, new MemoryStream()));
+        }
+    }
+
+    /// <summary>
     /// Gets the bytes a database's data and journal streams hold right now.
     /// </summary>
     /// <param name="databaseName">The database's name.</param>
