@@ -15,10 +15,19 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 /// A single QUIC stream surfaced as a <see cref="Connection"/>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The stream's pipes are created over the parent connection's shared stream pipe options, so
 /// every stream of one QUIC connection draws from a single memory pool. A unidirectional stream
 /// surfaces a pre-completed input (outbound) or an unwritable output (inbound); the usable
 /// halves are captured once in <see cref="Direction"/> at construction.
+/// </para>
+/// <para>
+/// <see cref="ConnectionClosed"/> fires when this end aborts or disposes the stream, and also when the
+/// stream ends underneath it: the peer resets the receiving half (<c>RESET_STREAM</c>), stops the
+/// sending half (<c>STOP_SENDING</c>), or the QUIC connection is lost. A consumer such as an HTTP/3
+/// request learns that its peer abandoned the stream without having to read or write. A half that
+/// ends cleanly (the peer's FIN, this end's own completion) does not fire it.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
@@ -84,6 +93,16 @@ internal sealed class QuicStreamConnection : Connection
             ? PipeWriter.Create(stream, streamOptions.WriterOptions)
             : UnwritablePipeWriter.Instance;
         _state = ConnectionState.Open;
+
+        if (stream.CanRead)
+        {
+            ObservePeerClosure(stream.ReadsClosed);
+        }
+
+        if (stream.CanWrite)
+        {
+            ObservePeerClosure(stream.WritesClosed);
+        }
 
         QuicConnectionEventSource.Log.StreamOpened(Id, connectionId, Direction);
     }
@@ -196,6 +215,27 @@ internal sealed class QuicStreamConnection : Connection
         {
             // Exceptions thrown by ConnectionClosed registrations must not fault teardown.
         }
+    }
+
+    // A half of the stream that faults for any reason but this end's own operation was ended by the
+    // peer (StreamAborted: RESET_STREAM or STOP_SENDING) or by the loss of the connection. The local
+    // paths, Abort and DisposeAsync, signal ConnectionClosed themselves; their faults
+    // (OperationAborted) are left alone. The continuation runs on the thread pool, never on the QUIC
+    // event thread that completed the task, so ConnectionClosed registrations cannot stall it.
+    private void ObservePeerClosure(Task closed)
+    {
+        _ = closed.ContinueWith(
+            static (task, state) =>
+            {
+                if (task.Exception?.InnerException is QuicException { QuicError: not QuicError.OperationAborted })
+                {
+                    ((QuicStreamConnection)state!).CancelConnectionClosedToken();
+                }
+            },
+            this,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default);
     }
 
     // Abort and DisposeAsync both end the stream; whichever comes first reports it, once.

@@ -64,6 +64,11 @@ public interface IConnection : IDuplexPipe, IAsyncDisposable
     /// <summary>
     /// Gets a token that is signaled when the connection is closed or aborted.
     /// </summary>
+    /// <remarks>
+    /// For a stream of a multiplexed transport, the token is also signaled when the peer abandons the
+    /// stream (for QUIC, a <c>RESET_STREAM</c> or <c>STOP_SENDING</c>), so a consumer learns of it
+    /// without reading or writing. A half that ends cleanly does not signal it.
+    /// </remarks>
     CancellationToken ConnectionClosed { get; }
 
     /// <summary>

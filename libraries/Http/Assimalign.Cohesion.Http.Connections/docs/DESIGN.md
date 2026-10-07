@@ -2500,6 +2500,40 @@ order matters on the QUIC driver: completing the stream's `Output` releases the 
 QUIC stream, so nothing can be read after the FIN, and an unread request direction is
 stopped as the stream is released.
 
+### A client's cancellation fires `RequestCancelled` (#1329)
+
+RFC 9114 §4.1.1 — a client cancels a request by resetting the request stream
+(`RESET_STREAM`) and stopping the response (`STOP_SENDING`), usually with
+`H3_REQUEST_CANCELLED`. HTTP/3 has no frame pump that would see either signal: the request
+body is read only when the application reads it, and the response direction only learns
+of a `STOP_SENDING` when it writes. Before #1329 the exchange's `RequestCancelled` was
+only the receive token, so an application that was neither reading nor writing kept
+working on a request whose client had gone, where HTTP/2's `RST_STREAM` fires it at once.
+
+The signal comes from the drivers instead: a stream connection's `ConnectionClosed` fires
+when its peer abandons the stream. The QUIC driver watches the QUIC stream's
+`ReadsClosed` and `WritesClosed` and signals on a peer abort (`RESET_STREAM`,
+`STOP_SENDING`) or the loss of the connection, but not on the server's own operations. The
+in-memory driver's two stream ends signal each other when one aborts or completes either
+half with an error. `Http3Context` passes the request stream's `ConnectionClosed` to
+`TransportHttpContext`, which links it with the receive token into the one source behind
+`RequestCancelled`:
+
+- **Either direction cancels.** A `RESET_STREAM` alone, a `STOP_SENDING` alone, and both
+  fire the token, while the application waits on something else entirely. A body read in
+  flight then ends with the cancellation or the stream's failure, and a later write fails.
+  A pipeline that honors the token unwinds, and the host resets the exchange
+  (`H3_REQUEST_CANCELLED`) instead of answering it.
+- **The server's own reset fires it too.** A transport reset (a malformed body, an
+  application `Cancel`) aborts the stream connection, as HTTP/2's `SendReset` fires its
+  abort.
+- **A completed exchange is left alone.** A clean FIN in either direction is a half-close,
+  not an abort, and the server stopping or releasing the stream after the response is a
+  local operation, so neither fires the token. The linked source is disposed with the
+  exchange, so a stream closed after that reaches no one.
+- **Connection loss.** On the QUIC driver a stream's halves also fault when the connection
+  is lost, so an exchange in flight is cancelled with its connection.
+
 ### Connection teardown — critical streams and close ordering
 
 Three long-lived unidirectional streams stay open for the connection's

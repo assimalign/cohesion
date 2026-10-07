@@ -273,8 +273,10 @@ to it. The interface remains the canonical surface consumers depend on.
   accept (#1308).
 - Three teardown paths: complete `Output` for a graceful half-close; `DisposeAsync()` to close;
   `Abort(Exception?)` to tear down immediately, discarding in-flight data. `ConnectionClosed` is
-  signaled on closure. `ConnectionState` tracks `Idle → Opening → Open → Closing → Closed`, or
-  `Aborted`.
+  signaled on closure. A stream of a multiplexed connection also signals it when its peer abandons
+  the stream (a QUIC `RESET_STREAM` or `STOP_SENDING`, or the in-memory equivalents), so a consumer
+  such as an HTTP/3 request learns of it without reading or writing (#1329). `ConnectionState` tracks
+  `Idle → Opening → Open → Closing → Closed`, or `Aborted`.
 - `ConnectionException` is the area-scoped exception root (inheriting directly from
   `Exception`; no framework-wide ancestry, per repository rules), with
   `ConnectionAbortedException` and `ConnectionResetException` for the common failures. Transports

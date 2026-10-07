@@ -17,17 +17,32 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </remarks>
 internal abstract class TransportHttpContext : HttpContext
 {
-    // Backs RequestAborted. Linked to the transport-supplied token so the
+    // Backs RequestAborted. Linked to the transport-supplied token(s) so the
     // exchange is aborted when the connection/stream is torn down, and can also
     // be tripped locally by Cancel().
     private readonly CancellationTokenSource _abortedSource;
 
+    /// <summary>
+    /// Initializes the exchange: its request, its response, and the source behind
+    /// <see cref="RequestCancelled"/>.
+    /// </summary>
+    /// <param name="version">The exchange's protocol version.</param>
+    /// <param name="requestHead">The parsed request head.</param>
+    /// <param name="connectionInfo">The connection's endpoints.</param>
+    /// <param name="requestAborted">The transport's token that aborts the exchange.</param>
+    /// <param name="features">The features request-parse interceptors attached, or <see langword="null"/>.</param>
+    /// <param name="streamAborted">
+    /// A second transport token that aborts the exchange — the HTTP/3 request stream's
+    /// <c>ConnectionClosed</c>, which fires when the client resets or stops the stream — or
+    /// <see langword="default"/> for none. Both tokens feed one linked source.
+    /// </param>
     protected TransportHttpContext(
         HttpVersion version,
         in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
-        IHttpFeatureCollection? features = null)
+        IHttpFeatureCollection? features = null,
+        CancellationToken streamAborted = default)
     {
         Version = version;
         // The request and response only store the reference; neither calls back into this context
@@ -40,7 +55,9 @@ internal abstract class TransportHttpContext : HttpContext
             this,
             supportsTrailers: (version is HttpVersion.Http20 or HttpVersion.Http30) && requestHead.Method != HttpMethod.Connect);
         ConnectionInfo = connectionInfo;
-        _abortedSource = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
+        _abortedSource = streamAborted.CanBeCanceled
+            ? CancellationTokenSource.CreateLinkedTokenSource(requestAborted, streamAborted)
+            : CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
         // The parser pre-populates the feature collection when request-parse interceptors
         // attached features during the read (see IHttpExchangeInterceptor); it is used directly —
         // no defaults-wrapper layer, which would add a second dictionary probe to every Get on

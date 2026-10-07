@@ -17,7 +17,15 @@ namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 /// peer's <see cref="Input"/> reader are the two ends of the same pipe, so a flush on one is directly
 /// observable on the other. Close and abort propagate through pipe completion — completing this end's
 /// output completes the peer's input, and completing this end's input completes the peer's output
-/// flush — so a peer observes tear-down the next time it reads or writes, without any peer reference.
+/// flush — so a peer observes tear-down the next time it reads or writes.
+/// </para>
+/// <para>
+/// The two ends of a multiplexed stream also hold each other, so an end that abandons the stream
+/// signals the other end's <see cref="ConnectionClosed"/> at once, as a QUIC stream's peer abort does:
+/// it aborts, or its holder completes <see cref="Output"/> with an error (the in-memory
+/// <c>RESET_STREAM</c>) or <see cref="Input"/> with an error (the in-memory <c>STOP_SENDING</c>). A
+/// clean completion is a half-close, not an abort, and signals nothing. The ends of a byte-stream pair
+/// keep their closed tokens local.
 /// </para>
 /// <para>
 /// This type carries no diagnostics dependency and performs no reflection; it is a pure
@@ -35,6 +43,7 @@ internal sealed class InMemoryConnection : Connection
         useSynchronizationContext: false);
 
     private readonly PipeReader _input;
+    private readonly PipeReader _inputView;
     private readonly PipeWriter _outputInner;
     private readonly PipeWriter _output;
     private readonly ConnectionCapabilities _capabilities;
@@ -50,13 +59,18 @@ internal sealed class InMemoryConnection : Connection
     private bool _inputCompleted;
     private bool _isDisposed;
 
+    // The other end of a multiplexed stream, which this end signals when it abandons the stream; null
+    // for a byte-stream pair. Set once, before either end is handed out.
+    private InMemoryConnection? _peer;
+
     private InMemoryConnection(
         PipeReader input,
         PipeWriter output,
         ConnectionDirection direction,
         ConnectionCapabilities capabilities,
         EndPoint? localEndPoint,
-        EndPoint? remoteEndPoint)
+        EndPoint? remoteEndPoint,
+        bool signalsPeer)
     {
         _input = input;
         _outputInner = output;
@@ -71,6 +85,10 @@ internal sealed class InMemoryConnection : Connection
         _output = direction == ConnectionDirection.ReadOnly
             ? ThrowingPipeWriter.Instance
             : new SignalingPipeWriter(this, output);
+
+        // A multiplexed stream's holder that completes its input with an error stops the peer's
+        // sending half, which the peer is told about; a byte-stream pair hands out the pipe reader itself.
+        _inputView = signalsPeer ? new SignalingPipeReader(this, input) : input;
     }
 
     /// <inheritdoc />
@@ -83,7 +101,7 @@ internal sealed class InMemoryConnection : Connection
     public override EndPoint? RemoteEndPoint => _remoteEndPoint;
 
     /// <inheritdoc />
-    public override PipeReader Input => _input;
+    public override PipeReader Input => _inputView;
 
     /// <inheritdoc />
     public override PipeWriter Output => _output;
@@ -125,10 +143,12 @@ internal sealed class InMemoryConnection : Connection
         Exception abortReason = reason ?? new ConnectionAbortedException();
 
         // Completing the send side with the reason makes the peer's read throw it; completing the
-        // receive side makes the peer's next flush observe completion. The peer learns of the abort.
+        // receive side makes the peer's next flush observe completion. The peer learns of the abort,
+        // and the other end of a multiplexed stream learns of it at once.
         CompleteOutput(abortReason);
         CompleteInput(abortReason);
         CancelConnectionClosed();
+        SignalPeer();
     }
 
     /// <inheritdoc />
@@ -175,12 +195,17 @@ internal sealed class InMemoryConnection : Connection
     /// <see cref="ConnectionDirection.Bidirectional"/> mirrors to itself, while
     /// <see cref="ConnectionDirection.WriteOnly"/> and <see cref="ConnectionDirection.ReadOnly"/> mirror each other.
     /// </param>
+    /// <param name="isStream">
+    /// Whether the pair is a stream of a multiplexed connection, whose ends signal each other's
+    /// <see cref="ConnectionClosed"/> when one abandons the stream.
+    /// </param>
     /// <returns>The two cross-wired ends of the connection.</returns>
     internal static (InMemoryConnection A, InMemoryConnection B) CreatePair(
         ConnectionCapabilities capabilities,
         EndPoint? endPointA,
         EndPoint? endPointB,
-        ConnectionDirection directionA = ConnectionDirection.Bidirectional)
+        ConnectionDirection directionA = ConnectionDirection.Bidirectional,
+        bool isStream = false)
     {
         // aToB carries A.Output -> B.Input; bToA carries B.Output -> A.Input.
         Pipe aToB = new(_pipeOptionsInstance);
@@ -193,8 +218,14 @@ internal sealed class InMemoryConnection : Connection
             _ => ConnectionDirection.Bidirectional
         };
 
-        InMemoryConnection a = new(bToA.Reader, aToB.Writer, directionA, capabilities, endPointA, endPointB);
-        InMemoryConnection b = new(aToB.Reader, bToA.Writer, directionB, capabilities, endPointB, endPointA);
+        InMemoryConnection a = new(bToA.Reader, aToB.Writer, directionA, capabilities, endPointA, endPointB, isStream);
+        InMemoryConnection b = new(aToB.Reader, bToA.Writer, directionB, capabilities, endPointB, endPointA, isStream);
+
+        if (isStream)
+        {
+            a._peer = b;
+            b._peer = a;
+        }
 
         // A unidirectional stream leaves one pipe degenerate: the write-only end never reads and the
         // read-only end never writes. Pre-complete the unused receive half so the write-only end sees
@@ -280,10 +311,19 @@ internal sealed class InMemoryConnection : Connection
         }
     }
 
+    // This end abandoned the stream: the other end of a multiplexed stream observes it on its
+    // ConnectionClosed, as a QUIC stream's peer abort does. Its state is left alone: the stream is the
+    // other end's to close. Registrations run on the calling thread, as the end's own abort runs them.
+    private void SignalPeer()
+    {
+        _peer?.CancelConnectionClosed();
+    }
+
     /// <summary>
     /// A delegating <see cref="PipeWriter"/> that transitions the owning connection to
     /// <see cref="ConnectionState.Closing"/> when the holder completes the send side, mirroring a real
-    /// transport's send loop draining its backlog before the connection closes.
+    /// transport's send loop draining its backlog before the connection closes. Completing it with an
+    /// error resets the sending half, which the other end of a multiplexed stream is told about.
     /// </summary>
     private sealed class SignalingPipeWriter : PipeWriter
     {
@@ -319,6 +359,11 @@ internal sealed class InMemoryConnection : Connection
             }
 
             _connection.OnOutputCompletedByHolder();
+
+            if (exception is not null)
+            {
+                _connection.SignalPeer();
+            }
         }
 
         public override async ValueTask CompleteAsync(Exception? exception = null)
@@ -333,6 +378,47 @@ internal sealed class InMemoryConnection : Connection
             }
 
             _connection.OnOutputCompletedByHolder();
+
+            if (exception is not null)
+            {
+                _connection.SignalPeer();
+            }
+        }
+    }
+
+    /// <summary>
+    /// A delegating <see cref="PipeReader"/> for an end of a multiplexed stream: completing it with an
+    /// error stops the peer's sending half, which the other end is told about.
+    /// </summary>
+    private sealed class SignalingPipeReader : PipeReader
+    {
+        private readonly InMemoryConnection _connection;
+        private readonly PipeReader _inner;
+
+        public SignalingPipeReader(InMemoryConnection connection, PipeReader inner)
+        {
+            _connection = connection;
+            _inner = inner;
+        }
+
+        public override void AdvanceTo(SequencePosition consumed) => _inner.AdvanceTo(consumed);
+
+        public override void AdvanceTo(SequencePosition consumed, SequencePosition examined) => _inner.AdvanceTo(consumed, examined);
+
+        public override void CancelPendingRead() => _inner.CancelPendingRead();
+
+        public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default) => _inner.ReadAsync(cancellationToken);
+
+        public override bool TryRead(out ReadResult result) => _inner.TryRead(out result);
+
+        public override void Complete(Exception? exception = null)
+        {
+            _connection.CompleteInput(exception);
+
+            if (exception is not null)
+            {
+                _connection.SignalPeer();
+            }
         }
     }
 

@@ -364,6 +364,44 @@ public class QuicMultiplexedConnectionTests
         endOfStream.Buffer.IsEmpty.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - Stream ConnectionClosed: A peer aborting the stream should signal the other end without a read or write")]
+    public async Task StreamConnectionClosed_OnPeerAbort_ShouldFire()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+
+        await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
+        await using Connection clientStream = await pair.Client.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellation.Token);
+
+        // A freshly opened QUIC stream is not visible to the peer until data is flushed on it.
+        await clientStream.Output.WriteAsync(new byte[] { 1 }, cancellation.Token);
+
+        await using Connection serverStream = await pair.Server.AcceptStreamAsync(cancellation.Token);
+        await ReadBytesAsync(serverStream.Input, 1, cancellation.Token);
+
+        TaskCompletionSource closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = serverStream.ConnectionClosed.Register(() => closed.TrySetResult());
+
+        // Act — RESET_STREAM and STOP_SENDING from the client.
+        clientStream.Abort();
+
+        // Assert
+        try
+        {
+            await closed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (TimeoutException)
+        {
+            throw new ShouldAssertException("The server stream's ConnectionClosed did not fire after the peer aborted the stream.");
+        }
+    }
+
     /// <summary>
     /// Writes on the supplied stream until the peer's teardown signal surfaces, returning the
     /// <see cref="QuicException"/> that carries it.

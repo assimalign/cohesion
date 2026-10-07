@@ -100,6 +100,18 @@ socket, `BindAsync` asynchronously acquires the endpoint and is idempotent while
   `ConnectionClosed`. In-flight data may be discarded; that is the
   contract of abort.
 
+A stream's `ConnectionClosed` fires on its own `Abort` and `DisposeAsync`,
+and also when the stream ends underneath it (#1329): the stream watches
+`QuicStream.ReadsClosed` and `WritesClosed` and signals when either faults
+with anything but `QuicError.OperationAborted`, that is, a peer
+`RESET_STREAM` or `STOP_SENDING` (`StreamAborted`) or the loss of the
+connection. Faults from this end's own operations (`OperationAborted`)
+and a half that ends cleanly signal nothing. The check runs on the thread
+pool, never on the QUIC event thread that completed the task. A consumer
+learns that the peer abandoned the stream without reading or writing,
+which is how an HTTP/3 server fires `RequestCancelled` for a request the
+client cancelled.
+
 Stream and connection dispose are idempotent, and each stream untracks
 itself from the owning connection through a dispose callback, so
 connection teardown and individual stream disposal can race safely.

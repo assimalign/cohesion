@@ -6,6 +6,17 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal sealed class Http3Context : TransportHttpContext
 {
+    /// <summary>
+    /// Initializes the exchange for a decoded request head.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="HttpContext.RequestCancelled"/> fires on <paramref name="requestAborted"/> and on the
+    /// request stream's <see cref="IConnection.ConnectionClosed"/>, which the drivers signal when the
+    /// client resets the request stream (<c>RESET_STREAM</c>), stops the response
+    /// (<c>STOP_SENDING</c>), or the stream is aborted or lost. RFC 9114 §4.1.1 — that is how a client
+    /// cancels a request, so the application learns of it as an HTTP/2 <c>RST_STREAM</c> tells it,
+    /// without having to read or write (#1329).
+    /// </remarks>
     public Http3Context(
         in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
@@ -14,7 +25,7 @@ internal sealed class Http3Context : TransportHttpContext
         long streamId,
         Http3RequestBodyStream requestBody,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http30, requestHead, connectionInfo, requestAborted, features)
+        : base(HttpVersion.Http30, requestHead, connectionInfo, requestAborted, features, streamConnection.ConnectionClosed)
     {
         StreamConnection = streamConnection;
         StreamId = streamId;

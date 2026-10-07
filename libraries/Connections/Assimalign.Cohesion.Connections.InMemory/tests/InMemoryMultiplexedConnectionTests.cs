@@ -154,4 +154,73 @@ public class InMemoryMultiplexedConnectionTests
         await client.DisposeAsync();
         await server.DisposeAsync();
     }
+
+    /// <summary>How the peer end of a stream abandons it.</summary>
+    public enum StreamAbort
+    {
+        /// <summary>Aborts the stream: both directions.</summary>
+        Abort,
+
+        /// <summary>Completes its output with an error: the in-memory RESET_STREAM.</summary>
+        ResetSending,
+
+        /// <summary>Completes its input with an error: the in-memory STOP_SENDING.</summary>
+        StopReceiving,
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Connections.InMemory] - Multiplexed: A peer abandoning a stream should signal the other end's ConnectionClosed")]
+    [InlineData(StreamAbort.Abort)]
+    [InlineData(StreamAbort.ResetSending)]
+    [InlineData(StreamAbort.StopReceiving)]
+    public async Task StreamConnectionClosed_OnPeerAbandoningTheStream_ShouldFire(StreamAbort abort)
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
+        Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+        ConnectionAbortedException reason = new("The peer abandoned the stream.");
+
+        // Act
+        switch (abort)
+        {
+            case StreamAbort.Abort:
+                clientStream.Abort(reason);
+                break;
+
+            case StreamAbort.ResetSending:
+                clientStream.Output.Complete(reason);
+                break;
+
+            case StreamAbort.StopReceiving:
+                clientStream.Input.Complete(reason);
+                break;
+        }
+
+        // Assert — the other end learns of it without reading or writing; its own state is unchanged.
+        serverStream.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
+        serverStream.State.ShouldBe(ConnectionState.Open);
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Multiplexed: A peer ending its side of a stream should not signal the other end's ConnectionClosed")]
+    public async Task StreamConnectionClosed_OnPeerGracefulHalfClose_ShouldNotFire()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
+        Connection clientStream = await client.OpenStreamAsync(cancellationToken: cancellation.Token);
+        Connection serverStream = await server.AcceptStreamAsync(cancellation.Token);
+
+        // Act — the FIN.
+        await clientStream.Output.CompleteAsync();
+
+        // Assert
+        serverStream.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+
+        await client.DisposeAsync();
+        await server.DisposeAsync();
+    }
 }
