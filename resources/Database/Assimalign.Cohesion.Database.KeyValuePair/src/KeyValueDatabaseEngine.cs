@@ -87,11 +87,12 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     private const string defaultName = "keyvalue-engine";
 
     private KeyValueDatabaseEngine(KeyValueDatabaseEngineOptions options)
-        : base(options.EngineName ?? defaultName, EngineModel.KeyValueStore)
+        : base(options.EngineName ?? defaultName, EngineModel.KeyValueStore, options.WorkerFailureLimit)
     {
         _options = options;
         _signalCommitPending = _commitPendingSignal.Set;
         _bufferPoolPages = Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
+        JournalSizeLimit = DatabaseWorkerLimits.GetJournalSizeLimit(options.JournalSizeLimit, options.CheckpointJournalSize);
 
         // Resolve the storage strategy at creation: the engine is operational from
         // the moment the constructor returns (create → use → dispose; no start).
@@ -139,6 +140,13 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// Gets the engine options, for the engine's background workers.
     /// </summary>
     internal KeyValueDatabaseEngineOptions EngineOptions => _options;
+
+    /// <summary>
+    /// Gets the journal size limit the checkpointer applies, resolved from
+    /// <see cref="KeyValueDatabaseEngineOptions.JournalSizeLimit"/> when the engine was created
+    /// (owner decision 25).
+    /// </summary>
+    internal long JournalSizeLimit { get; }
 
     /// <summary>
     /// Gets a point-in-time snapshot of every open storage file set (the data and
@@ -193,8 +201,11 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <exception cref="ArgumentOutOfRangeException">
     /// <see cref="KeyValueDatabaseEngineOptions.BufferPoolCapacity"/> is not a whole number of 8 KiB
     /// pages of at least 1 MiB; <see cref="KeyValueDatabaseEngineOptions.CheckpointJournalSize"/> is
-    /// negative; or <see cref="KeyValueDatabaseEngineOptions.CheckpointInterval"/> or
-    /// <see cref="KeyValueDatabaseEngineOptions.MaintenanceInterval"/> is not positive.
+    /// negative; <see cref="KeyValueDatabaseEngineOptions.CheckpointInterval"/> or
+    /// <see cref="KeyValueDatabaseEngineOptions.MaintenanceInterval"/> is not positive;
+    /// <see cref="KeyValueDatabaseEngineOptions.WorkerFailureLimit"/> is less than one; or
+    /// <see cref="KeyValueDatabaseEngineOptions.JournalSizeLimit"/> is negative, or set and below
+    /// <see cref="KeyValueDatabaseEngineOptions.CheckpointJournalSize"/>.
     /// </exception>
     public static KeyValueDatabaseEngine Create(KeyValueDatabaseEngineOptions options)
     {
@@ -228,6 +239,8 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
         ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.CheckpointInterval, TimeSpan.Zero, nameof(options.CheckpointInterval));
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaintenanceInterval, TimeSpan.Zero, nameof(options.MaintenanceInterval));
+        DatabaseWorkerLimits.Validate(options.WorkerFailureLimit, options.JournalSizeLimit, options.CheckpointJournalSize,
+            nameof(options.WorkerFailureLimit), nameof(options.JournalSizeLimit));
 
         // Checked here, before any file is touched, rather than by the storage setter at database
         // create or open (owner decision 26 of 2026-10-06): the window is also the flush worker's
@@ -541,8 +554,35 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     }
 
     /// <inheritdoc />
+    protected override StorageOfflineException? GetOfflineErrorCore(DatabaseName name)
+        => FindOpen(name)?.OfflineError;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The data file set goes offline with the cause, and its hook takes the catalog file set
+    /// offline and ends the database's lock waits, as after a failed durable flush (#1243).
+    /// </remarks>
+    protected override bool TakeDatabaseOfflineCore(DatabaseName name, StorageOfflineCause cause, string reason, Exception failure)
+        => FindOpen(name) is { IsOffline: false } database && database.DataStorage.TakeOffline(cause, reason, failure);
+
+    /// <inheritdoc />
     protected override void ForgetClosedDatabaseCore(DatabaseInstance database)
         => DatabaseRegistry.Forget((KeyValueDatabase)database, _syncRoot, GetInstanceSnapshot, ForgetLocked);
+
+    // The open database of that name in the published snapshot, or null: lock-free, so a worker
+    // that gives up on a database never waits for a create, open or drop holding the lock.
+    private KeyValueDatabase? FindOpen(DatabaseName name)
+    {
+        foreach (var database in GetInstanceSnapshot())
+        {
+            if (!database.IsClosed && string.Equals(database.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return database;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Closes every open database once the base disposed the servers, stopped the worker pumps

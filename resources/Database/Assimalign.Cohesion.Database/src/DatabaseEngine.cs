@@ -1,8 +1,12 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Internal;
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -48,6 +52,34 @@ namespace Assimalign.Cohesion.Database;
 /// is not a worker failure; <see cref="OfflineDatabases"/> lists it.
 /// </para>
 /// <para>
+/// <b>Persistent worker failures take a database offline</b> (owner decision 25 of 2026-10-06).
+/// When a checkpoint, page write-back, write-ahead flush or version-purge worker fails on one
+/// database <see cref="WorkerFailureLimit"/> times in a row, or the database's journal passes the
+/// engine's cap while its checkpoints keep failing, the engine gives up on that database: the leaf
+/// takes it offline (<see cref="TakeDatabaseOfflineCore"/>) through the same machinery a failed
+/// durable flush uses (#1243), with a storage cause that names the worker or the cap, and every
+/// later operation on it is refused with the model's offline code until it is reopened. Neo4j
+/// panics a database the same way once its checkpoint fails ten times in a row
+/// (<c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-75</c>,
+/// <c>community/monitoring/src/main/java/org/neo4j/monitoring/DatabaseHealth.java:74-85</c>); until
+/// then each failure is retried a second later, as PostgreSQL's background workers do
+/// (<c>src/backend/postmaster/checkpointer.c:286-345</c>). Only that database goes offline: the
+/// workers keep serving the engine's other databases, and a database already offline or closed is
+/// never counted.
+/// </para>
+/// <para>
+/// <b>The give-up never runs on a worker's thread.</b> Taking a database offline latches its
+/// journal under the journal's lock, which a durable flush holds for as long as its fsync takes. A
+/// worker that took a database offline on its own thread would therefore wait out a hung fsync of
+/// that database, and every other database the worker serves would wait with it, the very stall
+/// the checkpoint lanes isolate (#1268). The engine queues the give-up to the thread pool instead,
+/// one at a time per database, and the worker's pass goes on at once. Once the database is offline
+/// the engine forgets every worker's failure record of it, as it does whenever a database of the
+/// engine closes, so the engine reports <see cref="EngineState.Running"/> again at once, and a
+/// reopened database counts its failures from one. The engine's disposal waits for a give-up still
+/// running before it closes its databases.
+/// </para>
+/// <para>
 /// <b>Shape (concrete-types plan, phase 3, #1259).</b> Every public member is non-virtual and owns
 /// the argument, disposed and cancellation checks before it calls a protected core; the one
 /// abstract public member is <see cref="OfflineDatabases"/>, state the leaf computes. The leaves
@@ -60,13 +92,39 @@ namespace Assimalign.Cohesion.Database;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DatabaseEngine : IDatabaseEngine
 {
+    /// <summary>
+    /// The worker failure limit an engine gets when its options state none: ten, Neo4j's tolerance
+    /// of consecutive checkpoint failures before it panics the database
+    /// (<c>MAX_CONSECUTIVE_FAILURES_TOLERANCE</c>,
+    /// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42</c>).
+    /// </summary>
+    /// <remarks>
+    /// The count is Neo4j's; the window it spans is not. The workers retry a failing database
+    /// once a second (<see cref="DatabaseEngineWorker.FailureBackoff"/>), so a database whose
+    /// checkpoints keep failing goes offline about ten seconds after its first failure. Neo4j
+    /// checks for a checkpoint every ten seconds by default
+    /// (<c>DEFAULT_CHECKING_FREQUENCY_MILLIS</c>,
+    /// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointThreshold.java:40</c>),
+    /// so its ten failures span about a hundred seconds, ten times as long. A device that stops
+    /// answering for longer than about ten seconds (a storage path failover, say) therefore takes
+    /// the databases it holds offline, and a hosted application reopens each once the device
+    /// answers again (owner decision 22). An engine that must ride out longer outages raises its
+    /// limit.
+    /// </remarks>
+    public const int DefaultWorkerFailureLimit = 10;
+
     private readonly string _name;
     private readonly EngineModel _model;
+    private readonly int _workerFailureLimit;
     private readonly object _sync = new();
     private readonly List<DatabaseEngineWorker> _workers = [];
     private readonly List<DatabaseServer> _servers = [];
     private readonly List<Thread> _threads = [];
     private readonly CancellationTokenSource _stop = new();
+
+    // The give-ups queued to the thread pool, one per database at most, each until it ended
+    // (owner decision 25): the disposal waits for them before the leaf closes its databases.
+    private readonly ConcurrentDictionary<string, Task> _givingUp = new(StringComparer.OrdinalIgnoreCase);
 
     // The inventories as published to readers: replaced whole on every attach, so a reader never
     // enumerates a list being changed.
@@ -82,16 +140,24 @@ public abstract class DatabaseEngine : IDatabaseEngine
     private int _disposed;
 
     /// <summary>
-    /// Initializes a new engine with its name and data model.
+    /// Initializes a new engine with its name, its data model and its worker failure limit.
     /// </summary>
     /// <param name="name">The logical name of the engine instance.</param>
     /// <param name="model">The data model the engine implements.</param>
+    /// <param name="workerFailureLimit">
+    /// How many times in a row a worker may fail on one database before the engine takes the
+    /// database offline (<see cref="WorkerFailureLimit"/>); <see cref="DefaultWorkerFailureLimit"/>
+    /// unless given.
+    /// </param>
     /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
-    protected DatabaseEngine(string name, EngineModel model)
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="workerFailureLimit"/> is less than one.</exception>
+    protected DatabaseEngine(string name, EngineModel model, int workerFailureLimit = DefaultWorkerFailureLimit)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentOutOfRangeException.ThrowIfLessThan(workerFailureLimit, 1);
         _name = name;
         _model = model;
+        _workerFailureLimit = workerFailureLimit;
     }
 
     /// <summary>
@@ -103,6 +169,20 @@ public abstract class DatabaseEngine : IDatabaseEngine
     /// Gets the data model this engine implements.
     /// </summary>
     public EngineModel Model => _model;
+
+    /// <summary>
+    /// Gets how many times in a row a checkpoint, page write-back, write-ahead flush or
+    /// version-purge worker may fail on one database before the engine takes that database offline
+    /// (owner decision 25 of 2026-10-06), as the constructor set it from the engine's options.
+    /// </summary>
+    /// <remarks>
+    /// A worker's failures on a database are counted from its first failure to the pass that
+    /// finishes the database's work again; a pass that skips the database while its failure backs
+    /// off counts neither way. A failure on a database already offline, or one its holder closed,
+    /// is not counted, and the count ends when the engine takes the database offline or the
+    /// database closes, so a reopened database counts from one.
+    /// </remarks>
+    public int WorkerFailureLimit => _workerFailureLimit;
 
     /// <summary>
     /// Gets the observational state of the engine: <see cref="EngineState.Running"/> from creation,
@@ -150,9 +230,10 @@ public abstract class DatabaseEngine : IDatabaseEngine
 
     /// <summary>
     /// Gets the names of the open databases that are offline: a durable flush, a journal drain or a
-    /// file header write of theirs failed, and every operation on them is refused until
+    /// file header write of theirs failed, or the engine gave up on them after a worker's failures
+    /// persisted (<see cref="WorkerFailureLimit"/>), and every operation on them is refused until
     /// <see cref="OpenDatabaseAsync"/> reopens them. Empty while every open database is online; a
-    /// point-in-time snapshot.
+    /// point-in-time snapshot. <see cref="GetOfflineError"/> says what took one offline.
     /// </summary>
     /// <remarks>
     /// State the leaf computes from its storages, so the one abstract public member (rule 4 of
@@ -269,6 +350,28 @@ public abstract class DatabaseEngine : IDatabaseEngine
     }
 
     /// <summary>
+    /// Gets the storage error that took an open database offline, or null when the database is
+    /// online, or not open in the engine: its <see cref="StorageOfflineException.Cause"/> says which
+    /// device operation failed, or which background worker's work the engine gave up on, or that
+    /// the journal passed the engine's cap. Every operation on the database is refused with the
+    /// model's <see cref="DatabaseOfflineException"/>, whose inner exception this is.
+    /// </summary>
+    /// <param name="name">The name of the database.</param>
+    /// <returns>The error, or null.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
+    /// <remarks>
+    /// The lookup companion of <see cref="OfflineDatabases"/>: a database it lists has an error
+    /// here until it is reopened. A database a holder is closing is not open, so it has none.
+    /// </remarks>
+    public StorageOfflineException? GetOfflineError(DatabaseName name)
+    {
+        ThrowIfEmpty(name);
+        ThrowIfDisposed();
+        return GetOfflineErrorCore(name);
+    }
+
+    /// <summary>
     /// Disposes the engine: its servers, then its workers' pumps and the workers, then the leaf's
     /// databases. Idempotent; a call made while disposal runs returns at once.
     /// </summary>
@@ -335,6 +438,14 @@ public abstract class DatabaseEngine : IDatabaseEngine
             {
                 (failures ??= []).Add(failure);
             }
+        }
+
+        // A give-up a worker queued before its pump stopped ends before the databases close, so it
+        // never takes a database offline while the leaf closes it. One queued after disposal
+        // started finds the engine disposing and does nothing; a give-up never faults.
+        foreach (var givingUp in _givingUp.Values)
+        {
+            await givingUp.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         }
 
         // A worker may hold work of its own (a checkpoint left running on its lane); it ends
@@ -406,7 +517,7 @@ public abstract class DatabaseEngine : IDatabaseEngine
             // The claim comes before the pump starts, so no one can release the worker while its
             // pump runs, and a worker belongs to one engine: one another engine owns, or one already
             // released, is refused before it is pumped.
-            if (!worker.TryClaim())
+            if (!worker.TryClaim(this))
             {
                 throw new InvalidOperationException(
                     $"Worker '{worker.Name}' belongs to one engine: another engine owns it, or it was released.");
@@ -562,11 +673,31 @@ public abstract class DatabaseEngine : IDatabaseEngine
     protected abstract void ForgetClosedDatabaseCore(DatabaseInstance database);
 
     /// <summary>
-    /// Hands a database whose close has ended to the leaf (<see cref="ForgetClosedDatabaseCore"/>):
-    /// the entry <see cref="DatabaseInstance"/> calls once its close ran.
+    /// Hands a database whose close has ended to the leaf (<see cref="ForgetClosedDatabaseCore"/>),
+    /// and ends every worker's failure record of it: the entry <see cref="DatabaseInstance"/> calls
+    /// once its close ran, whoever closed it (a holder, a drop, a reopen after it went offline, the
+    /// engine's disposal).
     /// </summary>
     /// <param name="database">A database of this engine whose close has ended.</param>
-    internal void ForgetClosedDatabase(DatabaseInstance database) => ForgetClosedDatabaseCore(database);
+    /// <remarks>
+    /// The failures a worker counted belong to the instance that closed: a database reopened from its
+    /// files counts its failures from one, so it is not taken offline on its first failure after a
+    /// reopen, and a worker's failure on the closed instance no longer keeps the engine
+    /// <see cref="EngineState.Faulted"/> (owner decision 25). A close always ends before a new
+    /// instance of the same name is registered (the leaf waits for it), so this never ends a newer
+    /// instance's record.
+    /// </remarks>
+    internal void ForgetClosedDatabase(DatabaseInstance database)
+    {
+        try
+        {
+            ForgetClosedDatabaseCore(database);
+        }
+        finally
+        {
+            ForgetWorkerFailures(database.Name);
+        }
+    }
 
     /// <summary>
     /// Drops a database whose name and engine state <see cref="DropDatabaseAsync"/> checked.
@@ -591,6 +722,153 @@ public abstract class DatabaseEngine : IDatabaseEngine
     /// <param name="database">When this method returns true, the database.</param>
     /// <returns>True when the database is open in the engine; otherwise false.</returns>
     protected abstract bool TryGetDatabaseCore(DatabaseName name, [MaybeNullWhen(false)] out DatabaseInstance database);
+
+    /// <summary>
+    /// Gets the storage error that took an open database offline, for a name and engine state
+    /// <see cref="GetOfflineError"/> checked: the error of the first of the database's storages to
+    /// go offline, or null when the database is online, not open, or closing.
+    /// </summary>
+    /// <param name="name">The name of the database; never empty.</param>
+    /// <returns>The error, or null.</returns>
+    protected abstract StorageOfflineException? GetOfflineErrorCore(DatabaseName name);
+
+    /// <summary>
+    /// Takes an open database offline because the engine gave up on it (owner decision 25 of
+    /// 2026-10-06): a worker failed on it <see cref="WorkerFailureLimit"/> times in a row, or its
+    /// journal passed the engine's cap while its checkpoints kept failing. The leaf takes the
+    /// database's storages offline through
+    /// <see cref="Storage.Storage.TakeOffline(StorageOfflineCause, string, Exception)"/>, so the
+    /// database goes offline exactly as after a failed durable flush (#1243).
+    /// </summary>
+    /// <param name="name">The name of the database; never empty.</param>
+    /// <param name="cause">The cause: the worker's, or <see cref="StorageOfflineCause.JournalSizeLimit"/>.</param>
+    /// <param name="reason">What the engine gave up on, naming the worker, for the storage's message.</param>
+    /// <param name="failure">The worker's last failure.</param>
+    /// <returns>
+    /// True when this call took the database offline; false when the database is not open, is
+    /// closing, or is offline already: a failure of such a database does not count.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Called on a thread-pool thread, never a worker's: taking a storage offline latches its
+    /// journal under the journal's lock, which a durable flush holds through its fsync, so the call
+    /// may wait for a hung fsync of this database, and no worker waits with it (#1268's
+    /// per-database isolation). The engine runs one call per database at a time, and none once its
+    /// disposal started.
+    /// </para>
+    /// <para>
+    /// The leaf must find the database without waiting for its registry lock, which a create, open
+    /// or drop holds for as long as a recovery runs: the published, lock-free snapshot of its
+    /// databases, as <see cref="ForgetClosedDatabaseCore"/> reads it, so a give-up on one database
+    /// never waits for another's open.
+    /// </para>
+    /// </remarks>
+    protected abstract bool TakeDatabaseOfflineCore(DatabaseName name, StorageOfflineCause cause, string reason, Exception failure);
+
+    /// <summary>
+    /// Gives up on a database for a worker this engine owns: queues the leaf's
+    /// <see cref="TakeDatabaseOfflineCore"/> to the thread pool and returns at once. Once the leaf
+    /// took the database offline, the engine ends every worker's failure record of it and writes
+    /// the event. Nothing is queued on an engine whose disposal started, for a database name that is
+    /// empty, or for a database whose give-up is still queued or running.
+    /// </summary>
+    /// <param name="worker">The worker whose work on the database kept failing.</param>
+    /// <param name="database">The database's name, as the worker reported it.</param>
+    /// <param name="cause">The cause.</param>
+    /// <param name="reason">What the engine gave up on, for the storage's message.</param>
+    /// <param name="failure">The worker's last failure.</param>
+    /// <returns>True when this call queued the give-up; false when it queued nothing.</returns>
+    /// <remarks>
+    /// <para>
+    /// The worker's thread never runs the leaf's core (the core's remarks say why), so the pass that
+    /// reached the limit goes on to the engine's other databases at once. The database goes offline
+    /// a moment later; until then the worker's record of it still backs it off, and a failure the
+    /// worker reports meanwhile queues nothing more.
+    /// </para>
+    /// <para>
+    /// A database whose close raced the give-up is not taken offline. Any other failure of the
+    /// leaf's core is recorded on the worker as a failure of its own
+    /// (<see cref="DatabaseEngineWorker.Fault"/>, until its next pass runs to its end): the worker
+    /// keeps running, and the database's next failure tries again.
+    /// </para>
+    /// </remarks>
+    internal bool GiveUpOnDatabase(DatabaseEngineWorker worker, string database, StorageOfflineCause cause, string reason, Exception failure)
+    {
+        if (database.Length == 0 || IsDisposed)
+        {
+            return false;
+        }
+
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_givingUp.TryAdd(database, completion.Task))
+        {
+            // The database's give-up is queued or running: one at a time.
+            return false;
+        }
+
+        var request = new GiveUpRequest(this, worker, database, cause, reason, failure, completion);
+        try
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(static request => request.Engine.GiveUp(request), request, preferLocal: false);
+        }
+        catch
+        {
+            _givingUp.TryRemove(new KeyValuePair<string, Task>(database, completion.Task));
+            completion.TrySetResult();
+            throw;
+        }
+
+        return true;
+    }
+
+    // The queued give-up: the leaf takes the database offline, then the engine forgets the
+    // workers' records of it and writes the event. It ends its entry whatever happens, and lets
+    // nothing escape the thread-pool thread but an OutOfMemoryException.
+    private void GiveUp(GiveUpRequest request)
+    {
+        try
+        {
+            bool taken;
+            try
+            {
+                // An engine whose disposal started closes its databases itself.
+                taken = !IsDisposed && TakeDatabaseOfflineCore(request.Database, request.Cause, request.Reason, request.Failure);
+            }
+            catch (ObjectDisposedException)
+            {
+                // The database closed under the call: nothing is left to take offline.
+                taken = false;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                request.Worker.RecordGiveUpFailure(request.Database, exception);
+                return;
+            }
+
+            if (taken)
+            {
+                // The engine reports the offline database now, not the worker (the class remarks).
+                ForgetWorkerFailures(request.Database);
+                DatabaseEventSource.Log.DatabaseTakenOffline(this, request.Worker, request.Database, request.Cause, request.Failure);
+            }
+        }
+        finally
+        {
+            _givingUp.TryRemove(new KeyValuePair<string, Task>(request.Database, request.Completion.Task));
+            request.Completion.TrySetResult();
+        }
+    }
+
+    // Ends every attached worker's failure record of a database the engine no longer holds as it
+    // was: taken offline, or closed.
+    private void ForgetWorkerFailures(string database)
+    {
+        var workers = Volatile.Read(ref _workerView);
+        for (int index = 0; index < workers.Count; index++)
+        {
+            workers[index].ForgetDatabase(database);
+        }
+    }
 
     /// <summary>
     /// Closes the leaf's databases and releases what the leaf owns, once the servers, the worker
@@ -673,6 +951,19 @@ public abstract class DatabaseEngine : IDatabaseEngine
             throw new ArgumentException("A database name is required.", nameof(name));
         }
     }
+
+    /// <summary>
+    /// A give-up queued to the thread pool (<see cref="GiveUpOnDatabase"/>), and the completion the
+    /// engine's disposal waits for.
+    /// </summary>
+    private sealed record GiveUpRequest(
+        DatabaseEngine Engine,
+        DatabaseEngineWorker Worker,
+        string Database,
+        StorageOfflineCause Cause,
+        string Reason,
+        Exception Failure,
+        TaskCompletionSource Completion);
 
     IReadOnlyList<IDatabaseEngineWorker> IDatabaseEngine.Workers => Workers;
 

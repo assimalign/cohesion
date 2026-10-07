@@ -29,10 +29,13 @@ internal sealed class GraphCheckpointWorker : DatabaseCheckpointWorker<GraphData
     /// </summary>
     /// <param name="engine">The graph database engine whose open databases are checkpointed.</param>
     public GraphCheckpointWorker(GraphDatabaseEngine engine)
-        : base(engine.Name, engine.EngineOptions.CheckpointInterval)
+        : base(engine.Name, engine.EngineOptions.CheckpointInterval, engine.JournalSizeLimit)
     {
         _engine = engine;
     }
+
+    /// <inheritdoc />
+    protected override long GetJournalLength(GraphDatabase database) => database.DataStorage.JournalLength;
 
     /// <inheritdoc />
     protected override ManualResetEventSlim CheckpointNeededSignal => _engine.CheckpointNeededSignal;

@@ -682,6 +682,255 @@ public sealed class KeyValueWorkerResilienceTests
         engine.OfflineDatabases.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// A checkpoint failure that never clears takes the database offline (owner decision 25 of
+    /// 2026-10-06): once the checkpoint worker failed it on the engine's limit of passes in a row,
+    /// the engine takes it offline with <see cref="StorageOfflineCause.CheckpointFailures"/>, and
+    /// only it: the other database stays online and keeps being checkpointed. Every operation is
+    /// refused with COHDBK002, and once the fault clears the reopen brings the database back with
+    /// its entries. Before the decision the worker retried it every second for as long as the
+    /// process ran, and its journal grew without bound.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a checkpoint failure that never clears takes only its database offline after the limit of failed passes")]
+    public async Task CheckpointWorker_FailureNeverClears_ShouldTakeOnlyItsDatabaseOfflineAfterTheLimit()
+    {
+        // Arrange: the checkpointer looks every 100 ms; the engine gives up after three failed passes.
+        const int limit = 3;
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100));
+        options.WorkerFailureLimit = limit;
+        await using var engine = KeyValueDatabaseEngine.Create(options);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+
+        // Act: every data page write of one database fails while its journal is due, for good.
+        faults.FailPageWrites = true;
+        var watch = Stopwatch.StartNew();
+        await PutAsync(failing, 0, 20);
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        var elapsed = watch.Elapsed;
+        bool settled = await Eventually(() => worker.FailureCount >= limit);
+        var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
+        var error = engine.GetOfflineError(Failing);
+
+        // The checkpointer keeps serving the other database, and the failure record ends.
+        await PutAsync(healthy, 0, 20);
+        long healthyWritten = healthy.DataStorage.JournalLength;
+        bool healthyCheckpointed = await Eventually(() => healthy.DataStorage.JournalLength < healthyWritten);
+        bool running = await Eventually(() => worker.Fault is null && engine.State == EngineState.Running);
+        long failedPasses = worker.FailureCount;
+        var offlineList = engine.OfflineDatabases.ToArray();
+
+        faults.Clear();
+        var reopened = await engine.OpenDatabaseAsync(Failing);
+
+        // Assert: offline on the limit-th failed pass, each a backoff after the one before it.
+        offline.ShouldBeTrue();
+        settled.ShouldBeTrue();
+        failedPasses.ShouldBe(limit);
+        elapsed.ShouldBeGreaterThanOrEqualTo((limit - 1) * DatabaseEngineWorker.FailureBackoff * 0.9);
+        refusal.Code.ShouldBe("COHDBK002");
+        refusal.Message.ShouldStartWith("COHDBK002", Case.Sensitive);
+        refusal.Message.ShouldContain("its checkpoints kept failing");
+        var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
+        cause.Cause.ShouldBe(StorageOfflineCause.CheckpointFailures);
+        cause.Message.ShouldContain($"'{worker.Name}'");
+        cause.Message.ShouldContain($"{limit} passes in a row");
+        Mentions(refusal, "Injected page write failure").ShouldBeTrue(refusal.ToString());
+        error.ShouldNotBeNull().Cause.ShouldBe(StorageOfflineCause.CheckpointFailures);
+        offlineList.ShouldBe([(DatabaseName)Failing]);
+        healthy.IsOffline.ShouldBeFalse();
+        healthyCheckpointed.ShouldBeTrue();
+        running.ShouldBeTrue();
+        reopened.IsOffline.ShouldBeFalse();
+        engine.OfflineDatabases.ShouldBeEmpty();
+        (await CountAsync(reopened)).ShouldBe(20);
+    }
+
+    /// <summary>
+    /// A journal that grows past the engine's cap while its checkpoints fail takes the database
+    /// offline on its second failed checkpoint in a row (owner decision 25 and its review), long
+    /// before the failure limit, with
+    /// <see cref="StorageOfflineCause.JournalSizeLimit"/>, and only that database: under load the
+    /// journal would otherwise fill the device first.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a journal past the cap while its checkpoints fail takes only its database offline")]
+    public async Task CheckpointWorker_JournalPastTheCap_ShouldTakeOnlyItsDatabaseOffline()
+    {
+        // Arrange: checkpoints by journal size, a cap of four times the size, and a failure limit
+        // out of reach.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.CheckpointJournalSize = PaceJournalSize;
+        options.JournalSizeLimit = 4 * PaceJournalSize;
+        await using var engine = KeyValueDatabaseEngine.Create(options);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+
+        // Act: the failing database's journal grows past the cap while its checkpoints fail.
+        faults.FailPageWrites = true;
+        try
+        {
+            for (int id = 0; failing.DataStorage.JournalLength < options.JournalSizeLimit; id += 10)
+            {
+                await PutAsync(failing, id, 10);
+            }
+        }
+        catch (DatabaseOfflineException)
+        {
+            // A failed checkpoint found the journal past the cap between two writes.
+        }
+
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        long failedPasses = worker.FailureCount;
+        bool failedTwice = await Eventually(() => worker.FailureCount >= 2);
+        var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
+
+        // The other database is still checkpointed by size.
+        long checkpoints = strategy.Faults(Healthy).HeaderWrites;
+        for (int id = 0; strategy.Faults(Healthy).HeaderWrites == checkpoints && id < 100_000; id += 10)
+        {
+            await PutAsync(healthy, id, 10);
+        }
+
+        // Assert
+        offline.ShouldBeTrue();
+        failedPasses.ShouldBeLessThan(DatabaseEngine.DefaultWorkerFailureLimit);
+        failedTwice.ShouldBeTrue();
+        refusal.Code.ShouldBe("COHDBK002");
+        refusal.Message.ShouldContain("its journal grew past its engine's limit while its checkpoints kept failing");
+        var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
+        cause.Cause.ShouldBe(StorageOfflineCause.JournalSizeLimit);
+        cause.Message.ShouldContain($"past the engine's limit of {options.JournalSizeLimit} bytes");
+        cause.Message.ShouldContain($"'{worker.Name}'");
+        cause.Message.ShouldContain("passes in a row");
+        engine.OfflineDatabases.ShouldBe([(DatabaseName)Failing]);
+        healthy.IsOffline.ShouldBeFalse();
+        strategy.Faults(Healthy).HeaderWrites.ShouldBeGreaterThan(checkpoints);
+    }
+
+    /// <summary>
+    /// A journal that reached the engine's cap with no failure at all (a starved checkpointer,
+    /// #1283) is not taken offline by one transient checkpoint failure (owner decision 25 review):
+    /// the cap needs a second failed checkpoint in a row. Here the journal grows past the cap while
+    /// no checkpoint is due, one checkpoint then fails, the fault clears before the worker's retry,
+    /// and the retried checkpoint truncates the journal.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: one transient checkpoint failure of a journal already past the cap leaves the database online")]
+    public async Task CheckpointWorker_JournalPastTheCapOneTransientFailure_ShouldLeaveTheDatabaseOnline()
+    {
+        // Arrange: no checkpoint is due (no size trigger, an hour's time backstop) while the journal
+        // grows past a cap of four times the pace size, with no fault.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.CheckpointJournalSize = 0;
+        options.JournalSizeLimit = 4 * PaceJournalSize;
+        await using var engine = KeyValueDatabaseEngine.Create(options);
+        var database = await engine.CreateDatabaseAsync(Failing);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+        for (int id = 0; database.DataStorage.JournalLength < options.JournalSizeLimit; id += 10)
+        {
+            await PutAsync(database, id, 10);
+        }
+
+        long grown = database.DataStorage.JournalLength;
+
+        // Act: the size trigger is armed and the first checkpoint fails; the fault clears before
+        // the worker retries the database a backoff later.
+        faults.FailPageWrites = true;
+        database.DataStorage.CheckpointJournalSize = PaceJournalSize;
+        bool failed = await Eventually(() => worker.FailureCount >= 1);
+        faults.FailPageWrites = false;
+        bool truncated = await Eventually(() => worker.Fault is null && database.DataStorage.JournalLength < grown);
+
+        // Assert
+        grown.ShouldBeGreaterThanOrEqualTo(options.JournalSizeLimit);
+        failed.ShouldBeTrue();
+        truncated.ShouldBeTrue();
+        worker.FailureCount.ShouldBe(1);
+        database.IsOffline.ShouldBeFalse();
+        engine.OfflineDatabases.ShouldBeEmpty();
+        engine.GetOfflineError(Failing).ShouldBeNull();
+        engine.State.ShouldBe(EngineState.Running);
+    }
+
+    /// <summary>
+    /// A transient checkpoint failure under the engine's limit leaves the database online (owner
+    /// decision 25): two failed passes, then the fault clears and a checkpoint finishes, which ends
+    /// the failure record; two more failed passes later count from one again, so the database never
+    /// reaches the limit of five.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a transient checkpoint failure under the limit leaves the database online, and the count restarts")]
+    public async Task CheckpointWorker_TransientFailureUnderTheLimit_ShouldLeaveTheDatabaseOnline()
+    {
+        // Arrange: the checkpointer looks every 100 ms; the engine gives up after five failed passes.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100));
+        options.WorkerFailureLimit = 5;
+        await using var engine = KeyValueDatabaseEngine.Create(options);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var faults = strategy.Faults(Failing);
+
+        // Act: two transient faults of two failed passes each.
+        var rounds = new List<(bool Failed, bool Recovered)>();
+        for (int round = 0; round < 2; round++)
+        {
+            faults.FailPageWrites = true;
+            await PutAsync(failing, round * 100, 20);
+            bool failed = await Eventually(() => worker.ConsecutiveFailures >= 2);
+            faults.FailPageWrites = false;
+            long journal = failing.DataStorage.JournalLength;
+            bool recovered = await Eventually(() => worker.Fault is null && failing.DataStorage.JournalLength < journal);
+            rounds.Add((failed, recovered));
+        }
+
+        // Assert
+        rounds.ShouldAllBe(round => round.Failed && round.Recovered);
+        worker.FailureCount.ShouldBeGreaterThanOrEqualTo(4);
+        failing.IsOffline.ShouldBeFalse();
+        engine.OfflineDatabases.ShouldBeEmpty();
+        engine.GetOfflineError(Failing).ShouldBeNull();
+        engine.State.ShouldBe(EngineState.Running);
+        (await CountAsync(failing)).ShouldBe(40);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: the worker failure limit and the journal cap have their defaults, are validated, and reach the engine through the builder")]
+    public async Task Options_WorkerLimits_ShouldDefaultValidateAndReachTheEngine()
+    {
+        // Arrange
+        var defaults = new KeyValueDatabaseEngineOptions();
+        var builder = KeyValueDatabaseEngine.CreateBuilder();
+        builder.WorkerFailureLimit = 4;
+        builder.JournalSizeLimit = 512L * 1024 * 1024;
+
+        // Act
+        await using var engine = KeyValueDatabaseEngine.Create(new());
+        await using var timeOnly = KeyValueDatabaseEngine.Create(new() { CheckpointJournalSize = 0 });
+        await using var built = builder.Build();
+
+        // Assert: ten failed passes, and four times the checkpoint size (1 GiB at its default, or
+        // with the size trigger off); a limit set below the checkpoint size is refused.
+        defaults.WorkerFailureLimit.ShouldBe(DatabaseEngine.DefaultWorkerFailureLimit);
+        defaults.JournalSizeLimit.ShouldBe(0);
+        engine.WorkerFailureLimit.ShouldBe(10);
+        engine.JournalSizeLimit.ShouldBe(4 * defaults.CheckpointJournalSize);
+        timeOnly.JournalSizeLimit.ShouldBe(1024L * 1024 * 1024);
+        built.WorkerFailureLimit.ShouldBe(4);
+        built.JournalSizeLimit.ShouldBe(512L * 1024 * 1024);
+        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create(new() { WorkerFailureLimit = 0 }))
+            .ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.WorkerFailureLimit));
+        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create(new() { JournalSizeLimit = -1 }))
+            .ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.JournalSizeLimit));
+        Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create(new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
+            .ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.JournalSizeLimit));
+    }
+
     // The checkpoint trigger, the load window of the pace test, compared second by second, and the
     // share of the no-fault checkpoints the median counted second must keep (the test's remarks).
     // The writer outpaces the checkpointer in memory, so even with no fault the journal peaks at
@@ -858,12 +1107,17 @@ public sealed class KeyValueWorkerResilienceTests
     private static long FileBytes(KeyValueDatabase database)
         => database.DataStorage.Data.Length + database.DataStorage.JournalLength;
 
+    // The worker failure limit and the journal cap are out of reach unless a test sets them (owner
+    // decision 25): the retry tests keep a database failing for seconds on purpose, and the pace
+    // test's failing database fails for its whole window.
     private static KeyValueDatabaseEngineOptions Options(FaultInjectingJournalStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
     {
         StorageStrategy = strategy,
         CheckpointInterval = checkpoint ?? TimeSpan.FromHours(1),
         PageWriteBackInterval = writeBack ?? TimeSpan.FromHours(1),
         MaintenanceInterval = TimeSpan.FromHours(1),
+        WorkerFailureLimit = int.MaxValue,
+        JournalSizeLimit = long.MaxValue,
     };
 
     private static DatabaseEngineWorker WorkerOf(KeyValueDatabaseEngine engine, DatabaseEngineWorkerKind kind)

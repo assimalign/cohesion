@@ -29,10 +29,13 @@ internal sealed class BlobCheckpointWorker : DatabaseCheckpointWorker<BlobDataba
     /// </summary>
     /// <param name="engine">The blob database engine whose open databases are checkpointed.</param>
     public BlobCheckpointWorker(BlobDatabaseEngine engine)
-        : base(engine.Name, engine.EngineOptions.CheckpointInterval)
+        : base(engine.Name, engine.EngineOptions.CheckpointInterval, engine.JournalSizeLimit)
     {
         _engine = engine;
     }
+
+    /// <inheritdoc />
+    protected override long GetJournalLength(BlobDatabase database) => database.DataStorage.JournalLength;
 
     /// <inheritdoc />
     protected override ManualResetEventSlim CheckpointNeededSignal => _engine.CheckpointNeededSignal;

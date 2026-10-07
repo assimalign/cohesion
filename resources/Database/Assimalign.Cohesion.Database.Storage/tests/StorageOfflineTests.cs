@@ -314,6 +314,81 @@ public sealed class StorageOfflineTests
     }
 
     /// <summary>
+    /// An engine gives up on a storage (owner decision 25 of 2026-10-06): a worker's work on it
+    /// kept failing, or its journal passed the engine's cap. The storage goes offline exactly as
+    /// after a failed durable flush: <see cref="Storage.OnOffline"/> is raised once, every later
+    /// write is refused with the engine's cause, nothing more reaches either file, closing included,
+    /// and a second give-up keeps the first error.
+    /// </summary>
+    /// <param name="cause">The engine's cause.</param>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Offline: an engine gives up on a storage with its own cause, offline as after a failed flush")]
+    [InlineData(StorageOfflineCause.CheckpointFailures)]
+    [InlineData(StorageOfflineCause.PageWriteBackFailures)]
+    [InlineData(StorageOfflineCause.WriteAheadFlushFailures)]
+    [InlineData(StorageOfflineCause.VersionPurgeFailures)]
+    [InlineData(StorageOfflineCause.JournalSizeLimit)]
+    public void TakeOffline_EngineCause_ShouldTakeTheStorageOfflineOnce(StorageOfflineCause cause)
+    {
+        // Arrange: a dirty page the write-back would write while the storage is online.
+        var point = new CrashPoint();
+        var storage = TornStorage.Create(point);
+        storage.Insert("dirty");
+        var raised = new System.Collections.Generic.List<StorageOfflineException>();
+        storage.OnOffline = raised.Add;
+        var failure = new IOException("Injected page write failure");
+        const string reason = "the engine's checkpoint worker 'engine/checkpoint' failed on database 'd' on 3 passes in a row, the engine's limit";
+
+        // Act
+        bool taken = storage.TakeOffline(cause, reason, failure);
+        int writesAtTheGiveUp = point.Writes;
+        var refusal = Should.Throw<StorageOfflineException>(() => storage.BeginTransaction());
+        bool again = storage.TakeOffline(cause, "a second give-up", new IOException("later"));
+        int writtenBack = storage.WriteBackDirtyPages(64);
+        storage.Dispose();
+
+        // Assert
+        taken.ShouldBeTrue();
+        again.ShouldBeFalse();
+        var error = raised.ShouldHaveSingleItem();
+        storage.OfflineError.ShouldBeSameAs(error);
+        error.Cause.ShouldBe(cause);
+        error.InnerException.ShouldBeSameAs(failure);
+        error.CommitRecordWritten.ShouldBeFalse();
+        error.Message.ShouldStartWith(StorageOfflineException.ErrorCode, Case.Sensitive);
+        error.Message.ShouldContain(reason);
+        error.Message.ShouldContain("Injected page write failure");
+        refusal.Cause.ShouldBe(cause);
+        refusal.InnerException.ShouldBeSameAs(failure);
+        writtenBack.ShouldBe(0);
+        point.Writes.ShouldBe(writesAtTheGiveUp);
+    }
+
+    /// <summary>
+    /// Only the storage reports a failure of its own device operations: an engine that names one
+    /// as its reason to give up is refused, and the storage stays online.
+    /// </summary>
+    /// <param name="cause">A device cause.</param>
+    [Theory(DisplayName = "Cohesion Test [Storage] - Offline: an engine cannot take a storage offline with a device cause")]
+    [InlineData(StorageOfflineCause.JournalFlush)]
+    [InlineData(StorageOfflineCause.DataFlush)]
+    [InlineData(StorageOfflineCause.HeaderWrite)]
+    public void TakeOffline_DeviceCause_ShouldBeRefused(StorageOfflineCause cause)
+    {
+        // Arrange
+        var storage = TornStorage.Create(new CrashPoint());
+
+        // Act
+        var error = Should.Throw<ArgumentOutOfRangeException>(() => storage.TakeOffline(cause, "a device failure", new IOException("fsync failed")));
+        Should.Throw<ArgumentException>(() => storage.TakeOffline(StorageOfflineCause.CheckpointFailures, " ", new IOException("failed")));
+        Should.Throw<ArgumentNullException>(() => storage.TakeOffline(StorageOfflineCause.CheckpointFailures, "a reason", null!));
+
+        // Assert
+        error.ParamName.ShouldBe("cause");
+        storage.IsOffline.ShouldBeFalse();
+        storage.Dispose();
+    }
+
+    /// <summary>
     /// A durable flush of the data file fails at a checkpoint: <see cref="Storage.OnOffline"/> is
     /// raised exactly once with that error, although the data-file path also latches the journal.
     /// </summary>

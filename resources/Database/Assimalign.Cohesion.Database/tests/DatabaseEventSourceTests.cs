@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
@@ -109,6 +110,48 @@ public sealed class DatabaseEventSourceTests
 
         events[3].Payload.ShouldBe([name, nameof(DatabaseEngineWorkerKind.Checkpoint), string.Empty, typeof(InvalidOperationException).FullName, "the pass failed", 1]);
         events[4].Payload.ShouldBe([name, nameof(DatabaseEngineWorkerKind.Checkpoint), string.Empty, 1]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report a database its engine took offline once, with its declared payload")]
+    public async Task DatabaseTakenOffline_ShouldBeReportedOnceWithItsPayload()
+    {
+        // Arrange: an engine that gives up after two failed passes, and a checkpoint worker whose
+        // passes keep failing on database a (owner decision 25).
+        string engineName = "event-source-" + Guid.NewGuid().ToString("N");
+        await using var engine = new TestEngine(engineName, workerFailureLimit: 2);
+        await engine.CreateDatabaseAsync("a");
+        var worker = new ScriptedWorker((self, pass) =>
+        {
+            self.Begin("a");
+            self.Fail("a", new InvalidOperationException($"checkpoint failed on pass {pass}"), TimeSpan.Zero);
+        }, name: engineName + "/checkpoint");
+        engine.Attach(worker);
+        using var recorder = new DatabaseEventRecorder(EventLevel.Informational);
+
+        // Act: the second pass gives up on a; the engine takes it offline on a thread-pool thread
+        // and writes the event there. The third pass counts from one again, or finds the give-up
+        // still running; either way it takes nothing offline.
+        for (int pass = 1; pass <= 3; pass++)
+        {
+            worker.RunIteration(CancellationToken.None);
+        }
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (!recorder.Events.Any(e => e.EventId == 3 && Equals(e.Payload?[0], engineName)) && watch.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            await Task.Delay(10);
+        }
+
+        await Task.Delay(100);
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var offline = recorder.Events.Where(e => e.EventId == 3 && Equals(e.Payload?[0], engineName)).ShouldHaveSingleItem();
+        offline.EventName.ShouldBe("DatabaseTakenOffline");
+        offline.Level.ShouldBe(EventLevel.Error);
+        offline.PayloadNames.ShouldBe(["engineName", "database", "cause", "workerName", "workerKind", "exceptionType", "exceptionMessage"]);
+        offline.Payload.ShouldBe([engineName, "a", "CheckpointFailures", engineName + "/checkpoint", nameof(DatabaseEngineWorkerKind.Checkpoint),
+            typeof(InvalidOperationException).FullName, "checkpoint failed on pass 2"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should write nothing below its enabled level")]

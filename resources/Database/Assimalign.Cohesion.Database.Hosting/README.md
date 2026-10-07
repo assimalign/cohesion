@@ -37,6 +37,18 @@ settings are snapshotted, so retained mutable options cannot bypass this orderin
 The no-argument and options overloads remain plain-host entry points. They do
 not create a control plane or bind an admin listener.
 
+While the application runs, its own reopen service (owner decision 22) reopens a
+database an engine reports offline through the engine's `OpenDatabaseAsync`, with
+exponential backoff and jitter (`Options.ReopenInitialDelay`, one second, up to
+`Options.ReopenMaximumDelay`, one minute; `Options.ReopenOfflineDatabases = false`
+turns it off). Health stays unhealthy, naming each offline database with its cause
+and its failed reopen attempts, until the reopen succeeds; a dropped database is
+never reopened, and Stop never waits for an attempt. Databases are reopened side by
+side, and one that goes offline again soon after its reopen keeps its backoff.
+Every finding, attempt and
+outcome is an event of the `Assimalign.Cohesion.Database.Hosting` event source
+(`docs/DESIGN.md`, "Reopening offline databases" and "Diagnostics").
+
 The private cross-area `Web.Hosting` and `Web.Health` references implement the
 HTTP delivery seam without exposing Web types from Database public APIs. Model
 wire protocols remain independent and are still composed through

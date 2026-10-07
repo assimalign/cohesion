@@ -92,6 +92,22 @@ public sealed class GraphDatabaseEngineBuilder
         set { _state.EnsureMutable(); _options.CheckpointJournalSize = value; }
     }
 
+    /// <inheritdoc cref="GraphDatabaseEngineOptions.WorkerFailureLimit" />
+    /// <exception cref="InvalidOperationException">A build was attempted.</exception>
+    public int WorkerFailureLimit
+    {
+        get => _options.WorkerFailureLimit;
+        set { _state.EnsureMutable(); _options.WorkerFailureLimit = value; }
+    }
+
+    /// <inheritdoc cref="GraphDatabaseEngineOptions.JournalSizeLimit" />
+    /// <exception cref="InvalidOperationException">A build was attempted.</exception>
+    public long JournalSizeLimit
+    {
+        get => _options.JournalSizeLimit;
+        set { _state.EnsureMutable(); _options.JournalSizeLimit = value; }
+    }
+
     /// <inheritdoc cref="GraphDatabaseEngineOptions.BufferPoolCapacity" />
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
     public long BufferPoolCapacity

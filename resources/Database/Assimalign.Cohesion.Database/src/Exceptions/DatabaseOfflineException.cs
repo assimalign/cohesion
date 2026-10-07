@@ -7,14 +7,20 @@ namespace Assimalign.Cohesion.Database;
 /// <summary>
 /// Thrown by every operation on a database that went offline: a durable flush of its journal
 /// or of one of its data files failed (#1243), a write of a journal's append buffer failed (#1252),
-/// or a write of a file header failed after its header slot write was issued (#1268). Nothing more
-/// is written to the database, and
+/// a write of a file header failed after its header slot write was issued (#1268), or its engine
+/// gave up on it because a background worker's work on it kept failing or its journal passed the
+/// engine's cap (owner decision 25). Nothing more is written to the database, and
 /// every later operation, in process and over every wire server, is refused with this
 /// exception until the database is reopened (<see cref="IDatabaseEngine.OpenDatabaseAsync"/>),
 /// whose recovery reads the journal and decides the outcome of every commit that was not
 /// confirmed.
 /// </summary>
 /// <remarks>
+/// <para>
+/// The storage's <see cref="StorageOfflineException.Cause"/>, on the inner exception, says which:
+/// a device operation, or the background worker whose work the engine gave up on, or the journal
+/// cap (<see cref="DatabaseEngine.WorkerFailureLimit"/>, owner decision 25 of 2026-10-06).
+/// </para>
 /// <para>
 /// A failed fsync leaves every record written since the last successful one in an unknown
 /// state, and a retry can report success for writes the operating system already dropped
@@ -66,13 +72,28 @@ public class DatabaseOfflineException : DatabaseException
     {
         ArgumentNullException.ThrowIfNull(cause);
 
-        string detail = cause.InnerException?.Message ?? cause.Message;
         return new DatabaseOfflineException(
             code,
-            $"{code}: Database '{database}' is offline: {Describe(cause.Cause)} of its storage failed ({detail}), so nothing " +
+            $"{code}: Database '{database}' is offline: {DescribeFailure(cause)}, so nothing " +
             "more is written to it. Every operation is refused until the database is reopened (OpenDatabaseAsync); the " +
             "reopen's recovery reads the journal and decides the outcome of every commit that was not confirmed.",
             cause);
+    }
+
+    /// <summary>
+    /// Describes what took a storage offline, with the failure's own message, for an engine's
+    /// message: <c>a durable flush of the data file of its storage failed (…)</c> for a device
+    /// operation, <c>its checkpoints kept failing and its engine gave up on it (…)</c> when the
+    /// engine gave up on the storage (owner decision 25).
+    /// </summary>
+    /// <param name="offline">The storage's offline error.</param>
+    /// <returns>The clause.</returns>
+    internal static string DescribeFailure(StorageOfflineException offline)
+    {
+        string detail = offline.InnerException?.Message ?? offline.Message;
+        return offline.Cause is StorageOfflineCause.JournalFlush or StorageOfflineCause.DataFlush or StorageOfflineCause.HeaderWrite
+            ? $"{Describe(offline.Cause)} of its storage failed ({detail})"
+            : $"{Describe(offline.Cause)} ({detail})";
     }
 
     /// <summary>
@@ -84,13 +105,19 @@ public class DatabaseOfflineException : DatabaseException
     /// <remarks>
     /// <see cref="StorageOfflineCause.JournalFlush"/> covers both a failed fsync of the journal
     /// (#1243) and a failed drain of its append buffer (#1252), so it reads as either; the inner
-    /// storage exception's message names the exact operation.
+    /// storage exception's message names the exact operation. An engine's causes (owner decision
+    /// 25) read as a whole clause, and the inner storage exception's message names the worker.
     /// </remarks>
     internal static string Describe(StorageOfflineCause cause) => cause switch
     {
         StorageOfflineCause.JournalFlush => "a write or flush of the journal",
         StorageOfflineCause.DataFlush => "a durable flush of the data file",
         StorageOfflineCause.HeaderWrite => "a write of the file header",
+        StorageOfflineCause.CheckpointFailures => "its checkpoints kept failing and its engine gave up on it",
+        StorageOfflineCause.PageWriteBackFailures => "its page write-backs kept failing and its engine gave up on it",
+        StorageOfflineCause.WriteAheadFlushFailures => "its write-ahead flushes kept failing and its engine gave up on it",
+        StorageOfflineCause.VersionPurgeFailures => "its version purge kept failing and its engine gave up on it",
+        StorageOfflineCause.JournalSizeLimit => "its journal grew past its engine's limit while its checkpoints kept failing",
         _ => "a write",
     };
 }

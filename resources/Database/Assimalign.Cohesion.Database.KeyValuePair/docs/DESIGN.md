@@ -390,6 +390,34 @@ reopen, because the coordinator ends every lock wait of an offline database
 (`TransactionCoordinator.AbandonLockWaits`, wired to the data file set's offline hook), while
 the writer that holds the lock keeps it, since an offline database undoes nothing.
 
+**A failure that persists takes the database offline (owner decision 25 of 2026-10-06).** When
+the checkpoint, page write-back, write-ahead flush or version-purge worker fails on one database
+on `WorkerFailureLimit` passes in a row (an engine option, ten by default: Neo4j's tolerance of
+failed checkpoints, `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`;
+a pass that fails both file sets counts once), the root worker base asks the engine to give up on
+it, and `KeyValueDatabaseEngine.TakeDatabaseOfflineCore` takes the data file set offline with the
+`StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A second checkpoint in a row
+that fails while one of the database's journals holds `JournalSizeLimit` bytes (an engine option; zero, the
+default, means four times `CheckpointJournalSize`, 1 GiB at its default) takes it offline with
+`JournalSizeLimit`; one failure of a journal that reached the cap with no failure at all (#1283)
+is retried like any other. Either way the database goes offline through the #1243 machinery:
+the catalog file set follows through the data set's hook, every operation is refused with
+`COHDBK002`, its lock waits end, nothing more is written to it, and the engine lists it in
+`OfflineDatabases` until `OpenDatabaseAsync` reopens it (a hosted engine's application reopens it
+with backoff, owner decision 22). The engine takes it offline on a thread-pool thread, never the worker's,
+so a give-up that waits for a hung fsync of that database holds back none of the others, and it
+finds the database in its published snapshot, without its registry lock, so it never waits for
+another's open. Once the database is offline, or whenever it closes, the engine ends every
+worker's failure record of it, so the engine reports `Running` at once and a reopened database
+counts its failures from one; a
+database already offline or closed is not counted. `KeyValueWorkerResilienceTests` pins it: a
+checkpoint failure that never clears takes only its database offline after the limit of failed
+passes, a journal past the cap does on its second
+failed checkpoint in a row, one transient failure of a journal already past the cap does not,
+and a transient failure under the limit does not (the count restarts once a checkpoint
+finishes). The suite's other engines set both limits out of
+reach, since they keep a database failing on purpose.
+
 **A database closed outside the engine is skipped, then forgotten** (owner decision 33 of
 2026-10-06, #1289). A database its holder disposed (directly; `session.Database` is the same
 instance) stays registered only until its close ends. The close then tells the engine

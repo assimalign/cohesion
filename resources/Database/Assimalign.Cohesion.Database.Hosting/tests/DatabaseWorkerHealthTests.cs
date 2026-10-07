@@ -25,9 +25,10 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 /// and header writes through the SQL model's fault-injecting storage strategy, internal since then
 /// (D9). The worker half still runs on a real SQL engine: a guided worker registered through the
 /// typed <see cref="SqlDatabaseEngineBuilder.AddWorker"/> fails a pass the test runs, and the root
-/// engine base folds the engine's state from it. Only the offline half drives the engine double,
-/// which reports the offline databases the test sets; the real engine's offline path is the SQL
-/// model's own suites' (<c>SqlWorkerResilienceTests</c> and <c>SqlStorageOperationsTests</c>).
+/// engine base folds the engine's state from it. The offline half here drives the engine double,
+/// which reports the offline databases the test sets, through the root interface the double
+/// implements. A real engine's database goes offline in <c>DatabaseReopenTests</c>: since owner
+/// decision 25 such a registered worker takes it offline once its failures reach the engine's limit.
 /// </remarks>
 public sealed class DatabaseWorkerHealthTests
 {
@@ -103,9 +104,13 @@ public sealed class DatabaseWorkerHealthTests
 
         // Assert
         unhealthy.Status.ShouldBe(HealthStatus.Unhealthy);
-        unhealthy.Description.ShouldNotBeNull().ShouldContain("sql/app");
-        unhealthy.Description.ShouldContain("file header write");
+        unhealthy.Description.ShouldNotBeNull().ShouldContain("Offline databases: sql/app.");
+        unhealthy.Description.ShouldContain("every operation on them is refused until each is reopened");
         unhealthy.Data.ShouldNotBeNull()["engine.0.state"].ShouldBe(nameof(EngineState.Running));
+        unhealthy.Data["engine.0.offline.0.name"].ShouldBe("app");
+
+        // An engine of the root interface does not say what took the database offline.
+        unhealthy.Data.ContainsKey("engine.0.offline.0.cause").ShouldBeFalse();
 
         reopened.Status.ShouldBe(HealthStatus.Healthy);
     }

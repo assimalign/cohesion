@@ -6,6 +6,8 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Storage;
+
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
@@ -22,16 +24,64 @@ internal sealed class TestEngine : DatabaseEngine
 {
     private readonly Dictionary<string, TestDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _existing = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<GiveUp> _giveUps = [];
+    private readonly HashSet<string> _takenOffline = new(StringComparer.OrdinalIgnoreCase);
     private TestDatabase[] _snapshot = [];
     private int _coreCalls;
     private int _forgets;
     private int _reopens;
+    private int _takeOfflineCalls;
 
-    public TestEngine(string name = "test-engine", TestLog? log = null)
-        : base(name, EngineModel.Sql)
+    public TestEngine(string name = "test-engine", TestLog? log = null, int workerFailureLimit = DefaultWorkerFailureLimit)
+        : base(name, EngineModel.Sql, workerFailureLimit)
     {
         Log = log ?? new TestLog();
     }
+
+    /// <summary>
+    /// Gets every call the base made to take a database offline, in order, whether or not the
+    /// leaf took it offline.
+    /// </summary>
+    public IReadOnlyList<GiveUp> GiveUps
+    {
+        get
+        {
+            lock (_giveUps)
+            {
+                return [.. _giveUps];
+            }
+        }
+    }
+
+    /// <summary>Gets the names of the databases the leaf took offline.</summary>
+    public IReadOnlyCollection<string> TakenOffline
+    {
+        get
+        {
+            lock (_giveUps)
+            {
+                return [.. _takenOffline];
+            }
+        }
+    }
+
+    /// <summary>Gets the names the offline-error core was asked about, in order.</summary>
+    public List<string> OfflineErrorLookups { get; } = [];
+
+    /// <summary>
+    /// Gets or sets a gate the take-offline core waits on before it acts, as a storage whose
+    /// journal lock a hung fsync holds would make it wait.
+    /// </summary>
+    public ManualResetEventSlim? TakeOfflineGate { get; set; }
+
+    /// <summary>Gets or sets a failure the take-offline core throws once past its gate.</summary>
+    public Exception? TakeOfflineFailure { get; set; }
+
+    /// <summary>Gets how many calls entered the take-offline core.</summary>
+    public int TakeOfflineCalls => Volatile.Read(ref _takeOfflineCalls);
+
+    /// <summary>Gets the threads the take-offline core ran on.</summary>
+    public List<int> TakeOfflineThreads { get; } = [];
 
     public TestLog Log { get; }
 
@@ -171,6 +221,48 @@ internal sealed class TestEngine : DatabaseEngine
         }
     }
 
+    protected override StorageOfflineException? GetOfflineErrorCore(DatabaseName name)
+    {
+        Interlocked.Increment(ref _coreCalls);
+        lock (OfflineErrorLookups)
+        {
+            OfflineErrorLookups.Add(name);
+        }
+
+        // The double has no storage whose offline error it could report.
+        return null;
+    }
+
+    /// <summary>
+    /// A model leaf's shape: takes a tracked, open database offline once, and refuses one it does
+    /// not track, one closing, and one already offline.
+    /// </summary>
+    protected override bool TakeDatabaseOfflineCore(DatabaseName name, StorageOfflineCause cause, string reason, Exception failure)
+    {
+        Interlocked.Increment(ref _takeOfflineCalls);
+        lock (TakeOfflineThreads)
+        {
+            TakeOfflineThreads.Add(Environment.CurrentManagedThreadId);
+        }
+
+        TakeOfflineGate?.Wait();
+        if (TakeOfflineFailure is { } thrown)
+        {
+            throw thrown;
+        }
+
+        bool taken;
+        TestDatabase[] snapshot = Volatile.Read(ref _snapshot);
+        lock (_giveUps)
+        {
+            taken = Array.Exists(snapshot, database => string.Equals(database.Name, name, StringComparison.OrdinalIgnoreCase) && !database.IsClosing)
+                && _takenOffline.Add(name);
+            _giveUps.Add(new GiveUp(name, cause, reason, failure, taken));
+        }
+
+        return taken;
+    }
+
     protected override void ForgetClosedDatabaseCore(DatabaseInstance database)
     {
         Interlocked.Increment(ref _forgets);
@@ -229,4 +321,12 @@ internal sealed class TestEngine : DatabaseEngine
 
     // Under the lock: publishes the tracked databases for the lock-free check of the forget.
     private void Publish() => Volatile.Write(ref _snapshot, [.. _databases.Values]);
+
+    /// <summary>A call the base made to take a database offline, and whether the leaf did.</summary>
+    /// <param name="Name">The database's name.</param>
+    /// <param name="Cause">The cause.</param>
+    /// <param name="Reason">The reason, for the storage's message.</param>
+    /// <param name="Failure">The worker's last failure.</param>
+    /// <param name="Taken">Whether the leaf took the database offline.</param>
+    public sealed record GiveUp(string Name, StorageOfflineCause Cause, string Reason, Exception Failure, bool Taken);
 }

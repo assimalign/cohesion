@@ -88,11 +88,12 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     private const string defaultName = "sql-engine";
 
     private SqlDatabaseEngine(SqlDatabaseEngineOptions options)
-        : base(options.EngineName ?? defaultName, EngineModel.Sql)
+        : base(options.EngineName ?? defaultName, EngineModel.Sql, options.WorkerFailureLimit)
     {
         _options = options;
         _signalCommitPending = _commitPendingSignal.Set;
         _bufferPoolPages = Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
+        JournalSizeLimit = DatabaseWorkerLimits.GetJournalSizeLimit(options.JournalSizeLimit, options.CheckpointJournalSize);
 
         // Captured once, already validated by CreateUncomposed: a later change to the options
         // object never changes what the running engine accepts.
@@ -144,6 +145,13 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// Gets the engine options, for the engine's background workers.
     /// </summary>
     internal SqlDatabaseEngineOptions EngineOptions => _options;
+
+    /// <summary>
+    /// Gets the journal size limit the checkpointer applies, resolved from
+    /// <see cref="SqlDatabaseEngineOptions.JournalSizeLimit"/> when the engine was created
+    /// (owner decision 25).
+    /// </summary>
+    internal long JournalSizeLimit { get; }
 
     /// <summary>
     /// Gets the parser options the engine's sessions parse statement text with: its expression
@@ -205,9 +213,12 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <see cref="SqlDatabaseEngineOptions.ExpressionNestingLimit"/> is outside
     /// <see cref="SqlQueryParserOptions.MinimumExpressionNestingLimit"/>..<see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>;
     /// <see cref="SqlDatabaseEngineOptions.BufferPoolCapacity"/> is not a whole number of 8 KiB pages of at
-    /// least 1 MiB; <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/> is negative; or
+    /// least 1 MiB; <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/> is negative;
     /// <see cref="SqlDatabaseEngineOptions.CheckpointInterval"/> or
-    /// <see cref="SqlDatabaseEngineOptions.MaintenanceInterval"/> is not positive.
+    /// <see cref="SqlDatabaseEngineOptions.MaintenanceInterval"/> is not positive;
+    /// <see cref="SqlDatabaseEngineOptions.WorkerFailureLimit"/> is less than one; or
+    /// <see cref="SqlDatabaseEngineOptions.JournalSizeLimit"/> is negative, or set and below
+    /// <see cref="SqlDatabaseEngineOptions.CheckpointJournalSize"/>.
     /// </exception>
     public static SqlDatabaseEngine Create(SqlDatabaseEngineOptions options)
     {
@@ -249,6 +260,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.CheckpointInterval, TimeSpan.Zero, nameof(options.CheckpointInterval));
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaintenanceInterval, TimeSpan.Zero, nameof(options.MaintenanceInterval));
+        DatabaseWorkerLimits.Validate(options.WorkerFailureLimit, options.JournalSizeLimit, options.CheckpointJournalSize,
+            nameof(options.WorkerFailureLimit), nameof(options.JournalSizeLimit));
 
         // Checked here, before any file is touched, rather than by the storage setter at database
         // create or open (owner decision 26 of 2026-10-06): the window is also the flush worker's
@@ -617,8 +630,35 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     }
 
     /// <inheritdoc />
+    protected override StorageOfflineException? GetOfflineErrorCore(DatabaseName name)
+        => FindOpen(name)?.OfflineError;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The data file set goes offline with the cause, and its hook takes the catalog file set
+    /// offline and ends the database's lock waits, as after a failed durable flush (#1243).
+    /// </remarks>
+    protected override bool TakeDatabaseOfflineCore(DatabaseName name, StorageOfflineCause cause, string reason, Exception failure)
+        => FindOpen(name) is { IsOffline: false } database && database.DataStorage.TakeOffline(cause, reason, failure);
+
+    /// <inheritdoc />
     protected override void ForgetClosedDatabaseCore(DatabaseInstance database)
         => DatabaseRegistry.Forget((SqlDatabase)database, _syncRoot, GetInstanceSnapshot, ForgetLocked);
+
+    // The open database of that name in the published snapshot, or null: lock-free, so a worker
+    // that gives up on a database never waits for a create, open or drop holding the lock.
+    private SqlDatabase? FindOpen(DatabaseName name)
+    {
+        foreach (var database in GetInstanceSnapshot())
+        {
+            if (!database.IsClosed && string.Equals(database.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return database;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Closes every open database once the base disposed the servers, stopped the worker pumps

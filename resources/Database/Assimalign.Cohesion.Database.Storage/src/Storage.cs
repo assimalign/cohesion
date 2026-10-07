@@ -365,8 +365,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <summary>
     /// Gets the error that took this storage offline, or null while it is online: a durable
     /// flush of its journal or its data file failed (#1243), a write of the journal's append
-    /// buffer did (#1252), or a write of its file header failed after the header slot write was
-    /// issued (#1268). Once set it stays set for the life of this instance, and it is the error
+    /// buffer did (#1252), a write of its file header failed after the header slot write was
+    /// issued (#1268), or its engine gave up on it because a background worker's work on it kept
+    /// failing or its journal passed the engine's cap (owner decision 25;
+    /// <see cref="TakeOffline(StorageOfflineCause, string, Exception)"/>). Once set it stays set
+    /// for the life of this instance, and it is the error
     /// <see cref="OnOffline"/> was raised with: when two failures race, the first is kept and the
     /// later one is refused with it. Only reopening the storage, which runs recovery, brings the
     /// file set back.
@@ -409,11 +412,68 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Takes this storage offline because its engine gave up on it (owner decision 25 of
+    /// 2026-10-06): a background worker's work on the storage failed as many times in a row as the
+    /// engine allows, or the journal grew past the engine's hard cap while its checkpoints kept
+    /// failing. The storage goes offline exactly as after a failed durable flush: nothing more is
+    /// written to either file, <see cref="OnOffline"/> is raised once, and only a reopen, whose
+    /// recovery reads the journal, brings the file set back.
+    /// </summary>
+    /// <param name="cause">
+    /// The engine's cause, naming the worker whose work kept failing or the journal cap:
+    /// <see cref="StorageOfflineCause.CheckpointFailures"/>,
+    /// <see cref="StorageOfflineCause.PageWriteBackFailures"/>,
+    /// <see cref="StorageOfflineCause.WriteAheadFlushFailures"/>,
+    /// <see cref="StorageOfflineCause.VersionPurgeFailures"/> or
+    /// <see cref="StorageOfflineCause.JournalSizeLimit"/>.
+    /// </param>
+    /// <param name="reason">What the engine gave up on, naming the worker, for the message.</param>
+    /// <param name="failure">The worker's last failure: the inner exception of <see cref="OfflineError"/>.</param>
+    /// <returns>
+    /// True when this call took the storage offline; false when it was offline already, whose
+    /// first error <see cref="OfflineError"/> keeps reporting.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="cause"/> is a failure of the storage's own device operations
+    /// (<see cref="StorageOfflineCause.JournalFlush"/>, <see cref="StorageOfflineCause.DataFlush"/>
+    /// or <see cref="StorageOfflineCause.HeaderWrite"/>), which only the storage reports.
+    /// </exception>
+    /// <exception cref="ArgumentException"><paramref name="reason"/> is null, empty or white space.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="failure"/> is null.</exception>
+    /// <remarks>
+    /// Called outside every storage lock. It latches the error under the journal's lock, which a
+    /// durable flush holds through its fsync, so it waits for a flush in progress; an engine
+    /// therefore calls it on a thread of its own, never on a background worker's, whose other
+    /// databases would wait with it. Like <see cref="TakeOffline(StorageOfflineException)"/> it
+    /// returns at once on a storage already offline, without the journal's lock.
+    /// </remarks>
+    public bool TakeOffline(StorageOfflineCause cause, string reason, Exception failure)
+    {
+        if (!StorageOfflineException.IsEngineCause(cause))
+        {
+            throw new ArgumentOutOfRangeException(nameof(cause), cause,
+                "An engine takes a storage offline only with a cause of its own: a worker whose work kept failing, or the journal size limit.");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        ArgumentNullException.ThrowIfNull(failure);
+        if (IsOffline)
+        {
+            return false;
+        }
+
+        var offline = StorageOfflineException.EngineGaveUp(cause, reason, failure);
+        return ReferenceEquals(GoOffline(offline), offline);
+    }
+
+    /// <summary>
     /// Gets or sets the hook invoked once, with the error, when this storage goes offline: a
     /// durable flush of its journal or its data file failed (#1243), a write of the journal failed
-    /// (#1252), a write of its file header failed after the slot write was issued (#1268), or
-    /// <see cref="TakeOffline"/> was called. An engine whose database spans several storages takes
-    /// the others offline from it, so none of them is written after the failure.
+    /// (#1252), a write of its file header failed after the slot write was issued (#1268),
+    /// <see cref="TakeOffline(StorageOfflineException)"/> was called, or its engine gave up on it
+    /// (<see cref="TakeOffline(StorageOfflineCause, string, Exception)"/>, owner decision 25). An
+    /// engine whose database spans several storages takes the others offline from it, so none of
+    /// them is written after the failure.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -423,7 +483,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// offline even while that storage is going offline through its own hook: the two storages
     /// never wait on each other's journal. It may run while the failing call holds this
     /// storage's header, transaction or buffer-pool lock, so a handler must not call back into
-    /// this storage, except <see cref="TakeOffline"/>, which returns at once on a storage
+    /// this storage, except <see cref="TakeOffline(StorageOfflineException)"/>, which returns at once on a storage
     /// already offline. It should only take other storages offline, or end the database's lock
     /// waits (the transaction coordinator's <c>AbandonLockWaits</c>, which does no lock-table work
     /// on the calling thread), and must not throw.
@@ -2354,7 +2414,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Flushes the data file by the durability policy. A durable flush that fails takes the
-    /// storage offline (<see cref="TakeOffline"/>) and throws <see cref="StorageOfflineException"/>.
+    /// storage offline (<see cref="TakeOffline(Exception)"/>) and throws <see cref="StorageOfflineException"/>.
     /// </summary>
     private void FlushData()
     {
