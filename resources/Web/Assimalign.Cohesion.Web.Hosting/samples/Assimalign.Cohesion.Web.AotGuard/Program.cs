@@ -21,6 +21,7 @@ using Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Web.OpenApi;
 using Assimalign.Cohesion.Web.RateLimiting;
 using Assimalign.Cohesion.Web.RequestTimeouts;
+using Assimalign.Cohesion.Web.Rewrite;
 using Assimalign.Cohesion.Web.Routing;
 using Assimalign.Cohesion.Web.SecurityHeaders;
 using Assimalign.Cohesion.Web.Serialization;
@@ -60,6 +61,13 @@ await using WebApplication application = builder.Build();
 // Outermost, ahead of the exception boundary, so error pages carry the headers too.
 application.UseSecurityHeaders();
 application.UseErrorHandling();
+
+// Ahead of static files and routing, so both see the rewritten URL; redirects ahead of rewrites. The
+// rules cover an interpreted pattern and a source-generated one.
+application.UseRewrite(rules => rules
+    .AddRedirect("^/old-greeting$", "/greeting", HttpStatusCode.MovedPermanently)
+    .AddRewrite("^/legacy/items/(\\d+)$", "/items/$1")
+    .AddRewrite(GuardRewriteRules.CatalogValue(), "/values/${id}"));
 application.UseCookiePolicy();
 application.UseResponseCompression();
 application.UseRequestDecompression();

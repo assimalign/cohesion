@@ -4,6 +4,7 @@
     <!--
         NativeAOT guard for the Web area (#1052). A representative application composes routing
         (route groups, endpoint policy verbs, the static-file fallback), pipeline branching,
+        URL rewrite and redirect rules (interpreted and source-generated patterns),
         source-generated typed binding, source-generated JSON, error handling, Cookie and JWT Bearer
         authentication, authorization, antiforgery, cookie policy, security headers, static files,
         response compression, request decompression, CORS, rate limiting, request timeouts, handler
@@ -41,6 +42,7 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.OpenApi" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.RateLimiting" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.RequestTimeouts" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Rewrite" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.SecurityHeaders" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />

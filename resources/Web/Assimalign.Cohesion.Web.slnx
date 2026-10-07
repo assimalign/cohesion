@@ -550,6 +550,17 @@
 		<File Path="Assimalign.Cohesion.Web.Results/tests/obj/Debug/net9.0/Assimalign.Cohesion.Web.Results.csproj.AssemblyReference.cache" />
 		<File Path="Assimalign.Cohesion.Web.Results/tests/obj/Debug/net9.0/Assimalign.Cohesion.Web.Results.GeneratedMSBuildEditorConfig.editorconfig" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Rewrite/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Rewrite/docs/">
+		<File Path="Assimalign.Cohesion.Web.Rewrite/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Rewrite/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Rewrite/src/">
+		<Project Path="Assimalign.Cohesion.Web.Rewrite/src/Assimalign.Cohesion.Web.Rewrite.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Rewrite/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Rewrite/tests/Assimalign.Cohesion.Web.Rewrite.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Routing/">
 		<File Path="Assimalign.Cohesion.Web.Routing/README.md" />
 	</Folder>

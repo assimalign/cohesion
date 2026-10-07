@@ -115,6 +115,28 @@ internal static class GuardSmoke
                 && body.Contains("item-7", StringComparison.Ordinal);
         });
 
+        failures += await CheckAsync("an interpreted rewrite rule hands routing the rewritten path", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("legacy/items/12", cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK && body.Contains("item-12", StringComparison.Ordinal);
+        });
+
+        failures += await CheckAsync("a source-generated rewrite pattern substitutes a named capture", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("catalog/8", cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK && body.Contains("value-8", StringComparison.Ordinal);
+        });
+
+        failures += await CheckAsync("a redirect rule answers its status and Location", async () =>
+        {
+            using var redirects = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { BaseAddress = client.BaseAddress };
+            using HttpResponseMessage response = await redirects.GetAsync("old-greeting?from=guard", cancellationToken);
+            return response.StatusCode == HttpStatusCode.MovedPermanently
+                && response.Headers.Location?.OriginalString == "/greeting?from=guard";
+        });
+
         failures += await CheckAsync("typed JSON body binding round-trips", async () =>
         {
             using var content = new StringContent("{\"id\":3,\"name\":\"posted\"}", Encoding.UTF8, "application/json");

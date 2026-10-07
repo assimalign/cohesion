@@ -344,6 +344,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.Query'
     'resources/Web/Assimalign.Cohesion.Web.RateLimiting'
     'resources/Web/Assimalign.Cohesion.Web.RequestTimeouts'
+    'resources/Web/Assimalign.Cohesion.Web.Rewrite'
     'resources/Web/Assimalign.Cohesion.Web.Routing'
     'resources/Web/Assimalign.Cohesion.Web.SecurityHeaders'
     'resources/Web/Assimalign.Cohesion.Web.Serialization'

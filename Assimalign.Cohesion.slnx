@@ -2588,6 +2588,17 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/tests/Assimalign.Cohesion.Web.RequestTimeouts.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Rewrite/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Rewrite/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Rewrite/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Rewrite/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Rewrite/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Rewrite/src/Assimalign.Cohesion.Web.Rewrite.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Rewrite/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Rewrite/tests/Assimalign.Cohesion.Web.Rewrite.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.Routing/README.md" />
 	</Folder>

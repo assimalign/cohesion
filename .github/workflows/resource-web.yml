@@ -55,6 +55,7 @@ jobs:
             'Assimalign.Cohesion.Web.Query',
             'Assimalign.Cohesion.Web.RateLimiting',
             'Assimalign.Cohesion.Web.RequestTimeouts',
+            'Assimalign.Cohesion.Web.Rewrite',
             'Assimalign.Cohesion.Web.Routing',
             'Assimalign.Cohesion.Web.SecurityHeaders',
             'Assimalign.Cohesion.Web.Serialization',
@@ -90,7 +91,8 @@ jobs:
       - run: dotnet build libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release
 
   # NativeAOT guard (#1052): a representative Web application — routing (groups, branching, the
-  # static-file fallback), source-generated typed binding and JSON, error handling, Cookie + JWT
+  # static-file fallback), URL rewrite and redirect rules (#782),
+  # source-generated typed binding and JSON, error handling, Cookie + JWT
   # Bearer, authorization, antiforgery, cookie policy, security headers, static files, compression,
   # CORS, rate limiting, request timeouts, handler return values, request validation, file uploads and
   # the OpenAPI document — published with PublishAot. The guard promotes the trim/AOT analyzer
