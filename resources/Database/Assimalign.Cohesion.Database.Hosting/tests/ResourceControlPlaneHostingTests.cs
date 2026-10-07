@@ -279,14 +279,15 @@ public sealed class ResourceControlPlaneHostingTests
     {
         // Arrange: register the same engine directly and behind a server; the context health
         // contribution must count the data machine once while still discovering server engines.
+        // A pass of the engine's worker fails, so the engine base folds the engine as Faulted.
         var worker = new RecordingEngineWorker(
             "sql/wal-flush",
             DatabaseEngineWorkerKind.WriteAheadFlush,
             TimeSpan.FromMilliseconds(25));
-        var engine = new RecordingEngine(
-            "sql",
-            EngineState.Faulted,
-            [worker]);
+        await using var engine = new RecordingEngine("sql");
+        engine.AddWorker(worker);
+        worker.Failure = new InvalidOperationException("Injected flush failure");
+        worker.RunIteration(CancellationToken.None).ShouldBeFalse();
         var options = new DatabaseApplicationOptions();
         options.Engines.Add(engine);
         options.Servers.Add(new RecordingServer([], engine: engine));
@@ -349,9 +350,11 @@ public sealed class ResourceControlPlaneHostingTests
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a disposed engine is unhealthy")]
     public async Task CheckAsync_WithDisposedEngine_ShouldReportUnhealthy()
     {
-        // Arrange
+        // Arrange: an engine disposed by its owner while the application still borrows it.
+        var engine = new RecordingEngine();
+        await engine.DisposeAsync();
         var options = new DatabaseApplicationOptions();
-        options.Engines.Add(new RecordingEngine(state: EngineState.Disposed));
+        options.Engines.Add(engine);
         await using var application = new DatabaseApplication(options);
 
         // Act
@@ -412,9 +415,8 @@ public sealed class ResourceControlPlaneHostingTests
         }
     }
 
-    private sealed class ControlledStartServer : IDatabaseServer
+    private sealed class ControlledStartServer : DatabaseServer
     {
-        private readonly RecordingServer _inner = new([], "controlled");
         private readonly TaskCompletionSource<bool> _bindStarted;
         private readonly TaskCompletionSource<bool> _accepting;
 
@@ -424,22 +426,21 @@ public sealed class ResourceControlPlaneHostingTests
         public ControlledStartServer(
             TaskCompletionSource<bool> bindStarted,
             TaskCompletionSource<bool> accepting)
+            : base(new RecordingEngine())
         {
             _bindStarted = bindStarted;
             _accepting = accepting;
         }
 
-        public IDatabaseServerContext Context => _inner.Context;
+        public override IReadOnlyCollection<DatabaseServerSession> Sessions => [];
 
-        public Task StartAsync(CancellationToken cancellationToken = default)
+        protected override Task StartCoreAsync(CancellationToken cancellationToken)
         {
             _bindStarted.TrySetResult(true);
             return _accepting.Task.WaitAsync(cancellationToken);
         }
 
-        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        protected override Task StopCoreAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private static int ReservePort()

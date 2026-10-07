@@ -308,7 +308,7 @@ public sealed class DocumentEngineCompositionTests
     public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
     {
         // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
-        var state = new DatabaseEngineBuilderState<DocumentDatabaseEngine, DatabaseEngineWorker, DatabaseServer>();
+        var state = new DatabaseEngineBuilderState<DocumentDatabaseEngine>();
         var engine = DocumentDatabaseEngine.CreateUncomposed(new DocumentDatabaseEngineOptions { EngineName = "contract" });
         List<RecordingWorker> workers = [];
         List<RecordingServer> servers = [];

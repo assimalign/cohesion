@@ -56,7 +56,6 @@ public sealed class SqlEngineContractTests
         opened.ShouldBeSameAs(created);
         collated.Engine.ShouldBeSameAs(engine);
         created.SupportsSchemaProvisioning.ShouldBeTrue();
-        created.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>();
         names.ShouldBe(["orders", "people"], ignoreOrder: true);
         typedFound.ShouldBeTrue();
         lookedUp.ShouldBeSameAs(created);

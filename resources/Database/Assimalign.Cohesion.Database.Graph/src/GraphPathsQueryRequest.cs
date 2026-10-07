@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>A database-scoped MATCH request that projects one path or bound graph entity.</summary>
 /// <remarks>
-/// Execute through <see cref="IDatabaseSession.ExecuteAsync(QueryRequest, System.Threading.CancellationToken)"/>.
+/// Execute through <see cref="DatabaseSession.ExecuteAsync(QueryRequest, System.Threading.CancellationToken)"/>.
 /// A named path retains traversal order; a node becomes a one-node path, and a relationship becomes
 /// a path containing its source and target nodes in stored direction. Scalar and multiple projections,
 /// catalog statements, and mutations are rejected before execution.

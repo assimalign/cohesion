@@ -11,10 +11,10 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 /// </summary>
 internal sealed class DefaultDatabaseProvisioner : IHostService
 {
-    private readonly IDatabaseEngine _engine;
+    private readonly DatabaseEngine _engine;
     private readonly CompiledSchema _schema;
 
-    internal DefaultDatabaseProvisioner(IDatabaseEngine engine, CompiledSchema schema)
+    internal DefaultDatabaseProvisioner(DatabaseEngine engine, CompiledSchema schema)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(schema);
@@ -32,8 +32,7 @@ internal sealed class DefaultDatabaseProvisioner : IHostService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        IDatabase database;
-        if (!_engine.TryGetDatabase(_schema.Name, out database!))
+        if (!_engine.TryGetDatabase(_schema.Name, out DatabaseInstance? database))
         {
             try
             {
@@ -46,13 +45,15 @@ internal sealed class DefaultDatabaseProvisioner : IHostService
             }
         }
 
-        if (database is not IDatabaseSchemaProvisioner provisioner)
+        // The capability is a flag on the root base (concrete-types plan, row 8), fixed when the
+        // model creates the database: only a model that provisions schemas sets it.
+        if (!database.SupportsSchemaProvisioning)
         {
             throw new NotSupportedException(
                 $"Database engine '{_engine.Name}' ({_engine.Model}) does not support compiled schema provisioning.");
         }
 
-        await provisioner.ApplySchemaAsync(_schema, cancellationToken).ConfigureAwait(false);
+        await database.ApplySchemaAsync(_schema, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

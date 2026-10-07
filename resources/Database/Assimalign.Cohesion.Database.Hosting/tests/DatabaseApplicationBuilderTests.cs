@@ -113,7 +113,7 @@ public class DatabaseApplicationBuilderTests
         var log = new List<string>();
         var engine = new RecordingEngine();
         RecordingServer? server = null;
-        IReadOnlyList<IDatabaseEngine>? observedEngines = null;
+        IReadOnlyList<DatabaseEngine>? observedEngines = null;
 
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
         builder.AddEngine(engine);
@@ -212,6 +212,30 @@ public class DatabaseApplicationBuilderTests
         // Assert
         actual.ShouldBeSameAs(failure);
         log.ShouldBe(["engine:open"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Provision: a database without the provisioning capability is refused before the server starts")]
+    public async Task Provision_WhenDatabaseDoesNotSupportSchemaProvisioning_ShouldRefuseBeforeServerStarts()
+    {
+        // Arrange: the provisioner reads the capability flag of the root base (concrete-types
+        // plan, row 8), which a model sets when it creates the database.
+        var log = new List<string>();
+        var engine = new ProvisioningEngine(log, supportsSchemaProvisioning: false);
+        var server = new RecordingServer(log, "server", engine);
+        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+        builder.Options.Servers.Add(server);
+        builder.Provision(engine.Name, CompileSchema("app"));
+
+        // Act
+        await using DatabaseApplication application = builder.Build();
+        NotSupportedException actual = await Should.ThrowAsync<NotSupportedException>(async () =>
+            await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout()));
+
+        // Assert: the database was created, the schema never applied, and the server never started;
+        // the host's rollback stopped it, which releases a server that never started.
+        actual.Message.ShouldContain("provisioning-engine");
+        actual.Message.ShouldContain("does not support compiled schema provisioning");
+        log.ShouldBe(["engine:open", "engine:create", "server:stop"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - AddDatabase: retains code-first schema and provisions it before accept")]

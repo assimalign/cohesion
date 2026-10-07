@@ -17,43 +17,54 @@ surface. Child roots never reference the root.
 
 ## Phase 29 composition contract (current)
 
-The approved [hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md) supersedes the historical builder/worker descriptions below. `IDatabaseApplicationBuilder` exposes exactly borrowed `AddEngine(instance)`, owned `AddEngine(Func<IDatabaseApplicationContext, IDatabaseEngine>)`, and one-shot `Build()`. There is no builder engine enumeration, application-level AddServer, or Use stage. `IDatabaseApplication` inherits `IAsyncDisposable`; its context observes every engine, nested servers, and ordinal `GetEngine(name)` lookup. All four named engine operations use the existing `DatabaseName` value object; its implicit string conversions preserve straightforward callers while implementations use the typed contract.
+The approved [hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md) supersedes the historical builder/worker descriptions below. `IDatabaseApplicationBuilder` exposes exactly borrowed `AddEngine(DatabaseEngine)`, owned `AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine>)`, and one-shot `Build()`. There is no builder engine enumeration, application-level AddServer, or Use stage. `IDatabaseApplication` inherits `IAsyncDisposable`; its context observes every engine (`IReadOnlyList<DatabaseEngine> Engines`), nested servers (`IReadOnlyList<DatabaseServer> Servers`), and ordinal `GetEngine(name)` lookup, which returns the root base; the static extension `GetEngine<TEngine>(name) where TEngine : DatabaseEngine` (`Extensions/DatabaseApplicationContextExtensions.cs`) returns a model's engine typed, refusing an engine of another type with `InvalidOperationException`. These three are three of the area's five kept interfaces (`database-area.md`); since phase 6 of the concrete-types plan (#1262) they name the root bases, and every other root interface is deleted. All four named engine operations use the existing `DatabaseName` value object; its implicit string conversions preserve straightforward callers while implementations use the typed contract.
 
-`IDatabaseEngineBuilder` earns a shared seam because AddWorker is model-agnostic: the same factory can attach a worker to any model. Shared construction/rollback source is owned in this project's `shared/` and compiled by each model through `CohesionSharedSource`. Every model-specific interface extends the base and carries that model's options. No separate generic application composition algorithm consumes arbitrary model options. Strongly typed worker/server factory overloads are deliberately omitted: the common engine factory contract already works, and explicit casts for SQL/KeyValue servers avoid overload ambiguity and a second factory vocabulary. That last ruling is superseded on the concrete-types plan's schedule (D5): since step P4.0 the shared build state is typed over each model's engine, and each model's phase-4 PR gives its sealed builder typed `AddWorker` and `AddServer` ("Root bases", below).
+Each model ships a sealed engine builder (`SqlDatabaseEngineBuilder` and its siblings) with typed `AddWorker(Func<TEngine, DatabaseEngineWorker>)` and `AddServer(Func<TEngine, DatabaseServer>)`; the former root `IDatabaseEngineBuilder` they implemented is deleted (row 6 of the plan). Shared construction/rollback source is owned in this project's `shared/` (`DatabaseEngineBuilderState<TEngine>`) and compiled by each model through `CohesionSharedSource`. No separate generic application composition algorithm consumes arbitrary model options. The 2026-10-02 ruling that omitted typed worker/server factory overloads is superseded (D5): since step P4.0 the shared build state is typed over each model's engine, and since phase 4 each model's sealed builder offers typed `AddWorker` and `AddServer` ("Root bases", below).
 
-Workers remain scheduled and quiesced by their engine. `IDatabaseEngineWorker.Run(CancellationToken)` exposes the existing executable pump so workers returned by the approved deferred factories can run without requiring a particular base implementation. `IDatabaseEngine.Servers` enables hosting to discover nested servers. Engines own factory-produced workers and servers; hosting snapshots servers for lifecycle only. Application-created engines are disposed by the application; instance-registered engines remain caller-owned.
+Workers remain scheduled and quiesced by their engine. Every worker derives from `DatabaseEngineWorker`, whose non-virtual `Run(CancellationToken)` is the pump the engine runs on the thread it owns. `DatabaseEngine.Servers` enables hosting to discover nested servers. Engines own factory-produced workers and servers; hosting snapshots servers for lifecycle only. Application-created engines are disposed by the application; instance-registered engines remain caller-owned.
 
 ```mermaid
 classDiagram
     IDatabaseApplicationBuilder --> IDatabaseApplication : Build
     IDatabaseApplication --> IDatabaseApplicationContext : Context
-    IDatabaseApplicationContext --> IDatabaseEngine : Engines
-    IDatabaseEngineBuilder --> IDatabaseEngine : Build
-    IDatabaseEngine --> IDatabaseServer : Servers
-    IDatabaseEngine --> IDatabaseEngineWorker : Workers
+    IDatabaseApplicationContext --> DatabaseEngine : Engines
+    SqlDatabaseEngineBuilder --> SqlDatabaseEngine : Build
+    DatabaseEngine <|-- SqlDatabaseEngine
+    DatabaseEngine --> DatabaseServer : Servers
+    DatabaseEngine --> DatabaseEngineWorker : Workers
 ```
 
-## Root bases (concrete-types plan, phase 3, #1259)
+## Root bases (concrete-types plan, phases 3 and 6, #1259 and #1262)
 
 The area's concrete-first rule (`.claude/rules/database-area.md`, owner decision O34a) replaces
 the root's engine-model interfaces with abstract bases whose public members are non-virtual and
 call protected cores (the ADO.NET shape). Phase 3 of
-[the plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) adds the bases **beside**
-the interfaces: each base still implements its old interface (explicitly where the base retypes a
-member), so `Database.Hosting`, `Database.Embedded` and every model keep compiling against the
-interfaces. Each model moves its leaves onto them in its own phase-4 PR (#1260), KeyValuePair
-first, Graph second, Documents third and Blob fourth, and phase 6 deletes the interfaces; until then an adopted model's leaves reach the hosting
-layer through the interfaces the bases implement. Every base carries the deviation marker.
+[the plan](../../../../docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md) added the bases **beside**
+the interfaces, each implementing its old interface (explicitly where the base retyped a member),
+so `Database.Hosting`, `Database.Embedded` and every model kept compiling against the interfaces.
+Each model moved its leaves onto them in its own phase-4 PR (#1260), KeyValuePair first, Graph
+second, Documents third, Blob fourth and Sql last. Phase 6 (#1262) retyped the hosting layer,
+`Database.Embedded` and the kept composition seams onto the bases and deleted the ten root
+interfaces, the bridges' explicit implementations and the server context (`IDatabaseServerContext`,
+the four model context classes and the test doubles' contexts): the bases are the API, and
+the root keeps only `IDatabaseApplication`, `IDatabaseApplicationBuilder` and
+`IDatabaseApplicationContext`. Every base carries the deviation marker.
 
-| Base | Bridges | The leaf supplies | The base owns |
+| Base | Replaced (deleted in phase 6) | The leaf supplies | The base owns |
 |---|---|---|---|
 | `DatabaseEngine` | `IDatabaseEngine` | the database cores (create, open, drop, list, try-get), forgetting a database a holder closed (`ForgetClosedDatabaseCore`), `OfflineDatabases`, an offline database's storage error (`GetOfflineErrorCore`), taking a database offline it gave up on (`TakeDatabaseOfflineCore`, owner decision 25), and closing its databases (`DisposeAsyncCore`) | name and model, the worker failure limit, the worker and server inventories, attach and its freeze, the worker pump, the state fold, the disposal order, the open's wait for a holder's close, giving up on a database for its workers |
-| `DatabaseInstance` | `IDatabase` | the session core, disposal cores, and the schema core when it provisions | name, engine, the schema-provisioning capability, the disposed flag, the close's completion and the engine notice it sends |
+| `DatabaseInstance` | `IDatabase`, `IDatabaseSchemaProvisioner` | the session core, disposal cores, and the schema core when it provisions | name, engine, the schema-provisioning capability, the disposed flag, the close's completion and the engine notice it sends |
 | `DatabaseSession` | `IDatabaseSession` | the begin and execute cores, and ending its running operations | state, the session's transaction, the one "already active" check, the operation hold, the teardown order |
 | `DatabaseTransaction` | `IDatabaseTransaction` | the kernel state, commit and rollback cores with their own exception translation, the offline refusal, the coded aborted error | identity and isolation level, the end gate and the whole end state machine |
-| `DatabaseServer` | `IDatabaseServer` | start and stop cores, `Sessions`, and `Context` until phase 6 | the engine, the lifecycle state machine |
+| `DatabaseServer` | `IDatabaseServer`, `IDatabaseServerContext` | start and stop cores, and `Sessions` | the engine (the context's `Engine`), the lifecycle state machine |
 | `DatabaseServerSession` | `IDatabaseServerSession` | the engine session and disposal | the identity, the negotiated version, the authenticated principal |
 | `DatabaseEngineWorker` | `IDatabaseEngineWorker` | the per-pass work and, when signal-driven, the trigger wait | name, kind and interval (since phase 3), the pump loop and failure record (#1268), the escalation to the owning engine once a database's failures reach its limit (owner decision 25) |
+
+The engine builders' `IDatabaseEngineBuilder` went in phase 6 too; each model's sealed builder
+replaced it in phase 4 (row 6). Each base lists the BCL disposal interfaces the deleted interface
+carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDisposable`;
+`DatabaseSession`, `DatabaseTransaction`, `DatabaseServer` and `DatabaseServerSession` are
+`IAsyncDisposable`; `DatabaseEngineWorker` is neither (its release belongs to its engine, below).
 
 - **NVI and typed accessors.** Public members validate arguments, check disposal, take the
   cancellation fast path and run the state machine, then call a `protected abstract …Core` member.
@@ -79,8 +90,10 @@ layer through the interfaces the bases implement. Every base carries the deviati
   `COHESION_DATABASE_ENGINE_PUMP_IN_BASE` constant the adopted models defined to compile it to
   nothing.
 - **The shared build state composes through the leaf** (plan step P4.0, §6.5). Every model's
-  builder compiles `shared/DatabaseEngineBuilderState<TEngine, TWorker, TServer>`, which runs typed
-  factories (`Func<TEngine, TWorker>`, `Func<TEngine, TServer>`) and hands their products to the
+  builder compiles `shared/DatabaseEngineBuilderState<TEngine> where TEngine : DatabaseEngine`
+  (phase 6 collapsed its former `<TEngine, TWorker, TServer>` and fixed the products to the
+  bases), which runs typed factories (`Func<TEngine, DatabaseEngineWorker>`,
+  `Func<TEngine, DatabaseServer>`) and hands their products to the
   leaf's internal compose method as lazy sequences, one factory per product requested, so a
   factory still sees the products attached before it. The leaf attaches each product through
   `AttachWorker` and `AttachServer` and then calls `CompleteComposition()`. The state makes none of
@@ -97,9 +110,10 @@ layer through the interfaces the bases implement. Every base carries the deviati
   derived from the base, its builder composed through a bridge overload that adapted the
   engine's own two attach members; each model's phase-4 PR moved its builder to the compose
   method (KeyValuePair's `KeyValueDatabaseEngine.Compose` first, then Graph's, Documents', Blob's
-  and Sql's, each state typed `<…DatabaseEngine, DatabaseEngineWorker, DatabaseServer>`), and the
-  last one (Sql) deleted the bridge. Phase 6 fixes the products to the bases and constrains the
-  engine to `DatabaseEngine`.
+  and Sql's, each state then typed `<…DatabaseEngine, DatabaseEngineWorker, DatabaseServer>`), and
+  the last one (Sql) deleted the bridge. Phase 6 fixed the products to the bases and constrained
+  the engine to `DatabaseEngine`: a rejected worker goes to the leaf's release, a rejected server
+  or engine to its public `DisposeAsync`, with no type test left.
 - **Engine disposal has one order:** the servers (last attached first), then every worker pump is
   stopped and joined, then the workers (last attached first, each through its release hook: the
   checkpointer ends the work it left on its lanes), then the leaf closes its databases
@@ -213,8 +227,8 @@ layer through the interfaces the bases implement. Every base carries the deviati
   values fixed at construction; amending it is an owner decision, open at the phase-3 merge (plan
   §7). The plan's `Abort(Exception)` is `AbortAsync`, because the abort rolls back under the end
   gate, and the teardown's `CloseAsync` (Documents, Blob and KeyValuePair carried it) joined it.
-  `IDatabaseEngine.OfflineDatabases` arrived after the plan (#1243) and is the engine's one
-  abstract public member.
+  `OfflineDatabases` arrived on the former `IDatabaseEngine` after the plan (#1243) and is the
+  engine's one abstract public member.
 - **What moves in phase 4, per model.** Adopting the bases changes a model's behavior only where
   the base consolidates; §6.4 of the plan lists each change, and each model's PR updates the
   assertions it moves:
@@ -308,10 +322,12 @@ layer through the interfaces the bases implement. Every base carries the deviati
   (`DatabaseEngineWorker.Fault`, `ConsecutiveFailures`, `FailureCount`), and a
   database's record ends with the first pass that finishes that database's work, so a
   transient fault does not leave the engine `Faulted` for good, and one database's
-  deferred or busy work never keeps another database's resolved failure reported. Only
-  a worker that implements `IDatabaseEngineWorker` without the base and lets its loop
-  end early is recorded until disposal: the engine cannot tell when such a worker is
-  healthy again (the hosting health description says so).
+  deferred or busy work never keeps another database's resolved failure reported. Every
+  worker derives from the base since phase 6 deleted `IDatabaseEngineWorker`, whose
+  implementations could let their loop end early; the engine's pump still records a `Run`
+  that throws or returns before its engine stopped it, and reports `Faulted` until disposal,
+  but the base's loop lets nothing escape, so no worker reaches that frame (the hosting
+  health description no longer names the case).
 - **A worker failure never ends a worker, and one database's failure slows no other
   (#1268 and its review).** `DatabaseEngineWorker.Run` is a non-virtual loop over the
   non-virtual pass `RunIteration` and the protected `void RunIterationCore`. A pass
@@ -395,8 +411,8 @@ layer through the interfaces the bases implement. Every base carries the deviati
     failure record, from the first failed pass to the pass that finishes its work (several
     reports in one pass, one per file set, count once). When a checkpoint, page write-back,
     write-ahead flush or version-purge worker reaches its engine's `WorkerFailureLimit` (an
-    engine option, `DatabaseEngine.DefaultWorkerFailureLimit` = 10, Neo4j's
-    `failure_tolerance`; at least one) on one database, the base asks the owning engine to give
+    engine option, `DatabaseEngine.DefaultWorkerFailureLimit` = 100, owner decision 35 of
+    2026-10-07; at least one) on one database, the base asks the owning engine to give
     up on it (internal `DatabaseEngine.GiveUpOnDatabase`, then the leaf's
     `protected abstract TakeDatabaseOfflineCore`). The leaf finds the database in its
     lock-free published snapshot, never waiting for its registry lock, and takes its data
@@ -406,15 +422,37 @@ layer through the interfaces the bases implement. Every base carries the deviati
     `CheckpointFailures`, `PageWriteBackFailures`, `WriteAheadFlushFailures` or
     `VersionPurgeFailures`, and the storage's message names the worker instance and the
     count. Index-maintenance workers never escalate: their work costs space, not durability.
-    At the one-second backoff a database whose checkpoints keep failing goes offline about
-    ten seconds after its first failure; a deferred undo, retried on its coordinator's
-    doubling schedule, after about a hundred. The count is Neo4j's but the window is not:
-    Neo4j checks for a checkpoint every ten seconds by default
-    (`community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointThreshold.java:40`),
-    so its ten failures span about a hundred seconds. A device that stops answering for
-    longer than about ten seconds therefore takes the databases on it offline, and a hosted
-    application reopens each once the device answers; an engine that must ride out longer
-    outages raises its limit (owner review item, recorded in the plan).
+    The default keeps Neo4j's window, not its count: Neo4j panics after ten failed
+    checkpoints (`failure_tolerance`,
+    `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`)
+    and checks for a checkpoint every ten seconds by default (`DEFAULT_CHECKING_FREQUENCY_MILLIS`,
+    `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointThreshold.java:40`), so
+    its ten failures span about a hundred seconds; at the one-second backoff here that window is
+    a hundred failed passes. A device that stops answering for less than that (a storage path
+    failover) leaves its databases online; one that stays silent longer takes them offline, and
+    a hosted application reopens each once the device answers. An engine that must ride out
+    longer outages raises its limit, and one that must give up sooner lowers it. The limit was
+    ten, Neo4j's count, when decision 25 landed, and owner decision 35 of 2026-10-07 moved it to
+    the window.
+  - *The window depends on the worker.* The limit counts failed passes, so how long a give-up
+    takes is the limit times how often the worker visits the failing database (at the defaults,
+    with the window at the old limit of ten in parentheses):
+
+    | Worker | Visits a failing database | Window at 100 (at 10) |
+    |---|---|---|
+    | Checkpoint | every poll, once a second, after the one-second backoff | about 100 s, more when each attempt itself takes time (about 10 s) |
+    | Page write-back | every `PageWriteBackInterval` (1 s) after the backoff | about 100 s (about 10 s) |
+    | Write-ahead flush | when a commit wakes it or its window (the group-commit window, else 1 s) passes, after the backoff | about 100 s while commits stay pending (about 10 s) |
+    | Version purge, full pass | once per `MaintenanceInterval` (60 s) | about 100 minutes (about 10 minutes) |
+    | Version purge, deferred undo (#1226) | at its coordinator's retry, 100 ms doubling up to `MaintenanceInterval` | about 92 minutes: 102 s for the first ten, then a minute each (about 102 s) |
+
+    The worker's `Fault` is set from the first failure, so the engine is `Faulted`, Hosting's
+    health is `Degraded` and names the worker, and every failure is written to the event
+    source for the whole window. A deferred undo's writer keeps its locks all that time, and
+    Blob's server, which refuses every start, connection, handshake and operation while its
+    engine is not `Running`, is unavailable for all of it. Owner decision 35 was taken on the
+    checkpoint window; the longer windows are an owner review item (concrete-types plan, §7,
+    "P6, as landed").
   - *The journal cap.* A checkpoint that fails for the second pass or more in a row while one
     of the database's journals holds the engine's `JournalSizeLimit` (an engine option; zero,
     the default, resolves to four times `CheckpointJournalSize`, 1 GiB at its default and
@@ -463,7 +501,7 @@ layer through the interfaces the bases implement. Every base carries the deviati
 - **An offline database is reported beside the state, not in it** (#1243 review).
   A database whose fsync (#1243), drain of a journal's append buffer (#1252) or header slot
   write (#1268) failed refuses every request while its engine keeps
-  serving the others, so `EngineState` does not change; `IDatabaseEngine.OfflineDatabases`
+  serving the others, so `EngineState` does not change; `DatabaseEngine.OfflineDatabases`
   lists the open databases that are offline, and the hosting health aggregate
   reports the application unhealthy while the list is not empty. Before this an
   offline database left health `Healthy`, so neither an operator nor an
@@ -478,7 +516,7 @@ layer through the interfaces the bases implement. Every base carries the deviati
   because servers are per-model, so one application may front SQL and Documents
   engines through two servers) and `Engines` (the server-less, embedded
   registrations; an engine fronted by a server is reachable through that
-  server's context). `IDatabaseApplication` is the Web shape exactly: `Context`
+  server's `Engine`). `IDatabaseApplication` is the Web shape exactly: `Context`
   plus `StartAsync`/`StopAsync` (the loose `Engines` member it briefly carried
   is gone). Deferred composition callbacks on the builder receive the context —
   `AddServer(Func<IDatabaseApplicationContext, IDatabaseServer>)`, mirroring
@@ -487,7 +525,7 @@ layer through the interfaces the bases implement. Every base carries the deviati
   keeps the callback signature stable as the context grows. An earlier cut of
   this contract (same day, superseded before merge) exposed a single nullable
   `Server`; per-model servers made plurality structural, not optional.
-- **Two execute seams on `IDatabaseSession`.** The typed seam
+- **Two execute seams on `DatabaseSession`.** The typed seam
   (`ExecuteAsync(QueryRequest)`) is for in-process consumers that already speak a
   model's language objects (`SqlQueryRequest`). The **text seam**
   (`ExecuteAsync(string, parameters)`) exists for the wire protocol: the server
@@ -499,8 +537,8 @@ layer through the interfaces the bases implement. Every base carries the deviati
   its own parser (`SqlDatabaseSession` → `SqlQueryRequest.FromSql`).
 - **The isolation-level seam consumes the Transactions child's enum directly**
   (2026-07-13, with the MVCC-integration design — area DESIGN.md §3.8).
-  `IDatabaseSession.BeginTransactionAsync(IsolationLevel, …)` and
-  `IDatabaseTransaction.IsolationLevel` speak `Database.Transactions`'
+  `DatabaseSession.BeginTransactionAsync(IsolationLevel, …)` and
+  `DatabaseTransaction.IsolationLevel` speak `Database.Transactions`'
   `IsolationLevel` — the same pattern as `TransactionId`/`TransactionState`:
   post-inversion, the root consumes child vocabulary rather than duplicating
   it. The rejected alternative — a root-owned isolation enum mapped onto the
@@ -523,8 +561,8 @@ layer through the interfaces the bases implement. Every base carries the deviati
   own child root with pipeline/context machinery the contract root has no
   business carrying. The same holds for the other child-root vocabularies the
   root's contracts speak: `TransactionId`/`TransactionState` live in
-  `Database.Transactions` (`IDatabaseTransaction` consumes them), and
-  `ProtocolVersion` lives in `Database.Protocol` (`IDatabaseServerSession`
+  `Database.Transactions` (`DatabaseTransaction` consumes them), and
+  `ProtocolVersion` lives in `Database.Protocol` (`DatabaseServerSession`
   consumes it).
 - **Background workers are engine-owned, unconditionally — the claim handshake
   is gone** (owner decision, 2026-07-13; supersedes the #902 claim model). The
@@ -535,6 +573,8 @@ layer through the interfaces the bases implement. Every base carries the deviati
   contract (name, kind, cadence — what a diagnostics or health surface needs);
   the pump machinery (`Run`/`RunIteration`/`WaitForTrigger`) lives on the
   guided base `DatabaseEngineWorker` for the owning engine's internal use only.
+  Phase 6 of the concrete-types plan deleted the interface: the observational
+  members are the base's non-virtual `Name`, `Kind` and `Interval`.
   The rejected (previous) design — `TryClaim`/`Release` plus host worker slots
   mapping claimed workers onto the hosting execution menu — existed to let a
   host own worker scheduling; per R10 the engine had to own the *work* anyway,
@@ -548,10 +588,11 @@ layer through the interfaces the bases implement. Every base carries the deviati
   requirement; servers are per-model, each model package carrying its own copy
   of the server machinery** (owner decision 2026-07-14, settled on review of
   the second model server's extraction evidence). A server fronts exactly
-  **one** engine — `IDatabaseServerContext.Engine` is singular — so
+  **one** engine — `DatabaseServer.Engine` is singular — so
   model-specific wire behavior has a home. Each model ships its own
-  `IDatabaseServer`/`IDatabaseServerContext`/`IDatabaseServerSession`
-  implementation in its model package (`SqlDatabaseServer` in `Database.Sql`,
+  `DatabaseServer` and `DatabaseServerSession` leaves (the
+  `IDatabaseServer`/`IDatabaseServerContext`/`IDatabaseServerSession` implementations until
+  phase 6 of the concrete-types plan) in its model package (`SqlDatabaseServer` in `Database.Sql`,
   `KeyValueDatabaseServer` in `Database.KeyValuePair`), with the machinery
   (accept loop, session state machine and frame pump, guardrails, two-phase
   drain) internal to that package. The placement history is deliberate
@@ -564,9 +605,9 @@ layer through the interfaces the bases implement. Every base carries the deviati
   the preserved prediction-vs-evidence table lives in the area DESIGN §3.10).
   The contracts stay here for the same COHRES001 reason as before: feature
   libraries (quotas #167, health, `Database.Testing`) must be
-  able to name the server without referencing any runtime. The context shape
-  (`Context` = engine + sessions) mirrors the application context pattern —
-  observational composition on a context, lifecycle on the owning object.
+  able to name the server without referencing any runtime. The server's
+  observational members (`Engine` and `Sessions`, the server context the interfaces carried
+  until phase 6) sit beside its lifecycle (`StartAsync`/`StopAsync`) on the one base.
 - **The application builder is a root seam; the implementation is not** (owner
   direction, 2026-07-13). `IDatabaseApplicationBuilder`/`IDatabaseApplication`
   live here so **model packages register their engines and servers without
@@ -592,7 +633,8 @@ layer through the interfaces the bases implement. Every base carries the deviati
   2026-09-17). `CompiledSchema` is an abstract model-agnostic identity carrying
   `Format`, `Name`, `Model`, `AllowsDestructiveChanges`, and the model's canonical
   document. The root computes SHA-256 over that document without inspecting its
-  shape. `IDatabaseSchemaProvisioner` remains the common apply seam, returning
+  shape. `DatabaseInstance.ApplySchemaAsync`, behind the `SupportsSchemaProvisioning` flag, is
+  the common apply seam (the `IDatabaseSchemaProvisioner` interface until phase 6), returning
   the readonly `SchemaMigrationResult` value (`FromHash`, `ToHash`,
   `OperationCount`, `WasAlreadyApplied`). Relational declarations, builders,
   validation, serialization, and migration planning moved to the thin
@@ -628,7 +670,7 @@ engines and their satellites (`SqlCatalogException`, engine-thrown
 `SqlClientException`), the server, and `Database.Embedded`.
 The root defines semantic subtypes, each because the distinction is part
 of a public contract: `DatabaseNotFoundException` is the exact absence signal
-from `IDatabaseEngine.OpenDatabaseAsync` (so provisioning and server binding do
+from `DatabaseEngine.OpenDatabaseAsync` (so provisioning and server binding do
 not confuse an operational failure with a missing database),
 `DatabaseParseException` distinguishes fix-the-text from fix-the-data failures
 (the wire's `ParseFailure`), and the retryable-abort pair
@@ -643,7 +685,7 @@ so retrying it could apply it twice. `DatabaseOfflineException` (#1243) is what 
 operation gets after such a failure, or after any failed fsync of a database's journal
 or data files: the storage stopped writing (the storage's `StorageOfflineException`,
 `COHDBS002`, is its inner exception), and the database refuses everything until
-`IDatabaseEngine.OpenDatabaseAsync` reopens it and recovery decides the unconfirmed
+`DatabaseEngine.OpenDatabaseAsync` reopens it and recovery decides the unconfirmed
 commit — PostgreSQL's `PANIC` on a failed WAL fsync, scoped to one database instead of
 the process. Its `Code` leads the message and names the model: `COHSQLT004`,
 `COHDBK002`, `COHDBD002`, `COHDBG012`, `COHDBB002`. Every wire server reports it as
@@ -698,12 +740,12 @@ as `DatabaseException`, so the inversion changed no live wire mapping.
   its one transition: quiesce workers → durable flush → close every open
   database. Committed work is durable when `DisposeAsync` completes. `State` is
   observational only (`Running`/`Faulted`/`Disposed`).
-- Servers: `StartAsync`/`StopAsync` on `IDatabaseServer` — "running" lives on
+- Servers: `StartAsync`/`StopAsync` on `DatabaseServer` — "running" lives on
   the per-model server (and the application composing servers), never on the
   engine. Stop drains gracefully within the server's drain budget; disposal
   stops the server.
-- Sessions: disposing rolls back any active transaction (documented on the
-  interface; sessions must never commit implicitly on dispose).
+- Sessions: disposing rolls back any active transaction (owned by the
+  `DatabaseSession` base; sessions must never commit implicitly on dispose).
 - Transactions: disposing an uncommitted transaction rolls it back.
 
 ## Diagnostics
@@ -736,7 +778,7 @@ thread that took the database offline: the worker's failure count reached the en
 the checkpointer found the journal past the cap on a second failed checkpoint in a row. A give-up
 the leaf fails is written as event 1 of the worker that asked, with the database's name. A
 database a device failure took offline is not a worker event: the engines report it
-through `IDatabaseEngine.OfflineDatabases` and health, and every refusal carries the failure that
+through `DatabaseEngine.OfflineDatabases` and health, and every refusal carries the failure that
 took it offline (`DatabaseOfflineException`'s inner `StorageOfflineException`, its `Cause` and its
 I/O error). This source does not write that transition, and cannot without breaking the
 event-source convention: an engine model sees it in its storage's `OnOffline` hook, outside the

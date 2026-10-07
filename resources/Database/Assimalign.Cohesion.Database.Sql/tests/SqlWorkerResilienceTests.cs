@@ -793,11 +793,12 @@ public sealed class SqlWorkerResilienceTests
         await using var timeOnly = SqlDatabaseEngine.Create(new() { CheckpointJournalSize = 0 });
         await using var built = builder.Build();
 
-        // Assert: ten failed passes, and four times the checkpoint size (1 GiB at its default, or
-        // with the size trigger off); a limit set below the checkpoint size is refused.
+        // Assert: a hundred failed passes (owner decision 35), and four times the checkpoint size
+        // (1 GiB at its default, or with the size trigger off); a limit set below the checkpoint
+        // size is refused.
         defaults.WorkerFailureLimit.ShouldBe(DatabaseEngine.DefaultWorkerFailureLimit);
         defaults.JournalSizeLimit.ShouldBe(0);
-        engine.WorkerFailureLimit.ShouldBe(10);
+        engine.WorkerFailureLimit.ShouldBe(100);
         engine.JournalSizeLimit.ShouldBe(4 * defaults.CheckpointJournalSize);
         timeOnly.JournalSizeLimit.ShouldBe(1024L * 1024 * 1024);
         built.WorkerFailureLimit.ShouldBe(4);

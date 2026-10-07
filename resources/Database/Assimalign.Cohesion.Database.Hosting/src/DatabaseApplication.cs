@@ -29,7 +29,7 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
         _context = composition.Context;
         _ownership = composition.Ownership;
         var services = new List<IHostService>(composition.Options.Services);
-        foreach (IDatabaseServer server in composition.Context.Servers)
+        foreach (DatabaseServer server in composition.Context.Servers)
         {
             services.Add(new DatabaseServerHostService(server));
         }

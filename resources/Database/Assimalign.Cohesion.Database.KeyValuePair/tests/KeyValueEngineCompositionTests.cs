@@ -289,7 +289,7 @@ public sealed class KeyValueEngineCompositionTests
     public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
     {
         // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
-        var state = new DatabaseEngineBuilderState<KeyValueDatabaseEngine, DatabaseEngineWorker, DatabaseServer>();
+        var state = new DatabaseEngineBuilderState<KeyValueDatabaseEngine>();
         var engine = KeyValueDatabaseEngine.CreateUncomposed(new KeyValueDatabaseEngineOptions { EngineName = "contract" });
         List<RecordingWorker> workers = [];
         List<RecordingServer> servers = [];

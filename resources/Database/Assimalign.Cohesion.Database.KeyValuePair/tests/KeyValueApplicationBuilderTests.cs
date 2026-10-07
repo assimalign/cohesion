@@ -54,7 +54,7 @@ public class KeyValueApplicationBuilderTests
         serverCreated.ShouldBeTrue();
         var server = engine.Servers.ShouldHaveSingleItem().ShouldBeOfType<KeyValueDatabaseServer>();
         server.Engine.ShouldBeSameAs(engine);
-        server.Context.Engine.ShouldBeSameAs(engine);
+        server.Engine.ShouldBeSameAs(engine);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - AddKeyValue: Defaults register an in-memory engine that serves key-value commands")]

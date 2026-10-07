@@ -24,12 +24,11 @@ namespace Assimalign.Cohesion.Database;
 /// <b>Shape (concrete-types plan, phase 3, #1259).</b> The plan's constructor took the version and
 /// principal too; neither is known when the server constructs a session, so the base takes them
 /// when they are. The leaves live in the model assemblies and stay internal sealed, so the
-/// constructor is <c>protected</c>. Until phase 6 the base also implements
-/// <see cref="IDatabaseServerSession"/>.
+/// constructor is <c>protected</c>.
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
-public abstract class DatabaseServerSession : IDatabaseServerSession
+public abstract class DatabaseServerSession : IAsyncDisposable
 {
     private readonly Guid _id = Guid.NewGuid();
     private readonly object _sync = new();
@@ -122,6 +121,4 @@ public abstract class DatabaseServerSession : IDatabaseServerSession
     /// </summary>
     /// <returns>A task that completes once the session has wound down.</returns>
     protected abstract ValueTask DisposeAsyncCore();
-
-    IDatabaseSession? IDatabaseServerSession.DatabaseSession => DatabaseSession;
 }

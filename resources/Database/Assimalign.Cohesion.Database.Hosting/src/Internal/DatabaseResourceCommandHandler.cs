@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
 {
     private readonly IDatabaseApplicationContext _context;
-    private readonly Dictionary<string, IDatabaseEngine> _createdDatabases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DatabaseEngine> _createdDatabases = new(StringComparer.Ordinal);
 
     internal DatabaseResourceCommandHandler(string kind, IDatabaseApplicationContext context)
     {
@@ -44,8 +44,8 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         {
             throw new ResourceCommandRejectedException($"database.add-database key '{command.Key}' must match database key '{expectedKey}'.");
         }
-        IDatabaseEngine engine = ResolveEngine(payload);
-        if (_createdDatabases.TryGetValue(command.Key, out IDatabaseEngine? originalEngine))
+        DatabaseEngine engine = ResolveEngine(payload);
+        if (_createdDatabases.TryGetValue(command.Key, out DatabaseEngine? originalEngine))
         {
             if (!ReferenceEquals(engine, originalEngine))
             {
@@ -80,7 +80,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         {
             throw new ResourceCommandRejectedException($"{Kind} cannot be deleted: the database runtime has no principal mutation seam.");
         }
-        IDatabaseEngine engine = ResolveEngine(document.RootElement);
+        DatabaseEngine engine = ResolveEngine(document.RootElement);
         try
         {
             if (engine.TryGetDatabase(database, out _))
@@ -96,20 +96,20 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         return ReadOnlyMemory<byte>.Empty;
     }
 
-    private IDatabaseEngine ResolveEngine(JsonElement payload)
+    private DatabaseEngine ResolveEngine(JsonElement payload)
     {
-        var engines = new HashSet<IDatabaseEngine>(ReferenceEqualityComparer.Instance);
-        foreach (IDatabaseEngine engine in _context.Engines)
+        var engines = new HashSet<DatabaseEngine>(ReferenceEqualityComparer.Instance);
+        foreach (DatabaseEngine engine in _context.Engines)
         {
             engines.Add(engine);
         }
-        foreach (IDatabaseServer server in _context.Servers)
+        foreach (DatabaseServer server in _context.Servers)
         {
-            engines.Add(server.Context.Engine);
+            engines.Add(server.Engine);
         }
         string? name = payload.TryGetProperty("engine", out JsonElement configured) && configured.ValueKind is not JsonValueKind.Null
             ? Required(payload, "engine") : null;
-        IDatabaseEngine[] candidates = engines.Where(engine => name is null || engine.Name == name).ToArray();
+        DatabaseEngine[] candidates = engines.Where(engine => name is null || engine.Name == name).ToArray();
         return candidates.Length == 1 ? candidates[0] : throw new ResourceCommandRejectedException(
             $"database.add-database requires exactly one matching engine; engine '{name ?? "(unspecified)"}' matched {candidates.Length}. Specify a registered engine name.");
     }

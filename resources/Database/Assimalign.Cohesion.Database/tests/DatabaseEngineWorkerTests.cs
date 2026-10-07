@@ -492,20 +492,16 @@ public class DatabaseEngineWorkerTests
         worker.Fault.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Worker: the name, kind and cadence are the constructor's, through the interface too")]
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker: the name, kind and cadence are the constructor's")]
     public void Constructor_Identity_ShouldBeFixed()
     {
         // Arrange / Act
         var worker = new ScriptedWorker((_, _) => { }, TimeSpan.FromSeconds(5), "sql-engine/version-purge", DatabaseEngineWorkerKind.VersionPurge);
-        IDatabaseEngineWorker bridged = worker;
 
         // Assert
         worker.Name.ShouldBe("sql-engine/version-purge");
         worker.Kind.ShouldBe(DatabaseEngineWorkerKind.VersionPurge);
         worker.Interval.ShouldBe(TimeSpan.FromSeconds(5));
-        bridged.Name.ShouldBe(worker.Name);
-        bridged.Kind.ShouldBe(worker.Kind);
-        bridged.Interval.ShouldBe(worker.Interval);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Worker: a worker without a diagnostic name is refused")]

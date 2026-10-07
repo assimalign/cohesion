@@ -85,33 +85,51 @@ namespace Assimalign.Cohesion.Database;
 /// abstract public member is <see cref="OfflineDatabases"/>, state the leaf computes. The leaves
 /// live in the model assemblies, so the constructor is <c>protected</c>. A leaf re-exposes its
 /// typed database with <c>new</c> members that await the public members here, never the cores.
-/// Until phase 6 the base also implements <see cref="IDatabaseEngine"/>, so the hosting layer keeps
-/// composing engines through the interface.
+/// The hosting layer composes every model through this base (concrete-types plan, phase 6, #1262).
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
-public abstract class DatabaseEngine : IDatabaseEngine
+public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
 {
     /// <summary>
-    /// The worker failure limit an engine gets when its options state none: ten, Neo4j's tolerance
-    /// of consecutive checkpoint failures before it panics the database
-    /// (<c>MAX_CONSECUTIVE_FAILURES_TOLERANCE</c>,
-    /// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42</c>).
+    /// The worker failure limit an engine gets when its options state none: one hundred, the
+    /// window Neo4j tolerates checkpoint failures for, at this engine's worker backoff (owner
+    /// decision 35 of 2026-10-07).
     /// </summary>
     /// <remarks>
-    /// The count is Neo4j's; the window it spans is not. The workers retry a failing database
-    /// once a second (<see cref="DatabaseEngineWorker.FailureBackoff"/>), so a database whose
-    /// checkpoints keep failing goes offline about ten seconds after its first failure. Neo4j
-    /// checks for a checkpoint every ten seconds by default
+    /// <para>
+    /// Neo4j panics a database after ten consecutive checkpoint failures
+    /// (<c>MAX_CONSECUTIVE_FAILURES_TOLERANCE</c>,
+    /// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42</c>),
+    /// and it checks for a checkpoint every ten seconds by default
     /// (<c>DEFAULT_CHECKING_FREQUENCY_MILLIS</c>,
     /// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointThreshold.java:40</c>),
-    /// so its ten failures span about a hundred seconds, ten times as long. A device that stops
-    /// answering for longer than about ten seconds (a storage path failover, say) therefore takes
-    /// the databases it holds offline, and a hosted application reopens each once the device
-    /// answers again (owner decision 22). An engine that must ride out longer outages raises its
-    /// limit.
+    /// so its ten failures span about a hundred seconds. The workers here retry a failing database
+    /// no sooner than a second later (<see cref="DatabaseEngineWorker.FailureBackoff"/>), so the
+    /// limit that keeps Neo4j's window is a hundred failures, not its count of ten. A device that
+    /// stops answering for less than that window (a storage path failover, say) therefore leaves
+    /// the databases it holds online, and a hosted application reopens one that went offline once
+    /// the device answers again (owner decision 22). An engine that must ride out longer outages
+    /// raises its limit; one that must give up sooner lowers it.
+    /// </para>
+    /// <para>
+    /// The limit counts failed passes, so the time it takes depends on how often a worker visits
+    /// a failing database. The checkpoint and page write-back workers, which poll once a second,
+    /// take a database offline about a hundred seconds after its first failure, or later when
+    /// each failed attempt itself takes time; a write-ahead flush worker, which runs when a commit
+    /// wakes it or its window passes, takes about as long while commits stay pending. A
+    /// version-purge worker's full pass runs once per maintenance interval (a minute by default),
+    /// so a pass that keeps failing takes about a hundred intervals, a hundred minutes at the
+    /// default; and a rolled-back writer's deferred undo, retried on its coordinator's schedule
+    /// (about 100 ms, doubling up to the maintenance interval, #1226), takes about an hour and a
+    /// half, while the writer keeps its locks. Throughout, the worker's
+    /// <see cref="DatabaseEngineWorker.Fault"/> is set from the first failure, so the engine
+    /// reports <see cref="EngineState.Faulted"/> and every failure is written to the event source;
+    /// a model whose server refuses work while its engine is not <see cref="EngineState.Running"/>
+    /// (Blob) refuses it for the whole window.
+    /// </para>
     /// </remarks>
-    public const int DefaultWorkerFailureLimit = 10;
+    public const int DefaultWorkerFailureLimit = 100;
 
     private readonly string _name;
     private readonly EngineModel _model;
@@ -964,24 +982,4 @@ public abstract class DatabaseEngine : IDatabaseEngine
         string Reason,
         Exception Failure,
         TaskCompletionSource Completion);
-
-    IReadOnlyList<IDatabaseEngineWorker> IDatabaseEngine.Workers => Workers;
-
-    IReadOnlyList<IDatabaseServer> IDatabaseEngine.Servers => Servers;
-
-    async ValueTask<IDatabase> IDatabaseEngine.CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken)
-        => await CreateDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
-
-    async ValueTask<IDatabase> IDatabaseEngine.OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken)
-        => await OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
-
-    IAsyncEnumerable<IDatabase> IDatabaseEngine.GetDatabasesAsync(CancellationToken cancellationToken)
-        => GetDatabasesAsync(cancellationToken);
-
-    bool IDatabaseEngine.TryGetDatabase(DatabaseName name, out IDatabase database)
-    {
-        bool found = TryGetDatabase(name, out var instance);
-        database = instance!;
-        return found;
-    }
 }

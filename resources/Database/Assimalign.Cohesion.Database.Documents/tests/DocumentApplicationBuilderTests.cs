@@ -212,9 +212,9 @@ public sealed class DocumentApplicationBuilderTests
             _reject = reject;
         }
 
-        internal Func<IDatabaseApplicationContext, IDatabaseEngine>? Factory { get; private set; }
-        public IDatabaseApplicationBuilder AddEngine(IDatabaseEngine engine) => throw new NotSupportedException("Registration must be deferred.");
-        public IDatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, IDatabaseEngine> configure)
+        internal Func<IDatabaseApplicationContext, DatabaseEngine>? Factory { get; private set; }
+        public IDatabaseApplicationBuilder AddEngine(DatabaseEngine engine) => throw new NotSupportedException("Registration must be deferred.");
+        public IDatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine> configure)
         {
             if (_reject) { throw new InvalidOperationException("Registration refused."); }
             Factory = configure;
@@ -225,9 +225,9 @@ public sealed class DocumentApplicationBuilderTests
 
     private sealed class RecordingContext : IDatabaseApplicationContext
     {
-        public IReadOnlyList<IDatabaseEngine> Engines => [];
-        public IReadOnlyList<IDatabaseServer> Servers => [];
-        public IDatabaseEngine GetEngine(string name) => throw new KeyNotFoundException(name);
+        public IReadOnlyList<DatabaseEngine> Engines => [];
+        public IReadOnlyList<DatabaseServer> Servers => [];
+        public DatabaseEngine GetEngine(string name) => throw new KeyNotFoundException(name);
     }
 
     private sealed class RecordingStorageStrategy : DocumentStorageStrategy, IDisposable

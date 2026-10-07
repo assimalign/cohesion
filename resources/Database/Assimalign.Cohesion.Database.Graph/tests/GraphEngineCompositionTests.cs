@@ -308,7 +308,7 @@ public sealed class GraphEngineCompositionTests
     public void Complete_ComposeBreaksTheContract_ShouldFailAndReleaseEveryProductOnce(string scenario, string message, int workersMade, int serversMade)
     {
         // Arrange: the state the builder runs, against a leaf compose method misused on purpose.
-        var state = new DatabaseEngineBuilderState<GraphDatabaseEngine, DatabaseEngineWorker, DatabaseServer>();
+        var state = new DatabaseEngineBuilderState<GraphDatabaseEngine>();
         var engine = GraphDatabaseEngine.CreateUncomposed(new GraphDatabaseEngineOptions { EngineName = "contract" });
         List<RecordingWorker> workers = [];
         List<RecordingServer> servers = [];

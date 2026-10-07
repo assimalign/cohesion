@@ -27,10 +27,10 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <para>
 /// <b>Schema provisioning</b> is the one capability of the root base (row 8 of the concrete-types
 /// plan): the database passes <c>supportsSchemaProvisioning: true</c> and overrides
-/// <see cref="ApplySchemaCoreAsync"/>. Until phase 6 it also lists
-/// <see cref="IDatabaseSchemaProvisioner"/>, implemented by the base's inherited
-/// <see cref="DatabaseInstance.ApplySchemaAsync"/>, because the hosting layer's provisioner finds a
-/// provisionable database by that type test until phase 6 makes it a flag check.
+/// <see cref="ApplySchemaCoreAsync"/>. The hosting layer's provisioner reads
+/// <see cref="DatabaseInstance.SupportsSchemaProvisioning"/> and calls the base's
+/// <see cref="DatabaseInstance.ApplySchemaAsync"/> (phase 6, #1262, deleted the capability
+/// interface the database listed until then).
 /// </para>
 /// <para>
 /// <b>Closed by its holder.</b> Disposing the database closes it for every session. Once the
@@ -48,7 +48,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// disposed flag.
 /// </para>
 /// </remarks>
-public sealed class SqlDatabase : DatabaseInstance, IDatabaseSchemaProvisioner
+public sealed class SqlDatabase : DatabaseInstance
 {
     private readonly SqlStorage _storage;
     private readonly SqlStorage _catalogStorage;

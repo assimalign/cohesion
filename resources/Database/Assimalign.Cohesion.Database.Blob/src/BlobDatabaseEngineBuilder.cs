@@ -37,7 +37,7 @@ namespace Assimalign.Cohesion.Database.Blob;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class BlobDatabaseEngineBuilder
 {
-    private readonly DatabaseEngineBuilderState<BlobDatabaseEngine, DatabaseEngineWorker, DatabaseServer> _state = new();
+    private readonly DatabaseEngineBuilderState<BlobDatabaseEngine> _state = new();
     private readonly BlobDatabaseEngineOptions _options = new();
 
     internal BlobDatabaseEngineBuilder()

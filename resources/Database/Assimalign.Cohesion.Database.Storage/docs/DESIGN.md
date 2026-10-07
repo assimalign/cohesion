@@ -1014,7 +1014,7 @@ caller that tells the causes apart reads the enum, never the message:
   data-journal fsync failure).
 - **Only a reopen brings it back.** Disposing an offline storage writes nothing; opening the file
   set again runs recovery over the journal as the media holds it. Every engine lists an offline
-  database in `IDatabaseEngine.OfflineDatabases`, and `Database.Hosting` reports the application
+  database in `DatabaseEngine.OfflineDatabases`, and `Database.Hosting` reports the application
   unhealthy while one is listed, so an operator, or an orchestrator that restarts an unhealthy
   process, learns of it; a running hosted application reopens it by itself with backoff (owner
   decision 22).

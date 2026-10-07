@@ -51,7 +51,7 @@ public sealed class GraphDatabaseServerOptions
     public TimeSpan IdleTimeout { get; set; } = TimeSpan.FromMinutes(30);
 
     /// <summary>
-    /// Gets or sets the drain budget honored by <see cref="IDatabaseServer.StopAsync"/>
+    /// Gets or sets the drain budget honored by <see cref="DatabaseServer.StopAsync"/>
     /// before remaining sessions are aborted.
     /// </summary>
     public TimeSpan ShutdownDrainTimeout { get; set; } = TimeSpan.FromSeconds(30);

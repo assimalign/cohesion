@@ -74,13 +74,13 @@ These are also centrally managed. Don't duplicate per project unless the project
 
 ### `.NET 10 extension(...)` syntax for extension members
 ```csharp
-public static class DatabaseExtensions
+public static class CacheExtensions
 {
     extension(IServiceCollection services)
     {
-        public IServiceCollection AddDatabase()
+        public IServiceCollection AddCache()
         {
-            services.AddSingleton<IDatabase, Database>();
+            services.AddSingleton<ICache, MemoryCache>();
             return services;
         }
     }
@@ -126,13 +126,13 @@ Standing architectural commitment. No exceptions without explicit user confirmat
 ### Public classes without XML documentation
 ```csharp
 // ❌ WRONG
-public interface IDatabase { }
+public interface ICache { }
 
 // ✅ CORRECT
 /// <summary>
-/// Provides database access functionality.
+/// Provides cache access functionality.
 /// </summary>
-public interface IDatabase { }
+public interface ICache { }
 ```
 
 ### `ThrowHelper` / `ThrowHelpers` types
@@ -181,7 +181,7 @@ patterns, so they stay.
 ### Types
 | Kind | Convention | Example |
 |---|---|---|
-| Interface | `I` prefix | `IDatabase`, `IConfigurationProvider` |
+| Interface | `I` prefix | `ICache`, `IConfigurationProvider` |
 | Class | PascalCase, noun | `DatabaseEngine`, `ConfigurationBuilder` |
 | Exception | `Exception` suffix | `DatabaseConnectionException` |
 | Extension container | `Extensions` suffix | `ServiceCollectionExtensions` |

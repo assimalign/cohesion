@@ -12,5 +12,5 @@ public sealed class EmbeddedDatabaseOptions
     /// their model factories, for example
     /// <c>KeyValueDatabaseEngine.Create(new() { RootPath = dataPath })</c>.
     /// </summary>
-    public IList<IDatabaseEngine> Engines { get; } = new List<IDatabaseEngine>();
+    public IList<DatabaseEngine> Engines { get; } = new List<DatabaseEngine>();
 }

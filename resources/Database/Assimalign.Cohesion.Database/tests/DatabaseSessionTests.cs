@@ -297,24 +297,6 @@ public class DatabaseSessionTests
         error.InnerExceptions.ShouldBe(new Exception[] { teardown, refusal });
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Session: the interface view is the same session, database and transaction")]
-    public async Task InterfaceBridge_IDatabaseSession_ShouldExposeTheSameObjects()
-    {
-        // Arrange
-        var session = CreateSession();
-        IDatabaseSession bridged = session;
-
-        // Act
-        var transaction = await bridged.BeginTransactionAsync(IsolationLevel.ReadCommitted);
-
-        // Assert
-        bridged.Database.ShouldBeSameAs(session.Database);
-        transaction.ShouldBeSameAs(session.CurrentTransaction);
-        bridged.CurrentTransaction.ShouldBeSameAs(transaction);
-        bridged.State.ShouldBe(SessionState.Open);
-        (await bridged.ExecuteAsync("SELECT 1")).ShouldBeSameAs(TestResult.Instance);
-    }
-
     [Fact(DisplayName = "Cohesion Test [Database] - Session: the database is the constructor's and is required")]
     public void Constructor_Database_ShouldBeFixedAndRequired()
     {

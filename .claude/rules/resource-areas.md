@@ -273,8 +273,9 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   build rollback and disposal continue past a failure and aggregate it, which its tests pin).
   Moving them into the container needs the provider to continue-and-aggregate first. Its
   `Services` registry (reflection-free options, closed registrations) and its ownership of the
-  built provider already follow this section; its explicit `IDatabaseApplicationBuilder.AddEngine`
-  shims still forward to the private engine registry rather than to `Services`.
+  built provider already follow this section; its explicit `IDatabaseApplicationBuilder.AddEngine(DatabaseEngine)`
+  and `AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine>)` shims still forward to the
+  private engine registry rather than to `Services`.
 
 ## What every area is expected to provide
 

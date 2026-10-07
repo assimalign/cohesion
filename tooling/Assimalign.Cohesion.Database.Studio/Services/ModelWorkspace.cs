@@ -40,14 +40,14 @@ internal abstract class ModelWorkspace : IAsyncDisposable
 
     public StudioEngines Engines { get; }
 
-    public IDatabaseEngine Engine => Engines.Get(Model);
+    public DatabaseEngine Engine => Engines.Get(Model);
 
     public EndPoint? WireEndPoint { get; }
 
     public string? CurrentDatabase { get; private set; }
 
     /// <summary>The embedded session; null in wire modes.</summary>
-    public IDatabaseSession? Session { get; private set; }
+    public DatabaseSession? Session { get; private set; }
 
     /// <summary>Database create/drop/list needs the engine; an external server exposes no such verbs over the wire.</summary>
     public bool CanManageDatabases => Mode != ConnectionMode.WireExternal;
@@ -58,7 +58,7 @@ internal abstract class ModelWorkspace : IAsyncDisposable
 
     public string Description => Mode switch
     {
-        ConnectionMode.Embedded => $"Embedded: in-process {Engine.GetType().Name} + IDatabaseSession",
+        ConnectionMode.Embedded => $"Embedded: in-process {Engine.GetType().Name} + DatabaseSession",
         ConnectionMode.WireLoopback => $"Wire (loopback {EndPointText}): Studio-owned server + {ClientName}",
         ConnectionMode.WireExternal => $"Wire (external {EndPointText}): {ClientName}",
         _ => Mode.ToString(),
@@ -118,7 +118,7 @@ internal abstract class ModelWorkspace : IAsyncDisposable
             }
 
             var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-            await foreach (IDatabase database in Engine.GetDatabasesAsync(token).ConfigureAwait(false))
+            await foreach (DatabaseInstance database in Engine.GetDatabasesAsync(token).ConfigureAwait(false))
             {
                 names.Add(database.Name.ToString());
             }
@@ -181,7 +181,7 @@ internal abstract class ModelWorkspace : IAsyncDisposable
 
             if (Mode == ConnectionMode.Embedded)
             {
-                IDatabase database = await Engine.OpenDatabaseAsync(name, token).ConfigureAwait(false);
+                DatabaseInstance database = await Engine.OpenDatabaseAsync(name, token).ConfigureAwait(false);
                 Session = await database.CreateSessionAsync(token).ConfigureAwait(false);
             }
             else
@@ -219,7 +219,7 @@ internal abstract class ModelWorkspace : IAsyncDisposable
                 return;
             }
 
-            IDatabaseTransaction transaction = RequireSession().CurrentTransaction
+            DatabaseTransaction transaction = RequireSession().CurrentTransaction
                 ?? throw new InvalidOperationException("No transaction is active.");
             await transaction.CommitAsync(token).ConfigureAwait(false);
         }, cancellationToken);
@@ -233,7 +233,7 @@ internal abstract class ModelWorkspace : IAsyncDisposable
                 return;
             }
 
-            IDatabaseTransaction transaction = RequireSession().CurrentTransaction
+            DatabaseTransaction transaction = RequireSession().CurrentTransaction
                 ?? throw new InvalidOperationException("No transaction is active.");
             await transaction.RollbackAsync(token).ConfigureAwait(false);
         }, cancellationToken);
@@ -245,14 +245,14 @@ internal abstract class ModelWorkspace : IAsyncDisposable
         => throw new NotSupportedException($"{Model.DisplayName} has no wire transaction verbs; explicit transactions are embedded-only.");
 
     /// <summary>Opens a short-lived embedded session on the current database (loopback/embedded only).</summary>
-    protected async Task<IDatabaseSession> OpenAdminSessionAsync(CancellationToken cancellationToken)
+    protected async Task<DatabaseSession> OpenAdminSessionAsync(CancellationToken cancellationToken)
     {
         if (!CanManageDatabases)
         {
             throw new NotSupportedException("An external server exposes no catalog/admin verbs for this model over the wire.");
         }
 
-        IDatabase database = await Engine.OpenDatabaseAsync(RequireDatabase(), cancellationToken).ConfigureAwait(false);
+        DatabaseInstance database = await Engine.OpenDatabaseAsync(RequireDatabase(), cancellationToken).ConfigureAwait(false);
         return await database.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -260,7 +260,7 @@ internal abstract class ModelWorkspace : IAsyncDisposable
 
     protected abstract ValueTask CloseWireAsync();
 
-    protected IDatabaseSession RequireSession()
+    protected DatabaseSession RequireSession()
         => Session ?? throw new InvalidOperationException("Select a database first.");
 
     protected string RequireDatabase()

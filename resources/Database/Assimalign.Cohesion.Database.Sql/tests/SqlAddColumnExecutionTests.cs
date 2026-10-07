@@ -123,7 +123,7 @@ public sealed class SqlAddColumnExecutionTests
             [new CompiledSchemaTable("additions", "Tests.Additions",
                 [new CompiledSchemaColumn("id", DatabaseType.Int32, IsNullable: false),
                  new CompiledSchemaColumn("label", DatabaseType.String, IsNullable: true)], null, [], [])], [], [], [], []);
-        await database.ShouldBeAssignableTo<IDatabaseSchemaProvisioner>().ApplySchemaAsync(schema,
+        await database.ApplySchemaAsync(schema,
             cancellationToken: CancellationToken.None);
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "INSERT INTO additions VALUES (1, 'original'), (2, NULL)");

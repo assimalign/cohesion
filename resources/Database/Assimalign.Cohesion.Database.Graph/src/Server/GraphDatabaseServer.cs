@@ -41,7 +41,6 @@ public sealed class GraphDatabaseServer : DatabaseServer
     private readonly GraphDatabaseServerOptions _options;
     private readonly IConnectionListener _listener;
     private readonly DatabaseAuthenticator _authenticator;
-    private readonly GraphDatabaseServerContext _context;
     private readonly ConcurrentDictionary<Guid, GraphDatabaseServerSession> _sessions = new();
 
     // Soft stop ends the accept loop and cancels idle/handshake reads so sessions
@@ -68,7 +67,6 @@ public sealed class GraphDatabaseServer : DatabaseServer
         _options = options;
         _listener = options.Listener;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
-        _context = new GraphDatabaseServerContext(this, engine);
     }
 
     /// <summary>
@@ -78,9 +76,6 @@ public sealed class GraphDatabaseServer : DatabaseServer
 
     /// <inheritdoc />
     public override IReadOnlyCollection<DatabaseServerSession> Sessions => [.. _sessions.Values];
-
-    /// <inheritdoc />
-    public override IDatabaseServerContext Context => _context;
 
     /// <summary>
     /// Creates a Graph database server over the given engine and options. The server
@@ -98,13 +93,6 @@ public sealed class GraphDatabaseServer : DatabaseServer
 
         return new GraphDatabaseServer(engine, options);
     }
-
-    /// <summary>
-    /// A point-in-time snapshot of the sessions currently active on the server,
-    /// for the server context (the phase-6 bridge).
-    /// </summary>
-    internal IReadOnlyCollection<IDatabaseServerSession> GetSessionsSnapshot()
-        => [.. _sessions.Values];
 
     /// <inheritdoc />
     protected override async Task StartCoreAsync(CancellationToken cancellationToken)

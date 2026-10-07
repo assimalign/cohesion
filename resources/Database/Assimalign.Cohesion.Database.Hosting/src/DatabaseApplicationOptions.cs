@@ -20,11 +20,11 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     public FileSystemPath? ContentRootPath { get; set; }
 
     /// <summary>Gets caller-owned engines to borrow. Nested servers are discovered during Build.</summary>
-    public IList<IDatabaseEngine> Engines { get; } = new List<IDatabaseEngine>();
+    public IList<DatabaseEngine> Engines { get; } = new List<DatabaseEngine>();
 
     /// <summary>Gets legacy caller-owned servers to start and stop; their engines are implicitly borrowed.</summary>
     /// <remarks>New composition nests server factories under model engine builders.</remarks>
-    public IList<IDatabaseServer> Servers { get; } = new List<IDatabaseServer>();
+    public IList<DatabaseServer> Servers { get; } = new List<DatabaseServer>();
 
     /// <summary>Gets caller-owned services, started before servers and stopped after servers drain.</summary>
     public IList<IHostService> Services { get; } = new List<IHostService>();
@@ -32,7 +32,7 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     /// <summary>
     /// Gets or sets whether the running application reopens a database its engine reports offline
     /// (owner decision 22 of 2026-10-06): true, the default, retries
-    /// <see cref="IDatabaseEngine.OpenDatabaseAsync"/> with exponential backoff and jitter, from
+    /// <see cref="DatabaseEngine.OpenDatabaseAsync"/> with exponential backoff and jitter, from
     /// <see cref="ReopenInitialDelay"/> up to <see cref="ReopenMaximumDelay"/>, until the reopen
     /// succeeds or the application stops; false leaves every offline database to the operator.
     /// </summary>

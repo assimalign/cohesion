@@ -74,8 +74,11 @@ public sealed class DatabaseApplicationLifetimeTests
         var actual = await Should.ThrowAsync<InvalidOperationException>(async () =>
             await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout()));
 
+        // The host rolls back every service it started, the failed server included, but a failed
+        // start is terminal on the server base: the failing server released what its start held,
+        // so its stop reaches no core (concrete-types plan, phase 6).
         actual.ShouldBeSameAs(failure);
-        log.ShouldBe(["service:start", "first:start", "failing:start", "failing:stop", "first:stop", "service:stop"]);
+        log.ShouldBe(["service:start", "first:start", "failing:start", "first:stop", "service:stop"]);
         await Should.ThrowAsync<InvalidOperationException>(async () =>
             await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout()));
     }
@@ -99,9 +102,11 @@ public sealed class DatabaseApplicationLifetimeTests
 
         await Should.ThrowAsync<AggregateException>(async () => await ((IAsyncDisposable)application).DisposeAsync());
 
+        // The host's stop ran the server's stop core, which failed; the engine's disposal of the
+        // stopped server then finds nothing left to stop.
         first.DisposeCount.ShouldBe(1);
         second.DisposeCount.ShouldBe(1);
-        server.DisposeCount.ShouldBe(1);
+        server.Stops.ShouldBe(1);
     }
 
     private sealed class RecordingRunner : IHostRunner, IHostRunObserver

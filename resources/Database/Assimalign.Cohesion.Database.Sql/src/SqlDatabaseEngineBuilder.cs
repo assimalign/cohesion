@@ -39,7 +39,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class SqlDatabaseEngineBuilder
 {
-    private readonly DatabaseEngineBuilderState<SqlDatabaseEngine, DatabaseEngineWorker, DatabaseServer> _state = new();
+    private readonly DatabaseEngineBuilderState<SqlDatabaseEngine> _state = new();
     private readonly SqlDatabaseEngineOptions _options = new();
 
     internal SqlDatabaseEngineBuilder()
@@ -99,8 +99,8 @@ public sealed class SqlDatabaseEngineBuilder
 
     /// <summary>
     /// Gets or sets how many passes in a row a worker may fail on one database before the engine
-    /// takes it offline (<see cref="SqlDatabaseEngineOptions.WorkerFailureLimit"/>; ten by
-    /// default). Build validates it.
+    /// takes it offline (<see cref="SqlDatabaseEngineOptions.WorkerFailureLimit"/>; one
+    /// hundred by default). Build validates it.
     /// </summary>
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
     public int WorkerFailureLimit

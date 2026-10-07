@@ -52,4 +52,4 @@ outcome is an event of the `Assimalign.Cohesion.Database.Hosting` event source
 The private cross-area `Web.Hosting` and `Web.Health` references implement the
 HTTP delivery seam without exposing Web types from Database public APIs. Model
 wire protocols remain independent and are still composed through
-`IDatabaseServer`.
+`DatabaseServer`.

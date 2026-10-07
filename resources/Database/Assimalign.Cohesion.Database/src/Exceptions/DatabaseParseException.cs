@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database;
 /// protocol maps them to a dedicated error code (<c>ParseFailure</c>), and callers
 /// can retry with corrected text without treating the session as faulted. Every
 /// model's session throws this from the text-execute seam
-/// (<see cref="IDatabaseSession.ExecuteAsync(string, System.Collections.Generic.IReadOnlyDictionary{string, object?}?, System.Threading.CancellationToken)"/>)
+/// (<see cref="DatabaseSession.ExecuteAsync(string, System.Collections.Generic.IReadOnlyDictionary{string, object?}?, System.Threading.CancellationToken)"/>)
 /// when its parser rejects the input.
 /// </remarks>
 public class DatabaseParseException : DatabaseException

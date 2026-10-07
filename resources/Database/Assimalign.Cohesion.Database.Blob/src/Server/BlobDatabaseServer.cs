@@ -43,7 +43,6 @@ public sealed class BlobDatabaseServer : DatabaseServer
     private readonly BlobDatabaseServerOptions _options;
     private readonly IConnectionListener _listener;
     private readonly DatabaseAuthenticator _authenticator;
-    private readonly BlobDatabaseServerContext _context;
     private readonly ConcurrentDictionary<Guid, BlobDatabaseServerSession> _sessions = new();
     private readonly ConcurrentDictionary<Guid, Task> _rejections = new();
 
@@ -74,7 +73,6 @@ public sealed class BlobDatabaseServer : DatabaseServer
         _options = options;
         _listener = options.Listener;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
-        _context = new BlobDatabaseServerContext(this, engine);
     }
 
     /// <summary>
@@ -84,9 +82,6 @@ public sealed class BlobDatabaseServer : DatabaseServer
 
     /// <inheritdoc />
     public override IReadOnlyCollection<DatabaseServerSession> Sessions => [.. _sessions.Values];
-
-    /// <inheritdoc />
-    public override IDatabaseServerContext Context => _context;
 
     /// <summary>
     /// Creates a Blob database server over the given engine and options. The server
@@ -105,13 +100,6 @@ public sealed class BlobDatabaseServer : DatabaseServer
 
         return new BlobDatabaseServer(engine, options);
     }
-
-    /// <summary>
-    /// A point-in-time snapshot of the sessions currently active on the server,
-    /// for the server context (the phase-6 bridge).
-    /// </summary>
-    internal IReadOnlyCollection<IDatabaseServerSession> GetSessionsSnapshot()
-        => [.. _sessions.Values];
 
     /// <inheritdoc />
     /// <remarks>

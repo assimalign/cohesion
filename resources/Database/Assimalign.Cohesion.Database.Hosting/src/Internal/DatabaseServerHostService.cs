@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Hosting;
 namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 /// <summary>
-/// The endpoint host service: maps a <see cref="IDatabaseServer"/>'s bind and drain
+/// The endpoint host service: maps a <see cref="DatabaseServer"/>'s bind and drain
 /// operations directly onto the host lifecycle.
 /// </summary>
 /// <remarks>
@@ -18,9 +18,9 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 /// </remarks>
 internal sealed class DatabaseServerHostService : IHostService
 {
-    private readonly IDatabaseServer _server;
+    private readonly DatabaseServer _server;
 
-    internal DatabaseServerHostService(IDatabaseServer server)
+    internal DatabaseServerHostService(DatabaseServer server)
     {
         _server = server;
         Id = ServiceId.New();

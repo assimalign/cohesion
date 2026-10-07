@@ -44,12 +44,11 @@ namespace Assimalign.Cohesion.Database;
 /// re-exposes it typed with a <c>new</c> property over a typed field of its own, and its typed
 /// transaction with a <c>new</c> member that awaits <see cref="BeginTransactionAsync(IsolationLevel, CancellationToken)"/>,
 /// never <see cref="BeginTransactionCoreAsync"/>. The leaves live in the model assemblies, so the
-/// constructor is <c>protected</c>. Until phase 6 the base also implements
-/// <see cref="IDatabaseSession"/>.
+/// constructor is <c>protected</c>.
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
-public abstract class DatabaseSession : IDatabaseSession
+public abstract class DatabaseSession : IAsyncDisposable
 {
     /// <summary>
     /// The one message of the "already active" check.
@@ -387,14 +386,4 @@ public abstract class DatabaseSession : IDatabaseSession
     }
 
     private static DatabaseException CreateClosedException() => new("The session is closed.");
-
-    IDatabase IDatabaseSession.Database => _database;
-
-    IDatabaseTransaction? IDatabaseSession.CurrentTransaction => CurrentTransaction;
-
-    async ValueTask<IDatabaseTransaction> IDatabaseSession.BeginTransactionAsync(CancellationToken cancellationToken)
-        => await BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-
-    async ValueTask<IDatabaseTransaction> IDatabaseSession.BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken)
-        => await BeginTransactionAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
 }

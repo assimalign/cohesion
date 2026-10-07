@@ -12,21 +12,18 @@ namespace Assimalign.Cohesion.Database;
 /// for one engine, the freeze after the one build attempt, and the rollback of a build that fails.
 /// </summary>
 /// <typeparam name="TEngine">The model's engine, which every factory receives.</typeparam>
-/// <typeparam name="TWorker">The worker type the model's factories return.</typeparam>
-/// <typeparam name="TServer">The server type the model's factories return.</typeparam>
 /// <remarks>
 /// <para>
-/// <b>Typed over the engine (concrete-types plan, step P4.0, #1260).</b> A factory receives the
-/// model's own engine, so each model's sealed builder offers typed <c>AddWorker</c> and
-/// <c>AddServer</c>. Every model's engine derives from <see cref="DatabaseEngine"/> since phase 4,
-/// and every builder composes <see cref="DatabaseEngineWorker"/> and <see cref="DatabaseServer"/>;
-/// the product types stay parameters, constrained to the root interfaces the bases implement,
-/// until phase 6 deletes the interfaces, fixes the products to the bases and constrains
-/// <typeparamref name="TEngine"/> to <see cref="DatabaseEngine"/>.
+/// <b>Typed over the engine (concrete-types plan, step P4.0, #1260; collapsed in phase 6, #1262).</b>
+/// A factory receives the model's own engine, so each model's sealed builder offers typed
+/// <c>AddWorker</c> and <c>AddServer</c>. The products are the root bases,
+/// <see cref="DatabaseEngineWorker"/> and <see cref="DatabaseServer"/>: every model composes them
+/// since phase 4, and phase 6 deleted the root interfaces the state was constrained to while the
+/// models adopted the bases one at a time.
 /// </para>
 /// <para>
 /// <b>The leaf attaches; the base checks.</b> A builder cannot call the protected attach members
-/// of the engine it built, so <see cref="Complete(TEngine, Action{IEnumerable{TWorker}, IEnumerable{TServer}}, Func{TWorker, ValueTask})"/>
+/// of the engine it built, so <see cref="Complete(TEngine, Action{IEnumerable{DatabaseEngineWorker}, IEnumerable{DatabaseServer}}, Func{DatabaseEngineWorker, ValueTask})"/>
 /// takes the leaf's internal compose method, which attaches each product through
 /// <c>AttachWorker</c> and <c>AttachServer</c> and freezes the engine with
 /// <c>CompleteComposition</c>. The base refuses a product attached twice, a server that fronts
@@ -47,7 +44,7 @@ namespace Assimalign.Cohesion.Database;
 /// <para>
 /// <b>A rejected product is released by its owner's rules.</b> A rejected server or engine is
 /// disposed through its public disposal. A worker has none (concrete-types plan, row 7): the
-/// leaf hands <see cref="Complete(TEngine, Action{IEnumerable{TWorker}, IEnumerable{TServer}}, Func{TWorker, ValueTask})"/>
+/// leaf hands <see cref="Complete(TEngine, Action{IEnumerable{DatabaseEngineWorker}, IEnumerable{DatabaseServer}}, Func{DatabaseEngineWorker, ValueTask})"/>
 /// its internal re-exposure of the engine base's protected
 /// <see cref="DatabaseEngine.ReleaseUnownedWorkerAsync"/>, the same way it hands over its compose
 /// method, and a rejected worker no engine owns runs its release hook through it. A worker the
@@ -57,13 +54,11 @@ namespace Assimalign.Cohesion.Database;
 /// deleted with the last model's phase-4 PR (Sql, #1260).
 /// </para>
 /// </remarks>
-internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
-    where TEngine : class, IDatabaseEngine
-    where TWorker : class, IDatabaseEngineWorker
-    where TServer : class, IDatabaseServer
+internal sealed class DatabaseEngineBuilderState<TEngine>
+    where TEngine : DatabaseEngine
 {
-    private readonly List<Func<TEngine, TWorker>> _workers = [];
-    private readonly List<Func<TEngine, TServer>> _servers = [];
+    private readonly List<Func<TEngine, DatabaseEngineWorker>> _workers = [];
+    private readonly List<Func<TEngine, DatabaseServer>> _servers = [];
     private int _buildAttempted;
     private TEngine? _completedEngine;
 
@@ -92,7 +87,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
     /// <param name="configure">Creates the worker for the built engine.</param>
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
-    public void AddWorker(Func<TEngine, TWorker> configure)
+    public void AddWorker(Func<TEngine, DatabaseEngineWorker> configure)
     {
         EnsureMutable();
         ArgumentNullException.ThrowIfNull(configure);
@@ -105,7 +100,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
     /// <param name="configure">Creates the server for the built engine.</param>
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
-    public void AddServer(Func<TEngine, TServer> configure)
+    public void AddServer(Func<TEngine, DatabaseServer> configure)
     {
         EnsureMutable();
         ArgumentNullException.ThrowIfNull(configure);
@@ -150,7 +145,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
     /// did not attach, or returned before it read both sequences to the end).
     /// </exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>
-    public TEngine Complete(TEngine engine, Action<IEnumerable<TWorker>, IEnumerable<TServer>> compose, Func<TWorker, ValueTask> releaseWorker)
+    public TEngine Complete(TEngine engine, Action<IEnumerable<DatabaseEngineWorker>, IEnumerable<DatabaseServer>> compose, Func<DatabaseEngineWorker, ValueTask> releaseWorker)
     {
         try
         {
@@ -172,13 +167,13 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
                 // product it already owns like any other, and that product is the engine's to dispose.
                 var rejected = _pending;
                 _pending = null;
-                if (rejected is TWorker worker && !IsAttached(engine, worker))
+                if (rejected is DatabaseEngineWorker worker && !IsAttached(engine, worker))
                 {
                     ReleaseRejected(worker, releaseWorker, failure);
                 }
-                else if (rejected is not null && !IsAttached(engine, rejected))
+                else if (rejected is DatabaseServer server && !IsAttached(engine, server))
                 {
-                    DisposeRejected(rejected, failure);
+                    DisposeRejected(server, failure);
                 }
 
                 throw;
@@ -278,7 +273,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
 
     // A worker has no public disposal (row 7): the leaf's release runs its hook once, unless an
     // engine owns it.
-    private static void ReleaseRejected(TWorker worker, Func<TWorker, ValueTask> releaseWorker, Exception failure)
+    private static void ReleaseRejected(DatabaseEngineWorker worker, Func<DatabaseEngineWorker, ValueTask> releaseWorker, Exception failure)
     {
         try
         {
@@ -291,19 +286,13 @@ internal sealed class DatabaseEngineBuilderState<TEngine, TWorker, TServer>
         }
     }
 
-    private static void DisposeRejected(object product, Exception failure)
+    // A rejected server or engine: both are released through their public disposal.
+    private static void DisposeRejected(IAsyncDisposable product, Exception failure)
     {
         try
         {
-            if (product is IAsyncDisposable asyncDisposable)
-            {
-                Task.Run(async () => await asyncDisposable.DisposeAsync().ConfigureAwait(false))
-                    .GetAwaiter().GetResult();
-            }
-            else if (product is IDisposable disposable)
-            {
-                disposable.Dispose();
-            }
+            Task.Run(async () => await product.DisposeAsync().ConfigureAwait(false))
+                .GetAwaiter().GetResult();
         }
         catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
         {
