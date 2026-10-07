@@ -898,8 +898,13 @@ internal sealed class Http2Stream
     /// Thrown when a request-parse interceptor rejects the request.
     /// </exception>
     /// <exception cref="Http2StreamException">
-    /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> when the <c>:path</c> does not decode to a
-    /// legal path — a malformed request, reset per stream (RFC 9113 §8.1.1).
+    /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> for a malformed request, reset per stream
+    /// (RFC 9113 §8.1.1): a pseudo-header field that is repeated, a required one that is missing, an
+    /// empty <c>:path</c> (RFC 9113 §8.3.1), or a <c>:path</c> that does not decode to a legal path.
+    /// </exception>
+    /// <exception cref="Http2ConnectionException">
+    /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> when the head violates the extended
+    /// CONNECT rules of RFC 8441 §4.
     /// </exception>
     public async ValueTask<Http2Context> CreateContextAsync(
         HPackDecoder decoder,
@@ -930,6 +935,13 @@ internal sealed class Http2Stream
         // empty block, under its own size bound (ReceiveHeaders, ReceiveTrailers).
         _headerBlock.SetLength(0);
 
+        // RFC 9113 §8.3 — a repeated pseudo-header field makes the request malformed. The block is fully
+        // decoded, so this is a stream error (RFC 9113 §8.1.1), as are the §8.3.1 checks below.
+        if (decodedHeaders.RepeatedPseudoHeader is { } repeatedPseudoHeader)
+        {
+            throw CreateMalformedRequestError($"repeats the '{repeatedPseudoHeader}' pseudo-header field (RFC 9113 §8.3)");
+        }
+
         // RFC 8441 §4 / RFC 9220 — validate extended CONNECT before materializing
         // the request: the :protocol pseudo-header is only valid on a CONNECT, and
         // an extended CONNECT MUST also carry :scheme, :path, and :authority. A
@@ -947,6 +959,35 @@ internal sealed class Http2Stream
             throw new Http2ConnectionException(Http2ErrorCode.ProtocolError, extendedConnectViolation);
         }
 
+        // RFC 9113 §8.3.1 — every request carries :method, and every request but a CONNECT carries
+        // :scheme and :path, with a :path that is never empty (OPTIONS for the server as a whole uses
+        // "*"). A classic CONNECT carries only :method and :authority (RFC 9113 §8.5); an extended
+        // CONNECT was held to RFC 8441 §4 above. Nothing is defaulted: a request without its
+        // pseudo-header fields is malformed, not a GET of "/". The stream is reset before the request
+        // reaches the application, and the connection keeps serving its other streams.
+        if (decodedHeaders.Path is { Length: 0 })
+        {
+            throw CreateMalformedRequestError("carries an empty ':path' pseudo-header field (RFC 9113 §8.3.1)");
+        }
+
+        if (decodedHeaders.Method is not { } methodValue)
+        {
+            throw CreateMalformedRequestError("is missing the ':method' pseudo-header field (RFC 9113 §8.3.1)");
+        }
+
+        if (!string.Equals(methodValue, HttpMethod.Connect.Value, StringComparison.Ordinal))
+        {
+            if (decodedHeaders.Scheme is null)
+            {
+                throw CreateMalformedRequestError("is missing the ':scheme' pseudo-header field (RFC 9113 §8.3.1)");
+            }
+
+            if (decodedHeaders.Path is null)
+            {
+                throw CreateMalformedRequestError("is missing the ':path' pseudo-header field (RFC 9113 §8.3.1)");
+            }
+        }
+
         // RFC 3986 §2.4 — the :path is percent-decoded through the same HttpPath.FromUriComponent
         // decode HTTP/1.1 and HTTP/3 use. A :path whose decoded form is not a legal path — a decoded
         // space, control character, '?', '#', or NUL, or no leading '/' — makes the request malformed,
@@ -954,6 +995,9 @@ internal sealed class Http2Stream
         // header block has been fully decoded, so the connection's HPACK state is intact: only this
         // stream is reset and the connection keeps serving its other streams. The decode semantics
         // themselves are unchanged (h1/h2/h3 parity); only the failure's scope is.
+        //
+        // Only a classic CONNECT arrives here without a :path; its target is the root, as for the
+        // authority-form request-target of HTTP/1.1.
         HttpQueryCollection query;
         HttpPath path;
         try
@@ -983,7 +1027,7 @@ internal sealed class Http2Stream
             ? fallbackScheme
             : string.Equals(decodedHeaders.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
 
-        HttpMethod method = HttpMethod.GetCanonicalizedValue(decodedHeaders.Method ?? HttpMethod.Get.Value);
+        HttpMethod method = HttpMethod.GetCanonicalizedValue(methodValue);
         TransportHttpRequestHead requestHead = new(
             host,
             path,
@@ -1060,6 +1104,19 @@ internal sealed class Http2Stream
         return headers.TryGetValue(HttpHeaderKey.ContentLength, out HttpHeaderValue value)
             && value.Count == 1
             && long.TryParse(value.Value, NumberStyles.None, CultureInfo.InvariantCulture, out contentLength);
+    }
+
+    /// <summary>
+    /// The stream error for a malformed request head (RFC 9113 §8.1.1): <c>PROTOCOL_ERROR</c> on this
+    /// stream alone, which the frame pump's stream-error handler sends as an <c>RST_STREAM</c>.
+    /// </summary>
+    /// <param name="reason">What is wrong with the head, phrased to follow "the request on stream N".</param>
+    private Http2StreamException CreateMalformedRequestError(string reason)
+    {
+        return new Http2StreamException(
+            StreamId,
+            Http2ErrorCode.ProtocolError,
+            $"The HTTP/2 request on stream {StreamId} {reason}.");
     }
 
     private static HttpQueryCollection ParseQuery(string requestTarget, out HttpPath path)

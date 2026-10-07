@@ -4,11 +4,18 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Accumulates a decoded HTTP/2 field section while enforcing RFC 9113
-/// §8.2 (field validity) and §8.3 (pseudo-header order + completeness)
-/// rules. Pseudo-headers (<c>:method</c>, <c>:path</c>, <c>:scheme</c>,
-/// <c>:authority</c>) are surfaced as typed properties; ordinary fields
+/// §8.2 (field validity) and §8.3 (pseudo-header order) rules. Pseudo-headers
+/// (<c>:method</c>, <c>:path</c>, <c>:scheme</c>, <c>:authority</c>,
+/// <c>:protocol</c>) are surfaced as typed properties; ordinary fields
 /// land in <see cref="Headers"/>.
 /// </summary>
+/// <remarks>
+/// Whether the pseudo-header fields make a complete request — none missing, none repeated, no empty
+/// <c>:path</c> (RFC 9113 §8.3.1) — is judged by the stream once the section is folded, because a
+/// malformed request costs only its stream (RFC 9113 §8.1.1). A repeated pseudo-header is therefore
+/// recorded in <see cref="RepeatedPseudoHeader"/> rather than thrown, and an empty <c>:path</c> is kept
+/// as it arrived.
+/// </remarks>
 internal sealed class HPackDecodedHeaders
 {
     private bool _sawRegularField;
@@ -31,6 +38,13 @@ internal sealed class HPackDecodedHeaders
     /// extended CONNECT request. <see langword="null"/> for ordinary requests.
     /// </summary>
     public string? Protocol { get; private set; }
+
+    /// <summary>
+    /// The name of the first pseudo-header field the section repeats, or <see langword="null"/> when
+    /// none is repeated. The first value is the one kept. A repeated pseudo-header makes the request
+    /// malformed (RFC 9113 §8.3).
+    /// </summary>
+    public string? RepeatedPseudoHeader { get; private set; }
 
     public HttpHeaderCollection Headers { get; }
 
@@ -91,52 +105,24 @@ internal sealed class HPackDecodedHeaders
                 $"Pseudo-header field '{name}' appeared after regular fields; pseudo-headers MUST come first.");
         }
 
+        // RFC 9113 §8.3 — each pseudo-header field appears at most once. A repeat is recorded for the
+        // stream to judge (see the remarks on this type); an empty :path is likewise kept for it.
         switch (name)
         {
             case ":authority":
-                if (Authority is not null)
-                {
-                    throw new HPackDecodingException(
-                        "Pseudo-header field ':authority' MUST NOT appear more than once.");
-                }
-
-                Authority = value;
+                Authority = AssignOnce(Authority, value, name);
                 return;
 
             case ":method":
-                if (Method is not null)
-                {
-                    throw new HPackDecodingException(
-                        "Pseudo-header field ':method' MUST NOT appear more than once.");
-                }
-
-                Method = value;
+                Method = AssignOnce(Method, value, name);
                 return;
 
             case ":path":
-                if (Path is not null)
-                {
-                    throw new HPackDecodingException(
-                        "Pseudo-header field ':path' MUST NOT appear more than once.");
-                }
-
-                if (string.IsNullOrEmpty(value))
-                {
-                    throw new HPackDecodingException(
-                        "Pseudo-header field ':path' MUST NOT be empty (except for OPTIONS *, encoded as '*').");
-                }
-
-                Path = value;
+                Path = AssignOnce(Path, value, name);
                 return;
 
             case ":scheme":
-                if (Scheme is not null)
-                {
-                    throw new HPackDecodingException(
-                        "Pseudo-header field ':scheme' MUST NOT appear more than once.");
-                }
-
-                Scheme = value;
+                Scheme = AssignOnce(Scheme, value, name);
                 return;
 
             case ":protocol":
@@ -144,13 +130,7 @@ internal sealed class HPackDecodedHeaders
                 // CONNECT-only / required-companion rules are cross-field and
                 // are validated once the whole section is decoded
                 // (HttpFieldNormalization.ValidateExtendedConnect).
-                if (Protocol is not null)
-                {
-                    throw new HPackDecodingException(
-                        "Pseudo-header field ':protocol' MUST NOT appear more than once.");
-                }
-
-                Protocol = value;
+                Protocol = AssignOnce(Protocol, value, name);
                 return;
 
             case ":status":
@@ -165,6 +145,22 @@ internal sealed class HPackDecodedHeaders
                 throw new HPackDecodingException(
                     $"Unknown pseudo-header field '{name}'.");
         }
+    }
+
+    /// <summary>
+    /// Returns the value a pseudo-header keeps: <paramref name="value"/> the first time
+    /// <paramref name="name"/> appears, and <paramref name="current"/> after that, recording the repeat
+    /// in <see cref="RepeatedPseudoHeader"/>.
+    /// </summary>
+    private string AssignOnce(string? current, string value, string name)
+    {
+        if (current is null)
+        {
+            return value;
+        }
+
+        RepeatedPseudoHeader ??= name;
+        return current;
     }
 
     private static void ValidateRegularFieldName(string name)

@@ -1436,6 +1436,38 @@ decoder; the gate is integer/`double` arithmetic over `TimeProvider` ticks; the
 per-operation deadline is a linked `CancellationTokenSource` constructed with the
 injected `TimeProvider`.
 
+## HTTP/2 request heads (RFC 9113 §8.3)
+
+`HPackDecoder.DecodeRequestHeaders` folds each decoded field line into
+`HPackDecodedHeaders`, which applies the per-field rules as the line arrives: lowercase
+names, no connection-specific fields, `TE` only as `trailers` (RFC 9113 §8.2), and only
+the request pseudo-header fields, all ahead of the regular fields (§8.3). A violation of
+these closes the connection with `PROTOCOL_ERROR`.
+
+Whether the pseudo-header fields make a complete request is judged afterwards, by
+`Http2Stream.CreateContextAsync`, with the whole block decoded (#1321). In order:
+
+| Rule | Applies to | Failure |
+| --- | --- | --- |
+| No pseudo-header field repeats (§8.3) | every request | stream `PROTOCOL_ERROR` |
+| `:protocol` only on CONNECT, which then carries `:scheme`, `:path` and `:authority` (RFC 8441 §4) | a request with `:protocol` | connection `PROTOCOL_ERROR` |
+| A `:path` that is present is not empty (§8.3.1) | every request | stream `PROTOCOL_ERROR` |
+| `:method` is present (§8.3.1) | every request | stream `PROTOCOL_ERROR` |
+| `:scheme` and `:path` are present (§8.3.1) | every request but a classic CONNECT (§8.5) | stream `PROTOCOL_ERROR` |
+| `:path` decodes to a legal path (#937) | every request | stream `PROTOCOL_ERROR` |
+
+Nothing is defaulted. Before #1321 a missing `:method` became `GET` and a missing `:path`
+became `/`, so a head without its pseudo-header fields — the phantom request of #1314 —
+reached the application as `GET /`. A stream error is answered with
+`RST_STREAM(PROTOCOL_ERROR)` before the request reaches the application. Because a repeat
+is recorded (`HPackDecodedHeaders.RepeatedPseudoHeader`) rather than thrown mid-block, the
+block is always decoded to its end, the HPACK state stays in step, and the connection keeps
+serving its other streams (RFC 9113 §8.1.1). `OPTIONS` for the server as a whole carries
+`:path: *` and is dispatched with the path `*`, as asterisk-form is on HTTP/1.1. A classic
+CONNECT carries only `:method` and `:authority`; its path is the root, as for HTTP/1.1's
+authority-form. HTTP/3 applies the equivalent rules in `Http3HeaderCodec` (see
+"Field-section rules" under QPACK).
+
 ## HTTP/2 abuse limits
 
 ### Why the frame machinery isn't enough

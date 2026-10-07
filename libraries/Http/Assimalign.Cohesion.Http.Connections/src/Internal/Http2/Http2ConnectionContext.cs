@@ -1879,10 +1879,11 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
     /// and the exchange never reaches the application.
     /// </para>
     /// <para>
-    /// A malformed <c>:path</c> surfaces from <see cref="Http2Stream.CreateContextAsync"/> as an
-    /// <see cref="Http2StreamException"/> carrying <c>PROTOCOL_ERROR</c>, which the pump's stream-error
-    /// handler turns into an <c>RST_STREAM</c> for that stream alone (RFC 9113 §8.1.1) — the
-    /// connection keeps serving its other streams.
+    /// A malformed request — a repeated, missing or empty pseudo-header field (RFC 9113 §8.3), or a
+    /// <c>:path</c> that does not decode — surfaces from <see cref="Http2Stream.CreateContextAsync"/> as
+    /// an <see cref="Http2StreamException"/> carrying <c>PROTOCOL_ERROR</c>, which the pump's
+    /// stream-error handler turns into an <c>RST_STREAM</c> for that stream alone (RFC 9113 §8.1.1) —
+    /// the request never reaches the application, and the connection keeps serving its other streams.
     /// </para>
     /// </remarks>
     private async Task<Http2Context?> TryDispatchStreamAsync(Http2Stream stream, CancellationToken cancellationToken)

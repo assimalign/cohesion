@@ -772,6 +772,21 @@ public class Http2TransportTests
         Http2TestSettings.AssertContainsGoAway(output, expectedErrorCode);
     }
 
+    /// <summary>
+    /// A complete request head on <paramref name="streamId"/> with END_HEADERS but not END_STREAM, so
+    /// the stream opens and its request dispatches while the peer can still send on it.
+    /// </summary>
+    private static byte[] CreateRequestHeadersWithoutEndStream(int streamId)
+    {
+        return HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            streamId,
+            0x4 /* END_HEADERS */,
+            (":method", "GET"),
+            (":scheme", "https"),
+            (":path", "/"),
+            (":authority", "api.test"));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject HEADERS on stream 0 with PROTOCOL_ERROR")]
     public async Task Http2_OnHeadersOnStreamZero_ShouldGoAwayProtocolError()
     {
@@ -1117,22 +1132,8 @@ public class Http2TransportTests
         await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject duplicate pseudo-header fields")]
-    public async Task Http2_OnDuplicatePseudoHeader_ShouldGoAwayProtocolError()
-    {
-        // RFC 9113 §8.3 — each pseudo-header MUST appear at most once.
-        byte[] preface = Http2TestSettings.Preface();
-        byte[] settings = Http2TestSettings.RawFrame(0x4, 0, 0, Array.Empty<byte>());
-        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
-            streamId: 1,
-            flags: 0x4 | 0x1,
-            (":method", "GET"),
-            (":method", "POST"),     // duplicate
-            (":scheme", "https"),
-            (":path", "/"),
-            (":authority", "api.test"));
-        await AssertGoAwayAsync(Combine(preface, settings, headers), Http2ErrorCode.ProtocolError);
-    }
+    // A repeated pseudo-header field resets only its stream (RFC 9113 §8.1.1, #1321): see
+    // Http2RequestPseudoHeaderTests.
 
     [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject connection-specific header fields")]
     [InlineData("connection", "close")]
@@ -1541,7 +1542,7 @@ public class Http2TransportTests
         for (int cycle = 0; cycle < 6; cycle++)
         {
             int streamId = 1 + (cycle * 2);
-            parts.Add(Http2TestSettings.RawFrame(0x1, 0x4 /* END_HEADERS */, streamId, Array.Empty<byte>()));
+            parts.Add(CreateRequestHeadersWithoutEndStream(streamId));
             parts.Add(Http2TestSettings.RawFrame(0x3, 0, streamId, new byte[] { 0, 0, 0, 0x8 } /* CANCEL */));
         }
 
@@ -1564,7 +1565,7 @@ public class Http2TransportTests
         for (int cycle = 0; cycle < 5; cycle++)
         {
             int streamId = 1 + (cycle * 2);
-            parts.Add(Http2TestSettings.RawFrame(0x1, 0x4, streamId, Array.Empty<byte>()));
+            parts.Add(CreateRequestHeadersWithoutEndStream(streamId));
             parts.Add(Http2TestSettings.RawFrame(0x3, 0, streamId, new byte[] { 0, 0, 0, 0x8 }));
         }
 
