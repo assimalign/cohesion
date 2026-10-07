@@ -58,6 +58,20 @@ namespace Assimalign.Cohesion.Database;
 /// that failed) is not the worker's: the database is skipped from then on and the engine lists it
 /// offline.
 /// </para>
+/// <para>
+/// <b>A database whose checkpoints keep failing goes offline</b> (owner decision 25 of
+/// 2026-10-06), on whichever comes first. After the engine's worker failure limit of failed
+/// checkpoints in a row, the worker base takes it offline with
+/// <see cref="StorageOfflineCause.CheckpointFailures"/>. A checkpoint that fails while one of the
+/// database's journals has reached the engine's journal size limit takes it offline at once with
+/// <see cref="StorageOfflineCause.JournalSizeLimit"/>: the journal is no longer truncated, and
+/// under load it would fill the device long before the failure limit is reached. PostgreSQL has no
+/// such cap: its <c>max_wal_size</c> is a soft limit the WAL passes while checkpoints fail
+/// (<c>doc/src/sgml/config.sgml:4010-4014</c>), until a WAL write fails on a full device and the
+/// server stops (<c>XLogWrite</c>, <c>src/backend/access/transam/xlog.c:2529-2532</c>). Only a
+/// failure counts toward either: a checkpoint deferred to a statement or refused by a busy storage
+/// (#1283) never takes a database offline, however long its journal grows.
+/// </para>
 /// </remarks>
 internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWorker
     where TDatabase : class
@@ -69,6 +83,7 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     internal static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
     private readonly DatabaseCheckpointLanes _lanes;
+    private readonly long _journalSizeLimit;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DatabaseCheckpointWorker{TDatabase}"/> class,
@@ -76,10 +91,16 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     /// </summary>
     /// <param name="engineName">The name of the engine whose databases are checkpointed.</param>
     /// <param name="interval">The engine's checkpoint interval: the time backstop between checkpoints.</param>
-    protected DatabaseCheckpointWorker(string engineName, TimeSpan interval)
+    /// <param name="journalSizeLimit">
+    /// The engine's journal size limit, in bytes, as <see cref="DatabaseWorkerLimits.GetJournalSizeLimit"/>
+    /// resolved it: a failed checkpoint of a database one of whose journals holds this much takes the
+    /// database offline.
+    /// </param>
+    protected DatabaseCheckpointWorker(string engineName, TimeSpan interval, long journalSizeLimit)
         : base(engineName + "/checkpoint", DatabaseEngineWorkerKind.Checkpoint, interval)
     {
         _lanes = new DatabaseCheckpointLanes(engineName + "/" + DatabaseEngineWorkerKind.Checkpoint + " lane");
+        _journalSizeLimit = journalSizeLimit;
     }
 
     /// <summary>
@@ -118,6 +139,14 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     /// <param name="database">The database.</param>
     /// <returns>True while the engine holds it open.</returns>
     protected abstract bool IsOpen(TDatabase database);
+
+    /// <summary>
+    /// Gets the length, in bytes, of a database's longest journal: what the engine's journal size
+    /// limit is compared with when a checkpoint of the database fails.
+    /// </summary>
+    /// <param name="database">The database.</param>
+    /// <returns>The longest of its storages' <c>JournalLength</c>.</returns>
+    protected abstract long GetJournalLength(TDatabase database);
 
     /// <summary>Gets whether one of a database's storages is due for a checkpoint.</summary>
     /// <param name="database">The database.</param>
@@ -274,13 +303,41 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
             default:
                 // A failure that took the database offline (#1243, #1252, #1268) is reported through
                 // the engine's offline list, and the next pass skips the database; any other is
-                // this pass's failure, and a later pass retries the checkpoint.
+                // this pass's failure, and a later pass retries the checkpoint. Reporting it takes
+                // the database offline once its checkpoints failed the engine's limit of passes in a
+                // row; a journal already past the engine's cap takes it offline at once (owner
+                // decision 25).
                 if (!IsOffline(database))
                 {
                     ReportFailure(name, outcome.Failure);
+                    GiveUpOnJournal(database, name, outcome.Failure);
                 }
 
                 return;
+        }
+    }
+
+    /// <summary>
+    /// Takes a database whose checkpoint just failed offline when one of its journals has reached
+    /// the engine's journal size limit (owner decision 25): its checkpoints keep failing, so nothing
+    /// truncates the journal.
+    /// </summary>
+    private void GiveUpOnJournal(TDatabase database, string name, Exception failure)
+    {
+        if (IsOffline(database))
+        {
+            return;
+        }
+
+        long length = GetJournalLength(database);
+        if (length >= _journalSizeLimit)
+        {
+            TakeDatabaseOffline(
+                name,
+                StorageOfflineCause.JournalSizeLimit,
+                $"its journal holds {length} bytes, past the engine's limit of {_journalSizeLimit} bytes, while the engine's checkpoint " +
+                $"worker '{Name}' kept failing on database '{name}'",
+                failure);
         }
     }
 }

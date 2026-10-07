@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Configuration;
+using Assimalign.Cohesion.Database.Hosting.Internal;
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -83,6 +86,12 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     public string Name => "database";
 
     /// <summary>
+    /// Gets the application's reopen service (owner decision 22), or null when
+    /// <see cref="DatabaseApplicationOptions.ReopenOfflineDatabases"/> is off. Set once at Build.
+    /// </summary>
+    internal DatabaseReopenService? ReopenService { get; set; }
+
+    /// <summary>
     /// Aggregates the state and worker inventory of every distinct registered or server-fronted
     /// database engine.
     /// </summary>
@@ -91,13 +100,18 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// A healthy result when every engine is running, a degraded result while an engine reports a
     /// worker that keeps failing (the result names each failing worker and the type of its last
     /// failure, #1268), or an unhealthy result when an engine is disposed or reports an unknown
-    /// state, or when an open database is offline after a failed write or durable flush of its
-    /// journal (#1252, #1243), durable flush of its data file (#1243) or file header write (#1268).
+    /// state, or while a database is offline: its engine lists it offline (a failed write or
+    /// durable flush of its journal, #1252 and #1243, durable flush of its data file, #1243, or
+    /// file header write, #1268, or a background worker whose failures persisted or a journal past
+    /// the engine's cap, owner decision 25), or the application's reopen of it has not succeeded
+    /// yet (owner decision 22). The result names each offline database with its cause and its
+    /// reopen attempts, and turns healthy once every one is open again.
     /// </returns>
     /// <remarks>
     /// The health endpoint is served without authentication, so a failure is described by its
     /// exception types only: an exception's message can carry file paths and storage internals.
-    /// The full failure is written to the <c>Assimalign.Cohesion.Database</c> event source, which
+    /// The full failure is written to the <c>Assimalign.Cohesion.Database</c> event source, and
+    /// the reopen attempts to the <c>Assimalign.Cohesion.Database.Hosting</c> event source, which
     /// the application's logging forwards (<c>docs/EVENT_SOURCES.md</c>).
     /// </remarks>
     public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
@@ -135,6 +149,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         var unavailableEngines = new List<string>();
         var offlineDatabases = new List<string>();
         int workerCount = 0;
+
+        // The databases the application is reopening: a failed reopen left them closed, so their
+        // engine no longer lists them, but they are not open again (owner decision 22).
+        IReadOnlyList<ReopenState> reopening = ReopenService?.GetPendingReopens() ?? [];
 
         for (int engineIndex = 0; engineIndex < engines.Count; engineIndex++)
         {
@@ -195,28 +213,67 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     break;
             }
 
-            // A database that went offline after a failed write or flush of its journal, durable
-            // flush of its data file, or file header write refuses every request until it is
-            // reopened (#1243, #1252, #1268); the engine itself keeps running, so its state does
-            // not show it. A disposed engine has no databases to report.
+            // A database that went offline refuses every request until it is reopened (#1243,
+            // #1252, #1268, owner decision 25); the engine itself keeps running, so its state does
+            // not show it. A database whose reopen failed is closed, and its engine no longer lists
+            // it, so the reopen service's own list adds it. A disposed engine has no databases to
+            // report.
             if (state != EngineState.Disposed)
             {
-                IReadOnlyList<DatabaseName> offline = engine.OfflineDatabases;
+                List<string> offline = [.. engine.OfflineDatabases.Select(name => (string)name)];
+                foreach (ReopenState pending in reopening)
+                {
+                    if (ReferenceEquals(pending.Engine, engine) && !offline.Contains(pending.Name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        offline.Add(pending.Name);
+                    }
+                }
+
                 data[$"engine.{engineIndex}.offlineDatabaseCount"] = offline.Count;
                 if (offline.Count > 0)
                 {
-                    string names = string.Join(", ", offline);
-                    data[$"engine.{engineIndex}.offlineDatabases"] = names;
-                    foreach (DatabaseName database in offline)
+                    data[$"engine.{engineIndex}.offlineDatabases"] = string.Join(", ", offline);
+                }
+
+                for (int offlineIndex = 0; offlineIndex < offline.Count; offlineIndex++)
+                {
+                    string database = offline[offlineIndex];
+                    string prefix = $"engine.{engineIndex}.offline.{offlineIndex}";
+                    ReopenState? pending = FindPending(reopening, engine, database);
+                    StorageOfflineCause? cause = DatabaseReopenService.GetCause(engine, database) ?? pending?.Cause;
+                    data[$"{prefix}.name"] = database;
+                    if (cause is { } known)
                     {
-                        offlineDatabases.Add($"{engine.Name}/{database}");
+                        data[$"{prefix}.cause"] = known.ToString();
                     }
+
+                    var detail = new List<string>(2);
+                    if (cause is { } named)
+                    {
+                        detail.Add(named.ToString());
+                    }
+
+                    if (pending is { Attempts: > 0 } attempted)
+                    {
+                        data[$"{prefix}.reopenAttempts"] = attempted.Attempts;
+                        if (attempted.LastFailure is { } failure)
+                        {
+                            string kind = DescribeFault(failure);
+                            data[$"{prefix}.reopenFault"] = kind;
+                            detail.Add($"{attempted.Attempts} failed reopen attempt(s), last {kind}");
+                        }
+                    }
+
+                    offlineDatabases.Add(detail.Count == 0
+                        ? $"{engine.Name}/{database}"
+                        : $"{engine.Name}/{database} ({string.Join("; ", detail)})");
                 }
             }
         }
 
         data["workerCount"] = workerCount;
         data["offlineDatabaseCount"] = offlineDatabases.Count;
+        data["reopenOfflineDatabases"] = ReopenService is not null;
 
         HealthContribution contribution;
         if (unavailableEngines.Count > 0)
@@ -228,9 +285,12 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         else if (offlineDatabases.Count > 0)
         {
             contribution = HealthContribution.Unhealthy(
-                $"Offline databases: {string.Join(", ", offlineDatabases)}. A write or flush of their journal, a durable " +
-                "flush of their data file, or a file header write failed, so every operation on them is refused until each is " +
-                "reopened (OpenDatabaseAsync), or the process restarts and opens them again; either runs recovery.",
+                $"Offline databases: {string.Join(", ", offlineDatabases)}. A device operation of their storage failed, or their " +
+                "engine gave up on them after a background worker kept failing, so every operation on them is refused until " +
+                "each is reopened. " + (ReopenService is not null
+                    ? "The application reopens each by itself, with backoff, until the reopen succeeds; the reopen's recovery " +
+                      "decides every commit that was not confirmed."
+                    : "Reopen each (OpenDatabaseAsync), or restart the process to open them again; either runs recovery."),
                 data);
         }
         else if (faultedEngines.Count > 0)
@@ -274,6 +334,20 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         => fault.InnerException is { } inner
             ? $"{fault.GetType().Name} ({inner.GetType().Name})"
             : fault.GetType().Name;
+
+    // The reopen service's record of a database, if it has one.
+    private static ReopenState? FindPending(IReadOnlyList<ReopenState> reopening, IDatabaseEngine engine, string database)
+    {
+        foreach (ReopenState pending in reopening)
+        {
+            if (ReferenceEquals(pending.Engine, engine) && string.Equals(pending.Name, database, StringComparison.OrdinalIgnoreCase))
+            {
+                return pending;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Binds the composed host services once <see cref="DatabaseApplication"/> has

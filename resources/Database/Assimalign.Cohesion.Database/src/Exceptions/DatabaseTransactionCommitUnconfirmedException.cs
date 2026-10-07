@@ -72,10 +72,9 @@ public class DatabaseTransactionCommitUnconfirmedException : DatabaseException
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
         ArgumentNullException.ThrowIfNull(cause);
 
-        string detail = cause.InnerException?.Message ?? cause.Message;
         return new DatabaseTransactionCommitUnconfirmedException(
-            $"{code}: Database '{database}' went offline while the operation was committing: {DatabaseOfflineException.Describe(cause.Cause)} of its " +
-            $"storage failed ({detail}) after the operation's work reached the journal. The operation may or may not have been " +
+            $"{code}: Database '{database}' went offline while the operation was committing: {DatabaseOfflineException.DescribeFailure(cause)} " +
+            "after the operation's work reached the journal. The operation may or may not have been " +
             "applied; do not retry it. Reopen the database (OpenDatabaseAsync): its recovery keeps the work if its records " +
             "reached stable storage and discards it if not, and reading the data back then tells which.",
             cause);
@@ -100,7 +99,7 @@ public class DatabaseTransactionCommitUnconfirmedException : DatabaseException
         // The kernel's flush failure carries the storage's offline error when the storage raised
         // it; the root words its cause, as it does for every other offline message.
         string failure = StorageOfflineException.Find(cause) is { } offline
-            ? $"{DatabaseOfflineException.Describe(offline.Cause)} of its storage failed ({offline.InnerException?.Message ?? offline.Message})"
+            ? DatabaseOfflineException.DescribeFailure(offline)
             : $"the durable flush of its commit record failed ({cause.InnerException?.Message ?? cause.Message})";
         return new DatabaseTransactionCommitUnconfirmedException(
             $"{code}: Database '{database}' went offline while a transaction was committing: {failure} after the transaction's " +

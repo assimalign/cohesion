@@ -98,6 +98,30 @@ public sealed class SqlDatabaseEngineBuilder
     }
 
     /// <summary>
+    /// Gets or sets how many passes in a row a worker may fail on one database before the engine
+    /// takes it offline (<see cref="SqlDatabaseEngineOptions.WorkerFailureLimit"/>; ten by
+    /// default). Build validates it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A build was attempted.</exception>
+    public int WorkerFailureLimit
+    {
+        get => _options.WorkerFailureLimit;
+        set { _state.EnsureMutable(); _options.WorkerFailureLimit = value; }
+    }
+
+    /// <summary>
+    /// Gets or sets the hard cap, in bytes, on a journal whose checkpoints keep failing
+    /// (<see cref="SqlDatabaseEngineOptions.JournalSizeLimit"/>; zero for four times the
+    /// checkpoint journal size). Build validates it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A build was attempted.</exception>
+    public long JournalSizeLimit
+    {
+        get => _options.JournalSizeLimit;
+        set { _state.EnsureMutable(); _options.JournalSizeLimit = value; }
+    }
+
+    /// <summary>
     /// Gets or sets each database's buffer pool capacity, in bytes
     /// (<see cref="SqlDatabaseEngineOptions.BufferPoolCapacity"/>; 32 MiB by default). Build validates it.
     /// </summary>

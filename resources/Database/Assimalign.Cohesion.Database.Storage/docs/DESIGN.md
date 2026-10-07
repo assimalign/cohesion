@@ -1016,7 +1016,8 @@ caller that tells the causes apart reads the enum, never the message:
   set again runs recovery over the journal as the media holds it. Every engine lists an offline
   database in `IDatabaseEngine.OfflineDatabases`, and `Database.Hosting` reports the application
   unhealthy while one is listed, so an operator, or an orchestrator that restarts an unhealthy
-  process, learns of it.
+  process, learns of it; a running hosted application reopens it by itself with backoff (owner
+  decision 22).
 
 Before #1243 a failed journal fsync surfaced as a plain `IOException` from the commit, and the
 next commit's flush could succeed and acknowledge work whose earlier records had been dropped. A
@@ -1024,6 +1025,41 @@ failed data fsync in a header write let a retried checkpoint truncate the journa
 operating system may have discarded. `StorageOfflineTests` covers both files, the refusals, the
 quiet close and the reopen; every engine has an offline test that fails a journal fsync through
 a fault-injecting storage strategy and reopens with and without the unconfirmed record's bytes.
+
+### An engine gives up on a storage (owner decision 25 of 2026-10-06)
+
+The storage takes itself offline only for its own device failures. Its engine takes it offline
+too, through the same latch, when it gives up on the database: one of its background workers
+failed on the database as many passes in a row as the engine allows, or the journal reached the
+engine's hard cap while its checkpoints kept failing (the root's `DESIGN.md`, "A failure that
+persists takes its database offline"). `Storage.TakeOffline(StorageOfflineCause, string,
+Exception)` is that entry point:
+
+- **Five causes are the engine's.** `CheckpointFailures`, `PageWriteBackFailures`,
+  `WriteAheadFlushFailures` and `VersionPurgeFailures` name the worker whose work kept failing;
+  `JournalSizeLimit` names the cap. `StorageOfflineException.Cause` reads them like the three
+  device causes, and an engine's refusal words them ("its checkpoints kept failing and its engine
+  gave up on it"). A device cause passed here is refused with `ArgumentOutOfRangeException`: only
+  the storage reports its own device failures, so a cause never claims an fsync that did not fail.
+- **The message names the worker; the inner exception is its last failure.** The engine passes
+  the reason ("the engine's checkpoint worker 'orders/checkpoint' failed on database 'orders' on
+  10 passes in a row, the engine's limit"), and the storage's `COHDBS002` message reads "The
+  storage is offline: {reason} (last failure: {message}). Its engine stopped retrying, …".
+- **Everything else is the offline storage of #1243.** The journal latches the error under its
+  lock, the group-commit waiters are released, `OnOffline` is raised once (so a second file set
+  goes offline and the database's lock waits end), nothing more is written to either file,
+  closing included, and only a reopen, whose recovery reads the journal, brings the file set
+  back. Nothing about the media is unknown here, unlike after a failed fsync, so the reopen's
+  recovery replays an intact journal; the latch is the same so that no engine path can write to a
+  database it gave up on. A storage already offline returns `false` and keeps its first error.
+
+Neo4j gives up the same way, through its database's `DatabaseHealth.panic`, once its checkpoint
+failed ten times in a row (`community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-75`);
+PostgreSQL's checkpointer retries a failing checkpoint every second for as long as it runs
+(`src/backend/postmaster/checkpointer.c:286-345`) and stops only when the full device fails a WAL
+write (`src/backend/access/transam/xlog.c:2529-2532`). `StorageOfflineTests` covers each engine
+cause (offline once, refusals with the cause, nothing written, the first error kept) and the
+refusal of a device cause.
 
 ### The physical/logical bracket interplay (MVCC layering rules)
 
@@ -1977,9 +2013,11 @@ allocation failures), `SlottedPageException` (record layout violations),
 in a page's chain of journal records found by recovery, naming both LSNs — carries the
 `PageId`), `StorageFormatException` (a file set in another on-disk format, coded
 `COHDBS001`, carrying the found and supported versions), `StorageOfflineException` (a
-durable flush of the journal or the data file, or a write of the journal's append buffer,
-failed and the storage writes nothing more until it is reopened, coded `COHDBS002`, carrying
-the I/O failure; `Find` locates one in an inner-exception or aggregate chain, and
+durable flush of the journal or the data file, a write of the journal's append buffer or a
+header slot write failed, or the engine gave up on the storage (owner decision 25), and the
+storage writes nothing more until it is reopened, coded `COHDBS002`, carrying the I/O failure
+or the engine worker's last failure; `Cause` names which; `Find` locates one in an
+inner-exception or aggregate chain, and
 `CommitRecordWritten` says the throwing bracket's commit record was appended before the flush
 failed), and `JournalException` (journal framing violations: a record whose frame would exceed
 2 GiB; since #1252 a failed append no longer raises it) all derive from it, so consumers can

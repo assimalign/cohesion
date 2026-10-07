@@ -428,6 +428,18 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 options.Services.Add(service);
             }
             ConfigureExistingResourceIntegration(options, context, ownership);
+
+            // The module's own reopen service (owner decision 22): started with the other services,
+            // before the servers, and stopped after the servers drained. It supervises every engine
+            // of the frozen registry, the server-fronted ones included.
+            if (options.ReopenOfflineDatabases)
+            {
+                var reopen = new DatabaseReopenService(context.Engines, options.ReopenInitialDelay, options.ReopenMaximumDelay);
+                ownership.Services.Add(reopen);
+                options.Services.Add(reopen);
+                context.ReopenService = reopen;
+            }
+
             return new DatabaseApplicationComposition(options, context, ownership);
         }
         catch (Exception exception)
@@ -451,12 +463,19 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             throw new InvalidOperationException("Database applications require sequential service start and stop.");
         }
 
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.ReopenInitialDelay, TimeSpan.Zero, nameof(options.ReopenInitialDelay));
+        ArgumentOutOfRangeException.ThrowIfLessThan(options.ReopenMaximumDelay, options.ReopenInitialDelay, nameof(options.ReopenMaximumDelay));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(options.ReopenMaximumDelay, DatabaseApplicationOptions.MaximumReopenDelay, nameof(options.ReopenMaximumDelay));
+
         var snapshot = new DatabaseApplicationOptions
         {
             Environment = options.Environment,
             ContentRootPath = options.ContentRootPath,
             StartupTimeout = options.StartupTimeout,
             ShutdownTimeout = options.ShutdownTimeout,
+            ReopenOfflineDatabases = options.ReopenOfflineDatabases,
+            ReopenInitialDelay = options.ReopenInitialDelay,
+            ReopenMaximumDelay = options.ReopenMaximumDelay,
         };
         foreach (IDatabaseEngine engine in options.Engines)
         {

@@ -27,10 +27,14 @@ internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase
     private readonly SqlDatabaseEngine _engine;
 
     internal SqlCheckpointWorker(SqlDatabaseEngine engine)
-        : base(engine.Name, engine.EngineOptions.CheckpointInterval)
+        : base(engine.Name, engine.EngineOptions.CheckpointInterval, engine.JournalSizeLimit)
     {
         _engine = engine;
     }
+
+    /// <inheritdoc />
+    protected override long GetJournalLength(SqlDatabase database)
+        => Math.Max(database.DataStorage.JournalLength, database.CatalogStorage.JournalLength);
 
     /// <inheritdoc />
     protected override ManualResetEventSlim CheckpointNeededSignal => _engine.CheckpointNeededSignal;

@@ -70,9 +70,10 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     private DocumentStorage[] _storages = [];
 
     private DocumentDatabaseEngine(DocumentDatabaseEngineOptions options)
-        : base(options.EngineName ?? defaultName, EngineModel.Document)
+        : base(options.EngineName ?? defaultName, EngineModel.Document, options.WorkerFailureLimit)
     {
         _options = options;
+        JournalSizeLimit = DatabaseWorkerLimits.GetJournalSizeLimit(options.JournalSizeLimit, options.CheckpointJournalSize);
         _rootPath = options.StorageStrategy is null && options.RootPath is { IsEmpty: false } root ? Path.GetFullPath(root) : null;
         _memory = options.StorageStrategy is null && _rootPath is null ? new DatabaseMemoryFiles() : null;
         if (_rootPath is not null)
@@ -109,6 +110,14 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     }
 
     internal DocumentDatabaseEngineOptions EngineOptions => _options;
+
+    /// <summary>
+    /// Gets the journal size limit the checkpointer applies, resolved from
+    /// <see cref="DocumentDatabaseEngineOptions.JournalSizeLimit"/> when the engine was created
+    /// (owner decision 25).
+    /// </summary>
+    internal long JournalSizeLimit { get; }
+
     internal DocumentStorage[] GetStorageSnapshot() => Volatile.Read(ref _storages);
     internal DocumentDatabase[] GetInstanceSnapshot() => Volatile.Read(ref _instances);
 
@@ -173,7 +182,9 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// A worker interval or batch size is not positive, the buffer pool capacity is not a whole
-    /// number of 8 KiB pages of at least 1 MiB, or the checkpoint journal size is negative.
+    /// number of 8 KiB pages of at least 1 MiB, the checkpoint journal size is negative, the worker
+    /// failure limit is less than one, or the journal size limit is negative or set and below the
+    /// checkpoint journal size.
     /// </exception>
     public static DocumentDatabaseEngine Create(DocumentDatabaseEngineOptions options)
     {
@@ -207,6 +218,8 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.PageWriteBackBatchSize);
         Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
         ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
+        DatabaseWorkerLimits.Validate(options.WorkerFailureLimit, options.JournalSizeLimit, options.CheckpointJournalSize,
+            nameof(options.WorkerFailureLimit), nameof(options.JournalSizeLimit));
         return new DocumentDatabaseEngine(options);
     }
 
@@ -388,8 +401,35 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
     }
 
     /// <inheritdoc />
+    protected override StorageOfflineException? GetOfflineErrorCore(DatabaseName name)
+        => FindOpen(name)?.DataStorage.OfflineError;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The database's storage goes offline with the cause, and its hook ends the database's lock
+    /// waits, as after a failed durable flush (#1243).
+    /// </remarks>
+    protected override bool TakeDatabaseOfflineCore(DatabaseName name, StorageOfflineCause cause, string reason, Exception failure)
+        => FindOpen(name) is { IsOffline: false } database && database.DataStorage.TakeOffline(cause, reason, failure);
+
+    /// <inheritdoc />
     protected override void ForgetClosedDatabaseCore(DatabaseInstance database)
         => DatabaseRegistry.Forget((DocumentDatabase)database, _sync, GetInstanceSnapshot, ForgetLocked);
+
+    // The open database of that name in the published snapshot, or null: lock-free, so a worker
+    // that gives up on a database never waits for a create, open or drop holding the lock.
+    private DocumentDatabase? FindOpen(DatabaseName name)
+    {
+        foreach (var database in GetInstanceSnapshot())
+        {
+            if (!database.IsClosed && string.Equals(database.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return database;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Closes every open database once the base disposed the servers, stopped the worker pumps

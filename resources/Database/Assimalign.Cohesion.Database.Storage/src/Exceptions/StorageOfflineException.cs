@@ -32,6 +32,15 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// (<c>src/common/controldata_utils.c:245-265</c>).
 /// </para>
 /// <para>
+/// An engine takes a storage offline too, when it gives up on it (owner decision 25 of
+/// 2026-10-06): a background worker's work on the storage failed as many times in a row as the
+/// engine allows, or the journal grew past the engine's hard cap while its checkpoints kept
+/// failing. <see cref="Cause"/> then names the worker or the cap, the message names the worker, and
+/// <see cref="Exception.InnerException"/> is the worker's last failure. Neo4j panics a database the
+/// same way once its checkpoint fails ten times in a row
+/// (<c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-75</c>).
+/// </para>
+/// <para>
 /// The message leads with <see cref="ErrorCode"/>; <see cref="Exception.InnerException"/> is the
 /// failure that took the storage offline.
 /// </para>
@@ -40,7 +49,8 @@ public sealed class StorageOfflineException : StorageException
 {
     /// <summary>
     /// The code that leads the message: the storage is offline (a write or flush of the journal, a
-    /// durable flush of the data file, or a write of the file header failed; see <see cref="Cause"/>).
+    /// durable flush of the data file or a write of the file header failed, or its engine gave up
+    /// on it; see <see cref="Cause"/>).
     /// </summary>
     public const string ErrorCode = "COHDBS002";
 
@@ -58,8 +68,9 @@ public sealed class StorageOfflineException : StorageException
 
     /// <summary>
     /// Gets what failed and took the storage offline: getting the journal onto its file (a drain
-    /// of its append buffer or a flush, durable or not), a durable flush of the data file, or a
-    /// write of the file header. An engine's offline refusal names it; a caller that tells the
+    /// of its append buffer or a flush, durable or not), a durable flush of the data file, a write
+    /// of the file header, or, when its engine gave up on it, the background worker whose work kept
+    /// failing or the journal cap. An engine's offline refusal names it; a caller that tells the
     /// causes apart reads this, never the message.
     /// </summary>
     public StorageOfflineCause Cause { get; }
@@ -154,6 +165,32 @@ public sealed class StorageOfflineException : StorageException
         StorageOfflineCause.HeaderWrite => "a write of the file header",
         _ => "a write",
     };
+
+    /// <summary>
+    /// Gets whether <paramref name="offlineCause"/> is one an engine takes a storage offline with
+    /// when it gives up on it (owner decision 25), as opposed to a failure of the storage's own
+    /// device operations.
+    /// </summary>
+    /// <param name="offlineCause">The cause.</param>
+    /// <returns>True for the worker failure causes and the journal size limit.</returns>
+    internal static bool IsEngineCause(StorageOfflineCause offlineCause)
+        => offlineCause is >= StorageOfflineCause.CheckpointFailures and <= StorageOfflineCause.JournalSizeLimit;
+
+    /// <summary>
+    /// Creates the exception that takes a storage offline because its engine gave up on it (owner
+    /// decision 25 of 2026-10-06): a background worker's work on it kept failing, or its journal
+    /// grew past the engine's hard cap while its checkpoints kept failing.
+    /// </summary>
+    /// <param name="offlineCause">The engine's cause, for <see cref="Cause"/>.</param>
+    /// <param name="reason">What the engine gave up on, naming the worker, for the message.</param>
+    /// <param name="failure">The worker's last failure.</param>
+    internal static StorageOfflineException EngineGaveUp(StorageOfflineCause offlineCause, string reason, Exception failure)
+        => new(
+            $"{ErrorCode}: The storage is offline: {reason} (last failure: {failure.Message}). Its engine stopped retrying, so " +
+            "nothing more is written to the journal or the data file. Reopen the storage: its recovery reads the journal and " +
+            "decides the outcome of every commit that was not confirmed.",
+            offlineCause,
+            failure);
 
     /// <summary>
     /// Creates the exception a failed file header write throws once its header slot write was

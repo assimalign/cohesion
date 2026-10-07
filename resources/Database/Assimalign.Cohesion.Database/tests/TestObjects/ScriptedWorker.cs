@@ -1,6 +1,8 @@
 using System;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Storage;
+
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
@@ -40,6 +42,9 @@ internal sealed class ScriptedWorker : DatabaseEngineWorker
     public void Fail(string database, Exception exception, TimeSpan retryAfter) => ReportFailure(database, exception, retryAfter);
 
     public void Unfinished(string database) => ReportUnfinished(database);
+
+    public bool GiveUp(string database, StorageOfflineCause cause, string reason, Exception failure)
+        => TakeDatabaseOffline(database, cause, reason, failure);
 
     protected override void RunIterationCore(CancellationToken cancellationToken)
         => _pass(this, Interlocked.Increment(ref _passes));

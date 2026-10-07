@@ -92,6 +92,22 @@ public sealed class BlobDatabaseEngineBuilder
         set { _state.EnsureMutable(); _options.CheckpointJournalSize = value; }
     }
 
+    /// <inheritdoc cref="BlobDatabaseEngineOptions.WorkerFailureLimit" />
+    /// <exception cref="InvalidOperationException">A build was attempted.</exception>
+    public int WorkerFailureLimit
+    {
+        get => _options.WorkerFailureLimit;
+        set { _state.EnsureMutable(); _options.WorkerFailureLimit = value; }
+    }
+
+    /// <inheritdoc cref="BlobDatabaseEngineOptions.JournalSizeLimit" />
+    /// <exception cref="InvalidOperationException">A build was attempted.</exception>
+    public long JournalSizeLimit
+    {
+        get => _options.JournalSizeLimit;
+        set { _state.EnsureMutable(); _options.JournalSizeLimit = value; }
+    }
+
     /// <inheritdoc cref="BlobDatabaseEngineOptions.BufferPoolCapacity" />
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
     public long BufferPoolCapacity

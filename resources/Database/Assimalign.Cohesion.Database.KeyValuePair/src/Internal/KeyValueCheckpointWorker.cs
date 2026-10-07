@@ -27,10 +27,14 @@ internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyVal
     private readonly KeyValueDatabaseEngine _engine;
 
     internal KeyValueCheckpointWorker(KeyValueDatabaseEngine engine)
-        : base(engine.Name, engine.EngineOptions.CheckpointInterval)
+        : base(engine.Name, engine.EngineOptions.CheckpointInterval, engine.JournalSizeLimit)
     {
         _engine = engine;
     }
+
+    /// <inheritdoc />
+    protected override long GetJournalLength(KeyValueDatabase database)
+        => Math.Max(database.DataStorage.JournalLength, database.CatalogStorage.JournalLength);
 
     /// <inheritdoc />
     protected override ManualResetEventSlim CheckpointNeededSignal => _engine.CheckpointNeededSignal;

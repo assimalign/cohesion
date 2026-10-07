@@ -1113,6 +1113,28 @@ unexpected exception — a page write the checkpoint could not make, a deferred 
 failure handed back by the coordinator — ended that worker for good, and the reproduction
 left the journal at 332,278 bytes ten seconds after the fault cleared.
 
+**A failure that persists takes the database offline (owner decision 25 of 2026-10-06).** When
+the checkpoint, page write-back, write-ahead flush or version-purge worker fails on one database
+on `WorkerFailureLimit` passes in a row (an engine option, ten by default: Neo4j's tolerance of
+failed checkpoints, `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`;
+a pass that fails both file sets counts once), the root worker base asks the engine to give up on
+it, and `SqlDatabaseEngine.TakeDatabaseOfflineCore` takes the data file set offline with the
+`StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A checkpoint
+that fails while one of the database's journals holds `JournalSizeLimit` bytes (an engine option;
+zero, the default, means four times `CheckpointJournalSize`, 1 GiB at its default) takes it offline
+at once with `JournalSizeLimit`. Either way the database goes offline through the #1243 machinery:
+the catalog file set follows through the data set's hook, every operation is refused with
+`COHSQLT004`, its lock waits end, nothing more is written to it, and the engine lists it in
+`OfflineDatabases` until `OpenDatabaseAsync` reopens it (a hosted engine's application reopens it
+with backoff, owner decision 22). The engine finds the database in its published snapshot, without
+its registry lock, so a worker that gives up on one database never waits for another's open; a
+database already offline or closed is not counted. Until the decision a failure that never cleared
+was retried every second for as long as the process ran, and the journal grew until the disk
+filled. `SqlWorkerResilienceTests` pins it: a checkpoint failure that never clears takes only its
+database offline after the limit of failed passes, a journal past the cap does at once, and a
+transient failure under the limit does not (the count restarts once a checkpoint finishes). The
+suite's other engines set both limits out of reach, since they keep a database failing on purpose.
+
 Cadence knobs live here, on `SqlDatabaseEngineOptions` — the engine owns the
 loop, so cadence is engine configuration; observers read it through
 `DatabaseEngineWorker.Interval`.

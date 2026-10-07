@@ -416,6 +416,26 @@ queued for the database writer lock when the database goes offline (a header slo
 journal fsync or a journal drain failing) gets COHDBD002 at once instead of waiting for the reopen: an offline
 database undoes nothing, so the writer holding the lock keeps it, and the coordinator ends every
 lock wait instead (`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook).
+
+**A failure that persists takes the database offline (owner decision 25 of 2026-10-06).** When
+the checkpoint, page write-back, write-ahead flush or version-purge worker fails on one database
+on `WorkerFailureLimit` passes in a row (an engine option, ten by default: Neo4j's tolerance of
+failed checkpoints, `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`),
+the root worker base asks the engine to give up on it, and
+`DocumentDatabaseEngine.TakeDatabaseOfflineCore` takes the database's storage offline with the
+`StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A checkpoint
+that fails while the database's journal holds `JournalSizeLimit` bytes (an engine option; zero, the
+default, means four times `CheckpointJournalSize`, 1 GiB at its default) takes it offline at once
+with `JournalSizeLimit`. Either way the database goes offline through the #1243 machinery: every
+operation is refused with `COHDBD002`, its lock waits end, nothing more is written to it, and the
+engine lists it in `OfflineDatabases` until `OpenDatabaseAsync` reopens it (a hosted engine's
+application reopens it with backoff, owner decision 22). The engine finds the database in its
+published snapshot, without its registry lock, so a worker that gives up on one database never
+waits for another's open; a database already offline or closed is not counted.
+`DocumentWorkerResilienceTests` pins it: a checkpoint failure that never clears takes only its
+database offline after the limit of failed passes, a journal past the cap does at once, and a
+transient failure under the limit does not (the count restarts once a checkpoint finishes). The
+suite's other engines set both limits out of reach, since they keep a database failing on purpose.
 Disposal is idempotent: stop/join workers, dispose coordinators (rolling back open
 transactions), then durably flush and close each storage file set. Close errors
 are aggregated after attempting every database.

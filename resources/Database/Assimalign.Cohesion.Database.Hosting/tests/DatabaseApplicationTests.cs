@@ -111,21 +111,19 @@ public class DatabaseApplicationTests
         result.Rows[0].ShouldBe([1, "ada"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: the application is composition-only — one endpoint service per server, nothing else")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Composition: the application is composition-only — its reopen service, then one endpoint service per server, nothing else")]
     public async Task Application_Defaults_ShouldComposeOneEndpointServicePerServer()
     {
         // Arrange: the harness composes one SQL server; the engine takes no part in
         // the host lifecycle (it is a data machine, operational from creation).
         await using var harness = await DatabaseHostTestHarness.CreateAsync();
 
-        // Assert: exactly one hosted service — the endpoint wrapper for the server.
-        int count = 0;
-        foreach (IHostService _ in harness.Application.Context.HostedServices)
-        {
-            count++;
-        }
+        // Assert: exactly two hosted services — the module's own reopen service (owner decision
+        // 22), started before the servers, and the endpoint wrapper for the server.
+        var services = new List<IHostService>(harness.Application.Context.HostedServices);
 
-        count.ShouldBe(1);
+        services.Count.ShouldBe(2);
+        services[0].ShouldBeSameAs(harness.Application.Context.ReopenService);
         harness.Application.Context.Servers.ShouldHaveSingleItem().ShouldBeSameAs(harness.Server);
         harness.Application.Context.Engines.ShouldHaveSingleItem().ShouldBeSameAs(harness.Engine);
         harness.Server.Context.Engine.ShouldBeSameAs(harness.Engine);

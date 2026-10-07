@@ -1,11 +1,14 @@
 using System;
 using System.Diagnostics.Tracing;
 
+using Assimalign.Cohesion.Database.Storage;
+
 namespace Assimalign.Cohesion.Database.Internal;
 
 /// <summary>
 /// The Database area root's diagnostics: the failures and recoveries of engine background workers
-/// (<see cref="DatabaseEngineWorker"/>, #1268).
+/// (<see cref="DatabaseEngineWorker"/>, #1268), and the databases an engine takes offline once a
+/// worker's failures on them persist (owner decision 25 of 2026-10-06).
 /// </summary>
 /// <remarks>
 /// Internal by the repository's EventSource convention (<c>.claude/rules/event-source.md</c>). Tools
@@ -66,6 +69,33 @@ internal sealed class DatabaseEventSource : EventSource
         }
     }
 
+    /// <summary>
+    /// Writes that an engine took a database offline because it gave up on it (owner decision 25
+    /// of 2026-10-06): a worker's work on the database failed as many times in a row as the
+    /// engine's limit allows, or its journal passed the engine's cap while its checkpoints kept
+    /// failing.
+    /// </summary>
+    /// <param name="engine">The engine that took the database offline.</param>
+    /// <param name="worker">The worker whose work on the database kept failing.</param>
+    /// <param name="database">The database.</param>
+    /// <param name="cause">The cause the database went offline with.</param>
+    /// <param name="failure">The worker's last failure.</param>
+    [NonEvent]
+    public void DatabaseTakenOffline(DatabaseEngine engine, DatabaseEngineWorker worker, string database, StorageOfflineCause cause, Exception failure)
+    {
+        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            DatabaseTakenOffline(
+                engine.Name,
+                database,
+                cause.ToString(),
+                worker.Name,
+                worker.Kind.ToString(),
+                failure.GetType().FullName ?? failure.GetType().Name,
+                failure.Message);
+        }
+    }
+
     [Event(1, Level = EventLevel.Warning, Message = "Database engine worker {0} ({1}) failed on database '{2}': {3}: {4}. Failure {5} in a row; the worker retries.")]
     private void WorkerFailed(string workerName, string workerKind, string database, string exceptionType, string exceptionMessage, int consecutiveFailures)
         => WriteEvent(1, workerName, workerKind, database, exceptionType, exceptionMessage, consecutiveFailures);
@@ -73,4 +103,8 @@ internal sealed class DatabaseEventSource : EventSource
     [Event(2, Level = EventLevel.Informational, Message = "Database engine worker {0} ({1}) recovered on database '{2}' after {3} failure(s) in a row.")]
     private void WorkerRecovered(string workerName, string workerKind, string database, int failures)
         => WriteEvent(2, workerName, workerKind, database, failures);
+
+    [Event(3, Level = EventLevel.Error, Message = "Database engine {0} took database '{1}' offline ({2}): its worker {3} ({4}) kept failing on it; the last failure was {5}: {6}. Every operation on the database is refused until it is reopened.")]
+    private void DatabaseTakenOffline(string engineName, string database, string cause, string workerName, string workerKind, string exceptionType, string exceptionMessage)
+        => WriteEvent(3, engineName, database, cause, workerName, workerKind, exceptionType, exceptionMessage);
 }
