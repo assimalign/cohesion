@@ -22,13 +22,14 @@ internal static partial class HPackEncoder
 
     /// <summary>
     /// Encodes the response field section for an <em>incrementally streamed</em>
-    /// response: the <c>:status</c> pseudo-header followed by the supplied headers
-    /// verbatim, with <b>no</b> <c>Content-Length</c> synthesized. A streaming
+    /// response: the <c>:status</c> pseudo-header followed by the supplied headers,
+    /// with <b>no</b> <c>Content-Length</c> synthesized. A streaming
     /// response has no known body length up front — HTTP/2 delimits the body with
-    /// <c>END_STREAM</c> — so injecting a length here would be wrong.
+    /// <c>END_STREAM</c> — so injecting a length here would be wrong. A
+    /// connection-specific field is skipped (<see cref="HttpResponseFieldRules"/>).
     /// </summary>
     /// <param name="statusCode">The response status code.</param>
-    /// <param name="headers">The response headers to emit as-is.</param>
+    /// <param name="headers">The response headers to emit.</param>
     /// <returns>The HPACK-encoded field section.</returns>
     public static byte[] EncodeResponseHeaders(HttpStatusCode statusCode, IHttpHeaderCollection headers)
     {
@@ -37,6 +38,12 @@ internal static partial class HPackEncoder
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
+            // RFC 9113 §8.2.2 — a connection-specific field would make the response malformed.
+            if (!HttpResponseFieldRules.IsSendable(header.Key, header.Value))
+            {
+                continue;
+            }
+
             // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
             // value; combining cookies into a single comma-folded value is
             // forbidden.
@@ -79,7 +86,8 @@ internal static partial class HPackEncoder
 
     /// <summary>
     /// Encodes the field section for an <em>interim</em> (<c>1xx</c>) response: the <c>:status</c>
-    /// pseudo-header set to the interim code followed by the supplied fields verbatim, with <b>no</b>
+    /// pseudo-header set to the interim code followed by the supplied fields, less any
+    /// connection-specific field (<see cref="HttpResponseFieldRules"/>), with <b>no</b>
     /// <c>Content-Length</c> (an interim response carries no body — RFC 9110 §15.2). The resulting
     /// HEADERS frame is written without <c>END_STREAM</c> so the final response can follow on the same
     /// stream (RFC 9113 §8.1).
@@ -96,6 +104,12 @@ internal static partial class HPackEncoder
         {
             foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
             {
+                // RFC 9113 §8.2.2 — an interim response is a field section like any other.
+                if (!HttpResponseFieldRules.IsSendable(header.Key, header.Value))
+                {
+                    continue;
+                }
+
                 foreach (string? value in header.Value)
                 {
                     if (!string.IsNullOrEmpty(value))

@@ -912,7 +912,9 @@ final-response guard below), so all three engines classify `1xx` identically.
 - **HTTP/2** — `Http2ExchangeControl` delegates to
   `Http2ConnectionContext.WriteInterimResponseAsync`, which encodes the field
   section with `HPackEncoder.EncodeInterimResponseHeaders` (the `1xx` `:status`
-  with **no** synthesized `Content-Length`) and writes it as an additional HEADERS
+  with **no** synthesized `Content-Length`, and none of the connection-specific
+  fields, see "Connection-specific fields in HTTP/2 and HTTP/3 response heads")
+  and writes it as an additional HEADERS
   block **without** `END_STREAM` (RFC 9113 §8.1), holding the connection write gate
   (`Http2WriteScheduler`) at the stream's effective priority for the whole
   HEADERS [+ CONTINUATION…] sequence so it never interleaves with the pump's
@@ -922,7 +924,8 @@ final-response guard below), so all three engines classify `1xx` identically.
 - **HTTP/3** — `Http3ExchangeControl` delegates to
   `Http3ConnectionContext.WriteInterimResponseAsync`, which encodes the field
   section with `Http3HeaderCodec.EncodeInterimResponseHeaders` (QPACK, `1xx`
-  `:status`, no `Content-Length`) and writes an additional HEADERS frame on the
+  `:status`, no `Content-Length`, no connection-specific field) and writes an
+  additional HEADERS frame on the
   request stream ahead of the final HEADERS frame (RFC 9114 §4.1). The request
   stream is single-writer for the response direction and QUIC applies its own
   per-stream flow control, so the interim frame simply precedes the final frames.
@@ -1889,6 +1892,34 @@ volatile flags, and the cap is a running `long` counter maintained by the pump.
 - **`content-length` versus DATA-total validation.** RFC 9113 §8.1.1 makes a
   mismatch a malformed request. The declaration is used here only for the early
   rejection; the cap bounds the rest.
+
+## Connection-specific fields in HTTP/2 and HTTP/3 response heads
+
+RFC 9113 §8.2.2 and RFC 9114 §4.2 make a message carrying `Connection`,
+`Keep-Alive`, `Proxy-Connection`, `Transfer-Encoding`, or `Upgrade` malformed, and
+allow `TE` only with the value `trailers`; a client may reset a stream that carries
+one. An application, middleware written for HTTP/1.1, or a proxy can set these
+fields, so the HTTP/2 and HTTP/3 encoders skip them while they encode a response
+head (#1328):
+
+- **One rule, every head.** `HttpResponseFieldRules.IsSendable` is consulted by
+  `HPackEncoder.EncodeResponseHeaders` / `EncodeInterimResponseHeaders` and by
+  `Http3HeaderCodec.EncodeResponseHeaders` / `EncodeInterimResponseHeaders`. The
+  buffered head, the streamed head, early hints and every other interim response,
+  and an extended CONNECT tunnel's `200` all pass through it. `TE: trailers` is the
+  one value kept; any other `TE`, an empty one included, is dropped.
+- **The wire, not the collection.** The encoders skip the field without removing it
+  from `Response.Headers` or from the collection passed for an interim response, so
+  a component that set it and reads it back still sees it, and a collection reused
+  for several responses is not changed underneath its owner.
+- **Dropped, not refused.** A head that carries such a field is still sent: the field
+  means nothing on these versions, and a response built without knowing the version
+  should not fail on one of them. Trailers differ: the trailer collection exists only
+  where HTTP/2 or HTTP/3 sends it, so `HttpTrailerFieldRules` refuses such a field
+  when it is staged.
+- **Transport-built heads** (the HTTP/2 `413`, the HTTP/3 status-only response) carry
+  only fields the transport chose, and HTTP/1.1, where these fields have meaning,
+  does not use the rule.
 
 ## Trailers on HTTP/2 and HTTP/3
 
@@ -2987,8 +3018,10 @@ sequenceDiagram
   claim of the stream) and never on a cancelled exchange — each an
   `InvalidOperationException` — and never on a stream that is already gone,
   an `IOException`. The head is a `200` carrying the headers the application
-  set, minus `Content-Length` / `Transfer-Encoding` (RFC 9110 §9.3.6) and the
-  connection-specific fields (RFC 9113 §8.2.2, RFC 9114 §4.2): on HTTP/2 a
+  set, minus `Content-Length` (RFC 9110 §9.3.6), which accepting removes, and
+  the connection-specific fields, `Transfer-Encoding` among them, which every
+  HTTP/2 and HTTP/3 head drops (see "Connection-specific fields in HTTP/2 and
+  HTTP/3 response heads"): on HTTP/2 a
   HEADERS block without `END_STREAM` written under the connection write
   gate, on HTTP/3 a HEADERS frame and no FIN. Like an HTTP/1.1 upgrade's
   head it gets no `Alt-Svc` advertisement: it opens a tunnel, not a

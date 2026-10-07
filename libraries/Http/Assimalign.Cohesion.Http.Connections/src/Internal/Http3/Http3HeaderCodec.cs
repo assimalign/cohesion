@@ -237,7 +237,8 @@ internal static class Http3HeaderCodec
 
     /// <summary>
     /// Encodes the field section for an <em>interim</em> (<c>1xx</c>) response: the <c>:status</c>
-    /// pseudo-header set to the interim code followed by the supplied fields verbatim, with <b>no</b>
+    /// pseudo-header set to the interim code followed by the supplied fields, less any
+    /// connection-specific field (<see cref="HttpResponseFieldRules"/>), with <b>no</b>
     /// <c>Content-Length</c> (an interim response carries no body — RFC 9110 §15.2). Written as an
     /// additional HEADERS frame on the request stream, before the final HEADERS frame (RFC 9114 §4.1).
     /// </summary>
@@ -255,6 +256,12 @@ internal static class Http3HeaderCodec
         {
             foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
             {
+                // RFC 9114 §4.2 — an interim response is a field section like any other.
+                if (!HttpResponseFieldRules.IsSendable(header.Key, header.Value))
+                {
+                    continue;
+                }
+
                 foreach (string? value in header.Value)
                 {
                     if (!string.IsNullOrEmpty(value))
@@ -300,10 +307,11 @@ internal static class Http3HeaderCodec
 
     /// <summary>
     /// Encodes the response field section for an <em>incrementally streamed</em>
-    /// response: the <c>:status</c> pseudo-header followed by the response headers
-    /// verbatim, with <b>no</b> synthesized <c>Content-Length</c>. HTTP/3 delimits
+    /// response: the <c>:status</c> pseudo-header followed by the response headers,
+    /// with <b>no</b> synthesized <c>Content-Length</c>. HTTP/3 delimits
     /// the body with the stream end, so a length is neither known up front nor
-    /// required.
+    /// required. A connection-specific field is skipped
+    /// (<see cref="HttpResponseFieldRules"/>).
     /// </summary>
     /// <param name="context">The exchange whose response head is encoded.</param>
     /// <returns>The QPACK-encoded field section.</returns>
@@ -318,6 +326,12 @@ internal static class Http3HeaderCodec
 
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
         {
+            // RFC 9114 §4.2 — a connection-specific field would make the response malformed.
+            if (!HttpResponseFieldRules.IsSendable(header.Key, header.Value))
+            {
+                continue;
+            }
+
             // RFC 6265 §3 — Set-Cookie MUST be emitted as one field line per
             // value; combining cookies into a single comma-folded value is
             // forbidden.

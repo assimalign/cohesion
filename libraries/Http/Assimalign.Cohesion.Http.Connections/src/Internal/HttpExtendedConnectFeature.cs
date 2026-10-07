@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -102,27 +101,10 @@ internal abstract class HttpExtendedConnectFeature : IHttpExtendedConnectFeature
         HttpHeaderCollection headers = response.Headers;
 
         // RFC 9110 §9.3.6 — a 2xx response to CONNECT carries no Content-Length or Transfer-Encoding: the
-        // stream that follows is the tunnel, not a body. RFC 9113 §8.2.2 / RFC 9114 §4.2 — an HTTP/2 or
-        // HTTP/3 field section never carries connection-specific fields, which a client treats as a
-        // malformed response; an application that set the HTTP/1.1 upgrade fields would break the tunnel.
+        // stream that follows is the tunnel, not a body. Transfer-Encoding and the other
+        // connection-specific fields, such as the HTTP/1.1 upgrade fields an application might set, never
+        // reach an HTTP/2 or HTTP/3 head: the encoders drop them from every response head
+        // (HttpResponseFieldRules, RFC 9113 §8.2.2, RFC 9114 §4.2).
         headers.Remove(HttpHeaderKey.ContentLength);
-
-        List<HttpHeaderKey>? forbidden = null;
-
-        foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> header in headers)
-        {
-            if (HttpFieldNormalization.IsForbiddenInHttp2Or3(header.Key))
-            {
-                (forbidden ??= new List<HttpHeaderKey>()).Add(header.Key);
-            }
-        }
-
-        if (forbidden is not null)
-        {
-            foreach (HttpHeaderKey key in forbidden)
-            {
-                headers.Remove(key);
-            }
-        }
     }
 }
