@@ -681,8 +681,7 @@ internal sealed class Http2Stream
             _reset = true;
         }
 
-        CompleteBody();
-        TryFireAbort();
+        CutOffBody($"The HTTP/2 stream {StreamId} was reset before its request body ended.");
     }
 
     /// <summary>
@@ -718,8 +717,7 @@ internal sealed class Http2Stream
             _reset = true;
         }
 
-        CompleteBody();
-        TryFireAbort();
+        CutOffBody($"The HTTP/2 stream {StreamId} was reset before its request body ended.");
     }
 
     /// <summary>
@@ -759,8 +757,8 @@ internal sealed class Http2Stream
     /// <summary>
     /// Aborts the request when the connection tears down (wire failure, connection
     /// error, or cooperative shutdown) while the body is still incoming. Fires
-    /// <see cref="RequestAborted"/> and completes the body pipe so a handler parked
-    /// reading the body observes cancellation — not a clean end-of-stream, which
+    /// <see cref="RequestAborted"/> and fails the body pipe so a handler parked
+    /// reading the body observes the abort — not a clean end-of-stream, which
     /// would let it mistake a truncated body for a complete one.
     /// </summary>
     /// <returns>
@@ -772,17 +770,16 @@ internal sealed class Http2Stream
     /// </returns>
     public bool AbortOnShutdown()
     {
-        CompleteBody();
-
         // Only a body that was still incoming is truncated. A fully-received body
         // (END_STREAM already observed) is complete and buffered; the handler must
         // still be able to read it, so do NOT fire the abort for it.
         if (!InputCompleted)
         {
-            TryFireAbort();
+            CutOffBody($"The HTTP/2 connection closed before the request body on stream {StreamId} ended.");
             return true;
         }
 
+        CompleteBody();
         return false;
     }
 
@@ -790,13 +787,26 @@ internal sealed class Http2Stream
     /// Aborts the exchange because the host stopped waiting for the connection — it cancelled the
     /// receive enumeration, or the graceful close's bounded drain ran out. Unlike
     /// <see cref="AbortOnShutdown"/>, a fully received request is aborted too, since nothing waits for
-    /// its response any longer: fires <see cref="RequestAborted"/> and completes the body pipe.
-    /// Idempotent.
+    /// its response any longer: fires <see cref="RequestAborted"/> and fails a body pipe that had not
+    /// ended. Idempotent.
     /// </summary>
     public void AbortOnCancellation()
     {
-        CompleteBody();
+        CutOffBody($"The HTTP/2 exchange on stream {StreamId} was abandoned before its request body ended.");
+    }
+
+    /// <summary>
+    /// Ends a request whose body was cut off before its END_STREAM (RFC 9113 §8.1): fires the abort
+    /// first, then fails the body pipe with an <see cref="IOException"/> instead of completing it. A
+    /// reader that wakes on the pipe therefore never reads a clean end of the body, whichever signal
+    /// reaches it first, and the trailer section is never published (#1327). A body that already
+    /// ended keeps its clean end: the pipe's one-shot latch makes the failure a no-op.
+    /// </summary>
+    /// <param name="reason">Why the body was cut off.</param>
+    private void CutOffBody(string reason)
+    {
         TryFireAbort();
+        FailBody(new IOException(reason));
     }
 
     private void CompleteBody()

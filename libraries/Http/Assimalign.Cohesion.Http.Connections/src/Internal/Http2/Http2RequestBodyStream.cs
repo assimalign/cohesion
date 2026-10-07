@@ -28,7 +28,10 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// handler. A peer <c>RST_STREAM</c> (or a local reset) fires
 /// <see cref="Http2Stream.RequestAborted"/>, which surfaces here as an
 /// <see cref="OperationCanceledException"/> so a handler blocked reading the body
-/// wakes up and unwinds.
+/// wakes up and unwinds. The stream fires that abort before it fails the pipe with an
+/// <see cref="IOException"/>, so a body cut off by a reset or by the loss of the
+/// connection never reads as a clean end: only the peer's END_STREAM ends the body
+/// with a 0-octet read (RFC 9113 §8.1, #1327).
 /// </para>
 /// <para>
 /// Reaching the clean end of the body is also when the request's trailer section, if

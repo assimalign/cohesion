@@ -31,29 +31,13 @@ internal sealed class Http2ExtendedConnectStream : HttpExtendedConnectStream
     }
 
     /// <inheritdoc />
-    protected override async ValueTask<int> ReadCoreAsync(Memory<byte> buffer, CancellationToken cancellationToken)
-    {
-        int read = await _requestBody.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-
-        if (read == 0 && !buffer.IsEmpty)
-        {
-            // A reset and a torn-down connection complete the body pipe too, just ahead of the abort signal
-            // a read otherwise surfaces. Only the peer's own END_STREAM ends the tunnel.
-            Http2Stream stream = _context.Stream;
-
-            if (stream.IsReset)
-            {
-                throw new IOException($"The HTTP/2 stream {stream.StreamId} carrying the extended CONNECT tunnel was reset.");
-            }
-
-            if (!stream.InputCompleted)
-            {
-                throw new IOException("The HTTP/2 connection carrying the extended CONNECT tunnel closed.");
-            }
-        }
-
-        return read;
-    }
+    /// <remarks>
+    /// The body pipe returns 0 only at the peer's END_STREAM: a reset or a torn-down connection fires
+    /// the stream's abort and fails the pipe instead, which the base turns into an
+    /// <see cref="IOException"/>.
+    /// </remarks>
+    protected override ValueTask<int> ReadCoreAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+        => _requestBody.ReadAsync(buffer, cancellationToken);
 
     /// <inheritdoc />
     protected override ValueTask WriteCoreAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)

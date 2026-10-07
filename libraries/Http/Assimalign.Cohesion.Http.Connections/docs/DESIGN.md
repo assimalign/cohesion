@@ -1687,7 +1687,19 @@ fires its `RequestAborted` so a handler parked reading it observes cancellation
 rather than a clean end-of-stream (which would let it treat a truncated upload as
 complete), while a **fully-received** body stays readable to completion. Aborting
 before completing the channel makes the abort observable to a consumer that is
-about to see the enumerable end. Graceful close emits the shutdown GOAWAY while
+about to see the enumerable end.
+
+The same rule governs the body pipe itself: only END_STREAM completes it cleanly
+(RFC 9113 §8.1). A body cut off by a peer `RST_STREAM`, by the server's own reset,
+or by the loss of the connection fires the stream's abort **first** and then fails
+the pipe with an `IOException` instead of completing it (`CutOffBody`). Completing
+it first used to wake a parked reader with a clean end of the body, which it
+returned as a 0-octet read before the abort arrived — a truncated upload, with or
+without a `content-length`, read as complete (#1327). Now a reader sees the abort as
+an `OperationCanceledException`, or the pipe's `IOException`, never a clean end, and
+the request's trailer section is published only at a clean end. HTTP/3 needed no
+change: its body reads the request stream directly, and a reset or a closed
+connection fails that read. Graceful close emits the shutdown GOAWAY while
 the pump is still running — the write scheduler serializes it against the pump's
 writes — then drains in-flight exchanges (bounded) and only then cancels and
 awaits the pump (see "HTTP/2 graceful close").
@@ -2997,10 +3009,9 @@ sequenceDiagram
   whose consumption credits `WINDOW_UPDATE` on the stream and the connection,
   and the HTTP/3 lazy body — outside the body-size cap and the
   Content-Length rule (RFC 9110 §9.3.6). A read returns 0 only at the peer's
-  `END_STREAM` or FIN. A reset or a torn-down connection completes the HTTP/2
-  body pipe as well, just ahead of the abort signal, so the tunnel checks the
-  stream's state when the pipe ends and faults instead of reporting the end
-  of the tunnel.
+  `END_STREAM` or FIN: a reset or a torn-down connection fails the body instead
+  (see "Lifecycle: dispatch-at-headers, abandoned bodies, teardown"), which the
+  tunnel reports as an `IOException`.
 - **Writes** are unbuffered. HTTP/2 splits a write into `DATA` frames of at
   most the peer's `MAX_FRAME_SIZE`, each covered by credit from both send
   windows (RFC 9113 §5.2) — the accounting a streamed response uses — and
