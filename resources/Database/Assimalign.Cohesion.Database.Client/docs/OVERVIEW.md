@@ -27,7 +27,8 @@ handshake, runs model-owned framed exchanges, and pools authenticated connection
   `MaxPoolSize`), plus `For(Uri)` for generated or ambient resource
   endpoints.
 - **`DatabaseClientException`** — the client error root, carrying the wire's
-  stable `ProtocolErrorCode`.
+  stable `ProtocolErrorCode`. A failed dial carries `ConnectionFailure`, names the
+  endpoint, and keeps the transport's exception as its inner exception.
 
 ## Dependencies
 

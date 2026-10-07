@@ -55,7 +55,7 @@ otherwise, this list wins.
 | 36 | P5: the exchange bases' run entries | Stay internal (2026-10-07). |
 | 37 | P5: `DatabaseConnection.OpenAsync` | Stays internal (2026-10-07). |
 | 38 | P5: composing client observers | Not supported for now; a sealed composite observer per client only on demand (2026-10-07). |
-| 39 | P5: transport dial failures | Wrapped in `DatabaseClientException` with its connection-failure code, as Npgsql wraps socket errors (2026-10-07). |
+| 39 | P5: transport dial failures | Wrapped in `DatabaseClientException` with its connection-failure code, as Npgsql wraps socket errors (2026-10-07). **Landed** on `feat/database-client-dial-failures`, with the client-local code `ProtocolErrorCode.ConnectionFailure`, and reviewed on `feat/database-client-dial-failures-review`, which also stops a handshake-phase reset's `SocketException` escaping raw (§7, "P5, as landed", owner review 39 and its "Review, as applied"; §12). |
 | 40 | Decision 22: how Hosting reports reopen attempts | Its internal `EventSource`, forwarded into logging (`event-source.md`) (2026-10-07). |
 | 41 | Decision 25: the journal cap | Needs two failed checkpoints in a row (2026-10-07). |
 
@@ -3373,6 +3373,81 @@ readings their entries record:
       dial failure (`SocketException` from `TcpConnectionFactory`) reaches the caller unchanged.
       The XML documentation now says so. Wrapping it in `DatabaseClientException` (and so in each
       model's exception) is a behavior change, left to the owner.
+      **Landed (owner decision 39, 2026-10-07),** on `feat/database-client-dial-failures`. The
+      internal `DatabaseConnection.OpenAsync` dials through a private `DialAsync` that wraps
+      every failure of the connection factory in `DatabaseClientException` with a new
+      client-local code, `ProtocolErrorCode.ConnectionFailure = 10`, a message that names the
+      endpoint, and the factory's exception as `InnerException`. The caller's cancellation,
+      `ObjectDisposedException` and `OutOfMemoryException` pass through; a cancellation the caller
+      did not request (the TLS layer's handshake timeout) is wrapped as a timeout, as Npgsql's
+      `NpgsqlConnector.ConnectAsync` does (`src/Npgsql/Internal/NpgsqlConnector.cs:1373-1383` at
+      `9c472445`). SQL and Key-Value map the code to their existing `ConnectionFailure` kind;
+      Graph and Blob keep it. Why a new code: `DatabaseClientException.Code` is the only
+      discriminator the core and the Graph and Blob exceptions carry, and the existing codes mean
+      something else (`Internal` a server fault or a broken transport, `Unavailable` a server
+      that refuses the session); the taxonomy holds a client-local code the way SQLSTATE class 08
+      holds `08001` (PostgreSQL `src/backend/utils/errcodes.txt:108`). The enum's remarks and
+      Protocol `DESIGN.md` say no server sends it. The XML documentation of `RentAsync`,
+      `OpenAsync` and the four `ConnectAsync` members, the two kinds' summaries, and the five
+      client `DESIGN.md` files say what is thrown; Database.Client `DESIGN.md`'s known-limit
+      bullet is resolved. Tests: `DatabaseClientDialFailureTests` (10: a refused TCP dial that
+      also proves the slot is released, five transport exception types, the TLS layer's
+      handshake timeout and fatal alert over the in-memory transport, the caller's cancellation
+      and `ObjectDisposedException` unwrapped) and a `…ClientDialFailureTests` pair in each model
+      client (a refused TCP dial with the code, kind and inner chain; a canceled dial). Suites:
+      Client 43 to 53, Sql.Client 316 to 318, KeyValuePair.Client 12 to 14, Graph.Client 57 to
+      59, Blob.Client 21 to 23.
+      *Review, as applied (2026-10-07),* on `feat/database-client-dial-failures-review`, on top
+      of the landing. One review required changes for one major finding; it and three of the four
+      minor ones were applied, and the fourth, outside the track, is a §12 follow-up.
+      - *A peer reset during the handshake escaped raw (major).* The TCP transport completes the
+        connection's input with the raw `SocketException` of a reset
+        (`libraries/Connections/Assimalign.Cohesion.Connections.Tcp/src/Internal/TcpConnection.cs:209-212`,
+        `:243`), and the handshake's `WriteFrameAsync` and `ExpectFrameAsync` translated only
+        `IOException`, `ConnectionAbortedException` and `ConnectionResetException`; a
+        `SocketException` is not an `IOException`, so a peer that accepted and reset the
+        connection gave a raw `SocketException` from `RentAsync` and `SqlClient.ConnectAsync` in
+        8 of 20 of the review's probe runs. Kestrel wraps the same error in
+        `ConnectionResetException` (aspnetcore
+        `src/Servers/Kestrel/Transport.Sockets/src/Internal/SocketConnection.cs:216`). One private
+        `IsTransportFailure` now adds `SocketException` to the three for the two handshake
+        helpers and `ExecuteAsync`, which had the same filter: the reset becomes
+        `DatabaseClientException` with `Internal`, the socket error inside, and a broken
+        connection. `DatabaseClientHandshakeFailureTests` reproduces it deterministically (an
+        in-memory peer reads the startup frame and aborts with a reset `SocketException`) and
+        proves a second rent at pool size 1 still dials; `SqlClientDialFailureTests` pins the
+        `SqlClientException` to `DatabaseClientException` to `SocketException` chain. The
+        `RentAsync`, `OpenAsync` and four `ConnectAsync` `<exception>` lines, the
+        `DatabaseClientException` remarks and Database.Client `DESIGN.md` name the
+        handshake-phase `Internal` with the transport's exception inside; the owner question of
+        `ConnectionFailure` for it stays in §12.
+      - *A transport failure after the caller canceled was a dial failure (minor).* A factory
+        that throws a non-cancellation (an aborted socket) once the caller's token is canceled
+        became `ConnectionFailure`; Npgsql checks the token first
+        (`src/Npgsql/Internal/NpgsqlConnector.cs:1362`, `:1373` at `9c472445`). `DialAsync` now
+        throws `OperationCanceledException` for the caller's token with the failure inside,
+        ahead of the wrap; DESIGN lists keeping the inner exception as the second difference
+        from Npgsql.
+      - *A connection-string endpoint read `Unspecified/host:port` (minor).* Both connection
+        strings and `For(Uri)` give a `DnsEndPoint`, whose own text carries the address family.
+        A private `Describe` writes `host:port`, an IPv6 literal in brackets.
+      - *A server could send the client-local code (minor).* `ProtocolErrorMessage.Decode` casts
+        any `u16`, so a peer's error frame carrying `ConnectionFailure` was indistinguishable
+        from a failed dial. `FromErrorFrame` and `ExecuteAsync` (through which every model
+        exchange runs) read it as `ProtocolViolation` and break the connection, without the
+        decoded exception inside, so no exception chain carries the code but a failed dial's.
+        `FromErrorFrame` also reads a malformed handshake error frame as `ProtocolViolation`; its
+        `ProtocolException` escaped `RentAsync` raw before.
+      - *A failed TLS upgrade leaks the dialed TCP connection (minor, outside the track):* §12.
+      *Gate, as run:* a no-incremental build of `Assimalign.Cohesion.Database.slnx` has no
+      Database warning but CS2008 on Database.Refs; every Database suite and Sdk.Database pass at
+      their baselines but Client (53 to 61) and Sql.Client (318 to 319); Studio builds clean to a
+      `%TEMP%` output folder and its `--smoke` run gives 83 passed, 0 failed, 1 skipped; the
+      dependency graph check passes and the Database runtime producer packs. In that smoke run
+      the `unknown-database (observation)` step reported "The server closed the connection
+      mid-exchange." (`Internal`) for all four wire models, Graph included, where the landing's
+      run saw Graph report `DatabaseNotFound`: the server's rejection frame is lost to a race,
+      not to the model (the TCP-dispose defect #1086 is the likely cause).
 
   *Gate, as run:* a no-incremental build of every Database project but Database.Testing's tests,
   the SampleHost fixture and the stray `Cache/src` test csproj, plus Sdk.Database, has no Database
@@ -3970,3 +4045,30 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   lease over the pooled session) or a generation token checked on every call. A design change,
   left to P8 under #1261, with a test that disposes, re-rents at pool size 1 and asserts
   `ObjectDisposedException` on the stale reference.
+- Transport dial failures: **Done** by owner decision 39 (§7, "P5, as landed", owner review 39).
+  `RentAsync` and the four model `ConnectAsync` members throw the client exception with
+  `ProtocolErrorCode.ConnectionFailure` and the transport's exception inside. One neighbor is
+  left: *a transport that breaks after the dial, during the handshake, reports `Internal`.*
+  Since the review it is never raw (a reset's `SocketException` is the inner exception), but
+  a peer that accepts the connection and closes it (a listener past its accept limit, another
+  service on the port) gives "The server closed the connection mid-exchange." with
+  `Internal`, and one that resets it gives "The connection failed while awaiting a frame."
+  with `Internal`, so SQL and Key-Value report their `Internal` kind although the connection
+  never became usable, which their `ConnectionFailure` kind describes. Moving those failures to
+  `ConnectionFailure` touches only `DatabaseConnection.WriteFrameAsync` and `ExpectFrameAsync`,
+  which run only in the handshake, but it is a further behavior change, left to the owner.
+- A failed TLS upgrade leaks the dialed TCP connection (found by the decision 39 review,
+  outside the client; §7, "P5, as landed", owner review 39, "Review, as applied").
+  `LayeredConnectionFactory.ConnectAsync`
+  (`libraries/Connections/Assimalign.Cohesion.Connections/src/Internal/LayeredConnectionFactory.cs:24-29`)
+  never disposes the inner connection when `_layer.UpgradeAsync` throws, and
+  `TlsConnection.AuthenticateAsClientAsync`
+  (`libraries/Connections/Assimalign.Cohesion.Connections.Security/src/Internal/TlsConnection.cs:84-98`)
+  disposes only its `SslStream`, whose `DuplexPipeStream` does not own the connection. The
+  client never receives the inner connection, so `RentAsync` releases the pool slot (the dial
+  failure is wrapped, as decision 39 asks) but the socket and its I/O loops stay alive: the
+  review's probe saw the client never close its end after a TLS alert, even after a full GC.
+  `LayeredConnectionListener.AcceptAsync` (`:33`) has the same gap on the server side. The fix
+  is a `try`/`catch` that disposes the inner connection and rethrows, in both, with a
+  Connections.Security test that a failed upgrade closes it; it belongs to the Connections
+  libraries, not this plan.

@@ -47,7 +47,9 @@ another operation. Dispose rented connections before the client; healthy connect
 to the shared pool. Disposing a connection cancels and waits for its current exchange.
 
 `BlobClientException.Code` preserves a server's stable `ProtocolErrorCode`; local truncation
-or malformed frames map to `ProtocolViolation`, and transport failures map to `Internal`.
+or malformed frames map to `ProtocolViolation`, a failed dial in `ConnectAsync` maps to
+`ConnectionFailure` (the transport's exception stays inside), and other transport failures map
+to `Internal`.
 Every failed Blob exchange closes its connection, including rejected metadata operations.
 Rent a fresh connection after failure. Missing metadata returns null and deletion of a
 missing object returns false; downloading a missing object throws.

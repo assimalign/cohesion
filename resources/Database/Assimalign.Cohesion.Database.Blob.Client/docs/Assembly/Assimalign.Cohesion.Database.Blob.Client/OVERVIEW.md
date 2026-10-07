@@ -14,7 +14,8 @@
 | `BlobConnection.DisposeAsync` | Cancels active exchange, waits, then returns or closes shared lease |
 | `BlobClient.DisposeAsync` | Disposes the pool; rented connections should already be disposed |
 
-`BlobClientException.Code` preserves a server `ProtocolErrorCode`. Every failed exchange
+`BlobClientException.Code` preserves a server `ProtocolErrorCode`; a failed dial in
+`ConnectAsync` carries `ConnectionFailure`, with the transport's exception inside. Every failed exchange
 invalidates its connection. Cancellation throws `OperationCanceledException`; overlapping
 operations throw `InvalidOperationException`. A download's lifetime cancellation remains
 active after return, and later read failures remain sticky. Successful EOF requires verified

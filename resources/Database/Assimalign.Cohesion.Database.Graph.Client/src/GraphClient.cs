@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Graph.Client;
 
@@ -46,9 +47,9 @@ public sealed class GraphClient : IAsyncDisposable
     /// <summary>Rents an authenticated connection bound to the configured database.</summary>
     /// <param name="cancellationToken">Cancellation token for connecting.</param>
     /// <returns>The rented connection; dispose it to return its session.</returns>
-    /// <exception cref="ObjectDisposedException">The client is disposed.</exception>
-    /// <exception cref="OperationCanceledException">The wait for a slot, the dial or the handshake is canceled.</exception>
-    /// <exception cref="GraphClientException">The handshake failed; a transport dial failure propagates from the connection factory.</exception>
+    /// <exception cref="ObjectDisposedException">The client, or an object its connection factory needs, is disposed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> cancels the wait for a slot, the dial or the handshake.</exception>
+    /// <exception cref="GraphClientException">The dial failed (<see cref="ProtocolErrorCode.ConnectionFailure"/>; the inner <see cref="DatabaseClientException"/> keeps the transport's exception) or the handshake failed: the server's code, or <see cref="ProtocolErrorCode.Internal"/> when the transport broke during it (the inner <see cref="DatabaseClientException"/> keeps the transport's exception).</exception>
     public async ValueTask<GraphConnection> ConnectAsync(CancellationToken cancellationToken = default)
     {
         try

@@ -43,6 +43,12 @@ GraphClientException preserves the stable ProtocolErrorCode and inner failure. T
 connection does not translate error codes into connection health decisions: completion belongs
 to its exchange and pooling belongs to Database.Client.
 
+A failed dial reaches ConnectAsync as the core's DatabaseClientException with
+ProtocolErrorCode.ConnectionFailure (owner decision 39; the core's DESIGN.md, "Lifecycle and
+errors"). GraphClientException keeps that code, and the core exception, which keeps the
+transport's exception, is its inner exception. A canceled dial throws OperationCanceledException
+unchanged (GraphClientDialFailureTests).
+
 ## Path lifetime
 
 GraphPathsExchange derives from DatabaseStreamingExchange. OpenCoreAsync sends ExecutePaths and

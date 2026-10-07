@@ -57,6 +57,13 @@ Framing/decoder failure or cancellation during an exchange invalidates the share
 connection. Disposing a healthy typed connection returns its session to the pool;
 disposing the client disposes that pool.
 
+A failed dial reaches `ConnectAsync` as the core's `DatabaseClientException` with
+`ProtocolErrorCode.ConnectionFailure` (owner decision 39; the core's `DESIGN.md`,
+"Lifecycle and errors"). It maps to `KeyValueClientErrorKind.ConnectionFailure`, like a
+handshake rejection, and the core exception, which keeps the transport's exception, is
+the inner exception. A canceled dial throws `OperationCanceledException` unchanged
+(`KeyValueClientDialFailureTests`).
+
 Observers report grammar text, counts, and elapsed time. Key/value bytes are never
 included. Observer exceptions cannot fault an operation or mask its exception. An
 observer derives from the abstract `KeyValueClientObserver`, whose three hooks are
