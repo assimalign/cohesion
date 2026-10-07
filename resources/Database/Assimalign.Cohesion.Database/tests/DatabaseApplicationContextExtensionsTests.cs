@@ -35,35 +35,96 @@ public class DatabaseApplicationContextExtensionsTests
         untyped.ShouldBeSameAs(other);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - Context: the typed lookup refuses an engine of another type, an unknown name and a blank one")]
-    public async Task GetEngine_WrongTypeOrName_ShouldThrow()
+    [Fact(DisplayName = "Cohesion Test [Database] - Context: the typed lookup refuses an engine of another type, naming both types")]
+    public async Task GetEngine_WrongType_ShouldThrowInvalidOperation()
     {
         // Arrange
         await using var engine = new TestEngine("orders");
         IDatabaseApplicationContext context = new TestContext(engine);
 
         // Act
-        var wrongType = Should.Throw<InvalidOperationException>(() => context.GetEngine<OtherEngine>("orders"));
+        var error = Should.Throw<InvalidOperationException>(() => context.GetEngine<OtherEngine>("orders"));
 
         // Assert
-        wrongType.Message.ShouldContain("'orders'");
-        wrongType.Message.ShouldContain(nameof(TestEngine));
-        wrongType.Message.ShouldContain(nameof(OtherEngine));
-        Should.Throw<KeyNotFoundException>(() => context.GetEngine<TestEngine>("missing"));
-        Should.Throw<ArgumentException>(() => context.GetEngine<TestEngine>(" "));
-        Should.Throw<ArgumentNullException>(() => ((IDatabaseApplicationContext)null!).GetEngine<TestEngine>("orders"));
+        error.Message.ShouldContain("'orders'", Case.Sensitive);
+        error.Message.ShouldContain(nameof(TestEngine), Case.Sensitive);
+        error.Message.ShouldContain(nameof(OtherEngine), Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Context: the typed lookup passes on the context's refusal of an unknown name")]
+    public async Task GetEngine_UnknownName_ShouldThrowKeyNotFound()
+    {
+        // Arrange
+        await using var engine = new TestEngine("orders");
+        IDatabaseApplicationContext context = new TestContext(engine);
+
+        // Act
+        var error = Should.Throw<KeyNotFoundException>(() => context.GetEngine<TestEngine>("missing"));
+
+        // Assert
+        error.Message.ShouldContain("missing", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database] - Context: the typed lookup refuses an empty or white-space name")]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task GetEngine_BlankName_ShouldThrowArgument(string name)
+    {
+        // Arrange
+        await using var engine = new TestEngine("orders");
+        IDatabaseApplicationContext context = new TestContext(engine);
+
+        // Act
+        var error = Should.Throw<ArgumentException>(() => context.GetEngine<TestEngine>(name));
+
+        // Assert
+        error.ParamName.ShouldBe("name");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Context: the typed lookup refuses a null name")]
+    public async Task GetEngine_NullName_ShouldThrowArgumentNull()
+    {
+        // Arrange
+        await using var engine = new TestEngine("orders");
+        IDatabaseApplicationContext context = new TestContext(engine);
+
+        // Act
+        var error = Should.Throw<ArgumentNullException>(() => context.GetEngine<TestEngine>(null!));
+
+        // Assert
+        error.ParamName.ShouldBe("name");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Context: the typed lookup refuses a null context")]
+    public void GetEngine_NullContext_ShouldThrowArgumentNull()
+    {
+        // Arrange
+        IDatabaseApplicationContext context = null!;
+
+        // Act
+        var error = Should.Throw<ArgumentNullException>(() => context.GetEngine<TestEngine>("orders"));
+
+        // Assert
+        error.ParamName.ShouldBe("context");
     }
 
     // The kept context seam over a fixed list of engines, as the hosting layer's context lists them.
-    private sealed class TestContext(params DatabaseEngine[] engines) : IDatabaseApplicationContext
+    private sealed class TestContext : IDatabaseApplicationContext
     {
-        public IReadOnlyList<DatabaseEngine> Engines { get; } = engines;
+        private readonly IReadOnlyList<DatabaseEngine> _engines;
+
+        public TestContext(params DatabaseEngine[] engines)
+        {
+            _engines = engines;
+        }
+
+        public IReadOnlyList<DatabaseEngine> Engines => _engines;
 
         public IReadOnlyList<DatabaseServer> Servers => [];
 
         public DatabaseEngine GetEngine(string name)
         {
-            foreach (DatabaseEngine engine in Engines)
+            foreach (DatabaseEngine engine in _engines)
             {
                 if (string.Equals(engine.Name, name, StringComparison.Ordinal))
                 {
@@ -76,8 +137,13 @@ public class DatabaseApplicationContextExtensionsTests
     }
 
     // An engine of another type, with no databases.
-    private sealed class OtherEngine(string name) : DatabaseEngine(name, EngineModel.Custom)
+    private sealed class OtherEngine : DatabaseEngine
     {
+        public OtherEngine(string name)
+            : base(name, EngineModel.Custom)
+        {
+        }
+
         public override IReadOnlyList<DatabaseName> OfflineDatabases => [];
 
         protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)

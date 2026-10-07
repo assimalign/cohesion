@@ -13,12 +13,21 @@ public interface IDatabaseApplicationBuilder
     /// <summary>Registers a borrowed engine; its caller remains the disposal owner.</summary>
     /// <param name="engine">The existing engine.</param>
     /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="engine"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Registration is closed because Build has begun, or another engine of the application has the same name.
+    /// </exception>
     IDatabaseApplicationBuilder AddEngine(DatabaseEngine engine);
 
     /// <summary>Defers owned engine construction until the application's first Build attempt.</summary>
     /// <param name="configure">A factory receiving the engines already constructed in registration order.</param>
     /// <returns>This builder.</returns>
-    /// <remarks>The factory transfers ownership of a fresh engine. It cleans up allocations if it throws before returning.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">Registration is closed because Build has begun.</exception>
+    /// <remarks>
+    /// The factory transfers ownership of a fresh engine. It cleans up allocations if it throws before returning.
+    /// Its product's name is checked against the other engines at Build.
+    /// </remarks>
     IDatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine> configure);
 
     /// <summary>Consumes this builder and publishes a complete, disposable application.</summary>

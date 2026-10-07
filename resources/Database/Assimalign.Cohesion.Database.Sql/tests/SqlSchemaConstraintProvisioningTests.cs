@@ -24,9 +24,8 @@ public sealed class SqlSchemaConstraintProvisioningTests : IDisposable
         {
             var database = await engine.CreateDatabaseAsync("app");
             database.SupportsSchemaProvisioning.ShouldBeTrue();
-            var provisioner = database;
-            (await provisioner.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeFalse();
-            (await provisioner.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
+            (await database.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeFalse();
+            (await database.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
             await using var session = await database.CreateSessionAsync();
 
             var orphan = await Should.ThrowAsync<SqlConstraintViolationException>(async () =>

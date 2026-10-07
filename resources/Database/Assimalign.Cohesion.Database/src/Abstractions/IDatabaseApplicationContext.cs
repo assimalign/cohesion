@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database;
@@ -21,6 +22,8 @@ public interface IDatabaseApplicationContext
     /// <summary>Retrieves a borrowed engine by its ordinal name.</summary>
     /// <param name="name">The engine name.</param>
     /// <returns>The registered engine, without transferring ownership.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
     /// <exception cref="KeyNotFoundException">No engine has that name.</exception>
     DatabaseEngine GetEngine(string name);
 }

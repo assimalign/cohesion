@@ -428,14 +428,31 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
     and checks for a checkpoint every ten seconds by default (`DEFAULT_CHECKING_FREQUENCY_MILLIS`,
     `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointThreshold.java:40`), so
     its ten failures span about a hundred seconds; at the one-second backoff here that window is
-    a hundred failed passes. A database whose checkpoints keep failing therefore goes offline
-    about a hundred seconds after its first failure, and a deferred undo, retried on its
-    coordinator's doubling schedule, later still. A device that stops answering for less than
-    that (a storage path failover) leaves its databases online; one that stays silent longer
-    takes them offline, and a hosted application reopens each once the device answers. An
-    engine that must ride out longer outages raises its limit, and one that must give up sooner
-    lowers it. The limit was ten, Neo4j's count, when decision 25 landed; it gave up after about
-    ten seconds, and owner decision 35 of 2026-10-07 moved it to the window.
+    a hundred failed passes. A device that stops answering for less than that (a storage path
+    failover) leaves its databases online; one that stays silent longer takes them offline, and
+    a hosted application reopens each once the device answers. An engine that must ride out
+    longer outages raises its limit, and one that must give up sooner lowers it. The limit was
+    ten, Neo4j's count, when decision 25 landed, and owner decision 35 of 2026-10-07 moved it to
+    the window.
+  - *The window depends on the worker.* The limit counts failed passes, so how long a give-up
+    takes is the limit times how often the worker visits the failing database (at the defaults,
+    with the window at the old limit of ten in parentheses):
+
+    | Worker | Visits a failing database | Window at 100 (at 10) |
+    |---|---|---|
+    | Checkpoint | every poll, once a second, after the one-second backoff | about 100 s, more when each attempt itself takes time (about 10 s) |
+    | Page write-back | every `PageWriteBackInterval` (1 s) after the backoff | about 100 s (about 10 s) |
+    | Write-ahead flush | when a commit wakes it or its window (the group-commit window, else 1 s) passes, after the backoff | about 100 s while commits stay pending (about 10 s) |
+    | Version purge, full pass | once per `MaintenanceInterval` (60 s) | about 100 minutes (about 10 minutes) |
+    | Version purge, deferred undo (#1226) | at its coordinator's retry, 100 ms doubling up to `MaintenanceInterval` | about 92 minutes: 102 s for the first ten, then a minute each (about 102 s) |
+
+    The worker's `Fault` is set from the first failure, so the engine is `Faulted`, Hosting's
+    health is `Degraded` and names the worker, and every failure is written to the event
+    source for the whole window. A deferred undo's writer keeps its locks all that time, and
+    Blob's server, which refuses every start, connection, handshake and operation while its
+    engine is not `Running`, is unavailable for all of it. Owner decision 35 was taken on the
+    checkpoint window; the longer windows are an owner review item (concrete-types plan, §7,
+    "P6, as landed").
   - *The journal cap.* A checkpoint that fails for the second pass or more in a row while one
     of the database's journals holds the engine's `JournalSizeLimit` (an engine option; zero,
     the default, resolves to four times `CheckpointJournalSize`, 1 GiB at its default and

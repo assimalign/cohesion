@@ -48,8 +48,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         {
             SqlDatabase database = await engine.CreateDatabaseAsync("orders");
             database.SupportsSchemaProvisioning.ShouldBeTrue();
-            var provisioner = database;
-            SchemaMigrationResult result = await provisioner.ApplySchemaAsync(schema);
+            SchemaMigrationResult result = await database.ApplySchemaAsync(schema);
 
             result.FromHash.ShouldBeNull();
             result.ToHash.ShouldBe(schema.Hash);
@@ -67,8 +66,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         {
             SqlDatabase reopened = await reopenedEngine.OpenDatabaseAsync("orders");
             reopened.SupportsSchemaProvisioning.ShouldBeTrue();
-            var provisioner = reopened;
-            SchemaMigrationResult result = await provisioner.ApplySchemaAsync(schema);
+            SchemaMigrationResult result = await reopened.ApplySchemaAsync(schema);
 
             result.FromHash.ShouldBe(schema.Hash);
             result.ToHash.ShouldBe(schema.Hash);
@@ -84,11 +82,10 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
         database.SupportsSchemaProvisioning.ShouldBeTrue();
-        var provisioner = database;
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             []);
-        await provisioner.ApplySchemaAsync(initial);
+        await database.ApplySchemaAsync(initial);
 
         SqlCompiledSchema desired = OrdersSchema(
             [
@@ -98,7 +95,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
             [new CompiledSchemaIndex("ix_orders_note", ["note"])]);
 
         // Act
-        SchemaMigrationResult result = await provisioner.ApplySchemaAsync(desired);
+        SchemaMigrationResult result = await database.ApplySchemaAsync(desired);
 
         // Assert
         result.FromHash.ShouldBe(initial.Hash);
@@ -121,12 +118,11 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
         database.SupportsSchemaProvisioning.ShouldBeTrue();
-        var provisioner = database;
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             [],
             hasPrimaryKey: false);
-        await provisioner.ApplySchemaAsync(initial);
+        await database.ApplySchemaAsync(initial);
         await using (SqlDatabaseSession session = await database.CreateSessionAsync())
         {
             await session.ExecuteAsync("INSERT INTO dbo.orders (id) VALUES (1), (1);");
@@ -142,7 +138,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
 
         // Act
         SqlSchemaMigrationException exception = await Should.ThrowAsync<SqlSchemaMigrationException>(
-            async () => await provisioner.ApplySchemaAsync(invalid));
+            async () => await database.ApplySchemaAsync(invalid));
 
         // Assert: ADD COLUMN completed first, then its compensation removed it.
         exception.Message.ShouldContain("Every completed step was compensated");
@@ -159,7 +155,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
             ],
             [],
             hasPrimaryKey: false);
-        SchemaMigrationResult retry = await provisioner.ApplySchemaAsync(valid);
+        SchemaMigrationResult retry = await database.ApplySchemaAsync(valid);
         retry.OperationCount.ShouldBe(1);
     }
 
@@ -170,11 +166,10 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
         database.SupportsSchemaProvisioning.ShouldBeTrue();
-        var provisioner = database;
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             [new CompiledSchemaIndex("ix_orders_id", ["id"])]);
-        await provisioner.ApplySchemaAsync(schema);
+        await database.ApplySchemaAsync(schema);
 
         // Simulate a partially completed previous schema application through its
         // internal session; live sessions cannot create this drift anymore.
@@ -185,7 +180,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         }
 
         // Act
-        SchemaMigrationResult result = await provisioner.ApplySchemaAsync(schema);
+        SchemaMigrationResult result = await database.ApplySchemaAsync(schema);
 
         // Assert
         result.WasAlreadyApplied.ShouldBeFalse();
@@ -203,17 +198,16 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
         database.SupportsSchemaProvisioning.ShouldBeTrue();
-        var provisioner = database;
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             []);
-        await provisioner.ApplySchemaAsync(schema);
+        await database.ApplySchemaAsync(schema);
 
         var instance = database.ShouldBeOfType<SqlDatabase>();
         await instance.Catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(schema.Hash, "not-json"));
 
         // Act
-        SchemaMigrationResult result = await provisioner.ApplySchemaAsync(schema);
+        SchemaMigrationResult result = await database.ApplySchemaAsync(schema);
 
         // Assert
         result.WasAlreadyApplied.ShouldBeFalse();
@@ -229,14 +223,13 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
         database.SupportsSchemaProvisioning.ShouldBeTrue();
-        var provisioner = database;
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: true)],
             []);
 
         // Act
-        SchemaMigrationResult first = await provisioner.ApplySchemaAsync(schema);
-        SchemaMigrationResult second = await provisioner.ApplySchemaAsync(schema);
+        SchemaMigrationResult first = await database.ApplySchemaAsync(schema);
+        SchemaMigrationResult second = await database.ApplySchemaAsync(schema);
 
         // Assert
         first.OperationCount.ShouldBe(1);
@@ -254,7 +247,6 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
         database.SupportsSchemaProvisioning.ShouldBeTrue();
-        var provisioner = database;
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, IsNullable: false)],
             [new CompiledSchemaIndex("ix_orders_id", ["id"])]);
@@ -262,11 +254,11 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
             [new CompiledSchemaColumn("ID", DatabaseType.Int64, IsNullable: false)],
             [new CompiledSchemaIndex("IX_ORDERS_ID", ["ID"])],
             tableName: "ORDERS");
-        await provisioner.ApplySchemaAsync(initial);
+        await database.ApplySchemaAsync(initial);
 
         // Act
-        SchemaMigrationResult casingUpdate = await provisioner.ApplySchemaAsync(desired);
-        SchemaMigrationResult repeated = await provisioner.ApplySchemaAsync(desired);
+        SchemaMigrationResult casingUpdate = await database.ApplySchemaAsync(desired);
+        SchemaMigrationResult repeated = await database.ApplySchemaAsync(desired);
 
         // Assert
         desired.Hash.ShouldNotBe(initial.Hash);
@@ -328,12 +320,11 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
         database.SupportsSchemaProvisioning.ShouldBeTrue();
-        var provisioner = database;
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false),
              new CompiledSchemaColumn("note", DatabaseType.String, true)],
             [new CompiledSchemaIndex("ix_orders_id", ["id"])]);
-        await provisioner.ApplySchemaAsync(schema);
+        await database.ApplySchemaAsync(schema);
         await using SqlDatabaseSession session = await database.CreateSessionAsync();
 
         DatabaseObjectLockedException exception = await Should.ThrowAsync<DatabaseObjectLockedException>(
@@ -354,7 +345,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         catalog.TryGetIndex(table.ObjectId, "ix_orders_id", out var index).ShouldBeTrue();
         index.Owner.ShouldBe(DatabaseObjectOwner.Schema);
         index.OwningSchema.ShouldBe("orders");
-        (await provisioner.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
+        (await database.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
         await session.ExecuteAsync("INSERT INTO orders (id, note) VALUES (1, 'mutable data');");
     }
 
@@ -483,8 +474,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using var engine = CreateEngine();
         SqlDatabase database = await engine.CreateDatabaseAsync("orders");
         database.SupportsSchemaProvisioning.ShouldBeTrue();
-        var provisioner = database;
-        await provisioner.ApplySchemaAsync(OrdersSchema(
+        await database.ApplySchemaAsync(OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false),
              new CompiledSchemaColumn("note", DatabaseType.String, true)],
             [new CompiledSchemaIndex("ix_orders_note", ["note"])]));
@@ -492,7 +482,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         SqlCompiledSchema trimmed = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false)], [],
             allowsDestructiveChanges: true);
-        (await provisioner.ApplySchemaAsync(trimmed)).OperationCount.ShouldBe(2);
+        (await database.ApplySchemaAsync(trimmed)).OperationCount.ShouldBe(2);
         var catalog = database.ShouldBeOfType<SqlDatabase>().Catalog;
         catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
         table.Owner.ShouldBe(DatabaseObjectOwner.Schema);
@@ -503,9 +493,9 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
 
         var empty = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "orders", EngineModel.Sql,
             allowsDestructiveChanges: true, [], [], [], [], [], []);
-        (await provisioner.ApplySchemaAsync(empty)).OperationCount.ShouldBe(1);
+        (await database.ApplySchemaAsync(empty)).OperationCount.ShouldBe(1);
         catalog.Tables.ShouldBeEmpty();
-        (await provisioner.ApplySchemaAsync(empty)).WasAlreadyApplied.ShouldBeTrue();
+        (await database.ApplySchemaAsync(empty)).WasAlreadyApplied.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Ownership: schema apply preserves unrelated ad-hoc objects")]
@@ -516,19 +506,18 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using SqlDatabaseSession session = await database.CreateSessionAsync();
         await session.ExecuteAsync("CREATE TABLE scratch (id BIGINT);");
         database.SupportsSchemaProvisioning.ShouldBeTrue();
-        var provisioner = database;
         SqlCompiledSchema initial = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false)], []);
-        await provisioner.ApplySchemaAsync(initial);
+        await database.ApplySchemaAsync(initial);
         await session.ExecuteAsync("CREATE INDEX adhoc_index ON orders (id);");
-        (await provisioner.ApplySchemaAsync(initial)).WasAlreadyApplied.ShouldBeTrue();
+        (await database.ApplySchemaAsync(initial)).WasAlreadyApplied.ShouldBeTrue();
 
         var catalog = database.ShouldBeOfType<SqlDatabase>().Catalog;
         await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(initial.Hash, "invalid-json"));
         SqlCompiledSchema desired = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false),
              new CompiledSchemaColumn("note", DatabaseType.String, true)], []);
-        (await provisioner.ApplySchemaAsync(desired)).OperationCount.ShouldBe(1);
+        (await database.ApplySchemaAsync(desired)).OperationCount.ShouldBe(1);
         catalog.TryGetTable("dbo", "scratch", out var scratch).ShouldBeTrue();
         scratch.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
         await session.ExecuteAsync("DROP INDEX adhoc_index ON orders;");

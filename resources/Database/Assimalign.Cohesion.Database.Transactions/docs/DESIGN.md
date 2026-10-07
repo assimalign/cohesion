@@ -2,7 +2,7 @@
 
 ## Intent
 
-One transaction substrate for five engines. ACID is the platform's defining requirement (area `DESIGN.md` R1), so the machinery that provides it — MVCC snapshots, commit ordering, locking, WAL binding — lives in a kernel project no model owns. Engines *use* the manager; sessions *expose* the resulting `IDatabaseTransaction` from the contract root.
+One transaction substrate for five engines. ACID is the platform's defining requirement (area `DESIGN.md` R1), so the machinery that provides it — MVCC snapshots, commit ordering, locking, WAL binding — lives in a kernel project no model owns. Engines *use* the manager; sessions *expose* the resulting `DatabaseTransaction` from the contract root.
 
 ## Why MVCC (and not lock-based isolation)
 
@@ -14,11 +14,11 @@ This package is a child root the area root aggregates (root → Transactions,
 never the reverse — the 2026-07-13 inversion; see the area DESIGN.md decision
 log). The transaction vocabulary lives here — `TransactionId`,
 `TransactionState`, `TransactionSequence`, `IsolationLevel` — and the root's
-`IDatabaseTransaction` contract consumes it through the root's child-root
+`DatabaseTransaction` base consumes it through the root's child-root
 reference. The contracts in this package speak only Transactions-owned types:
-the earlier doc-level nods to the root's `IDatabaseTransaction` are *named*
+the doc-level nods to the root's `DatabaseTransaction` are *named*
 (`<c>`), not referenced (`<see cref>`), and the adaptation between
-`TransactionContext` and the public `IDatabaseTransaction` surface belongs to
+`TransactionContext` and the public `DatabaseTransaction` surface belongs to
 whoever owns both vocabularies — the model engines' session/transaction
 implementations above the root (the area's standing cycle-avoidance shape). `Storage`
 is the one reference (child-to-child): the journal/page
@@ -438,7 +438,7 @@ The area's recorded *isolation split-brain* — a complete MVCC manager no engin
 used — closed with the SQL engine's session binding (area DESIGN.md §3.8;
 work items under #862). The integration kept this package exactly as shaped:
 
-- The **model engine session** binds the root's `IDatabaseTransaction` to an
+- The **model engine session** binds the root's `DatabaseTransaction` to a
   `TransactionContext` from a per-database `TransactionManager` — the binding
   lives above both vocabularies (the SQL and KeyValuePair session/transaction adapters),
   per this document's "child root" section; nothing here learned about the area

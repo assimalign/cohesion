@@ -97,6 +97,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// decision 35 of 2026-10-07).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Neo4j panics a database after ten consecutive checkpoint failures
     /// (<c>MAX_CONSECUTIVE_FAILURES_TOLERANCE</c>,
     /// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42</c>),
@@ -104,13 +105,29 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// (<c>DEFAULT_CHECKING_FREQUENCY_MILLIS</c>,
     /// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointThreshold.java:40</c>),
     /// so its ten failures span about a hundred seconds. The workers here retry a failing database
-    /// once a second (<see cref="DatabaseEngineWorker.FailureBackoff"/>), so the limit that keeps
-    /// Neo4j's window is a hundred failures, not its count of ten: a database whose work keeps
-    /// failing goes offline about a hundred seconds after its first failure. A device that stops
-    /// answering for less than that (a storage path failover, say) therefore leaves the databases
-    /// it holds online, and a hosted application reopens one that went offline once the device
-    /// answers again (owner decision 22). An engine that must ride out longer outages raises its
-    /// limit; one that must give up sooner lowers it.
+    /// no sooner than a second later (<see cref="DatabaseEngineWorker.FailureBackoff"/>), so the
+    /// limit that keeps Neo4j's window is a hundred failures, not its count of ten. A device that
+    /// stops answering for less than that window (a storage path failover, say) therefore leaves
+    /// the databases it holds online, and a hosted application reopens one that went offline once
+    /// the device answers again (owner decision 22). An engine that must ride out longer outages
+    /// raises its limit; one that must give up sooner lowers it.
+    /// </para>
+    /// <para>
+    /// The limit counts failed passes, so the time it takes depends on how often a worker visits
+    /// a failing database. The checkpoint and page write-back workers, which poll once a second,
+    /// take a database offline about a hundred seconds after its first failure, or later when
+    /// each failed attempt itself takes time; a write-ahead flush worker, which runs when a commit
+    /// wakes it or its window passes, takes about as long while commits stay pending. A
+    /// version-purge worker's full pass runs once per maintenance interval (a minute by default),
+    /// so a pass that keeps failing takes about a hundred intervals, a hundred minutes at the
+    /// default; and a rolled-back writer's deferred undo, retried on its coordinator's schedule
+    /// (about 100 ms, doubling up to the maintenance interval, #1226), takes about an hour and a
+    /// half, while the writer keeps its locks. Throughout, the worker's
+    /// <see cref="DatabaseEngineWorker.Fault"/> is set from the first failure, so the engine
+    /// reports <see cref="EngineState.Faulted"/> and every failure is written to the event source;
+    /// a model whose server refuses work while its engine is not <see cref="EngineState.Running"/>
+    /// (Blob) refuses it for the whole window.
+    /// </para>
     /// </remarks>
     public const int DefaultWorkerFailureLimit = 100;
 

@@ -93,7 +93,9 @@ on `WorkerFailureLimit` passes in a row (an engine option, one hundred by defaul
 decision 35 of 2026-10-07: the window of Neo4j's ten failed checkpoints,
 `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`, at its
 ten-second checkpoint check, `CheckPointThreshold.java:40`, is a hundred passes at the one-second
-worker backoff),
+worker backoff, about a hundred seconds for a failing checkpoint or page write-back; a version-purge
+pass runs once per `MaintenanceInterval`, so a failing one takes about a hundred intervals, and a
+deferred undo about an hour and a half: the root `DESIGN.md`, "The window depends on the worker"),
 the root worker base asks the engine to give up on it, and
 `BlobDatabaseEngine.TakeDatabaseOfflineCore` takes the database's storage offline with the
 `StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A second checkpoint in a row
@@ -108,7 +110,13 @@ so a give-up that waits for a hung fsync of that database holds back none of the
 finds the database in its published snapshot, without its registry lock, so it never waits for
 another's open. Once the database is offline, or whenever it closes, the engine ends every
 worker's failure record of it, so the engine reports `Running` at once and a reopened database
-counts its failures from one; a database already offline or closed is not counted.
+counts its failures from one; a database already offline or closed is not counted. Until the
+failing database goes offline the engine is `Faulted`, and `BlobDatabaseServer` refuses every start, connection, handshake and
+operation while its engine is not `Running`, so one database whose work keeps failing makes the
+whole server unavailable for the window: about a hundred seconds for a failing checkpoint or page
+write-back at the default limit, about a hundred `MaintenanceInterval`s for a failing version purge
+(it was a tenth of that at the limit of ten). Narrowing the gates to the target database's offline
+state is an owner review item (concrete-types plan, §7, "P6, as landed").
 `BlobWorkerResilienceTests` pins it: a checkpoint failure that never clears takes only its
 database offline after the limit of failed passes, a journal past the cap does on its second
 failed checkpoint in a row, one transient failure of a journal already past the cap does not,

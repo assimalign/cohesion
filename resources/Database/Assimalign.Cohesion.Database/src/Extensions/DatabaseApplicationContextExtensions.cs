@@ -23,8 +23,8 @@ public static partial class DatabaseApplicationContextExtensions
         /// <typeparam name="TEngine">The engine's type, for example <c>SqlDatabaseEngine</c>.</typeparam>
         /// <param name="name">The engine name.</param>
         /// <returns>The registered engine, without transferring ownership.</returns>
-        /// <exception cref="ArgumentNullException">The context is null.</exception>
-        /// <exception cref="ArgumentException"><paramref name="name"/> is null, empty or white space.</exception>
+        /// <exception cref="ArgumentNullException">The context or <paramref name="name"/> is null.</exception>
+        /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
         /// <exception cref="KeyNotFoundException">No engine has that name.</exception>
         /// <exception cref="InvalidOperationException">The engine of that name is not a <typeparamref name="TEngine"/>.</exception>
         public TEngine GetEngine<TEngine>(string name)

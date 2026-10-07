@@ -667,17 +667,25 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     /// A database the service found offline: what took it offline, its reopen attempts, and the
     /// attempt or check running for it.
     /// </summary>
-    private sealed class OfflineDatabase(DatabaseEngine engine, string name, StorageOfflineCause? cause, int level)
+    private sealed class OfflineDatabase
     {
-        public DatabaseEngine Engine { get; } = engine;
+        public OfflineDatabase(DatabaseEngine engine, string name, StorageOfflineCause? cause, int level)
+        {
+            Engine = engine;
+            Name = name;
+            Cause = cause;
+            Level = level;
+        }
 
-        public string Name { get; } = name;
+        public DatabaseEngine Engine { get; }
 
-        public StorageOfflineCause? Cause { get; } = cause;
+        public string Name { get; }
+
+        public StorageOfflineCause? Cause { get; }
 
         // The backoff steps earlier episodes reached: zero unless the database went offline again
         // soon after a reopen.
-        public int Level { get; } = level;
+        public int Level { get; }
 
         public int Attempts { get; set; }
 

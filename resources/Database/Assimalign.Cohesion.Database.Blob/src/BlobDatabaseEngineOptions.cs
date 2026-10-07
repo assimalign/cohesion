@@ -62,16 +62,30 @@ public sealed class BlobDatabaseEngineOptions
     /// Gets or sets how many passes in a row the checkpoint, page write-back, write-ahead flush or
     /// version-purge worker may fail on one database before the engine takes that database offline
     /// (owner decision 25 of 2026-10-06). Defaults to <see cref="DatabaseEngine.DefaultWorkerFailureLimit"/>
-    /// (one hundred, owner decision 35 of 2026-10-07): at the workers' one-second retry a database
-    /// whose work keeps failing goes offline about a hundred seconds after its first failure, the
-    /// window Neo4j's ten failures span at its ten-second checkpoint check; raise it to ride out a
-    /// longer device outage, or lower it to give up sooner. Must be at least one.
+    /// (one hundred, owner decision 35 of 2026-10-07): a database whose checkpoints or page
+    /// write-backs keep failing, retried once a second, goes offline about a hundred seconds after
+    /// its first failure, the window Neo4j's ten failures span at its ten-second checkpoint check;
+    /// a version-purge pass, which runs once per <see cref="MaintenanceInterval"/>, takes about a
+    /// hundred intervals to give up (<see cref="DatabaseEngine.DefaultWorkerFailureLimit"/> lists
+    /// each worker's window). Raise it to ride out a longer device outage, or lower it to give up
+    /// sooner. Must be at least one.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// An offline database refuses every operation with <c>COHDBB002</c> until it is reopened
     /// (<see cref="BlobDatabaseEngine.OpenDatabaseAsync(DatabaseName, System.Threading.CancellationToken)"/>),
     /// whose recovery reads its journal; a hosted engine is reopened by the hosting module with
     /// backoff. A pass that finishes the database's work clears the count.
+    /// </para>
+    /// <para>
+    /// The engine is <see cref="EngineState.Faulted"/> from a worker's first failure on any
+    /// database until that failure is worked off or the database goes offline, and
+    /// <see cref="BlobDatabaseServer"/> refuses every start, connection, handshake and operation
+    /// while its engine is not <see cref="EngineState.Running"/>. One database whose work keeps
+    /// failing therefore makes the whole server unavailable until the limit takes that database
+    /// offline: about a hundred seconds for a failing checkpoint or page write-back at the default,
+    /// about a hundred maintenance intervals for a failing version purge.
+    /// </para>
     /// </remarks>
     public int WorkerFailureLimit { get; set; } = DatabaseEngine.DefaultWorkerFailureLimit;
 

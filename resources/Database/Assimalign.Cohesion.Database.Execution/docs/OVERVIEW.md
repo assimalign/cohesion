@@ -23,7 +23,7 @@ consumer and was deleted under the concrete-first program (#1255, #1257).
 
 `Database.Language` (statements, diagnostics) and `Database.Types`. Deliberately
 **below** the area contract root — the root's session surface
-(`IDatabaseSession.ExecuteAsync`) is typed in this project's terms, so nothing here
+(`DatabaseSession.ExecuteAsync`) is typed in this project's terms, so nothing here
 may reference root types (transaction identity, engine contracts).
 
 ## Usage

@@ -88,6 +88,10 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <summary>Registers a caller-owned engine.</summary>
     /// <param name="engine">The borrowed engine.</param>
     /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="engine"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Registration is closed because Build has begun, or another engine of the application has the same name.
+    /// </exception>
     public DatabaseApplicationBuilder AddEngine(DatabaseEngine engine)
     {
         EnsureMutable();
@@ -100,6 +104,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <summary>Defers owned engine construction until Build.</summary>
     /// <param name="configure">The dependency-free factory, observing preceding engines.</param>
     /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">Registration is closed because Build has begun.</exception>
     public DatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, DatabaseEngine> configure)
     {
         EnsureMutable();
@@ -112,6 +118,11 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="name">The ordinal engine name, which must match the factory product.</param>
     /// <param name="factory">The ownership-transferring factory.</param>
     /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="factory"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Registration is closed because Build has begun, or another engine of the application has the same name.
+    /// </exception>
     public DatabaseApplicationBuilder AddEngine(string name, Func<DatabaseApplicationBuildContext, DatabaseEngine> factory)
     {
         EnsureMutable();
@@ -147,6 +158,10 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="engine">The registered engine.</param>
     /// <param name="schema">The compiled schema.</param>
     /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="engine"/> or <paramref name="schema"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="schema"/> targets another data model than <paramref name="engine"/>.</exception>
+    /// <exception cref="InvalidOperationException">Registration is closed because Build has begun.</exception>
+    /// <remarks>Build refuses an engine the application did not register.</remarks>
     public DatabaseApplicationBuilder Provision(DatabaseEngine engine, CompiledSchema schema)
     {
         EnsureMutable();
@@ -168,6 +183,10 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="engineName">The registered engine name.</param>
     /// <param name="schema">The compiled schema.</param>
     /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="engineName"/> or <paramref name="schema"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="engineName"/> is empty or white space.</exception>
+    /// <exception cref="InvalidOperationException">Registration is closed because Build has begun.</exception>
+    /// <remarks>Build refuses a name no engine of the application has, or a schema of another data model.</remarks>
     public DatabaseApplicationBuilder Provision(string engineName, CompiledSchema schema)
     {
         EnsureMutable();
@@ -187,6 +206,13 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="name">The name matching the compiled schema.</param>
     /// <param name="schema">The compiled schema.</param>
     /// <returns>The same compiled schema.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="engine"/>, <paramref name="name"/> or <paramref name="schema"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty, white space or not the schema's name, or <paramref name="schema"/> targets
+    /// another data model than <paramref name="engine"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">Registration is closed because Build has begun.</exception>
+    /// <remarks>Build refuses an engine the application did not register.</remarks>
     public CompiledSchema AddDatabase(DatabaseEngine engine, string name, CompiledSchema schema)
     {
         ValidateDatabaseName(name, schema);
@@ -199,6 +225,13 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="name">The name matching the compiled schema.</param>
     /// <param name="schema">The compiled schema.</param>
     /// <returns>The same compiled schema.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="engineName"/>, <paramref name="name"/> or <paramref name="schema"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="engineName"/> or <paramref name="name"/> is empty or white space, or <paramref name="name"/> is
+    /// not the schema's name.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">Registration is closed because Build has begun.</exception>
+    /// <remarks>Build refuses a name no engine of the application has, or a schema of another data model.</remarks>
     public CompiledSchema AddDatabase(string engineName, string name, CompiledSchema schema)
     {
         ValidateDatabaseName(name, schema);
