@@ -5,12 +5,14 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.Client;
 
 /// <summary>
-/// Thrown when a client operation fails: a server error frame, a broken
+/// Thrown when a client operation fails: a failed dial, a server error frame, a broken
 /// connection mid-exchange, or invalid connection settings.
 /// </summary>
 /// <remarks>
 /// Server-reported failures carry the wire's stable <see cref="ProtocolErrorCode"/>
-/// in <see cref="Code"/>; client-local failures (settings, broken transport) use
+/// in <see cref="Code"/>. A failed dial uses <see cref="ProtocolErrorCode.ConnectionFailure"/>
+/// and keeps the transport's exception as <see cref="Exception.InnerException"/>; other
+/// client-local failures (settings, a transport broken after the dial) use
 /// <see cref="ProtocolErrorCode.Internal"/>.
 /// </remarks>
 public class DatabaseClientException : DatabaseException

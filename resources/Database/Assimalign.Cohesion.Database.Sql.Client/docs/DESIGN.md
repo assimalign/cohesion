@@ -79,6 +79,13 @@ and retains the original code. The shared pool invalidates incomplete exchanges,
 including cancellation and decoder failure. Completed parse/execution failures
 keep the connection reusable.
 
+A failed dial reaches `ConnectAsync` as the core's `DatabaseClientException` with
+`ProtocolErrorCode.ConnectionFailure` (owner decision 39; the core's `DESIGN.md`,
+"Lifecycle and errors"). The mapper translates it like a handshake rejection, to
+`SqlClientErrorKind.ConnectionFailure` with `ConnectionUsable` false, and the core
+exception, which keeps the transport's exception, is the inner exception. A canceled
+dial throws `OperationCanceledException` unchanged (`SqlClientDialFailureTests`).
+
 Observers receive synchronous primitive callbacks before execution, on completion,
 and on failure. Observer exceptions are swallowed so telemetry cannot change the
 command outcome. An observer derives from the abstract `SqlClientObserver`, whose

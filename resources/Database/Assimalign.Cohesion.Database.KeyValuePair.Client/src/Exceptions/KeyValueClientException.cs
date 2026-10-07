@@ -78,6 +78,7 @@ public sealed class KeyValueClientException : DatabaseException
     {
         KeyValueClientErrorKind kind = exception.Code switch
         {
+            ProtocolErrorCode.ConnectionFailure => KeyValueClientErrorKind.ConnectionFailure,
             ProtocolErrorCode.UnsupportedVersion => KeyValueClientErrorKind.ConnectionFailure,
             ProtocolErrorCode.DatabaseNotFound => KeyValueClientErrorKind.ConnectionFailure,
             ProtocolErrorCode.AuthenticationFailed => KeyValueClientErrorKind.AuthenticationFailure,

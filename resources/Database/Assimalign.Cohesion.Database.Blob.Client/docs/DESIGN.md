@@ -166,6 +166,12 @@ are normal null/false results; downloading a missing blob is an error. Local mal
 ordering mistakes, and truncation map to `ProtocolViolation`; transport failures map to `Internal`.
 Deadline behavior comes from supplied cancellation tokens and server lifecycle options.
 
+A failed dial is the one transport failure with its own code. It reaches `ConnectAsync` as the
+core's `DatabaseClientException` with `ProtocolErrorCode.ConnectionFailure` (owner decision 39;
+the core's `DESIGN.md`, "Lifecycle and errors"). `BlobClientException` keeps that code, and the
+core exception, which keeps the transport's exception, is its inner exception. A canceled dial
+throws `OperationCanceledException` unchanged (`BlobClientDialFailureTests`).
+
 ## Scope and verification
 
 This package does not provision databases or containers, expose SQL commands, multiplex

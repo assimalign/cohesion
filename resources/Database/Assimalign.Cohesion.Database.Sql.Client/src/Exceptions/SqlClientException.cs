@@ -70,6 +70,7 @@ public sealed class SqlClientException : DatabaseException
     {
         SqlClientErrorKind kind = exception.Code switch
         {
+            ProtocolErrorCode.ConnectionFailure => SqlClientErrorKind.ConnectionFailure,
             ProtocolErrorCode.UnsupportedVersion => SqlClientErrorKind.ConnectionFailure,
             ProtocolErrorCode.DatabaseNotFound => SqlClientErrorKind.ConnectionFailure,
             ProtocolErrorCode.AuthenticationFailed => SqlClientErrorKind.AuthenticationFailure,

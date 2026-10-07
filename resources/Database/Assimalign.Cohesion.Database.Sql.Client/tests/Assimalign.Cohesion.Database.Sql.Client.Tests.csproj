@@ -15,5 +15,7 @@
 		     on the in-memory Connections driver (tests are exempt from area layering). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<!-- Dial-failure tests (owner decision 39): a refused TCP dial. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 	</ItemGroup>
 </Project>

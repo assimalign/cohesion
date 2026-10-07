@@ -4,7 +4,9 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// Stable error codes carried by <see cref="ProtocolMessageType.Error"/> frames.
 /// </summary>
 /// <remarks>
-/// Codes are part of the wire contract: values are append-only and never renumbered.
+/// Codes are part of the wire contract: values are append-only and never renumbered. One value,
+/// <see cref="ConnectionFailure"/>, belongs to the taxonomy without crossing the wire: a client
+/// raises it when it cannot reach the server, so no server sends it.
 /// </remarks>
 public enum ProtocolErrorCode : ushort
 {
@@ -37,4 +39,11 @@ public enum ProtocolErrorCode : ushort
 
     /// <summary>The server is shutting down or over capacity.</summary>
     Unavailable = 9,
+
+    /// <summary>
+    /// The client could not connect to the server: the transport dial failed (a refused or
+    /// unreachable endpoint, a TLS handshake failure, a connect timeout). Client-local: no server
+    /// sends it.
+    /// </summary>
+    ConnectionFailure = 10,
 }

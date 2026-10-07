@@ -52,7 +52,7 @@ otherwise, this list wins.
 | 36 | P5: the exchange bases' run entries | Stay internal (2026-10-07). |
 | 37 | P5: `DatabaseConnection.OpenAsync` | Stays internal (2026-10-07). |
 | 38 | P5: composing client observers | Not supported for now; a sealed composite observer per client only on demand (2026-10-07). |
-| 39 | P5: transport dial failures | Wrapped in `DatabaseClientException` with its connection-failure code, as Npgsql wraps socket errors (2026-10-07). |
+| 39 | P5: transport dial failures | Wrapped in `DatabaseClientException` with its connection-failure code, as Npgsql wraps socket errors (2026-10-07). **Landed** on `feat/database-client-dial-failures`, with the client-local code `ProtocolErrorCode.ConnectionFailure` (§7, "P5, as landed", owner review 39; §12). |
 | 40 | Decision 22: how Hosting reports reopen attempts | Its internal `EventSource`, forwarded into logging (`event-source.md`) (2026-10-07). |
 | 41 | Decision 25: the journal cap | Needs two failed checkpoints in a row (2026-10-07). |
 
@@ -3332,6 +3332,30 @@ readings their entries record:
       dial failure (`SocketException` from `TcpConnectionFactory`) reaches the caller unchanged.
       The XML documentation now says so. Wrapping it in `DatabaseClientException` (and so in each
       model's exception) is a behavior change, left to the owner.
+      **Landed (owner decision 39, 2026-10-07),** on `feat/database-client-dial-failures`. The
+      internal `DatabaseConnection.OpenAsync` dials through a private `DialAsync` that wraps
+      every failure of the connection factory in `DatabaseClientException` with a new
+      client-local code, `ProtocolErrorCode.ConnectionFailure = 10`, a message that names the
+      endpoint, and the factory's exception as `InnerException`. The caller's cancellation,
+      `ObjectDisposedException` and `OutOfMemoryException` pass through; a cancellation the caller
+      did not request (the TLS layer's handshake timeout) is wrapped as a timeout, as Npgsql's
+      `NpgsqlConnector.ConnectAsync` does (`src/Npgsql/Internal/NpgsqlConnector.cs:1373-1383` at
+      `9c472445`). SQL and Key-Value map the code to their existing `ConnectionFailure` kind;
+      Graph and Blob keep it. Why a new code: `DatabaseClientException.Code` is the only
+      discriminator the core and the Graph and Blob exceptions carry, and the existing codes mean
+      something else (`Internal` a server fault or a broken transport, `Unavailable` a server
+      that refuses the session); the taxonomy holds a client-local code the way SQLSTATE class 08
+      holds `08001` (PostgreSQL `src/backend/utils/errcodes.txt:108`). The enum's remarks and
+      Protocol `DESIGN.md` say no server sends it. The XML documentation of `RentAsync`,
+      `OpenAsync` and the four `ConnectAsync` members, the two kinds' summaries, and the five
+      client `DESIGN.md` files say what is thrown; Database.Client `DESIGN.md`'s known-limit
+      bullet is resolved. Tests: `DatabaseClientDialFailureTests` (10: a refused TCP dial that
+      also proves the slot is released, five transport exception types, the TLS layer's
+      handshake timeout and fatal alert over the in-memory transport, the caller's cancellation
+      and `ObjectDisposedException` unwrapped) and a `…ClientDialFailureTests` pair in each model
+      client (a refused TCP dial with the code, kind and inner chain; a canceled dial). Suites:
+      Client 43 to 53, Sql.Client 316 to 318, KeyValuePair.Client 12 to 14, Graph.Client 57 to
+      59, Blob.Client 21 to 23.
 
   *Gate, as run:* a no-incremental build of every Database project but Database.Testing's tests,
   the SampleHost fixture and the stray `Cache/src` test csproj, plus Sdk.Database, has no Database
@@ -3730,3 +3754,13 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   lease over the pooled session) or a generation token checked on every call. A design change,
   left to P8 under #1261, with a test that disposes, re-rents at pool size 1 and asserts
   `ObjectDisposedException` on the stale reference.
+- Transport dial failures: **Done** by owner decision 39 (§7, "P5, as landed", owner review 39).
+  `RentAsync` and the four model `ConnectAsync` members throw the client exception with
+  `ProtocolErrorCode.ConnectionFailure` and the transport's exception inside. One neighbor is
+  left: *a transport that breaks after the dial, during the handshake, still reports
+  `Internal`.* A peer that accepts the connection and closes it (a listener past its accept
+  limit, another service on the port) gives "The server closed the connection mid-exchange."
+  with `Internal`, so SQL and Key-Value report their `Internal` kind although the connection
+  never became usable, which their `ConnectionFailure` kind describes. Moving those failures to
+  `ConnectionFailure` touches only `DatabaseConnection.WriteFrameAsync` and `ExpectFrameAsync`,
+  which run only in the handshake, but it is a further behavior change, left to the owner.

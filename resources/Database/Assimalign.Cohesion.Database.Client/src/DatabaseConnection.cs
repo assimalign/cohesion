@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -100,7 +101,9 @@ public sealed class DatabaseConnection : IAsyncDisposable
     /// handshake. The owning client calls it once, before the first rental.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <exception cref="DatabaseClientException">Thrown when the server rejects the handshake (version, authentication, unknown database, capacity).</exception>
+    /// <exception cref="DatabaseClientException">Thrown when the dial fails (<see cref="ProtocolErrorCode.ConnectionFailure"/>, with the factory's exception as the inner exception) or the server rejects the handshake (version, authentication, unknown database, capacity).</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> cancels the dial or the handshake.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when the connection, or an object the connection factory needs, is disposed.</exception>
     internal async ValueTask OpenAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_isClosed, this);
@@ -110,7 +113,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
             return;
         }
 
-        _connection = await _connectionFactory.ConnectAsync(_settings.EndPoint!, cancellationToken).ConfigureAwait(false);
+        _connection = await DialAsync(cancellationToken).ConfigureAwait(false);
 
         Stream stream = _connection.AsStream();
         var channel = new ProtocolChannel(stream, Family, leaveOpen: true);
@@ -153,6 +156,40 @@ public sealed class DatabaseConnection : IAsyncDisposable
 
         ServerVersion = ProtocolVersion.Current;
         _isOpen = true;
+    }
+
+    /// <summary>
+    /// Dials the transport. A failure of the connection factory (a refused or unreachable
+    /// endpoint, a TLS handshake failure, a connect timeout) becomes a
+    /// <see cref="DatabaseClientException"/> with <see cref="ProtocolErrorCode.ConnectionFailure"/>,
+    /// the endpoint in its message and the factory's exception as its inner exception, the way
+    /// Npgsql's connector wraps a failed connect in <c>NpgsqlException</c>.
+    /// </summary>
+    /// <remarks>
+    /// The caller's cancellation and a disposed object propagate unchanged. A cancellation the
+    /// caller did not request is the transport's own timeout (the TLS layer cancels a handshake
+    /// that outlives its timeout), so it is wrapped as a dial failure too, as Npgsql turns such a
+    /// cancellation into a timeout.
+    /// </remarks>
+    private async ValueTask<IConnection> DialAsync(CancellationToken cancellationToken)
+    {
+        EndPoint endPoint = _settings.EndPoint!;
+
+        try
+        {
+            return await _connectionFactory.ConnectAsync(endPoint, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new DatabaseClientException(ProtocolErrorCode.ConnectionFailure, $"Failed to connect to {endPoint}: the connection attempt timed out.", exception);
+        }
+        catch (Exception exception) when (exception is not (OperationCanceledException or ObjectDisposedException or OutOfMemoryException))
+        {
+            // Broad on purpose: IConnectionFactory is an open seam and each transport throws its
+            // own types (SocketException, IOException, AuthenticationException, TimeoutException,
+            // ConnectionAbortedException), so a list would let the next transport's failure escape.
+            throw new DatabaseClientException(ProtocolErrorCode.ConnectionFailure, $"Failed to connect to {endPoint}: {exception.Message}", exception);
+        }
     }
 
     /// <summary>

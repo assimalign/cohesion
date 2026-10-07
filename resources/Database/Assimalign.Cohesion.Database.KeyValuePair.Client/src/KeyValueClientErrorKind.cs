@@ -9,7 +9,7 @@ public enum KeyValueClientErrorKind
     /// <summary>An unexpected client-local or server-internal failure.</summary>
     Internal = 0,
 
-    /// <summary>Dialing, the handshake, or the transport failed — the connection never became usable.</summary>
+    /// <summary>The connection never became usable: the dial failed (<see cref="Assimalign.Cohesion.Database.Protocol.ProtocolErrorCode.ConnectionFailure"/>), or the handshake named an unsupported version or an unknown database.</summary>
     ConnectionFailure,
 
     /// <summary>The server rejected the session's credentials.</summary>

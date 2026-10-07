@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Sql.Client;
 
@@ -72,9 +73,9 @@ public sealed class SqlClient : IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for the operation, including the wait for a free slot.</param>
     /// <returns>An open typed connection; dispose it to return it to the pool.</returns>
-    /// <exception cref="ObjectDisposedException">Thrown when the client is disposed.</exception>
-    /// <exception cref="OperationCanceledException">Thrown when the wait for a slot, the dial or the handshake is canceled.</exception>
-    /// <exception cref="SqlClientException">Thrown when the handshake fails; a transport dial failure propagates from the connection factory.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when the client, or an object its connection factory needs, is disposed.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> cancels the wait for a slot, the dial or the handshake.</exception>
+    /// <exception cref="SqlClientException">Thrown when the dial fails (<see cref="SqlClientErrorKind.ConnectionFailure"/> with <see cref="ProtocolErrorCode.ConnectionFailure"/>; the inner <see cref="DatabaseClientException"/> keeps the transport's exception) or the handshake fails.</exception>
     public async ValueTask<SqlConnection> ConnectAsync(CancellationToken cancellationToken = default)
     {
         try
