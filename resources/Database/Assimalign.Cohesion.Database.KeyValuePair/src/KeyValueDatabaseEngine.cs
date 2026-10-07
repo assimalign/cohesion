@@ -33,6 +33,15 @@ using Assimalign.Cohesion.Database.Storage;
 /// engine-level write-ahead log.
 /// </para>
 /// <para>
+/// <b>A database its holder closed.</b> A database disposed outside the engine (directly, or
+/// through a session's <see cref="KeyValueDatabaseSession.Database"/>) is forgotten once its close
+/// ends (owner decision 33 of 2026-10-06, #1289), so a later
+/// <see cref="OpenDatabaseAsync(DatabaseName, CancellationToken)"/> opens it again from its files,
+/// in memory as on disk, with its entries. Until the close ends the engine's workers skip it
+/// (<see cref="IsOpen(KeyValueDatabase)"/> is false for it), so the engine stays
+/// <see cref="EngineState.Running"/> and its server keeps serving its other databases.
+/// </para>
+/// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A sealed leaf of the root
 /// <see cref="DatabaseEngine"/>: the base owns the name, the model, the worker pumps, the
 /// state fold, the composition attach and freeze, the argument and disposed checks of every
@@ -115,7 +124,8 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
             List<DatabaseName>? offline = null;
             foreach (var database in GetInstanceSnapshot())
             {
-                if (database.IsOffline)
+                // A database its holder is closing is not one of the open databases any more.
+                if (database.IsOffline && !database.IsClosed)
                 {
                     (offline ??= []).Add(database.Name);
                 }
@@ -162,8 +172,9 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// false once it was dropped, closed for a reopen, the engine closed it, or a holder of the
     /// database disposed it (directly or through a session's
     /// <see cref="KeyValueDatabaseSession.Database"/>, the same instance; the engine keeps such a
-    /// database registered). A worker pass that raced such a close tolerates the
-    /// <see cref="ObjectDisposedException"/> it gets; one from a database still open is a failure.
+    /// database registered until its close ends, then forgets it). A worker pass that raced such a
+    /// close tolerates the <see cref="ObjectDisposedException"/> it gets; one from a database still
+    /// open is a failure.
     /// </summary>
     /// <param name="database">The database a worker pass visited.</param>
     internal bool IsOpen(KeyValueDatabase database) => !database.IsClosed && Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
@@ -274,17 +285,24 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
         => (KeyValueDatabase)await base.CreateDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
-    /// Opens an existing logical key-value database by name. A database that went offline is
-    /// reopened: the returned instance is a new one, opened again from its files.
+    /// Opens an existing logical key-value database by name. A database that went offline, or
+    /// that a holder closed outside the engine, is reopened: the returned instance is a new one,
+    /// opened again from its files.
     /// </summary>
     /// <param name="name">The name of the database to open.</param>
-    /// <param name="cancellationToken">Observed before the database is opened.</param>
+    /// <param name="cancellationToken">Observed before the database is opened, and while the open waits for a holder's close of it.</param>
     /// <returns>The opened database.</returns>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
     /// <exception cref="DatabaseException">A file set or the entry-space format of the database was refused.</exception>
+    /// <remarks>
+    /// A database a holder closed is forgotten once its close ends (owner decision 33, #1289), and
+    /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
+    /// the close still running waits for it to end first. Until that decision the engine returned
+    /// the closed instance, which refused every session.
+    /// </remarks>
     public new async ValueTask<KeyValueDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => (KeyValueDatabase)await base.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
 
@@ -331,6 +349,9 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     {
         lock (_syncRoot)
         {
+            // A create that raced the engine's disposal cannot add a database after
+            // DisposeAsyncCore closed them.
+            ThrowIfDisposed();
             if (_databases.ContainsKey(name))
             {
                 throw new DatabaseException($"A database with name '{name}' already exists.");
@@ -378,16 +399,23 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     {
         lock (_syncRoot)
         {
+            // An open that raced the engine's disposal cannot add a database after
+            // DisposeAsyncCore closed them.
+            ThrowIfDisposed();
             if (_databases.TryGetValue(name, out var existing))
             {
-                if (!existing.IsOffline)
+                if (existing.IsClosed || !existing.IsOffline)
                 {
+                    // A database its holder is closing is returned as it is, without touching its
+                    // files: the base waits for the close, which forgets it, and opens it again.
                     return new ValueTask<DatabaseInstance>(existing);
                 }
 
                 // The database went offline after a failed durable flush (#1243): reopening it
                 // is the one way back. Its close writes nothing, and the open below runs
                 // recovery, which decides the outcome of every commit that was not confirmed.
+                // The engine lets it go before it closes it, and the close waits for one a holder
+                // started meanwhile, so the open below never races it for the files.
                 _databases.Remove(name);
                 RebuildStorageSnapshotLocked();
                 existing.Dispose();
@@ -468,11 +496,14 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     {
         lock (_syncRoot)
         {
+            ThrowIfDisposed();
             if (_databases.TryGetValue(name, out var database))
             {
                 // Publish the shrunken snapshot before disposing so worker passes
                 // stop touching the storage as early as possible (a pass already in
-                // flight may still race the dispose, which workers tolerate).
+                // flight may still race the dispose, which workers tolerate). The
+                // close waits for one a holder started, so the files are dropped only
+                // once nothing holds them.
                 _databases.Remove(name);
                 RebuildStorageSnapshotLocked();
                 database.Dispose();
@@ -509,11 +540,15 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
         return false;
     }
 
+    /// <inheritdoc />
+    protected override void ForgetClosedDatabaseCore(DatabaseInstance database)
+        => DatabaseRegistry.Forget((KeyValueDatabase)database, _syncRoot, GetInstanceSnapshot, ForgetLocked);
+
     /// <summary>
     /// Closes every open database once the base disposed the servers, stopped the worker pumps
     /// and disposed the workers: each database durably flushes according to its storage's
-    /// durability policy, and an offline one closes without writing. Then the engine's worker
-    /// signals are released.
+    /// durability policy, and an offline one closes without writing. A close a holder started is
+    /// waited for. Then the engine's worker signals, and an in-memory engine's files, are released.
     /// </summary>
     /// <returns>A task that completes once every database is closed.</returns>
     protected override async ValueTask DisposeAsyncCore()
@@ -543,6 +578,9 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
         _commitPendingSignal.Dispose();
         _checkpointNeededSignal.Dispose();
         _undoDeferredSignal.Dispose();
+
+        // An in-memory engine's files go with it: nothing opens them again (#1272).
+        (_strategy as InMemoryKeyValueStorageStrategy)?.Release();
 
         // The base reports this step's failure among the engine's components: one database's
         // failure as itself, several together.
@@ -592,6 +630,17 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
         Volatile.Write(ref _storageSnapshot, storages);
     }
 
+    // Under the engine lock: removes a database whose close ended, when the registry still holds
+    // that instance (a reopen may have registered a new one of the same name).
+    private void ForgetLocked(KeyValueDatabase database)
+    {
+        if (_databases.TryGetValue(database.Name, out var tracked) && ReferenceEquals(tracked, database))
+        {
+            _databases.Remove(database.Name);
+            RebuildStorageSnapshotLocked();
+        }
+    }
+
     /// <summary>
     /// Rebuilds the storage snapshot the background workers iterate. Called under
     /// the engine lock whenever the open-database set changes.
@@ -627,7 +676,12 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
         foreach (var database in snapshot)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            yield return database;
+
+            // A database its holder is closing is about to be forgotten: not one of the engine's.
+            if (!database.IsClosed)
+            {
+                yield return database;
+            }
         }
 
         await Task.CompletedTask.ConfigureAwait(false);

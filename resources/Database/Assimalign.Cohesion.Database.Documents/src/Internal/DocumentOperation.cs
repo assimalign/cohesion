@@ -7,15 +7,15 @@ using Assimalign.Cohesion.Database.Transactions;
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 /// <summary>
-/// One statement: an OQL statement or a collection or document operation, of a session or of the
-/// database itself. It owns its transaction context (the session's explicit transaction's, or an
-/// autocommit context of its own) and, for a session's statement, the hold it keeps on the session
-/// and its admission into the explicit transaction, until it completes or is aborted.
+/// One statement of a session: an OQL statement or a collection or document operation. It owns its
+/// transaction context (the session's explicit transaction's, or an autocommit context of its own),
+/// the hold it keeps on the session and its admission into the explicit transaction, until it
+/// completes or is aborted. Every statement has a session (owner decision 32 of 2026-10-06).
 /// </summary>
 internal sealed class DocumentOperation
 {
     private readonly DocumentDatabase _database;
-    private readonly DocumentDatabaseSession? _session;
+    private readonly DocumentDatabaseSession _session;
     private readonly DocumentDatabaseTransaction? _transaction;
     private readonly TransactionContext _context;
     private readonly SemaphoreSlim _completionGate = new(1, 1);
@@ -25,12 +25,11 @@ internal sealed class DocumentOperation
     /// <summary>Initializes a new instance of the <see cref="DocumentOperation"/> class.</summary>
     /// <param name="database">The database the statement runs on.</param>
     /// <param name="session">
-    /// The session the statement holds, which the operation releases when it finishes; null for a
-    /// collection operation of the database itself, which runs in autocommit.
+    /// The session the statement holds, which the operation releases when it finishes.
     /// </param>
     /// <param name="context">The transaction context the statement runs under.</param>
     /// <param name="transaction">The explicit transaction that admitted the statement, or null for autocommit.</param>
-    internal DocumentOperation(DocumentDatabase database, DocumentDatabaseSession? session, TransactionContext context, DocumentDatabaseTransaction? transaction)
+    internal DocumentOperation(DocumentDatabase database, DocumentDatabaseSession session, TransactionContext context, DocumentDatabaseTransaction? transaction)
     {
         _database = database;
         _session = session;
@@ -57,7 +56,7 @@ internal sealed class DocumentOperation
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
-        _session?.ThrowIfNotOpen();
+        _session.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
             throw new DatabaseException("The document operation's transaction is no longer active.");
@@ -132,8 +131,8 @@ internal sealed class DocumentOperation
             return;
         }
 
-        // A session's statement ends its admission into the explicit transaction and its hold on the session.
-        _session?.ReleaseOperation(_transaction);
+        // The statement ends its admission into the explicit transaction and its hold on the session.
+        _session.ReleaseOperation(_transaction);
     }
 
     private async ValueTask ReleaseSnapshotPinAsync()

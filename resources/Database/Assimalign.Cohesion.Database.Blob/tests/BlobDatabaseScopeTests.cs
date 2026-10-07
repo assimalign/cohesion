@@ -19,8 +19,8 @@ public sealed class BlobDatabaseScopeTests
         await using var engine = BlobDatabaseEngine.Create(new());
         var own = await engine.CreateDatabaseAsync("own");
         var other = await engine.CreateDatabaseAsync("other");
-        var ownContainer = await own.CreateContainerAsync("files");
-        var otherContainer = await other.CreateContainerAsync("files");
+        var ownContainer = await AutocommitContainer.CreateAsync(own, "files");
+        var otherContainer = await AutocommitContainer.CreateAsync(other, "files");
         await BlobEngineTests.WriteAsync(ownContainer, "item", "own"u8.ToArray());
         await BlobEngineTests.WriteAsync(otherContainer, "item", "other"u8.ToArray());
         await using var session = await own.CreateSessionAsync();

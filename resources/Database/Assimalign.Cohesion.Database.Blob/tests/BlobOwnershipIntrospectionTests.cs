@@ -18,11 +18,12 @@ public sealed class BlobOwnershipIntrospectionTests
     {
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        await database.CreateContainerAsync("adhoc");
+        await AutocommitContainer.CreateAsync(database, "adhoc");
         await SaveManagedAsync(database, "managed", "MediaSchema");
 
         var count = 0;
-        await foreach (var container in database.GetContainersAsync())
+        await using var session = await database.CreateSessionAsync();
+        await foreach (var container in session.GetContainersAsync())
         {
             var ownership = await container.GetOwnershipAsync();
             ownership.Count.ShouldBe(2);
@@ -38,7 +39,7 @@ public sealed class BlobOwnershipIntrospectionTests
     {
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var container = await database.CreateContainerAsync("files");
+        var container = await AutocommitContainer.CreateAsync(database, "files");
         var ownership = (IDictionary<string, object?>)await container.GetOwnershipAsync();
 
         ownership.IsReadOnly.ShouldBeTrue();
@@ -62,7 +63,7 @@ public sealed class BlobOwnershipIntrospectionTests
 
         (await (await session.GetContainerAsync("files")).GetOwnershipAsync())["OWNING_SCHEMA"].ShouldBe("OwnSchema");
         await Should.ThrowAsync<DatabaseException>(async () => await session.GetContainerAsync("other/files"));
-        (await (await other.GetContainerAsync("files")).GetOwnershipAsync())["OWNING_SCHEMA"].ShouldBe("OtherSchema");
+        (await (await AutocommitContainer.GetAsync(other, "files")).GetOwnershipAsync())["OWNING_SCHEMA"].ShouldBe("OtherSchema");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Blob] - Ownership: respects transaction visibility and reads fresh metadata")]
@@ -91,12 +92,12 @@ public sealed class BlobOwnershipIntrospectionTests
     {
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var container = await database.CreateContainerAsync("files");
+        var container = await AutocommitContainer.CreateAsync(database, "files");
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         await Should.ThrowAsync<OperationCanceledException>(async () => await container.GetOwnershipAsync(cancellation.Token));
-        await database.DropContainerAsync("files");
-        await database.CreateContainerAsync("files");
+        await AutocommitContainer.DropAsync(database, "files");
+        await AutocommitContainer.CreateAsync(database, "files");
         await Should.ThrowAsync<DatabaseException>(async () => await container.GetOwnershipAsync());
 
         await using var session = await database.CreateSessionAsync();

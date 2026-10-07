@@ -34,7 +34,7 @@ public sealed class BlobLifecycleTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("lifecycle", timeout.Token);
-        var container = await database.CreateContainerAsync("files", timeout.Token);
+        var container = await AutocommitContainer.CreateAsync(database, "files", timeout.Token);
         await using var first = await database.CreateSessionAsync(timeout.Token);
         await using var waiting = await database.CreateSessionAsync(timeout.Token);
         var firstFiles = await first.GetContainerAsync("files", timeout.Token);
@@ -102,7 +102,7 @@ public sealed class BlobLifecycleTests
             await using (var engine = BlobDatabaseEngine.Create(options))
             {
                 var database = await engine.CreateDatabaseAsync("db", timeout.Token);
-                var container = await database.CreateContainerAsync("files", timeout.Token);
+                var container = await AutocommitContainer.CreateAsync(database, "files", timeout.Token);
                 await using (var upload = await container.OpenWriteAsync("big", cancellationToken: timeout.Token))
                 {
                     await upload.WriteAsync(content, timeout.Token);
@@ -146,7 +146,7 @@ public sealed class BlobLifecycleTests
             await using var reopened = BlobDatabaseEngine.Create(options);
             var loaded = await reopened.OpenDatabaseAsync("db", timeout.Token);
             loaded.Coordinator.RunVersionPurgePass(timeout.Token);
-            var loadedFiles = await loaded.GetContainerAsync("files", timeout.Token);
+            var loadedFiles = await AutocommitContainer.GetAsync(loaded, "files", timeout.Token);
             var properties = await loadedFiles.GetPropertiesAsync("big", timeout.Token);
             byte[] stored = await ReadAsync(loadedFiles, "big", timeout.Token);
 
@@ -171,7 +171,21 @@ public sealed class BlobLifecycleTests
         await stream.WriteAsync(Encoding.UTF8.GetBytes(name), cancellationToken);
     }
 
+    private static async Task WriteAsync(AutocommitContainer container, string name, CancellationToken cancellationToken)
+    {
+        await using var stream = await container.OpenWriteAsync(name, cancellationToken: cancellationToken);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(name), cancellationToken);
+    }
+
     private static async Task<byte[]> ReadAsync(BlobContainer container, string name, CancellationToken cancellationToken)
+    {
+        await using var stream = await container.OpenReadAsync(name, cancellationToken);
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
+        return buffer.ToArray();
+    }
+
+    private static async Task<byte[]> ReadAsync(AutocommitContainer container, string name, CancellationToken cancellationToken)
     {
         await using var stream = await container.OpenReadAsync(name, cancellationToken);
         using var buffer = new MemoryStream();

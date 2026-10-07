@@ -39,17 +39,19 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// operation on the session is refused meanwhile, and so is a BEGIN.
 /// </para>
 /// <para>
-/// <b>Option B (concrete-types plan, §6.6).</b> The session exposes its container operations
-/// itself (<see cref="CreateContainerAsync"/>, <see cref="GetContainerAsync"/>,
+/// <b>Option B (concrete-types plan, §6.6).</b> The session exposes the container operations
+/// (<see cref="CreateContainerAsync"/>, <see cref="GetContainerAsync"/>,
 /// <see cref="DropContainerAsync"/>, <see cref="GetContainersAsync"/>), and
-/// <see cref="Database"/> is the unbound <see cref="BlobDatabase"/>, whose own container
-/// operations run in autocommit outside any session. Disposing the session closes the session;
-/// disposing its database closes the database for every session, and the engine refuses to reopen
-/// it (<see cref="ObjectDisposedException"/>) until it is dropped or the engine is recreated; the
-/// engine's workers skip the closed database, so the engine stays
-/// <see cref="EngineState.Running"/> and its server keeps serving its other databases.
-/// Before phase 4 the session's database was a session-bound view whose disposal closed the
-/// session, so <c>Dispose</c> meant two things on one type.
+/// <see cref="Database"/> is the unbound <see cref="BlobDatabase"/>. Every container and blob
+/// operation takes the session (owner decision 32 of 2026-10-06): the database has no container
+/// operations of its own, so none runs outside a session or waits for a session's own
+/// transaction. Disposing the session closes the session; disposing its database closes the
+/// database for every session, and once the close ends the engine forgets it, so the engine's
+/// <c>OpenDatabaseAsync</c> opens it again from its files (owner decision 33, #1289); meanwhile
+/// the engine's workers skip the closed database, so the engine stays
+/// <see cref="EngineState.Running"/> and its server keeps serving its other databases. Before
+/// phase 4 the session's database was a session-bound view whose disposal closed the session, so
+/// <c>Dispose</c> meant two things on one type.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root base with
@@ -78,24 +80,13 @@ public sealed class BlobDatabaseSession : DatabaseSession
     /// closes the database, not the session (option B, §6.6 of the concrete-types plan).
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Disposing it closes the database for every session of it. The engine keeps the closed
-    /// database registered, so it refuses to reopen it (<see cref="ObjectDisposedException"/>)
-    /// until it is dropped or the engine is recreated, and its workers skip it, so the engine
-    /// stays <see cref="EngineState.Running"/> and its server keeps serving the engine's other
-    /// databases.
-    /// </para>
-    /// <para>
-    /// The database's own container operations, and the operations of a container it returns, run
-    /// in autocommit, never in this session's transaction. A write through it
-    /// (<see cref="BlobDatabase.CreateContainerAsync(string, CancellationToken)"/>,
-    /// <see cref="BlobDatabase.DropContainerAsync(string, CancellationToken)"/>, a blob upload or
-    /// delete of a container it returned) while the session's explicit transaction has written
-    /// waits for that transaction's writer lock (the engine has one writer at a time) until the
-    /// transaction ends or the call's token is canceled; inside a transaction, use the session's
-    /// own container operations (<see cref="CreateContainerAsync"/>, <see cref="GetContainerAsync"/>,
-    /// <see cref="DropContainerAsync"/>).
-    /// </para>
+    /// Disposing it closes the database for every session of it. Once the close ends the engine
+    /// forgets the database, so <see cref="BlobDatabaseEngine.OpenDatabaseAsync(DatabaseName, CancellationToken)"/>
+    /// opens it again from its files as a new instance, with its containers and blobs (owner
+    /// decision 33, #1289); until then the engine's workers skip it, so the engine stays
+    /// <see cref="EngineState.Running"/> and its server keeps serving the engine's other databases.
+    /// The database has no container operations of its own (owner decision 32): they are this
+    /// session's.
     /// </remarks>
     public new BlobDatabase Database => _database;
 

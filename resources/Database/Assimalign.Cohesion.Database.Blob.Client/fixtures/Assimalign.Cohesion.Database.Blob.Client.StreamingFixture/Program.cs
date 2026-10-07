@@ -40,7 +40,11 @@ internal static class Program
                 PageWriteBackBatchSize = 4096
             });
             var database = await engine.CreateDatabaseAsync("large", token);
-            await database.CreateContainerAsync("objects", token);
+            await using (var session = await database.CreateSessionAsync(token))
+            {
+                await session.CreateContainerAsync("objects", token);
+            }
+
             await using var listener = new InMemoryConnectionListener();
             await using var server = BlobDatabaseServer.Create(engine, new BlobDatabaseServerOptions { Listener = listener });
             await server.StartAsync(token);

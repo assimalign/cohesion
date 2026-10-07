@@ -54,15 +54,16 @@ public sealed class DocumentStorageOperationsTests
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
         var other = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
+        var otherItems = await other.GetCollectionAsync("items");
         await collection.PutAsync(session, "kept", Doc("kept"));
 
         // A reader: the database has one writer at a time, so an open writer would block the
         // commit below.
         var open = await other.BeginTransactionAsync();
-        (await collection.GetAsync(other, "kept")).ShouldNotBeNull();
+        (await otherItems.GetAsync(other, "kept")).ShouldNotBeNull();
 
         // Act: the commit record is appended and its fsync fails.
         DatabaseTransactionCommitUnconfirmedException unconfirmed;
@@ -81,7 +82,6 @@ public sealed class DocumentStorageOperationsTests
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await collection.PutAsync(session, "late", Doc("late"))),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.ExecuteAsync("SELECT id FROM items")),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.BeginTransactionAsync()),
-            await Should.ThrowAsync<DatabaseOfflineException>(async () => await database.CreateCollectionAsync("late")),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await session.CreateCollectionAsync("late")),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.CommitAsync()),
             await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.RollbackAsync()),
@@ -132,6 +132,7 @@ public sealed class DocumentStorageOperationsTests
         var ids = await IdsAsync(observer);
 
         // Assert
+        unconfirmed.Message.ShouldStartWith("COHDBD002: Database 'test' went offline while a transaction was committing", Case.Sensitive);
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
         refusals.ShouldAllBe(refusal => refusal.Code == "COHDBD002" && refusal.Message.StartsWith("COHDBD002", StringComparison.Ordinal));
@@ -219,11 +220,16 @@ public sealed class DocumentStorageOperationsTests
             CheckpointInterval = TimeSpan.FromHours(1),
         });
         var database = await engine.CreateDatabaseAsync("bounded");
-        var collection = await database.CreateCollectionAsync("items");
+        await using (var setup = await database.CreateSessionAsync())
+        {
+            await setup.CreateCollectionAsync("items");
+        }
+
         using var stop = new CancellationTokenSource();
         var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
         {
             await using var session = await database.CreateSessionAsync();
+            var collection = await session.GetCollectionAsync("items");
             for (int i = 0; !stop.IsCancellationRequested; i++)
             {
                 await collection.PutAsync(session, $"{writer}-{i}", Doc($"{writer}-{i}", "\"payload\":\"" + new string('x', 5000) + "\""));
@@ -263,9 +269,10 @@ public sealed class DocumentStorageOperationsTests
         };
         await using var engine = DocumentDatabaseEngine.Create(options);
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await using var other = await database.CreateSessionAsync();
+        var otherItems = await other.GetCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "rolled", Doc("rolled"));
 
@@ -282,13 +289,13 @@ public sealed class DocumentStorageOperationsTests
         // The engine handed the coordinator its first retry delay: the retry is due within it.
         var firstRetry = database.Coordinator.NextDeferredUndoRetry;
 
-        await collection.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(Timeout);
+        await otherItems.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(Timeout);
         watch.Stop();
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        (await collection.GetAsync(other, "rolled")).ShouldBeNull();
+        (await otherItems.GetAsync(other, "rolled")).ShouldBeNull();
         options.DeferredUndoRetryDelay.ShouldBe(TimeSpan.FromMilliseconds(100));
         firstRetry.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(options.DeferredUndoRetryDelay);
         // The regression this guards against waits a full MaintenanceInterval (an hour here) per retry.
@@ -318,8 +325,8 @@ public sealed class DocumentStorageOperationsTests
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
         var database = await engine.CreateDatabaseAsync("space");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         long pagesBefore = database.DataStorage.PageManager.PageCount;
 
         // Act: each put is its own transaction.

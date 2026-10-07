@@ -26,9 +26,19 @@ namespace Assimalign.Cohesion.Database;
 /// <para>
 /// <b>Disposal is idempotent and the base owns the flag</b>: the first <see cref="Dispose"/> or
 /// <see cref="DisposeAsync"/> runs the leaf's <see cref="DisposeCore"/> or
-/// <see cref="DisposeAsyncCore"/>, and every later call returns. Disposing a database closes it;
-/// the engine that manages it disposes it when the database is dropped, reopened after going
-/// offline, or when the engine is disposed.
+/// <see cref="DisposeAsyncCore"/>, and a later call waits until that close has ended, then
+/// returns. Disposing a database closes it; the engine that manages it disposes it when the
+/// database is dropped, reopened after going offline, or when the engine is disposed.
+/// </para>
+/// <para>
+/// <b>A database closed outside its engine is forgotten</b> (owner decision 33 of 2026-10-06,
+/// #1289): when a close ends, whoever ran it, the base hands the database to its engine
+/// (<see cref="DatabaseEngine.ForgetClosedDatabaseCore"/>), and the engine stops tracking it if
+/// it still does, so a later <see cref="DatabaseEngine.OpenDatabaseAsync"/> opens the database
+/// again from its files. An open that finds the database still closing waits for the close to
+/// end first, so the reopen never races the close for the database's files. A close the engine
+/// ran itself (a drop, a reopen after going offline, the engine's disposal) is unchanged: the
+/// engine had already let the database go.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 3, #1259).</b> The leaves live in the model assemblies,
@@ -44,6 +54,10 @@ public abstract class DatabaseInstance : IDatabase
     private readonly DatabaseName _name;
     private readonly DatabaseEngine _engine;
     private readonly bool _supportsSchemaProvisioning;
+
+    // Completed once the first close ran to its end and the engine was told (CompleteClose). A
+    // later Dispose or DisposeAsync, and an engine open that found the database closing, wait on it.
+    private readonly TaskCompletionSource _closure = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _disposed;
 
     /// <summary>
@@ -86,9 +100,20 @@ public abstract class DatabaseInstance : IDatabase
     public bool SupportsSchemaProvisioning => _supportsSchemaProvisioning;
 
     /// <summary>
-    /// Gets whether the database has been disposed.
+    /// Gets whether the database has been disposed: true from the moment its close starts.
     /// </summary>
     protected bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
+    /// <summary>
+    /// Gets whether the database's close has started, for the engine base's open and lookup.
+    /// </summary>
+    internal bool IsClosing => Volatile.Read(ref _disposed) != 0;
+
+    /// <summary>
+    /// Gets the task that completes once the database's close has ended and its engine was told,
+    /// for the engine base's open.
+    /// </summary>
+    internal Task Closure => _closure.Task;
 
     /// <summary>
     /// Creates a new lightweight session scoped to this database.
@@ -128,30 +153,54 @@ public abstract class DatabaseInstance : IDatabase
     }
 
     /// <summary>
-    /// Closes the database. Idempotent: only the first call reaches <see cref="DisposeCore"/>.
+    /// Closes the database. Idempotent: only the first call reaches <see cref="DisposeCore"/>, and
+    /// a call made while another caller's close runs blocks until that close has ended.
     /// </summary>
+    /// <remarks>
+    /// When the close ends, the database's engine forgets it if it still tracks it (owner decision
+    /// 33, #1289), so a later <see cref="DatabaseEngine.OpenDatabaseAsync"/> reopens it from its
+    /// files.
+    /// </remarks>
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
+            // Another caller's close: the engine disposes a database it let go (a drop, a reopen
+            // after going offline) and then reuses its files, so it must not run ahead of a close a
+            // holder started. A close never disposes its own database again, so this never waits
+            // on itself.
+            _closure.Task.GetAwaiter().GetResult();
             return;
         }
 
-        DisposeCore();
+        try
+        {
+            DisposeCore();
+        }
+        finally
+        {
+            CompleteClose();
+        }
     }
 
     /// <summary>
-    /// Closes the database. Idempotent: only the first call reaches <see cref="DisposeAsyncCore"/>.
+    /// Closes the database. Idempotent: only the first call reaches <see cref="DisposeAsyncCore"/>,
+    /// and a call made while another caller's close runs completes once that close has ended.
     /// </summary>
     /// <returns>A task that completes once the database is closed.</returns>
+    /// <remarks>
+    /// When the close ends, the database's engine forgets it if it still tracks it (owner decision
+    /// 33, #1289), so a later <see cref="DatabaseEngine.OpenDatabaseAsync"/> reopens it from its
+    /// files.
+    /// </remarks>
     public ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
-            return ValueTask.CompletedTask;
+            return new ValueTask(_closure.Task);
         }
 
-        return DisposeAsyncCore();
+        return CloseAsync();
     }
 
     /// <summary>
@@ -191,6 +240,33 @@ public abstract class DatabaseInstance : IDatabase
     /// </summary>
     /// <returns>A task that completes once the database is closed.</returns>
     protected abstract ValueTask DisposeAsyncCore();
+
+    // The first DisposeAsync's close: the leaf's core, then the engine is told, whatever the core threw.
+    private async ValueTask CloseAsync()
+    {
+        try
+        {
+            await DisposeAsyncCore().ConfigureAwait(false);
+        }
+        finally
+        {
+            CompleteClose();
+        }
+    }
+
+    // Runs once, when the first close ended: the engine forgets the database before anyone waiting
+    // for the close resumes, so an open that waited finds it gone and opens it again from its files.
+    private void CompleteClose()
+    {
+        try
+        {
+            _engine.ForgetClosedDatabase(this);
+        }
+        finally
+        {
+            _closure.TrySetResult();
+        }
+    }
 
     IDatabaseEngine IDatabase.Engine => _engine;
 

@@ -723,6 +723,47 @@ internal sealed partial class SqlPlanExecutor
 
     // ── DDL ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Awaits one catalog self-commit of a DDL statement that changes what a reopened database
+    /// shows (it publishes, alters or removes a definition) and records it on the statement once
+    /// its commit returned. The session reads the record when the statement meets an offline
+    /// storage: a statement that already committed such a change is unconfirmed, because the
+    /// change survives the reopen; one that committed none is refused like any other statement
+    /// (#1272). A commit whose own record was written before its flush failed is unconfirmed
+    /// either way (<c>StorageOfflineException.CommitRecordWritten</c>).
+    /// </summary>
+    /// <remarks>
+    /// A durable step nothing can reach before the catalog publishes it is not recorded: CREATE
+    /// TABLE's identity reservation persists only the object-id counter, and the index trees CREATE
+    /// TABLE, ADD CONSTRAINT and CREATE INDEX build before their catalog commit are orphaned pages
+    /// until it. A statement that failed after them leaves a reopened database without the table or
+    /// index, so it is refused, and a retry is safe.
+    /// </remarks>
+    /// <param name="statement">The DDL statement.</param>
+    /// <param name="commit">The self-commit.</param>
+    /// <returns>A task that completes once the bracket committed.</returns>
+    private static async ValueTask SelfCommitAsync(SqlStatementContext statement, ValueTask commit)
+    {
+        await commit.ConfigureAwait(false);
+        statement.Metrics.RecordSelfCommit();
+    }
+
+    /// <summary>
+    /// Awaits one catalog self-commit of a DDL statement that changes what a reopened database shows
+    /// and records it on the statement once its commit returned (see
+    /// <see cref="SelfCommitAsync(SqlStatementContext, ValueTask)"/>).
+    /// </summary>
+    /// <typeparam name="T">The commit's result.</typeparam>
+    /// <param name="statement">The DDL statement.</param>
+    /// <param name="commit">The self-commit.</param>
+    /// <returns>The commit's result.</returns>
+    private static async ValueTask<T> SelfCommitAsync<T>(SqlStatementContext statement, ValueTask<T> commit)
+    {
+        T result = await commit.ConfigureAwait(false);
+        statement.Metrics.RecordSelfCommit();
+        return result;
+    }
+
     private async Task<QueryResult> ExecuteCreateTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (plan.IfNotExists && _catalog.TryGetTable(plan.Schema, plan.Name, out _))
@@ -782,7 +823,7 @@ internal sealed partial class SqlPlanExecutor
         // The authoritative step: the catalog checks the drop again under its own lock
         // and commits it. Bind the published version before the statement completes, as
         // every DDL does, so no later write parses its definitions.
-        var updated = await _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken).ConfigureAwait(false);
+        var updated = await SelfCommitAsync(statement, _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken)).ConfigureAwait(false);
         _definitions.Get(updated);
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
@@ -821,7 +862,7 @@ internal sealed partial class SqlPlanExecutor
         // second, all under the exclusive lock so no writer maintains a ghost.
         var droppedIndexes = _catalog.GetIndexes(table.ObjectId);
 
-        await _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken).ConfigureAwait(false);
+        await SelfCommitAsync(statement, _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken)).ConfigureAwait(false);
 
         foreach (var metadata in droppedIndexes)
         {
@@ -907,6 +948,8 @@ internal sealed partial class SqlPlanExecutor
 
         try
         {
+            // Durable, but not a self-commit the session counts (#1272): the tree is orphaned pages
+            // until the catalog commit below describes it, so a failure here leaves no index.
             await statement.Coordinator.ApplyStatementAsync<bool>(statement.Transaction, async bracket =>
             {
                 var index = await _indexManager.CreateIndexAsync(statement.Transaction, plan.Table.ObjectId, definition, cancellationToken).ConfigureAwait(false);
@@ -949,13 +992,13 @@ internal sealed partial class SqlPlanExecutor
         // reverse). A crash before this write leaves only orphaned tree pages —
         // a safe leak, never a re-attached index.
         var registrations = _indexManager.ExportRegistrations();
-        await _catalog.CreateIndexAsync(
+        await SelfCommitAsync(statement, _catalog.CreateIndexAsync(
             new SqlCatalogIndex(
                 plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
                 statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
                 statement.ProvisioningSchema),
             registrations,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken)).ConfigureAwait(false);
 
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
@@ -1011,7 +1054,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        await _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken).ConfigureAwait(false);
+        await SelfCommitAsync(statement, _catalog.DropIndexAsync(plan.Table.ObjectId, metadata.Name, remaining, cancellationToken)).ConfigureAwait(false);
 
         if (_indexManager.TryGetIndex(plan.Table.ObjectId, metadata.Name, out _))
         {

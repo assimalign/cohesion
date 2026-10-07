@@ -174,6 +174,13 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    but could not be made durable is not an abort: it throws
    `DatabaseTransactionCommitUnconfirmedException` and leaves the transaction `Committed`
    (`Database.Transactions` DESIGN.md, "A commit record that was written but not made durable").
+   Its message leads with the model's code on every path, the explicit commit and an autocommit
+   statement's own commit alike (owner decision 24 of 2026-10-06, #1272):
+   `COHDBG012: Database '{name}' went offline while a transaction was committing: ...`, built by
+   the root's `DatabaseTransactionCommitUnconfirmedException.Create(code, database, cause)` in
+   `GraphDatabase.TranslateKernelFailure`, now an instance member so it knows the database, with
+   the kernel's `TransactionCommitUnconfirmedException` as its inner exception. Before #1272 this
+   path carried the kernel's message alone.
 5. Every failure of a statement that started counts: parse diagnostics, planning and execution
    errors, ownership refusals, kernel aborts such as conflicts and deadlocks, cancellation while
    the statement runs, and (on the wire) a result the server cannot encode or deliver. Failures
@@ -600,12 +607,31 @@ instead of waiting for the reopen: an offline database undoes nothing, so the wr
 lock keeps it, and the coordinator ends every lock wait instead
 (`TransactionCoordinator.AbandonLockWaits`, wired to the storage's offline hook).
 
-**A database closed outside the engine is skipped, not failed.** A database its holder disposed
-(directly; `session.Database` is the same instance) stays registered, so `OpenDatabaseAsync`
-refuses it with `ObjectDisposedException` until it is dropped or the engine is recreated. The
-workers skip it: `GraphDatabase.IsClosed` reads the base's disposed flag,
-`GraphDatabaseEngine.IsOpen` is false for the closed database and for its storage, the
-version-purge worker skips it in its pass and in its trigger wait, and the checkpointer skips it
+**A database closed outside the engine is skipped, then forgotten** (owner decision 33 of
+2026-10-06, #1289). A database its holder disposed (directly; `session.Database` is the same
+instance) stays registered only until its close ends. The close then tells the engine
+(`GraphDatabaseEngine.ForgetClosedDatabaseCore`, through the root's shared
+`DatabaseRegistry.Forget`), which stops tracking it, so a later `OpenDatabaseAsync` opens it again
+from its files: a new instance with every committed node and relationship. An in-memory database
+reopens with its graph too, because the engine keeps each in-memory file set's streams until its
+own disposal releases them (`DatabaseMemoryFiles`) and the open copies the closed streams' bytes
+and runs the same recovery over them (#1272); before #1272 an in-memory reopen got empty storage.
+While the close runs, an open waits for it (the root `DatabaseEngine.OpenDatabaseAsync`),
+`TryGetDatabase` does not report the database, a create of its name is refused as existing, and a drop or the engine's
+disposal waits for the close, so nothing reuses the files under it. Before decision 33 the
+database stayed registered until it was dropped, and the open refused it with
+`ObjectDisposedException`. The forget reads the engine's lock-free instance snapshot and takes the
+engine's lock only through a bounded `Monitor.TryEnter` loop: a drop, an offline reopen and the
+engine's disposal dispose a database while holding that lock, and that disposal waits for a close
+a holder started, so a forget that blocked on the lock would deadlock with them. The same wait
+means a holder's close that stalls (a fsync that does not answer) stalls the engine's other
+registry operations until it ends, and a drop's token is not observed meanwhile (root
+`DESIGN.md`, "A stalled close stalls the engine's registry").
+
+For the window between the close and the forget the workers skip the database:
+`GraphDatabase.IsClosed` reads the base's disposed flag, `GraphDatabaseEngine.IsOpen` is false
+for the closed database and for its storage, the version-purge worker skips it in its pass and
+in its trigger wait, and the checkpointer skips it
 through the model's `IsCheckpointDue`, which is false for a closed database (the pass is the
 engines' shared one, and its `IsOpen` check covers only a checkpoint that raced the close). A
 close that was not idle leaves the journal untruncated: when its retry of a deferred undo still
@@ -623,12 +649,16 @@ workers do what PostgreSQL's background workers do with an object dropped under
 them: check that it still exists and skip it quietly (autovacuum,
 `src/backend/postmaster/autovacuum.c:998-1000`, `:1859-1868`, `:2510-2513`; the checkpointer's
 canceled fsync requests, `src/backend/storage/sync/sync.c:400-411`, `:492-503`). A close here
-happens outside the engine, which is never told, so the workers read the database's own flag where
-PostgreSQL reads the cancellation.
+happens outside the engine, which learns of it only when it ends, so until then the workers read
+the database's own flag where PostgreSQL reads the cancellation.
 `GraphWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing`
 closes a database under 20 ms worker intervals and asserts that every pass succeeds, no worker
 records a failure, the engine is `Running`, a server over the engine starts and serves a handshake
-and a write to the other database, and the reopen is still refused.
+and a write to the other database, and the open opens the closed database again with its nodes.
+`OpenDatabaseAsync_DatabaseClosedOutsideTheEngine_ShouldReopenItWithItsNodes` closes it both
+ways, in memory and on disk, with a node of an uncommitted transaction: the reopened instance is
+new, holds the committed nodes and not the uncommitted one, takes writes, and a second close and
+open keeps them.
 `GraphWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
 records a checkpoint failure for a database whose page writes fail, closes it with a rolled-back
 transaction's undo deferred behind a bracket that holds every page, and asserts that the
@@ -653,7 +683,8 @@ the file set, closing included — PostgreSQL's `PANIC` on a failed WAL fsync (`
 `src/backend/access/transam/xlog.c:9877-9937`; the commit critical section in
 `RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`; and `data_sync_retry`
 off, `src/backend/storage/file/fd.c:3966-3987`), scoped to the database. The statement whose
-commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`. Every later operation —
+commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`, its message leading with
+`COHDBG012` (owner decision 24). Every later operation —
 a new session, a GQL statement, a typed `GraphDatabase` call, BEGIN, and the COMMIT or ROLLBACK
 of a transaction open at the failure — is refused with `DatabaseOfflineException`, code
 `COHDBG012`, carrying the storage's `StorageOfflineException`; the offline check runs before the

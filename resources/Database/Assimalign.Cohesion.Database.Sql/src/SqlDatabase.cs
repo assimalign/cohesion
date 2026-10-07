@@ -33,11 +33,12 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// provisionable database by that type test until phase 6 makes it a flag check.
 /// </para>
 /// <para>
-/// <b>Closed by its holder.</b> Disposing the database closes it for every session. The engine
-/// keeps a database its holder closed registered, so it refuses to reopen it
-/// (<see cref="ObjectDisposedException"/>) until it is dropped or the engine is recreated, and its
-/// workers skip it, so the engine stays <see cref="EngineState.Running"/> and its server keeps
-/// serving the engine's other databases.
+/// <b>Closed by its holder.</b> Disposing the database closes it for every session. Once the
+/// close ends the engine forgets it (owner decision 33 of 2026-10-06, #1289), and
+/// <see cref="SqlDatabaseEngine.OpenDatabaseAsync(DatabaseName, CancellationToken)"/> opens it
+/// again from its files, with its data, as a new instance; until then the engine's workers skip
+/// it, so the engine stays <see cref="EngineState.Running"/> and its server keeps serving the
+/// engine's other databases.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of
@@ -433,10 +434,10 @@ public sealed class SqlDatabase : DatabaseInstance, IDatabaseSchemaProvisioner
         => OfflineError is { } error ? DatabaseOfflineException.Create(OfflineCode, Name, error) : null;
 
     /// <summary>
-    /// Gets whether the database has been disposed: by the engine, or by a holder of the
+    /// Gets whether the database's close has started: by the engine, or by a holder of the
     /// database (<c>await using var database = await engine.CreateDatabaseAsync(...)</c>, or a
     /// session's <see cref="SqlDatabaseSession.Database"/>). The engine keeps a database its holder
-    /// closed registered, to refuse its reopen, and its workers skip it.
+    /// is closing registered until the close ends, then forgets it; its workers skip it meanwhile.
     /// </summary>
     internal bool IsClosed => IsDisposed;
 
@@ -446,18 +447,21 @@ public sealed class SqlDatabase : DatabaseInstance, IDatabaseSchemaProvisioner
     /// <see cref="DatabaseTransactionCommitUnconfirmedException"/> when the work may survive the
     /// reopen: a storage commit record was written before its flush failed
     /// (<see cref="StorageOfflineException.CommitRecordWritten"/>), or the operation is a
-    /// self-committing statement, which commits durable brackets in both file sets as it goes.
-    /// An unconfirmed commit that already has its own type is returned unchanged, and so is any
-    /// other failure.
+    /// self-committing statement that had already committed a catalog change a reopened database
+    /// shows. Both lead with <see cref="OfflineCode"/>. An unconfirmed commit that already has its
+    /// own type is returned unchanged, and so is any other failure.
     /// </summary>
     /// <param name="error">The failure to translate.</param>
-    /// <param name="selfCommitting">
-    /// True for a statement that commits by itself (DDL), which the database was online for when
-    /// it started: any part of it may have committed before the failure, so it is never reported
-    /// as refused.
+    /// <param name="selfCommitted">
+    /// True for a self-committing statement (DDL) that committed at least one catalog change a
+    /// reopened database shows (a published, altered or removed definition) before the failure:
+    /// that part survives the reopen, so it is never reported as refused. A DDL statement that met
+    /// the offline storage before it committed such a change passes false and is reported as
+    /// refused, exactly as any other statement (#1272), even when it had durably committed work
+    /// nothing can reach: a reserved table identity, or index trees no catalog entry describes.
     /// </param>
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
-    internal Exception TranslateOffline(Exception error, bool selfCommitting = false)
+    internal Exception TranslateOffline(Exception error, bool selfCommitted = false)
     {
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
             || StorageOfflineException.Find(error) is not { } offline)
@@ -465,10 +469,20 @@ public sealed class SqlDatabase : DatabaseInstance, IDatabaseSchemaProvisioner
             return error;
         }
 
-        return offline.CommitRecordWritten || selfCommitting
+        return offline.CommitRecordWritten || selfCommitted
             ? DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, offline)
             : DatabaseOfflineException.Create(OfflineCode, Name, OfflineError ?? offline);
     }
+
+    /// <summary>
+    /// Translates the transaction kernel's unconfirmed commit into the area root's, its message led
+    /// by <see cref="OfflineCode"/> as on every other unconfirmed path (owner decision 24 of
+    /// 2026-10-06, #1272): an explicit transaction's commit and an auto-commit statement's.
+    /// </summary>
+    /// <param name="error">The kernel's unconfirmed commit, kept as the inner exception.</param>
+    /// <returns>The exception to throw.</returns>
+    internal DatabaseTransactionCommitUnconfirmedException CreateUnconfirmedCommit(TransactionCommitUnconfirmedException error)
+        => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, error);
 
     /// <summary>
     /// Creates a new lightweight SQL session scoped to this database.

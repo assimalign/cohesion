@@ -28,9 +28,9 @@ public sealed class BlobDatabaseServerTests
         var own = await engine.CreateDatabaseAsync("own", token);
         var other = await engine.CreateDatabaseAsync("other", token);
         var remote = await otherEngine.CreateDatabaseAsync("own", token);
-        var ownFiles = await own.CreateContainerAsync("files", token);
-        var otherFiles = await other.CreateContainerAsync("files", token);
-        var remoteFiles = await remote.CreateContainerAsync("files", token);
+        var ownFiles = await AutocommitContainer.CreateAsync(own, "files", token);
+        var otherFiles = await AutocommitContainer.CreateAsync(other, "files", token);
+        var remoteFiles = await AutocommitContainer.CreateAsync(remote, "files", token);
         await WriteBlobAsync(otherFiles, "item", "other"u8.ToArray(), token);
         await WriteBlobAsync(remoteFiles, "item", "remote"u8.ToArray(), token);
         var listener = new InMemoryConnectionListener();
@@ -146,7 +146,7 @@ public sealed class BlobDatabaseServerTests
         CancellationToken token = deadline.Token;
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("objects", token);
-        var container = await database.CreateContainerAsync("files", token);
+        var container = await AutocommitContainer.CreateAsync(database, "files", token);
         await WriteBlobAsync(container, "item", "previous"u8.ToArray(), token);
         var listener = new InMemoryConnectionListener();
         await using var server = BlobDatabaseServer.Create(engine, new()
@@ -230,9 +230,10 @@ public sealed class BlobDatabaseServerTests
     /// <summary>
     /// Disposing a session's database (option B of the concrete-types plan, §6.6: the session's
     /// <see cref="BlobDatabaseSession.Database"/> is the unbound database) closes that database
-    /// alone. The engine keeps it registered, so it refuses to reopen it until it is dropped, but
-    /// its workers skip it, so the engine stays <see cref="EngineState.Running"/> and its server
-    /// still starts and serves the engine's other databases. Before the workers skipped a closed
+    /// alone. Its workers skip it, so the engine stays <see cref="EngineState.Running"/> and its
+    /// server still starts and serves the engine's other databases; once the close ends the engine
+    /// forgets it, so the next open, in process or by a handshake over the wire, opens it again with
+    /// its blobs (owner decision 33, #1289). Before the workers skipped a closed
     /// database, the version-purge worker failed on its disposed coordinator every pass, the engine
     /// reported <see cref="EngineState.Faulted"/> for good, and the server refused every start,
     /// connection and handshake.
@@ -249,10 +250,10 @@ public sealed class BlobDatabaseServerTests
             CheckpointInterval = interval, PageWriteBackInterval = interval, MaintenanceInterval = interval
         });
         var closed = await engine.CreateDatabaseAsync("closed", token);
-        var closedFiles = await closed.CreateContainerAsync("files", token);
+        var closedFiles = await AutocommitContainer.CreateAsync(closed, "files", token);
         await WriteBlobAsync(closedFiles, "item", "closed"u8.ToArray(), token);
         var open = await engine.CreateDatabaseAsync("open", token);
-        await open.CreateContainerAsync("files", token);
+        await AutocommitContainer.CreateAsync(open, "files", token);
         await using var session = await closed.CreateSessionAsync(token);
 
         // Act: close the database through the session, let the workers pass over it many times,
@@ -277,8 +278,15 @@ public sealed class BlobDatabaseServerTests
         engine.OfflineDatabases.ShouldBeEmpty();
         server.Sessions.Single().DatabaseSession!.Database.Name.ShouldBe(open.Name);
         written.Length.ShouldBe(4);
-        (await ReadBlobAsync(await open.GetContainerAsync("files", token), "item", token)).ShouldBe("open"u8.ToArray());
-        await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.OpenDatabaseAsync("closed", token));
+        (await ReadBlobAsync(await AutocommitContainer.GetAsync(open, "files", token), "item", token)).ShouldBe("open"u8.ToArray());
+
+        // Assert: the closed database opens again, over the wire and in process, with its blob.
+        await using IConnection reconnection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using var rechannel = new ProtocolChannel(reconnection.AsStream(), BlobProtocol.Family);
+        await HandshakeAsync(rechannel, "closed", token);
+        engine.TryGetDatabase("closed", out var reopened).ShouldBeTrue();
+        reopened.ShouldNotBeSameAs(closed);
+        (await ReadBlobAsync(await AutocommitContainer.GetAsync(reopened, "files", token), "item", token)).ShouldBe("closed"u8.ToArray());
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Blob server: Shutdown owns blocked capacity rejections")]
@@ -313,7 +321,7 @@ public sealed class BlobDatabaseServerTests
         CancellationToken token = deadline.Token;
         await using var engine = BlobDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("objects", token);
-        var container = await database.CreateContainerAsync("files", token);
+        var container = await AutocommitContainer.CreateAsync(database, "files", token);
         var inner = new InMemoryConnectionListener();
         var listener = new FaultingAcceptListener(inner);
         await using var server = BlobDatabaseServer.Create(engine, new()
@@ -362,7 +370,21 @@ public sealed class BlobDatabaseServerTests
         await stream.WriteAsync(bytes, token);
     }
 
+    private static async Task WriteBlobAsync(AutocommitContainer container, string name, byte[] bytes, CancellationToken token)
+    {
+        await using Stream stream = await container.OpenWriteAsync(name, cancellationToken: token);
+        await stream.WriteAsync(bytes, token);
+    }
+
     private static async Task<byte[]> ReadBlobAsync(BlobContainer container, string name, CancellationToken token)
+    {
+        await using Stream stream = await container.OpenReadAsync(name, token);
+        using var result = new MemoryStream();
+        await stream.CopyToAsync(result, token);
+        return result.ToArray();
+    }
+
+    private static async Task<byte[]> ReadBlobAsync(AutocommitContainer container, string name, CancellationToken token)
     {
         await using Stream stream = await container.OpenReadAsync(name, token);
         using var result = new MemoryStream();

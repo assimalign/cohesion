@@ -162,6 +162,6 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     private Exception Translate(Exception error)
     {
         var offline = _database.TranslateOffline(error);
-        return ReferenceEquals(offline, error) ? GraphDatabase.TranslateKernelFailure(error) : offline;
+        return ReferenceEquals(offline, error) ? _database.TranslateKernelFailure(error) : offline;
     }
 }

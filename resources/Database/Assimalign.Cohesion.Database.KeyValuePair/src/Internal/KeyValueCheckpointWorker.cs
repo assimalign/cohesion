@@ -51,9 +51,10 @@ internal sealed class KeyValueCheckpointWorker : DatabaseCheckpointWorker<KeyVal
     /// <remarks>
     /// False for a database its holder closed (directly; a session's
     /// <see cref="KeyValueDatabaseSession.Database"/> is the same instance), which the engine keeps
-    /// registered. A close that was not idle (a writer the close kept in flight, #1226) leaves the
-    /// data journal untruncated, so the closed data set would stay due for a checkpoint it refuses,
-    /// and a failure recorded for the database would never end.
+    /// registered until its close ends, then forgets it. A close that was not idle (a writer the
+    /// close kept in flight, #1226) leaves the data journal untruncated, so the closed data set
+    /// would stay due for a checkpoint it refuses, and a failure recorded for the database would
+    /// never end.
     /// </remarks>
     protected override bool IsCheckpointDue(KeyValueDatabase database, TimeSpan interval)
         => !database.IsClosed && (database.DataStorage.IsCheckpointDue(interval) || database.CatalogStorage.IsCheckpointDue(interval));

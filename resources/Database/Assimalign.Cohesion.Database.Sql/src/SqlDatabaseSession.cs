@@ -196,17 +196,21 @@ public sealed class SqlDatabaseSession : DatabaseSession
     {
         _database.ThrowIfOffline();
 
+        // The statement's own metrics are the ones set after this point; a statement that fails
+        // before it runs leaves the previous statement's, which never classify this one.
+        var previousMetrics = _lastStatementMetrics;
         try
         {
             return await ExecuteStatementAsync(request, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (_database.TranslateOffline(exception, selfCommitting: IsSelfCommitting(request)) is var translated
+        catch (Exception exception) when (_database.TranslateOffline(exception, selfCommitted: SelfCommitted(request, previousMetrics)) is var translated
             && !ReferenceEquals(translated, exception))
         {
             // A statement that met the offline storage (#1243) gets the coded refusal, unless its
-            // work may survive the reopen: a self-committing DDL statement, or a bracket whose
-            // commit record was written, is unconfirmed instead. The unconfirmed commit that took
-            // the database offline keeps its own type.
+            // work may survive the reopen: a self-committing DDL statement that already committed a
+            // catalog change a reopened database shows, or a bracket whose commit record was
+            // written, is unconfirmed instead (#1272). The unconfirmed commit that took the database offline
+            // keeps its own type. Both lead with COHSQLT004.
             throw translated;
         }
         catch (InsufficientExecutionStackException exception)
@@ -235,6 +239,25 @@ public sealed class SqlDatabaseSession : DatabaseSession
     private static bool IsSelfCommitting(QueryRequest request)
         => request is SqlQueryRequest { Statement.SqlExpression.CommandType:
             SqlQueryCommandType.Create or SqlQueryCommandType.Alter or SqlQueryCommandType.Drop };
+
+    /// <summary>
+    /// Reports whether a failed request is a self-committing statement that had committed at
+    /// least one catalog change a reopened database shows when it failed: the executor records
+    /// each catalog self-commit that publishes, alters or removes a definition on the statement's
+    /// metrics once its commit returned. Such a statement's failure on an offline storage is
+    /// unconfirmed, because what it committed survives the reopen; a DDL statement that committed
+    /// no such change is refused, like any other statement (#1272), even after durable steps
+    /// nothing can reach (CREATE TABLE's identity reservation, index trees no catalog entry
+    /// describes yet). Before #1272 every DDL statement that met an offline storage was reported as
+    /// unconfirmed, even one a concurrent failure refused before it wrote anything.
+    /// </summary>
+    /// <param name="request">The failed request.</param>
+    /// <param name="previousMetrics">The session's last metrics before the request ran.</param>
+    /// <returns>True when the statement committed a visible catalog change before it failed.</returns>
+    private bool SelfCommitted(QueryRequest request, SqlStatementMetrics? previousMetrics)
+        => IsSelfCommitting(request)
+            && _lastStatementMetrics is { SelfCommits: > 0 } metrics
+            && !ReferenceEquals(metrics, previousMetrics);
 
     private async ValueTask<QueryResult> ExecuteStatementAsync(QueryRequest request, CancellationToken cancellationToken)
     {
@@ -348,7 +371,7 @@ public sealed class SqlDatabaseSession : DatabaseSession
         catch (TransactionCommitUnconfirmedException exception)
         {
             // The statement committed; only the durability of its commit record is unconfirmed.
-            throw new DatabaseTransactionCommitUnconfirmedException(exception.Message, exception);
+            throw _database.CreateUnconfirmedCommit(exception);
         }
         catch (TransactionDeadlockException exception)
         {

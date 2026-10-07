@@ -87,6 +87,33 @@ refused, never granted. The queued writer queues before the fault and does
 nothing that drains: a container lookup is an autocommit read whose commit drains the journal, and
 one that commits after the fault gets the unconfirmed commit of #1243 instead of the refusal.
 
+**A database closed outside the engine is forgotten once its close ends** (owner decision 33 of
+2026-10-06, #1289). A holder may dispose a database directly or through `session.Database`; the
+close then tells the engine (`BlobDatabaseEngine.ForgetClosedDatabaseCore`, through the root's
+shared `DatabaseRegistry.Forget`), which stops tracking it, so a later `OpenDatabaseAsync` opens
+it again from its files: a new instance with every committed blob. An in-memory database reopens
+with its blobs too, because the engine keeps each in-memory file set's streams until its own
+disposal releases them (`DatabaseMemoryFiles`) and the open copies the closed streams' bytes and
+runs the same recovery over them (#1272); before #1272 an in-memory reopen got empty storage.
+While the close runs, the engine still tracks the closing database, so the workers'
+closed-database skips ("Concrete types", option B) still cover it; an open waits for the close,
+`TryGetDatabase` does not report
+the database, and a drop or the engine's disposal waits for it, so nothing reuses the files under
+the close. Before decision 33 the database stayed registered until it was dropped, and the open
+refused it with `ObjectDisposedException`. The forget reads the engine's lock-free instance
+snapshot and takes the engine's lock only through a bounded `Monitor.TryEnter` loop, because a
+drop, an offline reopen and the engine's disposal dispose a database while holding that lock,
+and that disposal waits for a close a holder started. The same wait means a holder's close that
+stalls (a fsync that does not answer) stalls the engine's other registry operations, the wire
+server's handshake among them, until it ends, and a drop's token is not observed meanwhile (root
+`DESIGN.md`, "A stalled close stalls the engine's registry").
+`BlobEngineTests.OpenDatabaseAsync_DatabaseClosedOutsideTheEngine_ShouldReopenItWithItsBlobs`
+closes a database both ways, in memory and on disk, with an upload of an uncommitted transaction:
+the reopened instance is new, holds the committed blobs (a small one and a 100,000-byte one)
+byte for byte and not the uncommitted one, takes uploads, and a second close and open keeps them.
+The server test that closes a database outside the engine asserts that the reopen serves it
+again over the wire and in process.
+
 File-backed databases use `<RootPath>/<database>/blob.dat`, `blob.log`, and `blob.bak`.
 Database names are single file-name components, compared ignoring case; invalid path components
 are rejected. Database enumeration includes persisted databases and opens them through recovery.
@@ -155,21 +182,21 @@ itself stays on disk. File-backed storage is required when content exceeds avail
 
 ## Sessions, concurrency and ownership
 
-The session runs the container operations itself (`BlobDatabaseSession.CreateContainerAsync`,
-`GetContainerAsync`, `DropContainerAsync`, `GetContainersAsync`), in its active transaction
-when one is open; containers it returns are bound to it and use the same coordinator and
-explicit transaction, without a session parameter on their operations. The database's own
-container operations, and the containers they return, use automatic transactions outside any
-session. `session.Database` is that unbound database (option B of the concrete-types plan,
-§6.6), so its operations run automatic transactions too, and disposing it closes the database
-for every session, never the session itself (the engine then refuses to reopen it with
-`ObjectDisposedException` until it is dropped or the engine is recreated, and its workers skip
-it, so the engine stays `Running`). The engine has one
-writer at a time, so a write through `session.Database` or a container it returned
-(`CreateContainerAsync`, `DropContainerAsync`, an upload or delete) while the session's explicit
-transaction has written waits for that transaction's writer lock: the caller that awaits it before
-ending the transaction waits until the call's token is canceled. Inside a transaction, use the
-session's own container operations. Session disposal invalidates bound containers and streams.
+Container operations exist only on the session (owner decision 32 of 2026-10-06):
+`BlobDatabaseSession.CreateContainerAsync`, `GetContainerAsync`, `DropContainerAsync` and
+`GetContainersAsync` run in its active transaction when one is open, and otherwise each in an
+automatic transaction; containers it returns are bound to it and use the same coordinator and
+explicit transaction, without a session parameter on their operations. Until decision 32 the
+database carried session-less copies whose containers used automatic transactions outside any
+session. The engine has one writer at a time, so a write through one of them (a create, a drop,
+an upload or a delete) while the caller's own session held an explicit transaction's writer lock
+waited for that transaction, and a caller that awaited it before ending the transaction waited
+until the call's token was canceled. With the session as the one entry point that self-wait
+cannot happen. `session.Database` is the unbound database (option B of the concrete-types plan,
+§6.6): disposing it closes the database for every session, never the session itself. Once that
+close ends the engine forgets the database, and a later `OpenDatabaseAsync` opens it again with
+its blobs, in memory as on disk ("Composition and lifetime", owner decision 33). Session
+disposal invalidates bound containers and streams.
 Snapshot and ReadCommitted isolation are supported; unsupported isolation is
 rejected rather than weakened. Read operations pin the selected snapshot until stream disposal.
 An explicit ReadCommitted operation also retains a fixed snapshot pin so an earlier writer
@@ -274,9 +301,14 @@ commit whose record was written but could not be made durable, which leaves the 
 `Committed`), never as the kernel's own exception types, for operations
 and for every end of the explicit transaction: commit, rollback, disposal, the session's closure,
 and the abort an operation failure starts. One translation (`BlobDatabase.TranslateKernelFailure`)
-serves them all. The lifecycle is the Documents state diagram with operations in place of statements.
-Since phase 4 of the concrete-types plan the end state machine this section describes is the root
-`DatabaseTransaction` base's, and the session state, the "already active" check and the
+serves them all. The unconfirmed commit's message leads with the model's code on every path, the
+explicit commit and an upload's own commit alike (owner decision 24 of 2026-10-06, #1272):
+`COHDBB002: Database '{name}' went offline while a transaction was committing: ...`, built by the
+root's `DatabaseTransactionCommitUnconfirmedException.Create(code, database, cause)` with the
+kernel's `TransactionCommitUnconfirmedException` as its inner exception; before #1272 this path
+carried the kernel's message alone. The lifecycle is the Documents state diagram with operations
+in place of statements. Since phase 4 of the concrete-types plan the end state machine this
+section describes is the root `DatabaseTransaction` base's, and the session state, the "already active" check and the
 one-operation hold are the root `DatabaseSession` base's; the model supplies `COHDBB001`,
 `COHDBB002`, the kernel calls and this translation ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)).
 
@@ -557,9 +589,9 @@ the file set, closing included — PostgreSQL's `PANIC` on a failed WAL fsync (`
 off, `src/backend/storage/file/fd.c:3966-3987`), scoped to the database.
 
 - The upload whose commit flush failed gets `DatabaseTransactionCommitUnconfirmedException` from
-  its stream's disposal. Before #1243 an upload's completion failures reached the caller
-  untranslated (the kernel's own exception types) because the upload stream's callbacks bypassed
-  the engine's translation; `BlobGuardedStream` now translates every write, flush, read and
+  its stream's disposal, its message leading with `COHDBB002` (owner decision 24). Before #1243
+  an upload's completion failures reached the caller untranslated (the kernel's own exception
+  types) because the upload stream's callbacks bypassed the engine's translation; `BlobGuardedStream` now translates every write, flush, read and
   disposal failure the way the other operations' failures are translated, and the upload's abort
   records the translated cause.
 - Every later operation — a new session, a container call, `OpenWriteAsync`, `OpenReadAsync`, a
@@ -681,15 +713,16 @@ behind its `Open` factory.
   meanings: disposing a session's database closed the session, disposing the database itself
   closed the database. The session now runs its container operations itself
   (`CreateContainerAsync`, `GetContainerAsync`, `DropContainerAsync`, `GetContainersAsync`,
-  in its transaction), and `session.Database` is the unbound `BlobDatabase`, whose container
-  operations run in autocommit and whose disposal closes the database. So a container operation
-  called on `session.Database`, or on a container it returned, no longer joins the session's
-  transaction (a write through it while that transaction has written waits for the transaction's
-  writer lock, "Sessions, concurrency and ownership"), `session.Database` creates sessions after
-  the session closed (the view refused with "The blob session is closed."), and disposing it
-  closes the database for every session, not the session: the engine refuses to reopen it
-  (`ObjectDisposedException`) until it is dropped or the engine is recreated, as a directly
-  disposed database always was. Its workers leave a closed database alone
+  in its transaction), and `session.Database` is the unbound `BlobDatabase`, whose disposal closes
+  the database. So `session.Database` creates sessions after the session closed (the view refused
+  with "The blob session is closed."), and disposing it closes the database for every session,
+  not the session. Since owner decision 33 the engine forgets the closed database once its close
+  ends and the next open opens it again; until then it refused the reopen with
+  `ObjectDisposedException` until the database was dropped or the engine recreated, as a directly
+  disposed database always was. Phase 4 also kept the database's own container operations, in
+  autocommit; owner decision 32 removed them, so the session is the one entry point and a write
+  can no longer wait on its caller's own explicit transaction ("Sessions, concurrency and
+  ownership"). Its workers leave a closed database alone
   (`BlobDatabase.IsClosed`, and `BlobDatabaseEngine.IsOpen` is false for it), so the engine stays
   `Running` and its server keeps serving the other databases: the version-purge worker skips it in
   its pass and its trigger wait, and the checkpointer through `BlobCheckpointWorker.IsCheckpointDue`,

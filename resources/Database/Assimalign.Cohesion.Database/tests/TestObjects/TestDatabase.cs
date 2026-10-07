@@ -5,19 +5,23 @@ namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
 /// A database whose cores create <see cref="TestSession"/>s, apply a schema when it supports
-/// provisioning, and record their disposal.
+/// provisioning, and record their disposal. A close gate, when given, holds the disposal cores
+/// until it is released, so a test can act while a close runs.
 /// </summary>
 internal sealed class TestDatabase : DatabaseInstance
 {
+    private readonly TaskCompletionSource? _closeGate;
+    private readonly TaskCompletionSource _closing = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _sessions;
     private int _disposeCores;
     private int _asyncDisposeCores;
     private int _schemaApplies;
 
-    public TestDatabase(DatabaseName name, DatabaseEngine engine, bool supportsSchemaProvisioning = false, TestLog? log = null)
+    public TestDatabase(DatabaseName name, DatabaseEngine engine, bool supportsSchemaProvisioning = false, TestLog? log = null, TaskCompletionSource? closeGate = null)
         : base(name, engine, supportsSchemaProvisioning)
     {
         Log = log ?? new TestLog();
+        _closeGate = closeGate;
     }
 
     public TestLog Log { get; }
@@ -31,6 +35,9 @@ internal sealed class TestDatabase : DatabaseInstance
     public int SchemaApplies => Volatile.Read(ref _schemaApplies);
 
     public bool Disposed => IsDisposed;
+
+    /// <summary>Gets a task that completes once a disposal core started.</summary>
+    public Task Closing => _closing.Task;
 
     protected override ValueTask<DatabaseSession> CreateSessionCoreAsync(CancellationToken cancellationToken)
     {
@@ -47,13 +54,20 @@ internal sealed class TestDatabase : DatabaseInstance
     protected override void DisposeCore()
     {
         Interlocked.Increment(ref _disposeCores);
+        _closing.TrySetResult();
+        _closeGate?.Task.GetAwaiter().GetResult();
         Log.Add($"database:{Name}:dispose");
     }
 
-    protected override ValueTask DisposeAsyncCore()
+    protected override async ValueTask DisposeAsyncCore()
     {
         Interlocked.Increment(ref _asyncDisposeCores);
+        _closing.TrySetResult();
+        if (_closeGate is { } gate)
+        {
+            await gate.Task.ConfigureAwait(false);
+        }
+
         Log.Add($"database:{Name}:dispose");
-        return ValueTask.CompletedTask;
     }
 }

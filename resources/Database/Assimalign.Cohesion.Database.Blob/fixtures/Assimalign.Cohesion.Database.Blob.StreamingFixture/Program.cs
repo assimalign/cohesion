@@ -71,7 +71,8 @@ internal static class Program
         await using (var engine = CreateEngine(root))
         {
             var database = await engine.CreateDatabaseAsync("large", token);
-            var container = await database.CreateContainerAsync("objects", token);
+            await using var session = await database.CreateSessionAsync(token);
+            var container = await session.CreateContainerAsync("objects", token);
             await using (var output = await container.OpenWriteAsync("payload", cancellationToken: token))
             {
                 expectedHash = await WritePatternAsync(output, LargeBlobLength, 17, token);
@@ -105,7 +106,8 @@ internal static class Program
         await using (var reopened = CreateEngine(recoveryRoot))
         {
             var database = await reopened.OpenDatabaseAsync("large", token);
-            var container = await database.GetContainerAsync("objects", token);
+            await using var session = await database.CreateSessionAsync(token);
+            var container = await session.GetContainerAsync("objects", token);
             await VerifyAsync(container, "payload", LargeBlobLength, expectedHash, token);
         }
 
@@ -119,9 +121,11 @@ internal static class Program
         // can turn the crash test into a graceful shutdown test.
         var engine = CreateEngine(root);
         var database = await engine.CreateDatabaseAsync("existing", token);
-        var container = await database.CreateContainerAsync("objects", token);
+        var session = await database.CreateSessionAsync(token);
+        var container = await session.CreateContainerAsync("objects", token);
         var otherDatabase = await engine.CreateDatabaseAsync("new-object", token);
-        var otherContainer = await otherDatabase.CreateContainerAsync("objects", token);
+        var otherSession = await otherDatabase.CreateSessionAsync(token);
+        var otherContainer = await otherSession.CreateContainerAsync("objects", token);
         string committedHash;
         await using (var output = await container.OpenWriteAsync("committed", cancellationToken: token))
         {

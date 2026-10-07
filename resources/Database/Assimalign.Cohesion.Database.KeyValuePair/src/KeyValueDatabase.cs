@@ -41,10 +41,11 @@ using Assimalign.Cohesion.Database.Transactions;
 /// <see cref="DatabaseInstance"/> with an internal constructor, replacing the former
 /// <c>IKeyValueDatabase</c> interface and its internal implementation; the engine creates and
 /// opens it. The base owns the name, the owning engine (re-exposed typed with <c>new</c>) and the
-/// disposed flag. Disposing it outside the engine closes it for every session; the engine keeps
-/// it registered (its <c>OpenDatabaseAsync</c> returns the closed instance, which refuses a new
-/// session with <see cref="ObjectDisposedException"/>, until it is dropped or the engine is
-/// recreated), and its workers skip it, so the engine stays <see cref="EngineState.Running"/>.
+/// disposed flag. Disposing it outside the engine closes it for every session; once the close
+/// ends the engine forgets it (owner decision 33 of 2026-10-06, #1289), and
+/// <see cref="KeyValueDatabaseEngine.OpenDatabaseAsync(DatabaseName, CancellationToken)"/> opens
+/// it again from its files, with its entries, as a new instance. Until then its workers skip it,
+/// so the engine stays <see cref="EngineState.Running"/>.
 /// </para>
 /// </remarks>
 public sealed class KeyValueDatabase : DatabaseInstance
@@ -369,9 +370,10 @@ public sealed class KeyValueDatabase : DatabaseInstance
     internal bool IsOffline => OfflineError is not null;
 
     /// <summary>
-    /// Gets whether the database has been disposed: by the engine, or by a holder of the
+    /// Gets whether the database's close has started: by the engine, or by a holder of the
     /// database (a session's <see cref="KeyValueDatabaseSession.Database"/> is the same instance).
-    /// The engine keeps a database its holder closed registered, and its workers skip it.
+    /// The engine keeps a database its holder is closing registered until the close ends, then
+    /// forgets it; its workers skip it meanwhile.
     /// </summary>
     internal bool IsClosed => IsDisposed;
 
@@ -441,6 +443,16 @@ public sealed class KeyValueDatabase : DatabaseInstance
             ? DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, offline)
             : DatabaseOfflineException.Create(OfflineCode, Name, OfflineError ?? offline);
     }
+
+    /// <summary>
+    /// Translates the transaction kernel's unconfirmed commit into the area root's, its message led
+    /// by <see cref="OfflineCode"/> as on every other unconfirmed path (owner decision 24 of
+    /// 2026-10-06, #1272): an explicit transaction's commit and an auto-commit command's.
+    /// </summary>
+    /// <param name="error">The kernel's unconfirmed commit, kept as the inner exception.</param>
+    /// <returns>The exception to throw.</returns>
+    internal DatabaseTransactionCommitUnconfirmedException CreateUnconfirmedCommit(TransactionCommitUnconfirmedException error)
+        => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, error);
 
     /// <summary>
     /// Creates a new lightweight key-value session scoped to this database.

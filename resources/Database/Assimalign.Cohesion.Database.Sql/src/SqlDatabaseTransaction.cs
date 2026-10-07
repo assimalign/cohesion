@@ -173,10 +173,11 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
 
     // The area error policy: the engine translates the transaction kernel's independent exception
     // root at the model boundary. A failure the offline storage caused becomes the coded refusal
-    // (#1243); the unconfirmed commit that took it offline keeps its own type.
+    // (#1243); the unconfirmed commit that took it offline keeps its own type, its message led by
+    // the offline code (#1272).
     private Exception Translate(Exception error) => error switch
     {
-        TransactionCommitUnconfirmedException => new DatabaseTransactionCommitUnconfirmedException(error.Message, error),
+        TransactionCommitUnconfirmedException unconfirmed => _database.CreateUnconfirmedCommit(unconfirmed),
         _ when _database.TranslateOffline(error) is var offline && !ReferenceEquals(offline, error) => offline,
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),

@@ -47,7 +47,7 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
             // Nothing of an offline database is written (#1243): neither file set, whichever
             // went offline. Each storage also refuses on its own. Nor is anything of a database
             // its holder closed: its close flushes its file sets, and the engine keeps the closed
-            // instance registered (its reopen returns it).
+            // instance registered only until the close ends.
             if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;

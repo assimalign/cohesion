@@ -7,16 +7,17 @@ using Assimalign.Cohesion.Database.Transactions;
 namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 /// <summary>
-/// One blob operation: a container operation, or a blob operation or stream of a container, of a
-/// session or of the database itself. It owns its transaction context (the session's explicit
-/// transaction's, or an autocommit context of its own) and, for a session's operation, the hold it
-/// keeps on the session and its admission into the explicit transaction, until it completes or is
-/// aborted. A stream's operation lasts until the stream is disposed.
+/// One blob operation of a session: a container operation, or a blob operation or stream of a
+/// container bound to the session. It owns its transaction context (the session's explicit
+/// transaction's, or an autocommit context of its own), the hold it keeps on the session and its
+/// admission into the explicit transaction, until it completes or is aborted. A stream's operation
+/// lasts until the stream is disposed. Every operation has a session (owner decision 32 of
+/// 2026-10-06).
 /// </summary>
 internal sealed class BlobOperation
 {
     private readonly BlobDatabase _database;
-    private readonly BlobDatabaseSession? _session;
+    private readonly BlobDatabaseSession _session;
     private readonly BlobDatabaseTransaction? _transaction;
     private readonly TransactionContext _context;
     private readonly SemaphoreSlim _completionGate = new(1, 1);
@@ -26,12 +27,11 @@ internal sealed class BlobOperation
     /// <summary>Initializes a new instance of the <see cref="BlobOperation"/> class.</summary>
     /// <param name="database">The database the operation runs on.</param>
     /// <param name="session">
-    /// The session the operation holds, which the operation releases when it finishes; null for an
-    /// operation of the database itself or of a container it returned, which runs in autocommit.
+    /// The session the operation holds, which the operation releases when it finishes.
     /// </param>
     /// <param name="context">The transaction context the operation runs under.</param>
     /// <param name="transaction">The explicit transaction that admitted the operation, or null for autocommit.</param>
-    internal BlobOperation(BlobDatabase database, BlobDatabaseSession? session, TransactionContext context, BlobDatabaseTransaction? transaction)
+    internal BlobOperation(BlobDatabase database, BlobDatabaseSession session, TransactionContext context, BlobDatabaseTransaction? transaction)
     {
         _database = database;
         _session = session;
@@ -61,7 +61,7 @@ internal sealed class BlobOperation
         // A blob stream checks here before every read and write, and an upload before its
         // completion: an offline database refuses them with its coded error (#1243).
         _database.ThrowIfOffline();
-        _session?.ThrowIfNotOpen();
+        _session.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
             throw new DatabaseException("The blob operation's transaction is no longer active.");
@@ -146,8 +146,8 @@ internal sealed class BlobOperation
             return;
         }
 
-        // A session's operation ends its admission into the explicit transaction and its hold on the session.
-        _session?.ReleaseOperation(_transaction);
+        // The operation ends its admission into the explicit transaction and its hold on the session.
+        _session.ReleaseOperation(_transaction);
     }
 
     private async ValueTask ReleaseSnapshotPinAsync()

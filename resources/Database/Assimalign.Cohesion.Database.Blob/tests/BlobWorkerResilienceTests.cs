@@ -846,11 +846,17 @@ public sealed class BlobWorkerResilienceTests
     private static async Task<BlobDatabase> CreateAsync(BlobDatabaseEngine engine, string name)
     {
         var database = await engine.CreateDatabaseAsync(name);
-        await database.CreateContainerAsync("files");
+        await AutocommitContainer.CreateAsync(database, "files");
         return database;
     }
 
     private static async Task WriteAsync(BlobContainer container, string name, string content)
+    {
+        await using var stream = await container.OpenWriteAsync(name);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(content));
+    }
+
+    private static async Task WriteAsync(AutocommitContainer container, string name, string content)
     {
         await using var stream = await container.OpenWriteAsync(name);
         await stream.WriteAsync(Encoding.UTF8.GetBytes(content));

@@ -44,8 +44,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var keep = await collection.PutAsync(session, "keep", Doc("keep", "\"v\":1"));
         var transaction = await session.BeginTransactionAsync(isolation);
         await collection.PutAsync(session, "pending", Doc("pending"));
@@ -66,7 +66,7 @@ public sealed class DocumentTransactionFailureTests
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
         await using var observer = await database.CreateSessionAsync();
-        var stored = (await collection.GetAsync(observer, "keep")).ShouldNotBeNull();
+        var stored = (await (await observer.GetCollectionAsync("items")).GetAsync(observer, "keep")).ShouldNotBeNull();
         stored.Version.ShouldBe(keep.Version);
         Encoding.UTF8.GetString(stored.Content.Span).ShouldBe("{\"id\":\"keep\",\"v\":1}");
         (await IdsAsync(observer)).ShouldBe(["keep"]);
@@ -79,8 +79,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await collection.PutAsync(session, "keep", Doc("keep"));
         var transaction = await session.BeginTransactionAsync();
         await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM missing"));
@@ -126,8 +126,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await using var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "pending", Doc("pending"));
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM missing"));
@@ -157,8 +157,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "pending", Doc("pending"));
         await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM missing"));
@@ -181,8 +181,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange: the indexed value outgrows the index key only after the new content chunks are written.
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await session.ExecuteAsync("CREATE INDEX by_a ON items (a)");
         await collection.PutAsync(session, "keep", Doc("keep", "\"a\":\"k\""));
         var transaction = await session.BeginTransactionAsync();
@@ -211,16 +211,17 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var failed = await database.CreateSessionAsync();
+        var collection = await failed.CreateCollectionAsync("items");
         await using var other = await database.CreateSessionAsync();
+        var otherItems = await other.GetCollectionAsync("items");
         await using var transaction = await failed.BeginTransactionAsync();
         await collection.PutAsync(failed, "pending", Doc("pending"));
         await Should.ThrowAsync<DatabaseException>(async () => await failed.ExecuteAsync("SELECT * FROM missing"));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         // Act
-        await collection.PutAsync(other, "other", Doc("other"), cancellationToken: timeout.Token);
+        await otherItems.PutAsync(other, "other", Doc("other"), cancellationToken: timeout.Token);
 
         // Assert
         transaction.State.ShouldBe(TransactionState.Faulted);
@@ -234,8 +235,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await collection.PutAsync(session, "keep", Doc("keep"));
 
         // Act
@@ -256,8 +257,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await using var transaction = await session.BeginTransactionAsync();
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM missing"));
 
@@ -278,14 +279,15 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var blocker = await database.CreateSessionAsync();
+        var collection = await blocker.CreateCollectionAsync("items");
         await using var waiting = await database.CreateSessionAsync();
+        var waitingItems = await waiting.GetCollectionAsync("items");
         var blocking = await blocker.BeginTransactionAsync();
         await collection.PutAsync(blocker, "blocker", Doc("blocker"));
         var transaction = await waiting.BeginTransactionAsync();
         using var cancellation = new CancellationTokenSource();
-        var pending = collection.PutAsync(waiting, "waiting", Doc("waiting"), cancellationToken: cancellation.Token).AsTask();
+        var pending = waitingItems.PutAsync(waiting, "waiting", Doc("waiting"), cancellationToken: cancellation.Token).AsTask();
         pending.IsCompleted.ShouldBeFalse();
 
         // Act: the refusal is immediate; the timeout only turns a regression into a failure, not a hang.
@@ -293,7 +295,7 @@ public sealed class DocumentTransactionFailureTests
         await Should.ThrowAsync<OperationCanceledException>(async () => await pending);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var refused = await Should.ThrowAsync<DatabaseException>(async () =>
-            await collection.PutAsync(waiting, "late", Doc("late"), cancellationToken: timeout.Token));
+            await waitingItems.PutAsync(waiting, "late", Doc("late"), cancellationToken: timeout.Token));
         var faultedState = transaction.State;
         await transaction.RollbackAsync();
         await blocking.CommitAsync();
@@ -312,8 +314,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "pending", Doc("pending"));
         await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM missing"));
@@ -346,8 +348,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "pending", Doc("pending"));
         DatabaseException? failure = aborted
@@ -385,10 +387,10 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         var otherDatabase = await engine.CreateDatabaseAsync("other");
         await using var session = await database.CreateSessionAsync();
         await using var foreign = await otherDatabase.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "pending", Doc("pending"));
 
@@ -420,8 +422,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var rolledBack = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "discarded", Doc("discarded"));
         await rolledBack.RollbackAsync();
@@ -449,8 +451,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "first", Doc("first"));
         using var canceled = new CancellationTokenSource();
@@ -479,8 +481,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "discarded", Doc("discarded"));
         await transaction.RollbackAsync();
@@ -506,13 +508,14 @@ public sealed class DocumentTransactionFailureTests
         // Arrange: another transaction holds the writer lock, so the session's statement waits.
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var blocker = await database.CreateSessionAsync();
+        var collection = await blocker.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
+        var sessionItems = await session.GetCollectionAsync("items");
         var blocking = await blocker.BeginTransactionAsync();
         await collection.PutAsync(blocker, "blocker", Doc("blocker"));
         var transaction = await session.BeginTransactionAsync();
-        var pending = collection.PutAsync(session, "waiting", Doc("waiting")).AsTask();
+        var pending = sessionItems.PutAsync(session, "waiting", Doc("waiting")).AsTask();
         pending.IsCompleted.ShouldBeFalse();
 
         // Act
@@ -542,13 +545,14 @@ public sealed class DocumentTransactionFailureTests
         // Arrange: another transaction holds the writer lock, so the statement waits.
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var blocker = await database.CreateSessionAsync();
+        var collection = await blocker.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var sessionItems = await session.GetCollectionAsync("items");
         var blocking = await blocker.BeginTransactionAsync();
         await collection.PutAsync(blocker, "blocker", Doc("blocker"));
         var transaction = await session.BeginTransactionAsync();
-        var pending = collection.PutAsync(session, "waiting", Doc("waiting")).AsTask();
+        var pending = sessionItems.PutAsync(session, "waiting", Doc("waiting")).AsTask();
         pending.IsCompleted.ShouldBeFalse();
 
         // Act
@@ -605,8 +609,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var bound = await session.GetCollectionAsync("items");
         await session.DisposeAsync();
 
@@ -647,8 +651,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "pending", Doc("pending"));
         await engine.DropDatabaseAsync("test");
@@ -689,8 +693,8 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await session.DisposeAsync();
         await engine.DropDatabaseAsync("test");
 
@@ -725,19 +729,20 @@ public sealed class DocumentTransactionFailureTests
         // Arrange: another transaction holds the writer lock, so the session's statement waits.
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var blocker = await database.CreateSessionAsync();
+        var collection = await blocker.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var sessionItems = await session.GetCollectionAsync("items");
         var blocking = await blocker.BeginTransactionAsync();
         await collection.PutAsync(blocker, "blocker", Doc("blocker"));
-        var pending = collection.PutAsync(session, "waiting", Doc("waiting")).AsTask();
+        var pending = sessionItems.PutAsync(session, "waiting", Doc("waiting")).AsTask();
         pending.IsCompleted.ShouldBeFalse();
 
         // Act
         var statement = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT id FROM items"));
         var request = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(DocumentQueryRequest.FromOql("SELECT id FROM items")));
         var collectionOperation = await Should.ThrowAsync<DatabaseException>(async () => await session.GetCollectionAsync("items"));
-        var documentOperation = await Should.ThrowAsync<DatabaseException>(async () => await collection.GetAsync(session, "blocker"));
+        var documentOperation = await Should.ThrowAsync<DatabaseException>(async () => await sessionItems.GetAsync(session, "blocker"));
         var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
         bool stillWaiting = !pending.IsCompleted;
         await blocking.CommitAsync();
@@ -755,16 +760,18 @@ public sealed class DocumentTransactionFailureTests
 
     /// <summary>
     /// A session's database is the unbound <see cref="DocumentDatabase"/> (option B of the
-    /// concrete-types plan, §6.6): its collection operations run in autocommit outside the session,
-    /// whatever transaction the session holds, while the session's own collection operations run in
-    /// that transaction; it creates sessions after the session closed; and disposing it closes the
-    /// database for every session, never the session itself, and the engine refuses to reopen it
-    /// (<see cref="ObjectDisposedException"/>) until it is dropped or the engine is recreated, as a
-    /// directly disposed database always was. Before phase 4 a session returned a session-bound
-    /// view: its collection operations ran in the session's transaction, it refused a closed
-    /// session with "The document session is closed.", and disposing it closed the session.
+    /// concrete-types plan, §6.6), and the collection operations are the session's (owner decision
+    /// 32 of 2026-10-06): a collection the session created in its transaction is gone after the
+    /// rollback, and one it created in autocommit is visible to another session. The database
+    /// creates sessions after the session closed, and disposing it closes the database for every
+    /// session, never the session itself; once that close ends the engine forgets the database, so
+    /// its <c>OpenDatabaseAsync</c> opens it again from its files as a new instance, with its
+    /// collections (owner decision 33, #1289). Before phase 4 a session returned a session-bound
+    /// view whose disposal closed the session; until decision 32 the database had collection
+    /// operations of its own, which ran in autocommit outside the session; until decision 33 the
+    /// engine refused the reopen with <see cref="ObjectDisposedException"/>.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: the session's database is the unbound database, and the session runs its own collection operations")]
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: the session's database is the unbound database, and the session runs the collection operations")]
     public async Task Database_OfASession_ShouldBeTheUnboundDatabase()
     {
         // Arrange
@@ -772,70 +779,38 @@ public sealed class DocumentTransactionFailureTests
         var database = await engine.CreateDatabaseAsync("test");
         var session = await database.CreateSessionAsync();
         await using var other = await database.CreateSessionAsync();
+        var kept = await session.CreateCollectionAsync("kept");
         var transaction = await session.BeginTransactionAsync();
 
-        // Act: one collection outside the transaction, through the session's database, and one
-        // inside it, through the session; then the transaction rolls back.
-        var outside = await session.Database.CreateCollectionAsync("outside");
+        // Act: a collection inside the transaction, which then rolls back; then the session and
+        // the database close, and the engine opens the database again.
         var inside = await session.CreateCollectionAsync("inside");
         var visibleToOther = new List<string>();
         await foreach (var visible in other.GetCollectionsAsync()) { visibleToOther.Add(visible.Name); }
         await transaction.RollbackAsync();
         var afterRollback = new List<string>();
-        await foreach (var kept in database.GetCollectionsAsync()) { afterRollback.Add(kept.Name); }
+        await foreach (var collection in session.GetCollectionsAsync()) { afterRollback.Add(collection.Name); }
         await session.DisposeAsync();
         await using var afterClose = await session.Database.CreateSessionAsync();
         await other.Database.DisposeAsync();
+        var reopened = await engine.OpenDatabaseAsync("test");
+        await using var reader = await reopened.CreateSessionAsync();
+        var afterReopen = new List<string>();
+        await foreach (var collection in reader.GetCollectionsAsync()) { afterReopen.Add(collection.Name); }
 
         // Assert
         session.Database.ShouldBeSameAs(database);
         database.Engine.ShouldBeSameAs(engine);
-        outside.Name.ShouldBe("outside");
+        kept.Name.ShouldBe("kept");
         inside.Name.ShouldBe("inside");
-        visibleToOther.ShouldBe(["outside"]);
-        afterRollback.ShouldBe(["outside"]);
+        visibleToOther.ShouldBe(["kept"]);
+        afterRollback.ShouldBe(["kept"]);
         afterClose.State.ShouldBe(SessionState.Open);
         other.State.ShouldBe(SessionState.Open);
         await Should.ThrowAsync<ObjectDisposedException>(async () => await database.CreateSessionAsync());
-        await Should.ThrowAsync<ObjectDisposedException>(async () => await other.ExecuteAsync("SELECT id FROM outside"));
-        await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.OpenDatabaseAsync("test"));
-    }
-
-    /// <summary>
-    /// A write through a session's database runs in autocommit, outside the session's explicit
-    /// transaction (option B of the concrete-types plan, §6.6), so once that transaction has
-    /// written, the write waits for the transaction's writer lock (the engine has one writer at a
-    /// time): a caller that awaits it before ending the transaction waits until the call's token is
-    /// canceled. The canceled wait writes nothing and leaves the transaction active and
-    /// committable, and the write succeeds once the transaction has ended. Before phase 4 the
-    /// session-bound view ran the write in the session's transaction.
-    /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: a write through the session's database waits for the session transaction's writer lock")]
-    public async Task CreateCollectionAsync_ThroughSessionDatabaseAfterTransactionWrote_ShouldWaitForItsWriterLock()
-    {
-        // Arrange
-        await using var engine = DocumentDatabaseEngine.Create(new());
-        var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
-        await using var session = await database.CreateSessionAsync();
-        var transaction = await session.BeginTransactionAsync();
-        await collection.PutAsync(session, "pending", Doc("pending"));
-
-        // Act: only the token ends the wait.
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
-        await Should.ThrowAsync<OperationCanceledException>(async () =>
-            await session.Database.CreateCollectionAsync("outside", cancellation.Token));
-        var stateAfterWait = transaction.State;
-        var missing = await Should.ThrowAsync<DatabaseException>(async () => await database.GetCollectionAsync("outside"));
-        await transaction.CommitAsync();
-        var created = await session.Database.CreateCollectionAsync("outside");
-
-        // Assert
-        stateAfterWait.ShouldBe(TransactionState.Active);
-        missing.Message.ShouldBe("Collection 'outside' does not exist.");
-        created.Name.ShouldBe("outside");
-        transaction.State.ShouldBe(TransactionState.Committed);
-        (await IdsAsync(session)).ShouldBe(["pending"]);
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await other.ExecuteAsync("SELECT id FROM kept"));
+        reopened.ShouldNotBeSameAs(database);
+        afterReopen.ShouldBe(["kept"]);
     }
 
     /// <summary>
@@ -854,9 +829,10 @@ public sealed class DocumentTransactionFailureTests
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var other = await database.CreateSessionAsync();
+        var otherItems = await other.GetCollectionAsync("items");
         await collection.PutAsync(session, "keep", Doc("keep"));
         var transaction = await session.BeginTransactionAsync();
 
@@ -875,11 +851,11 @@ public sealed class DocumentTransactionFailureTests
             unspentAfterTheRollback = failures.Remaining;
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             lost = await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(
-                async () => await collection.PutAsync(other, "other", Doc("other"), cancellationToken: timeout.Token));
+                async () => await otherItems.PutAsync(other, "other", Doc("other"), cancellationToken: timeout.Token));
             unspent = failures.Remaining;
         }
 
-        var refused = await Should.ThrowAsync<DatabaseOfflineException>(async () => await collection.PutAsync(other, "after", Doc("after")));
+        var refused = await Should.ThrowAsync<DatabaseOfflineException>(async () => await otherItems.PutAsync(other, "after", Doc("after")));
         await other.DisposeAsync();
         await session.DisposeAsync();
         engine.Dispose();
@@ -911,8 +887,8 @@ public sealed class DocumentTransactionFailureTests
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await collection.PutAsync(session, "keep", Doc("keep"));
         var transaction = await session.BeginTransactionAsync();
         (await collection.DeleteAsync(session, "missing")).ShouldBeFalse();
@@ -955,8 +931,8 @@ public sealed class DocumentTransactionFailureTests
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "pending", Doc("pending"));
 
@@ -979,6 +955,7 @@ public sealed class DocumentTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
+        error.Message.ShouldStartWith("COHDBD002: Database 'test' went offline while a transaction was committing", Case.Sensitive);
         stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
         (await IdsAsync(observer)).ShouldBeEmpty();
@@ -991,9 +968,10 @@ public sealed class DocumentTransactionFailureTests
         // and a waiting writer.
         await using var engine = DocumentDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await using var other = await database.CreateSessionAsync();
+        var otherItems = await other.GetCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "rolled", "1"u8.ToArray());
         int locked;
@@ -1004,7 +982,7 @@ public sealed class DocumentTransactionFailureTests
         }
 
         int deferred = database.Coordinator.VersionStore.PendingAbortedPurges.Count;
-        var waiting = collection.PutAsync(other, "other", "2"u8.ToArray()).AsTask();
+        var waiting = otherItems.PutAsync(other, "other", "2"u8.ToArray()).AsTask();
 
         // Act: the late operation gets the lock its transaction still holds, finds the
         // transaction ended, and cleans up; then the purge pass completes the undo.
@@ -1021,8 +999,8 @@ public sealed class DocumentTransactionFailureTests
         transaction.State.ShouldBe(TransactionState.RolledBack);
         late.Message.ShouldContain("ended while waiting for the writer lock");
         otherProceededBeforeTheUndo.ShouldBeFalse();
-        (await collection.GetAsync(other, "rolled")).ShouldBeNull();
-        (await collection.GetAsync(other, "other")).ShouldNotBeNull();
+        (await otherItems.GetAsync(other, "rolled")).ShouldBeNull();
+        (await otherItems.GetAsync(other, "other")).ShouldNotBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Rollback: an undo that still fails at close is scrubbed at the next open")]
@@ -1032,9 +1010,9 @@ public sealed class DocumentTransactionFailureTests
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using (var session = await database.CreateSessionAsync())
         {
+            var collection = await session.CreateCollectionAsync("items");
             await collection.PutAsync(session, "kept", "1"u8.ToArray());
             var transaction = await session.BeginTransactionAsync();
             await collection.PutAsync(session, "rolled", "2"u8.ToArray());
@@ -1054,13 +1032,13 @@ public sealed class DocumentTransactionFailureTests
 
         await using var reopened = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var recovered = await reopened.OpenDatabaseAsync("test");
-        var items = await recovered.GetCollectionAsync("items");
         await using var observer = await recovered.CreateSessionAsync();
+        var observerItems = await observer.GetCollectionAsync("items");
 
         // Assert: the insert is gone and the delete is undone.
         closeFailure.Flatten().InnerExceptions.ShouldContain(error => error is StorageTransactionException);
-        (await items.GetAsync(observer, "rolled")).ShouldBeNull();
-        (await items.GetAsync(observer, "kept")).ShouldNotBeNull();
+        (await observerItems.GetAsync(observer, "rolled")).ShouldBeNull();
+        (await observerItems.GetAsync(observer, "kept")).ShouldNotBeNull();
     }
 
     /// <summary>
@@ -1080,9 +1058,9 @@ public sealed class DocumentTransactionFailureTests
         var strategy = new FaultInjectingJournalStorageStrategy();
         var engine = DocumentDatabaseEngine.Create(QuietOptions(strategy));
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using (var session = await database.CreateSessionAsync())
         {
+            var collection = await session.CreateCollectionAsync("items");
             await collection.PutAsync(session, "kept", Doc("kept"));
             var transaction = await session.BeginTransactionAsync();
             await collection.PutAsync(session, "rolled", Doc("rolled"));
@@ -1118,19 +1096,31 @@ public sealed class DocumentTransactionFailureTests
         (await IdsAsync(observer)).ShouldBe(["kept"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed")]
-    public void TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheAreaRootsCommitUnconfirmedException()
+    /// <summary>
+    /// The kernel's unconfirmed commit crosses the model boundary as the area root's, its message led by
+    /// the model's offline code like every other unconfirmed commit (owner decision 24, #1272); the
+    /// kernel's exception is kept as the inner exception. Before #1272 this path kept the kernel's
+    /// message, uncoded.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed, led by COHDBD002")]
+    public async Task TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheCodedCommitUnconfirmedException()
     {
         // Arrange
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = await engine.CreateDatabaseAsync("test");
         var kernel = new TransactionCommitUnconfirmedException("Transaction 7 committed, but its commit record could not be made durable.", new IOException("flush"));
 
         // Act
-        var translated = DocumentDatabase.TranslateKernelFailure(kernel);
+        var translated = database.TranslateKernelFailure(kernel);
 
         // Assert: not an abort, so a caller never retries work that committed.
         var unconfirmed = translated.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
         unconfirmed.ShouldNotBeAssignableTo<DatabaseTransactionAbortedException>();
-        unconfirmed.Message.ShouldBe(kernel.Message);
+        unconfirmed.Message.ShouldBe(
+            "COHDBD002: Database 'test' went offline while a transaction was committing: the durable flush of its commit record failed (flush) " +
+            "after the transaction's commit record was written. The transaction may or may not have committed; do not retry it. Reopen the " +
+            "database (OpenDatabaseAsync): its recovery keeps the commit if its record reached stable storage and discards it if not, and " +
+            "reading the data back then tells which.");
         unconfirmed.InnerException.ShouldBeSameAs(kernel);
     }
 
@@ -1147,9 +1137,10 @@ public sealed class DocumentTransactionFailureTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(QuietOptions(new FaultInjectingJournalStorageStrategy()));
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await using var other = await database.CreateSessionAsync();
+        var otherItems = await other.GetCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "first", Doc("first"));
 
@@ -1190,7 +1181,7 @@ public sealed class DocumentTransactionFailureTests
         transaction.State.ShouldBe(TransactionState.RolledBack);
         refused.Message.ShouldContain("the statement was not applied", Case.Sensitive);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        await collection.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(Timeout);
+        await otherItems.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(Timeout);
         (await IdsAsync(other)).ShouldBe(["other"]);
     }
 

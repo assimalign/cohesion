@@ -121,6 +121,7 @@ public sealed class SqlStorageOperationsTests
 
         // Assert: the coded refusals, everywhere.
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
+        unconfirmed.Message.ShouldStartWith("COHSQLT004: Database 'app' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
         refusals.ShouldAllBe(refusal => refusal.Code == "COHSQLT004" && refusal.Message.StartsWith("COHSQLT004", StringComparison.Ordinal));
         statementError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
@@ -321,6 +322,200 @@ public sealed class SqlStorageOperationsTests
         // the case a refusal would misreport.
         outcomes.Count.ShouldBeGreaterThan(0);
         outcomes.ShouldContain(true);
+    }
+
+    /// <summary>
+    /// A DDL statement that meets an offline storage before it committed anything is refused, not
+    /// unconfirmed (#1272): here <c>DROP TABLE</c> waits for its table's exclusive lock behind an
+    /// open writer when another statement's commit fsync fails and takes the database offline,
+    /// which ends the lock wait. Nothing of the drop was written, and the reopen keeps the table.
+    /// Before #1272 every self-committing statement that met the offline storage was reported as
+    /// unconfirmed, this one included, so a caller looked for an effect that cannot exist. A
+    /// statement is refused this way in PostgreSQL too: only the commit record's flush, inside the
+    /// commit's critical section, leaves an outcome unknown (<c>RecordTransactionCommit</c>,
+    /// <c>src/backend/access/transam/xact.c:1470-1583</c>); an error before it aborts the transaction.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Offline: a DDL statement refused before it committed anything is offline, not unconfirmed")]
+    public async Task Ddl_RefusedBeforeItCommittedAnything_ShouldBeOfflineNotUnconfirmed()
+    {
+        // Arrange: an open writer holds the table, and the drop waits for its exclusive lock.
+        const string name = "ddl";
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        var database = await engine.CreateDatabaseAsync(name);
+        await using (var setup = await database.CreateSessionAsync())
+        {
+            await setup.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
+            await setup.ExecuteAsync("CREATE TABLE u (id INT NOT NULL)");
+            await setup.ExecuteAsync("INSERT INTO t (id) VALUES (1), (2)");
+        }
+
+        await using var writer = await database.CreateSessionAsync();
+        await using var ddl = await database.CreateSessionAsync();
+        await using var other = await database.CreateSessionAsync();
+        _ = await writer.BeginTransactionAsync();
+        await writer.ExecuteAsync("INSERT INTO t (id) VALUES (3)");
+        var drop = ddl.ExecuteAsync("DROP TABLE t").AsTask();
+        bool dropWaited = !await CompletesWithin(drop, TimeSpan.FromMilliseconds(200));
+
+        // Act: another statement's commit fsync fails, which takes the database offline.
+        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, storageName: name))
+        {
+            await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await other.ExecuteAsync("INSERT INTO u (id) VALUES (1)"));
+        }
+
+        var refused = await Should.ThrowAsync<DatabaseException>(async () => await drop.WaitAsync(Timeout));
+        var reopened = await engine.OpenDatabaseAsync(name);
+        await using var observer = await reopened.CreateSessionAsync();
+
+        // Assert: refused with the offline code, and the table is still there.
+        dropWaited.ShouldBeTrue();
+        var offline = refused.ShouldBeOfType<DatabaseOfflineException>();
+        offline.Code.ShouldBe("COHSQLT004");
+        offline.Message.ShouldStartWith("COHSQLT004: Database 'ddl' is offline", Case.Sensitive);
+        (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 't'")).ShouldBe(1L);
+        (await Scalar(observer, "SELECT COUNT(*) FROM t")).ShouldBe(2L);
+    }
+
+    /// <summary>
+    /// A DDL statement that committed a durable bracket of its own and then meets an offline
+    /// storage is unconfirmed, even when the operation that met it wrote no commit record (#1272):
+    /// here <c>DROP TABLE</c> has committed the catalog's removal of its table and waits for the
+    /// statement apply gate to release the table's pages when the database goes offline; the
+    /// release is refused, but the drop survives the reopen, so the caller must not be told it was
+    /// refused. The storage's offline error carries no written commit record, so the record of the
+    /// committed bracket is what makes the statement unconfirmed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Offline: a DDL statement that committed a durable bracket before the offline storage is unconfirmed")]
+    public async Task Ddl_OfflineAfterItCommittedADurableBracket_ShouldBeUnconfirmed()
+    {
+        // Arrange: a table to drop, and a second database whose failed fsync supplies the offline error.
+        const string name = "ddl";
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        var database = await engine.CreateDatabaseAsync(name);
+        await using (var setup = await database.CreateSessionAsync())
+        {
+            await setup.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
+            await setup.ExecuteAsync("INSERT INTO t (id) VALUES (1), (2)");
+        }
+
+        var failed = await engine.CreateDatabaseAsync("failed");
+        await using (var setup = await failed.CreateSessionAsync())
+        {
+            await setup.ExecuteAsync("CREATE TABLE f (id INT NOT NULL)");
+            using var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, storageName: "failed");
+            await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await setup.ExecuteAsync("INSERT INTO f (id) VALUES (1)"));
+        }
+
+        var offlineError = failed.DataStorage.OfflineError.ShouldNotBeNull();
+
+        // Another statement holds the database's apply gate, so the drop commits its catalog bracket
+        // and then waits to release the table's pages.
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var released = new Release(() => release.TrySetResult());
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holder = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var holding = database.Coordinator.ApplyStatementAsync<bool>(holder, async _ =>
+        {
+            entered.SetResult();
+            await release.Task;
+            return true;
+        }, durable: false).AsTask();
+        await entered.Task.WaitAsync(Timeout);
+        await using var ddl = await database.CreateSessionAsync();
+        var drop = ddl.ExecuteAsync("DROP TABLE t").AsTask();
+        bool catalogCommitted = await Eventually(() => !database.Catalog.TryGetTable("dbo", "t", out _));
+        bool dropWaited = !drop.IsCompleted;
+
+        // Act: the database goes offline while the drop waits; then the gate is released.
+        database.DataStorage.TakeOffline(offlineError);
+        release.SetResult();
+        await Record.ExceptionAsync(async () => await holding.WaitAsync(Timeout));
+        var unconfirmed = await Should.ThrowAsync<DatabaseException>(async () => await drop.WaitAsync(Timeout));
+        await Record.ExceptionAsync(async () => await database.Coordinator.RollbackAsync(holder));
+        var reopened = await engine.OpenDatabaseAsync(name);
+        await using var observer = await reopened.CreateSessionAsync();
+
+        // Assert: unconfirmed with the offline code, no commit record of its own written, and the
+        // drop survived.
+        catalogCommitted.ShouldBeTrue();
+        dropWaited.ShouldBeTrue();
+        var error = unconfirmed.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
+        error.Message.ShouldStartWith("COHSQLT004: Database 'ddl' went offline while the operation was committing", Case.Sensitive);
+        StorageOfflineException.Find(error).ShouldNotBeNull().CommitRecordWritten.ShouldBeFalse();
+        (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 't'")).ShouldBe(0L);
+    }
+
+    /// <summary>
+    /// A DDL statement whose only durable steps leave nothing a reopened database shows is refused,
+    /// not unconfirmed (#1272): here <c>CREATE TABLE</c> has committed its table's identity
+    /// reservation, which persists only the object-id counter, and waits for the statement apply
+    /// gate to build its primary-key tree when the database goes offline. The table could never
+    /// be published, so the caller is told the statement was refused and may retry it. The
+    /// reservation did commit: the next table created after the reopen skips its identity.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Offline: a CREATE TABLE refused after its identity reservation and before its publish is offline, not unconfirmed")]
+    public async Task Ddl_OfflineAfterTheReservationBeforeThePublish_ShouldBeOfflineNotUnconfirmed()
+    {
+        // Arrange: a table whose identity the test measures from, and a second database whose
+        // failed fsync supplies the offline error.
+        const string name = "ddl";
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        await using var engine = SqlDatabaseEngine.Create(QuietOptions(strategy));
+        var database = await engine.CreateDatabaseAsync(name);
+        await using (var setup = await database.CreateSessionAsync())
+        {
+            await setup.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
+        }
+
+        database.Catalog.TryGetTable("dbo", "t", out var existing).ShouldBeTrue();
+        var failed = await engine.CreateDatabaseAsync("failed");
+        await using (var setup = await failed.CreateSessionAsync())
+        {
+            await setup.ExecuteAsync("CREATE TABLE f (id INT NOT NULL)");
+            using var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalFlushes(1, storageName: "failed");
+            await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await setup.ExecuteAsync("INSERT INTO f (id) VALUES (1)"));
+        }
+
+        var offlineError = failed.DataStorage.OfflineError.ShouldNotBeNull();
+
+        // Another statement holds the database's apply gate, so the create reserves its table's
+        // identity in the catalog and then waits to build the primary-key tree.
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var released = new Release(() => release.TrySetResult());
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holder = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var holding = database.Coordinator.ApplyStatementAsync<bool>(holder, async _ =>
+        {
+            entered.SetResult();
+            await release.Task;
+            return true;
+        }, durable: false).AsTask();
+        await entered.Task.WaitAsync(Timeout);
+        await using var ddl = await database.CreateSessionAsync();
+        var create = ddl.ExecuteAsync("CREATE TABLE u (id INT PRIMARY KEY)").AsTask();
+        bool createWaited = !await CompletesWithin(create, TimeSpan.FromMilliseconds(200));
+
+        // Act: the database goes offline while the create waits; then the gate is released.
+        database.DataStorage.TakeOffline(offlineError);
+        release.SetResult();
+        await Record.ExceptionAsync(async () => await holding.WaitAsync(Timeout));
+        var refused = await Should.ThrowAsync<DatabaseException>(async () => await create.WaitAsync(Timeout));
+        await Record.ExceptionAsync(async () => await database.Coordinator.RollbackAsync(holder));
+        var reopened = await engine.OpenDatabaseAsync(name);
+        await using var observer = await reopened.CreateSessionAsync();
+        await observer.ExecuteAsync("CREATE TABLE v (id INT NOT NULL)");
+
+        // Assert: refused with the offline code, the table absent after the reopen, and the
+        // reservation's identity never reused.
+        createWaited.ShouldBeTrue();
+        var offline = refused.ShouldBeOfType<DatabaseOfflineException>();
+        offline.Code.ShouldBe("COHSQLT004");
+        offline.Message.ShouldStartWith("COHSQLT004: Database 'ddl' is offline", Case.Sensitive);
+        (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'u'")).ShouldBe(0L);
+        reopened.Catalog.TryGetTable("dbo", "v", out var next).ShouldBeTrue();
+        next.ObjectId.ShouldBe(existing.ObjectId + 2);
     }
 
     /// <summary>
@@ -675,6 +870,16 @@ public sealed class SqlStorageOperationsTests
         PageWriteBackInterval = TimeSpan.FromHours(1),
         MaintenanceInterval = TimeSpan.FromHours(1),
     };
+
+    private static async Task<bool> CompletesWithin(Task task, TimeSpan wait)
+        => await Task.WhenAny(task, Task.Delay(wait)) == task;
+
+    // Lets a held statement end when a test leaves its scope, a failed assertion included.
+    // Declared after the engine, it runs before the engine's disposal, which waits for that statement.
+    private sealed class Release(Action release) : IDisposable
+    {
+        public void Dispose() => release();
+    }
 
     // Polls a condition the engine's workers make true, for at most the test timeout.
     private static async Task<bool> Eventually(Func<bool> condition)

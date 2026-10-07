@@ -23,8 +23,8 @@ public sealed class DocumentEngineTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         string[] values = ["{\"nested\":{\"array\":[1,null,{\"name\":\"雪\"}]}}", "{\"other\":true}", "[1,2,3]", "null", "42", "\"scalar\""];
         for (int i = 0; i < values.Length; i++)
         {
@@ -41,8 +41,8 @@ public sealed class DocumentEngineTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var first = await collection.PutAsync(session, "one", "{}"u8.ToArray());
         var second = await collection.PutAsync(session, "one", "{\"a\":1}"u8.ToArray(), first.Version);
         second.Version.Value.ShouldBeGreaterThan(first.Version.Value);
@@ -62,13 +62,14 @@ public sealed class DocumentEngineTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var writer = await database.CreateSessionAsync();
+        var collection = await writer.CreateCollectionAsync("items");
         await using var reader = await database.CreateSessionAsync();
+        var read = await reader.GetCollectionAsync("items");
         await collection.PutAsync(writer, "one", "1"u8.ToArray());
         await using var transaction = await reader.BeginTransactionAsync(isolation);
         await collection.PutAsync(writer, "one", "2"u8.ToArray());
-        Encoding.UTF8.GetString((await collection.GetAsync(reader, "one")).ShouldNotBeNull().Content.Span).ShouldBe(expected.ToString());
+        Encoding.UTF8.GetString((await read.GetAsync(reader, "one")).ShouldNotBeNull().Content.Span).ShouldBe(expected.ToString());
         await transaction.RollbackAsync();
     }
 
@@ -77,19 +78,20 @@ public sealed class DocumentEngineTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await collection.PutAsync(session, "old", "1"u8.ToArray());
         await using var observer = await database.CreateSessionAsync();
+        var observed = await observer.GetCollectionAsync("items");
         await using var transaction = await session.BeginTransactionAsync();
         await collection.DeleteAsync(session, "old");
         await collection.PutAsync(session, "new", "2"u8.ToArray());
         (await collection.GetAsync(session, "old")).ShouldBeNull();
-        (await collection.GetAsync(observer, "new")).ShouldBeNull();
+        (await observed.GetAsync(observer, "new")).ShouldBeNull();
         await session.DisposeAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        (await collection.GetAsync(observer, "old")).ShouldNotBeNull();
-        (await collection.GetAsync(observer, "new")).ShouldBeNull();
+        (await observed.GetAsync(observer, "old")).ShouldNotBeNull();
+        (await observed.GetAsync(observer, "new")).ShouldBeNull();
     }
 
     /// <summary>
@@ -102,8 +104,8 @@ public sealed class DocumentEngineTests
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         var transaction = await session.BeginTransactionAsync();
         await collection.PutAsync(session, "kept", "1"u8.ToArray());
         using var canceled = new CancellationTokenSource();
@@ -128,18 +130,19 @@ public sealed class DocumentEngineTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var old = await database.CreateSessionAsync();
+        var collection = await old.CreateCollectionAsync("items");
         await using var current = await database.CreateSessionAsync();
-        await collection.PutAsync(current, "one", "1"u8.ToArray());
+        var currentItems = await current.GetCollectionAsync("items");
+        await currentItems.PutAsync(current, "one", "1"u8.ToArray());
         await using var transaction = await old.BeginTransactionAsync();
-        await collection.PutAsync(current, "one", "2"u8.ToArray());
+        await currentItems.PutAsync(current, "one", "2"u8.ToArray());
         await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await collection.PutAsync(old, "one", "3"u8.ToArray()));
         // The conflict aborts the explicit transaction, which waits for the caller's rollback (#1225).
         transaction.State.ShouldBe(TransactionState.Faulted);
         await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        Encoding.UTF8.GetString((await collection.GetAsync(current, "one")).ShouldNotBeNull().Content.Span).ShouldBe("2");
+        Encoding.UTF8.GetString((await currentItems.GetAsync(current, "one")).ShouldNotBeNull().Content.Span).ShouldBe("2");
     }
 
     [Fact]
@@ -147,7 +150,11 @@ public sealed class DocumentEngineTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        await database.CreateCollectionAsync("owned");
+        await using (var setup = await database.CreateSessionAsync())
+        {
+            await setup.CreateCollectionAsync("owned");
+        }
+
         var context = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
         var metadata = database.Catalog.FindCollection("owned", context.Snapshot).ShouldNotBeNull();
         await database.Catalog.SaveCollectionAsync(metadata with { Owner = DatabaseObjectOwner.Schema, OwningSchema = "Sales" }, context);
@@ -180,8 +187,8 @@ public sealed class DocumentEngineTests
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = await engine.CreateDatabaseAsync("test");
-        var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
         await using var transaction = await session.BeginTransactionAsync();
         await using var ddlSession = await database.CreateSessionAsync();
         await ddlSession.ExecuteAsync("CREATE INDEX ix ON items (a)");
@@ -197,7 +204,7 @@ public sealed class DocumentEngineTests
         transaction.State.ShouldBe(TransactionState.Faulted);
         await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        (await database.GetCollectionAsync("items")).Name.ShouldBe("items");
+        (await session.GetCollectionAsync("items")).Name.ShouldBe("items");
     }
 
     [Fact]
@@ -211,9 +218,12 @@ public sealed class DocumentEngineTests
             engine.State.ShouldBe(EngineState.Running);
             engine.Workers.Select(worker => worker.Kind).Distinct().Count().ShouldBe(4);
             var database = await engine.CreateDatabaseAsync("saved");
-            var collection = await database.CreateCollectionAsync("items");
             var bytes = Encoding.UTF8.GetBytes("{\"large\":\"" + new string('x', 50000) + "\"}");
-            await using (var session = await database.CreateSessionAsync()) { await collection.PutAsync(session, "large", bytes); }
+            await using (var session = await database.CreateSessionAsync())
+            {
+                var collection = await session.CreateCollectionAsync("items");
+                await collection.PutAsync(session, "large", bytes);
+            }
             engine.Dispose();
             await engine.DisposeAsync();
             engine.State.ShouldBe(EngineState.Disposed);
@@ -223,7 +233,7 @@ public sealed class DocumentEngineTests
             names.ShouldBe(["saved"]);
             reopened.TryGetDatabase("SAVED", out var stored).ShouldBeTrue();
             await using var reader = await stored.CreateSessionAsync();
-            var reopenedCollection = await stored.GetCollectionAsync("items");
+            var reopenedCollection = await reader.GetCollectionAsync("items");
             (await reopenedCollection.GetAsync(reader, "large")).ShouldNotBeNull().Content.ToArray().ShouldBe(bytes);
             await reader.DisposeAsync();
             await reopened.DropDatabaseAsync("saved");
@@ -255,8 +265,8 @@ public sealed class DocumentEngineTests
             await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
             {
                 var database = await engine.CreateDatabaseAsync("legacy");
-                var collection = await database.CreateCollectionAsync("items");
                 await using var session = await database.CreateSessionAsync();
+                var collection = await session.CreateCollectionAsync("items");
                 await collection.PutAsync(session, "a", Encoding.UTF8.GetBytes("{\"score\":1}"));
                 await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
             }
@@ -295,8 +305,8 @@ public sealed class DocumentEngineTests
             await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
             {
                 var database = await engine.CreateDatabaseAsync("legacy");
-                var collection = await database.CreateCollectionAsync("items");
                 await using var session = await database.CreateSessionAsync();
+                var collection = await session.CreateCollectionAsync("items");
                 await collection.PutAsync(session, "a", Encoding.UTF8.GetBytes("{\"score\":1}"));
             }
 
@@ -437,8 +447,8 @@ public sealed class DocumentEngineTests
             for (int index = 0; index < databases; index++)
             {
                 var database = await engine.CreateDatabaseAsync($"{name}-{index}");
-                var collection = await database.CreateCollectionAsync("items");
                 await using var session = await database.CreateSessionAsync();
+                var collection = await session.CreateCollectionAsync("items");
                 await collection.PutAsync(session, "item", Encoding.UTF8.GetBytes("{\"id\":\"item\"}"));
             }
 

@@ -108,7 +108,8 @@ internal sealed class KeyValueVersionPurgeWorker : DatabaseEngineWorker
 
             // An offline database is not begun: the engine reports it (#1243), and a failure the
             // worker recorded for it ends. Nor is a database its holder closed: the engine keeps
-            // it registered, and its disposed coordinator has nothing left to purge.
+            // it registered until its close ends, and its disposed coordinator has nothing left
+            // to purge.
             if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {
                 continue;

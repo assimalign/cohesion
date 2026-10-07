@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -508,13 +509,15 @@ public sealed class GraphWorkerResilienceTests
 
     /// <summary>
     /// A database its holder closed outside the engine (disposed directly; a session's
-    /// <see cref="GraphDatabaseSession.Database"/> is the same instance) stays registered, so the
-    /// engine refuses to reopen it until it is dropped; but the engine's workers skip it, so every
-    /// pass succeeds, no worker records a failure, the engine stays
+    /// <see cref="GraphDatabaseSession.Database"/> is the same instance) leaves the engine's workers
+    /// passing: every pass succeeds, no worker records a failure, the engine stays
     /// <see cref="EngineState.Running"/>, and a server over the engine still starts and serves the
-    /// engine's other database. Before the workers skipped a closed database, the version-purge
-    /// worker failed on its disposed coordinator every pass, and the engine reported
-    /// <see cref="EngineState.Faulted"/> for good.
+    /// engine's other database. Once the close ends the engine forgets the database, and the next
+    /// open opens it again from its files with its nodes (owner decision 33, #1289). Before the
+    /// workers skipped a closed database, the version-purge worker failed on its disposed
+    /// coordinator every pass, and the engine reported <see cref="EngineState.Faulted"/> for good;
+    /// until decision 33 the engine refused the reopen with <see cref="ObjectDisposedException"/>
+    /// until the database was dropped.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Workers: a database closed outside the engine is skipped, the engine stays running and its server serves")]
     public async Task DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunningAndItsServerServing()
@@ -558,7 +561,75 @@ public sealed class GraphWorkerResilienceTests
         server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull().Database.Name.ShouldBe(open.Name);
         written.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
         (await CountAsync(open)).ShouldBe(1);
-        await Should.ThrowAsync<ObjectDisposedException>(async () => await engine.OpenDatabaseAsync(Failing, token));
+        engine.TryGetDatabase(Failing, out _).ShouldBeFalse();
+        var reopened = await engine.OpenDatabaseAsync(Failing, token);
+        reopened.ShouldNotBeSameAs(closed);
+        (await CountAsync(reopened)).ShouldBe(20);
+    }
+
+    /// <summary>
+    /// A database a holder closed outside the engine is forgotten once its close ends, so the next
+    /// open opens it again, a new instance with every node it held, in memory as on disk (owner
+    /// decision 33, #1289; #1272's in-memory reopen): the engine keeps an in-memory database's
+    /// files for its own lifetime, and the open runs recovery over them as it does over files. A
+    /// node of a transaction the close ended is not there. The reopened database takes writes, and
+    /// a second close and open keeps them too. Until decision 33 the engine refused the reopen with
+    /// <see cref="ObjectDisposedException"/> until the database was dropped.
+    /// </summary>
+    /// <param name="onDisk">True for a file-backed engine; false for an in-memory one.</param>
+    /// <param name="throughSession">Whether the database is closed through a session's database rather than directly.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Lifecycle: a database closed outside the engine reopens with its nodes, in memory and on disk")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task OpenDatabaseAsync_DatabaseClosedOutsideTheEngine_ShouldReopenItWithItsNodes(bool onDisk, bool throughSession)
+    {
+        // Arrange: a database with committed nodes, and one more in an uncommitted transaction.
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-graph-reopen-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var engine = GraphDatabaseEngine.Create(onDisk ? new() { RootPath = root } : new());
+            var database = await engine.CreateDatabaseAsync(Failing);
+            await InsertAsync(database, 0, 20);
+            var session = await database.CreateSessionAsync();
+            _ = await session.BeginTransactionAsync();
+            await session.ExecuteAsync("INSERT (:Item {name: 'uncommitted'})");
+
+            // Act: close the database outside the engine, then open it again, write to it, and
+            // close and open it once more.
+            if (throughSession)
+            {
+                await session.Database.DisposeAsync();
+            }
+            else
+            {
+                await database.DisposeAsync();
+            }
+
+            bool foundAfterTheClose = engine.TryGetDatabase(Failing, out _);
+            var reopened = await engine.OpenDatabaseAsync(Failing);
+            int afterTheReopen = await CountAsync(reopened);
+            await InsertAsync(reopened, 20, 5);
+            await reopened.DisposeAsync();
+            var again = await engine.OpenDatabaseAsync(Failing);
+
+            // Assert
+            foundAfterTheClose.ShouldBeFalse();
+            reopened.ShouldNotBeSameAs(database);
+            afterTheReopen.ShouldBe(20);
+            again.ShouldNotBeSameAs(reopened);
+            (await CountAsync(again)).ShouldBe(25);
+            engine.State.ShouldBe(EngineState.Running);
+            await session.DisposeAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     /// <summary>

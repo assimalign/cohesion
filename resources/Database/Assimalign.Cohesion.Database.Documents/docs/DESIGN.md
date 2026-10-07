@@ -51,19 +51,18 @@ There are no Hosting or ApplicationModel references.
 
 ## Sessions and authority
 
-The database's own collection methods run automatic transactions, outside any session. The
-session's collection methods (`DocumentDatabaseSession.CreateCollectionAsync`,
-`GetCollectionAsync`, `DropCollectionAsync`, `GetCollectionsAsync`) use that session's active
-transaction, as OQL statements do; without one, each runs in an automatic statement transaction.
-`session.Database` is the unbound database (option B of the concrete-types plan, §6.6), so its
-methods run automatic transactions too, and disposing it closes the database for every session,
-never the session itself (the engine then refuses to reopen it with `ObjectDisposedException`
-until it is dropped or the engine is recreated, and its workers skip it, so the engine stays
-`Running`; "Lifecycle and durability"). The engine has one writer at a time, so a write
-through `session.Database` (`CreateCollectionAsync`, `DropCollectionAsync`) while the session's
-explicit transaction has written waits for that transaction's writer lock: the caller that awaits
-it before ending the transaction waits until the call's token is canceled. Inside a transaction,
-use the session's own collection operations.
+Collection operations exist only on the session (owner decision 32 of 2026-10-06):
+`DocumentDatabaseSession.CreateCollectionAsync`, `GetCollectionAsync`, `DropCollectionAsync` and
+`GetCollectionsAsync` use that session's active transaction, as OQL statements do; without one,
+each runs in an automatic statement transaction. Until decision 32 the database carried
+session-less copies that always ran automatic transactions. The engine has one writer at a time,
+so a write through one of them while the caller's own session held an explicit transaction's
+writer lock waited for that transaction, and a caller that awaited it before ending the
+transaction waited until the call's token was canceled. With the session as the one entry point
+that self-wait cannot happen. `session.Database` is the unbound database (option B of the
+concrete-types plan, §6.6): disposing it closes the database for every session, never the
+session itself. Once that close ends the engine forgets the database, so a later
+`OpenDatabaseAsync` opens it again from its files ("Lifecycle and durability", owner decision 33).
 
 Collection CRUD always takes a `DocumentDatabaseSession`; a collection rejects sessions from
 another database. A handle obtained through a session remains bound to that specific session and
@@ -175,9 +174,14 @@ and a commit whose record was written but could not be made durable as
 durability is unconfirmed, `Database.Transactions` DESIGN.md), never as the kernel's own
 exception types, for statements and for every end of the explicit transaction alike: commit,
 rollback, disposal, the session's closure, and the abort a statement failure starts. One translation (`DocumentDatabase.TranslateKernelFailure`) serves them
-all. Storage failures still surface as the storage child root's exceptions. Since phase 4 of the
-concrete-types plan the end state machine this section describes is the root
-`DatabaseTransaction` base's, and the session state, the "already active" check and the
+all. The unconfirmed commit's message leads with the model's code on every path, the explicit
+commit and an automatic statement's own commit alike (owner decision 24 of 2026-10-06, #1272):
+`COHDBD002: Database '{name}' went offline while a transaction was committing: ...`, built by the
+root's `DatabaseTransactionCommitUnconfirmedException.Create(code, database, cause)` with the
+kernel's `TransactionCommitUnconfirmedException` as its inner exception. Before #1272 this path
+carried the kernel's message alone, without a code. Storage failures still surface as the
+storage child root's exceptions. Since phase 4 of the concrete-types plan the end state machine
+this section describes is the root `DatabaseTransaction` base's, and the session state, the "already active" check and the
 one-statement hold are the root `DatabaseSession` base's; the model supplies `COHDBD001`,
 `COHDBD002`, the kernel calls and this translation ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)).
 
@@ -416,12 +420,32 @@ Disposal is idempotent: stop/join workers, dispose coordinators (rolling back op
 transactions), then durably flush and close each storage file set. Close errors
 are aggregated after attempting every database.
 
-**A database closed outside the engine is skipped, not failed.** A database its holder disposed,
-directly or through `session.Database` (option B, "Sessions and authority"), stays registered,
-so `OpenDatabaseAsync` refuses it with `ObjectDisposedException` until it is dropped or the
-engine is recreated. The workers skip it: `DocumentDatabase.IsClosed` reads the base's disposed
-flag, `DocumentDatabaseEngine.IsOpen` is false for the closed database and for its storage, the
-version-purge worker skips it in its pass and in its trigger wait, and the checkpointer skips it
+**A database closed outside the engine is skipped, then forgotten** (owner decision 33 of
+2026-10-06, #1289). A database its holder disposed, directly or through `session.Database`
+(option B, "Sessions and authority"), stays registered only until its close ends. The close then
+tells the engine (`DocumentDatabaseEngine.ForgetClosedDatabaseCore`, through the root's shared
+`DatabaseRegistry.Forget`), which stops tracking it, so a later `OpenDatabaseAsync` opens it again
+from its files: a new instance with every committed document. An in-memory database reopens with
+its documents too, because the engine keeps each in-memory file set's streams until its own
+disposal releases them (`DatabaseMemoryFiles`) and the open copies the closed streams' bytes and
+runs the same recovery over them (#1272); before #1272 an in-memory reopen got empty storage.
+While the close runs, an open waits for it (the root `DatabaseEngine.OpenDatabaseAsync`),
+`TryGetDatabase` does not report
+the database, a create of its name is refused as existing, and a drop or the engine's disposal
+waits for the close, so nothing reuses the files under it. Before decision 33 the database stayed
+registered until it was dropped, and the open refused it with `ObjectDisposedException`. The
+forget reads the engine's lock-free instance snapshot and takes the engine's lock only through a
+bounded `Monitor.TryEnter` loop. A drop, an offline reopen and the engine's disposal remove a
+database from the snapshot and dispose it while holding that lock, and that disposal waits for a
+close a holder started, so a forget that blocked on the lock would deadlock with them. The same
+wait means a holder's close that stalls (a fsync that does not answer) stalls the engine's other
+registry operations until it ends, and a drop's token is not observed meanwhile (root
+`DESIGN.md`, "A stalled close stalls the engine's registry").
+
+For the window between the close and the forget the workers skip the database:
+`DocumentDatabase.IsClosed` reads the base's disposed flag, `DocumentDatabaseEngine.IsOpen` is
+false for the closed database and for its storage, the version-purge worker skips it in its pass
+and in its trigger wait, and the checkpointer skips it
 through the model's `IsCheckpointDue`, which is false for a closed database (the pass is the
 engines' shared one, and its `IsOpen` check covers only a checkpoint that raced the close). A
 close that was not idle leaves the journal untruncated: when its retry of a deferred undo still
@@ -440,11 +464,15 @@ a dropped or partially dropped database (`src/backend/postmaster/autovacuum.c:99
 `:1859-1868`) and a relation dropped since it listed it (`:2510-2513`), and the checkpointer skips
 the fsync request of a dropped relation, which the drop canceled before it unlinked the file
 (`src/backend/storage/sync/sync.c:400-411`, `:492-503`). A close here happens outside the engine,
-which is never told, so the workers read the database's own flag where PostgreSQL reads the
-cancellation. `DocumentWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunning`
+which learns of it only when it ends, so until then the workers read the database's own flag
+where PostgreSQL reads the cancellation. `DocumentWorkerResilienceTests.DisposeAsync_DatabaseClosedOutsideTheEngine_ShouldLeaveTheEngineRunning`
 closes a database both ways under 20 ms worker intervals and asserts that every pass succeeds,
 no worker records a failure, the engine is `Running`, the other database takes writes, and the
-reopen is still refused.
+open opens the database again with its 20 documents.
+`OpenDatabaseAsync_DatabaseClosedOutsideTheEngine_ShouldReopenItWithItsDocuments` closes it both
+ways, in memory and on disk, with a document of an uncommitted transaction: the reopened instance
+is new, holds the committed documents and not the uncommitted one, takes writes, and a second
+close and open keeps them.
 `DocumentWorkerResilienceTests.CheckpointWorker_FailingDatabaseClosedWithAWriterInFlight_ShouldEndItsFailureAndLeaveTheEngineRunning`
 records a checkpoint failure for a database whose page writes fail, closes it with a rolled-back
 transaction's undo deferred behind a bracket that holds every page, and asserts that the
@@ -477,7 +505,8 @@ the file set, closing included — PostgreSQL's `PANIC` on a failed WAL fsync (`
 `src/backend/access/transam/xlog.c:9877-9937`; the commit critical section in
 `RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`; and `data_sync_retry`
 off, `src/backend/storage/file/fd.c:3966-3987`), scoped to the database. The statement whose
-commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`. Every later operation —
+commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`, its message leading
+with `COHDBD002` (owner decision 24). Every later operation —
 a new session, an OQL statement or typed request, a collection call, BEGIN, and the COMMIT or
 ROLLBACK of a transaction open at the failure — is refused with `DatabaseOfflineException`, code
 `COHDBD002`, carrying the storage's `StorageOfflineException`. The engine has no wire server.
@@ -696,17 +725,24 @@ session leaf.
   meanings: disposing a session's database closed the session, disposing the database itself
   closed the database. The session now runs its collection operations itself
   (`CreateCollectionAsync`, `GetCollectionAsync`, `DropCollectionAsync`, `GetCollectionsAsync`,
-  in its transaction), and `session.Database` is the unbound `DocumentDatabase`, whose collection
-  operations run in autocommit and whose disposal closes the database. So a collection operation
-  called on `session.Database` no longer joins the session's transaction (a write through it
-  while that transaction has written waits for the transaction's writer lock, "Sessions and
-  authority"), `session.Database` creates sessions after the session closed (the view refused with
-  "The document session is closed."), and disposing it closes the database for every session, not
-  the session: the engine refuses to reopen it (`ObjectDisposedException`) until it is dropped or
-  the engine is recreated, as a directly disposed database always was. Its workers skip a closed
-  database ("Lifecycle and durability"), so the engine stays `Running`; until they did, option B
-  made the version-purge worker's endless failure on a closed database, which a directly disposed
-  database always caused, reachable from a session's own property.
+  in its transaction), and `session.Database` is the unbound `DocumentDatabase`, whose disposal
+  closes the database. So `session.Database` creates sessions after the session closed (the view
+  refused with "The document session is closed."), and disposing it closes the database for every
+  session, not the session. Since owner decision 33 the engine forgets the closed database once
+  its close ends and the next open opens it again; until then it refused the reopen with
+  `ObjectDisposedException` until the database was dropped or the engine recreated, as a directly
+  disposed database always was. Its workers skip a closed database ("Lifecycle and durability"),
+  so the engine stays `Running`; until they did, option B made the version-purge worker's endless
+  failure on a closed database, which a directly disposed database always caused, reachable from
+  a session's own property.
+- **Session-only collection operations** (owner decision 32 of 2026-10-06, plan §6.6). Phase 4
+  kept the database's own `CreateCollectionAsync`, `GetCollectionAsync`, `DropCollectionAsync` and
+  `GetCollectionsAsync`, which ran in autocommit outside any session. A write through one of them
+  while the caller's session held an explicit transaction's writer lock waited for that
+  transaction, so a caller that awaited it before ending the transaction waited until its token
+  was canceled. Decision 32 removed them: the session is the one entry point, a collection handle
+  is always bound to the session that produced it, and the self-wait, its caveat and its test are
+  gone. Studio already used the session's operations.
 - **Typed surface without casts.** The engine re-exposes `CreateDatabaseAsync`,
   `OpenDatabaseAsync` and `GetDatabasesAsync` typed (`DocumentDatabase`) with `new` members over
   the base's public members; a database re-exposes its `Engine` and `CreateSessionAsync`

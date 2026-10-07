@@ -109,7 +109,7 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
 
             // An offline database is not begun: the engine reports it (#1243), and a failure the
             // worker recorded for it ends. Nor is a database its holder closed (a session's
-            // Database included): the engine keeps it registered only to refuse its reopen, and
+            // Database included): the engine keeps it registered until its close ends, then forgets it, and
             // its disposed coordinator has nothing left to purge.
             if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
             {

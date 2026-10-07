@@ -47,8 +47,8 @@ layer through the interfaces the bases implement. Every base carries the deviati
 
 | Base | Bridges | The leaf supplies | The base owns |
 |---|---|---|---|
-| `DatabaseEngine` | `IDatabaseEngine` | the database cores (create, open, drop, list, try-get), `OfflineDatabases`, and closing its databases (`DisposeAsyncCore`) | name and model, the worker and server inventories, attach and its freeze, the worker pump, the state fold, the disposal order |
-| `DatabaseInstance` | `IDatabase` | the session core, disposal cores, and the schema core when it provisions | name, engine, the schema-provisioning capability, the disposed flag |
+| `DatabaseEngine` | `IDatabaseEngine` | the database cores (create, open, drop, list, try-get), forgetting a database a holder closed (`ForgetClosedDatabaseCore`), `OfflineDatabases`, and closing its databases (`DisposeAsyncCore`) | name and model, the worker and server inventories, attach and its freeze, the worker pump, the state fold, the disposal order, the open's wait for a holder's close |
+| `DatabaseInstance` | `IDatabase` | the session core, disposal cores, and the schema core when it provisions | name, engine, the schema-provisioning capability, the disposed flag, the close's completion and the engine notice it sends |
 | `DatabaseSession` | `IDatabaseSession` | the begin and execute cores, and ending its running operations | state, the session's transaction, the one "already active" check, the operation hold, the teardown order |
 | `DatabaseTransaction` | `IDatabaseTransaction` | the kernel state, commit and rollback cores with their own exception translation, the offline refusal, the coded aborted error | identity and isolation level, the end gate and the whole end state machine |
 | `DatabaseServer` | `IDatabaseServer` | start and stop cores, `Sessions`, and `Context` until phase 6 | the engine, the lifecycle state machine |
@@ -152,6 +152,55 @@ layer through the interfaces the bases implement. Every base carries the deviati
   the teardown ("The session closed before the transaction ended." is the cause a later commit
   names). Both steps run whatever the first threw, and any failure is reported in one
   `AggregateException` ("The session failed to close."), as the engine reports its own.
+- **A database closed outside its engine is forgotten** (owner decision 33 of 2026-10-06, #1289;
+  rule 8: one mechanism in the bases, not five copies). Until it, a database a holder disposed
+  stayed registered until it was dropped, and every later open handed back the disposed instance
+  or refused it. Now `DatabaseInstance` disposal completes a close task once its core ends and
+  then tells its engine, which calls the leaf's `protected abstract ForgetClosedDatabaseCore`;
+  the five leaves implement it through the shared `shared/DatabaseRegistry.Forget`, so the next
+  `OpenDatabaseAsync` opens the database again from its files. The rules that make it race-free:
+  - **The leaf keeps tracking the database until its close ends**, so every worker's closed-database
+    skip (the `IsClosed` guards) still covers the window between the close and the forget.
+  - **Nothing reuses the files under a running close.** The base's `OpenDatabaseAsync` loops: when
+    the open core returns an instance whose close has started, it awaits that close (honoring its
+    token) and calls the core again, and it throws `InvalidOperationException` if the same
+    instance comes back, a leaf that never forgets, rather than spinning. `TryGetDatabase` does not
+    report a closing database. A second `Dispose` or `DisposeAsync` waits for the close in flight
+    instead of returning early, so a drop, an offline reopen and the engine's disposal, which
+    dispose the database, wait for a close a holder started.
+  - **The forget never blocks on the leaf's lock.** Those engine paths remove the database from
+    the leaf's lock-free instance snapshot and then dispose it while holding the leaf's lock, so a
+    forget that waited for that lock would deadlock with them. The forget reads the snapshot
+    first and returns at once when the database is not in it; otherwise it takes the lock through
+    a bounded `Monitor.TryEnter` loop (10 ms attempts) and rereads the snapshot between attempts,
+    and under the lock it removes the database only if the registry still holds that same
+    instance.
+  - **The close chain never captures a synchronization context.** A second `Dispose` blocks on
+    the close in flight, and the engines' drop and offline reopen call `Dispose` under the leaf's
+    lock, so every await from a leaf's `DisposeAsyncCore` down to the storage streams uses
+    `ConfigureAwait(false)` (`Storage.DisposeAsync` and `StorageStream.DisposeAsync` included).
+    One continuation posted to a UI context (Studio is MAUI) would deadlock a drop made on that
+    thread while a holder's close runs.
+  - **A stalled close stalls the engine's registry.** A drop and an offline reopen wait for a
+    holder's close while holding the leaf's lock, as the drop's own close always did. A close that
+    stalls (a data fsync that does not answer) therefore blocks every registry operation of that
+    engine until it ends: create, open, drop, a lookup that takes the lock, enumeration, a wire
+    server's handshake and the engine's disposal. The drop's cancellation token is not observed
+    during that wait. Moving the wait out of the lock (a `_dropping` set that open and create
+    refuse, the close awaited with the token, the files deleted under the lock again) is the
+    remedy if the stall matters; it is not done, because the exposure predates decision 33.
+  - **Engine-initiated closes are unchanged**: a drop, an offline reopen and the engine's disposal
+    remove the database first, so its forget finds nothing to do.
+
+  In-memory databases reopen with their data too (#1272): `shared/DatabaseMemoryFiles` keeps each
+  in-memory file set's streams until it is dropped or the engine is disposed (the disposal
+  releases every file set, so a disposed engine still referenced holds none of its databases), and
+  an open copies the closed streams' bytes into new streams outside its lock, each allocated once
+  at its final size (a `MemoryStream` keeps its buffer after it closes), and runs the same
+  recovery a file reopen runs; it refuses a file set whose storage still has a stream open. The
+  root suite pins the base's part with a test leaf (`TestEngine`) whose close a gate holds: an
+  open, a canceled open, a drop and the engine's disposal during a holder's close, the refusal
+  of a leaf that never forgets, and a second disposal that waits.
 - **The server lifecycle Sql, KeyValuePair and Graph carried** lives in `DatabaseServer`: a server
   is created inert, starts once, and a failed start or any stop is terminal (a start after it
   throws `ObjectDisposedException`); stop is idempotent and runs for a server that never started,
@@ -526,11 +575,20 @@ the process. Its `Code` leads the message and names the model: `COHSQLT004`,
 message names what failed from the storage's typed `StorageOfflineException.Cause`
 (`JournalFlush`, `DataFlush`, `HeaderWrite`; the root words each cause itself, so callers
 tell the causes apart by the enum, never by the text). An
-operation that committed by itself (a self-committing statement such as SQL DDL, or any
-storage bracket whose commit record was written before the flush failed,
-`StorageOfflineException.CommitRecordWritten`) is never reported as refused, because its
-work can survive the reopen: `DatabaseTransactionCommitUnconfirmedException.Create` builds the
-code-led unconfirmed error for it.
+operation that committed by itself (a self-committing statement such as SQL DDL that committed a
+durable bracket of its own, or any storage bracket whose commit record was written before the
+flush failed, `StorageOfflineException.CommitRecordWritten`) is never reported as refused,
+because its work can survive the reopen; one that committed nothing is refused (#1272: SQL
+records each durable self-commit per statement, so the classification is exact).
+`DatabaseTransactionCommitUnconfirmedException` has two factories, and every unconfirmed commit
+in every model goes through one of them, so its message always leads with the model's code
+(owner decision 24 of 2026-10-06, #1272): `Create(code, database, StorageOfflineException)` for
+an operation that met the offline storage ("… went offline while the operation was committing
+…"), and `Create(code, database, TransactionCommitUnconfirmedException)` for a transaction whose
+commit record the kernel wrote but could not make durable ("… went offline while a transaction
+was committing …"), the explicit commit and an automatic statement's own commit alike, with the
+kernel's exception as the inner exception. Until #1272 the kernel path carried the kernel's
+message alone, without a code.
 
 **Child roots own independent exception roots** — `StorageException`,
 `DatabaseTypeException`, `ProtocolException`,

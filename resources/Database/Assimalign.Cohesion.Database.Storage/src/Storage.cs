@@ -2181,17 +2181,18 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
                 if (_journal != null)
                 {
-                    await _journal.DisposeAsync();
+                    await _journal.DisposeAsync().ConfigureAwait(false);
                 }
             }
             finally
             {
                 _bufferPool.Dispose();
 
-                // Dispose all three streams
-                await Data.DisposeAsync();
-                await Journal.DisposeAsync();
-                await Backup.DisposeAsync();
+                // Dispose all three streams. No await captures the caller's context: a second
+                // database Dispose, and an engine's drop and offline reopen, block on this close.
+                await Data.DisposeAsync().ConfigureAwait(false);
+                await Journal.DisposeAsync().ConfigureAwait(false);
+                await Backup.DisposeAsync().ConfigureAwait(false);
 
                 _disposed = true;
             }
