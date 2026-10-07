@@ -300,6 +300,21 @@ Pure span logic over strings — no reflection, no codegen. Fully AOT/trim safe.
   fail to match anyway; the grammar check would add cost without adding
   security.
 
+## Query parameters (`HttpQuery`)
+
+`HttpQuery.Parse` splits the raw query on `&`, splits each parameter on its
+first `=`, and percent-decodes both halves (RFC 3986 §2.1) into an
+`HttpQueryCollection`. Every transport parses the query through it, so a query
+reads the same on HTTP/1.1, HTTP/2 and HTTP/3.
+
+A parameter with an empty name — `?=1`, a bare `=` — is **skipped** (#1323).
+`HttpQueryKey` is never empty, and RFC 3986 §3.4 gives the query no syntax that
+would make such a parameter an error, so it is left out of the collection and
+stays visible only in the raw `HttpQuery.Value`. Before #1323 the parse threw
+`ArgumentException` while the transport read the request head, so any client
+could fail its own connection or stream, and have the server log the failure as
+a defect, with one `=`.
+
 ## Media types and content negotiation
 
 The core owns the RFC 9110 §8.3 / §12 content-negotiation primitives so that every

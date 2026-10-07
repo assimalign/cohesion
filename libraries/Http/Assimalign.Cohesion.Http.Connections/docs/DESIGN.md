@@ -583,7 +583,8 @@ Two invariants are load-bearing:
   `{**}` identity form and a static mount's segment boundaries survive an encoded slash. The
   query, by contrast, is decoded fully (including `%2F` → `/`) because it is split off before
   the path decode and parsed through `HttpQuery.Parse`, not `FromUriComponent` — the same split
-  and the same query decode on all three transports.
+  and the same query decode on all three transports. A parameter with an empty name (`?=1`) is
+  skipped there, so it never fails the request as its head is read (#1323).
 - **A decoded octet that is not a legal path character** (a space from `%20`, a control from
   `%09`, `?`/`#`, or a NUL from `%00`) makes the request-target malformed. On h1 the reader
   surfaces this as its existing malformed-request-target failure (an `InvalidDataException`

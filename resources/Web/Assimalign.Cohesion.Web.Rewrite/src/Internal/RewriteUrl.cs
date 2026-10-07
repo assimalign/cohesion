@@ -218,23 +218,40 @@ internal static class RewriteUrl
     }
 
     /// <summary>
-    /// Parses percent-encoded query text the way the transports parse a request's query. Fails, rather than
-    /// throwing, for an entry with an empty key (<c>=value</c>), which no query key may be.
+    /// Parses percent-encoded query text the way the transports parse a request's query, but fails for an
+    /// entry with an empty key (<c>=value</c>). A transport skips such an entry in a request it receives
+    /// (<see cref="HttpQuery.Parse"/>); a rewrite target that produces one is refused instead, so the
+    /// mistake surfaces at registration, or as a 400 when a capture produced it.
     /// </summary>
     public static bool TryParseQuery(string text, out IHttpQueryCollection query)
     {
-        try
-        {
-            HttpQueryCollection parsed = new HttpQuery(text).Parse();
-            parsed.IsReadOnly = true;
-            query = parsed;
-            return true;
-        }
-        catch (ArgumentException)
+        if (HasEntryWithoutKey(text))
         {
             query = null!;
             return false;
         }
+
+        HttpQueryCollection parsed = new HttpQuery(text).Parse();
+        parsed.IsReadOnly = true;
+        query = parsed;
+        return true;
+    }
+
+    /// <summary>
+    /// Whether the query text has an entry whose key is empty, split as <see cref="HttpQuery.Parse"/> splits
+    /// it: entries on <c>&amp;</c>, empty entries ignored, the key before the first <c>=</c>.
+    /// </summary>
+    private static bool HasEntryWithoutKey(string text)
+    {
+        foreach (string entry in new HttpQuery(text).Value.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (entry[0] == '=')
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
