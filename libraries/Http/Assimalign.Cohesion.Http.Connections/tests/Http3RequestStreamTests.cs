@@ -577,6 +577,31 @@ public class Http3RequestStreamTests
         context.Request.Trailers[new HttpHeaderKey("x-checksum")].Value.ShouldBe("abc123");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A trailer field prohibited in trailers should reset the stream with H3_MESSAGE_ERROR")]
+    [InlineData("content-length")]
+    [InlineData("content-type")]
+    [InlineData("authorization")]
+    [InlineData("trailer")]
+    public async Task ReadBody_OnTrailerFieldProhibitedInTrailers_ShouldResetWithMessageError(string fieldName)
+    {
+        // Arrange — the rules HTTP/2 applies (RFC 9110 §6.5.1): a trailer section carries none of the
+        // framing, routing, authentication, or content-processing fields.
+        byte[] payload = Combine(
+            HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "a"),
+            HttpProtocolPayloadFactory.CreateHttp3Frame(0x0, Encoding.ASCII.GetBytes("hello")),
+            HttpProtocolPayloadFactory.CreateHttp3HeadersFrame((fieldName, "value")));
+        TestConnection stream = new(payload);
+        (_, IHttpContext context) = await ReceiveSingleAsync(stream);
+
+        // Act
+        using StreamReader reader = new(context.Request.Body);
+        await Should.ThrowAsync<IOException>(() => reader.ReadToEndAsync());
+
+        // Assert
+        stream.AbortReason.ShouldBeOfType<Http3StreamException>().ErrorCode.ShouldBe(Http3ErrorCode.MessageError);
+        context.Request.Trailers.Count.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3 Request Streams: A Content-Length the DATA frames contradict should reset the stream with H3_MESSAGE_ERROR")]
     public async Task ReadBody_OnContentLengthMismatch_ShouldResetWithMessageError()
     {

@@ -71,6 +71,17 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // Guarded by _syncRoot alongside the stream table.
     private readonly Dictionary<int, HttpPriority> _bufferedPriorities = new();
     private const int MaxBufferedPriorities = 128;
+    // RFC 9113 §5.1 — the streams the server reset while the peer was still sending. The peer can
+    // have sent frames before the RST_STREAM reached it, a trailer section among them, and a HEADERS
+    // frame is a field block the HPACK decoder must still process (§4.3) before the frame is ignored.
+    // Bounded: the oldest id is forgotten first, and a HEADERS frame for a forgotten id is then the
+    // connection error any closed stream draws (§5.1 lets an endpoint bound how long it ignores such
+    // frames). Guarded by _syncRoot.
+    private const int maxRecentlyResetStreams = 128;
+    private readonly Queue<int> _recentlyResetStreams = new();
+    // The field block of a HEADERS frame for a recently reset stream, while its CONTINUATION frames
+    // arrive; decoded once complete, then discarded. Pump-only.
+    private MemoryStream? _discardedHeaderBlock;
     // Ready request heads produced by the frame pump and consumed by ReceiveAsync.
     // The pump dispatches a context as soon as a stream's header block is complete
     // (RFC 9113 lets the server respond before the body arrives), then keeps
@@ -90,6 +101,11 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     private Task? _pumpTask;
     private int _pumpStarted;
     private int? _continuationStreamId;
+    // The stream whose header block the CONTINUATION frames extend — held directly, not looked up in
+    // the stream table, because the application can close or reset a stream while its trailer section
+    // is still arriving, and the block must still be completed and decoded (RFC 9113 §4.3). Null for a
+    // block on a recently reset stream (_discardedHeaderBlock). Pump-only, set with _continuationStreamId.
+    private Http2Stream? _continuationStream;
     private bool _initialized;
     private bool _receivedClientSettings;
     private int _lastInboundStreamId;
@@ -1198,6 +1214,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         if (_continuationStreamId == receivedFrame.Frame.StreamId)
         {
             _continuationStreamId = null;
+            _continuationStream = null;
         }
     }
 
@@ -1227,8 +1244,10 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // Re-using a stream id is legal if the stream is still tracked
         // (continuation of HEADERS, body DATA, etc.). It is only an
         // ordering violation when opening a NEW stream with a smaller id
-        // than the previously highest one.
-        if (streamId < _lastInboundStreamId && !_streams.ContainsKey(streamId))
+        // than the previously highest one — or with that same id once its
+        // stream has been retired: re-opening it would turn a late trailer
+        // section into a phantom request.
+        if (streamId <= _lastInboundStreamId && !_streams.ContainsKey(streamId))
         {
             throw new Http2ConnectionException(
                 Http2ErrorCode.ProtocolError,
@@ -1373,7 +1392,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
 
         Http2Frame frame = receivedFrame.Frame;
 
-        Http2Stream stream = OpenInboundStream(frame);
+        Http2Stream? stream = OpenInboundStream(frame);
+
+        if (stream is null)
+        {
+            // The server reset this stream while the peer was still sending (see OpenInboundStream).
+            ReceiveDiscardedHeaderBlock(frame.StreamId, receivedFrame.Payload, frame.HeadersEndHeaders);
+            return null;
+        }
 
         // Hand the HEADERS frame to the state machine — it folds the payload
         // into the accumulating header block AND updates the stream's
@@ -1383,6 +1409,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         if (!frame.HeadersEndHeaders)
         {
             _continuationStreamId = frame.StreamId;
+            _continuationStream = stream;
             return null;
         }
 
@@ -1393,10 +1420,23 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// Validates, admission-controls, and materializes the inbound stream a HEADERS
     /// frame targets, under the stream-table lock.
     /// </summary>
-    private Http2Stream OpenInboundStream(Http2Frame frame)
+    /// <returns>
+    /// The stream, or <see langword="null"/> when the frame belongs to a stream the server reset while
+    /// the peer was still sending — the caller decodes its field block and discards it.
+    /// </returns>
+    private Http2Stream? OpenInboundStream(Http2Frame frame)
     {
         lock (_syncRoot)
         {
+            // RFC 9113 §5.1 — after resetting a stream, the server ignores the frames the peer sent
+            // before the reset reached it. A HEADERS frame among them (normally the trailer section of
+            // a request the application answered without reading it all) is still a field block, so
+            // it is decoded rather than refused, re-opened, or treated as a connection error.
+            if (_recentlyResetStreams.Contains(frame.StreamId))
+            {
+                return null;
+            }
+
             // RFC 9113 §5.1.1 — client-initiated streams MUST use odd-numbered
             // identifiers, and stream IDs MUST increase monotonically. The server
             // never initiates a stream (PUSH_PROMISE is disabled), so we treat any
@@ -1444,27 +1484,110 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 "The HTTP/2 CONTINUATION frame did not match the active header block stream.");
         }
 
-        Http2Stream? stream;
-        lock (_syncRoot)
+        if (_discardedHeaderBlock is not null)
         {
-            if (!_streams.TryGetValue(receivedFrame.Frame.StreamId, out stream))
-            {
-                // The leading HEADERS frame must have created the stream entry;
-                // an orphan CONTINUATION is a protocol error.
-                throw new Http2ConnectionException(
-                    Http2ErrorCode.ProtocolError,
-                    $"HTTP/2 CONTINUATION frame received on unknown stream {receivedFrame.Frame.StreamId}.");
-            }
+            // The block continues a HEADERS frame for a recently reset stream.
+            ReceiveDiscardedHeaderBlock(receivedFrame.Frame.StreamId, receivedFrame.Payload, receivedFrame.Frame.HeadersEndHeaders);
+            return null;
         }
+
+        // The leading HEADERS frame named the stream, and the block continues on it even if the
+        // application has since closed or reset the stream (a trailer section still arriving when its
+        // response went out): the stream table no longer has it then, but its block still has to be
+        // decoded.
+        Http2Stream stream = _continuationStream ?? throw new Http2ConnectionException(
+            Http2ErrorCode.ProtocolError,
+            $"HTTP/2 CONTINUATION frame received on unknown stream {receivedFrame.Frame.StreamId}.");
 
         stream.ReceiveContinuation(receivedFrame.Payload, receivedFrame.Frame.HeadersEndHeaders);
 
         if (receivedFrame.Frame.HeadersEndHeaders)
         {
             _continuationStreamId = null;
+            _continuationStream = null;
         }
 
         return await TryDispatchStreamAsync(stream, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Takes one HEADERS or CONTINUATION payload of a field block sent on a stream the server reset
+    /// while the peer was still sending. Once the block is complete it is decoded — keeping the HPACK
+    /// decoder in step (RFC 9113 §4.3) — and its fields are discarded: RFC 9113 §5.1 has the server
+    /// ignore frames that arrive on a stream after it sent RST_STREAM.
+    /// </summary>
+    /// <param name="streamId">The reset stream.</param>
+    /// <param name="payload">The frame's field-block fragment.</param>
+    /// <param name="endHeaders">Whether the frame carried END_HEADERS.</param>
+    /// <exception cref="Http2ConnectionException">
+    /// The block exceeds the header-block size bound, is not valid HPACK, or decodes past the
+    /// advertised <c>SETTINGS_MAX_HEADER_LIST_SIZE</c>.
+    /// </exception>
+    private void ReceiveDiscardedHeaderBlock(int streamId, ReadOnlySpan<byte> payload, bool endHeaders)
+    {
+        MemoryStream block = _discardedHeaderBlock ??= new MemoryStream();
+
+        // RFC 9113 §6.10 / §10.5.1 — the CONTINUATION-flood bound applies here as to any header block.
+        if (block.Length + payload.Length > _http2Limits.MaxRequestHeaderListSize)
+        {
+            throw new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 header block on stream {streamId} exceeded the maximum of {_http2Limits.MaxRequestHeaderListSize} octets (CONTINUATION flood).");
+        }
+
+        block.Write(payload);
+
+        if (!endHeaders)
+        {
+            _continuationStreamId = streamId;
+            return;
+        }
+
+        _continuationStreamId = null;
+        _discardedHeaderBlock = null;
+
+        try
+        {
+            _headerDecoder.DecodeFieldLines(new ReadOnlySpan<byte>(block.GetBuffer(), 0, (int)block.Length));
+        }
+        catch (HPackDecodingException error)
+        {
+            throw CreateFieldBlockDecodingError(streamId, error);
+        }
+    }
+
+    /// <summary>
+    /// Maps a failure to decode a field block that is judged only after it is decoded — a trailer
+    /// section, or a block on a reset stream — to its connection error. Either way the decoder state
+    /// can no longer be trusted, so the connection ends: a decoded list over the advertised
+    /// <c>SETTINGS_MAX_HEADER_LIST_SIZE</c> is <c>ENHANCE_YOUR_CALM</c>, as for a request head
+    /// (RFC 9113 §10.5.1), and a block that is not valid HPACK is <c>COMPRESSION_ERROR</c>
+    /// (RFC 9113 §4.3).
+    /// </summary>
+    private static Http2ConnectionException CreateFieldBlockDecodingError(int streamId, HPackDecodingException error)
+    {
+        return error is HPackHeaderListSizeExceededException
+            ? new Http2ConnectionException(
+                Http2ErrorCode.EnhanceYourCalm,
+                $"HTTP/2 field block on stream {streamId} exceeded the maximum header list size: {error.Message}")
+            : new Http2ConnectionException(
+                Http2ErrorCode.CompressionError,
+                $"HTTP/2 field block on stream {streamId} could not be decoded: {error.Message}");
+    }
+
+    /// <summary>
+    /// Records that the server reset <paramref name="streamId"/> while the peer was still sending, so a
+    /// HEADERS frame the peer sent before the reset reached it is decoded and ignored (see
+    /// <see cref="OpenInboundStream"/>). Must be called while holding <see cref="_syncRoot"/>.
+    /// </summary>
+    private void RememberResetStreamLocked(int streamId)
+    {
+        if (_recentlyResetStreams.Count == maxRecentlyResetStreams)
+        {
+            _recentlyResetStreams.Dequeue();
+        }
+
+        _recentlyResetStreams.Enqueue(streamId);
     }
 
     private async Task<Http2Context?> ProcessDataFrameAsync(ReceivedFrame receivedFrame, CancellationToken cancellationToken)
@@ -1648,6 +1771,25 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// </remarks>
     private async Task<Http2Context?> TryDispatchStreamAsync(Http2Stream stream, CancellationToken cancellationToken)
     {
+        if (stream.IsTrailerBlockReady)
+        {
+            // RFC 9113 §4.3 / §8.1 — a completed trailer section is decoded here, in frame order,
+            // whether or not the application ever reads it: HPACK is stateful, so a skipped field
+            // block would leave the decoder out of step for every later request on the connection.
+            // A malformed section surfaces as an Http2StreamException (PROTOCOL_ERROR), which the
+            // pump's stream-error handler turns into an RST_STREAM for this stream alone.
+            try
+            {
+                stream.ReceiveTrailers(_headerDecoder);
+            }
+            catch (HPackDecodingException error)
+            {
+                throw CreateFieldBlockDecodingError(stream.StreamId, error);
+            }
+
+            return null;
+        }
+
         if (!stream.IsHeadReady)
         {
             return null;
@@ -1856,7 +1998,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// The debt is exactly <c>InitialReceiveWindow - ReceiveWindow.Available</c> —
     /// what was consumed on receipt minus what consumption already credited.
     /// </remarks>
-    private async ValueTask<Http2Stream?> RemoveStreamAsync(int streamId, CancellationToken cancellationToken)
+    /// <param name="streamId">The stream to remove.</param>
+    /// <param name="cancellationToken">A token to cancel the connection-level <c>WINDOW_UPDATE</c>.</param>
+    /// <param name="resetByServer">
+    /// Whether the server is removing the stream because it reset it. A stream reset while the peer
+    /// was still sending is remembered, so a HEADERS frame the peer had already sent is decoded and
+    /// ignored rather than refused (<see cref="RememberResetStreamLocked"/>).
+    /// </param>
+    private async ValueTask<Http2Stream?> RemoveStreamAsync(int streamId, CancellationToken cancellationToken, bool resetByServer = false)
     {
         int reclaimed = 0;
         Http2Stream? stream;
@@ -1879,6 +2028,13 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             }
 
             _streams.Remove(streamId);
+
+            // Recorded with the removal, under the same lock, so a HEADERS frame the pump reads next
+            // finds the stream either still tracked or remembered as reset — never neither.
+            if (resetByServer && !stream.InputCompleted)
+            {
+                RememberResetStreamLocked(streamId);
+            }
         }
 
         if (reclaimed > 0)
@@ -2479,7 +2635,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             // surface that via GOAWAY.
         }
 
-        Http2Stream? stream = await RemoveStreamAsync(streamId, cancellationToken).ConfigureAwait(false);
+        Http2Stream? stream = await RemoveStreamAsync(streamId, cancellationToken, resetByServer: true).ConfigureAwait(false);
 
         if (stream is not null)
         {
@@ -2490,14 +2646,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             WakeSendWindowWaiters();
         }
 
-        // NOTE: _continuationStreamId is deliberately NOT touched here. This method
-        // is callable from the application thread (SendAsync's abandoned-body /
-        // cancel reset) concurrently with the pump, and _continuationStreamId is a
-        // non-atomic int? owned solely by the pump. A stream can never be both
-        // mid-CONTINUATION (header block incomplete) and dispatched-and-responded-
-        // to, so the app path never targets the active continuation stream; the
-        // pump resets the field itself in ProcessRstStreamFrame when the peer
-        // resets a mid-continuation stream.
+        // NOTE: _continuationStreamId / _continuationStream are deliberately NOT
+        // touched here. This method is callable from the application thread
+        // (SendAsync's abandoned-body / cancel reset) concurrently with the pump,
+        // and both fields are owned solely by the pump. The app path can reset a
+        // stream whose trailer section is mid-CONTINUATION; the pump still holds
+        // the stream object, so it finishes and decodes that block (RFC 9113 §4.3)
+        // and the stream then ignores it. The pump resets the fields itself in
+        // ProcessRstStreamFrame when the peer resets a mid-continuation stream.
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Threading;
@@ -10,8 +11,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Server-side HTTP/2 stream — tracks the RFC 9113 §5.1 lifecycle state
-/// plus the accumulating header block and the streaming body pipe fed from
-/// the peer's DATA frames.
+/// plus the accumulating header block (the request head, then any trailer
+/// section) and the streaming body pipe fed from the peer's DATA frames.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -105,6 +106,21 @@ internal sealed class Http2Stream
     private long? _maxRequestBodySize;
     private long _requestBodyReceived;
     private bool _requestBodyRejected;
+
+    // RFC 9113 §8.1 — the request's trailer section: a second field block, opened by a HEADERS frame
+    // that carries END_STREAM once the head is in, and closed by END_HEADERS. It accumulates in
+    // _headerBlock, which the head's decode emptied, and the frame pump decodes it as soon as it is
+    // complete (ReceiveTrailers). Pump-only state.
+    private bool _receivingTrailers;
+    private bool _trailerBlockCompleted;
+    // Whether the request is a CONNECT, whose stream carries only DATA after the head (RFC 9113 §8.5).
+    // Set at dispatch; pump-only.
+    private bool _isConnect;
+    // The validated trailer fields. The pump writes them before it completes the body pipe; the body
+    // reader reads them after it observes that completion, and copies them into _requestTrailers.
+    private HttpHeaderCollection? _receivedTrailers;
+    // The request's trailer collection, created at dispatch and filled when the body is read to its end.
+    private HttpTrailerCollection? _requestTrailers;
 
     /// <summary>
     /// Send-side flow-control window — the number of DATA octets we
@@ -204,6 +220,12 @@ internal sealed class Http2Stream
     /// block is complete and it has not already been dispatched or closed.
     /// </summary>
     public bool IsHeadReady => HeadersCompleted && !ContextDispatched && State != Http2StreamState.Closed;
+
+    /// <summary>
+    /// Whether the request's trailer section has been received in full (END_HEADERS) and waits to be
+    /// decoded by <see cref="ReceiveTrailers"/>.
+    /// </summary>
+    public bool IsTrailerBlockReady => _receivingTrailers && _trailerBlockCompleted;
 
     /// <summary>
     /// Marks this stream as counted toward the connection's in-flight exchange
@@ -324,6 +346,11 @@ internal sealed class Http2Stream
     /// block, applies the RFC 9113 §5.1 state transition driven by HEADERS, and
     /// returns when the header block has been fully assembled.
     /// </summary>
+    /// <remarks>
+    /// A HEADERS frame that arrives once the head is in opens the trailer section (RFC 9113 §8.1).
+    /// Its block is decoded on its own once complete (<see cref="ReceiveTrailers"/>), and the request
+    /// body ends only then, so a reader that reaches the end of the body finds the section validated.
+    /// </remarks>
     /// <param name="payload">The decoded payload bytes (no padding / no priority data).</param>
     /// <param name="endHeaders">Whether the inbound frame carried the END_HEADERS flag.</param>
     /// <param name="endStream">
@@ -337,6 +364,8 @@ internal sealed class Http2Stream
     /// </exception>
     public void ReceiveHeaders(ReadOnlySpan<byte> payload, bool endHeaders, bool endStream)
     {
+        bool opensTrailers = false;
+
         lock (_stateLock)
         {
             // RFC 9113 §5.1 — HEADERS is legal in:
@@ -364,6 +393,14 @@ internal sealed class Http2Stream
                     State = State == Http2StreamState.Open
                         ? Http2StreamState.HalfClosedRemote
                         : Http2StreamState.Closed;
+                    opensTrailers = true;
+                    break;
+                case Http2StreamState.Closed when _reset:
+                    // RFC 9113 §5.1 — the server reset this stream between the pump finding it and
+                    // this frame (a peer's reset removes the stream before any later frame is read).
+                    // The peer sent the frame before it saw the reset: its block is still decoded
+                    // (RFC 9113 §4.3), and ReceiveTrailers then ignores it.
+                    opensTrailers = true;
                     break;
                 case Http2StreamState.HalfClosedRemote:
                 case Http2StreamState.Closed:
@@ -373,14 +410,20 @@ internal sealed class Http2Stream
             }
         }
 
+        if (opensTrailers)
+        {
+            _receivingTrailers = true;
+        }
+
         AppendHeaderBytes(payload);
 
         if (endHeaders)
         {
-            HeadersCompleted = true;
+            CompleteHeaderBlock();
         }
 
-        if (endStream)
+        // The trailer section ends the input when ReceiveTrailers has decoded it, not here.
+        if (endStream && !opensTrailers)
         {
             InputCompleted = true;
             CompleteBody();
@@ -401,10 +444,12 @@ internal sealed class Http2Stream
         // CONTINUATION is only legal mid-header-block on a stream that has
         // already received its leading HEADERS frame. The connection-level
         // continuation tracking guards the cross-stream rule; here we just
-        // assert that the stream itself is in a sane state.
+        // assert that the stream itself is in a sane state. A trailing HEADERS
+        // frame closes a stream whose response is already complete, and the
+        // CONTINUATION frames of that trailer section still belong to it.
         lock (_stateLock)
         {
-            if (State == Http2StreamState.Idle || State == Http2StreamState.Closed)
+            if (State == Http2StreamState.Idle || (State == Http2StreamState.Closed && !_receivingTrailers))
             {
                 throw new Http2ConnectionException(
                     Http2ErrorCode.ProtocolError,
@@ -416,7 +461,101 @@ internal sealed class Http2Stream
 
         if (endHeaders)
         {
+            CompleteHeaderBlock();
+        }
+    }
+
+    /// <summary>
+    /// Decodes the completed trailer section with the connection's HPACK decoder, validates it, and
+    /// ends the request input. The frame pump calls this as soon as END_HEADERS completes the section,
+    /// in frame order and whether or not the application ever reads it: HPACK is stateful, so every
+    /// field block must be decoded or the decoder falls out of step for every later request on the
+    /// connection (RFC 9113 §4.3).
+    /// </summary>
+    /// <remarks>
+    /// The whole block is decoded before any field is judged, so a malformed section still leaves the
+    /// decoder in step and costs only this stream. A valid section is published to the request's
+    /// trailer collection when the body is read to its end (<see cref="PublishTrailers"/>). A section
+    /// that was still arriving when the server reset the stream is decoded and otherwise ignored
+    /// (RFC 9113 §5.1).
+    /// </remarks>
+    /// <param name="decoder">The connection's HPACK decoder.</param>
+    /// <exception cref="HPackDecodingException">
+    /// The block is not valid HPACK, or its decoded list exceeds the advertised
+    /// <c>SETTINGS_MAX_HEADER_LIST_SIZE</c>. The caller maps it to a connection error.
+    /// </exception>
+    /// <exception cref="Http2StreamException">
+    /// The section is malformed (RFC 9113 §8.1.1) — a pseudo-header field, a connection-specific field,
+    /// a field prohibited in trailers, an uppercase name, or any trailer section after a CONNECT head
+    /// (RFC 9113 §8.5): a stream error of type <c>PROTOCOL_ERROR</c>. The body pipe fails first, so the
+    /// reader never mistakes the request for a complete one.
+    /// </exception>
+    public void ReceiveTrailers(HPackDecoder decoder)
+    {
+        _receivingTrailers = false;
+
+        List<(string Name, string Value)> fields = decoder.DecodeFieldLines(
+            new ReadOnlySpan<byte>(_headerBlock.GetBuffer(), 0, (int)_headerBlock.Length));
+        _headerBlock.SetLength(0);
+
+        // RFC 9113 §5.1 — the server reset the stream while the section was arriving. Decoding it was
+        // the only work left; nobody reads the request any more, so it is neither judged nor published.
+        if (_reset)
+        {
+            return;
+        }
+
+        HttpHeaderCollection trailers = new();
+        InputCompleted = true;
+
+        try
+        {
+            if (_isConnect)
+            {
+                throw new InvalidDataException(
+                    $"HTTP/2 stream {StreamId} carried a trailer section after a CONNECT head; a CONNECT stream carries only DATA (RFC 9113 §8.5).");
+            }
+
+            HttpTrailerFieldRules.AddReceivedFields(fields, trailers, "HTTP/2");
+        }
+        catch (InvalidDataException exception)
+        {
+            FailBody(new IOException(exception.Message, exception));
+            throw new Http2StreamException(StreamId, Http2ErrorCode.ProtocolError, exception.Message);
+        }
+
+        Volatile.Write(ref _receivedTrailers, trailers);
+        CompleteBody();
+    }
+
+    private void CompleteHeaderBlock()
+    {
+        if (_receivingTrailers)
+        {
+            _trailerBlockCompleted = true;
+        }
+        else
+        {
             HeadersCompleted = true;
+        }
+    }
+
+    /// <summary>
+    /// Copies the validated trailer section into the request's trailer collection. The request body
+    /// calls this once, when its reader reaches the clean end of the body — where HTTP/1.1 and HTTP/3
+    /// surface trailers too — so the collection is filled on the reader's own thread, after the frame
+    /// pump completed the body pipe.
+    /// </summary>
+    private void PublishTrailers()
+    {
+        if (Volatile.Read(ref _receivedTrailers) is not { } received || _requestTrailers is null)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> field in received)
+        {
+            _requestTrailers[field.Key] = field.Value;
         }
     }
 
@@ -777,6 +916,10 @@ internal sealed class Http2Stream
 
         HPackDecodedHeaders decodedHeaders = decoder.DecodeRequestHeaders(_headerBlock.ToArray());
 
+        // A trailer section that follows the body is a field block of its own: it accumulates from an
+        // empty block, under its own size bound (ReceiveHeaders, ReceiveTrailers).
+        _headerBlock.SetLength(0);
+
         // RFC 8441 §4 / RFC 9220 — validate extended CONNECT before materializing
         // the request: the :protocol pseudo-header is only valid on a CONNECT, and
         // an extended CONNECT MUST also carry :scheme, :path, and :authority. A
@@ -817,8 +960,11 @@ internal sealed class Http2Stream
 
         // RFC 9113 §5.2 — the body streams in through the flow-control-aware pipe
         // rather than being buffered whole before dispatch, so a large upload is
-        // bounded by the advertised receive window and paced by the reader.
-        Stream body = new Http2RequestBodyStream(_bodyChannel.Reader, onBodyConsumed, StreamId, requestAborted);
+        // bounded by the advertised receive window and paced by the reader. RFC 9110
+        // §6.5 — the trailer collection is supported and starts empty; the body fills
+        // it when its reader reaches the end (PublishTrailers).
+        _requestTrailers = new HttpTrailerCollection(isSupported: true);
+        Stream body = new Http2RequestBodyStream(_bodyChannel.Reader, onBodyConsumed, StreamId, requestAborted, PublishTrailers);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
         // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3
         // reconcile authority identically.
@@ -835,7 +981,8 @@ internal sealed class Http2Stream
             scheme,
             query,
             decodedHeaders.Headers,
-            body);
+            body,
+            _requestTrailers);
 
         // RFC 9218 §4 / §8 — the request's Priority header initialises the
         // effective priority. Parsing is tolerant: a malformed header value is
@@ -853,6 +1000,7 @@ internal sealed class Http2Stream
         // into the exchange through the Http2Context constructor; zero interceptors keeps the
         // pre-seam fast path.
         bool isConnect = method == HttpMethod.Connect;
+        _isConnect = isConnect;
         HttpRequestInterceptionResult interception = await HttpRequestInterceptorPipeline.InterceptAsync(
             interceptors,
             HttpVersion.Http20,

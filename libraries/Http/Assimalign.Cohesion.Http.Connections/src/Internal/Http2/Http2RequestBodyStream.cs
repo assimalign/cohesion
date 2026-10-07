@@ -30,6 +30,11 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <see cref="OperationCanceledException"/> so a handler blocked reading the body
 /// wakes up and unwinds.
 /// </para>
+/// <para>
+/// Reaching the clean end of the body is also when the request's trailer section, if
+/// it carried one, appears on <c>Request.Trailers</c>: the frame pump decodes the
+/// section before it completes the pipe, and this stream publishes it at the end.
+/// </para>
 /// </remarks>
 internal sealed class Http2RequestBodyStream : Stream
 {
@@ -40,6 +45,9 @@ internal sealed class Http2RequestBodyStream : Stream
     // is the only implementer, matching how the HTTP/1.1 reader takes its
     // timeout-phase signals as delegates.
     private readonly Func<int, int, CancellationToken, ValueTask> _onConsumed;
+    // Invoked once, when the reader reaches the clean end of the body: the stream publishes the
+    // request's trailer section there (RFC 9110 §6.5), as HTTP/1.1 and HTTP/3 do.
+    private readonly Action _onEndOfBody;
     private readonly int _streamId;
     private readonly CancellationToken _requestAborted;
 
@@ -51,12 +59,14 @@ internal sealed class Http2RequestBodyStream : Stream
         ChannelReader<Http2DataChunk> reader,
         Func<int, int, CancellationToken, ValueTask> onConsumed,
         int streamId,
-        CancellationToken requestAborted)
+        CancellationToken requestAborted,
+        Action onEndOfBody)
     {
         _reader = reader;
         _onConsumed = onConsumed;
         _streamId = streamId;
         _requestAborted = requestAborted;
+        _onEndOfBody = onEndOfBody;
     }
 
     /// <inheritdoc />
@@ -179,7 +189,10 @@ internal sealed class Http2RequestBodyStream : Stream
 
             if (!await WaitToReadAsync(cancellationToken).ConfigureAwait(false))
             {
+                // The pipe completed cleanly. A trailer section, when the request carried one, was
+                // decoded and validated before the pump completed the pipe, so it is complete now.
                 _completed = true;
+                _onEndOfBody();
                 return false;
             }
         }

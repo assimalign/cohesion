@@ -1510,6 +1510,10 @@ distinct `HPackHeaderListSizeExceededException` (a subclass of
 `ENHANCE_YOUR_CALM` while genuinely malformed field sections keep mapping to
 `PROTOCOL_ERROR`.
 
+A request's trailer section is a block of its own: both caps apply to it apart
+from the head, and its size overflow is the same `ENHANCE_YOUR_CALM` connection
+error (see "Trailers on HTTP/2 and HTTP/3").
+
 ### The flood detectors are sliding windows
 
 `Http2FloodGuard` owns three `Http2SlidingWindowCounter`s (reset / SETTINGS /
@@ -1851,6 +1855,97 @@ volatile flags, and the cap is a running `long` counter maintained by the pump.
   mismatch a malformed request. The declaration is used here only for the early
   rejection; the cap bounds the rest.
 
+## Trailers on HTTP/2 and HTTP/3
+
+Trailers (RFC 9110 §6.5) are HTTP semantics, decided apart from gRPC (decision 18,
+[ADR 2](../../../../docs/libraries/Http/DECISIONS.md#adr-2-trailers-decided-apart-from-grpc)).
+Every version surfaces a request's trailer section on `Request.Trailers`, a supported
+collection that stays empty until the body has been read to its end: HTTP/1.1 for a
+chunked request (see "HTTP/1.1 request-body streaming and data rates"), HTTP/3 from a
+trailing HEADERS frame (see "Request streams: dispatch at HEADERS, lazy body"), and
+HTTP/2 as described here.
+
+### HTTP/2 request trailers: every field block is decoded
+
+HPACK is stateful (RFC 7541): a field block can add entries to the connection's
+dynamic table, and later blocks reference them by index. RFC 9113 §4.3 therefore
+requires every field block to be decoded. Until #1314 a trailing HEADERS frame was
+appended to the stream's header buffer after the head had been decoded, and was never
+decoded itself. A trailer field the client indexed left the server's decoder out of
+step for every later request on the connection: wrong header values, or a decoding
+error that closed the connection.
+
+The frame pump now handles the trailer section as a field block of its own:
+
+- **Accumulation.** The head's decode empties the stream's header buffer, so a HEADERS
+  frame that arrives once the head is in (it must carry `END_STREAM`, RFC 9113 §8.1)
+  starts a fresh block under the same raw-size bound as the head, the
+  CONTINUATION-flood defence. CONTINUATION frames extend it.
+- **Decode in frame order, as soon as `END_HEADERS` completes it,** whether or not the
+  application ever reads the body or the trailers. `HPackDecoder.DecodeFieldLines`
+  decodes the whole block before any field is judged, so a malformed section still
+  leaves the decoder in step.
+- **Validation.** `HttpTrailerFieldRules`, shared with HTTP/3, rejects a pseudo-header
+  field (RFC 9113 §8.1), an uppercase field name (§8.2.1), a connection-specific field
+  (§8.2.2), and the fields RFC 9110 §6.5.1 excludes from trailers
+  (`HttpFieldRules.IsProhibitedInTrailers`). A CONNECT stream carries only DATA after
+  its head (§8.5), so any trailer section on it is malformed. A violation is a stream
+  error of type `PROTOCOL_ERROR` (§8.1.1). The body pipe fails with an `IOException`
+  first, so the reader never mistakes the request for a complete one; the stream is
+  reset, and the connection keeps serving.
+- **Exposure.** The pump parks the validated fields on the stream before it completes
+  the body pipe. The request body copies them into `Request.Trailers` when its reader
+  reaches the clean end of the body, on the reader's own thread.
+- **Limits.** The decoded section counts against `SETTINGS_MAX_HEADER_LIST_SIZE`
+  (`MaxRequestHeaderListSize`) on its own, like any field section. Going over aborts
+  the decode and leaves the dynamic table indeterminate, so it is a connection error,
+  `ENHANCE_YOUR_CALM`, as for a request head (see "The two header-list caps are
+  complementary, not redundant"). A block that is not valid HPACK is
+  `COMPRESSION_ERROR` (§4.3).
+
+The shape follows from HPACK, and the alternatives fail on it:
+
+- **Decoding at the body read, as HTTP/3 does.** QPACK inserts into its dynamic table
+  on the encoder stream, and a field section only references it, so an unread trailer
+  section can be skipped. HPACK inserts inside the field blocks themselves, so the pump
+  has to decode every block where it falls in the frame sequence.
+- **Validating while decoding, as the request-head path does.** Rejecting a field
+  mid-block abandons the rest of the block, so every violation would have to be a
+  connection error. Decoding first lets one malformed request cost only its stream.
+- **Filling `Request.Trailers` from the pump.** The pump would write the collection
+  while the application might read it on another thread. Publishing at the end of the
+  body keeps a single writer and matches the HTTP/1.1 and HTTP/3 lifecycle.
+
+HTTP/3 applies the same validation: `Http3HeaderCodec.AddTrailers` delegates to
+`HttpTrailerFieldRules`. Before #1314 it rejected only connection-specific fields,
+`Content-Length`, and `Host`; it now rejects the rest of the RFC 9110 §6.5.1 set too,
+so both versions accept the same trailer sections. HTTP/1.1 keeps its narrower check:
+its chunked reader rejects the framing and routing fields a trailer could use to
+smuggle a request (`Content-Length`, `Transfer-Encoding`, `Host`; RFC 9112 §7.1.2).
+
+### Trailers that arrive after the server reset the stream
+
+A handler that answers without reading the whole body makes the server reset the
+stream with `NO_ERROR` once the response is out (RFC 9113 §8.1), and the client may
+already have sent its trailer section. RFC 9113 §5.1 has the server ignore frames that
+arrive after it sent `RST_STREAM`, but a HEADERS frame still carries a field block the
+decoder must process. So the connection remembers the streams it reset while the peer
+was still sending, the most recent 128, recorded with the stream's removal under the
+stream-table lock. A HEADERS frame for one of them, and its CONTINUATION frames, is
+decoded and then dropped without a reply.
+
+The response can also go out while a trailer section is still arriving in CONTINUATION
+frames. The pump therefore holds the stream whose block is open, rather than looking it
+up in the stream table, and finishes and decodes the block even after the application
+closed or reset that stream. A section on a reset stream is decoded and then ignored.
+
+Other HEADERS frames for a retired stream keep their connection error, the ordering
+`PROTOCOL_ERROR` of RFC 9113 §5.1.1: a stream both sides ended, one the peer reset, or
+one dropped from the bounded record. That now includes the highest stream id seen so
+far. Before #1314, a late trailer section on that stream re-opened it and was
+dispatched as a new request. DATA on a retired stream still draws
+`RST_STREAM(STREAM_CLOSED)` (see "Recently-closed discard").
+
 ## HTTP/2 graceful close (GOAWAY + stream drain)
 
 RFC 9113 §6.8 makes an orderly HTTP/2 shutdown a two-part gesture: announce
@@ -2149,10 +2244,10 @@ interceptors run, and the context is published.
 when the application reads. It delivers DATA payloads straight into the
 caller's buffer, skips unknown frames, and surfaces a trailing HEADERS frame as
 `Request.Trailers` (a supported collection, filled when the body is read to its
-end; decoded and acknowledged like the head, and rejected as malformed if it
-carries a pseudo-header, `Content-Length`, `Host`, or a connection-specific
-field). Octets the application has not asked for stay in the QUIC stream's
-receive buffer, so QUIC flow control (RFC 9000 §4) paces the peer; beyond what
+end; decoded and acknowledged like the head, and rejected as malformed under the
+rules HTTP/2 shares, see "Trailers on HTTP/2 and HTTP/3"). Octets the
+application has not asked for stay in the QUIC stream's receive buffer, so QUIC
+flow control (RFC 9000 §4) paces the peer; beyond what
 the application consumed, the server holds at most one read buffer of the
 stream's input pipe. Frame progress is kept in fields, so a read cancelled
 mid-frame resumes where it stopped; a read in flight is cancelled with the
@@ -2666,10 +2761,11 @@ rules:
 - **Content-Length** must be one or more identical non-negative decimal
   values (RFC 9110 §8.6); the body path then holds the DATA frames to it
   (RFC 9114 §4.1.2).
-- **Trailer sections** (`Http3HeaderCodec.AddTrailers`) carry no
-  pseudo-headers (RFC 9114 §4.3), follow the same field-name rules, and may
-  not carry `Content-Length` or `Host` (RFC 9110 §6.5.1; the HTTP/1.1 reader
-  rejects the same set).
+- **Trailer sections** (`Http3HeaderCodec.AddTrailers`, which delegates to
+  the `HttpTrailerFieldRules` HTTP/2 uses) carry no pseudo-headers
+  (RFC 9114 §4.3), follow the same field-name rules, and carry none of the
+  fields RFC 9110 §6.5.1 excludes from trailers, `Content-Length` and `Host`
+  among them (see "Trailers on HTTP/2 and HTTP/3").
 
 Every violation is a malformed message (RFC 9114 §4.1.2): the request stream
 is reset with `H3_MESSAGE_ERROR`, and the connection keeps serving.

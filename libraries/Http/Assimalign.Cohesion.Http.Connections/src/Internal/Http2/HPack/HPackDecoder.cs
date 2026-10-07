@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 
 using Assimalign.Cohesion.Http.Internal;
@@ -30,6 +31,32 @@ internal sealed class HPackDecoder
     public HPackDecodedHeaders DecodeRequestHeaders(ReadOnlySpan<byte> headerBlock)
     {
         HPackDecodedHeaders decodedHeaders = new();
+        DecodeFieldBlock(headerBlock, decodedHeaders.Add);
+        return decodedHeaders;
+    }
+
+    /// <summary>
+    /// Decodes a field block into its field lines, in wire order, without applying the request-head
+    /// rules <see cref="DecodeRequestHeaders"/> enforces as it goes. Used for a trailer section, and
+    /// for a block that is decoded only to keep the dynamic table in step: the caller judges the
+    /// fields once the whole block has been processed, so a field the caller rejects never leaves
+    /// part of the block undecoded.
+    /// </summary>
+    /// <param name="headerBlock">The complete field block (a HEADERS payload plus its CONTINUATION payloads).</param>
+    /// <returns>The decoded field lines.</returns>
+    /// <exception cref="HPackDecodingException">The block is not a valid HPACK encoding.</exception>
+    /// <exception cref="HPackHeaderListSizeExceededException">
+    /// The decoded list exceeds the advertised <c>SETTINGS_MAX_HEADER_LIST_SIZE</c>; the decode stops there.
+    /// </exception>
+    public List<(string Name, string Value)> DecodeFieldLines(ReadOnlySpan<byte> headerBlock)
+    {
+        List<(string Name, string Value)> fieldLines = new();
+        DecodeFieldBlock(headerBlock, (name, value) => fieldLines.Add((name, value)));
+        return fieldLines;
+    }
+
+    private void DecodeFieldBlock(ReadOnlySpan<byte> headerBlock, Action<string, string> addField)
+    {
         int index = 0;
 
         // RFC 9113 §10.5.1 — the header-list size is accounted per field section, so reset the
@@ -45,13 +72,13 @@ internal sealed class HPackDecoder
             {
                 int headerIndex = DecodeInteger(headerBlock, ref index, 7);
                 ref readonly HPackHeaderField headerField = ref GetHeaderField(headerIndex);
-                AccountAndAdd(decodedHeaders, ToAsciiString(headerField.Name), ToAsciiString(headerField.Value));
+                AccountAndAdd(addField, ToAsciiString(headerField.Name), ToAsciiString(headerField.Value));
                 continue;
             }
 
             if ((current & 0x40) != 0)
             {
-                DecodeLiteralHeaderField(headerBlock, ref index, 6, decodedHeaders, indexHeader: true);
+                DecodeLiteralHeaderField(headerBlock, ref index, 6, addField, indexHeader: true);
                 continue;
             }
 
@@ -62,13 +89,11 @@ internal sealed class HPackDecoder
                 continue;
             }
 
-            DecodeLiteralHeaderField(headerBlock, ref index, 4, decodedHeaders, indexHeader: false);
+            DecodeLiteralHeaderField(headerBlock, ref index, 4, addField, indexHeader: false);
         }
-
-        return decodedHeaders;
     }
 
-    private void DecodeLiteralHeaderField(ReadOnlySpan<byte> headerBlock, ref int index, int prefixLength, HPackDecodedHeaders decodedHeaders, bool indexHeader)
+    private void DecodeLiteralHeaderField(ReadOnlySpan<byte> headerBlock, ref int index, int prefixLength, Action<string, string> addField, bool indexHeader)
     {
         int nameIndex = DecodeInteger(headerBlock, ref index, prefixLength);
         string name;
@@ -96,7 +121,7 @@ internal sealed class HPackDecoder
         byte[] valueBytesBuffer = DecodeStringBytes(headerBlock, ref index);
         ReadOnlySpan<byte> valueBytes = valueBytesBuffer;
         string value = ToAsciiString(valueBytes);
-        AccountAndAdd(decodedHeaders, name, value);
+        AccountAndAdd(addField, name, value);
 
         if (!indexHeader)
         {
@@ -113,7 +138,7 @@ internal sealed class HPackDecoder
         }
     }
 
-    private void AccountAndAdd(HPackDecodedHeaders decodedHeaders, string name, string value)
+    private void AccountAndAdd(Action<string, string> addField, string name, string value)
     {
         // RFC 9113 §10.5.1 — bound the decoded header list by the advertised
         // SETTINGS_MAX_HEADER_LIST_SIZE. Accounting each field as name + value + 32 octets and
@@ -128,7 +153,7 @@ internal sealed class HPackDecoder
                 $"The decoded HTTP/2 header list exceeded the advertised SETTINGS_MAX_HEADER_LIST_SIZE of {_maxHeaderListSize} octets.");
         }
 
-        decodedHeaders.Add(name, value);
+        addField(name, value);
     }
 
     private ref readonly HPackHeaderField GetHeaderField(int index)

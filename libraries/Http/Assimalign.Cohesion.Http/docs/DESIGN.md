@@ -60,8 +60,9 @@ section be added to the core message model without breaking the many existing
 inherit the safe unsupported default. The abstract `HttpRequest` / `HttpResponse`
 bases override it with a concrete `HttpTrailerCollection` property (and explicit
 interface mapping), and the transports override *that* where they actually
-surface trailers — HTTP/1.1 attaches a supported, populated collection for a
-chunked request's parsed trailer section.
+surface trailers — HTTP/1.1 for a chunked request, HTTP/2 and HTTP/3 for every
+request, each attaching a supported collection it fills from the parsed trailer
+section once the body has been read to its end.
 
 ### Repeated fields, combining, and `Set-Cookie`
 
@@ -109,11 +110,11 @@ dictionaries. Fully AOT/trim safe.
 - **Trailer emission / per-version surfacing.** The core models the trailer
   collection; whether a given transport surfaces or emits it is the transport's
   concern, and `IsSupported` reports the truth per exchange. The HTTP/1.1
-  (chunked) and HTTP/3 (trailing HEADERS frame, #1066) transports surface
-  inbound request trailers today; HTTP/2 trailing-HEADERS surfacing and
-  HTTP/1.1 outbound chunked-trailer emission are wired incrementally by the
-  version transports — the model makes each a drop-in (`IsSupported = true` +
-  a populated `HttpTrailerCollection`).
+  (chunked), HTTP/2 (trailing HEADERS frame, #1314) and HTTP/3 (trailing
+  HEADERS frame, #1066) transports surface inbound request trailers; outbound
+  response-trailer emission is wired by the version transports — the model
+  makes each a drop-in (`IsSupported = true` + a populated
+  `HttpTrailerCollection`).
 - **Per-field parsers.** `HttpFieldRules` classifies field *names*; it does not
   parse field *values* (dates, cache-control directives, etc.). Value parsing
   belongs to the field-specific consumer, and the shared toolkit those consumers

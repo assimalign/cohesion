@@ -202,52 +202,18 @@ internal static class Http3HeaderCodec
 
     /// <summary>
     /// Validates a decoded request trailer section (RFC 9114 §4.1) and adds its fields to
-    /// <paramref name="trailers"/>. A trailer section carries no pseudo-header fields
-    /// (RFC 9114 §4.3), follows the same field-name rules as a header section (RFC 9114 §4.2),
-    /// and may not carry the fields that frame or route a message — <c>Content-Length</c> and
-    /// <c>Host</c> — which a trailer could otherwise use to contradict the head it follows
-    /// (RFC 9110 §6.5.1; the HTTP/1.1 reader rejects the same set).
+    /// <paramref name="trailers"/>. The rules are the ones HTTP/2 applies
+    /// (<see cref="HttpTrailerFieldRules.AddReceivedFields"/>): no pseudo-header field (RFC 9114 §4.3),
+    /// the header section's field-name rules (RFC 9114 §4.2), and none of the fields RFC 9110 §6.5.1
+    /// excludes from trailers, among them the <c>Content-Length</c> and <c>Host</c> a trailer could
+    /// otherwise use to contradict the head it follows.
     /// </summary>
     /// <param name="fields">The decoded name/value field lines, in wire order.</param>
     /// <param name="trailers">The request's trailer collection.</param>
     /// <exception cref="InvalidDataException">Thrown when the trailer section violates an HTTP/3 message rule.</exception>
     public static void AddTrailers(List<(string Name, string Value)> fields, HttpTrailerCollection trailers)
     {
-        foreach ((string name, string value) in fields)
-        {
-            if (name.Length == 0)
-            {
-                throw new InvalidDataException("HTTP/3 trailer section contains a zero-length field name.");
-            }
-
-            if (name[0] == ':')
-            {
-                throw new InvalidDataException($"HTTP/3 trailer section contains the pseudo-header field '{name}' (RFC 9114 §4.3).");
-            }
-
-            if (!IsLowercaseFieldName(name))
-            {
-                throw new InvalidDataException($"HTTP/3 trailer field name '{name}' must be lowercase (RFC 9114 §4.2).");
-            }
-
-            HttpHeaderKey key = new(name);
-
-            if (HttpFieldNormalization.IsForbiddenInHttp2Or3(key)
-                || key.Equals(HttpHeaderKey.ContentLength)
-                || key.Equals(HttpHeaderKey.Host))
-            {
-                throw new InvalidDataException($"HTTP/3 trailer field '{name}' is not permitted in a trailer section (RFC 9114 §4.2, RFC 9110 §6.5.1).");
-            }
-
-            if (trailers.TryGetValue(key, out HttpHeaderValue existingValue))
-            {
-                trailers[key] = HttpFieldNormalization.CombineFieldValue(key, existingValue, value);
-            }
-            else
-            {
-                trailers[key] = value;
-            }
-        }
+        HttpTrailerFieldRules.AddReceivedFields(fields, trailers, "HTTP/3");
     }
 
     /// <summary>
