@@ -20,9 +20,10 @@
         exact publish and run commands. On LongPathsEnabled=0 machines publish from a short path:
         ILC intermediate paths are long.
 
-        WebSockets (#765): a permessage-deflate echo over the default HTTP/1.1 upgrade and over an
-        HTTP/2 extended CONNECT (a second, prior-knowledge HTTP/2 endpoint in smoke mode), behind the
-        UseWebSockets origin policy, which also refuses a cross-site handshake.
+        WebSockets (#765, #1336): one MapWebSocket endpoint serves a permessage-deflate echo over the
+        default HTTP/1.1 upgrade and over an HTTP/2 extended CONNECT (a second, prior-knowledge HTTP/2
+        endpoint in smoke mode) and answers a plain GET with 400, behind the UseWebSockets origin
+        policy, which also refuses a cross-site handshake.
     -->
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>

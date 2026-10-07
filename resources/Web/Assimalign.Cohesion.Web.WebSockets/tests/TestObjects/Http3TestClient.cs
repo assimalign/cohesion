@@ -47,10 +47,12 @@ internal sealed class Http3TestClient : IAsyncDisposable
     /// </summary>
     /// <param name="headers">The request's regular fields, such as <c>sec-websocket-version</c>.</param>
     /// <param name="cancellationToken">A token that cancels the exchange.</param>
+    /// <param name="path">The request's <c>:path</c>.</param>
     /// <returns>The request stream, positioned after the response head, and the head's field lines.</returns>
     public async Task<(Http3RequestStream Stream, Http3ResponseHead Head)> ConnectWebSocketAsync(
         IEnumerable<(string Name, string Value)> headers,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string path = "/ws")
     {
         Connection connection = await _connection.OpenStreamAsync(ConnectionDirection.Bidirectional, cancellationToken);
         List<(string Name, string Value)> fields = new()
@@ -59,7 +61,7 @@ internal sealed class Http3TestClient : IAsyncDisposable
             (":protocol", "websocket"),
             (":scheme", "https"),
             (":authority", "localhost"),
-            (":path", "/ws"),
+            (":path", path),
         };
         fields.AddRange(headers);
 

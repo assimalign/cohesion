@@ -10,7 +10,8 @@ namespace Assimalign.Cohesion.Web.WebSockets;
 /// <remarks>
 /// <para>
 /// The handshake and the framing are <c>Assimalign.Cohesion.Http.WebSockets</c>'s: an endpoint
-/// reads <c>context.WebSockets</c> and accepts the socket. <c>UseWebSockets</c> adds the policy an
+/// mapped with <c>MapWebSocket</c> (<see cref="WebSocketEndpointExtensions"/>), or one that reads
+/// <c>context.WebSockets</c>, accepts the socket. <c>UseWebSockets</c> adds the policy an
 /// application that serves browsers needs around that accept, and every accept downstream of it
 /// takes the policy whether or not it was written for it.
 /// </para>

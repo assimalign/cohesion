@@ -427,6 +427,12 @@ internal static class GuardSmoke
                 && socket.CloseStatus == WebSocketCloseStatus.NormalClosure;
         });
 
+        failures += await CheckAsync("a WebSocket endpoint answers a plain GET with 400 without running its handler", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("/ws/echo", cancellationToken);
+            return response.StatusCode == HttpStatusCode.BadRequest;
+        });
+
         failures += await CheckAsync("the WebSocket origin policy refuses a cross-site handshake with 403", async () =>
         {
             using var socket = new ClientWebSocket();

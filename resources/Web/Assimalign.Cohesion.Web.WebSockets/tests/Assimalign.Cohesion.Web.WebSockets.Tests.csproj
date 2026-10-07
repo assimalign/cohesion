@@ -6,6 +6,10 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.WebSockets" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<!-- Test-only: a route group's authorization policy guards a MapWebSocket endpoint. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />

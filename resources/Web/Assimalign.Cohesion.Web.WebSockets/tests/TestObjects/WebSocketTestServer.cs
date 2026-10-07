@@ -12,9 +12,9 @@ using Assimalign.Cohesion.Web.Hosting;
 namespace Assimalign.Cohesion.Web.WebSockets.Tests.TestObjects;
 
 /// <summary>
-/// The protocol a <see cref="WebSocketTestServer"/> serves.
+/// The protocol a <see cref="WebSocketTestServer"/> serves. Public, so theory methods can take it.
 /// </summary>
-internal enum WebSocketTestProtocol
+public enum WebSocketTestProtocol
 {
     /// <summary>HTTP/1.1 over loopback TCP: the RFC 6455 upgrade.</summary>
     Http1,
@@ -70,10 +70,31 @@ internal sealed class WebSocketTestServer : IAsyncDisposable
         return StartAsync(WebSocketTestProtocol.Http1, configure, handler, cancellationToken);
     }
 
-    public static async Task<WebSocketTestServer> StartAsync(
+    public static Task<WebSocketTestServer> StartAsync(
         WebSocketTestProtocol protocol,
         Action<WebSocketOptions>? configure,
         Func<IHttpContext, Task> handler,
+        CancellationToken cancellationToken)
+    {
+        return StartAsync(
+            protocol,
+            builder => { },
+            application =>
+            {
+                application.UseWebSockets(configure);
+                application.Use((context, next) => handler(context));
+            },
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts a server whose builder and pipeline the test composes, for routed endpoints and the
+    /// policies around them.
+    /// </summary>
+    public static async Task<WebSocketTestServer> StartAsync(
+        WebSocketTestProtocol protocol,
+        Action<WebApplicationBuilder> build,
+        Action<WebApplication> compose,
         CancellationToken cancellationToken)
     {
         TcpConnectionListener? tcpListener = null;
@@ -106,9 +127,9 @@ internal sealed class WebSocketTestServer : IAsyncDisposable
             });
         }
 
+        build(builder);
         WebApplication application = builder.Build();
-        application.UseWebSockets(configure);
-        application.Use((context, next) => handler(context));
+        compose(application);
 
         await ((IWebApplication)application).StartAsync(cancellationToken);
 

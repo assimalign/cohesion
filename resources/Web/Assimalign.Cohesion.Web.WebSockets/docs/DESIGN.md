@@ -26,6 +26,10 @@ Unlike ASP.NET Core's `UseWebSockets`, the middleware is not what makes `context
 the protocol package does that on its own. The middleware adds the policy, and every accept
 downstream of it takes the policy, whether or not it was written with the policy in mind.
 
+The package also maps socket endpoints: `MapWebSocket` serves one handler for the HTTP/1.1 upgrade
+and the HTTP/2 and HTTP/3 extended CONNECT, and applies the policy even when the middleware is
+absent (see "Mapping a socket endpoint").
+
 ## The request flow
 
 An arrow reads "goes to"; the middleware decides on the handshake status the protocol package
@@ -165,9 +169,60 @@ three protocols: the BCL client over loopback TCP for HTTP/1.1 and prior-knowled
 minimal HTTP/3 client over the in-memory multiplexed driver, since the BCL client has no HTTP/3
 WebSockets.
 
-Routing is the one thing an application changes for HTTP/2 and HTTP/3: the handshake's method is
-`CONNECT`, so a WebSocket route mapped for `GET` only does not match it, the same as in ASP.NET
-Core. Map the endpoint for `CONNECT` as well.
+Routing is the one thing that differs by protocol: the handshake's method is `GET` on HTTP/1.1 and
+`CONNECT` on HTTP/2 and HTTP/3, so a WebSocket route mapped for `GET` only does not match the
+latter. `MapWebSocket` (below) removes the difference.
+
+## Mapping a socket endpoint
+
+`MapWebSocket(pattern, handler)` maps one route for both handshake methods, `GET` and `CONNECT`, on
+the application (through the router `AddRouting` registered) or on a route group, and returns the
+route's builder. #1336 exists because the `MapGet` alternative fails only in production: a local
+test over `http://localhost` speaks HTTP/1.1 and passes, while every browser behind `UseHttps`
+negotiates HTTP/2 through ALPN, opens the socket with RFC 8441, and gets the router's `405`. ASP.NET
+Core documents the same pitfall; a verb that owns both methods removes it.
+
+```mermaid
+flowchart TD
+    Request["Request matching the route (GET or CONNECT)"] --> Status{"context.WebSockets.HandshakeStatus"}
+    Status -->|"None: a plain GET or HEAD, a classic CONNECT"| Bad["400 Bad Request; the handler never runs"]
+    Status -->|"handshake"| Guarded{"UseWebSockets ran?"}
+    Guarded -->|"yes: its decorator is installed"| Accept["accept with the endpoint's options"]
+    Guarded -->|"no"| Default["the default policy: 400/426, origin 403, then the decorator"]
+    Default --> Accept
+    Accept --> Handler["handler(context, socket); the socket is disposed when it returns"]
+```
+
+The decisions:
+
+- **The handler receives the accepted socket**, `Func<IHttpContext, WebSocket, Task>`. Accepting
+  is the endpoint's whole reason to exist, so the verb does it and the handler only drives the
+  socket; the context is still there for route values, the user and `RequestCancelled`. An overload
+  takes `Func<IHttpContext, HttpWebSocketAcceptOptions?>`, called after the handshake is validated
+  and before the accept, so the accept options (a subprotocol among
+  `context.WebSockets.RequestedProtocols`, compression, keep-alive) are chosen per handshake. A
+  value it leaves `null` takes the policy's default, as for any accept.
+- **The socket is disposed when the handler returns.** The handler completes the close handshake;
+  one that returns early aborts the socket, and the exchange ends with it.
+- **A request that is not a handshake gets `400`, never the handler.** The route exists, so `404`
+  would hide it; the route does take `GET`, so `405` would contradict its own `Allow`. RFC 6455
+  §4.2.1 answers a request that does not match the handshake with `400`, and so does every protocol
+  here, where `426` could name the WebSocket protocol only on HTTP/1.1 (HTTP/2 and HTTP/3 prohibit
+  `Upgrade`). A method other than `GET`, `HEAD` or `CONNECT` gets the router's `405` with
+  `Allow: GET, CONNECT, HEAD`. A page and a socket therefore cannot share a URL through this verb;
+  serve the page at another path, or write one handler that branches on
+  `context.WebSockets.IsWebSocketRequest`.
+- **The policy always applies.** When `UseWebSockets` ran, it refused a malformed or cross-site
+  handshake before the endpoint and installed its decorator. Otherwise the endpoint applies the
+  default policy itself, the one `UseWebSockets()` with default options applies, so an application
+  that forgot the middleware still refuses a cross-site handshake. Configure origins, keep-alive or
+  compression with `UseWebSockets`.
+- **Policies attach where the endpoint is mapped.** The route builder takes metadata like any
+  route's: `RequireAuthorization` on the endpoint or its group refuses an anonymous handshake with
+  the scheme's `401` before the handler runs, on every protocol. A socket outlives any request
+  timeout, so `DisableRequestTimeout()` belongs on socket endpoints under a timeout policy.
+- **No source generator.** The verb takes typed delegates, not `Delegate`, so the Web endpoint
+  generator neither intercepts it nor needs to; it is AOT-safe as written.
 
 ## Ordering
 
@@ -182,16 +237,17 @@ does any request, so disable the timeout on WebSocket endpoints (`DisableRequest
 ## Dependency rule
 
 A Web feature library: it references the Web root (for `IWebApplicationPipelineBuilder` and
-`IWebServerDrainFeature`), `Http`, `Http.WebSockets` and `Http.Forwarded`, and nothing in the hosting
-family (COHRES001, COHRES004). The drain signal crosses from `Web.Hosting` through the Web root's
+`IWebServerDrainFeature`), `Web.Routing` (the router builder and route groups `MapWebSocket` maps
+into, a feature-to-feature reference the area allows), `Http`, `Http.WebSockets` and
+`Http.Forwarded`, and nothing in the hosting family (COHRES001, COHRES004). The drain signal crosses from `Web.Hosting` through the Web root's
 feature contract, which is how the policy reaches the server's lifecycle without referencing it.
 
 ## AOT posture
 
 No reflection and no runtime code generation: span parsing for origins, delegate composition for
-the middleware, and a `WebSocket` subclass that forwards to the BCL socket. The Web NativeAOT guard
-publishes the middleware and runs a WebSocket echo over HTTP/1.1 and over HTTP/2, and a refused
-cross-site handshake.
+the middleware and the endpoint, and a `WebSocket` subclass that forwards to the BCL socket. The Web
+NativeAOT guard publishes the middleware and a `MapWebSocket` endpoint, and runs its echo over
+HTTP/1.1 and over HTTP/2, its `400` for a plain `GET`, and a refused cross-site handshake.
 
 ## Non-goals
 

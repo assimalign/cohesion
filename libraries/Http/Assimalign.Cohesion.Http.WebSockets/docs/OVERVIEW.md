@@ -21,24 +21,18 @@ The surface is the same on every protocol; an endpoint does not branch on the ve
 
 ## Usage
 
-On a Web application the host registers the protocol-upgrade interceptor, and `UseWebSockets`
-(`Assimalign.Cohesion.Web.WebSockets`) adds the origin policy. An endpoint then accepts:
+On a Web application, map the endpoint with `MapWebSocket` (`Assimalign.Cohesion.Web.WebSockets`).
+It routes both handshake methods, `GET` on HTTP/1.1 and `CONNECT` on HTTP/2 and HTTP/3, refuses a
+request that is not a handshake, applies the origin policy, and accepts; the handler drives the
+socket. The host registers the protocol-upgrade interceptor.
 
 ```csharp
 using System.Net.WebSockets;
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.WebSockets;
 
-app.MapGet("/chat", async (IHttpContext context) =>
+app.MapWebSocket("/chat", async (IHttpContext context, WebSocket socket) =>
 {
-    IHttpWebSocketFeature webSockets = context.WebSockets;
-    if (!webSockets.IsWebSocketRequest)
-    {
-        context.Response.StatusCode = HttpStatusCode.BadRequest;
-        return;
-    }
-
-    using WebSocket socket = await webSockets.AcceptWebSocketAsync(cancellationToken: context.RequestCancelled);
-
     byte[] buffer = new byte[4096];
     WebSocketReceiveResult result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), context.RequestCancelled);
     while (result.MessageType != WebSocketMessageType.Close)
@@ -51,11 +45,24 @@ app.MapGet("/chat", async (IHttpContext context) =>
 });
 ```
 
-The endpoint keeps running for as long as the socket is open; the server ends the connection
-(HTTP/1.1) or the stream (HTTP/2, HTTP/3) when the exchange completes. To select a subprotocol, pick
-one of `webSockets.RequestedProtocols` (the client's offer, in its order of preference) and pass it
-as `HttpWebSocketAcceptOptions.SubProtocol`. Over HTTP/2 and HTTP/3 the handshake's method is
-`CONNECT`, so a route mapped for `GET` only does not match it; map the endpoint for `CONNECT` too.
+Code that serves the exchange itself uses this package's surface directly:
+
+```csharp
+IHttpWebSocketFeature webSockets = context.WebSockets;
+if (!webSockets.IsWebSocketRequest)
+{
+    context.Response.StatusCode = HttpStatusCode.BadRequest;
+    return;
+}
+
+using WebSocket socket = await webSockets.AcceptWebSocketAsync(cancellationToken: context.RequestCancelled);
+```
+
+It must be reached by both handshake methods, which a `MapGet` route is not: over HTTP/2 and HTTP/3
+the handshake is a `CONNECT`. The exchange keeps running for as long as the socket is open; the
+server ends the connection (HTTP/1.1) or the stream (HTTP/2, HTTP/3) when the exchange completes. To
+select a subprotocol, pick one of `webSockets.RequestedProtocols` (the client's offer, in its order
+of preference) and pass it as `HttpWebSocketAcceptOptions.SubProtocol`.
 
 On a bare HTTP/1.1 listener, register the protocol-upgrade interceptor yourself, and check `Origin`
 before accepting a socket that serves browsers. HTTP/2 and HTTP/3 listeners need nothing registered:

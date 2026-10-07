@@ -213,12 +213,15 @@ application.MapPost("/upload", async (IHttpFormFile file, IHttpContext context) 
     await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"{file.FileName}:{file.Length}"), context.RequestCancelled);
 }).DisableAntiforgery();
 
-// A WebSocket echo (#765): over the HTTP/1.1 upgrade the default server installs, and over the HTTP/2
-// extended CONNECT (RFC 8441), whose handshake is a CONNECT, so the endpoint is mapped for both methods.
-// permessage-deflate is accepted when the client offers it, so the guard exercises zlib under NativeAOT
-// too. The socket outlives any request timeout, so the endpoint disables it.
-application.MapGet("/ws/echo", (IHttpContext context) => EchoWebSocketAsync(context)).DisableRequestTimeout();
-application.Map(HttpMethod.Connect, "/ws/echo", (IHttpContext context) => EchoWebSocketAsync(context)).DisableRequestTimeout();
+// A WebSocket echo (#765, #1336): MapWebSocket serves the HTTP/1.1 upgrade the default server installs
+// and the HTTP/2 extended CONNECT (RFC 8441) from one endpoint. permessage-deflate is accepted when the
+// client offers it, so the guard exercises zlib under NativeAOT too. The socket outlives any request
+// timeout, so the endpoint disables it.
+application.MapWebSocket(
+        "/ws/echo",
+        EchoWebSocketAsync,
+        static _ => new HttpWebSocketAcceptOptions { DangerousEnableCompression = true })
+    .DisableRequestTimeout();
 
 // The OpenAPI document (#152): built once from the typed endpoints' metadata and the source-generated
 // JSON contracts, then served with an ETag.
@@ -245,19 +248,8 @@ finally
     await web.StopAsync(CancellationToken.None);
 }
 
-static async Task EchoWebSocketAsync(IHttpContext context)
+static async Task EchoWebSocketAsync(IHttpContext context, WebSocket socket)
 {
-    IHttpWebSocketFeature webSockets = context.WebSockets;
-    if (!webSockets.IsWebSocketRequest)
-    {
-        context.Response.StatusCode = HttpStatusCode.BadRequest;
-        return;
-    }
-
-    using WebSocket socket = await webSockets.AcceptWebSocketAsync(
-        new HttpWebSocketAcceptOptions { DangerousEnableCompression = true },
-        context.RequestCancelled);
-
     byte[] buffer = new byte[4096];
     WebSocketReceiveResult result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), context.RequestCancelled);
     while (result.MessageType != WebSocketMessageType.Close)

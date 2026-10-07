@@ -34,7 +34,9 @@ namespace Assimalign.Cohesion.Http;
 /// <c>websocket</c> (RFC 8441, RFC 9220), which the transport surfaces as
 /// <see cref="IHttpExtendedConnectFeature"/> with nothing to register. The same calls serve every
 /// protocol; only the response differs: <c>101</c> with <c>Sec-WebSocket-Accept</c> on HTTP/1.1,
-/// <c>200</c> with no accept value on HTTP/2 and HTTP/3.
+/// <c>200</c> with no accept value on HTTP/2 and HTTP/3. The request method differs too, <c>GET</c>
+/// against <c>CONNECT</c>, so code that routes on it must take both; on a Web application,
+/// <c>MapWebSocket</c> (<c>Assimalign.Cohesion.Web.WebSockets</c>) maps an endpoint that does.
 /// </para>
 /// <para>
 /// The exchange must keep running for as long as the socket is open: when the exchange completes,
