@@ -19,6 +19,9 @@
         every feature over real HTTP; the process exit code is the verdict. See the job for the
         exact publish and run commands. On LongPathsEnabled=0 machines publish from a short path:
         ILC intermediate paths are long.
+
+        WebSockets (#765): a permessage-deflate echo over the default HTTP/1.1 upgrade, behind the
+        UseWebSockets origin policy, which also refuses a cross-site handshake.
     -->
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
@@ -48,6 +51,7 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.StaticFiles" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Validation" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.WebSockets" />
     <CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />
   </ItemGroup>
   <ItemGroup>

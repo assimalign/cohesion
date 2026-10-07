@@ -825,6 +825,17 @@
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/Assimalign.Cohesion.Http.ProtocolUpgrade.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.WebSockets/" />
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.WebSockets/docs/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.WebSockets/docs/DESIGN.md" />
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.WebSockets/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.WebSockets/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.WebSockets/src/Assimalign.Cohesion.Http.WebSockets.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.WebSockets/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.WebSockets/tests/Assimalign.Cohesion.Http.WebSockets.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.RequestLimits/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.RequestLimits/README.md" />
 	</Folder>
@@ -2675,6 +2686,17 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Validation/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Validation/tests/Assimalign.Cohesion.Web.Validation.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.WebSockets/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.WebSockets/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.WebSockets/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.WebSockets/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.WebSockets/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.WebSockets/src/Assimalign.Cohesion.Web.WebSockets.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.WebSockets/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.WebSockets/tests/Assimalign.Cohesion.Web.WebSockets.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/sdks/">
 		<File Path="sdks/Directory.Build.props" />

@@ -62,7 +62,8 @@ jobs:
             'Assimalign.Cohesion.Web.Sessions',
             'Assimalign.Cohesion.Web.StaticFiles',
             'Assimalign.Cohesion.Web.Testing',
-            'Assimalign.Cohesion.Web.Validation'
+            'Assimalign.Cohesion.Web.Validation',
+            'Assimalign.Cohesion.Web.WebSockets'
         ]
     steps:
       - uses: actions/checkout@v4
@@ -99,6 +100,7 @@ jobs:
   # diagnostics and ILC's per-assembly summaries (IL2104/IL3053) to errors, so a trim or AOT warning in
   # any Web library it reaches fails the publish; the smoke run then exercises every feature over real
   # HTTP and fails the job on the first failed check.
+  # WebSockets (#765): a permessage-deflate echo behind the UseWebSockets origin policy.
   aot-guard:
     name: "Web NativeAOT guard [ubuntu-latest]"
     runs-on: ubuntu-latest

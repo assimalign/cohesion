@@ -211,17 +211,21 @@ public sealed class WebApplicationServerBuilder
     }
 
     /// <summary>
-    /// Installs the web host's default request-parse interceptors. Runs before any user
-    /// configuration so the defaults occupy the front of the interceptor order: the
-    /// max-request-body-size interceptor is registered first, guaranteeing every request
-    /// carries the typed <c>IHttpMaxRequestBodySizeFeature</c> and that user-registered
-    /// interceptors' <c>AfterRequestHead</c> hooks can observe it (all three protocol versions
-    /// run the request-parse seam). User configurations may still inspect or clear
-    /// <see cref="HttpConnectionListenerOptions.Interceptors"/> to opt out.
+    /// Installs the web host's default interceptors. Runs before any user configuration so the
+    /// defaults occupy the front of the interceptor order: the max-request-body-size interceptor
+    /// is registered first, guaranteeing every request carries the typed
+    /// <c>IHttpMaxRequestBodySizeFeature</c> and that user-registered interceptors'
+    /// <c>AfterRequestHead</c> hooks can observe it (all three protocol versions run the
+    /// request-parse seam). The HTTP/1.1 protocol-upgrade interceptor follows, so
+    /// <c>context.Upgrade</c>, and with it a WebSocket handshake, is available on every HTTP/1.1
+    /// listener; a request that no application accepts is served exactly as before. User
+    /// configurations may still inspect or clear <see cref="HttpConnectionListenerOptions.Interceptors"/>
+    /// to opt out.
     /// </summary>
     /// <param name="options">The listener options being composed.</param>
     internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
     {
         options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
+        options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
     }
 }

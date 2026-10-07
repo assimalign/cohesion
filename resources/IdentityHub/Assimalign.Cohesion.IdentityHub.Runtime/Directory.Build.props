@@ -28,7 +28,9 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.SecurityHeaders" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Cookies" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Forms" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Streaming" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

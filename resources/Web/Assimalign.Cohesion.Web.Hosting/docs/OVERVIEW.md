@@ -22,6 +22,11 @@ its own failures — a listener that cannot bind, a connection fault, a drain th
 short — through `builder.Logging`, never with request content. Disposing the application
 disposes the service provider and every factory-created service.
 
+Every listener the default server composes gets two interceptors before any of the application's
+own: the request-size limit, and the HTTP/1.1 protocol upgrade, so `context.Upgrade` and a WebSocket
+handshake (`context.WebSockets`) work without listener configuration. A request no handler accepts
+is served as before.
+
 ## Telemetry
 
 The default server traces and measures every request (#1064). Subscribe by name:

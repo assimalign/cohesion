@@ -829,7 +829,14 @@ and a raw prior-knowledge HTTP/2 client sees `GOAWAY(NO_ERROR)` naming its open 
 as the last processed while that stream is still running, then the stream's full
 response. An exchange in flight sees its `IWebServerDrainFeature` fire when the stop begins,
 while its `RequestCancelled` does not, and its response is still delivered. The per-version
-announcements are pinned in the transport's own suite (`HttpConnectionGracefulCloseTests`).
+announcements are pinned in the transport's own suite (`HttpConnectionGracefulCloseTests`). The
+WebSocket close it enables (`1001` before the budget runs out) is pinned end to end in
+`Web.WebSockets`' suite.
+
+The default protocol-upgrade interceptor is pinned by `WebApplicationServerDefaultsTests` (slot 1,
+by behavior) and by `WebApplicationProtocolUpgradeTests` over a real loopback connection: an
+upgrade nobody accepts is served as an ordinary `200`, and an accepted one answers `101` and hands
+the handler the raw connection.
 
 The diagnostics (#147) are pinned by `WebApplicationServerDiagnosticsTests`, which records the
 entries through a real `LoggerFactoryBuilder`: a bind failure (`Critical`, with its cause), an
@@ -1106,15 +1113,35 @@ No reflection, no codegen, no dynamic activation. The binder is straight-line
 registration verbs, and certificate files load through the BCL's
 `X509Certificate2.CreateFromPemFile` / `X509CertificateLoader` APIs.
 
-## Default request-parse interceptors
+## Default interceptors
 
 ### What it is
 
 When the web host composes the `HttpConnectionListener`, it installs the
-default request-parse interceptors **before** any user `UseServer`
+default interceptors **before** any user `UseServer`
 configuration runs (`WebApplicationServerBuilder.ApplyDefaultInterceptors`).
-Today that is one interceptor: `Http.RequestLimits`'
-max-request-body-size interceptor, which occupies slot 0 of the interceptor
+There are two, in this order:
+
+1. `Http.RequestLimits`' max-request-body-size interceptor (request scope), in slot 0, described
+   below.
+2. `Http.ProtocolUpgrade`'s interceptor (decision 16,
+   [Http ADR 1](../../../../docs/libraries/Http/DECISIONS.md#adr-1-server-websockets)). It surfaces an
+   HTTP/1.1 upgrade or `CONNECT` as `context.Upgrade`, so a WebSocket handshake
+   (`context.WebSockets`, `Http.WebSockets`) works on every HTTP/1.1 listener with no listener
+   configuration. Nothing changes for a request no application accepts: it is served exactly as
+   before, and the upgrade is ignored (RFC 9110 §7.8). `Web.Hosting` references
+   `Http.ProtocolUpgrade` for this, a reference outside the Web area (COHRES002 is about same-area
+   references).
+
+The upgrade interceptor participates in the response phase (it needs the exchange control's
+takeover), and a response-scoped interceptor is what makes a transport build the per-exchange
+response sink and exchange control. With it installed, every exchange, on every protocol version,
+pays for those two small objects and the hook calls, where before the default composition was on
+the transports' zero-interceptor fast path. That is the price decision 16 accepted for default-on
+WebSockets; an application that wants the fast path back removes the interceptor in its own
+`UseServer` callback.
+
+The max-request-body-size interceptor occupies slot 0 of the interceptor
 order so every request carries the typed `IHttpMaxRequestBodySizeFeature` and
 user-registered interceptors' `AfterRequestHead` hooks can observe it. As of #819 the seam is
 invoked on **all three** parse paths — HTTP/1.1, HTTP/2, and HTTP/3 — so the
@@ -1128,8 +1155,9 @@ the transport-wide default is `HttpConnectionListenerLimits.MaxRequestBodySize`.
 
 The transport itself stays lean — with zero interceptors it allocates no
 per-request interception state at all — so the "every request always has the
-typed feature" guarantee is a *hosting* policy, not a transport one. It lives
-here because this is the composition root: apps that want a leaner pipeline can
+typed feature" and "a WebSocket handshake just works" guarantees are *hosting*
+policy, not transport policy. They live here because this is the composition root:
+apps that want a leaner pipeline can
 inspect or clear `HttpConnectionListenerOptions.Interceptors` in their own
 `UseServer` callback (user configurations run after the defaults), which keeps
 the default overridable without a dedicated opt-out knob.
@@ -1138,7 +1166,10 @@ the default overridable without a dedicated opt-out knob.
 
 No other interceptor ships by default. Parse-time features under design
 (digest fields, request decompression) register through the same seam when
-their packages land, but each is an explicit opt-in.
+their packages land, but each is an explicit opt-in. The WebSocket policy
+(origins, keep-alive defaults, the drain close) is not an interceptor: it is
+`UseWebSockets`, a middleware in `Web.WebSockets`, which this module does not
+reference (COHRES002).
 
 ## TLS convenience surface
 

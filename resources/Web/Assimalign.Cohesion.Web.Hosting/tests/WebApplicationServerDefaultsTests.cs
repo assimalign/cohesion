@@ -127,7 +127,7 @@ public class WebApplicationServerDefaultsTests
 
         WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
 
-        options.Interceptors.Count.ShouldBe(1);
+        options.Interceptors.Count.ShouldBe(2);
 
         // Prove slot 0 is the RequestLimits interceptor by behavior: its head hook attaches the
         // typed feature as a write-through view over the context knob.
@@ -149,6 +149,64 @@ public class WebApplicationServerDefaultsTests
         IHttpMaxRequestBodySizeFeature? feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
         feature.ShouldNotBeNull();
         feature!.MaxRequestBodySize.ShouldBe(2048);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server defaults: Should install the HTTP/1.1 protocol-upgrade interceptor after request limits")]
+    public void ApplyDefaultInterceptors_ShouldInstallProtocolUpgradeSecond()
+    {
+        // Decision 16 (Http ADR 1): the upgrade interceptor is on by default, so a WebSocket
+        // handshake reaches context.Upgrade without any listener configuration.
+        HttpConnectionListenerOptions options = new();
+        WebApplicationServerBuilder.ApplyDefaultInterceptors(options);
+
+        HttpHeaderCollection requestHeaders = new();
+        requestHeaders[HttpHeaderKey.Connection] = "Upgrade";
+        requestHeaders[HttpHeaderKey.Upgrade] = "websocket";
+        HttpFeatureCollection features = new();
+
+        // Prove slot 1 is the upgrade interceptor by behavior: its head hook records the upgrade
+        // signal and its response hook installs the feature context.Upgrade reads.
+        options.Interceptors[1].AfterRequestHead(new HttpExchangeInterceptorRequestContext
+        {
+            Version = HttpVersion.Http11,
+            Method = HttpMethod.Get,
+            Path = new HttpPath("/socket"),
+            Scheme = HttpScheme.Http,
+            Host = new HttpHost("api.test"),
+            Headers = requestHeaders.AsReadOnly(),
+            Features = features,
+            ConnectionInfo = HttpConnectionInfo.Empty,
+            MaxRequestBodySize = null,
+        });
+        options.Interceptors[1].BeforeResponse(new HttpExchangeInterceptorResponseContext
+        {
+            Version = HttpVersion.Http11,
+            Headers = new HttpHeaderCollection(),
+            Features = features,
+            ConnectionInfo = HttpConnectionInfo.Empty,
+            ResponseBody = System.IO.Stream.Null,
+            Control = new TakeoverOnlyControl(),
+        });
+
+        IHttpProtocolUpgrade? upgrade = features.Get<IHttpProtocolUpgradeFeature>()?.Upgrade;
+        upgrade.ShouldNotBeNull();
+        upgrade!.Kind.ShouldBe(HttpProtocolUpgradeKind.Upgrade);
+        upgrade.Protocol.ShouldBe("websocket");
+    }
+
+    /// <summary>An exchange control whose only capability is a takeover that was never exercised.</summary>
+    private sealed class TakeoverOnlyControl : IHttpExchangeControl
+    {
+        public bool HasResponseStarted => false;
+
+        public bool CanWriteInterimResponse => false;
+
+        public ValueTask WriteInterimResponseAsync(Assimalign.Cohesion.Http.HttpStatusCode statusCode, IHttpHeaderCollection? headers = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public bool CanTakeOver => true;
+
+        public System.IO.Stream TakeOver() => throw new NotSupportedException();
     }
 
     private sealed class TrackingApplicationServer : IWebApplicationServer, IHostService

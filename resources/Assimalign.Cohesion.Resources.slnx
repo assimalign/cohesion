@@ -1503,6 +1503,17 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Validation/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Validation/tests/Assimalign.Cohesion.Web.Validation.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.WebSockets/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.WebSockets/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.WebSockets/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.WebSockets/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.WebSockets/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.WebSockets/src/Assimalign.Cohesion.Web.WebSockets.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.WebSockets/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.WebSockets/tests/Assimalign.Cohesion.Web.WebSockets.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/refs/" >
 		<Project Path="../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />

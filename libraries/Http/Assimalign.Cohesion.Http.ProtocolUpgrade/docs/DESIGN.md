@@ -6,8 +6,9 @@ Model the HTTP/1.1 *connection transition* mechanisms — an RFC 9110 §7.8 prot
 **upgrade** (`Connection: upgrade` + `Upgrade`, answered with `101 Switching Protocols`) and an
 RFC 9110 §9.3.6 **CONNECT** tunnel (answered with `200 OK`) — as an explicit, opt-in capability
 on `IHttpContext`. An application detects the transition through `context.Upgrade`, accepts it,
-and receives the raw duplex transport stream to drive the negotiated protocol (for example the
-WebSocket handshake, #765) or the tunnel.
+and receives the raw duplex transport stream to drive the negotiated protocol or the tunnel. The
+WebSocket handshake of `Assimalign.Cohesion.Http.WebSockets` is the main consumer: it accepts the
+upgrade and hands the stream to the BCL's RFC 6455 framing.
 
 This is the HTTP/1.1 counterpart to the sibling `Assimalign.Cohesion.Http.ExtendedConnect`
 package, which models the HTTP/2 / HTTP/3 extended-CONNECT (`:protocol`) bootstrap. HTTP/2 and
@@ -47,7 +48,11 @@ the whole capability by registering the pair:
 options.Interceptors.Add(HttpProtocolUpgrade.CreateInterceptor());
 ```
 
-Nothing is default-installed: like streaming, upgrades are opt-in per listener. Neither the core
+The transport installs nothing: a host registers the interceptor on each listener it wants
+upgrades on. The Web host (`Web.Hosting`) registers it on every listener by default, after the
+request-size interceptor, so a WebSocket handshake works with no listener configuration
+(decision 16, [Http ADR 1](../../../../docs/libraries/Http/DECISIONS.md#adr-1-server-websockets));
+a request that no application accepts is served exactly as before. Neither the core
 nor the transport carries an upgrade-specific type — the core owns the generic seam
 (`IHttpExchangeControl`, the single per-exchange control surface, of which takeover is one
 capability), the transport implements it per protocol version and owns the raw-stream handover
@@ -117,13 +122,16 @@ transport's DESIGN.md.)
 
 ## Non-goals
 
-- **No WebSocket framing surface.** This package surrenders the stream after the handshake; the
-  RFC 6455 framing/codec layer is the WebSocket feature's concern (#765), which builds its
-  HTTP/1.1 handshake on `context.Upgrade`.
+- **No protocol beyond the transition.** This package writes the `101` and surrenders the stream;
+  what runs over it is the consumer's. WebSockets are `Assimalign.Cohesion.Http.WebSockets`, which
+  validates the RFC 6455 handshake, stages `Sec-WebSocket-Accept` and its negotiated fields before
+  accepting through `context.Upgrade`, and hands the stream to the BCL's
+  `WebSocket.CreateFromStream` (decision 16, Http ADR 1).
 - **No client-side initiation.** Server-side accept surface only.
 - **No HTTP/2 / HTTP/3 upgrade.** Those versions removed `Upgrade`; their bootstrap is extended
   CONNECT (`Assimalign.Cohesion.Http.ExtendedConnect`).
-- **No default installation.** Hosts opt in per listener by registering the interceptor.
+- **No installation by the transport.** A host registers the interceptor per listener; the Web host
+  does so by default.
 
 ## AOT posture
 

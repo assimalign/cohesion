@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.WebSockets</RootNamespace>
+		<Description>The WebSocket policy for the Cohesion Web pipeline. UseWebSockets refuses a cross-site WebSocket handshake with 403 unless its Origin is the request's own origin (read from the effective, proxy-resolved scheme and host) or an allowed one, refuses a malformed handshake with 400 or 426, applies keep-alive and compression defaults to every accept (compression stays off unless enabled), and closes open sockets with 1001 Going Away when the default server begins its drain. The handshake and the framing come from Assimalign.Cohesion.Http.WebSockets.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.WebSockets" />
+	</ItemGroup>
+</Project>

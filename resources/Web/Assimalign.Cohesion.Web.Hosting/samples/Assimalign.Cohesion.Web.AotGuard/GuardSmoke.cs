@@ -3,10 +3,12 @@ using System.Buffers.Text;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -359,6 +361,56 @@ internal static class GuardSmoke
                 && await response.Content.ReadAsStringAsync(cancellationToken) == "accepted";
         });
 
+        failures += await CheckAsync("a WebSocket echoes a compressed message over HTTP/1.1", async () =>
+        {
+            // The server negotiates permessage-deflate with the BCL client, so both ends run zlib.
+            using var socket = new ClientWebSocket();
+            socket.Options.DangerousDeflateOptions = new WebSocketDeflateOptions();
+            socket.Options.CollectHttpResponseDetails = true;
+            await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws/echo"), cancellationToken);
+
+            byte[] message = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("echo through the AOT guard; ", 32)));
+            await socket.SendAsync(message, WebSocketMessageType.Text, endOfMessage: true, cancellationToken);
+
+            byte[] buffer = new byte[message.Length + 64];
+            int received = 0;
+            ValueWebSocketReceiveResult result;
+            do
+            {
+                result = await socket.ReceiveAsync(buffer.AsMemory(received), cancellationToken);
+                received += result.Count;
+            }
+            while (!result.EndOfMessage);
+
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", cancellationToken);
+            string? extensions = socket.HttpResponseHeaders is { } headers && headers.TryGetValue("Sec-WebSocket-Extensions", out IEnumerable<string>? values)
+                ? string.Join(", ", values)
+                : null;
+
+            return result.MessageType == WebSocketMessageType.Text
+                && buffer.AsSpan(0, received).SequenceEqual(message)
+                && extensions is not null
+                && extensions.StartsWith("permessage-deflate", StringComparison.Ordinal)
+                && socket.CloseStatus == WebSocketCloseStatus.NormalClosure;
+        });
+
+        failures += await CheckAsync("the WebSocket origin policy refuses a cross-site handshake with 403", async () =>
+        {
+            using var socket = new ClientWebSocket();
+            socket.Options.SetRequestHeader("Origin", "https://untrusted.cohesion.local");
+            socket.Options.CollectHttpResponseDetails = true;
+
+            try
+            {
+                await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws/echo"), cancellationToken);
+                return false;
+            }
+            catch (WebSocketException)
+            {
+                return socket.HttpStatusCode == HttpStatusCode.Forbidden;
+            }
+        });
+
         Console.WriteLine(failures == 0 ? "AOT guard smoke: all checks passed." : $"AOT guard smoke: {failures} check(s) failed.");
         return failures == 0 ? 0 : 1;
     }
@@ -371,7 +423,7 @@ internal static class GuardSmoke
             Console.WriteLine($"{(passed ? "PASS" : "FAIL")}: {name}");
             return passed ? 0 : 1;
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or WebSocketException)
         {
             Console.WriteLine($"FAIL: {name} ({exception.GetType().Name}: {exception.Message})");
             return 1;

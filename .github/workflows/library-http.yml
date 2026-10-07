@@ -32,7 +32,8 @@ jobs:
             "Assimalign.Cohesion.Http.Streaming",
             "Assimalign.Cohesion.Http.DigestFields",
             "Assimalign.Cohesion.Http.InterimResponses",
-            "Assimalign.Cohesion.Http.ServerSentEvents"
+            "Assimalign.Cohesion.Http.ServerSentEvents",
+            "Assimalign.Cohesion.Http.WebSockets"
           ]
     steps:
       - uses: actions/checkout@v4

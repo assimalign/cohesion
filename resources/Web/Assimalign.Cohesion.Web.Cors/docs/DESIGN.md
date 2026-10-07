@@ -355,7 +355,9 @@ the trim and AOT analyzers enabled (`IsAotCompatible`) and no warnings.
   by endpoint metadata, which keeps evaluation trimming-safe and visible at the route. A dynamic origin
   decision is the predicate's job.
 - **Blocking requests from denied origins:** CORS grants reads; it is not access control.
-- **WebSocket origin checks:** the WebSocket handshake is not subject to CORS (#765).
+- **WebSocket origin checks:** the WebSocket handshake is not subject to CORS. `UseWebSockets`
+  (`Assimalign.Cohesion.Web.WebSockets`) refuses a cross-site handshake with `403` unless its origin
+  is the request's own or an allowed one.
 - **`Timing-Allow-Origin`:** it belongs to the Resource Timing specification, not to CORS.
 
 ## Scope-creep candidates (recorded, not taken)

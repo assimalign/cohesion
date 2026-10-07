@@ -11,6 +11,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.RequestLimits" />
 		<!-- Test-only: a stream that faults after its response started through the streaming feature
 		     must be reset, not finalized (#1049). The runtime module takes no dependency on it. -->

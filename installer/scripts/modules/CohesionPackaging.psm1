@@ -136,6 +136,7 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Http/Assimalign.Cohesion.Http.DigestFields'
     'libraries/Http/Assimalign.Cohesion.Http.InterimResponses'
     'libraries/Http/Assimalign.Cohesion.Http.ServerSentEvents'
+    'libraries/Http/Assimalign.Cohesion.Http.WebSockets'
 
     # libraries/IdentityModel
     'libraries/IdentityModel/Assimalign.Cohesion.IdentityModel'
@@ -352,6 +353,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.StaticFiles'
     'resources/Web/Assimalign.Cohesion.Web.Testing'
     'resources/Web/Assimalign.Cohesion.Web.Validation'
+    'resources/Web/Assimalign.Cohesion.Web.WebSockets'
 
     # tooling/Cli
     'tooling/Cli/Assimalign.Cohesion.Cli'

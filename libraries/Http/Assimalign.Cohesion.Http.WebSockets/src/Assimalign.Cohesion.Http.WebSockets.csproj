@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<!-- The HTTP feature packages share the Assimalign.Cohesion.Http namespace, so the
+		     context.WebSockets extension member is discoverable without an extra using (matches
+		     Assimalign.Cohesion.Http.ProtocolUpgrade and Assimalign.Cohesion.Http.ExtendedConnect). -->
+		<RootNamespace>Assimalign.Cohesion.Http</RootNamespace>
+		<Description>Server WebSockets for the Cohesion HTTP family. Owns the RFC 6455 opening handshake (Sec-WebSocket-Key, Sec-WebSocket-Accept and Sec-WebSocket-Version: 13, answered 400 or 426 when malformed or for another version), subprotocol selection, and permessage-deflate negotiation (RFC 7692, opt-in), then hands the connection to the BCL framing: applications receive a System.Net.WebSockets.WebSocket. context.WebSockets exposes IsWebSocketRequest, the requested subprotocols and AcceptWebSocketAsync. HTTP/1.1 rides the protocol-upgrade takeover (Assimalign.Cohesion.Http.ProtocolUpgrade). Policy (origins, keep-alive defaults, closing sockets on a server drain) ships in Assimalign.Cohesion.Web.WebSockets.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
+	</ItemGroup>
+</Project>

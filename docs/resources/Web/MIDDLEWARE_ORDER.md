@@ -25,7 +25,7 @@ flowchart TD
         Errors["UseErrorHandling"] --> Pages["UseStatusCodePages"] --> Rewrite["UseRewrite"] --> Cookies["UseCookiePolicy"] --> Compress["UseResponseCompression"] --> Decompress["UseRequestDecompression"] --> Static["UseStaticFiles"] --> Authn["UseAuthentication"] --> Sessions["UseSessions"]
     end
     subgraph Policy["Endpoint policy: reads the endpoint UseRouting published"]
-        Routing["UseRouting"] --> Cors["UseCors"] --> Authz["UseAuthorization"] --> Timeouts["UseRequestTimeouts"] --> Limits["UseRateLimiting"] --> Forms["UseForms"] --> Csrf["UseAntiforgery"] --> Cache["UseOutputCache"] --> Endpoint["Endpoint, run by the pipeline terminal"]
+        Routing["UseRouting"] --> Cors["UseCors"] --> Authz["UseAuthorization"] --> Timeouts["UseRequestTimeouts"] --> Limits["UseRateLimiting"] --> Forms["UseForms"] --> Csrf["UseAntiforgery"] --> Cache["UseOutputCache"] --> Sockets["UseWebSockets"] --> Endpoint["Endpoint, run by the pipeline terminal"]
     end
     Headers --> Forwarded
     Hsts --> Errors
@@ -57,6 +57,7 @@ flowchart TD
 | 21 | `UseForms` | Web.Forms | Optional, because it parses every request. It goes after the limits, so rejected requests are never parsed, and ahead of `UseAntiforgery`, which reuses the parsed form. |
 | 22 | `UseAntiforgery` | Web.Antiforgery | After the limits, and inside the timeout so its form read is bounded. |
 | 23 | `UseOutputCache` | Web.Caching | After authorization. `UseResponseCompression` comes right after it, so the cache stores and replays the compressed bytes. |
+| 24 | `UseWebSockets` | Web.WebSockets | After `UseForwardedHeaders`, whose effective scheme and host its same-origin check reads, and ahead of every endpoint that accepts a socket. Last, so host filtering, authorization and rate limiting apply to a handshake first; it refuses a cross-site or malformed handshake before the endpoint runs. A request timeout cancels a socket's endpoint when it fires, so WebSocket endpoints disable it (`DisableRequestTimeout()`). |
 
 ## What fails closed, and what does not
 

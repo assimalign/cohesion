@@ -1,4 +1,5 @@
 using System;
+using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -27,6 +28,7 @@ using Assimalign.Cohesion.Web.SecurityHeaders;
 using Assimalign.Cohesion.Web.Serialization;
 using Assimalign.Cohesion.Web.StaticFiles;
 using Assimalign.Cohesion.Web.Validation;
+using Assimalign.Cohesion.Web.WebSockets;
 
 // NativeAOT guard for the Web area (#1052): a representative application composed the way a
 // customer's Program.cs composes one. Run plainly it serves like any Web application; run with
@@ -98,6 +100,9 @@ application.UseRateLimiting(options => options.GlobalPolicy = RateLimitingPolicy
         Window = TimeSpan.FromMinutes(1),
     })));
 application.UseAntiforgery();
+
+// WebSockets (decision 16): the origin policy goes last, closest to the endpoints that accept.
+application.UseWebSockets();
 
 application.MapGet("/items/{id:int}", async (int id, IHttpContext context) =>
 {
@@ -201,6 +206,33 @@ application.MapPost("/upload", async (IHttpFormFile file, IHttpContext context) 
     context.Response.StatusCode = HttpStatusCode.Ok;
     await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"{file.FileName}:{file.Length}"), context.RequestCancelled);
 }).DisableAntiforgery();
+
+// A WebSocket echo over the HTTP/1.1 upgrade the default server installs (#765): permessage-deflate is
+// accepted when the client offers it, so the guard exercises zlib under NativeAOT too. The socket
+// outlives any request timeout, so the endpoint disables it.
+application.MapGet("/ws/echo", async (IHttpContext context) =>
+{
+    IHttpWebSocketFeature webSockets = context.WebSockets;
+    if (!webSockets.IsWebSocketRequest)
+    {
+        context.Response.StatusCode = HttpStatusCode.BadRequest;
+        return;
+    }
+
+    using WebSocket socket = await webSockets.AcceptWebSocketAsync(
+        new HttpWebSocketAcceptOptions { DangerousEnableCompression = true },
+        context.RequestCancelled);
+
+    byte[] buffer = new byte[4096];
+    WebSocketReceiveResult result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), context.RequestCancelled);
+    while (result.MessageType != WebSocketMessageType.Close)
+    {
+        await socket.SendAsync(new ArraySegment<byte>(buffer, 0, result.Count), result.MessageType, result.EndOfMessage, context.RequestCancelled);
+        result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), context.RequestCancelled);
+    }
+
+    await socket.CloseAsync(result.CloseStatus ?? WebSocketCloseStatus.NormalClosure, result.CloseStatusDescription, CancellationToken.None);
+}).DisableRequestTimeout();
 
 // The OpenAPI document (#152): built once from the typed endpoints' metadata and the source-generated
 // JSON contracts, then served with an ETag.

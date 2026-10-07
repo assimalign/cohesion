@@ -20,6 +20,7 @@ flowchart LR
     Forms["Http.Forms"]
     Antiforgery["Http.Antiforgery"]
     Upgrade["Http.ProtocolUpgrade"]
+    WebSockets["Http.WebSockets"]
     Streaming["Http.Streaming"]
     Sse["Http.ServerSentEvents"]
     HttpConn["Http.Connections"]
@@ -32,6 +33,8 @@ flowchart LR
     Antiforgery --> Forms
     Upgrade --> Root
     Upgrade --> Cookies
+    WebSockets --> Root
+    WebSockets --> Upgrade
     Sse --> Root
     Sse --> Streaming
     HttpConn --> Root
