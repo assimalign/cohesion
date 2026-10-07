@@ -264,7 +264,9 @@ to it. The interface remains the canonical surface consumers depend on.
   to handle: it releases that connection and accepts the next. An exception from `AcceptAsync`
   therefore means the listener itself can produce no more connections (it was disposed, or its
   endpoint failed), or the caller canceled, and a consumer may treat it as fatal. The layered
-  listener below and the QUIC driver both honor this (#1304).
+  listener below and the QUIC driver honor this (#1304). So does the TCP driver: it skips a
+  connection whose client reset it before the accept, which Windows reports by failing the
+  accept (#1308).
 - Three teardown paths: complete `Output` for a graceful half-close; `DisposeAsync()` to close;
   `Abort(Exception?)` to tear down immediately, discarding in-flight data. `ConnectionClosed` is
   signaled on closure. `ConnectionState` tracks `Idle → Opening → Open → Closing → Closed`, or

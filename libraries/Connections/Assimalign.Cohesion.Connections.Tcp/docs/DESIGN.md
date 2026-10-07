@@ -128,6 +128,16 @@ transport security) are identical for both families — only the protocol identi
   itself and disposes it on every path that does not return it; Unix accepts with `accept(2)` after the
   connection is queued, so nothing is attached early. The regression test races 100 cancelled accepts
   against connecting clients; before the fix about 40 of them were left open.
+- **A client that resets before the accept costs only its own connection.** A client can connect and
+  reset (RST) while its connection waits in the accept queue. Windows then fails that accept with
+  `ConnectionReset`. BSD-derived stacks, and Linux in some cases, fail it with `ConnectionAborted`;
+  Linux usually returns the connection anyway, already reset. `AcceptAsync` treats those two errors as
+  the queued connection's own, raises `AcceptSkipped`, and accepts the next connection. This is the
+  `IConnectionListener.AcceptAsync` contract: a failure that belongs to one inbound connection never
+  escapes, because a consumer such as the HTTP accept loop treats whatever escapes as the listener's
+  end. Until #1308 the error escaped, and one reset stopped an HTTP endpoint. Neither error can recur
+  without a new connection, so the retry cannot spin. Errors that leave the listening socket unable to
+  accept still escape, such as running out of descriptors (`TooManyOpenSockets`).
 
 ## Diagnostics
 
@@ -151,6 +161,7 @@ category.
 | 7 | `ConnectionResumed` | Verbose | `connectionId` |
 | 8 | `ConnectionReset` | Verbose | `connectionId` |
 | 9 | `ConnectionError` | Error | `connectionId`, `operation` (`receiving`/`sending`), `exceptionType`, `exceptionMessage` |
+| 10 | `AcceptSkipped` | Verbose | `listenerId`, `socketError` (`ConnectionReset`/`ConnectionAborted`): a queued connection its client closed before the accept |
 
 Counters: `current-connections`, `total-connections`, and `connections-per-second`.
 

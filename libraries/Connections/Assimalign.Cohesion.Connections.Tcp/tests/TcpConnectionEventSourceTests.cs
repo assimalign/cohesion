@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -92,6 +93,80 @@ public class TcpConnectionEventSourceTests
         events.Where(e => IsFor(e, "ConnectionClosed", server.Id)).ShouldHaveSingleItem();
         events.Where(e => IsFor(e, "ConnectionClosed", client.Id)).ShouldHaveSingleItem();
         events.Where(e => e.EventName == "ListenerClosed").ShouldHaveSingleItem().Payload![0].ShouldBe(listenerId);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - TcpConnectionEventSource: Should report each queued connection the listener skipped")]
+    public async Task AcceptSkipped_ClientsResetWhileQueued_ShouldReportEachSkippedConnection()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using EventSourceRecorder recorder = new(TcpConnectionEventSource.Log, EventLevel.Verbose);
+
+        await using TcpConnectionListener listener = TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+        await listener.BindAsync(cancellation.Token);
+
+        const int resetClients = 4;
+
+        for (int i = 0; i < resetClients; i++)
+        {
+            using Socket reset = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            await reset.ConnectAsync(listener.EndPoint, cancellation.Token);
+            reset.LingerState = new LingerOption(true, 0);
+        }
+
+        using Socket healthy = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await healthy.ConnectAsync(listener.EndPoint, cancellation.Token);
+        int healthyPort = ((IPEndPoint)healthy.LocalEndPoint!).Port;
+
+        // Act
+        int resetConnectionsReturned = 0;
+        Connection? accepted = null;
+
+        for (int i = 0; i <= resetClients && accepted is null; i++)
+        {
+            Connection connection = await listener.AcceptAsync(cancellation.Token);
+
+            if (connection.RemoteEndPoint is IPEndPoint remote && remote.Port == healthyPort)
+            {
+                accepted = connection;
+            }
+            else
+            {
+                resetConnectionsReturned++;
+                await connection.DisposeAsync();
+            }
+        }
+
+        // Assert
+        accepted.ShouldNotBeNull();
+        await accepted.DisposeAsync();
+
+        IReadOnlyList<EventWrittenEventArgs> events = recorder.Events;
+        events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+
+        string listenerId = events
+            .Where(e => e.EventName == "ListenerBound" && Equals(e.Payload![2], listener.EndPoint.ToString()))
+            .ShouldHaveSingleItem()
+            .Payload![0]
+            .ShouldBeOfType<string>();
+
+        EventWrittenEventArgs[] skipped = events
+            .Where(e => e.EventName == "AcceptSkipped" && Equals(e.Payload![0], listenerId))
+            .ToArray();
+
+        foreach (EventWrittenEventArgs skip in skipped)
+        {
+            skip.PayloadNames.ShouldBe(["listenerId", "socketError"]);
+            skip.Payload![1].ShouldBeOneOf(nameof(SocketError.ConnectionReset), nameof(SocketError.ConnectionAborted));
+        }
+
+        (skipped.Length + resetConnectionsReturned).ShouldBeLessThanOrEqualTo(resetClients);
+
+        if (OperatingSystem.IsWindows())
+        {
+            // Windows fails the accept of every connection reset while it was queued.
+            skipped.Length.ShouldBe(resetClients);
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - TcpConnectionEventSource: Should publish its connection counters")]

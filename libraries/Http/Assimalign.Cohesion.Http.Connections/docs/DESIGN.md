@@ -1094,7 +1094,10 @@ certificate policy refuses, a silent client) closes that connection,
 is reported by the `Assimalign.Cohesion.Connections` event source, and
 never reaches the accept loop. The QUIC driver does the same for the
 handshakes `System.Net.Quic` runs, reporting them from its own event
-source. So a slow client never delays another client's accept, and one
+source. Below TLS, the TCP driver skips a connection whose client reset
+it while it waited in the accept queue (Windows fails that accept with
+`ConnectionReset`), so a reset never reaches the accept loop either
+(#1308). So a slow client never delays another client's accept, and one
 client never stops an endpoint.
 
 That is the contract of `AcceptAsync` on both listener shapes: a

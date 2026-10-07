@@ -184,10 +184,25 @@ public sealed class TcpConnectionListener : ConnectionListener
                     ObjectDisposedException.ThrowIf(_isDisposed, this);
                 }
             }
+            catch (SocketException exception) when (IsQueuedConnectionFailure(exception.SocketErrorCode))
+            {
+                // A client closed its connection while the connection waited in the accept queue. The
+                // failure belongs to that one connection, so skip it and accept the next one. Letting it
+                // escape would stop the listener, and any client could do that with one reset (#1308).
+                TcpConnectionEventSource.Log.AcceptSkipped(_listenerId, exception.SocketErrorCode);
+            }
         }
 
         throw new OperationCanceledException(cancellationToken);
     }
+
+    // The errors an accept reports for the queued connection it was taking, not for the listening socket. A
+    // client that resets (RST) before the accept makes Windows fail it with ConnectionReset, and BSD-derived
+    // stacks, and Linux in some cases, with ConnectionAborted. Neither can recur without a new connection, so
+    // retrying cannot spin. Errors that leave the listener unable to accept, such as running out of
+    // descriptors (TooManyOpenSockets), still escape.
+    private static bool IsQueuedConnectionFailure(SocketError error)
+        => error is SocketError.ConnectionReset or SocketError.ConnectionAborted;
 
     // On Windows an accept is an AcceptEx into a socket created before the call, and the OS can attach
     // an incoming client to that socket before the accept completes. When the accept is cancelled, or

@@ -1,12 +1,14 @@
 using System;
 using System.Diagnostics.Tracing;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 
 namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 
 /// <summary>
-/// The TCP driver's diagnostics: listener and connection lifecycle events, and connection counters.
+/// The TCP driver's diagnostics: listener and connection lifecycle events, skipped accepts, and connection
+/// counters.
 /// </summary>
 /// <remarks>
 /// Internal by the repository's EventSource convention (<c>.claude/rules/event-source.md</c>). Tools enable
@@ -51,6 +53,15 @@ internal sealed class TcpConnectionEventSource : EventSource
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
             ListenerClosed(listenerId.ToString());
+        }
+    }
+
+    [NonEvent]
+    public void AcceptSkipped(ListenerId listenerId, SocketError error)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            AcceptSkipped(listenerId.ToString(), error.ToString());
         }
     }
 
@@ -167,6 +178,10 @@ internal sealed class TcpConnectionEventSource : EventSource
     [Event(9, Level = EventLevel.Error, Message = "Connection {0} failed while {1}: {2}: {3}")]
     private void ConnectionError(string connectionId, string operation, string exceptionType, string exceptionMessage)
         => WriteEvent(9, connectionId, operation, exceptionType, exceptionMessage);
+
+    [Event(10, Level = EventLevel.Verbose, Message = "Listener {0} skipped a queued connection its client closed before it was accepted ({1})")]
+    private void AcceptSkipped(string listenerId, string socketError)
+        => WriteEvent(10, listenerId, socketError);
 
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)

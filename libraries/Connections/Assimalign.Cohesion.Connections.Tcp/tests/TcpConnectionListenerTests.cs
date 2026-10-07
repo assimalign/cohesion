@@ -277,6 +277,54 @@ public class TcpConnectionListenerTests
         leftOpen.ShouldBe(0, "a client stayed connected to a socket the listener no longer owned");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - AcceptAsync: Clients that reset while queued should not fault the listener")]
+    public async Task AcceptAsync_ClientsResetWhileQueued_ShouldKeepAccepting()
+    {
+        // Arrange — clients that connect and reset (SO_LINGER 0) before the listener accepts them (#1308).
+        // Windows fails the accept of each with ConnectionReset, and BSD-derived stacks with
+        // ConnectionAborted. Linux usually returns the connection anyway, already reset. In every case
+        // the listener has to go on to the healthy client queued behind them.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+
+        await using TcpConnectionListener listener = TcpConnectionListener.Create(
+            options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+        await listener.BindAsync(cancellation.Token);
+
+        const int resetClients = 8;
+
+        for (int i = 0; i < resetClients; i++)
+        {
+            using Socket reset = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            await reset.ConnectAsync(listener.EndPoint, cancellation.Token);
+            reset.LingerState = new LingerOption(true, 0);
+        }
+
+        using Socket healthy = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await healthy.ConnectAsync(listener.EndPoint, cancellation.Token);
+        int healthyPort = ((IPEndPoint)healthy.LocalEndPoint!).Port;
+
+        // Act
+        Connection? accepted = null;
+
+        for (int i = 0; i <= resetClients && accepted is null; i++)
+        {
+            Connection connection = await listener.AcceptAsync(cancellation.Token);
+
+            if (connection.RemoteEndPoint is IPEndPoint remote && remote.Port == healthyPort)
+            {
+                accepted = connection;
+            }
+            else
+            {
+                await connection.DisposeAsync();
+            }
+        }
+
+        // Assert
+        accepted.ShouldNotBeNull();
+        await accepted.DisposeAsync();
+    }
+
     private static async Task<bool> ClosesWithinAsync(Socket client, TimeSpan budget)
     {
         using CancellationTokenSource timeout = new(budget);
