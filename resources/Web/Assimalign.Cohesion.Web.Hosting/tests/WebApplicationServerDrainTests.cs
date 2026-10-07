@@ -207,7 +207,10 @@ public class WebApplicationServerDrainTests
         await cancelled.Task.WaitAsync(cancellationToken);
         Exception failure = await Should.ThrowAsync<Exception>(() => request.WaitAsync(cancellationToken));
         (failure is HttpRequestException or ConnectionAbortedException).ShouldBeTrue(failure.ToString());
-        await Should.NotThrowAsync(() => stop.WaitAsync(cancellationToken));
+
+        // Awaited directly: Shouldly's NotThrowAsync counts a cancelled task as a pass, so a stop that hung
+        // until the guard token fired would have passed.
+        await stop.WaitAsync(cancellationToken);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server/Drain: An HTTP/2 connection gets GOAWAY when the stop begins and its open stream completes")]
