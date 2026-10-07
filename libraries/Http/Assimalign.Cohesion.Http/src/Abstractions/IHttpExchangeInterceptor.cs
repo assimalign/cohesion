@@ -167,10 +167,13 @@ public interface IHttpExchangeInterceptor
     /// </summary>
     /// <remarks>
     /// Runs on the exchange's send path (never the HTTP/2 frame pump), so awaiting is safe. Not
-    /// invoked when the exchange was aborted (<see cref="IHttpContext.Cancel"/>) or its connection
-    /// taken over before the head commit, nor for transport-generated error responses that never
-    /// became an exchange; the transport re-reads the exchange's state after the hooks run, so a
-    /// concurrent abort or a hook-driven takeover is honored instead of writing the head.
+    /// invoked when the exchange was aborted (<see cref="IHttpContext.Cancel"/>) or taken over
+    /// before the head commit — its HTTP/1.1 connection by a protocol upgrade, or its HTTP/2 or
+    /// HTTP/3 stream by an accepted extended CONNECT tunnel
+    /// (<see cref="IHttpExtendedConnectFeature.AcceptAsync"/>), each of which writes its own head —
+    /// nor for transport-generated error responses that never became an exchange; the transport
+    /// re-reads the exchange's state after the hooks run, so a concurrent abort or a hook-driven
+    /// takeover is honored instead of writing the head.
     /// </remarks>
     /// <param name="context">The response-lifecycle view of the exchange.</param>
     /// <param name="cancellationToken">A token to cancel the work.</param>
@@ -186,7 +189,9 @@ public interface IHttpExchangeInterceptor
     /// </summary>
     /// <remarks>
     /// Runs on the exchange's send path, so awaiting is safe. Not invoked when the exchange was
-    /// aborted or taken over — there is no final response to observe in either case.
+    /// aborted or taken over (an HTTP/1.1 protocol upgrade, or an accepted HTTP/2 or HTTP/3
+    /// extended CONNECT tunnel) — there is no final response for the transport to complete in
+    /// either case.
     /// </remarks>
     /// <param name="context">The response-lifecycle view of the exchange.</param>
     /// <param name="cancellationToken">A token to cancel the work.</param>

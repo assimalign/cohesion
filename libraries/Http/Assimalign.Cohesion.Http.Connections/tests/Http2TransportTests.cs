@@ -491,13 +491,12 @@ public class Http2TransportTests
         serverSettings[Http2TestSettings.Parameter.EnableConnectProtocol].ShouldBe(1u);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should surface a valid extended CONNECT via the :protocol item")]
-    public async Task Http2_OnExtendedConnect_ShouldSurfaceProtocolItem()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should install the extended CONNECT feature in the exchange's feature collection")]
+    public async Task Http2_OnExtendedConnect_ShouldInstallFeatureInFeatureCollection()
     {
         // RFC 8441 §4 — CONNECT + :protocol with :scheme/:path/:authority is a
-        // valid extended CONNECT. The transport surfaces the :protocol
-        // pseudo-header verbatim through IHttpContext.Items so the
-        // ExtendedConnect package can model it without a transport dependency.
+        // valid extended CONNECT. The transport installs the feature it
+        // implements on the exchange's feature collection, once.
         byte[] preface = Http2TestSettings.Preface();
         byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
         byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
@@ -519,15 +518,17 @@ public class Http2TransportTests
 
         httpContext.Request.Method.ShouldBe(HttpMethod.Connect);
         httpContext.Request.Path.Value.ShouldBe("/chat");
-        httpContext.Items.ContainsKey(TransportItemKeys.Protocol).ShouldBeTrue();
-        httpContext.Items[TransportItemKeys.Protocol].ShouldBe("websocket");
+        IHttpExtendedConnectFeature? feature = httpContext.Features.Get<IHttpExtendedConnectFeature>();
+        feature.ShouldNotBeNull();
+        feature!.Protocol.ShouldBe("websocket");
+        feature.ShouldBeOfType<Http2ExtendedConnectFeature>();
+        httpContext.ExtendedConnect.ShouldBeSameAs(feature);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A valid extended CONNECT exposes the ExtendedConnect feature")]
     public async Task Http2_OnExtendedConnect_ShouldExposeExtendedConnectFeature()
     {
-        // The transport surfaces :protocol via IHttpContext.Items; the
-        // Http.ExtendedConnect package models it as a typed feature.
+        // The transport installs the feature; the Http.ExtendedConnect accessors read it.
         byte[] preface = Http2TestSettings.Preface();
         byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
         byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
@@ -568,11 +569,20 @@ public class Http2TransportTests
         httpContext.ExtendedConnect.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A normal request carries no :protocol item")]
-    public async Task Http2_OnNormalRequest_ShouldNotSurfaceProtocolItem()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: A classic CONNECT carries no extended CONNECT feature")]
+    public async Task Http2_OnClassicConnect_ShouldNotInstallExtendedConnectFeature()
     {
-        byte[] payload = HttpProtocolPayloadFactory.CreateHttp2Request(1, "GET", "/", "https", "api.test");
-        TestConnection connection = new(payload);
+        // RFC 9113 §8.5 — a CONNECT without :protocol carries only :method and :authority. It is an
+        // ordinary CONNECT request, not an extended CONNECT, so no tunnel feature is installed.
+        byte[] preface = Http2TestSettings.Preface();
+        byte[] settings = Http2TestSettings.RawFrame(frameType: 0x4, flags: 0, streamId: 0, payload: Array.Empty<byte>());
+        byte[] headers = HttpProtocolPayloadFactory.CreateHttp2HeadersFrame(
+            1,
+            0x4 | 0x1,
+            (":method", "CONNECT"),
+            (":authority", "api.test:443"));
+
+        TestConnection connection = new(Combine(preface, settings, headers));
         HttpConnectionListenerOptions options = new();
         options.UseHttp2(new TestConnectionListener(connection));
 
@@ -580,7 +590,8 @@ public class Http2TransportTests
         IHttpConnectionContext httpConnectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
         IHttpContext httpContext = await ReadSingleContextAsync(httpConnectionContext);
 
-        httpContext.Items.ContainsKey(TransportItemKeys.Protocol).ShouldBeFalse();
+        httpContext.Request.Method.ShouldBe(HttpMethod.Connect);
+        httpContext.Features.Get<IHttpExtendedConnectFeature>().ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2: Should reject :protocol on a non-CONNECT request with PROTOCOL_ERROR")]

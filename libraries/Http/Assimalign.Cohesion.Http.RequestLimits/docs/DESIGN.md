@@ -17,9 +17,12 @@ That placement conflated two different kinds of surface:
 - **Features** — concrete capabilities: extended CONNECT, sessions, cookies, forms, and
   per-request body-size limiting. These belong in their own packages that reference only core.
 
-The repo already encodes this taxonomy: `IHttpExtendedConnectFeature` lives in
-`Assimalign.Cohesion.Http.ExtendedConnect`, not in core, and the transport stays decoupled from
-it. This package restores that discipline for the body-size feature. The enforcement itself —
+The repo encodes this taxonomy elsewhere too: feature packages such as
+`Assimalign.Cohesion.Http.ProtocolUpgrade` and `Assimalign.Cohesion.Http.InterimResponses` own their
+contracts, and the transport never references them. (A contract only moves into core when the
+transport itself must implement it — `IHttpTlsConnectionFeature`, and `IHttpExtendedConnectFeature`
+once extended CONNECT gained its tunnel; see core Http DESIGN.) This package restores that
+discipline for the body-size feature. The enforcement itself —
 the wire-level cap with 413 semantics — is *not* a feature and stays transport-owned in
 `Http.Connections` (`HttpConnectionListenerLimits.MaxRequestBodySize`): the security guarantee must hold
 with zero optional packages installed.
@@ -49,12 +52,12 @@ The feature is a **write-through view over the parse context**, not a copy:
 The transport keeps the context alive until the request body is consumed (documented on
 `HttpExchangeInterceptorRequestContext`), so the view never dangles.
 
-### Why a typed seam here, when ExtendedConnect chose an Items-key bridge
+### Why a typed seam here, rather than an Items-key bridge
 
-ExtendedConnect deliberately bridges transport → package with a convention-named
-`IHttpContext.Items` string and **no shared symbol**. That is the right shape for its job:
-one-way publication of an immutable value after parse. This package needs three things the
-Items bridge cannot express:
+An `Items`-key bridge — the transport publishes a convention-named `IHttpContext.Items` value with
+**no shared symbol**, and a package interprets it (what extended CONNECT used before its tunnel) — is
+the right shape for one-way publication of an immutable value after parse. This package needs three
+things such a bridge cannot express:
 
 1. **Mutation with enforcement coupling** — the feature must write a value the transport then
    enforces mid-parse, not merely read one it published.
@@ -63,9 +66,8 @@ Items bridge cannot express:
 3. **Stream wrapping** — returning a replacement body stream has no Items-key analogue.
 
 Those three are exactly the `IHttpExchangeInterceptor` surface, which is why the escalation to a
-compile-time shared seam (in core, shared by all future parse-time features) is justified. New
-capabilities that only need one-way post-parse publication should still prefer the Items-key
-bridge.
+compile-time shared seam (in core, shared by all future parse-time features) is justified. A
+capability that only needs one-way post-parse publication can still use an `Items` key.
 
 ## Ordering and defaults
 

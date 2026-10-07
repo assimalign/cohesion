@@ -481,13 +481,12 @@ public class Http3TransportTests
             (":scheme", "https"),
             (":authority", "a")));
 
-    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should surface a valid extended CONNECT via the :protocol item")]
-    public async Task Http3_OnExtendedConnect_ShouldSurfaceProtocolItem()
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should install the extended CONNECT feature in the exchange's feature collection")]
+    public async Task Http3_OnExtendedConnect_ShouldInstallFeatureInFeatureCollection()
     {
         // RFC 9220 — CONNECT + :protocol with :scheme/:path/:authority is a
-        // valid extended CONNECT. The transport surfaces the :protocol
-        // pseudo-header verbatim through IHttpContext.Items so the
-        // ExtendedConnect package can model it without a transport dependency.
+        // valid extended CONNECT. The transport installs the feature it
+        // implements on the exchange's feature collection, once.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "CONNECT"),
             (":protocol", "websocket"),
@@ -506,15 +505,17 @@ public class Http3TransportTests
 
         httpContext.Request.Method.ShouldBe(HttpMethod.Connect);
         httpContext.Request.Path.Value.ShouldBe("/chat");
-        httpContext.Items.ContainsKey(TransportItemKeys.Protocol).ShouldBeTrue();
-        httpContext.Items[TransportItemKeys.Protocol].ShouldBe("websocket");
+        IHttpExtendedConnectFeature? feature = httpContext.Features.Get<IHttpExtendedConnectFeature>();
+        feature.ShouldNotBeNull();
+        feature!.Protocol.ShouldBe("websocket");
+        feature.ShouldBeOfType<Http3ExtendedConnectFeature>();
+        httpContext.ExtendedConnect.ShouldBeSameAs(feature);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: A valid extended CONNECT exposes the ExtendedConnect feature")]
     public async Task Http3_OnExtendedConnect_ShouldExposeExtendedConnectFeature()
     {
-        // The transport surfaces :protocol via IHttpContext.Items; the
-        // Http.ExtendedConnect package models it as a typed feature.
+        // The transport installs the feature; the Http.ExtendedConnect accessors read it.
         byte[] payload = HttpProtocolPayloadFactory.CreateHttp3RequestRaw(
             (":method", "CONNECT"),
             (":protocol", "websocket"),

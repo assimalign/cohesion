@@ -611,9 +611,10 @@ reason. The implementation stays in the transport.
 
 Alternatives rejected:
 
-- **An `Items`-key bridge with a feature package**, as extended CONNECT does. That fits a single
-  string published one way; a session of four typed values, one of them a certificate with an
-  owner, would travel as an untyped object, and a new package would exist only to cast it back.
+- **An `Items`-key bridge with a feature package**, as extended CONNECT used until it gained its
+  tunnel (next section). That fits a single string published one way; a session of four typed
+  values, one of them a certificate with an owner, would travel as an untyped object, and a new
+  package would exist only to cast it back.
 - **New members on `IHttpConnectionInfo`.** Adding members to the interface breaks every
   implementation, test doubles included, while a feature is optional by construction: an exchange
   without TLS simply has none, and a host other than the transport can attach its own.
@@ -631,6 +632,42 @@ It reports; it does not decide. Requesting, requiring, and validating client cer
 server's TLS configuration (`Assimalign.Cohesion.Connections.Security`'s `TlsServerOptions`, exposed
 on `Web.Hosting`'s endpoints), and authenticating a request from the certificate belongs to an
 authentication handler, which does not exist yet.
+
+## The extended CONNECT feature (`IHttpExtendedConnectFeature`)
+
+### What it is
+
+`IHttpExtendedConnectFeature` is the HTTP/2 and HTTP/3 *extended CONNECT* capability (RFC 8441,
+RFC 9220): a `CONNECT` request that carries `:protocol` asks to run another protocol — most often
+WebSocket — over its one stream. The feature reports the requested `Protocol` and offers
+`AcceptAsync`, which answers `200` without ending the stream and returns the stream as a duplex
+`Stream`: reads deliver the client's `DATA`, writes go out as `DATA` under flow control, and
+disposing ends the server's side. The server transport (`Assimalign.Cohesion.Http.Connections`)
+installs it on every valid extended CONNECT and on no other exchange. Code reads it as
+`context.ExtendedConnect`, an accessor that ships in `Assimalign.Cohesion.Http.ExtendedConnect`.
+The interface's documentation carries the full accept contract; the transport's DESIGN carries the
+wire behavior; `docs/libraries/Http/DECISIONS.md` (ADR 1) records why the tunnel exists.
+
+### Why the contract lives in the core
+
+The same rule as the TLS feature above: the producer of the capability is the transport. Accepting
+writes a HEADERS block without `END_STREAM` and frames `DATA` under the stream's flow-control windows,
+which only the transport can do, and the transport references no feature package. The contract
+therefore sits here and the implementation stays internal to the transport.
+
+The application-facing accessors stay in their package, which is what the WebSocket package builds
+on. Until the tunnel existed the feature only reported `:protocol`, and the transport published
+that string under an `IHttpContext.Items` key for the package to wrap — the one-way bridge the TLS
+section rejects for a richer surface. An accept call cannot travel as a string, so the bridge is
+gone and the contract moved here. It used to live in the `Http.ExtendedConnect` assembly; the
+namespace is unchanged, so source that referenced the package compiles as before, but a binary built
+against the old assembly has to be rebuilt.
+
+### What it does not do
+
+It carries octets, not a protocol: WebSocket framing comes from the BCL over the accepted stream,
+and the handshake from `Http.WebSockets`. A classic `CONNECT` (no `:protocol`) carries no such
+feature, and nothing here dials the request's authority.
 
 ## The exchange interceptor seam
 
@@ -733,12 +770,14 @@ is transport-owned (`HttpConnectionListenerOptions.Interceptors` in
 `Http.Connections`) because *when* hooks run is a transport decision; *what*
 they can do is defined here.
 
-Unlike the ExtendedConnect Items-key bridge (one-way, post-parse, no shared
-symbol), this seam is a compile-time contract — justified specifically by
-mutation the transport must enforce mid-parse, pre-dispatch feature attachment,
-and stream replacement, none of which a loosely-typed key can express. New
-capabilities that only need one-way post-parse publication should still prefer
-the Items-key bridge.
+Unlike an `Items`-key bridge (one-way, post-parse, no shared symbol — what
+extended CONNECT used before its tunnel), this seam is a compile-time contract —
+justified specifically by mutation the transport must enforce mid-parse,
+pre-dispatch feature attachment, and stream replacement, none of which a
+loosely-typed key can express. A capability that only needs one-way post-parse
+publication can still use an `Items` key; one the transport itself must
+implement puts its contract in this core (see the TLS and extended CONNECT
+features above).
 
 ### Contract details that are load-bearing
 

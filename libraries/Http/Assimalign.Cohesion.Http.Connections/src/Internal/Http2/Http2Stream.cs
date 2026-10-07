@@ -964,7 +964,7 @@ internal sealed class Http2Stream
         // §6.5 — the trailer collection is supported and starts empty; the body fills
         // it when its reader reaches the end (PublishTrailers).
         _requestTrailers = new HttpTrailerCollection(isSupported: true);
-        Stream body = new Http2RequestBodyStream(_bodyChannel.Reader, onBodyConsumed, StreamId, requestAborted, PublishTrailers);
+        Http2RequestBodyStream body = new(_bodyChannel.Reader, onBodyConsumed, StreamId, requestAborted, PublishTrailers);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
         // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3
         // reconcile authority identically.
@@ -1019,20 +1019,19 @@ internal sealed class Http2Stream
             && TryGetDeclaredContentLength(decodedHeaders.Headers, out long declaredLength)
             && declaredLength > limit;
 
+        // RFC 8441 §4 — :protocol is non-null only on a valid extended CONNECT (validated above). The
+        // connection installs the extended CONNECT feature from it at dispatch; an accepted tunnel
+        // reads the peer's DATA from the transport's own body stream.
         Http2Context context = new(
             this,
             requestHead with { Body = interception.Body },
             connectionInfo,
             requestAborted,
-            interception.Features);
-
-        // Surface the :protocol pseudo-header (RFC 8441) generically so a
-        // higher layer (the Assimalign.Cohesion.Http.ExtendedConnect package)
-        // can model extended CONNECT without the transport knowing about it.
-        if (decodedHeaders.Protocol is not null)
+            interception.Features)
         {
-            context.Items[Internal.TransportItemKeys.Protocol] = decodedHeaders.Protocol;
-        }
+            ExtendedConnectProtocol = decodedHeaders.Protocol,
+            RequestBody = body,
+        };
 
         return context;
     }

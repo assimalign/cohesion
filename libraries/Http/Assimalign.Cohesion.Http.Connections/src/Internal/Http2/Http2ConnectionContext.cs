@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
-internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsyncDisposable
+internal sealed partial class Http2ConnectionContext : HttpStreamConnectionContext, IAsyncDisposable
 {
     private static readonly byte[] _clientPreface = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
 
@@ -550,6 +550,14 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // AfterResponse hooks do not fire for an aborted exchange.
         if (stream.IsReset || stream.IsAnsweredByTransport)
         {
+            return;
+        }
+
+        // An accepted extended CONNECT tunnel already sent the exchange's only head; end the tunnel
+        // rather than write a response (RFC 8441 §5).
+        if (http2Context.Tunnel is { } tunnel)
+        {
+            await FinishTunnelAsync(http2Context, tunnel, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -1859,6 +1867,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         }
 
         AttachTlsConnection(context);
+        AttachExtendedConnect(context);
 
         if (stream.IsDeclaredBodyOverLimit)
         {

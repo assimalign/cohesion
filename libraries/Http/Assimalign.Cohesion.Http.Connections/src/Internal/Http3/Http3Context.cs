@@ -49,4 +49,18 @@ internal sealed class Http3Context : TransportHttpContext
     /// rather than an input to an explicit scheduler (see docs/DESIGN.md).
     /// </summary>
     public HttpPriority EffectivePriority { get; set; } = HttpPriority.Default;
+
+    /// <summary>
+    /// The extended CONNECT tunnel accepted on this exchange (RFC 9220), or <see langword="null"/>. Set
+    /// by the accept path before the tunnel's response head is written.
+    /// </summary>
+    public Http3ExtendedConnectStream? Tunnel { get; set; }
+
+    /// <summary>
+    /// An accepted extended CONNECT tunnel takes the exchange's request stream over, so the exchange
+    /// reports <see cref="HttpExchangeDirective.TakeOver"/> and the raw response body sink refuses to
+    /// commit a second head; otherwise the base's abort/continue derivation applies.
+    /// </summary>
+    internal override HttpExchangeDirective ExchangeDirective =>
+        Tunnel is not null ? HttpExchangeDirective.TakeOver : base.ExchangeDirective;
 }

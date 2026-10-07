@@ -49,10 +49,9 @@ internal sealed class Http1Context : TransportHttpContext
     public bool ResponseFinalized { get; set; }
 
     /// <summary>
-    /// HTTP/1.1 is the one version whose exchange can be handed off (it owns its whole
-    /// connection), so a finalized-out-of-band exchange reports
-    /// <see cref="HttpExchangeDirective.TakeOver"/>; otherwise the base's abort/continue
-    /// derivation applies.
+    /// HTTP/1.1 is the one version whose exchange can hand off its whole connection, so a
+    /// finalized-out-of-band exchange reports <see cref="HttpExchangeDirective.TakeOver"/>;
+    /// otherwise the base's abort/continue derivation applies.
     /// </summary>
     internal override HttpExchangeDirective ExchangeDirective =>
         ResponseFinalized ? HttpExchangeDirective.TakeOver : base.ExchangeDirective;

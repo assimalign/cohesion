@@ -26,10 +26,12 @@ public static class HttpContextTransportExtensions
         /// <para>
         /// The final response starts at the first write or flush through the raw response body sink
         /// that response interceptors expose (the incremental-streaming path, for example
-        /// <c>Assimalign.Cohesion.Http.Streaming</c>), or at the commit point of
-        /// <see cref="IHttpConnectionContext.SendAsync"/>. An interim (<c>1xx</c>) response does not
-        /// start it. This is the state <see cref="IHttpExchangeControl.HasResponseStarted"/> reports to
-        /// response interceptors, exposed to the host.
+        /// <c>Assimalign.Cohesion.Http.Streaming</c>), when an HTTP/2 or HTTP/3 extended CONNECT
+        /// tunnel is accepted (<see cref="IHttpExtendedConnectFeature.AcceptAsync"/>), or at the
+        /// commit point of <see cref="IHttpConnectionContext.SendAsync"/>. An interim (<c>1xx</c>)
+        /// response does not start it. This is the state
+        /// <see cref="IHttpExchangeControl.HasResponseStarted"/> reports to response interceptors,
+        /// exposed to the host.
         /// </para>
         /// <para>
         /// A host that finalizes an exchange whose application processing failed reads it to choose

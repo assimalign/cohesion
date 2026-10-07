@@ -2372,8 +2372,8 @@ the HTTP/2 path follows (see "HTTP/2 response flow control, HEAD, and the
 request-body cap"). A **CONNECT** request is
 dispatched at its HEADERS frame like any other, and its tunnel octets are read
 through the request body as they arrive; neither the body-size cap nor the
-Content-Length rule applies to them, and the drain skips them (see "No tunnel —
-scope boundary").
+Content-Length rule applies to them, and the drain skips them (see "Extended
+CONNECT (`:protocol`)", "The tunnel").
 
 Why this shape, and not the obvious alternatives:
 
@@ -2867,27 +2867,37 @@ and string primitives.
 Extended CONNECT (RFC 8441 for HTTP/2, RFC 9220 for HTTP/3) lets a client
 bootstrap another protocol — most commonly WebSocket — over a single
 HTTP/2 or HTTP/3 stream by sending a `CONNECT` request that additionally
-carries the `:protocol` pseudo-header. Cohesion **recognizes and models**
-extended CONNECT explicitly so an application can detect it and respond
-deterministically.
+carries the `:protocol` pseudo-header. Cohesion recognizes and validates it,
+and lets the application accept the stream as a duplex tunnel: WebSockets on
+HTTP/2 and HTTP/3 run over that tunnel (`docs/libraries/Http/DECISIONS.md`,
+ADR 1).
 
-### The model: an explicit feature, not a baseline side effect
+### The model: a transport-installed feature
 
-A valid extended CONNECT installs an `IHttpExtendedConnectFeature` on the
-exchange's feature collection, exposing the requested `:protocol`. Ordinary
-requests carry no such feature, so `context.IsExtendedConnect` is `false`
-and `context.ExtendedConnect` is `null` for them. Modeling the transition
-as an opt-in feature — rather than, say, a flag baked into every request —
-keeps it an explicit extension surface (per the issue's framing) and means
-baseline request handling is unchanged for the common case.
+A valid extended CONNECT carries an `IHttpExtendedConnectFeature` on the
+exchange's feature collection: the requested `:protocol` and the
+`AcceptAsync` call. Ordinary requests carry none, so
+`context.IsExtendedConnect` is `false` and `context.ExtendedConnect` is
+`null` for them, and baseline request handling is unchanged.
 
-The feature contract (`IHttpExtendedConnectFeature`) and the
-`context.IsExtendedConnect` / `context.ExtendedConnect` ergonomics live in
-the core `Assimalign.Cohesion.Http` library; the transport produces the
-internal implementation. Recognition (`:protocol`), validation, and the
-`IsExtendedConnect` / `ValidateExtendedConnect` rules are shared between
-HTTP/2 and HTTP/3 via `HttpFieldNormalization` so both versions behave
-identically.
+The contract lives in the core `Assimalign.Cohesion.Http` library, beside
+`IHttpTlsConnectionFeature`, because the transport produces the capability
+and references no feature package (core Http DESIGN, "The TLS connection
+feature"). The transport installs its own implementation at dispatch —
+`Http2ExtendedConnectFeature` from the frame pump, next to the TLS feature,
+and `Http3ExtendedConnectFeature` when the request stream's exchange is
+built — so response interceptors and the application see it from the
+start. The `context.ExtendedConnect` / `context.IsExtendedConnect`
+accessors live in `Assimalign.Cohesion.Http.ExtendedConnect` and read the
+feature directly. The feature used to travel as a `:protocol` string under
+an `IHttpContext.Items` key that the package rebuilt into a feature on
+every read; a published string cannot carry an accept call, so that bridge
+is gone.
+
+Recognition (`:protocol`), validation, and the `IsExtendedConnect` /
+`ValidateExtendedConnect` rules are shared between HTTP/2 and HTTP/3 via
+`HttpFieldNormalization` so both versions behave identically. A classic
+`CONNECT` (no `:protocol`) carries no feature.
 
 ### Deterministic validation (RFC 8441 §4 / RFC 9220)
 
@@ -2916,38 +2926,128 @@ with `H3_MESSAGE_ERROR` (the connection survives).
   the request is then recognized, validated, and modeled identically to
   HTTP/2 — there is no silent downgrade in either direction.
 
-### No tunnel — scope boundary
+### The tunnel
 
-The feature exposes the requested protocol; it does **not** surrender a
-tunnel stream or implement WebSocket framing. Cohesion does not retain a
-WebSocket transport/API surface, so per the issue's "implement only if the
-transport and API surface are intentionally retained" guidance, the actual
-WebSocket bootstrap (the post-2xx data tunnel) is out of scope. An
-application that wants to act on an extended CONNECT reads the feature and
-drives its own response; the framework neither fabricates a tunnel nor
-pretends one exists.
+`AcceptAsync` turns the exchange's stream into a duplex tunnel (RFC 8441 §5,
+RFC 9220 §3). The rules both versions share live in
+`HttpExtendedConnectFeature` and `HttpExtendedConnectStream`; the
+per-version subclasses and the `Http2ConnectionContext` /
+`Http3ConnectionContext` partials (`*.ExtendedConnect.cs`) do the wire work.
 
-What the transport no longer does is stand in the way. On HTTP/3 a CONNECT
-(extended or classic) used to be undispatchable, because the request path
-waited for a stream end a tunnel never sends. It is now dispatched at its
-HEADERS frame, and the peer's tunnel octets are readable through the request
-body as its DATA frames arrive — outside the body-size cap and the
-Content-Length rule, which apply to message content only (RFC 9110 §9.3.6).
-The response direction is unchanged: a response still ends the stream, so a
-tunnel that must stay open in both directions needs the out-of-scope surface
-above.
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Transport
+    participant App as Application
+    Client->>Transport: HEADERS CONNECT + :protocol, stream left open
+    Transport->>App: exchange carrying IHttpExtendedConnectFeature
+    App->>Transport: AcceptAsync
+    Transport->>Client: HEADERS :status 200, stream left open
+    Client->>Transport: DATA
+    Transport->>App: tunnel read
+    App->>Transport: tunnel write
+    Transport->>Client: DATA, paced by flow control
+    App->>Transport: dispose the tunnel
+    Transport->>Client: END_STREAM or FIN
+    App->>Transport: handler returns, SendAsync
+    Transport->>Client: RST_STREAM NO_ERROR or STOP_SENDING if still sending
+```
+
+- **Accepting.** At most once; never after the final response started (a
+  streamed head, the buffered commit, or on HTTP/2 the transport's own
+  claim of the stream) and never on a cancelled exchange — each an
+  `InvalidOperationException` — and never on a stream that is already gone,
+  an `IOException`. The head is a `200` carrying the headers the application
+  set, minus `Content-Length` / `Transfer-Encoding` (RFC 9110 §9.3.6) and the
+  connection-specific fields (RFC 9113 §8.2.2, RFC 9114 §4.2): on HTTP/2 a
+  HEADERS block without `END_STREAM` written under the connection write
+  gate, on HTTP/3 a HEADERS frame and no FIN. Like an HTTP/1.1 upgrade's
+  head it gets no `Alt-Svc` advertisement: it opens a tunnel, not a
+  resource the client could fetch elsewhere.
+- **Takeover.** Accepting registers the tunnel on the exchange before the
+  head is written, the way an HTTP/1.1 takeover claims the connection first.
+  The exchange then reports `HttpExchangeDirective.TakeOver` (`Http2Context`
+  and `Http3Context` override it), so the raw response body sink refuses to
+  commit a head and `SendAsync` finalizes the tunnel instead of writing the
+  application's response — even when the head write itself failed. The
+  interceptors' `BeforeResponseHeadAsync` / `AfterResponseAsync` hooks do not
+  run for a tunnel, matching their documented carve-out for a taken-over
+  exchange and the HTTP/1.1 upgrade, so a WebSocket behaves the same on
+  every version. `HasResponseStarted` reads `true` from the accept on, so a
+  host whose handler faults after accepting resets the stream rather than
+  writing a `500`.
+- **Reads** drain the transport's own request body — the HTTP/2 body pipe,
+  whose consumption credits `WINDOW_UPDATE` on the stream and the connection,
+  and the HTTP/3 lazy body — outside the body-size cap and the
+  Content-Length rule (RFC 9110 §9.3.6). A read returns 0 only at the peer's
+  `END_STREAM` or FIN. A reset or a torn-down connection completes the HTTP/2
+  body pipe as well, just ahead of the abort signal, so the tunnel checks the
+  stream's state when the pipe ends and faults instead of reporting the end
+  of the tunnel.
+- **Writes** are unbuffered. HTTP/2 splits a write into `DATA` frames of at
+  most the peer's `MAX_FRAME_SIZE`, each covered by credit from both send
+  windows (RFC 9113 §5.2) — the accounting a streamed response uses — and
+  flushed at once; a writer waits for credit without holding the write gate.
+  Unlike a streamed response, whose write is discarded once its stream is
+  reset (RFC 9113 §5.4.2), a tunnel write faults. HTTP/3 frames `DATA`
+  straight into the request stream's output pipe and flushes it, so QUIC's
+  per-stream flow control paces it; writing the pipe rather than a stream
+  adapter is what lets a flush that finds the peer stopped reading fault the
+  write. Cancellation is honored only while a write waits — for credit, the
+  write gate, or a flush — so a frame, once begun, is never cut short.
+- **Closing.** Disposing ends the server's side: an empty `DATA` frame with
+  `END_STREAM`, recorded under the write gate so no `DATA` can follow it, or
+  the HTTP/3 FIN by completing the output pipe. `Dispose` starts the close
+  and returns without waiting, because the BCL WebSocket disposes its stream
+  synchronously under its own lock; the close first wakes any read or write
+  still waiting. `DisposeAsync` and `SendAsync` wait for the close. The
+  client may keep sending until it ends its own side.
+- **Ending the exchange.** When the handler returns, `SendAsync` ends a tunnel
+  the application left open, then removes the stream once both sides have
+  ended or stops a client still sending — `RST_STREAM(NO_ERROR)` on HTTP/2
+  (RFC 9113 §8.1), `STOP_SENDING(H3_NO_ERROR)` on HTTP/3 (RFC 9114 §4.1) — as
+  after any response that completes before its request. A cancelled
+  exchange, or a tunnel whose head never reached the wire, is reset instead:
+  `RST_STREAM(CANCEL)`, RFC 8441 §5's abortive close, or
+  `H3_REQUEST_CANCELLED`. No second head is ever written.
+- **Failures.** A peer reset or a lost connection faults pending and later
+  reads and writes with an `IOException`, translated from the transport's
+  internal cancellation where needed; an `OperationCanceledException`
+  surfaces only for the caller's own token.
+- **Lifetime.** An open tunnel is an in-flight exchange. It holds its stream
+  against `SETTINGS_MAX_CONCURRENT_STREAMS` (or QUIC's stream limit), and a
+  graceful close waits for it only within the drain window before teardown
+  aborts it.
+
+### Known limitation: half-close on the QUIC driver
+
+The QUIC connection driver backs a stream's output with a pipe writer that
+does not leave the `QuicStream` open, so completing it — the FIN — disposes
+the stream, which also stops its read side with the driver's default error
+code. On real QUIC, ending the server's side therefore ends the tunnel in
+both directions: a server that closes first cannot read what the client
+still sends. A WebSocket closes after its close handshake, when nothing more
+is expected, so it is unaffected. A write-only half-close needs a
+per-direction completion on `IConnection`, the same follow-up work in
+`Assimalign.Cohesion.Connections` that putting `H3_NO_ERROR` on the wire
+needs (see "Request streams: dispatch at HEADERS, lazy body"). The in-memory
+driver half-closes exactly.
 
 ### AOT posture
 
 No reflection or runtime codegen. Recognition is pseudo-header dispatch;
-validation is string comparison; the feature is a two-property record-like
-class resolved through the existing feature collection.
+validation is string comparison; the feature and the tunnel are plain
+classes resolved through the existing feature collection, and the tunnel
+waits on the write gate, the send-window signal, and a cancellation source.
 
 ### Non-goals
 
-- **WebSocket framing / the data tunnel.** See above.
+- **WebSocket framing.** The tunnel carries raw octets: RFC 6455 framing
+  comes from the BCL (`WebSocket.CreateFromStream` over the tunnel) and the
+  handshake and policy from `Http.WebSockets` / `Web.WebSockets` (ADR 1).
 - **Classic CONNECT tunneling.** A `CONNECT` without `:protocol` is surfaced
-  as an ordinary CONNECT request; opaque TCP tunneling is not implemented.
+  as an ordinary CONNECT request; opaque TCP tunneling to its authority is
+  not implemented, and it carries no tunnel feature.
 
 ## RFC 9218 extensible priorities
 

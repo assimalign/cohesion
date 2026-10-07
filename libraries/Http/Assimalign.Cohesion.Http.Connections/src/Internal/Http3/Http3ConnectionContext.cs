@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
-internal sealed class Http3ConnectionContext : HttpConnectionContext
+internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 {
     // RFC 9114 §7.2.4 / RFC 9218 §7.2 — the peer's SETTINGS frame and its control-stream PRIORITY_UPDATE
     // frames are read whole before they are applied. Both carry a handful of varints, so a declared
@@ -1461,6 +1461,8 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             context.Features.Set(_tlsConnection);
         }
 
+        AttachExtendedConnect(context, extendedConnectProtocol);
+
         // RFC 9218 §4 — the request's Priority header sets the effective priority.
         // Parsing is tolerant: a malformed value leaves the default (urgency 3,
         // non-incremental) in place.
@@ -1482,15 +1484,6 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
                 _responseInterceptors,
                 new Http3ResponseBodyStream(context),
                 new Http3ExchangeControl(this, context));
-        }
-
-        // Surface the :protocol pseudo-header (RFC 8441 / RFC 9220) generically
-        // so a higher layer (Assimalign.Cohesion.Http.ExtendedConnect) can model
-        // extended CONNECT without the transport interpreting it. Same Items key
-        // convention as the HTTP/2 transport.
-        if (extendedConnectProtocol is not null)
-        {
-            context.Items[TransportItemKeys.Protocol] = extendedConnectProtocol;
         }
 
         return context;
@@ -1680,6 +1673,14 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         // body was read — so there is no stream left to answer on.
         if (requestBody.IsReset)
         {
+            return;
+        }
+
+        // An accepted extended CONNECT tunnel already sent the exchange's only head; end the tunnel
+        // rather than write a response (RFC 9220).
+        if (http3Context.Tunnel is { } tunnel)
+        {
+            await FinishTunnelAsync(http3Context, tunnel, cancellationToken).ConfigureAwait(false);
             return;
         }
 
