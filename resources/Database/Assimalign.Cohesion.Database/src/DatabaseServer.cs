@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Tracing;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Internal;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -100,15 +103,17 @@ public abstract class DatabaseServer : IAsyncDisposable
             {
                 await StartCoreAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch
+            catch (Exception exception)
             {
                 // A failed start is terminal: the leaf released what the start acquired, and a
                 // later stop has nothing left to do.
                 Volatile.Write(ref _lifecycle, stopped);
+                DatabaseEventSource.Log.ServerStartFailed(this, exception);
                 throw;
             }
 
             Volatile.Write(ref _lifecycle, running);
+            DatabaseEventSource.Log.ServerStarted(this);
         }
         finally
         {
@@ -129,13 +134,21 @@ public abstract class DatabaseServer : IAsyncDisposable
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (Volatile.Read(ref _lifecycle) == stopped)
+            int lifecycle = Volatile.Read(ref _lifecycle);
+            if (lifecycle == stopped)
             {
                 return;
             }
 
             Volatile.Write(ref _lifecycle, stopped);
+
+            // Only a server that ran reports its stop; one that never started releases its listener
+            // silently.
+            long started = lifecycle == running
+                ? DatabaseEventSource.Log.StartTimer(EventLevel.Informational, EventKeywords.None)
+                : 0;
             await StopCoreAsync(cancellationToken).ConfigureAwait(false);
+            DatabaseEventSource.Log.ServerStopped(this, started);
         }
         finally
         {

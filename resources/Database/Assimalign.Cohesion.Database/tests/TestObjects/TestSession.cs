@@ -61,6 +61,24 @@ internal sealed class TestSession : DatabaseSession
         }
     }
 
+    /// <summary>
+    /// Gets or sets what the execute cores throw instead of returning a result; null to return
+    /// <see cref="Result"/>.
+    /// </summary>
+    public Exception? ExecuteFailure { get; set; }
+
+    /// <summary>
+    /// Gets or sets the result the execute cores return.
+    /// </summary>
+    public QueryResult Result { get; set; } = TestResult.Instance;
+
+    /// <summary>
+    /// Calls the typed execute core directly, past the base's public member: the baseline the
+    /// event source's allocation check compares the public member with.
+    /// </summary>
+    public ValueTask<QueryResult> ExecuteCoreDirectly(QueryRequest request, CancellationToken cancellationToken = default)
+        => ExecuteCoreAsync(request, cancellationToken);
+
     public bool EnterOperation() => TryEnterOperation();
 
     public void LeaveOperation() => ExitOperation();
@@ -92,7 +110,12 @@ internal sealed class TestSession : DatabaseSession
     {
         Interlocked.Increment(ref _executions);
         LastRequest = request;
-        return new ValueTask<QueryResult>(TestResult.Instance);
+        if (ExecuteFailure is { } failure)
+        {
+            throw failure;
+        }
+
+        return new ValueTask<QueryResult>(Result);
     }
 
     protected override ValueTask<QueryResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
@@ -100,7 +123,12 @@ internal sealed class TestSession : DatabaseSession
         Interlocked.Increment(ref _executions);
         LastStatement = statement;
         LastParameters = parameters;
-        return new ValueTask<QueryResult>(TestResult.Instance);
+        if (ExecuteFailure is { } failure)
+        {
+            throw failure;
+        }
+
+        return new ValueTask<QueryResult>(Result);
     }
 
     protected override ValueTask DisposeAsyncCore()

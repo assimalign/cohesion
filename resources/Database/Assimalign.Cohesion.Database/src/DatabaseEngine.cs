@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Tracing;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -113,6 +116,11 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// </remarks>
     public const int DefaultWorkerFailureMinimumPasses = 3;
 
+    // The operation names DatabaseOperationFailed writes (event-sources plan, event 13).
+    private const string createOperation = "Create";
+    private const string openOperation = "Open";
+    private const string dropOperation = "Drop";
+
     private readonly string _name;
     private readonly EngineModel _model;
     private readonly TimeSpan _workerFailureWindow;
@@ -190,6 +198,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         _workerFailureWindow = workerFailureWindow;
         _workerFailureMinimumPasses = workerFailureMinimumPasses;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        DatabaseEventSource.Log.EngineCreated(this);
     }
 
     /// <summary>
@@ -479,7 +488,15 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         ThrowIfEmpty(name);
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        return CreateDatabaseCoreAsync(name, cancellationToken);
+
+        // The core is returned as it is while nobody listens; only an enabled source pays for the
+        // wrapper that times it (event-sources plan, D5 a).
+        if (!DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            return CreateDatabaseCoreAsync(name, cancellationToken);
+        }
+
+        return CreateDatabaseTracedAsync(name, cancellationToken);
     }
 
     /// <summary>
@@ -508,7 +525,12 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         ThrowIfEmpty(name);
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        return OpenUnclosedAsync(name, cancellationToken);
+        if (!DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            return OpenUnclosedAsync(name, waitedForClose: null, cancellationToken);
+        }
+
+        return OpenDatabaseTracedAsync(name, cancellationToken);
     }
 
     /// <summary>
@@ -525,7 +547,12 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         ThrowIfEmpty(name);
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        return DropDatabaseCoreAsync(name, cancellationToken);
+        if (!DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            return DropDatabaseCoreAsync(name, cancellationToken);
+        }
+
+        return DropDatabaseTracedAsync(name, cancellationToken);
     }
 
     /// <summary>
@@ -611,6 +638,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             return;
         }
 
+        long disposeStarted = DatabaseEventSource.Log.EngineDisposeStart(this);
         DatabaseServer[] servers;
         DatabaseEngineWorker[] workers;
         Thread[] threads;
@@ -692,6 +720,12 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         }
 
         _stop.Dispose();
+        if (failures is not null)
+        {
+            DatabaseEventSource.Log.EngineDisposeFailed(this, failures.Count, failures[0]);
+        }
+
+        DatabaseEventSource.Log.EngineDisposeStop(this, failures?.Count ?? 0, disposeStarted);
         if (failures is not null)
         {
             throw new AggregateException($"One or more components of engine '{_name}' failed to close.", failures);
@@ -831,9 +865,21 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// </summary>
     protected void CompleteComposition()
     {
+        bool completed;
+        int workerCount;
+        int serverCount;
         lock (_sync)
         {
+            completed = !_composed;
             _composed = true;
+            workerCount = _workers.Count;
+            serverCount = _servers.Count;
+        }
+
+        // The first call froze the composition: written once, outside the lock.
+        if (completed)
+        {
+            DatabaseEventSource.Log.EngineComposed(this, workerCount, serverCount);
         }
     }
 
@@ -914,6 +960,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         finally
         {
             ForgetWorkerFailures(database.Name);
+            DatabaseEventSource.Log.DatabaseClosed(this, database.Name);
         }
     }
 
@@ -1118,7 +1165,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
                     return;
                 }
 
-                Volatile.Write(ref _workerRunFault, new InvalidOperationException(
+                RecordWorkerRunFault(worker, new InvalidOperationException(
                     $"Worker '{worker.Name}' returned from Run before its engine stopped it; the engine runs it again."));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1127,21 +1174,133 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                Volatile.Write(ref _workerRunFault, exception);
+                RecordWorkerRunFault(worker, exception);
             }
 
             cancellationToken.WaitHandle.WaitOne(DatabaseEngineWorker.FailureBackoff);
         }
     }
 
+    /// <summary>
+    /// Records what ended a worker's <see cref="DatabaseEngineWorker.Run"/> before the engine stopped
+    /// it, which keeps the engine <see cref="EngineState.Faulted"/> until it is disposed, and writes
+    /// it (<c>WorkerLoopFaulted</c>). The pump's two exits call it; the base's loop lets neither
+    /// happen, so the engine's tests reach it directly.
+    /// </summary>
+    /// <param name="worker">The worker whose run ended.</param>
+    /// <param name="fault">What escaped the run, or the failure recorded for an early return.</param>
+    internal void RecordWorkerRunFault(DatabaseEngineWorker worker, Exception fault)
+    {
+        Volatile.Write(ref _workerRunFault, fault);
+        DatabaseEventSource.Log.WorkerLoopFaulted(this, worker, fault);
+    }
+
+    // The traced create (event-sources plan, D5 a): entered only while the source is enabled, so
+    // the timestamp and the wrapper cost nothing while nobody listens. The filter writes a failure
+    // and never catches it: the exception leaves exactly as it would untraced.
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<DatabaseInstance> CreateDatabaseTracedAsync(DatabaseName name, CancellationToken cancellationToken)
+    {
+        long started = Stopwatch.GetTimestamp();
+        DatabaseInstance database;
+        try
+        {
+            database = await CreateDatabaseCoreAsync(name, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (TraceDatabaseOperationFailure(name, createOperation, exception))
+        {
+            throw;
+        }
+
+        DatabaseEventSource.Log.DatabaseCreated(this, name, started);
+        return database;
+    }
+
+    // The traced open: the event is written only for a database the leaf held no open instance of
+    // before the call, so an open of an open database writes nothing.
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<DatabaseInstance> OpenDatabaseTracedAsync(DatabaseName name, CancellationToken cancellationToken)
+    {
+        long started = Stopwatch.GetTimestamp();
+        bool heldOpen = HoldsOpenDatabase(name);
+        var waitedForClose = new StrongBox<bool>();
+        DatabaseInstance database;
+        try
+        {
+            database = await OpenUnclosedAsync(name, waitedForClose, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (TraceDatabaseOperationFailure(name, openOperation, exception))
+        {
+            throw;
+        }
+
+        if (!heldOpen)
+        {
+            DatabaseEventSource.Log.DatabaseOpened(this, name, waitedForClose.Value, started);
+        }
+
+        return database;
+    }
+
+    // The traced drop.
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
+    private async ValueTask DropDatabaseTracedAsync(DatabaseName name, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await DropDatabaseCoreAsync(name, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (TraceDatabaseOperationFailure(name, dropOperation, exception))
+        {
+            throw;
+        }
+
+        DatabaseEventSource.Log.DatabaseDropped(this, name);
+    }
+
+    // Whether the leaf held an open instance of the database before a traced open: a read of the
+    // leaf's lookup, made only while the source is enabled. A lookup that throws (a leaf's own name
+    // or state check) reads as none; the open's core then runs as it would untraced and decides.
+    private bool HoldsOpenDatabase(DatabaseName name)
+    {
+        try
+        {
+            return TryGetDatabaseCore(name, out var database) && !database.IsClosing;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return false;
+        }
+    }
+
+    // An exception filter: writes a failed create, open or drop and returns false, so nothing is
+    // caught. A cancellation is not a failure, nor is a missing database on open, which a server's
+    // database resolution expects.
+    private bool TraceDatabaseOperationFailure(DatabaseName name, string operation, Exception exception)
+    {
+        if (exception is not OperationCanceledException
+            && !(exception is DatabaseNotFoundException && ReferenceEquals(operation, openOperation)))
+        {
+            DatabaseEventSource.Log.DatabaseOperationFailed(this, name, operation, exception);
+        }
+
+        return false;
+    }
+
     // The open behind OpenDatabaseAsync: never hands out a closed instance. A database the core
     // returns while a holder closes it is waited for, and opened again once its close ended and
-    // the leaf forgot it; ForgetClosedDatabaseCore runs before the close's waiters resume.
-    private async ValueTask<DatabaseInstance> OpenUnclosedAsync(DatabaseName name, CancellationToken cancellationToken)
+    // the leaf forgot it; ForgetClosedDatabaseCore runs before the close's waiters resume. A traced
+    // open passes a box that learns whether the open waited for a close; an untraced one passes null.
+    private async ValueTask<DatabaseInstance> OpenUnclosedAsync(DatabaseName name, StrongBox<bool>? waitedForClose, CancellationToken cancellationToken)
     {
         var database = await OpenDatabaseCoreAsync(name, cancellationToken).ConfigureAwait(false);
         while (database.IsClosing)
         {
+            if (waitedForClose is not null)
+            {
+                waitedForClose.Value = true;
+            }
+
             var closing = database;
             await closing.Closure.WaitAsync(cancellationToken).ConfigureAwait(false);
             ThrowIfDisposed();

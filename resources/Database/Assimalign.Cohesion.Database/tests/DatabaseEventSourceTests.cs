@@ -1,21 +1,31 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
+using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Documents;
+using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Graph;
 using Assimalign.Cohesion.Database.Internal;
+using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Sql;
 
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the Database event source: the source is process-wide.
+/// Serializes the tests that observe the Database event source: the source is process-wide, so the
+/// collection runs alone, after every parallel collection.
 /// </summary>
 [CollectionDefinition(nameof(DatabaseEventSourceCollection), DisableParallelization = true)]
 public class DatabaseEventSourceCollection
@@ -23,16 +33,17 @@ public class DatabaseEventSourceCollection
 }
 
 /// <summary>
-/// The Database root's event source against the repository's EventSource convention, and the
-/// worker failures and recoveries it reports (#1268): one event per failure, one per recovery.
+/// The Database root's event source against the repository's EventSource convention: its name and
+/// manifest, the engine, database, server, session, statement and explicit-transaction lifecycle it
+/// reports over real in-memory engines and the root's test doubles, the worker failures and
+/// recoveries it reports (#1268), its <c>current-sessions</c> counter, and what the statement path
+/// allocates while nobody listens (the event-sources plan, §7).
 /// </summary>
-/// <remarks>
-/// The source declares no counters: a worker's counts are on the worker itself
-/// (<see cref="DatabaseEngineWorker.FailureCount"/>).
-/// </remarks>
 [Collection(nameof(DatabaseEventSourceCollection))]
 public sealed class DatabaseEventSourceTests
 {
+    private static readonly TimeSpan _wait = TimeSpan.FromSeconds(30);
+
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should be named for its assembly")]
     public void GetName_DatabaseEventSource_ShouldEqualAssemblyName()
     {
@@ -55,6 +66,10 @@ public sealed class DatabaseEventSourceTests
         // Assert
         manifest.ShouldNotBeNull();
         manifest.ShouldContain("Assimalign.Cohesion.Database", Case.Sensitive);
+        for (int id = 1; id <= 34; id++)
+        {
+            manifest.ShouldContain($"value=\"{id}\"", Case.Sensitive);
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report each worker failure and each recovery once with its declared payload")]
@@ -141,12 +156,7 @@ public sealed class DatabaseEventSourceTests
             }
         }
 
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        while (!recorder.Events.Any(e => e.EventId == 3 && Equals(e.Payload?[0], engineName)) && watch.Elapsed < TimeSpan.FromSeconds(30))
-        {
-            await Task.Delay(10);
-        }
-
+        await recorder.WaitForAsync(e => e.EventId == 3 && Equals(e.Payload?[0], engineName));
         await Task.Delay(100);
 
         // Assert
@@ -182,26 +192,754 @@ public sealed class DatabaseEventSourceTests
         recorder.Events.Where(e => Equals(e.Payload?[0], name)).Select(e => e.EventName).ShouldBe(["WorkerFailed"]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report a real engine's database lifecycle once per transition")]
+    public async Task DatabaseLifecycle_RealSqlEngine_ShouldReportEachTransitionOnce()
+    {
+        // Arrange
+        string engineName = "event-source-sql-" + Guid.NewGuid().ToString("N");
+        using var recorder = new DatabaseEventRecorder(EventLevel.Informational);
+        Exception? duplicate;
+        Exception? missing;
+
+        // Act: create, close, reopen, open again while open, a missing open, a duplicate create, a
+        // drop, and the engine's disposal.
+        await using (var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = engineName }))
+        {
+            var created = await engine.CreateDatabaseAsync("lifecycle");
+            await created.DisposeAsync();
+            var opened = await engine.OpenDatabaseAsync("lifecycle");
+            (await engine.OpenDatabaseAsync("lifecycle")).ShouldBeSameAs(opened);
+            missing = await Record.ExceptionAsync(async () => await engine.OpenDatabaseAsync("missing"));
+            duplicate = await Record.ExceptionAsync(async () => await engine.CreateDatabaseAsync("lifecycle"));
+            await engine.DropDatabaseAsync("lifecycle");
+        }
+
+        // Assert
+        missing.ShouldBeOfType<DatabaseNotFoundException>();
+        duplicate.ShouldNotBeNull();
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(Payload(e, "engineName"), engineName)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(
+        [
+            "EngineCreated",
+            "EngineComposed",
+            "DatabaseCreated",
+            "DatabaseClosed",
+            "DatabaseOpened",
+            "DatabaseOperationFailed",
+            "DatabaseClosed",
+            "DatabaseDropped",
+            "EngineDisposeStart",
+            "EngineDisposeStop",
+        ]);
+
+        var engineCreated = events[0];
+        engineCreated.EventId.ShouldBe(4);
+        engineCreated.Level.ShouldBe(EventLevel.Informational);
+        engineCreated.PayloadNames.ShouldBe(["engineName", "model", "workerFailureWindowMilliseconds", "workerFailureMinimumPasses"]);
+        engineCreated.Payload.ShouldBe([engineName, nameof(EngineModel.Sql), DatabaseEngine.DefaultWorkerFailureWindow.TotalMilliseconds, DatabaseEngine.DefaultWorkerFailureMinimumPasses]);
+
+        var composed = events[1];
+        composed.EventId.ShouldBe(5);
+        composed.PayloadNames.ShouldBe(["engineName", "model", "workerCount", "serverCount"]);
+        ((int)Payload(composed, "workerCount")!).ShouldBeGreaterThan(0);
+        Payload(composed, "serverCount").ShouldBe(0);
+
+        var databaseCreated = events[2];
+        databaseCreated.EventId.ShouldBe(9);
+        databaseCreated.PayloadNames.ShouldBe(["engineName", "model", "database", "durationMilliseconds"]);
+        Payload(databaseCreated, "database").ShouldBe("lifecycle");
+        ((double)Payload(databaseCreated, "durationMilliseconds")!).ShouldBeGreaterThanOrEqualTo(0);
+
+        var closed = events[3];
+        closed.EventId.ShouldBe(12);
+        closed.PayloadNames.ShouldBe(["engineName", "model", "database"]);
+        closed.Payload.ShouldBe([engineName, nameof(EngineModel.Sql), "lifecycle"]);
+
+        var databaseOpened = events[4];
+        databaseOpened.EventId.ShouldBe(10);
+        databaseOpened.PayloadNames.ShouldBe(["engineName", "model", "database", "waitedForClose", "durationMilliseconds"]);
+        Payload(databaseOpened, "database").ShouldBe("lifecycle");
+        Payload(databaseOpened, "waitedForClose").ShouldBe(false);
+
+        var operationFailed = events[5];
+        operationFailed.EventId.ShouldBe(13);
+        operationFailed.Level.ShouldBe(EventLevel.Error);
+        operationFailed.PayloadNames.ShouldBe(["engineName", "model", "database", "operation", "exceptionType", "exceptionMessage"]);
+        operationFailed.Payload.ShouldBe([engineName, nameof(EngineModel.Sql), "lifecycle", "Create", duplicate.GetType().FullName, duplicate.Message]);
+
+        var dropped = events[7];
+        dropped.EventId.ShouldBe(11);
+        dropped.PayloadNames.ShouldBe(["engineName", "model", "database"]);
+        dropped.Payload.ShouldBe([engineName, nameof(EngineModel.Sql), "lifecycle"]);
+
+        var disposeStart = events[8];
+        disposeStart.EventId.ShouldBe(6);
+        disposeStart.Opcode.ShouldBe(EventOpcode.Start);
+        disposeStart.PayloadNames.ShouldBe(["engineName", "model"]);
+
+        var disposeStop = events[9];
+        disposeStop.EventId.ShouldBe(7);
+        disposeStop.Opcode.ShouldBe(EventOpcode.Stop);
+        disposeStop.PayloadNames.ShouldBe(["engineName", "model", "failureCount", "durationMilliseconds"]);
+        Payload(disposeStop, "failureCount").ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report a real engine's statements and explicit transactions once each")]
+    public async Task StatementsAndTransactions_RealSqlEngine_ShouldReportEachOnce()
+    {
+        // Arrange: a 0 ms threshold makes every statement slow (plan D7).
+        string engineName = "event-source-sql-" + Guid.NewGuid().ToString("N");
+        using var recorder = new DatabaseEventRecorder(EventLevel.Verbose, slowStatementThreshold: "0");
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = engineName });
+        DatabaseInstance database = await engine.CreateDatabaseAsync("statements");
+        var session = await database.CreateSessionAsync();
+        long sessionNumber = session.SessionNumber;
+
+        // Act: a statement that succeeds, one that fails to parse (thrown) and one the session
+        // refuses with a coded result (COMMIT with no open transaction); a committed and a rolled
+        // back transaction; a commit of the rolled back one; then the session's close.
+        var succeeded = await session.ExecuteAsync("CREATE TABLE items (id INT NOT NULL)");
+        var parseFailure = await Record.ExceptionAsync(async () => await session.ExecuteAsync("SELEC 1"));
+        var failed = await session.ExecuteAsync("COMMIT");
+        var committed = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("INSERT INTO items (id) VALUES (1)");
+        await committed.CommitAsync();
+        await committed.DisposeAsync();
+        var rolledBack = await session.BeginTransactionAsync();
+        await rolledBack.RollbackAsync();
+        var refusal = await Record.ExceptionAsync(async () => await rolledBack.CommitAsync());
+        await session.DisposeAsync();
+
+        // Assert
+        succeeded.Status.ShouldBe(QueryResultStatus.Success);
+        parseFailure.ShouldBeOfType<DatabaseParseException>();
+        failed.Status.ShouldBe(QueryResultStatus.Error);
+        refusal.ShouldNotBeNull();
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+
+        var sessionEvents = recorder.Events.Where(e => Equals(Payload(e, "sessionNumber"), sessionNumber)).ToArray();
+        sessionEvents.Select(e => e.EventName).ShouldBe(
+        [
+            "SessionOpened",
+            "StatementStart", "SlowStatement", "StatementStop",
+            "StatementStart", "StatementFailed", "SlowStatement", "StatementStop",
+            "StatementStart", "StatementFailed", "SlowStatement", "StatementStop",
+            "TransactionBegun",
+            "StatementStart", "SlowStatement", "StatementStop",
+            "TransactionBegun",
+            "SessionClosed",
+        ]);
+
+        var opened = sessionEvents[0];
+        opened.EventId.ShouldBe(23);
+        opened.Level.ShouldBe(EventLevel.Verbose);
+        opened.Keywords.HasFlag(DatabaseEventSource.Keywords.Sessions).ShouldBeTrue();
+        opened.PayloadNames.ShouldBe(["engineName", "database", "sessionNumber"]);
+        opened.Payload.ShouldBe([engineName, "statements", sessionNumber]);
+
+        var start = sessionEvents[1];
+        start.EventId.ShouldBe(25);
+        start.Opcode.ShouldBe(EventOpcode.Start);
+        start.Keywords.HasFlag(DatabaseEventSource.Keywords.Statements).ShouldBeTrue();
+        start.PayloadNames.ShouldBe(["database", "sessionNumber", "requestKind"]);
+        start.Payload.ShouldBe(["statements", sessionNumber, DatabaseEventSource.TextRequestKind]);
+
+        var slow = sessionEvents[2];
+        slow.EventId.ShouldBe(27);
+        slow.Level.ShouldBe(EventLevel.Warning);
+        slow.PayloadNames.ShouldBe(["engineName", "model", "database", "sessionNumber", "requestKind", "status", "durationMilliseconds", "thresholdMilliseconds"]);
+        Payload(slow, "engineName").ShouldBe(engineName);
+        Payload(slow, "model").ShouldBe(nameof(EngineModel.Sql));
+        Payload(slow, "status").ShouldBe(nameof(QueryResultStatus.Success));
+        Payload(slow, "thresholdMilliseconds").ShouldBe(0d);
+
+        var stop = sessionEvents[3];
+        stop.EventId.ShouldBe(26);
+        stop.Opcode.ShouldBe(EventOpcode.Stop);
+        stop.PayloadNames.ShouldBe(["database", "sessionNumber", "status", "affectedCount", "durationMilliseconds"]);
+        Payload(stop, "status").ShouldBe(nameof(QueryResultStatus.Success));
+        Payload(stop, "affectedCount").ShouldBe(succeeded.AffectedCount);
+
+        // The parse failure the session threw: its type and message.
+        var thrown = sessionEvents[5];
+        thrown.EventId.ShouldBe(28);
+        thrown.Level.ShouldBe(EventLevel.Error);
+        thrown.PayloadNames.ShouldBe(["database", "sessionNumber", "requestKind", "failure", "message", "durationMilliseconds"]);
+        Payload(thrown, "failure").ShouldBe(typeof(DatabaseParseException).FullName);
+        Payload(thrown, "message").ShouldBe(parseFailure.Message);
+        Payload(thrown, "requestKind").ShouldBe(DatabaseEventSource.TextRequestKind);
+        Payload(sessionEvents[7], "status").ShouldBe(nameof(QueryResultStatus.Error));
+        Payload(sessionEvents[7], "affectedCount").ShouldBe(-1L);
+
+        // The coded result the session returned: its error diagnostic's code and message.
+        var coded = sessionEvents[9];
+        var diagnostic = failed.Diagnostics!.First(d => d.Severity == DiagnosticSeverity.Error);
+        coded.EventId.ShouldBe(28);
+        diagnostic.Code.ShouldBe("COHSQLT002");
+        Payload(coded, "failure").ShouldBe(diagnostic.Code);
+        Payload(coded, "message").ShouldBe(diagnostic.Message);
+        Payload(sessionEvents[11], "status").ShouldBe(nameof(QueryResultStatus.Error));
+
+        var begun = sessionEvents[12];
+        begun.EventId.ShouldBe(29);
+        begun.Keywords.HasFlag(DatabaseEventSource.Keywords.Transactions).ShouldBeTrue();
+        begun.PayloadNames.ShouldBe(["database", "sessionNumber", "transactionId", "isolationLevel"]);
+        begun.Payload.ShouldBe(["statements", sessionNumber, committed.Id.ToString(), committed.IsolationLevel.ToString()]);
+
+        var closed = sessionEvents[^1];
+        closed.EventId.ShouldBe(24);
+        closed.PayloadNames.ShouldBe(["database", "sessionNumber", "failed"]);
+        closed.Payload.ShouldBe(["statements", sessionNumber, false]);
+
+        // The committed transaction: one commit, and no rollback from its disposal.
+        var committedEvents = recorder.Events.Where(e => Equals(Payload(e, "transactionId"), committed.Id.ToString())).ToArray();
+        committedEvents.Select(e => e.EventName).ShouldBe(["TransactionBegun", "TransactionCommitted"]);
+        committedEvents[1].EventId.ShouldBe(30);
+        committedEvents[1].PayloadNames.ShouldBe(["transactionId", "durationMilliseconds"]);
+
+        // The rolled back transaction: one rollback, and its refused commit.
+        var rolledBackEvents = recorder.Events.Where(e => Equals(Payload(e, "transactionId"), rolledBack.Id.ToString())).ToArray();
+        rolledBackEvents.Select(e => e.EventName).ShouldBe(["TransactionBegun", "TransactionRolledBack", "TransactionCommitFailed"]);
+        rolledBackEvents[1].EventId.ShouldBe(31);
+        rolledBackEvents[1].Payload.ShouldBe([rolledBack.Id.ToString(), "Rollback"]);
+        rolledBackEvents[2].EventId.ShouldBe(33);
+        rolledBackEvents[2].Level.ShouldBe(EventLevel.Error);
+        rolledBackEvents[2].PayloadNames.ShouldBe(["transactionId", "exceptionType", "exceptionMessage"]);
+        rolledBackEvents[2].Payload.ShouldBe([rolledBack.Id.ToString(), refusal.GetType().FullName, refusal.Message]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report a statement whose core threw, and leave the exception as it was")]
+    public async Task StatementThrew_ShouldReportTheFailureAndRethrowTheSameException()
+    {
+        // Arrange
+        string engineName = "event-source-" + Guid.NewGuid().ToString("N");
+        await using var engine = new TestEngine(engineName);
+        var database = new TestDatabase("thrown", engine);
+        await using var session = new TestSession(database);
+        var failure = new DatabaseException("the statement failed");
+        using var recorder = new DatabaseEventRecorder(EventLevel.Verbose);
+
+        // Act: a failed statement, then a cancelled one.
+        session.ExecuteFailure = failure;
+        var thrown = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new TestRequest()));
+        var cancellation = new OperationCanceledException();
+        session.ExecuteFailure = cancellation;
+        // Recorded rather than asserted with Should.ThrowAsync, which reports a canceled task with an
+        // exception of its own instead of the one the task holds.
+        var cancelled = await Record.ExceptionAsync(async () => await session.ExecuteAsync("SELECT 1"));
+
+        // Assert: the caller gets the core's own exceptions.
+        thrown.ShouldBeSameAs(failure);
+        cancelled.ShouldBeSameAs(cancellation);
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(Payload(e, "sessionNumber"), session.SessionNumber) && e.EventName!.Contains("Statement", StringComparison.Ordinal)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["StatementStart", "StatementFailed", "StatementStop", "StatementStart", "StatementStop"]);
+        events[0].Payload.ShouldBe(["thrown", session.SessionNumber, nameof(TestRequest)]);
+        events[1].Payload![2].ShouldBe(nameof(TestRequest));
+        events[1].Payload![3].ShouldBe(typeof(DatabaseException).FullName);
+        events[1].Payload![4].ShouldBe("the statement failed");
+        Payload(events[2], "status").ShouldBe(nameof(QueryResultStatus.Error));
+        Payload(events[2], "affectedCount").ShouldBe(-1L);
+        Payload(events[3], "requestKind").ShouldBe(DatabaseEventSource.TextRequestKind);
+        Payload(events[4], "status").ShouldBe(nameof(QueryResultStatus.Cancelled));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should write a failed result's first error diagnostic, or its status when it has none")]
+    public async Task StatementFailed_ErrorResult_ShouldWriteItsFirstErrorDiagnostic()
+    {
+        // Arrange: a result whose first diagnostic is a warning, and one with no diagnostics.
+        await using var engine = new TestEngine("event-source-" + Guid.NewGuid().ToString("N"));
+        await using var session = new TestSession(new TestDatabase("diagnosed", engine));
+        using var recorder = new DatabaseEventRecorder(EventLevel.Error);
+
+        // Act
+        session.Result = new DiagnosedResult(
+            new Diagnostic("TESTW001", "a warning first", 0, 0, DiagnosticSeverity.Warning),
+            new Diagnostic("TESTE001", "the error", 0, 0, DiagnosticSeverity.Error));
+        await session.ExecuteAsync(new TestRequest());
+        session.Result = new DiagnosedResult();
+        await session.ExecuteAsync(new TestRequest());
+
+        // Assert
+        var failures = recorder.Events.Where(e => e.EventId == 28 && Equals(Payload(e, "sessionNumber"), session.SessionNumber)).ToArray();
+        failures.Length.ShouldBe(2);
+        Payload(failures[0], "failure").ShouldBe("TESTE001");
+        Payload(failures[0], "message").ShouldBe("the error");
+        Payload(failures[1], "failure").ShouldBe(nameof(QueryResultStatus.Error));
+        Payload(failures[1], "message").ShouldBe(string.Empty);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should write one statement pair for a Graph or Documents text statement that re-enters the typed path")]
+    public async Task TextStatement_GraphAndDocuments_ShouldWriteOneStatementPairEach()
+    {
+        // Arrange: Graph and Documents parse a text statement and run the typed request through the
+        // root's typed overload again on the same session (the plan's §4.1, "Re-entry").
+        using var recorder = new DatabaseEventRecorder(EventLevel.Verbose);
+        await using var graphEngine = GraphDatabaseEngine.Create(new GraphDatabaseEngineOptions { EngineName = "event-source-graph-" + Guid.NewGuid().ToString("N") });
+        var graph = await graphEngine.CreateDatabaseAsync("graph");
+        await using var graphSession = await graph.CreateSessionAsync();
+        await using var documentEngine = DocumentDatabaseEngine.Create(new DocumentDatabaseEngineOptions { EngineName = "event-source-documents-" + Guid.NewGuid().ToString("N") });
+        var documents = await documentEngine.CreateDatabaseAsync("documents");
+        await using (var setup = await documents.CreateSessionAsync())
+        {
+            await setup.CreateCollectionAsync("items");
+        }
+
+        await using var documentSession = await documents.CreateSessionAsync();
+
+        // Act: one statement each, and a Graph statement that fails to parse.
+        await graphSession.ExecuteAsync("INSERT (:Node {name: 'a'})");
+        await documentSession.ExecuteAsync("SELECT id FROM items");
+        var parseFailure = await Record.ExceptionAsync(async () => await graphSession.ExecuteAsync("THIS IS NOT GQL"));
+
+        // Assert
+        parseFailure.ShouldBeAssignableTo<DatabaseParseException>();
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        StatementEvents(recorder, graphSession.SessionNumber).ShouldBe(
+            ["StatementStart", "StatementStop", "StatementStart", "StatementFailed", "StatementStop"]);
+        StatementEvents(recorder, documentSession.SessionNumber).ShouldBe(["StatementStart", "StatementStop"]);
+        recorder.Events
+            .Where(e => e.EventId == 25 && (Equals(Payload(e, "sessionNumber"), graphSession.SessionNumber) || Equals(Payload(e, "sessionNumber"), documentSession.SessionNumber)))
+            .ShouldAllBe(e => Equals(Payload(e, "requestKind"), DatabaseEventSource.TextRequestKind));
+
+        static string?[] StatementEvents(DatabaseEventRecorder recorder, long sessionNumber)
+            => [.. recorder.Events
+                .Where(e => Equals(Payload(e, "sessionNumber"), sessionNumber) && e.EventName!.StartsWith("Statement", StringComparison.Ordinal))
+                .Select(e => e.EventName)];
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report an aborted transaction once, and its session's teardown rollback")]
+    public async Task TransactionAbortedAndSessionClosed_ShouldBeReportedOnce()
+    {
+        // Arrange
+        await using var engine = new TestEngine("event-source-" + Guid.NewGuid().ToString("N"));
+        var database = new TestDatabase("transactions", engine);
+        var aborted = new TestTransaction();
+        var session = new TestSession(database);
+        using var recorder = new DatabaseEventRecorder(EventLevel.Verbose);
+
+        // Act: an operation's failure aborts the transaction (twice: the second changes nothing),
+        // its caller rolls it back and tries a commit; then a session closes with its transaction.
+        await aborted.Abort(new DatabaseException("the operation failed"));
+        await aborted.Abort(new DatabaseException("a later failure"));
+        await aborted.RollbackAsync();
+        await Should.ThrowAsync<DatabaseException>(async () => await aborted.CommitAsync());
+        var open = await session.BeginTransactionAsync();
+        await session.DisposeAsync();
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var abortedEvents = recorder.Events.Where(e => Equals(Payload(e, "transactionId"), aborted.Id.ToString())).ToArray();
+        abortedEvents.Select(e => e.EventName).ShouldBe(["TransactionAborted", "TransactionCommitFailed"]);
+        abortedEvents[0].EventId.ShouldBe(32);
+        abortedEvents[0].PayloadNames.ShouldBe(["transactionId", "exceptionType", "exceptionMessage"]);
+        abortedEvents[0].Payload.ShouldBe([aborted.Id.ToString(), typeof(DatabaseException).FullName, "the operation failed"]);
+
+        var openEvents = recorder.Events.Where(e => Equals(Payload(e, "transactionId"), open.Id.ToString())).ToArray();
+        openEvents.Select(e => e.EventName).ShouldBe(["TransactionBegun", "TransactionRolledBack"]);
+        openEvents[1].Payload.ShouldBe([open.Id.ToString(), "SessionClosed"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report a worker's passes, its unfinished work and a give-up its engine could not complete")]
+    public async Task WorkerPassesAndGiveUpFailure_ShouldBeReportedOnceEach()
+    {
+        // Arrange: a free worker whose first pass leaves database a unfinished and whose second fails
+        // on it; and an engine whose leaf refuses a give-up.
+        string name = "event-source-" + Guid.NewGuid().ToString("N");
+        var worker = new ScriptedWorker((self, pass) =>
+        {
+            self.Begin("a").ShouldBeTrue();
+            if (pass == 1)
+            {
+                self.Unfinished("a");
+            }
+            else
+            {
+                self.Fail("a", new InvalidOperationException("the pass failed on a"), TimeSpan.Zero);
+            }
+        }, name: name);
+
+        var clock = new ManualTimeProvider();
+        string engineName = name + "-engine";
+        await using var engine = new TestEngine(engineName, workerFailureWindow: TimeSpan.FromSeconds(1), workerFailureMinimumPasses: 1, time: clock)
+        {
+            TakeOfflineFailure = new InvalidOperationException("the leaf refused"),
+        };
+        await engine.CreateDatabaseAsync("b");
+        var givingUp = new ScriptedWorker((self, pass) =>
+        {
+            self.Begin("b");
+            self.Fail("b", new InvalidOperationException("checkpoint failed"), TimeSpan.Zero);
+            clock.Advance(TimeSpan.FromSeconds(2));
+        }, name: engineName + "/checkpoint");
+        engine.Attach(givingUp);
+        using var recorder = new DatabaseEventRecorder(EventLevel.Verbose);
+
+        // Act
+        worker.RunIteration(CancellationToken.None);
+        worker.RunIteration(CancellationToken.None);
+        givingUp.RunIteration(CancellationToken.None);
+        givingUp.RunIteration(CancellationToken.None);
+        await recorder.WaitForAsync(e => e.EventId == 17 && Equals(e.Payload?[0], engineName + "/checkpoint"));
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], name)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(
+            ["WorkerPassStart", "WorkerDatabaseUnfinished", "WorkerPassStop", "WorkerPassStart", "WorkerFailed", "WorkerPassStop"]);
+        events[0].EventId.ShouldBe(14);
+        events[0].Keywords.HasFlag(DatabaseEventSource.Keywords.Workers).ShouldBeTrue();
+        events[0].PayloadNames.ShouldBe(["workerName", "workerKind", "pass"]);
+        events[0].Payload.ShouldBe([name, nameof(DatabaseEngineWorkerKind.Checkpoint), 1L]);
+        events[1].EventId.ShouldBe(16);
+        events[1].PayloadNames.ShouldBe(["workerName", "workerKind", "database"]);
+        events[1].Payload.ShouldBe([name, nameof(DatabaseEngineWorkerKind.Checkpoint), "a"]);
+        events[2].EventId.ShouldBe(15);
+        events[2].PayloadNames.ShouldBe(["workerName", "workerKind", "pass", "failed", "durationMilliseconds"]);
+        Payload(events[2], "failed").ShouldBe(false);
+        Payload(events[5], "pass").ShouldBe(2L);
+        Payload(events[5], "failed").ShouldBe(true);
+
+        var giveUpFailed = recorder.Events.Where(e => e.EventId == 17 && Equals(e.Payload?[0], engineName + "/checkpoint")).ShouldHaveSingleItem();
+        giveUpFailed.EventName.ShouldBe("WorkerGiveUpFailed");
+        giveUpFailed.Level.ShouldBe(EventLevel.Error);
+        giveUpFailed.PayloadNames.ShouldBe(["workerName", "workerKind", "database", "exceptionType", "exceptionMessage"]);
+        giveUpFailed.Payload.ShouldBe([engineName + "/checkpoint", nameof(DatabaseEngineWorkerKind.Checkpoint), "b", typeof(InvalidOperationException).FullName, "the leaf refused"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report a worker loop the engine's pump saw end early")]
+    public async Task WorkerLoopFaulted_ShouldBeReportedWithItsPayload()
+    {
+        // Arrange: the base's loop never returns early or throws but for an out-of-memory failure, so
+        // the test reaches the pump's recorder directly, as the pump's two exits do.
+        string engineName = "event-source-" + Guid.NewGuid().ToString("N");
+        await using var engine = new TestEngine(engineName);
+        var worker = new ScriptedWorker((_, _) => { }, name: engineName + "/pumped");
+        using var recorder = new DatabaseEventRecorder(EventLevel.Error);
+
+        // Act
+        engine.RecordWorkerRunFault(worker, new InvalidOperationException("the loop escaped"));
+
+        // Assert
+        engine.State.ShouldBe(EngineState.Faulted);
+        var faulted = recorder.Events.Where(e => Equals(e.Payload?[0], engineName)).ShouldHaveSingleItem();
+        faulted.EventId.ShouldBe(8);
+        faulted.EventName.ShouldBe("WorkerLoopFaulted");
+        faulted.Level.ShouldBe(EventLevel.Error);
+        faulted.PayloadNames.ShouldBe(["engineName", "workerName", "workerKind", "exceptionType", "exceptionMessage"]);
+        faulted.Payload.ShouldBe([engineName, engineName + "/pumped", nameof(DatabaseEngineWorkerKind.Checkpoint), typeof(InvalidOperationException).FullName, "the loop escaped"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report a server's start, failed start and stop once each")]
+    public async Task ServerLifecycle_ShouldBeReportedOnceEach()
+    {
+        // Arrange
+        string engineName = "event-source-" + Guid.NewGuid().ToString("N");
+        await using var engine = new TestEngine(engineName);
+        var server = new TestServer(engine);
+        var failing = new TestServer(engine) { StartFailure = new InvalidOperationException("bind failed") };
+        var idle = new TestServer(engine);
+        using var recorder = new DatabaseEventRecorder(EventLevel.Informational);
+
+        // Act: start twice and stop twice; a failed start; and a stop of a server that never started.
+        await server.StartAsync();
+        await server.StartAsync();
+        await server.StopAsync();
+        await server.StopAsync();
+        await Should.ThrowAsync<InvalidOperationException>(async () => await failing.StartAsync());
+        await idle.StopAsync();
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(Payload(e, "engineName"), engineName)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["ServerStarted", "ServerStopped", "ServerStartFailed"]);
+        events[0].EventId.ShouldBe(18);
+        events[0].PayloadNames.ShouldBe(["engineName", "model", "serverType"]);
+        events[0].Payload.ShouldBe([engineName, nameof(EngineModel.Sql), nameof(TestServer)]);
+        events[1].EventId.ShouldBe(20);
+        events[1].PayloadNames.ShouldBe(["engineName", "model", "serverType", "durationMilliseconds"]);
+        events[2].EventId.ShouldBe(19);
+        events[2].Level.ShouldBe(EventLevel.Error);
+        events[2].PayloadNames.ShouldBe(["engineName", "model", "serverType", "exceptionType", "exceptionMessage"]);
+        events[2].Payload.ShouldBe([engineName, nameof(EngineModel.Sql), nameof(TestServer), typeof(InvalidOperationException).FullName, "bind failed"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report a server session's negotiated version and authenticated principal")]
+    public void ServerSessionHandshake_ShouldBeReportedOnceEach()
+    {
+        // Arrange
+        var session = new TestServerSession();
+        using var recorder = new DatabaseEventRecorder(EventLevel.Verbose);
+
+        // Act
+        session.Negotiate(new ProtocolVersion(1, 2));
+        session.Authenticate("alice");
+
+        // Assert
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(e.Payload?[0], session.Id)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["ServerSessionNegotiated", "ServerSessionAuthenticated"]);
+        events[0].EventId.ShouldBe(21);
+        events[0].Keywords.HasFlag(DatabaseEventSource.Keywords.Sessions).ShouldBeTrue();
+        events[0].PayloadNames.ShouldBe(["sessionId", "protocolVersion"]);
+        events[0].Payload.ShouldBe([session.Id, "1.2"]);
+        events[1].EventId.ShouldBe(22);
+        events[1].Level.ShouldBe(EventLevel.Informational);
+        events[1].PayloadNames.ShouldBe(["sessionId", "principal"]);
+        events[1].Payload.ShouldBe([session.Id, "alice"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report an engine disposal whose components failed to close")]
+    public async Task EngineDisposeFailed_ShouldBeReportedBeforeItsStop()
+    {
+        // Arrange
+        string engineName = "event-source-" + Guid.NewGuid().ToString("N");
+        var engine = new TestEngine(engineName) { DisposeFailure = new InvalidOperationException("the databases failed to close") };
+        using var recorder = new DatabaseEventRecorder(EventLevel.Informational);
+
+        // Act
+        await Should.ThrowAsync<AggregateException>(async () => await engine.DisposeAsync());
+        await engine.DisposeAsync();
+
+        // Assert: one disposal, written once, though disposed twice.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.Events.Where(e => Equals(Payload(e, "engineName"), engineName)).ToArray();
+        events.Select(e => e.EventName).ShouldBe(["EngineDisposeStart", "EngineDisposeFailed", "EngineDisposeStop"]);
+        events[1].EventId.ShouldBe(34);
+        events[1].Level.ShouldBe(EventLevel.Error);
+        events[1].PayloadNames.ShouldBe(["engineName", "model", "failureCount", "exceptionType", "exceptionMessage"]);
+        events[1].Payload.ShouldBe([engineName, nameof(EngineModel.Sql), 1, typeof(InvalidOperationException).FullName, "the databases failed to close"]);
+        Payload(events[2], "failureCount").ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should set the slow-statement threshold from each enabling session")]
+    public void SlowStatementThreshold_EnablingSessions_ShouldSetItOrRestoreTheDefault()
+    {
+        // Act and assert: an argument sets it; none, or one that does not parse, restores the default.
+        using (new DatabaseEventRecorder(EventLevel.Warning, slowStatementThreshold: "250"))
+        {
+            DatabaseEventSource.Log.SlowStatementThresholdMilliseconds.ShouldBe(250);
+        }
+
+        using (new DatabaseEventRecorder(EventLevel.Warning))
+        {
+            DatabaseEventSource.Log.SlowStatementThresholdMilliseconds.ShouldBe(DatabaseEventSource.DefaultSlowStatementThresholdMilliseconds);
+        }
+
+        using (new DatabaseEventRecorder(EventLevel.Warning, slowStatementThreshold: "-5"))
+        {
+            DatabaseEventSource.Log.SlowStatementThresholdMilliseconds.ShouldBe(DatabaseEventSource.DefaultSlowStatementThresholdMilliseconds);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should not report a quick statement as slow under the default threshold")]
+    public async Task SlowStatement_DefaultThreshold_ShouldNotBeWrittenForAQuickStatement()
+    {
+        // Arrange
+        await using var engine = new TestEngine("event-source-" + Guid.NewGuid().ToString("N"));
+        await using var session = new TestSession(new TestDatabase("quick", engine));
+        using var recorder = new DatabaseEventRecorder(EventLevel.Warning);
+
+        // Act
+        await session.ExecuteAsync(new TestRequest());
+
+        // Assert
+        recorder.Events.Where(e => Equals(Payload(e, "sessionNumber"), session.SessionNumber)).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should publish current-sessions, which returns to its starting value")]
+    public async Task CurrentSessions_ShouldPublishAndReturnToItsStartingValue()
+    {
+        // Arrange
+        await using var engine = new TestEngine("event-source-" + Guid.NewGuid().ToString("N"));
+        var database = new TestDatabase("counted", engine);
+        long before = DatabaseEventSource.Log.CurrentSessions;
+        using var recorder = new DatabaseEventRecorder(EventLevel.Informational, counterIntervalSeconds: 0.1);
+
+        // Act
+        var first = new TestSession(database);
+        var second = new TestSession(database);
+        long open = DatabaseEventSource.Log.CurrentSessions;
+        await recorder.WaitForCounterAsync("current-sessions");
+        await first.DisposeAsync();
+        await first.DisposeAsync();
+        await second.DisposeAsync();
+
+        // Assert
+        open.ShouldBe(before + 2);
+        DatabaseEventSource.Log.CurrentSessions.ShouldBe(before);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: The statement path should allocate nothing more than its core while nobody listens")]
+    public async Task ExecuteAsync_NoListener_ShouldAllocateNothingMoreThanTheCore()
+    {
+        // Arrange: the core completes synchronously and allocates nothing, so the public member's
+        // own cost is the whole difference.
+        DatabaseEventSource.Log.IsEnabled().ShouldBeFalse("A listener left the Database event source enabled.");
+        await using var engine = new TestEngine("event-source-" + Guid.NewGuid().ToString("N"));
+        await using var session = new TestSession(new TestDatabase("hot", engine));
+        var request = new TestRequest();
+        const int iterations = 10_000;
+        Measure(() => session.ExecuteAsync(request), 100);
+        Measure(() => session.ExecuteCoreDirectly(request), 100);
+        Measure(() => session.ExecuteAsync("SELECT 1"), 100);
+
+        // Act
+        long core = Measure(() => session.ExecuteCoreDirectly(request), iterations);
+        long typed = Measure(() => session.ExecuteAsync(request), iterations);
+        long text = Measure(() => session.ExecuteAsync("SELECT 1"), iterations);
+
+        // Assert
+        core.ShouldBe(0);
+        typed.ShouldBe(core);
+        text.ShouldBe(core);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: The statement path should allocate nothing for a synchronous core under a Warning listener")]
+    public async Task ExecuteAsync_WarningListener_ShouldAllocateNothingForASynchronousCore()
+    {
+        // Arrange: a Warning listener (an application forwarding at Information) takes the timed,
+        // pooled path: two timestamps, and no event for a quick statement that succeeds. An
+        // unoptimized (Debug) build compiles the wrapper's state machine as a class, which the call
+        // allocates once; an optimized build keeps it a struct on the stack, so nothing is allocated.
+        await using var engine = new TestEngine("event-source-" + Guid.NewGuid().ToString("N"));
+        await using var session = new TestSession(new TestDatabase("warm", engine));
+        var request = new TestRequest();
+        const int iterations = 10_000;
+        bool optimized = typeof(DatabaseSession).Assembly.GetCustomAttribute<DebuggableAttribute>() is not { IsJITOptimizerDisabled: true };
+        using var recorder = new DatabaseEventRecorder(EventLevel.Warning);
+        Measure(() => session.ExecuteAsync(request), 100);
+
+        // Act
+        long typed = Measure(() => session.ExecuteAsync(request), iterations);
+
+        // Assert
+        if (optimized)
+        {
+            typed.ShouldBe(0);
+        }
+        else
+        {
+            (typed / iterations).ShouldBeLessThanOrEqualTo(256, "An unoptimized build allocates the wrapper's state machine, and nothing else, per statement.");
+        }
+
+        recorder.Events.Where(e => Equals(Payload(e, "sessionNumber"), session.SessionNumber)).ShouldBeEmpty();
+    }
+
+    // Runs the call the given number of times on this thread and returns the bytes it allocated.
+    private static long Measure(Func<ValueTask<QueryResult>> execute, int iterations)
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int index = 0; index < iterations; index++)
+        {
+            var pending = execute();
+            if (!pending.IsCompletedSuccessfully)
+            {
+                throw new InvalidOperationException("The measured call did not complete synchronously.");
+            }
+
+            _ = pending.Result;
+        }
+
+        return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
+
+    private static object? Payload(EventWrittenEventArgs eventData, string name)
+    {
+        int index = eventData.PayloadNames?.IndexOf(name) ?? -1;
+        return index < 0 ? null : eventData.Payload![index];
+    }
+
     /// <summary>
-    /// Records the events the Database event source writes.
+    /// A result a session refused with diagnostics: <see cref="QueryResultStatus.Error"/>.
+    /// </summary>
+    private sealed class DiagnosedResult(params Diagnostic[] diagnostics) : QueryResult
+    {
+        public override QueryResultStatus Status => QueryResultStatus.Error;
+
+        public override long AffectedCount => 0;
+
+        public override IReadOnlyList<Diagnostic>? Diagnostics { get; } = diagnostics;
+    }
+
+    /// <summary>
+    /// Records the events and counter names the Database event source writes, and disables the
+    /// source again when it is disposed.
     /// </summary>
     private sealed class DatabaseEventRecorder : EventListener
     {
         private readonly ConcurrentQueue<EventWrittenEventArgs> _events = new();
+        private readonly ConcurrentDictionary<string, bool> _counters = new(StringComparer.Ordinal);
 
-        public DatabaseEventRecorder(EventLevel level)
+        public DatabaseEventRecorder(
+            EventLevel level,
+            EventKeywords keywords = EventKeywords.All,
+            string? slowStatementThreshold = null,
+            double? counterIntervalSeconds = null)
         {
-            EnableEvents(DatabaseEventSource.Log, level, EventKeywords.All);
+            Dictionary<string, string?>? arguments = null;
+            if (slowStatementThreshold is not null)
+            {
+                (arguments ??= [])[DatabaseEventSource.SlowStatementThresholdArgument] = slowStatementThreshold;
+            }
+
+            if (counterIntervalSeconds is { } interval)
+            {
+                (arguments ??= [])["EventCounterIntervalSec"] = interval.ToString(CultureInfo.InvariantCulture);
+            }
+
+            EnableEvents(DatabaseEventSource.Log, level, keywords, arguments);
         }
 
         public IReadOnlyList<EventWrittenEventArgs> Events => _events.ToArray();
 
+        public async Task WaitForAsync(Func<EventWrittenEventArgs, bool> predicate)
+        {
+            using var timeout = new CancellationTokenSource(_wait);
+            while (!_events.Any(predicate))
+            {
+                await Task.Delay(10, timeout.Token);
+            }
+        }
+
+        public async Task WaitForCounterAsync(string name)
+        {
+            using var timeout = new CancellationTokenSource(_wait);
+            while (!_counters.ContainsKey(name))
+            {
+                await Task.Delay(20, timeout.Token);
+            }
+        }
+
+        public override void Dispose()
+        {
+            // Disabling sends the source the command that turns it off once no listener is left, so
+            // a later test sees it disabled.
+            DisableEvents(DatabaseEventSource.Log);
+            base.Dispose();
+        }
+
         protected override void OnEventWritten(EventWrittenEventArgs eventData)
         {
-            if (ReferenceEquals(eventData.EventSource, DatabaseEventSource.Log))
+            if (!ReferenceEquals(eventData.EventSource, DatabaseEventSource.Log))
             {
-                _events.Enqueue(eventData);
+                return;
             }
+
+            if (string.Equals(eventData.EventName, "EventCounters", StringComparison.Ordinal))
+            {
+                if (eventData.Payload is [IDictionary<string, object?> counter, ..]
+                    && counter.TryGetValue("Name", out object? name)
+                    && name is string counterName)
+                {
+                    _counters[counterName] = true;
+                }
+
+                return;
+            }
+
+            _events.Enqueue(eventData);
         }
     }
 }

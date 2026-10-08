@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database;
@@ -98,6 +99,8 @@ public abstract class DatabaseServerSession : IAsyncDisposable
             _protocolVersion = version;
             _negotiated = true;
         }
+
+        DatabaseEventSource.Log.ServerSessionNegotiated(this, version);
     }
 
     /// <summary>
@@ -113,6 +116,8 @@ public abstract class DatabaseServerSession : IAsyncDisposable
         {
             throw new InvalidOperationException("The session's principal was already authenticated.");
         }
+
+        DatabaseEventSource.Log.ServerSessionAuthenticated(this, principal);
     }
 
     /// <summary>

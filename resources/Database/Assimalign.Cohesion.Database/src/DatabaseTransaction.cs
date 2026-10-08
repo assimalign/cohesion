@@ -1,7 +1,9 @@
 using System;
+using System.Diagnostics.Tracing;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database;
@@ -58,6 +60,11 @@ namespace Assimalign.Cohesion.Database;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DatabaseTransaction : IAsyncDisposable
 {
+    // The causes TransactionRolledBack writes (event-sources plan, event 31).
+    private const string rollbackCause = "Rollback";
+    private const string disposeCause = "Dispose";
+    private const string sessionClosedCause = "SessionClosed";
+
     private readonly TransactionId _id;
     private readonly IsolationLevel _isolationLevel;
     private readonly object _sync = new();
@@ -188,57 +195,68 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        long started = DatabaseEventSource.Log.StartTimer(EventLevel.Verbose, DatabaseEventSource.Keywords.Transactions);
 
-        // An offline database refuses the commit before it starts (#1243): nothing is written,
-        // and the reopen's recovery aborts the transaction, which has no commit record.
-        ThrowIfOffline();
-        await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // The filter writes a failed commit and never catches it: the exception leaves exactly as
+        // it would untraced.
         try
         {
-            Exception? failure;
-            bool aborted;
-            lock (_sync)
+            // An offline database refuses the commit before it starts (#1243): nothing is written,
+            // and the reopen's recovery aborts the transaction, which has no commit record.
+            ThrowIfOffline();
+            await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                var state = GetKernelState();
-                if (_ended && state != TransactionState.Active)
+                Exception? failure;
+                bool aborted;
+                lock (_sync)
                 {
-                    // A transaction an operation aborted keeps reporting why nothing committed, so
-                    // the outcome never depends on whether the session's teardown ended it first.
-                    throw _failure is not null
-                        ? CreateAbortedException(_failure, commit: true)
-                        : new DatabaseException($"The transaction is {state}.");
+                    var state = GetKernelState();
+                    if (_ended && state != TransactionState.Active)
+                    {
+                        // A transaction an operation aborted keeps reporting why nothing committed, so
+                        // the outcome never depends on whether the session's teardown ended it first.
+                        throw _failure is not null
+                            ? CreateAbortedException(_failure, commit: true)
+                            : new DatabaseException($"The transaction is {state}.");
+                    }
+
+                    failure = _failure;
+
+                    // Under the end gate an ended transaction whose kernel transaction is still active
+                    // had a commit or rollback the kernel refused before it started (it refuses every
+                    // end while the database closes); nothing the caller rolled back may commit then.
+                    aborted = failure is not null || state != TransactionState.Active || _ended;
+                    if (!aborted && _operations != 0)
+                    {
+                        // The operation would race the commit record. The caller completes it first, as
+                        // with any statement of an explicit transaction.
+                        throw new DatabaseException("An operation of the transaction is still running; commit after it completes.");
+                    }
+
+                    _ended = true;
                 }
 
-                failure = _failure;
-
-                // Under the end gate an ended transaction whose kernel transaction is still active
-                // had a commit or rollback the kernel refused before it started (it refuses every
-                // end while the database closes); nothing the caller rolled back may commit then.
-                aborted = failure is not null || state != TransactionState.Active || _ended;
-                if (!aborted && _operations != 0)
+                if (!aborted)
                 {
-                    // The operation would race the commit record. The caller completes it first, as
-                    // with any statement of an explicit transaction.
-                    throw new DatabaseException("An operation of the transaction is still running; commit after it completes.");
+                    await CommitCoreAsync().ConfigureAwait(false);
+                    DatabaseEventSource.Log.TransactionCommitted(this, started);
+                    return;
                 }
 
-                _ended = true;
+                // Nothing may commit. An abort's own rollback normally ran already; this one completes
+                // it when the commit took the end gate first.
+                await RollbackKernelAsync().ConfigureAwait(false);
+                throw CreateAbortedException(failure, commit: true);
             }
-
-            if (!aborted)
+            finally
             {
-                await CommitCoreAsync().ConfigureAwait(false);
-                return;
+                _endGate.Release();
             }
-
-            // Nothing may commit. An abort's own rollback normally ran already; this one completes
-            // it when the commit took the end gate first.
-            await RollbackKernelAsync().ConfigureAwait(false);
-            throw CreateAbortedException(failure, commit: true);
         }
-        finally
+        catch (Exception exception) when (TraceCommitFailure(exception))
         {
-            _endGate.Release();
+            throw;
         }
     }
 
@@ -274,7 +292,12 @@ public abstract class DatabaseTransaction : IAsyncDisposable
                 _ended = true;
             }
 
-            await RollbackKernelAsync().ConfigureAwait(false);
+            var rollback = RollbackKernelAsync(out bool rolledBack);
+            await rollback.ConfigureAwait(false);
+            if (rolledBack)
+            {
+                DatabaseEventSource.Log.TransactionRolledBack(this, rollbackCause);
+            }
         }
         finally
         {
@@ -304,7 +327,12 @@ public abstract class DatabaseTransaction : IAsyncDisposable
                     _ended = true;
                 }
 
-                await RollbackKernelAsync().ConfigureAwait(false);
+                var rollback = RollbackKernelAsync(out bool rolledBack);
+                await rollback.ConfigureAwait(false);
+                if (rolledBack)
+                {
+                    DatabaseEventSource.Log.TransactionRolledBack(this, disposeCause);
+                }
             }
             finally
             {
@@ -332,12 +360,21 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     protected async ValueTask AbortAsync(Exception cause)
     {
         ArgumentNullException.ThrowIfNull(cause);
+        bool aborted;
         lock (_sync)
         {
+            // This failure aborts the transaction when it is the first one the open transaction
+            // records; a later failure, or one after its caller ended it, changes nothing.
+            aborted = !_ended && _failure is null;
             if (!_ended)
             {
                 _failure ??= cause;
             }
+        }
+
+        if (aborted)
+        {
+            DatabaseEventSource.Log.TransactionAborted(this, cause);
         }
 
         await _endGate.WaitAsync().ConfigureAwait(false);
@@ -376,7 +413,12 @@ public abstract class DatabaseTransaction : IAsyncDisposable
                 _ended = true;
             }
 
-            await RollbackKernelAsync().ConfigureAwait(false);
+            var rollback = RollbackKernelAsync(out bool rolledBack);
+            await rollback.ConfigureAwait(false);
+            if (rolledBack)
+            {
+                DatabaseEventSource.Log.TransactionRolledBack(this, sessionClosedCause);
+            }
         }
         finally
         {
@@ -509,13 +551,30 @@ public abstract class DatabaseTransaction : IAsyncDisposable
 
     // Runs under the end gate. Only an active kernel transaction on an online database is rolled
     // back; the kernel ends it whatever fails once the rollback starts.
-    private ValueTask RollbackKernelAsync()
+    private ValueTask RollbackKernelAsync() => RollbackKernelAsync(out _);
+
+    // The same, telling its caller whether the kernel rollback started, for the rolled-back event.
+    private ValueTask RollbackKernelAsync(out bool started)
     {
         if (GetKernelState() != TransactionState.Active || GetOfflineRefusal() is not null)
         {
+            started = false;
             return ValueTask.CompletedTask;
         }
 
+        started = true;
         return RollbackCoreAsync();
+    }
+
+    // An exception filter: writes a failed commit and returns false, so nothing is caught. A token
+    // canceled before the commit started is not a failed commit.
+    private bool TraceCommitFailure(Exception exception)
+    {
+        if (exception is not OperationCanceledException)
+        {
+            DatabaseEventSource.Log.TransactionCommitFailed(this, exception);
+        }
+
+        return false;
     }
 }
