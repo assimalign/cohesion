@@ -96,12 +96,18 @@ internal sealed class StorageGroupCommitGate
         // Self-help: the worker did not flush within the window. Flush inline (a
         // no-op if another self-helper got there first) and publish so any other
         // waiter covered by this flush wakes too.
-        journal.EnsureDurable(lsn);
+        bool flushed = journal.EnsureDurableReportingFlush(lsn);
         PublishDurable(journal.DurableLsn);
 
         if (!abandoned)
         {
-            StorageEventSource.Log.CountGroupCommitSelfFlush();
+            // Every committer whose window passed missed it; only one whose request reached the
+            // device is a self-flush, so N committers sharing one inline flush count once.
+            if (flushed)
+            {
+                StorageEventSource.Log.CountGroupCommitSelfFlush();
+            }
+
             StorageEventSource.Log.GroupCommitWindowMissed(this, lsn, window);
         }
     }

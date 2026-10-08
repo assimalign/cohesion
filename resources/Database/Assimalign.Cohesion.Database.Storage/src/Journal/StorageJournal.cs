@@ -751,7 +751,16 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// <see cref="StorageOfflineException"/>, and a drain or a durable flush that fails takes
     /// the journal offline.
     /// </remarks>
-    public void EnsureDurable(long lsn)
+    public void EnsureDurable(long lsn) => EnsureDurableReportingFlush(lsn);
+
+    /// <summary>
+    /// <see cref="EnsureDurable"/>, reporting whether this call flushed the journal: false when
+    /// <paramref name="lsn"/> was already durable, as it is when another flush covered it first.
+    /// The group-commit gate counts its inline flushes by it (<see cref="StorageEventSource"/>).
+    /// </summary>
+    /// <param name="lsn">The LSN that must be durable.</param>
+    /// <returns>True when this call made the journal durable; false when it already was.</returns>
+    internal bool EnsureDurableReportingFlush(long lsn)
     {
         ThrowIfDisposed();
         EnsureInitialized();
@@ -763,12 +772,13 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 ThrowIfDisposed();
                 if (_durableLsn >= lsn)
                 {
-                    return;
+                    return false;
                 }
 
                 ThrowIfOfflineLocked();
                 DrainLocked(durable: true);
                 Volatile.Write(ref _durableLsn, _lastLsn);
+                return true;
             }
         }
         finally

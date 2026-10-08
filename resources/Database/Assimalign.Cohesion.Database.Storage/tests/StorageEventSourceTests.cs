@@ -69,7 +69,7 @@ public sealed class StorageEventSourceTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - StorageEventSource: Should report a storage's create, write-back, checkpoints and close once each")]
-    public void CreateWriteBackCheckpointClose_ShouldReportEachLifecycleEventOnce()
+    public void Lifecycle_CreateWriteBackCheckpointClose_ShouldReportEachEventOnce()
     {
         // Arrange
         string name = UniqueName();
@@ -82,7 +82,9 @@ public sealed class StorageEventSourceTests
         var storage = TornStorage.Create(name: name);
         long gaugeWhileOpen = StorageEventSource.Log.CurrentStorages;
         string storageId = storage.Id.ToString();
+        long journalFlushes = StorageEventSource.Log.JournalFlushes;
         storage.Insert("v1");
+        long journalFlushesForCommit = StorageEventSource.Log.JournalFlushes - journalFlushes;
         int writtenBack = storage.WriteBackDirtyPages(64);
         long journalLength = storage.JournalLength;
         storage.Checkpoint();
@@ -120,12 +122,14 @@ public sealed class StorageEventSourceTests
 
         var checkpointStart = events[2];
         checkpointStart.EventId.ShouldBe(5);
+        checkpointStart.Opcode.ShouldBe(EventOpcode.Start);
         SourceKeywords(checkpointStart).ShouldBe(StorageEventSource.Keywords.Checkpoints);
         checkpointStart.PayloadNames.ShouldBe(["database", "activeTransactions", "journalLength"]);
         checkpointStart.Payload.ShouldBe([name, 0, journalLength]);
 
         var checkpointStop = events[3];
         checkpointStop.EventId.ShouldBe(6);
+        checkpointStop.Opcode.ShouldBe(EventOpcode.Stop);
         checkpointStop.PayloadNames.ShouldBe(["database", "checkpointLsn", "durationMilliseconds"]);
         ((long)checkpointStop.Payload![1]!).ShouldBeGreaterThan(0);
 
@@ -137,6 +141,46 @@ public sealed class StorageEventSourceTests
         gaugeWhileOpen.ShouldBe(gauge + 1);
         StorageEventSource.Log.CurrentStorages.ShouldBe(gauge);
         (StorageEventSource.Log.Checkpoints - checkpoints).ShouldBe(2);
+
+        // A synchronous commit makes its record durable with one durable flush of the journal.
+        journalFlushesForCommit.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - StorageEventSource: Should close a failed checkpoint's activity with a zero LSN")]
+    public void Checkpoint_JournalFlushFails_ShouldWriteStopWithZeroLsn()
+    {
+        // Arrange: the fault-injection double fails the checkpoint's journal flush.
+        string name = UniqueName();
+        using var recorder = new StorageEventRecorder(EventLevel.Verbose);
+        long gauge = StorageEventSource.Log.CurrentStorages;
+        long checkpoints = StorageEventSource.Log.Checkpoints;
+        var storage = TornStorage.Create(name: name);
+        storage.Insert("v1");
+        storage.JournalFaults.FailNextFlush();
+
+        // Act
+        Should.Throw<StorageOfflineException>(() => storage.Checkpoint());
+        storage.Dispose();
+
+        // Assert: the stop follows the offline transition the failure caused, once, with LSN zero;
+        // the failed checkpoint is not counted.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.For(name);
+        events.Select(e => e.EventName).ShouldBe(
+            ["StorageCreated", "CheckpointStart", "StorageOffline", "CheckpointStop", "ShutdownFlushSkipped", "StorageClosed"]);
+
+        var start = events[1];
+        start.EventId.ShouldBe(5);
+        start.Opcode.ShouldBe(EventOpcode.Start);
+
+        var stop = events[3];
+        stop.EventId.ShouldBe(6);
+        stop.Opcode.ShouldBe(EventOpcode.Stop);
+        stop.PayloadNames.ShouldBe(["database", "checkpointLsn", "durationMilliseconds"]);
+        stop.Payload![1].ShouldBe(0L);
+
+        (StorageEventSource.Log.Checkpoints - checkpoints).ShouldBe(0);
+        StorageEventSource.Log.CurrentStorages.ShouldBe(gauge);
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - StorageEventSource: Should report the recovery of a reopened file set as one start and one stop")]
@@ -182,6 +226,38 @@ public sealed class StorageEventSourceTests
         stop.Payload![1].ShouldBe(1);
         stop.Payload[2].ShouldBe(1L);
         stop.Payload[3].ShouldBe(redoLsn);
+
+        StorageEventSource.Log.CurrentStorages.ShouldBe(gauge);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - StorageEventSource: Should close a failed recovery's activity with zeros and count nothing open")]
+    public void Reopen_RecoveryFails_ShouldWriteStopWithZeros()
+    {
+        // Arrange: the redo fixture of a committed delta whose full page image was cut out of the
+        // journal, which recovery refuses as corruption.
+        string name = UniqueName();
+        var created = TornStorage.Create(name: name);
+        created.Insert("v1");
+        var images = created.CaptureDurable();
+        created.Dispose();
+        var image = JournalImage.Frames(images.Journal).Single(frame => frame.Type == JournalRecordType.FullPageImage);
+        using var recorder = new StorageEventRecorder(EventLevel.Verbose);
+        long gauge = StorageEventSource.Log.CurrentStorages;
+
+        // Act
+        Should.Throw<StorageCorruptionException>(() => TornStorage.Open((images.Data, JournalImage.Without(images.Journal, image))));
+
+        // Assert: one start, one stop carrying zeros, and no close of a storage that never opened.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var events = recorder.For(name);
+        events.Select(e => e.EventName).ShouldBe(["RecoveryStart", "RecoveryStop"]);
+
+        var stop = events[1];
+        stop.EventId.ShouldBe(3);
+        stop.Opcode.ShouldBe(EventOpcode.Stop);
+        stop.Payload![1].ShouldBe(0);
+        stop.Payload[2].ShouldBe(0L);
+        stop.Payload[3].ShouldBe(0L);
 
         StorageEventSource.Log.CurrentStorages.ShouldBe(gauge);
     }
@@ -268,6 +344,34 @@ public sealed class StorageEventSourceTests
         (StorageEventSource.Log.GroupCommitSelfFlushes - selfFlushes).ShouldBe(1);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Storage] - StorageEventSource: Should report a missed window another flush covered without counting a self-flush")]
+    public void AwaitDurable_WindowMissedAfterAnotherFlush_ShouldReportWithoutCountingASelfFlush()
+    {
+        // Arrange: a synchronous commit made its record durable, and a gate that never saw that
+        // flush waits for the same LSN with a zero window: a committer whose window passed while
+        // another committer's inline flush covered it.
+        string name = UniqueName();
+        using var storage = TornStorage.Create();
+        storage.Insert("v1");
+        long lsn = storage.Log.DurableLsn;
+        var gate = new StorageGroupCommitGate { StorageName = name };
+        using var recorder = new StorageEventRecorder(EventLevel.Verbose);
+        long selfFlushes = StorageEventSource.Log.GroupCommitSelfFlushes;
+        long journalFlushes = StorageEventSource.Log.JournalFlushes;
+
+        // Act
+        gate.AwaitDurable(lsn, TimeSpan.Zero, storage.Log);
+
+        // Assert: the window was missed, but the committer's flush request reached no device.
+        recorder.Events.ShouldNotContain(e => e.EventId == 0, "EventSource reported an instrumentation error.");
+        var missed = recorder.For(name).ShouldHaveSingleItem();
+        missed.EventName.ShouldBe("GroupCommitWindowMissed");
+        missed.Payload.ShouldBe([name, lsn, 0d]);
+        lsn.ShouldBeGreaterThan(0);
+        (StorageEventSource.Log.GroupCommitSelfFlushes - selfFlushes).ShouldBe(0);
+        (StorageEventSource.Log.JournalFlushes - journalFlushes).ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - StorageEventSource: Should report a storage a failing journal device took offline, its unconfirmed commit and its skipped shutdown flush")]
     public void Commit_JournalFlushFails_ShouldReportOfflineUnconfirmedCommitAndSkippedShutdownFlush()
     {
@@ -303,7 +407,8 @@ public sealed class StorageEventSourceTests
         unconfirmed.EventId.ShouldBe(11);
         unconfirmed.Level.ShouldBe(EventLevel.Error);
         unconfirmed.PayloadNames.ShouldBe(["database", "transactionSequence", "commitLsn", "exceptionMessage"]);
-        unconfirmed.Payload.ShouldBe([name, transaction.Sequence, commitLsn, error.Message]);
+        // The same device failure's message as the offline event, so one query finds both.
+        unconfirmed.Payload.ShouldBe([name, transaction.Sequence, commitLsn, error.InnerException!.Message]);
         commitLsn.ShouldBeGreaterThan(0);
 
         var skipped = events[3];

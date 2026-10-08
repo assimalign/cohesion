@@ -96,7 +96,10 @@ internal sealed class StorageEventSource : EventSource
     /// <summary>The dirty pages an eviction wrote back on the evicting thread since the process started.</summary>
     internal long ForegroundPageWrites => Volatile.Read(ref _foregroundPageWrites);
 
-    /// <summary>The grouped commits that flushed the journal inline after their window passed, since the process started.</summary>
+    /// <summary>
+    /// The grouped commits whose own inline flush made the journal durable after their window
+    /// passed, since the process started; a commit another flush covered first is not counted.
+    /// </summary>
     internal long GroupCommitSelfFlushes => Volatile.Read(ref _groupCommitSelfFlushes);
 
     /// <summary>The pre-images storage transactions spilled to the journal since the process started.</summary>
@@ -133,7 +136,7 @@ internal sealed class StorageEventSource : EventSource
     [NonEvent]
     internal void CountForegroundPageWrite() => Interlocked.Increment(ref _foregroundPageWrites);
 
-    /// <summary>Counts a grouped commit that flushed the journal inline after its window passed.</summary>
+    /// <summary>Counts a grouped commit whose own inline flush made the journal durable after its window passed.</summary>
     [NonEvent]
     internal void CountGroupCommitSelfFlush() => Interlocked.Increment(ref _groupCommitSelfFlushes);
 
@@ -280,8 +283,9 @@ internal sealed class StorageEventSource : EventSource
     }
 
     /// <summary>
-    /// Writes that a grouped commit's window passed before the flush worker flushed it, so the
-    /// committer flushed the journal inline itself.
+    /// Writes that a grouped commit's window passed before a group flush covered it, so the
+    /// committer requested the journal flush itself. The request is a no-op when another flush
+    /// covered the commit first; only the requests that flushed count as self-flushes.
     /// </summary>
     /// <param name="gate">The storage's group-commit gate.</param>
     /// <param name="lsn">The commit's LSN.</param>
@@ -319,13 +323,19 @@ internal sealed class StorageEventSource : EventSource
     /// <param name="storage">The storage.</param>
     /// <param name="transactionSequence">The storage transaction's sequence.</param>
     /// <param name="commitLsn">The commit record's LSN.</param>
-    /// <param name="error">The failure of the wait.</param>
+    /// <param name="error">
+    /// The failure of the wait. For a <see cref="StorageOfflineException"/> the message written is
+    /// its inner exception's, the device failure that
+    /// <see cref="StorageOffline(Storage, StorageOfflineException)"/> writes too, so one query on
+    /// that message finds both events.
+    /// </param>
     [NonEvent]
     public void StorageCommitUnconfirmed(Storage storage, long transactionSequence, long commitLsn, Exception error)
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            StorageCommitUnconfirmed(storage.Name.ToString(), transactionSequence, commitLsn, error.Message);
+            var failure = error is StorageOfflineException { InnerException: { } inner } ? inner : error;
+            StorageCommitUnconfirmed(storage.Name.ToString(), transactionSequence, commitLsn, failure.Message);
         }
     }
 
@@ -449,7 +459,7 @@ internal sealed class StorageEventSource : EventSource
     private void PendingCommitsFlushed(string database, long durableLsn)
         => WriteEvent(8, database, durableLsn);
 
-    [Event(9, Level = EventLevel.Verbose, Keywords = Keywords.GroupCommit, Message = "Storage '{0}' grouped commit at LSN {1} waited its {2} ms window and flushed the journal inline.")]
+    [Event(9, Level = EventLevel.Verbose, Keywords = Keywords.GroupCommit, Message = "Storage '{0}' grouped commit at LSN {1} missed its {2} ms window and requested the journal flush itself.")]
     private void GroupCommitWindowMissed(string database, long lsn, double windowMilliseconds)
         => WriteEvent(9, database, lsn, windowMilliseconds);
 

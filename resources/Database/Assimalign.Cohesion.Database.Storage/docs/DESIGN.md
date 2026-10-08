@@ -2039,9 +2039,9 @@ session enables.
 | 6 | `CheckpointStop` | Informational | `Checkpoints` | `database`, `checkpointLsn`, `durationMilliseconds` | the end of `Checkpoint` |
 | 7 | `PagesWrittenBack` | Verbose | `WriteBack` | `database`, `pages`, `durationMilliseconds` | `WriteBackDirtyPages`, when the pass wrote a page |
 | 8 | `PendingCommitsFlushed` | Verbose | `GroupCommit` | `database`, `durableLsn` | the gate's `FlushPending` (a flush worker's `FlushPendingCommits`), when it flushed |
-| 9 | `GroupCommitWindowMissed` | Verbose | `GroupCommit` | `database`, `lsn`, `windowMilliseconds` | the gate's `AwaitDurable`: the window passed and the committer flushed inline (a zero window does this on every grouped commit); not for a wait the storage going offline abandoned |
+| 9 | `GroupCommitWindowMissed` | Verbose | `GroupCommit` | `database`, `lsn`, `windowMilliseconds` | the gate's `AwaitDurable`: the window passed before a group flush covered the commit, so the committer requested the journal flush itself (a no-op when another flush covered it first; a zero window does this on every grouped commit); not for a wait the storage going offline abandoned |
 | 10 | `StorageOffline` | Error | — | `database`, `cause` (the `StorageOfflineCause` name), `exceptionType`, `exceptionMessage` (of the failure that took it offline: the I/O error, or the engine worker's last failure) | `RaiseOffline`, once per instance, before `OnOffline` runs; for an engine give-up the root source writes its `DatabaseTakenOffline` too |
-| 11 | `StorageCommitUnconfirmed` | Error | — | `database`, `transactionSequence`, `commitLsn`, `exceptionMessage` | `CommitTransaction`: the commit record is in the journal but the wait for its durability failed, offline or otherwise; the bracket ends committed and recovery decides |
+| 11 | `StorageCommitUnconfirmed` | Error | — | `database`, `transactionSequence`, `commitLsn`, `exceptionMessage` (for an offline storage, the device failure's, as event 10 writes it; otherwise the wait's own failure's) | `CommitTransaction`: the commit record is in the journal but the wait for its durability failed, offline or otherwise; the bracket ends committed and recovery decides |
 | 12 | `ShutdownFlushSkipped` | Warning | — | `database`, `reason` (`Offline: <cause>`) | `ShutdownFlush` of an offline storage, which writes nothing |
 | 13 | `BufferPoolExhausted` | Error | — | `database`, `capacity` | the pool's eviction, when every resident page is pinned |
 | 14 | `DirtyPageEvicted` | Verbose | `BufferPool` | `database`, `pageId`, `pageLsn` | the pool's eviction of a dirty page, written back on the thread that needed the frame (a pin miss or a shrink) |
@@ -2063,8 +2063,15 @@ written only when its start was, so a listener that attaches in the middle sees 
 `Stopwatch` timestamp is taken only when its event is enabled. The group-commit gate's wait
 already took a timestamp before this source existed. The pin path's hit branch is unchanged: its
 allocation-delta test (`StorageEventSourceTests`) asserts that a hit allocates exactly the
-`StoragePageHandle` it returns. Events on the pool's paths are written under the pool lock, as
-the failures they report are raised there.
+`StoragePageHandle` it returns. Events on the pool's paths (13, 14, 16) are written under the pool
+lock, where the failures and the eviction happen; `BufferPoolResized` is written after it. An
+enabled listener's synchronous work therefore runs under that lock. For the Verbose
+`DirtyPageEvicted` that is deliberate: the eviction it reports has already run the write-ahead
+gate (which can flush the journal durably) and the page write under the same lock, so a listener
+adds work of the same kind to a path that already waits on a device. Writing it after the lock
+would take a `try`/`finally` around `Pin` and `PinForOverwrite`, hit branch included, so an
+eviction before a failed load is still reported, and a buffer of evictions in `Resize`'s shrink
+loop. That trade is open for owner review.
 
 Counters, all maintained whether or not anyone listens, and only on paths that already wrote to or
 waited on a device (plan D6; nothing is counted per pin, per record or per statement):
@@ -2077,7 +2084,7 @@ waited on a device (plan D6; nothing is counted per pin, per record or per state
 | `page-reads-per-second` | rate | a page the pool read from the data file on a miss |
 | `page-writes-per-second` | rate | a page the pool wrote back (eviction, paced write-back, flush, checkpoint) |
 | `foreground-page-writes-per-second` | rate | a dirty page an eviction wrote back on the evicting thread |
-| `group-commit-self-flushes-per-second` | rate | a grouped commit that flushed inline after its window (event 9) |
+| `group-commit-self-flushes-per-second` | rate | a grouped commit whose own inline flush, after its window, made the journal durable (`StorageJournal.EnsureDurableReportingFlush` returned true); a committer another flush covered first writes event 9 but is not counted, so N committers sharing one inline fsync count once |
 | `pre-images-spilled-per-second` | rate | a pre-image a storage transaction spilled to the journal |
 
 The per-storage diagnostics properties (`SpilledPreImages`, `PeakPreImageBytes`, `HeaderState` and
