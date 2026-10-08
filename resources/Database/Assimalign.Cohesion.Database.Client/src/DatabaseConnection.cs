@@ -46,6 +46,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
     private bool _isOpen;
     private bool _isRented;
     private bool _isClosed;
+    private int _opened;
     private readonly object _exchangeLock = new();
     private CancellationTokenSource? _operation;
     private TaskCompletionSource? _exchangeCompletion;
@@ -92,6 +93,10 @@ public sealed class DatabaseConnection : IAsyncDisposable
     {
         lock (_exchangeLock)
         {
+            if (!_isRented)
+            {
+                DatabaseClientEventSource.Log.RentalStarted();
+            }
             _isRented = true;
             _returnTask = null;
         }
@@ -114,49 +119,75 @@ public sealed class DatabaseConnection : IAsyncDisposable
             return;
         }
 
-        _connection = await DialAsync(cancellationToken).ConfigureAwait(false);
+        long startTimestamp = DatabaseClientEventSource.Log.GetTimestamp();
 
-        Stream stream = _connection.AsStream();
-        var channel = new ProtocolChannel(stream, Family, leaveOpen: true);
-        _reader = channel.Reader;
-        _writer = channel.Writer;
-
-        var startup = new ProtocolStartupMessage(ProtocolVersion.Current, Database, Principal);
-        await WriteFrameAsync(ProtocolMessageType.Startup, startup.Encode(), cancellationToken).ConfigureAwait(false);
-
-        ProtocolFrame challenge = await ExpectFrameAsync(cancellationToken).ConfigureAwait(false);
-
-        if (challenge.Type == ProtocolMessageType.Error)
+        try
         {
-            // Startup rejections: unsupported version, unknown database, capacity.
-            throw FromErrorFrame(challenge);
+            _connection = await DialAsync(cancellationToken).ConfigureAwait(false);
+
+            Stream stream = _connection.AsStream();
+            var channel = new ProtocolChannel(stream, Family, leaveOpen: true);
+            _reader = channel.Reader;
+            _writer = channel.Writer;
+
+            var startup = new ProtocolStartupMessage(ProtocolVersion.Current, Database, Principal);
+            await WriteFrameAsync(ProtocolMessageType.Startup, startup.Encode(), cancellationToken).ConfigureAwait(false);
+
+            ProtocolFrame challenge = await ExpectFrameAsync(cancellationToken).ConfigureAwait(false);
+
+            if (challenge.Type == ProtocolMessageType.Error)
+            {
+                // Startup rejections: unsupported version, unknown database, capacity.
+                throw FromErrorFrame(challenge);
+            }
+
+            if (challenge.Type != ProtocolMessageType.Authenticate)
+            {
+                throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate challenge but received {challenge.Type}."));
+            }
+
+            // MVP trust method: the challenge carries no payload and the response
+            // sends no evidence. Method-specific responses arrive with real
+            // authenticator implementations.
+            await WriteFrameAsync(ProtocolMessageType.AuthenticateResponse, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+
+            ProtocolFrame ready = await ExpectFrameAsync(cancellationToken).ConfigureAwait(false);
+
+            if (ready.Type == ProtocolMessageType.Error)
+            {
+                // Authentication rejection.
+                throw FromErrorFrame(ready);
+            }
+
+            if (ready.Type != ProtocolMessageType.Ready)
+            {
+                throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Expected a ready frame but received {ready.Type}."));
+            }
         }
-
-        if (challenge.Type != ProtocolMessageType.Authenticate)
+        catch (DatabaseClientException exception) when (ReportOpenFailed(exception, startTimestamp))
         {
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate challenge but received {challenge.Type}."));
-        }
-
-        // MVP trust method: the challenge carries no payload and the response
-        // sends no evidence. Method-specific responses arrive with real
-        // authenticator implementations.
-        await WriteFrameAsync(ProtocolMessageType.AuthenticateResponse, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
-
-        ProtocolFrame ready = await ExpectFrameAsync(cancellationToken).ConfigureAwait(false);
-
-        if (ready.Type == ProtocolMessageType.Error)
-        {
-            // Authentication rejection.
-            throw FromErrorFrame(ready);
-        }
-
-        if (ready.Type != ProtocolMessageType.Ready)
-        {
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Expected a ready frame but received {ready.Type}."));
+            // Unreachable: the filter writes the failure and declines the exception, so it
+            // propagates unchanged.
+            throw;
         }
 
         ServerVersion = ProtocolVersion.Current;
         _isOpen = true;
+
+        // The flag the first close exchanges: a connection that opened is counted closed once.
+        Volatile.Write(ref _opened, 1);
+        DatabaseClientEventSource.Log.ConnectionOpened(this, startTimestamp);
+    }
+
+    /// <summary>
+    /// Writes a failed open to the event source and declines the failure, so the exception filter
+    /// that calls it never catches.
+    /// </summary>
+    /// <returns>Always false.</returns>
+    private bool ReportOpenFailed(DatabaseClientException exception, long startTimestamp)
+    {
+        DatabaseClientEventSource.Log.ConnectionOpenFailed(this, exception, startTimestamp);
+        return false;
     }
 
     /// <summary>
@@ -216,6 +247,11 @@ public sealed class DatabaseConnection : IAsyncDisposable
         };
 
     /// <summary>
+    /// Names the endpoint the connection dials, for the event source.
+    /// </summary>
+    internal string DescribeEndPoint() => Describe(_settings.EndPoint!);
+
+    /// <summary>
     /// Executes one complete model-owned framed exchange.
     /// </summary>
     /// <typeparam name="TResult">The model's result type.</typeparam>
@@ -270,8 +306,10 @@ public sealed class DatabaseConnection : IAsyncDisposable
             // for anything but a failed dial.
             throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"The server sent the client-local {nameof(ProtocolErrorCode.ConnectionFailure)} code: {exception.Message}"));
         }
-        catch (DatabaseClientException)
+        catch (DatabaseClientException exception)
         {
+            DatabaseClientEventSource.Log.ExchangeFailed(this, exception);
+
             // The exchange knows whether it consumed a terminal, reusable response.
             if (!exchange.IsResponseComplete)
             {
@@ -369,6 +407,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
                 return ValueTask.CompletedTask;
             }
             _isRented = false;
+            DatabaseClientEventSource.Log.RentalEnded();
             _operation?.Cancel();
             _returnTask = ReturnAfterExchangeAsync(_exchangeCompletion?.Task);
             return new ValueTask(_returnTask);
@@ -396,6 +435,13 @@ public sealed class DatabaseConnection : IAsyncDisposable
         }
 
         _isClosed = true;
+
+        // _isClosed is checked and set without synchronization, so the gauge counts the close of
+        // an opened connection behind its own exchange.
+        if (Interlocked.Exchange(ref _opened, 0) == 1)
+        {
+            DatabaseClientEventSource.Log.ConnectionClosed(this);
+        }
 
         if (_isOpen && _writer is not null)
         {
@@ -483,6 +529,12 @@ public sealed class DatabaseConnection : IAsyncDisposable
 
     private DatabaseClientException MarkBroken(DatabaseClientException exception)
     {
+        // An open that fails never opened, so its failure is ConnectionOpenFailed, not a break.
+        if (_isOpen)
+        {
+            DatabaseClientEventSource.Log.ConnectionBroken(this, exception);
+        }
+
         _isOpen = false;
         return exception;
     }

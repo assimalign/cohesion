@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -102,7 +103,11 @@ public sealed class DatabaseClient : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
+        long waitStartTimestamp = DatabaseClientEventSource.Log.GetPoolTimestamp();
+
         await _slots.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        long waitEndTimestamp = waitStartTimestamp == 0 ? 0 : Stopwatch.GetTimestamp();
 
         try
         {
@@ -113,6 +118,7 @@ public sealed class DatabaseClient : IAsyncDisposable
                 if (idle.IsOpen)
                 {
                     idle.MarkRented();
+                    DatabaseClientEventSource.Log.ConnectionRented(idle, reused: true, waitStartTimestamp, waitEndTimestamp);
                     return idle;
                 }
 
@@ -132,6 +138,7 @@ public sealed class DatabaseClient : IAsyncDisposable
             }
 
             connection.MarkRented();
+            DatabaseClientEventSource.Log.ConnectionRented(connection, reused: false, waitStartTimestamp, waitEndTimestamp);
             return connection;
         }
         catch
@@ -181,10 +188,13 @@ public sealed class DatabaseClient : IAsyncDisposable
         {
             if (!_isDisposed && connection.IsOpen)
             {
+                // Written before the push, so a rental of the pooled connection is never traced first.
+                DatabaseClientEventSource.Log.ConnectionReturned(connection, pooled: true);
                 _idle.Push(connection);
             }
             else
             {
+                DatabaseClientEventSource.Log.ConnectionReturned(connection, pooled: false);
                 await connection.CloseAsync().ConfigureAwait(false);
             }
         }

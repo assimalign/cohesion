@@ -54,6 +54,35 @@ throwing is reserved for infrastructure failures, which surface as the
 implementation's own exceptions. The base throws only `ArgumentNullException` and
 `OperationCanceledException`, before the core runs.
 
+## Diagnostics
+
+The project reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Security` (`src/Internal/EventSource/DatabaseSecurityEventSource.cs`).
+The public, non-virtual `AuthenticateAsync` writes every event, so one source covers the built-in
+authenticator and every application's.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `AuthenticationSucceeded` | Verbose | `authenticator` (the leaf's type name), `database`, `principal` |
+| 2 | `AuthenticationRejected` | Verbose | `authenticator`, `database`, `principal` |
+| 3 | `AuthenticationFailed` | Error | `authenticator`, `database`, `principal`, `exceptionType` (full name), `exceptionMessage` |
+
+A verdict is Verbose: the model server's own refused-handshake warning is the operator-facing
+record of a rejection. A core that throws is an infrastructure failure, so an Error; a cancellation
+is not a failure and writes nothing. The evidence is never written; the principal is (owner
+question Q4 of the event-source plan). No counters.
+
+**Nothing changes for the caller, and nothing is paid while nobody listens.** While the source is
+off, `AuthenticateAsync` returns the core's task unchanged. While it is on, a verdict that completed
+synchronously is reported at once and returned as a new completed task; otherwise a wrapper on a
+pooling builder awaits it. A failure is written by an exception filter that declines the exception,
+so it reaches the caller unchanged, and a core that throws before it returns a task still throws
+from the call itself.
+
+`DatabaseSecurityEventSourceTests` checks the name, the strict manifest, one event per verdict and
+failure with its payload, the synchronous throw, the silent cancellation, and that
+`AllowAll.AuthenticateAsync` allocates nothing while nobody listens.
+
 ## AOT posture
 
 One abstract base plus one branch-free internal implementation — nothing to trim.

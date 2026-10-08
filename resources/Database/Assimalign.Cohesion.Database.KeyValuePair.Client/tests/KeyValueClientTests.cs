@@ -252,7 +252,7 @@ public class KeyValueClientTests
     {
         internal int Executed { get; private set; }
 
-        protected override void OnExecuted(string commandText, long rowCount, long affectedCount, TimeSpan elapsed)
+        protected internal override void OnExecuted(string commandText, long rowCount, long affectedCount, TimeSpan elapsed)
         {
             Executed++;
             throw new InvalidOperationException("The observer failed.");

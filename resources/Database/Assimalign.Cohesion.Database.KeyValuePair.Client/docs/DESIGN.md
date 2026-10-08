@@ -70,6 +70,33 @@ observer derives from the abstract `KeyValueClientObserver`, whose three hooks a
 `protected internal virtual` with empty bodies: it overrides only what it records, and
 only the owning `KeyValueConnection` fires them.
 
+## Diagnostics
+
+The client reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.KeyValuePair.Client`
+(`src/Internal/EventSource/KeyValueClientEventSource.cs`), written by `KeyValueConnection`'s one
+command path. Its ids, names and payloads are the SQL client's, so one query reads both. Start and
+stop carry the `Commands` keyword (`0x1`).
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `CommandStart` | Verbose | `Commands` | `database`, `parameterCount` |
+| 2 | `CommandStop` | Verbose | `Commands` | `database`, `rowCount`, `affectedCount`, `durationMilliseconds` |
+| 3 | `CommandFailed` | Error | — | `database`, `errorKind` (`KeyValueClientErrorKind`), `code` (the wire code), `exceptionMessage`, `durationMilliseconds` |
+| 4 | `ObserverFailed` | Warning | — | `database`, `callback` (`OnExecuting`, `OnExecuted` or `OnFailed`), `exceptionType`, `exceptionMessage` |
+
+Keys, values and the command text are never written, as the observers never receive key or value
+bytes. A command fails with an Error whatever its cause; a cancellation writes no failure, and a
+`MalformedResult` the typed operation raises after a completed response is not a command failure.
+Event 4 makes visible an observer failure the client swallows. No counters. The command path
+already takes the timestamp its observer receives, so the events add only `IsEnabled` checks while
+nobody listens.
+
+`KeyValueClientEventSourceTests` checks the name, the strict manifest, and a put and a refused scan
+under an observer whose every hook throws: each event once, in order, with its payload, and no key,
+value or command text. The test assembly's observers override the hooks as `protected internal`,
+which the project's test-only `InternalsVisibleTo` requires (CS0507).
+
 ## Materialized scans, AOT, and non-goals
 
 Materialized scans are this package's policy. Use a range limit to bound results;

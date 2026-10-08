@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Sql.Client.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Client;
 
@@ -202,20 +203,24 @@ public sealed class SqlConnection : IAsyncDisposable
         // The pooled connection may already serve another caller's rental; never reach it.
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 
-        NotifyExecuting(commandText, parameters?.Count ?? 0);
+        int parameterCount = parameters?.Count ?? 0;
+        NotifyExecuting(commandText, parameterCount);
 
         long startTimestamp = Stopwatch.GetTimestamp();
+        SqlClientEventSource.Log.CommandStart(this, parameterCount);
 
         try
         {
             DatabaseClientResult result = await _connection.ExecuteAsync(commandText, parameters, cancellationToken).ConfigureAwait(false);
 
+            SqlClientEventSource.Log.CommandStop(this, result.Rows.Count, result.AffectedCount, startTimestamp);
             NotifyExecuted(commandText, result.Rows.Count, result.AffectedCount, Stopwatch.GetElapsedTime(startTimestamp));
             return result;
         }
         catch (DatabaseClientException exception)
         {
             SqlClientException translated = SqlClientException.FromClientException(exception);
+            SqlClientEventSource.Log.CommandFailed(this, translated, startTimestamp);
             NotifyFailed(commandText, translated, Stopwatch.GetElapsedTime(startTimestamp));
             throw translated;
         }
@@ -235,6 +240,7 @@ public sealed class SqlConnection : IAsyncDisposable
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // A telemetry observer must never fault the command it is observing.
+            SqlClientEventSource.Log.ObserverFailed(this, nameof(SqlClientObserver.OnExecuting), exception);
         }
     }
 
@@ -252,6 +258,7 @@ public sealed class SqlConnection : IAsyncDisposable
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // A telemetry observer must never fault the command it is observing.
+            SqlClientEventSource.Log.ObserverFailed(this, nameof(SqlClientObserver.OnExecuted), exception);
         }
     }
 
@@ -269,6 +276,7 @@ public sealed class SqlConnection : IAsyncDisposable
         catch (Exception observerException) when (observerException is not OutOfMemoryException)
         {
             // A telemetry observer must never mask the original failure.
+            SqlClientEventSource.Log.ObserverFailed(this, nameof(SqlClientObserver.OnFailed), observerException);
         }
     }
 }

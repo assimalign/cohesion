@@ -172,6 +172,39 @@ the core's `DESIGN.md`, "Lifecycle and errors"). `BlobClientException` keeps tha
 core exception, which keeps the transport's exception, is its inner exception. A canceled dial
 throws `OperationCanceledException` unchanged (`BlobClientDialFailureTests`).
 
+## Diagnostics
+
+The client reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Blob.Client` (`src/Internal/EventSource/BlobClientEventSource.cs`).
+Start and stop carry the `Transfers` keyword (`0x1`).
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `TransferStart` | Verbose | `Transfers` | `database`, `operation` (`Upload`, `Download`, `Delete`, `GetProperties` or `List`), `container` |
+| 2 | `TransferStop` | Verbose | `Transfers` | `database`, `operation`, `container`, `bytes` (the content an upload sent or a download received; zero otherwise), `durationMilliseconds` |
+| 3 | `TransferFailed` | Error | — | `database`, `operation`, `container`, `code` (the wire code), `exceptionMessage`, `durationMilliseconds` |
+| 4 | `ListCleanupFailed` | Verbose | — | `database`, `container`, `exceptionType`, `exceptionMessage` |
+
+Upload, delete, properties and listing are written around the private `ExecuteCoreAsync` every one
+of them runs through. A download starts in `DownloadAsync` and stops when its last chunk is
+verified, inside the download exchange's copy, which can be after `DownloadAsync` returned its
+stream. A failure before the stream opens is written by `DownloadAsync`; one after it, by the copy,
+through an exception filter that declines it, with the code the shared client gives it (its own
+for a coded failure, `ProtocolViolation` for malformed frames, `Internal` otherwise). A
+cancellation, or an enumeration or download stream disposed early, writes neither stop nor
+failure. Event 4 reports a failure the listing's cleanup swallows only when its consumer never saw
+it: the failure the enumeration already surfaced, and the cancellation the cleanup itself causes,
+are not written.
+
+Container names are identifiers and are written; blob names may be user data and are never
+written, nor is any content. Timestamps are taken only while a listener takes the source. No
+counters.
+
+`BlobClientEventSourceTests` checks the name, the strict manifest, each member's transfer once (the
+download's stop with its received bytes, and a refused download's failure), no blob name in a
+start or stop, and event 4's payload, which it writes directly because the swallowed failure cannot
+be provoked deterministically.
+
 ## Scope and verification
 
 This package does not provision databases or containers, expose SQL commands, multiplex

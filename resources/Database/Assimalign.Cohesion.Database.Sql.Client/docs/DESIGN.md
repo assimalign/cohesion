@@ -92,6 +92,34 @@ command outcome. An observer derives from the abstract `SqlClientObserver`, whos
 three hooks are `protected internal virtual` with empty bodies: an observer overrides
 only the hooks it records, and only the owning `SqlConnection` fires them.
 
+## Diagnostics
+
+The client reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Sql.Client` (`src/Internal/EventSource/SqlClientEventSource.cs`),
+written by `SqlConnection`'s one command path. Start and stop carry the `Commands` keyword (`0x1`).
+The Key-Value client's source has the same ids, names and payloads, so one query reads both.
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `CommandStart` | Verbose | `Commands` | `database`, `parameterCount` |
+| 2 | `CommandStop` | Verbose | `Commands` | `database`, `rowCount`, `affectedCount`, `durationMilliseconds` |
+| 3 | `CommandFailed` | Error | — | `database`, `errorKind` (`SqlClientErrorKind`), `code` (the wire code), `exceptionMessage`, `durationMilliseconds` |
+| 4 | `ObserverFailed` | Warning | — | `database`, `callback` (`OnExecuting`, `OnExecuted` or `OnFailed`), `exceptionType`, `exceptionMessage` |
+
+A command fails with an Error whatever its cause, a statement the server rejects included (owner
+question Q1 of the event-source plan); a cancellation writes no failure. Event 4 makes visible an
+observer failure the client swallows; the command's outcome is unchanged. Statement text and
+parameter values are never written (Q3). The connection itself is the shared core's
+(`Assimalign.Cohesion.Database.Client`). No counters: a process-wide count updated per command would
+be a contention point. The command path already takes the timestamp its observer receives, so the
+events add only `IsEnabled` checks while nobody listens.
+
+`SqlClientEventSourceTests` checks the name, the strict manifest, a succeeding and a failing command
+under an observer whose every hook throws (each event once, in order, with its payload, no
+statement text), and that start and stop need the `Commands` keyword. The test assembly's
+observers override the hooks as `protected internal`, which the project's test-only
+`InternalsVisibleTo` requires (CS0507); an application overrides them as `protected`.
+
 ## AOT and non-goals
 
 Encoding and materialization are hand-written, with no reflection or code

@@ -126,6 +126,41 @@ itself, not through the returned task, as the channel's family check is. `Protoc
 in the stream reader's core, where the declared length is decoded. The other public members add
 no check of their own.
 
+## Diagnostics
+
+The child root reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Protocol` (`src/Internal/EventSource/ProtocolEventSource.cs`): a
+Verbose frame trace under the `Frames` keyword (`0x1`), so a tool takes it alone with
+`dotnet-trace collect --providers Assimalign.Cohesion.Database.Protocol:0x1:5`. A frame carries its
+message type and payload length, never its payload.
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `FrameRead` | Verbose | `Frames` | `messageType` (the `ProtocolMessageType` name, or its number for a model identifier), `payloadLength` |
+| 2 | `FrameWritten` | Verbose | `Frames` | `messageType`, `payloadLength` |
+
+**The public members write the events, for the stream leaf only.** `ReadFrameAsync` and
+`WriteFrameAsync` write them, so the trace follows the NVI rule, but only when the reader or writer
+is the stream one `Create` returns. Every other leaf in the table above decorates a stream leaf
+through its public member, so writing at every layer would report one wire frame two or three
+times (a client's response passes the client decorator, the channel's family reader and the stream
+reader). A frame is reported once, where it crosses the transport; a frame a decorator refuses (the
+family check) was still read or written. `FrameRead` follows a non-null frame; the clean end of the
+stream writes nothing. `FrameWritten` follows a completed write, before any flush.
+
+**The trace costs nothing while nobody takes it.** The public member checks
+`IsEnabled(Verbose, Frames)` and returns the core's task unchanged when it is off. When it is on, a
+core that completed synchronously is reported at once; otherwise a static wrapper on a pooling
+builder (`PoolingAsyncValueTaskMethodBuilder`) awaits it and reports the frame. No counters: the
+SQL server writes one frame per result row, and a process-wide count updated per frame by every
+session would be a contention point. Frame failures (`ProtocolException`) are not events here: the
+server session or the client that catches one reports it, with its session or connection.
+
+`ProtocolEventSourceTests` checks the name, the strict manifest, one event per frame through a
+`ProtocolChannel` (and through a transport that completes asynchronously), nothing without the
+keyword, and that the reader and writer allocate no more than their stream cores while nobody
+listens (zero bytes per frame in Release).
+
 ## Shared exchange and payloads
 
 The shared handshake precedes every model-specific exchange, as shown here.

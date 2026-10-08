@@ -92,6 +92,30 @@ BEGIN, COMMIT, ROLLBACK, and the reserved Transaction message are unsupported. M
 the engine's existing execution and validation semantics. Database binding remains fixed at
 handshake and catalog SHOW keeps its existing read-only and scoping diagnostics.
 
+## Diagnostics
+
+The client reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Graph.Client` (`src/Internal/EventSource/GraphClientEventSource.cs`),
+written by GraphConnection's three public members. Start and stop carry the `Queries` keyword
+(`0x1`).
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `QueryStart` | Verbose | `Queries` | `database`, `operation` (`Query`, `Execute` or `QueryPaths`) |
+| 2 | `QueryStop` | Verbose | `Queries` | `database`, `operation`, `rowCount` (rows; for `QueryPaths`, paths), `durationMilliseconds` |
+| 3 | `QueryFailed` | Error | — | `database`, `operation`, `code` (the wire code), `exceptionMessage`, `durationMilliseconds` |
+
+QueryAsync and ExecuteAsync share one private core that names the operation, so an Execute is
+reported as such and not as the Query it runs. A path query stops when its enumeration reaches the
+server's terminal count, and fails on a coded failure of the initial response or of any later read.
+Its start and stop are written by different steps of the enumerator, so an activity-tracking tool
+sees the stop on the consumer's flow rather than nested under the start; an enumeration disposed
+early, like a cancellation, writes neither stop nor failure. Statement text and parameter values
+are never written. Timestamps are taken only while a listener takes the source. No counters.
+
+`GraphClientEventSourceTests` checks the name, the strict manifest, and one event per query of each
+member, a refused statement included, with its payload and without statement text.
+
 ## Concrete types (concrete-types plan, phase 5, #1261)
 
 The package has no public interface left and no `Abstractions/` folder
