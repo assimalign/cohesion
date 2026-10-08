@@ -92,12 +92,20 @@ public sealed class BlobDatabaseEngineBuilder
         set { _state.EnsureMutable(); _options.CheckpointJournalSize = value; }
     }
 
-    /// <inheritdoc cref="BlobDatabaseEngineOptions.WorkerFailureLimit" />
+    /// <inheritdoc cref="BlobDatabaseEngineOptions.WorkerFailureWindow" />
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
-    public int WorkerFailureLimit
+    public TimeSpan WorkerFailureWindow
     {
-        get => _options.WorkerFailureLimit;
-        set { _state.EnsureMutable(); _options.WorkerFailureLimit = value; }
+        get => _options.WorkerFailureWindow;
+        set { _state.EnsureMutable(); _options.WorkerFailureWindow = value; }
+    }
+
+    /// <inheritdoc cref="BlobDatabaseEngineOptions.WorkerFailureMinimumPasses" />
+    /// <exception cref="InvalidOperationException">A build was attempted.</exception>
+    public int WorkerFailureMinimumPasses
+    {
+        get => _options.WorkerFailureMinimumPasses;
+        set { _state.EnsureMutable(); _options.WorkerFailureMinimumPasses = value; }
     }
 
     /// <inheritdoc cref="BlobDatabaseEngineOptions.JournalSizeLimit" />

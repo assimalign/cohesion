@@ -115,10 +115,11 @@ public sealed class DatabaseEventSourceTests
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should report a database its engine took offline once, with its declared payload")]
     public async Task DatabaseTakenOffline_ShouldBeReportedOnceWithItsPayload()
     {
-        // Arrange: an engine that gives up after two failed passes, and a checkpoint worker whose
-        // passes keep failing on database a (owner decision 25).
+        // Arrange: an engine that gives up after two failed passes a second apart, and a checkpoint
+        // worker whose passes keep failing on database a (owner decisions 25 and 42).
         string engineName = "event-source-" + Guid.NewGuid().ToString("N");
-        await using var engine = new TestEngine(engineName, workerFailureLimit: 2);
+        var clock = new ManualTimeProvider();
+        await using var engine = new TestEngine(engineName, workerFailureWindow: TimeSpan.FromSeconds(1), workerFailureMinimumPasses: 2, time: clock);
         await engine.CreateDatabaseAsync("a");
         var worker = new ScriptedWorker((self, pass) =>
         {
@@ -128,12 +129,16 @@ public sealed class DatabaseEventSourceTests
         engine.Attach(worker);
         using var recorder = new DatabaseEventRecorder(EventLevel.Informational);
 
-        // Act: the second pass gives up on a; the engine takes it offline on a thread-pool thread
-        // and writes the event there. The third pass counts from one again, or finds the give-up
-        // still running; either way it takes nothing offline.
+        // Act: the second pass, a second after the first, gives up on a; the engine takes it offline
+        // on a thread-pool thread and writes the event there. The third pass starts a new streak, or
+        // finds the give-up still running; either way it takes nothing offline.
         for (int pass = 1; pass <= 3; pass++)
         {
             worker.RunIteration(CancellationToken.None);
+            if (pass == 1)
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+            }
         }
 
         var watch = System.Diagnostics.Stopwatch.StartNew();

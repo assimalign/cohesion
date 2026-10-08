@@ -13,6 +13,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.Database.Tests;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
@@ -562,35 +563,45 @@ public sealed class SqlWorkerResilienceTests
     }
 
     /// <summary>
-    /// A checkpoint failure that never clears takes the database offline (owner decision 25 of
-    /// 2026-10-06): once the checkpoint worker failed it on the engine's limit of passes in a row,
-    /// the engine takes it offline with <see cref="StorageOfflineCause.CheckpointFailures"/>, and
-    /// only it: the other database stays online and keeps being checkpointed. Every operation is
-    /// refused with COHSQLT004, and once the fault clears the reopen brings the database back with
-    /// its rows. Before the decision the worker retried it every second for as long as the process
-    /// ran, and its journal grew without bound.
+    /// A checkpoint failure that persists takes the database offline (owner decisions 25 of
+    /// 2026-10-06 and 42 of 2026-10-07): once the checkpoint worker's failures of it have lasted the
+    /// engine's window across its minimum of failed passes, the engine takes it offline with
+    /// <see cref="StorageOfflineCause.CheckpointFailures"/>, and only it: the other database stays
+    /// online and keeps being checkpointed. The window is measured on the engine's clock, which the
+    /// test moves: the minimum of failed passes, each a backoff after the one before it, leaves the
+    /// database online while the window has not passed, and the first failed pass past it takes the
+    /// database offline. Every operation is then refused with COHSQLT004, and once the fault clears the
+    /// reopen brings the database back with its rows. Before decision 25 the worker retried it
+    /// every second for as long as the process ran, and its journal grew without bound.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Workers: a checkpoint failure that never clears takes only its database offline after the limit of failed passes")]
-    public async Task CheckpointWorker_FailureNeverClears_ShouldTakeOnlyItsDatabaseOfflineAfterTheLimit()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Workers: a checkpoint failure that persists past the window across the minimum of passes takes only its database offline")]
+    public async Task CheckpointWorker_FailurePersistsPastTheWindow_ShouldTakeOnlyItsDatabaseOffline()
     {
-        // Arrange: the checkpointer looks every 100 ms; the engine gives up after three failed passes.
-        const int limit = 3;
+        // Arrange: the checkpointer looks every 100 ms; the default window of 100 s and minimum of
+        // three failed passes, on a clock the test moves.
+        var clock = new ManualTimeProvider();
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
         var options = Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100));
-        options.WorkerFailureLimit = limit;
+        options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
+        options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
+        options.TimeProvider = clock;
         await using var engine = SqlDatabaseEngine.Create(options);
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
 
-        // Act: every data page write of one database fails while its journal is due, for good.
+        // Act: every data page write of one database fails while its journal is due, for good. The
+        // minimum of failed passes, a backoff apart, passes inside the window.
         faults.FailPageWrites = true;
-        var watch = Stopwatch.StartNew();
         await InsertAsync(failing, 0, 20);
+        bool failedTheMinimum = await Eventually(() => worker.FailureCount >= DatabaseEngine.DefaultWorkerFailureMinimumPasses);
+        bool onlineInsideTheWindow = !failing.IsOffline && engine.OfflineDatabases.Count == 0;
+        long passesInsideTheWindow = worker.FailureCount;
+
+        // The window passes on the engine's clock; the next failed pass gives up on the database.
+        clock.Advance(DatabaseEngine.DefaultWorkerFailureWindow);
         bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
-        var elapsed = watch.Elapsed;
-        bool settled = await Eventually(() => worker.FailureCount >= limit);
         var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
         var error = engine.GetOfflineError(Failing);
 
@@ -605,18 +616,19 @@ public sealed class SqlWorkerResilienceTests
         faults.Clear();
         var reopened = await engine.OpenDatabaseAsync(Failing);
 
-        // Assert: offline on the limit-th failed pass, each a backoff after the one before it.
+        // Assert: online through the minimum of passes inside the window, offline on a failed pass
+        // past it.
+        failedTheMinimum.ShouldBeTrue();
+        onlineInsideTheWindow.ShouldBeTrue();
         offline.ShouldBeTrue();
-        settled.ShouldBeTrue();
-        failedPasses.ShouldBe(limit);
-        elapsed.ShouldBeGreaterThanOrEqualTo((limit - 1) * DatabaseEngineWorker.FailureBackoff * 0.9);
+        failedPasses.ShouldBeGreaterThan(passesInsideTheWindow);
         refusal.Code.ShouldBe("COHSQLT004");
         refusal.Message.ShouldStartWith("COHSQLT004", Case.Sensitive);
         refusal.Message.ShouldContain("its checkpoints kept failing");
         var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
         cause.Cause.ShouldBe(StorageOfflineCause.CheckpointFailures);
         cause.Message.ShouldContain($"'{worker.Name}'");
-        cause.Message.ShouldContain($"{limit} passes in a row");
+        cause.Message.ShouldContain("passes in a row over 100 s, at least the engine's window of 100 s", Case.Sensitive);
         Mentions(refusal, "Injected page write failure").ShouldBeTrue(refusal.ToString());
         error.ShouldNotBeNull().Cause.ShouldBe(StorageOfflineCause.CheckpointFailures);
         offlineList.ShouldBe([(DatabaseName)Failing]);
@@ -631,15 +643,15 @@ public sealed class SqlWorkerResilienceTests
     /// <summary>
     /// A journal that grows past the engine's cap while its checkpoints fail takes the database
     /// offline on its second failed checkpoint in a row (owner decision 25 and its review), long
-    /// before the failure limit, with
+    /// before the failure window, with
     /// <see cref="StorageOfflineCause.JournalSizeLimit"/>, and only that database: under load the
     /// journal would otherwise fill the device first.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Workers: a journal past the cap while its checkpoints fail takes only its database offline")]
     public async Task CheckpointWorker_JournalPastTheCap_ShouldTakeOnlyItsDatabaseOffline()
     {
-        // Arrange: checkpoints by journal size, a cap of four times the size, and a failure limit
-        // out of reach.
+        // Arrange: checkpoints by journal size, a cap of four times the size, and a minimum of failed
+        // passes out of reach.
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
         var options = Options(strategy);
         options.CheckpointJournalSize = PaceJournalSize;
@@ -678,7 +690,8 @@ public sealed class SqlWorkerResilienceTests
 
         // Assert
         offline.ShouldBeTrue();
-        failedPasses.ShouldBeLessThan(DatabaseEngine.DefaultWorkerFailureLimit);
+        // Long before the window: fewer failed passes than the window holds at the backoff.
+        failedPasses.ShouldBeLessThan((long)(DatabaseEngine.DefaultWorkerFailureWindow / DatabaseEngineWorker.FailureBackoff));
         failedTwice.ShouldBeTrue();
         refusal.Code.ShouldBe("COHSQLT004");
         refusal.Message.ShouldContain("its journal grew past its engine's limit while its checkpoints kept failing");
@@ -739,30 +752,37 @@ public sealed class SqlWorkerResilienceTests
     }
 
     /// <summary>
-    /// A transient checkpoint failure under the engine's limit leaves the database online (owner
-    /// decision 25): two failed passes, then the fault clears and a checkpoint finishes, which ends
-    /// the failure record; two more failed passes later count from one again, so the database never
-    /// reaches the limit of five.
+    /// A transient checkpoint failure leaves the database online (owner decisions 25 and 42): a
+    /// streak of the minimum of failed passes ends when the fault clears and a checkpoint finishes,
+    /// 60 s into the window on the engine's clock; a second streak starts the window again, so the
+    /// database is never taken offline although its two streaks span 120 s of the clock.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Workers: a transient checkpoint failure under the limit leaves the database online, and the count restarts")]
-    public async Task CheckpointWorker_TransientFailureUnderTheLimit_ShouldLeaveTheDatabaseOnline()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Workers: a transient checkpoint failure under the window leaves the database online, and the window starts again")]
+    public async Task CheckpointWorker_TransientFailureUnderTheWindow_ShouldLeaveTheDatabaseOnline()
     {
-        // Arrange: the checkpointer looks every 100 ms; the engine gives up after five failed passes.
+        // Arrange: the checkpointer looks every 100 ms; the default window of 100 s and minimum of
+        // three failed passes, on a clock the test moves.
+        var clock = new ManualTimeProvider();
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
         var options = Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100));
-        options.WorkerFailureLimit = 5;
+        options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
+        options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
+        options.TimeProvider = clock;
         await using var engine = SqlDatabaseEngine.Create(options);
         var failing = await CreateAsync(engine, Failing);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var faults = strategy.Faults(Failing);
 
-        // Act: two transient faults of two failed passes each.
+        // Act: two transient faults, each failing the minimum of passes over 60 s of the clock.
         var rounds = new List<(bool Failed, bool Recovered)>();
         for (int round = 0; round < 2; round++)
         {
             faults.FailPageWrites = true;
+            long before = worker.FailureCount;
             await InsertAsync(failing, round * 100, 20);
-            bool failed = await Eventually(() => worker.ConsecutiveFailures >= 2);
+            bool failed = await Eventually(() => worker.FailureCount > before);
+            clock.Advance(TimeSpan.FromSeconds(60));
+            failed &= await Eventually(() => worker.ConsecutiveFailures >= DatabaseEngine.DefaultWorkerFailureMinimumPasses);
             faults.FailPageWrites = false;
             long journal = failing.DataStorage.JournalLength;
             bool recovered = await Eventually(() => worker.Fault is null && failing.DataStorage.JournalLength < journal);
@@ -771,7 +791,8 @@ public sealed class SqlWorkerResilienceTests
 
         // Assert
         rounds.ShouldAllBe(round => round.Failed && round.Recovered);
-        worker.FailureCount.ShouldBeGreaterThanOrEqualTo(4);
+        worker.FailureCount.ShouldBeGreaterThanOrEqualTo(2 * DatabaseEngine.DefaultWorkerFailureMinimumPasses);
+        clock.Elapsed.ShouldBe(TimeSpan.FromSeconds(120));
         failing.IsOffline.ShouldBeFalse();
         engine.OfflineDatabases.ShouldBeEmpty();
         engine.GetOfflineError(Failing).ShouldBeNull();
@@ -779,13 +800,14 @@ public sealed class SqlWorkerResilienceTests
         (await CountAsync(failing)).ShouldBe(40);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Workers: the worker failure limit and the journal cap have their defaults, are validated, and reach the engine through the builder")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Workers: the worker failure window, its minimum of passes and the journal cap have their defaults, are validated, and reach the engine through the builder")]
     public async Task Options_WorkerLimits_ShouldDefaultValidateAndReachTheEngine()
     {
         // Arrange
         var defaults = new SqlDatabaseEngineOptions();
         var builder = SqlDatabaseEngine.CreateBuilder();
-        builder.WorkerFailureLimit = 4;
+        builder.WorkerFailureWindow = TimeSpan.FromSeconds(30);
+        builder.WorkerFailureMinimumPasses = 4;
         builder.JournalSizeLimit = 512L * 1024 * 1024;
 
         // Act
@@ -793,18 +815,26 @@ public sealed class SqlWorkerResilienceTests
         await using var timeOnly = SqlDatabaseEngine.Create(new() { CheckpointJournalSize = 0 });
         await using var built = builder.Build();
 
-        // Assert: a hundred failed passes (owner decision 35), and four times the checkpoint size
-        // (1 GiB at its default, or with the size trigger off); a limit set below the checkpoint
-        // size is refused.
-        defaults.WorkerFailureLimit.ShouldBe(DatabaseEngine.DefaultWorkerFailureLimit);
+        // Assert: a hundred seconds across at least three failed passes (owner decision 42), and
+        // four times the checkpoint size (1 GiB at its default, or with the size trigger off); a
+        // window that is not positive or past the maximum, a minimum below one pass, and a journal
+        // limit set below the checkpoint size are refused.
+        defaults.WorkerFailureWindow.ShouldBe(DatabaseEngine.DefaultWorkerFailureWindow);
+        defaults.WorkerFailureMinimumPasses.ShouldBe(DatabaseEngine.DefaultWorkerFailureMinimumPasses);
         defaults.JournalSizeLimit.ShouldBe(0);
-        engine.WorkerFailureLimit.ShouldBe(100);
+        engine.WorkerFailureWindow.ShouldBe(TimeSpan.FromSeconds(100));
+        engine.WorkerFailureMinimumPasses.ShouldBe(3);
         engine.JournalSizeLimit.ShouldBe(4 * defaults.CheckpointJournalSize);
         timeOnly.JournalSizeLimit.ShouldBe(1024L * 1024 * 1024);
-        built.WorkerFailureLimit.ShouldBe(4);
+        built.WorkerFailureWindow.ShouldBe(TimeSpan.FromSeconds(30));
+        built.WorkerFailureMinimumPasses.ShouldBe(4);
         built.JournalSizeLimit.ShouldBe(512L * 1024 * 1024);
-        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new() { WorkerFailureLimit = 0 }))
-            .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.WorkerFailureLimit));
+        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new() { WorkerFailureWindow = TimeSpan.Zero }))
+            .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.WorkerFailureWindow));
+        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new() { WorkerFailureWindow = DatabaseEngine.MaximumWorkerFailureWindow + TimeSpan.FromTicks(1) }))
+            .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.WorkerFailureWindow));
+        Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new() { WorkerFailureMinimumPasses = 0 }))
+            .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.WorkerFailureMinimumPasses));
         Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new() { JournalSizeLimit = -1 }))
             .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.JournalSizeLimit));
         Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create(new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
@@ -987,8 +1017,8 @@ public sealed class SqlWorkerResilienceTests
     private static long FileBytes(SqlDatabase database)
         => database.DataStorage.Data.Length + database.DataStorage.JournalLength;
 
-    // The worker failure limit and the journal cap are out of reach unless a test sets them (owner
-    // decision 25): the retry tests keep a database failing for seconds on purpose, and the pace
+    // The worker failure minimum of passes and the journal cap are out of reach unless a test sets
+    // them (owner decisions 25 and 42): the retry tests keep a database failing for seconds on purpose, and the pace
     // test's failing database fails for its whole window.
     private static SqlDatabaseEngineOptions Options(FaultInjectingJournalSqlStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
     {
@@ -996,7 +1026,7 @@ public sealed class SqlWorkerResilienceTests
         CheckpointInterval = checkpoint ?? TimeSpan.FromHours(1),
         PageWriteBackInterval = writeBack ?? TimeSpan.FromHours(1),
         MaintenanceInterval = TimeSpan.FromHours(1),
-        WorkerFailureLimit = int.MaxValue,
+        WorkerFailureMinimumPasses = int.MaxValue,
         JournalSizeLimit = long.MaxValue,
     };
 

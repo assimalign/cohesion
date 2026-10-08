@@ -52,13 +52,13 @@ the root keeps only `IDatabaseApplication`, `IDatabaseApplicationBuilder` and
 
 | Base | Replaced (deleted in phase 6) | The leaf supplies | The base owns |
 |---|---|---|---|
-| `DatabaseEngine` | `IDatabaseEngine` | the database cores (create, open, drop, list, try-get), forgetting a database a holder closed (`ForgetClosedDatabaseCore`), `OfflineDatabases`, an offline database's storage error (`GetOfflineErrorCore`), taking a database offline it gave up on (`TakeDatabaseOfflineCore`, owner decision 25), and closing its databases (`DisposeAsyncCore`) | name and model, the worker failure limit, the worker and server inventories, attach and its freeze, the worker pump, the state fold, the disposal order, the open's wait for a holder's close, giving up on a database for its workers |
+| `DatabaseEngine` | `IDatabaseEngine` | the database cores (create, open, drop, list, try-get), forgetting a database a holder closed (`ForgetClosedDatabaseCore`), `OfflineDatabases`, an offline database's storage error (`GetOfflineErrorCore`), taking a database offline it gave up on (`TakeDatabaseOfflineCore`, owner decision 25), and closing its databases (`DisposeAsyncCore`) | name and model, the worker failure window, its minimum of passes and the clock that measures it (owner decision 42), the worker and server inventories, attach and its freeze, the worker pump, the state fold and its per-database part (`HasFailingWorker`, `HasEngineWideFailure`, owner decision 42), the disposal order, the open's wait for a holder's close, giving up on a database for its workers |
 | `DatabaseInstance` | `IDatabase`, `IDatabaseSchemaProvisioner` | the session core, disposal cores, and the schema core when it provisions | name, engine, the schema-provisioning capability, the disposed flag, the close's completion and the engine notice it sends |
 | `DatabaseSession` | `IDatabaseSession` | the begin and execute cores, and ending its running operations | state, the session's transaction, the one "already active" check, the operation hold, the teardown order |
 | `DatabaseTransaction` | `IDatabaseTransaction` | the kernel state, commit and rollback cores with their own exception translation, the offline refusal, the coded aborted error | identity and isolation level, the end gate and the whole end state machine |
 | `DatabaseServer` | `IDatabaseServer`, `IDatabaseServerContext` | start and stop cores, and `Sessions` | the engine (the context's `Engine`), the lifecycle state machine |
 | `DatabaseServerSession` | `IDatabaseServerSession` | the engine session and disposal | the identity, the negotiated version, the authenticated principal |
-| `DatabaseEngineWorker` | `IDatabaseEngineWorker` | the per-pass work and, when signal-driven, the trigger wait | name, kind and interval (since phase 3), the pump loop and failure record (#1268), the escalation to the owning engine once a database's failures reach its limit (owner decision 25) |
+| `DatabaseEngineWorker` | `IDatabaseEngineWorker` | the per-pass work and, when signal-driven, the trigger wait | name, kind and interval (since phase 3), the pump loop and failure record (#1268), the escalation to the owning engine once a database's failures last its window across its minimum of passes (owner decisions 25 and 42) |
 
 The engine builders' `IDatabaseEngineBuilder` went in phase 6 too; each model's sealed builder
 replaced it in phase 4 (row 6). Each base lists the BCL disposal interfaces the deleted interface
@@ -407,52 +407,75 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   (`community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-75`,
   `community/monitoring/src/main/java/org/neo4j/monitoring/DatabaseHealth.java:74-85`), but per
   database and through the #1243 offline machinery instead of a process-wide panic:
-  - *The failure limit.* A database's failures are counted per pass in the worker base's
-    failure record, from the first failed pass to the pass that finishes its work (several
-    reports in one pass, one per file set, count once). When a checkpoint, page write-back,
-    write-ahead flush or version-purge worker reaches its engine's `WorkerFailureLimit` (an
-    engine option, `DatabaseEngine.DefaultWorkerFailureLimit` = 100, owner decision 35 of
-    2026-10-07; at least one) on one database, the base asks the owning engine to give
-    up on it (internal `DatabaseEngine.GiveUpOnDatabase`, then the leaf's
+  - *The failure window (owner decision 42 of 2026-10-07).* A database's failures are a streak
+    in the worker base's failure record, from the first failed pass to the pass that finishes
+    its work; the record counts the streak's failed passes (several reports in one pass, one
+    per file set, count once) and times it from its first failed pass on the owning engine's
+    clock. When a checkpoint, page write-back, write-ahead flush or version-purge worker's
+    streak on one database has lasted the engine's `WorkerFailureWindow` and spans at least its
+    `WorkerFailureMinimumPasses` failed passes (engine options; `DatabaseEngine.DefaultWorkerFailureWindow`
+    = 100 s, positive and at most `MaximumWorkerFailureWindow`, `int.MaxValue` milliseconds;
+    `DefaultWorkerFailureMinimumPasses` = 3, at least one), the base asks the owning engine to
+    give up on it (internal `DatabaseEngine.GiveUpOnDatabase`, then the leaf's
     `protected abstract TakeDatabaseOfflineCore`). The leaf finds the database in its
     lock-free published snapshot, never waiting for its registry lock, and takes its data
-    storage offline with the new `Storage.TakeOffline(StorageOfflineCause, string, Exception)`;
+    storage offline with `Storage.TakeOffline(StorageOfflineCause, string, Exception)`;
     the storage's `OnOffline` hook takes a second file set offline and ends the database's
     lock waits, exactly as after a failed fsync. The cause names the worker:
     `CheckpointFailures`, `PageWriteBackFailures`, `WriteAheadFlushFailures` or
-    `VersionPurgeFailures`, and the storage's message names the worker instance and the
-    count. Index-maintenance workers never escalate: their work costs space, not durability.
-    The default keeps Neo4j's window, not its count: Neo4j panics after ten failed
-    checkpoints (`failure_tolerance`,
+    `VersionPurgeFailures`, and the storage's message names the worker instance, the passes and
+    how long they lasted ("… on 3 passes in a row over 100 s, at least the engine's window of
+    100 s"). Index-maintenance workers never escalate: their work costs space, not durability.
+    The window is Neo4j's: Neo4j panics after ten failed checkpoints (`failure_tolerance`,
     `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`)
     and checks for a checkpoint every ten seconds by default (`DEFAULT_CHECKING_FREQUENCY_MILLIS`,
     `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointThreshold.java:40`), so
-    its ten failures span about a hundred seconds; at the one-second backoff here that window is
-    a hundred failed passes. A device that stops answering for less than that (a storage path
-    failover) leaves its databases online; one that stays silent longer takes them offline, and
-    a hosted application reopens each once the device answers. An engine that must ride out
-    longer outages raises its limit, and one that must give up sooner lowers it. The limit was
-    ten, Neo4j's count, when decision 25 landed, and owner decision 35 of 2026-10-07 moved it to
-    the window.
-  - *The window depends on the worker.* The limit counts failed passes, so how long a give-up
-    takes is the limit times how often the worker visits the failing database (at the defaults,
-    with the window at the old limit of ten in parentheses):
+    its ten failures span about a hundred seconds. A device that stops answering for less than
+    that (a storage path failover) leaves its databases online; one that stays silent longer
+    takes them offline, and a hosted application reopens each once the device answers. An
+    engine that must ride out longer outages widens its window, and one that must give up
+    sooner narrows it.
+  - *Why time, not a count.* Decision 25 landed a count of failed passes (ten, Neo4j's count),
+    and owner decision 35 of 2026-10-07 raised it to a hundred to keep Neo4j's window at the
+    one-second worker backoff. A count is a window only at one worker's pace: a version purge's
+    full pass, once per `MaintenanceInterval`, took about a hundred minutes to give up, and a
+    rolled-back writer's deferred undo, retried at its coordinator's 100 ms doubling up to that
+    interval (#1226), about 92 minutes while the writer kept its locks (the P6 review). Decision
+    42 measures the window instead, so every worker gives up about the window after its first
+    failure. The minimum of passes is for the slow ones: a worker that visits a failing
+    database seldom, or whose one attempt outlasted the window (a checkpoint that hung on its
+    lane), would otherwise give up after one or two failures; three mean the failure was
+    retried twice. A busy, deferred or still-running pass neither ends the streak nor stops its
+    clock: a pass that reports the database's work unfinished without a failure (a storage busy
+    with a transaction, a checkpoint deferred to a running statement or still on its lane) keeps
+    the record, and the window runs from the streak's first failed pass, so one failure, a long
+    busy stretch and two more failures give up on the third, where decision 35 needed a hundred
+    (`ReportUnfinished_BetweenFailures_ShouldKeepTheStreaksClockRunning`; the decision 42 review
+    kept it and recorded it for owner review). A version purge's full pass keeps its streak across
+    the deferred-undo retries between full passes: those passes do not redo the full pass's work,
+    so each model's purge worker reports a database whose last full pass failed unfinished until
+    a full pass completes it (before the review such a retry ended the streak as recovered, so a
+    full pass that kept failing never reached the window while another database deferred an
+    undo). At the defaults:
 
-    | Worker | Visits a failing database | Window at 100 (at 10) |
-    |---|---|---|
-    | Checkpoint | every poll, once a second, after the one-second backoff | about 100 s, more when each attempt itself takes time (about 10 s) |
-    | Page write-back | every `PageWriteBackInterval` (1 s) after the backoff | about 100 s (about 10 s) |
-    | Write-ahead flush | when a commit wakes it or its window (the group-commit window, else 1 s) passes, after the backoff | about 100 s while commits stay pending (about 10 s) |
-    | Version purge, full pass | once per `MaintenanceInterval` (60 s) | about 100 minutes (about 10 minutes) |
-    | Version purge, deferred undo (#1226) | at its coordinator's retry, 100 ms doubling up to `MaintenanceInterval` | about 92 minutes: 102 s for the first ten, then a minute each (about 102 s) |
+    | Worker | Visits a failing database | Gives up (decision 42) | Was (decision 35, 100 passes) |
+    |---|---|---|---|
+    | Checkpoint | every poll, once a second, after the one-second backoff | at about 100 s, on about its 101st failed pass | about 100 s, more when each attempt took time |
+    | Page write-back | every `PageWriteBackInterval` (1 s) after the backoff | at about 100 s | about 100 s |
+    | Write-ahead flush | when a commit wakes it or its window (the group-commit window, else 1 s) passes, after the backoff | at about 100 s while commits stay pending | about 100 s while commits stay pending |
+    | Version purge, full pass | once per `MaintenanceInterval` (60 s) | at 120 s, its third failed pass | about 100 minutes |
+    | Version purge, deferred undo (#1226) | at its coordinator's retry, 100 ms doubling up to `MaintenanceInterval` | at 102.2 s, its tenth retry | about 92 minutes |
 
-    The worker's `Fault` is set from the first failure, so the engine is `Faulted`, Hosting's
-    health is `Degraded` and names the worker, and every failure is written to the event
-    source for the whole window. A deferred undo's writer keeps its locks all that time, and
-    Blob's server, which refuses every start, connection, handshake and operation while its
-    engine is not `Running`, is unavailable for all of it. Owner decision 35 was taken on the
-    checkpoint window; the longer windows are an owner review item (concrete-types plan, §7,
-    "P6, as landed").
+    The measured clock is a `System.TimeProvider` the engine owns: `TimeProvider.System` unless
+    the leaf passes one to the protected constructor. The model engines pass their options'
+    internal `TimeProvider`, which only each model's own test assembly sets, so the tests cross
+    the window on a clock they move by hand and never wait for it (`DatabaseWorkerFailureWindowTests`
+    and each model's `*WorkerResilienceTests`). The worker's backoff between retries stays on
+    the monotonic clock: it paces the work, not the give-up. The worker's `Fault` is set from the
+    first failure, so the engine is `Faulted`, Hosting's health is `Degraded` and names the
+    worker, and every failure is written to the event source for the whole window; Blob's
+    server refuses only the failing database meanwhile ("A failing worker refuses its database
+    alone", below).
   - *The journal cap.* A checkpoint that fails for the second pass or more in a row while one
     of the database's journals holds the engine's `JournalSizeLimit` (an engine option; zero,
     the default, resolves to four times `CheckpointJournalSize`, 1 GiB at its default and
@@ -460,14 +483,17 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
     `shared/DatabaseWorkerLimits.cs`) takes the database offline with
     `StorageOfflineCause.JournalSizeLimit`, through the worker base's
     `protected TakeDatabaseOffline`: under load the journal would fill the device long before
-    the failure limit. One failure is not enough, because a journal reaches the cap with no
+    the failure window passes. One failure is not enough (owner decision 41), because a journal
+    reaches the cap with no
     failure at all: a checkpoint deferred to a running statement or refused by a busy storage
     (#1283), or a write burst, never takes a database offline by itself, however long its
     journal grows, and a single transient failure of such a journal is retried like any
     other. The second failure in a row, a backoff later, is what says the checkpoints keep
     failing (`ReportFailure` returns the database's count of failed passes in a row; the
-    shared checkpointer's `JournalSizeLimitFailures` is two). PostgreSQL's `max_wal_size` is a
-    soft limit the WAL may pass under heavy load (`doc/src/sgml/config.sgml:4010-4014`).
+    shared checkpointer's `JournalSizeLimitFailures` is two). The cap is not held back by the
+    window or its minimum of three passes: it is a count of two, whatever the clock says.
+    PostgreSQL's `max_wal_size` is a soft limit the WAL may pass under heavy load
+    (`doc/src/sgml/config.sgml:4010-4014`).
   - *The give-up never runs on a worker's thread.* Taking a storage offline latches its
     journal under the journal's lock, which a durable flush holds through its fsync. A worker
     that gave up on its own thread would wait out a hung fsync of that database, and so would
@@ -475,9 +501,10 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
     `GiveUpOnDatabase` therefore queues the leaf's `TakeDatabaseOfflineCore` to the thread pool,
     at most one per database at a time, and the pass goes on; until the database is offline the
     worker's record of it still backs it off. A failure of the leaf's core is recorded on the
-    worker as a failure of its own (`Fault`, until its next pass runs to its end), and the
-    database's next failure asks again. The engine's disposal waits for a give-up still running
-    before the leaf closes its databases.
+    worker (`Fault`, until its next pass runs to its end) as that database's failure, not the
+    worker's own: the database's record stays and names it, `HasEngineWideFailure` does not read
+    it (owner decision 42 review), and the database's next failure asks again. The engine's
+    disposal waits for a give-up still running before the leaf closes its databases.
   - *What does not count.* A failure of a database already offline or closed (the workers
     skip both, and the leaf refuses them), a worker no engine owns, and an engine whose
     disposal started. Only the failing database goes offline; the workers keep serving the
@@ -485,11 +512,34 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
     worker's failure record of it (internal `DatabaseEngineWorker.ForgetDatabase`), and it does
     the same whenever a database of the engine closes (`ForgetClosedDatabase`, whoever closed
     it: a holder, a drop, a reopen after going offline, the engine's disposal). The engine
-    reports `Running` again at once, and a reopened database counts its failures from one:
-    before the review a record outlived the reopen, so the engine stayed `Faulted` (hosted
-    health `Degraded`) after a successful reopen, and the reopened database went offline on its
-    first transient failure. A record a pass no longer visits still ends with that pass. Each
-    give-up is written to the event source (event 3, "Diagnostics" below).
+    reports `Running` again at once, and a reopened database starts a new streak, with a new
+    window: before the review a record outlived the reopen, so the engine stayed `Faulted`
+    (hosted health `Degraded`) after a successful reopen, and the reopened database went offline
+    on its first transient failure. A record a pass no longer visits still ends with that pass.
+    Each give-up is written to the event source (event 3, "Diagnostics" below).
+  - *A failing worker refuses its database alone (owner decision 42 of 2026-10-07).* A worker
+    failure is one database's (its record, and a give-up of it the leaf could not complete) or
+    the worker's own (a pass that failed before it settled its databases, a trigger wait that
+    failed). The engine reports the two apart, beside the `Faulted` state that folds them:
+    `DatabaseEngine.HasFailingWorker(name)` is true while a worker whose failures can take a
+    database offline (not an index-maintenance worker, whose failures cost space only and would
+    otherwise refuse a database for as long as they lasted) holds a record of that database, and
+    `HasEngineWideFailure` while a worker holds a failure of its own or a worker's loop escaped.
+    Both are non-virtual reads over the workers' records (internal
+    `DatabaseEngineWorker.HoldsFailure`, `TakesDatabasesOffline` and `HoldsOwnFailure`; a worker
+    holding no database record answers without its lock), and neither checks disposal, so a
+    server's gate can read them beside the state. A record ends at once when the engine gives up
+    on the database or the database closes; a database a failure of its own storage took
+    offline keeps it until the worker's next pass, so a gate checks that the database is online
+    first and the offline refusal wins. Blob's server, the one model server that gated on the
+    engine's state, refused every start, connection, handshake and exchange while the engine was
+    not `Running`, so one database's failing checkpoint made the whole server unavailable for
+    the window; it now refuses a database's handshakes and exchanges with `Unavailable` and
+    `COHDBB003` while that database has a failing worker, serves the others, and refuses
+    everything only while the engine is disposed or has an engine-wide failure (Blob
+    `DESIGN.md`). The Sql, KeyValuePair and Graph servers never gated on the engine's state (a
+    session limit, shutdown, an idle timeout and an offline database's refusal are their only
+    refusals), and Documents has no server, so they needed no change.
   - *Each worker reports under the database's name in the engine.* The Blob, Documents and
     Graph write-back and flush workers visited the engine's storages and reported under the
     storage's name, which a storage reads from its file header: a database opened from a copied
@@ -767,14 +817,16 @@ before it sleeps and retries (`src/backend/postmaster/checkpointer.c:294-295`).
 
 `consecutiveFailures` counts failed passes of that database since owner decision 25: a pass that
 reports several failures of one database (one per file set) counts once, and the count is what
-the engine's `WorkerFailureLimit` is compared with.
+the engine's `WorkerFailureMinimumPasses` is compared with (owner decision 42; the window is
+timed, not counted, and is in the give-up's reason).
 
 No counters: a worker's counts are on the worker (`FailureCount`, `ConsecutiveFailures`), and
 the hosting health aggregate reports them. The health output names a failing worker and the
 type of its failure only, because the health endpoint is unauthenticated and an exception's
 message can carry file paths; the event carries the message. An engine that gives up on a
 database (owner decision 25) writes event 3 once, from the root engine base, on the thread-pool
-thread that took the database offline: the worker's failure count reached the engine's limit, or
+thread that took the database offline: the worker's failures lasted the engine's window across
+its minimum of passes, or
 the checkpointer found the journal past the cap on a second failed checkpoint in a row. A give-up
 the leaf fails is written as event 1 of the worker that asked, with the database's name. A
 database a device failure took offline is not a worker event: the engines report it

@@ -104,9 +104,44 @@ public sealed class BlobDatabase : DatabaseInstance
     internal const string OfflineCode = "COHDBB002";
 
     /// <summary>
+    /// The code that leads the message of the server's refusal of the database while a background
+    /// worker of its engine holds a failure of it (owner decision 42 of 2026-10-07).
+    /// </summary>
+    internal const string WorkerFailureCode = "COHDBB003";
+
+    /// <summary>
     /// Gets whether a failed durable flush took the database offline.
     /// </summary>
     internal bool IsOffline => DataStorage.IsOffline;
+
+    /// <summary>
+    /// Gets the coded message (<see cref="WorkerFailureCode"/>) with which
+    /// <see cref="BlobDatabaseServer"/> refuses the database's handshakes and exchanges while a
+    /// background worker of its engine holds a failure of it
+    /// (<see cref="DatabaseEngine.HasFailingWorker"/>), or null while none does (owner decision 42
+    /// of 2026-10-07). The engine's other databases are served meanwhile.
+    /// </summary>
+    /// <returns>The refusal's message, or null.</returns>
+    /// <remarks>
+    /// <para>
+    /// The refusal lasts until a pass finishes the failing work, or the engine gives up on the
+    /// database, which is then refused as offline (<see cref="OfflineCode"/>) until it is reopened.
+    /// It concerns the wire server only: an operation in process runs, and fails or succeeds, as
+    /// the failing work lets it.
+    /// </para>
+    /// <para>
+    /// An offline database is not refused here, so the offline refusal wins: a database a failure
+    /// of its own storage took offline keeps a worker's record until that worker's next pass,
+    /// which can be a whole <see cref="BlobDatabaseEngineOptions.MaintenanceInterval"/> away for
+    /// the version purge, and it is refused with <see cref="OfflineCode"/> meanwhile (owner
+    /// decision 42 review).
+    /// </para>
+    /// </remarks>
+    internal string? GetWorkerFailureRefusal()
+        => !IsOffline && _engine.HasFailingWorker(Name)
+            ? $"{WorkerFailureCode}: Database '{Name}' is unavailable while its engine's background work on it keeps failing; " +
+              $"it is served again once that work succeeds, and refused as offline ({OfflineCode}) if its engine gives up on it."
+            : null;
 
     /// <summary>
     /// Gets whether the database's close has started: by the engine, or by a holder of the

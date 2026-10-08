@@ -69,7 +69,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     private BlobDatabase[] _instances = [];
 
     private BlobDatabaseEngine(BlobDatabaseEngineOptions options)
-        : base(options.EngineName ?? defaultName, EngineModel.Blob, options.WorkerFailureLimit)
+        : base(options.EngineName ?? defaultName, EngineModel.Blob, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
     {
         _options = options;
         JournalSizeLimit = DatabaseWorkerLimits.GetJournalSizeLimit(options.JournalSizeLimit, options.CheckpointJournalSize);
@@ -142,6 +142,21 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// <param name="database">The database a worker pass visited.</param>
     internal bool IsOpen(BlobDatabase database) => !database.IsClosed && Array.IndexOf(GetInstanceSnapshot(), database) >= 0;
 
+    /// <summary>
+    /// Gets whether <see cref="BlobDatabaseServer"/> refuses every database's work, and the state it
+    /// names: the engine is disposed, or it failed as a whole
+    /// (<see cref="DatabaseEngine.HasEngineWideFailure"/>). A worker's failure of one database
+    /// refuses that database alone (owner decision 42 of 2026-10-07;
+    /// <see cref="BlobDatabase.GetWorkerFailureRefusal"/>).
+    /// </summary>
+    /// <param name="state">The engine's state, read once, for the refusal's message.</param>
+    /// <returns>True when every database's work is refused.</returns>
+    internal bool RefusesEveryDatabase(out EngineState state)
+    {
+        state = State;
+        return state == EngineState.Disposed || (state == EngineState.Faulted && HasEngineWideFailure);
+    }
+
     /// <summary>Creates a dependency-free builder for an engine and its deferred workers and servers.</summary>
     /// <returns>A one-shot model builder; constructing the builder starts no components.</returns>
     /// <remarks>Use this entry point inside hosting-aware factories to assign already resolved values before Build.</remarks>
@@ -161,8 +176,10 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// <exception cref="ArgumentOutOfRangeException">
     /// A worker interval or batch size is not positive, the buffer pool capacity is not a whole
     /// number of 8 KiB pages of at least 1 MiB, the checkpoint journal size is negative, the worker
-    /// failure limit is less than one, or the journal size limit is negative or set and below the
-    /// checkpoint journal size.
+    /// failure window is not positive or is longer than
+    /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>, the worker failure minimum of passes
+    /// is less than one, or the journal size limit is negative or set and below the checkpoint
+    /// journal size.
     /// </exception>
     public static BlobDatabaseEngine Create(BlobDatabaseEngineOptions options)
     {
@@ -196,8 +213,8 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.PageWriteBackBatchSize);
         Assimalign.Cohesion.Database.Storage.Storage.GetBufferPoolPageCount(options.BufferPoolCapacity, nameof(options.BufferPoolCapacity));
         ArgumentOutOfRangeException.ThrowIfNegative(options.CheckpointJournalSize, nameof(options.CheckpointJournalSize));
-        DatabaseWorkerLimits.Validate(options.WorkerFailureLimit, options.JournalSizeLimit, options.CheckpointJournalSize,
-            nameof(options.WorkerFailureLimit), nameof(options.JournalSizeLimit));
+        DatabaseWorkerLimits.Validate(options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.JournalSizeLimit, options.CheckpointJournalSize,
+            nameof(options.WorkerFailureWindow), nameof(options.WorkerFailureMinimumPasses), nameof(options.JournalSizeLimit));
         return new BlobDatabaseEngine(options);
     }
 

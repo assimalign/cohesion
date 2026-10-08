@@ -24,9 +24,22 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// configured deadline. Each authenticated session binds to one database.
 /// </para>
 /// <para>
+/// <b>A failing worker refuses its database alone</b> (owner decision 42 of 2026-10-07). While a
+/// background worker of the engine holds a failure of one database
+/// (<see cref="DatabaseEngine.HasFailingWorker"/>), the server refuses that database's handshakes
+/// and exchanges with <see cref="ProtocolErrorCode.Unavailable"/> and a message led by
+/// <c>COHDBB003</c>, and serves the engine's other databases; the refusal ends with the failure,
+/// or turns into the offline refusal (<c>COHDBB002</c>) once the engine gives up on the database.
+/// The server refuses its start, new connections, handshakes and exchanges for every database only
+/// while the engine is disposed or has failed as a whole
+/// (<see cref="DatabaseEngine.HasEngineWideFailure"/>). Before the decision it refused all of them
+/// while the engine was not <see cref="EngineState.Running"/>, which a failure of any one database
+/// made it.
+/// </para>
+/// <para>
 /// <b>The lifecycle is the base's</b> (concrete-types plan, phase 4, #1260): the server is created
-/// inert; <see cref="DatabaseServer.StartAsync"/> refuses to start while the engine is not
-/// <see cref="EngineState.Running"/>, and otherwise binds the configured listener before it begins
+/// inert; <see cref="DatabaseServer.StartAsync"/> refuses to start while the engine is disposed or
+/// has failed as a whole, and otherwise binds the configured listener before it begins
 /// accepting; a refused start and a bind that fails both dispose the listener and leave the server
 /// stopped for good, so a later start throws <see cref="ObjectDisposedException"/>;
 /// <see cref="DatabaseServer.StopAsync"/> drains sessions within
@@ -103,17 +116,18 @@ public sealed class BlobDatabaseServer : DatabaseServer
 
     /// <inheritdoc />
     /// <remarks>
-    /// Refuses with a <see cref="DatabaseException"/> while the engine is not
-    /// <see cref="EngineState.Running"/>, after it disposed the listener.
+    /// Refuses with a <see cref="DatabaseException"/> while the engine is disposed or has failed as
+    /// a whole (<see cref="DatabaseEngine.HasEngineWideFailure"/>), after it disposed the listener.
+    /// A worker's failure of one database does not refuse the start (owner decision 42).
     /// </remarks>
     protected override async Task StartCoreAsync(CancellationToken cancellationToken)
     {
-        if (_engine.State != EngineState.Running)
+        if (_engine.RefusesEveryDatabase(out var state))
         {
             // The base leaves a server whose start failed stopped for good, so a later stop has
             // nothing to release: the listener the server owns is released here, before the
             // refusal propagates (concrete-types plan, row 9).
-            var refusal = new DatabaseException($"The Blob engine is {_engine.State} and cannot accept sessions.");
+            var refusal = new DatabaseException($"The Blob engine is {state} and cannot accept sessions.");
             await DisposeListenerAfterFailedStartAsync().ConfigureAwait(false);
             throw refusal;
         }
@@ -245,7 +259,9 @@ public sealed class BlobDatabaseServer : DatabaseServer
                 break;
             }
 
-            if (_sessions.Count >= _options.MaxSessions || _engine.State != EngineState.Running)
+            // A connection names its database only in its handshake, so only a refusal of every
+            // database turns it away here; a failing database is refused at the handshake.
+            if (_sessions.Count >= _options.MaxSessions || _engine.RefusesEveryDatabase(out _))
             {
                 Guid rejectionId = Guid.NewGuid();
                 Task rejection = RejectAsync(connection, hardAbort);

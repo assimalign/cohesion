@@ -60,13 +60,14 @@ namespace Assimalign.Cohesion.Database;
 /// </para>
 /// <para>
 /// <b>A database whose checkpoints keep failing goes offline</b> (owner decision 25 of
-/// 2026-10-06), on whichever comes first. After the engine's worker failure limit of failed
-/// checkpoints in a row, the worker base takes it offline with
-/// <see cref="StorageOfflineCause.CheckpointFailures"/>. A checkpoint that fails for the second
-/// pass or more in a row while one of the database's journals has reached the engine's journal
-/// size limit takes it offline with <see cref="StorageOfflineCause.JournalSizeLimit"/>: the journal
-/// is no longer truncated, and under load it would fill the device long before the failure limit
-/// is reached. One failure is not enough: a journal can reach the cap with no failure at all (a
+/// 2026-10-06), on whichever comes first. Once its checkpoints have kept failing for the engine's
+/// worker failure window across its minimum of failed passes (owner decision 42 of 2026-10-07),
+/// the worker base takes it offline with <see cref="StorageOfflineCause.CheckpointFailures"/>. A
+/// checkpoint that fails for the second pass or more in a row while one of the database's journals
+/// has reached the engine's journal size limit takes it offline with
+/// <see cref="StorageOfflineCause.JournalSizeLimit"/> (owner decision 41): the journal is no longer
+/// truncated, and under load it would fill the device long before the window passes. One failure
+/// is not enough: a journal can reach the cap with no failure at all (a
 /// checkpoint deferred to a long statement, a busy storage, a write burst, #1283), and a single
 /// transient failure of such a database is retried like any other; the second failure in a row,
 /// a backoff later, is what says its checkpoints keep failing. PostgreSQL has no such cap: its
@@ -316,9 +317,10 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
                 // A failure that took the database offline (#1243, #1252, #1268) is reported through
                 // the engine's offline list, and the next pass skips the database; any other is
                 // this pass's failure, and a later pass retries the checkpoint. Reporting it takes
-                // the database offline once its checkpoints failed the engine's limit of passes in a
-                // row; a second failure in a row with the journal past the engine's cap takes it
-                // offline sooner (owner decision 25).
+                // the database offline once its checkpoints kept failing for the engine's window
+                // across its minimum of passes (owner decision 42); a second failure in a row with
+                // the journal past the engine's cap takes it offline sooner (owner decisions 25
+                // and 41).
                 if (!IsOffline(database))
                 {
                     int failures = ReportFailure(name, outcome.Failure);

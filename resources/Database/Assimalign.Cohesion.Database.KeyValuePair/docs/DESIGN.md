@@ -391,15 +391,18 @@ reopen, because the coordinator ends every lock wait of an offline database
 (`TransactionCoordinator.AbandonLockWaits`, wired to the data file set's offline hook), while
 the writer that holds the lock keeps it, since an offline database undoes nothing.
 
-**A failure that persists takes the database offline (owner decision 25 of 2026-10-06).** When
-the checkpoint, page write-back, write-ahead flush or version-purge worker fails on one database
-on `WorkerFailureLimit` passes in a row (an engine option, one hundred by default since owner
-decision 35 of 2026-10-07: the window of Neo4j's ten failed checkpoints,
+**A failure that persists takes the database offline (owner decisions 25 of 2026-10-06 and
+42 of 2026-10-07).** When
+the checkpoint, page write-back, write-ahead flush or version-purge worker keeps failing on one
+database for `WorkerFailureWindow` across at least `WorkerFailureMinimumPasses` failed passes in a
+row (engine options, 100 s and three by default since owner decision 42 of 2026-10-07, which
+replaced decision 35's count of a hundred passes: the window of Neo4j's ten failed checkpoints,
 `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`, at its
-ten-second checkpoint check, `CheckPointThreshold.java:40`, is a hundred passes at the one-second
-worker backoff, about a hundred seconds for a failing checkpoint or page write-back; a version-purge
-pass runs once per `MaintenanceInterval`, so a failing one takes about a hundred intervals, and a
-deferred undo about an hour and a half: the root `DESIGN.md`, "The window depends on the worker";
+ten-second checkpoint check, `CheckPointThreshold.java:40`, measured on the engine's clock from
+the first failed pass, so every worker gives up about that long after its first failure: about
+100 s for a failing checkpoint, page write-back or write-ahead flush, 120 s for a version purge's
+full pass and about 102 s for a deferred undo, where the count took about 100 and 92 minutes;
+the root `DESIGN.md`, "Why time, not a count";
 a pass that fails both file sets counts once), the root worker base asks the engine to give up on
 it, and `KeyValueDatabaseEngine.TakeDatabaseOfflineCore` takes the data file set offline with the
 `StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A second checkpoint in a row
@@ -415,13 +418,14 @@ so a give-up that waits for a hung fsync of that database holds back none of the
 finds the database in its published snapshot, without its registry lock, so it never waits for
 another's open. Once the database is offline, or whenever it closes, the engine ends every
 worker's failure record of it, so the engine reports `Running` at once and a reopened database
-counts its failures from one; a
+starts a new streak; a
 database already offline or closed is not counted. `KeyValueWorkerResilienceTests` pins it: a
-checkpoint failure that never clears takes only its database offline after the limit of failed
-passes, a journal past the cap does on its second
+checkpoint failure that persists takes only its database offline once it lasted the window across the minimum of
+passes (on a clock the test
+moves; the minimum of passes inside the window leaves it online), a journal past the cap does on its second
 failed checkpoint in a row, one transient failure of a journal already past the cap does not,
-and a transient failure under the limit does not (the count restarts once a checkpoint
-finishes). The suite's other engines set both limits out of
+and a transient failure under the window does not (the window starts again once a checkpoint
+finishes). The suite's other engines set the minimum of passes and the journal cap out of
 reach, since they keep a database failing on purpose.
 
 **A database closed outside the engine is skipped, then forgotten** (owner decision 33 of
@@ -537,7 +541,9 @@ other databases' checkpoints.
 **Deferred undo is retried on its own backoff (#1226).** The version-purge worker retries a
 failed undo about 100 ms after the deferral, then at doubling delays up to `MaintenanceInterval`.
 A retry that fails makes the engine report `Faulted`; the first pass with no failure and no undo
-still deferred clears it.
+still deferred clears it. A full pass that fails keeps the database's failure until a later full
+pass completes: the retries between full passes do not redo its work (owner decision 42 review;
+Sql DESIGN.md, "Deferred undo is retried on its own backoff").
 
 ## Two file sets per database
 

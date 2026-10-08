@@ -1115,15 +1115,18 @@ unexpected exception — a page write the checkpoint could not make, a deferred 
 failure handed back by the coordinator — ended that worker for good, and the reproduction
 left the journal at 332,278 bytes ten seconds after the fault cleared.
 
-**A failure that persists takes the database offline (owner decision 25 of 2026-10-06).** When
-the checkpoint, page write-back, write-ahead flush or version-purge worker fails on one database
-on `WorkerFailureLimit` passes in a row (an engine option, one hundred by default since owner
-decision 35 of 2026-10-07: the window of Neo4j's ten failed checkpoints,
+**A failure that persists takes the database offline (owner decisions 25 of 2026-10-06 and
+42 of 2026-10-07).** When
+the checkpoint, page write-back, write-ahead flush or version-purge worker keeps failing on one
+database for `WorkerFailureWindow` across at least `WorkerFailureMinimumPasses` failed passes in a
+row (engine options, 100 s and three by default since owner decision 42 of 2026-10-07, which
+replaced decision 35's count of a hundred passes: the window of Neo4j's ten failed checkpoints,
 `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`, at its
-ten-second checkpoint check, `CheckPointThreshold.java:40`, is a hundred passes at the one-second
-worker backoff, about a hundred seconds for a failing checkpoint or page write-back; a version-purge
-pass runs once per `MaintenanceInterval`, so a failing one takes about a hundred intervals, and a
-deferred undo about an hour and a half: the root `DESIGN.md`, "The window depends on the worker";
+ten-second checkpoint check, `CheckPointThreshold.java:40`, measured on the engine's clock from
+the first failed pass, so every worker gives up about that long after its first failure: about
+100 s for a failing checkpoint, page write-back or write-ahead flush, 120 s for a version purge's
+full pass and about 102 s for a deferred undo, where the count took about 100 and 92 minutes;
+the root `DESIGN.md`, "Why time, not a count";
 a pass that fails both file sets counts once), the root worker base asks the engine to give up on
 it, and `SqlDatabaseEngine.TakeDatabaseOfflineCore` takes the data file set offline with the
 `StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A second checkpoint in a row
@@ -1139,15 +1142,17 @@ so a give-up that waits for a hung fsync of that database holds back none of the
 finds the database in its published snapshot, without its registry lock, so it never waits for
 another's open. Once the database is offline, or whenever it closes, the engine ends every
 worker's failure record of it, so the engine reports `Running` at once and a reopened database
-counts its failures from one; a
+starts a new streak; a
 database already offline or closed is not counted. Until the decision a failure that never cleared
 was retried every second for as long as the process ran, and the journal grew until the disk
-filled. `SqlWorkerResilienceTests` pins it: a checkpoint failure that never clears takes only its
-database offline after the limit of failed passes, a journal past the cap does on its second
+filled. `SqlWorkerResilienceTests` pins it: a checkpoint failure that persists takes only its
+database offline once it lasted the window across the minimum of passes (on a clock the test
+moves; the minimum of passes inside the window leaves it online), a journal past the cap does on its second
 failed checkpoint in a row, one transient failure of a journal already past the cap does not,
-and a transient failure under the limit does not (the count restarts once a checkpoint
+and a transient failure under the window does not (the window starts again once a checkpoint
 finishes). The
-suite's other engines set both limits out of reach, since they keep a database failing on purpose.
+suite's other engines set the minimum of passes and the journal cap out of reach, since
+they keep a database failing on purpose.
 
 Cadence knobs live here, on `SqlDatabaseEngineOptions` — the engine owns the
 loop, so cadence is engine configuration; observers read it through
@@ -1365,6 +1370,11 @@ a failed retry with no backoff of its own (`ReportFailure(name, exception, TimeS
 coordinator's schedule already paces each retry, so the retries keep the 0.1, 0.2, 0.4 … second
 schedule, and a failing undo in one database delays no other database's retry (#1268 review;
 before it, any failed pass slept the worker a second and held every database's retries with it).
+A full pass that fails (its prune, or its own retry of a deferred undo) keeps the database's
+failure until a later full pass completes: the retries between full passes do not redo the full
+pass's work, so they report the database unfinished, and its streak reaches the failure window
+on its third failed full pass (owner decision 42 review; before it, such a retry ended the
+streak, so a failing full pass never went offline while any database deferred an undo).
 
 ## The SQL server runtime (`SqlDatabaseServer`)
 

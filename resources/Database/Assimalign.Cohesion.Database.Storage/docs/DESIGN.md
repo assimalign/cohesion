@@ -1030,9 +1030,10 @@ a fault-injecting storage strategy and reopens with and without the unconfirmed 
 
 The storage takes itself offline only for its own device failures. Its engine takes it offline
 too, through the same latch, when it gives up on the database: one of its background workers
-failed on the database as many passes in a row as the engine allows, or the journal reached the
-engine's hard cap while its checkpoints kept failing (the root's `DESIGN.md`, "A failure that
-persists takes its database offline"). `Storage.TakeOffline(StorageOfflineCause, string,
+kept failing on the database for the engine's window across its minimum of failed passes (owner
+decision 42 of 2026-10-07), or the journal reached the engine's hard cap while its checkpoints
+kept failing (the root's `DESIGN.md`, "A failure that persists takes its database offline").
+`Storage.TakeOffline(StorageOfflineCause, string,
 Exception)` is that entry point:
 
 - **Five causes are the engine's.** `CheckpointFailures`, `PageWriteBackFailures`,
@@ -1043,7 +1044,8 @@ Exception)` is that entry point:
   the storage reports its own device failures, so a cause never claims an fsync that did not fail.
 - **The message names the worker; the inner exception is its last failure.** The engine passes
   the reason ("the engine's checkpoint worker 'orders/checkpoint' failed on database 'orders' on
-  10 passes in a row, the engine's limit"), and the storage's `COHDBS002` message reads "The
+  101 passes in a row over 100 s, at least the engine's window of 100 s"), and the storage's
+  `COHDBS002` message reads "The
   storage is offline: {reason} (last failure: {message}). Its engine stopped retrying, …".
 - **Everything else is the offline storage of #1243.** The journal latches the error under its
   lock, the group-commit waiters are released, `OnOffline` is raised once (so a second file set

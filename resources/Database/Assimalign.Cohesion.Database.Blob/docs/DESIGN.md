@@ -87,15 +87,18 @@ refused, never granted. The queued writer queues before the fault and does
 nothing that drains: a container lookup is an autocommit read whose commit drains the journal, and
 one that commits after the fault gets the unconfirmed commit of #1243 instead of the refusal.
 
-**A failure that persists takes the database offline (owner decision 25 of 2026-10-06).** When
-the checkpoint, page write-back, write-ahead flush or version-purge worker fails on one database
-on `WorkerFailureLimit` passes in a row (an engine option, one hundred by default since owner
-decision 35 of 2026-10-07: the window of Neo4j's ten failed checkpoints,
+**A failure that persists takes the database offline (owner decisions 25 of 2026-10-06 and
+42 of 2026-10-07).** When
+the checkpoint, page write-back, write-ahead flush or version-purge worker keeps failing on one
+database for `WorkerFailureWindow` across at least `WorkerFailureMinimumPasses` failed passes in a
+row (engine options, 100 s and three by default since owner decision 42 of 2026-10-07, which
+replaced decision 35's count of a hundred passes: the window of Neo4j's ten failed checkpoints,
 `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`, at its
-ten-second checkpoint check, `CheckPointThreshold.java:40`, is a hundred passes at the one-second
-worker backoff, about a hundred seconds for a failing checkpoint or page write-back; a version-purge
-pass runs once per `MaintenanceInterval`, so a failing one takes about a hundred intervals, and a
-deferred undo about an hour and a half: the root `DESIGN.md`, "The window depends on the worker"),
+ten-second checkpoint check, `CheckPointThreshold.java:40`, measured on the engine's clock from
+the first failed pass, so every worker gives up about that long after its first failure: about
+100 s for a failing checkpoint, page write-back or write-ahead flush, 120 s for a version purge's
+full pass and about 102 s for a deferred undo, where the count took about 100 and 92 minutes;
+the root `DESIGN.md`, "Why time, not a count"),
 the root worker base asks the engine to give up on it, and
 `BlobDatabaseEngine.TakeDatabaseOfflineCore` takes the database's storage offline with the
 `StorageOfflineCause` that names the worker (`CheckpointFailures` and its siblings). A second checkpoint in a row
@@ -110,22 +113,20 @@ so a give-up that waits for a hung fsync of that database holds back none of the
 finds the database in its published snapshot, without its registry lock, so it never waits for
 another's open. Once the database is offline, or whenever it closes, the engine ends every
 worker's failure record of it, so the engine reports `Running` at once and a reopened database
-counts its failures from one; a database already offline or closed is not counted. Until the
-failing database goes offline the engine is `Faulted`, and `BlobDatabaseServer` refuses every start, connection, handshake and
-operation while its engine is not `Running`, so one database whose work keeps failing makes the
-whole server unavailable for the window: about a hundred seconds for a failing checkpoint or page
-write-back at the default limit, about a hundred `MaintenanceInterval`s for a failing version purge
-(it was a tenth of that at the limit of ten). Narrowing the gates to the target database's offline
-state is an owner review item (concrete-types plan, §7, "P6, as landed").
-`BlobWorkerResilienceTests` pins it: a checkpoint failure that never clears takes only its
-database offline after the limit of failed passes, a journal past the cap does on its second
+starts a new streak; a database already offline or closed is not counted. Until the
+failing database's work succeeds or it goes offline the engine is `Faulted`, but
+`BlobDatabaseServer` refuses only that database ("Server lifecycle and failure semantics", owner
+decision 42). `BlobWorkerResilienceTests` pins it: a checkpoint failure that persists takes only its
+database offline once it lasted the window across the minimum of passes (on a clock the test
+moves; the minimum of passes inside the window leaves it online), a journal past the cap does on its second
 failed checkpoint in a row, one transient failure of a journal already past the cap does not,
-and a transient failure under the limit does not (the count restarts once a checkpoint
+and a transient failure under the window does not (the window starts again once a checkpoint
 finishes). A database opened from a copied file set, whose storage carries the original's name
 in its file header, goes offline for its own write-back failures, never the original: the
 write-back and flush workers visit the engine's databases and report under the database's
 name, not the storage's (owner decision 25 review). The
-suite's other engines set both limits out of reach, since they keep a database failing on purpose.
+suite's other engines set the minimum of passes and the journal cap out of reach, since
+they keep a database failing on purpose.
 
 **A database closed outside the engine is forgotten once its close ends** (owner decision 33 of
 2026-10-06, #1289). A holder may dispose a database directly or through `session.Database`; the
@@ -567,14 +568,62 @@ The engine stays owned by the composition root. Start binds the listener;
 a bind failure attempts listener cleanup and is terminal. Stop and disposal are idempotent;
 restart requires a fresh server and listener. The server's `Sessions` exposes a point-in-time
 active-session snapshot (and its `Context` did until phase 6 of the concrete-types plan deleted
-the server context). Non-running EngineState rejects
-startup, handshakes, newly accepted connections, and new object operations with an unavailable
-response where possible. A start refused because the engine is not `Running` ("The Blob engine is
-{State} and cannot accept sessions.") is terminal like any failed start of the base: the start
-core disposes the listener before the refusal propagates, and a later start throws
-`ObjectDisposedException`. Before phase 4 that refusal left the server inert, so a later start
-could retry and a later stop disposed the listener; keeping the retry would need a non-terminal
-refusal path in the base (pending owner confirmation, plan §7).
+the server context).
+
+**A failing worker refuses its database alone (owner decision 42 of 2026-10-07).** The server
+reads the engine's per-database view of its workers' failures, not its state:
+
+- While a background worker whose failures can take a database offline (checkpoint, page
+  write-back, write-ahead flush, version purge) holds a failure of one database
+  (`DatabaseEngine.HasFailingWorker`), that database's handshakes, after authentication, and the
+  exchanges of its sessions already open are refused with `Unavailable` and a message led by
+  `COHDBB003` ("Database '{name}' is unavailable while its engine's background work on it keeps
+  failing; …"), and the session closes, as on every refusal. Every other database of the engine
+  is served: the server starts, accepts connections, completes their handshakes and runs their
+  exchanges. The refusal ends with the failure (the next pass that finishes the database's
+  work), or turns into the offline refusal, `COHDBB002`, once the engine gives up on the
+  database and takes it offline. A give-up the engine's leaf could not complete is that
+  database's failure too, and keeps refusing it alone.
+- The offline refusal wins: a database that is offline is refused with `COHDBB002` even while a
+  worker's record of it lingers. A database a failure of its own storage took offline (a failed
+  fsync, journal write or header write), not the engine's give-up, keeps the record until that
+  worker's next pass, which for the version purge's full pass can be a whole
+  `MaintenanceInterval` away (owner decision 42 review).
+- A version purge whose full pass failed keeps its failure until a later full pass completes:
+  the passes between them only retry deferred undo, which does not redo the full pass's work. So
+  a failing full pass refuses its database for at least one `MaintenanceInterval` (a minute by
+  default), and until the third failed full pass (two minutes) takes the database offline when
+  the failure persists (owner decision 42 review; recorded for owner review in the plan).
+- An index-maintenance worker's failure refuses nothing: its work costs space, not durability,
+  and never takes a database offline, so a refusal would last for as long as the work kept
+  failing. Blob ships no such worker; one attached through `AddWorker` still makes the engine
+  `Faulted` and Hosting's health `Degraded`.
+- The server refuses everything, its start, new connections, every handshake before it reads
+  the database and every exchange, only while the engine is disposed or has failed as a whole
+  (`DatabaseEngine.HasEngineWideFailure`: a worker's pass that failed before it settled its
+  databases, a trigger wait that failed, or a worker loop that escaped). Nothing then tells
+  which databases the failing work concerns. The messages name the state: "The Blob engine is
+  {State} and cannot accept sessions." for a start, "The Blob engine is {State}." for a
+  handshake or an exchange.
+- A refused exchange is a wire failure like any other, so it ends a host-opened transaction: the
+  server aborts the session's still-usable transaction with the refusal before it writes the
+  error, and the host's COMMIT fails with `COHDBB001` naming the refusal whichever of the commit
+  and the teardown runs first ("Failed operations in explicit transactions", above).
+
+`BlobDatabaseEngine.RefusesEveryDatabase` and `BlobDatabase.GetWorkerFailureRefusal` hold the two
+checks. Until the decision the server refused its start, connections, handshakes and exchanges
+while the engine was not `Running`, and a failure of any one database's checkpoint, page
+write-back, flush or purge made it `Faulted`: one failing database made the whole server
+unavailable until the engine gave up on it (about a hundred seconds for a checkpoint, about a
+hundred maintenance intervals for a version purge at owner decision 35's count). The refusal
+concerns the wire server only: the engine's in-process API never gated on the engine's state.
+Hosting's health still reports the engine `Degraded` and names the failing worker.
+
+A start refused because the engine is disposed or failed as a whole is terminal like any failed
+start of the base: the start core disposes the listener before the refusal propagates, and a
+later start throws `ObjectDisposedException`. Before phase 4 that refusal left the server inert,
+so a later start could retry and a later stop disposed the listener; owner decision 31 kept the
+base's terminal start.
 
 A connection must finish startup and authentication within AuthenticationTimeout. The configured
 authenticator receives the selected database, claimed principal and opaque evidence. Only after
@@ -615,8 +664,19 @@ abort work. Already delivered download bytes are provisional until successful EO
 
 The Blob server tests cover all five operations against another database and another server with
 matching names, authenticator evidence, session limits, idle/authentication timeouts, terminal
-lifecycle, engine-state rejection (a start refused for a `Faulted` engine disposes the listener
-once and stays stopped), both drain phases, and a blocked over-limit rejection. The
+lifecycle, engine-state rejection (a start refused for an engine failed as a whole disposes the
+listener once and stays stopped), a worker failing on one database (the engine `Faulted`, the
+server started, the healthy database written and read over the wire, the failing one refused at
+its handshake and at an open session's next exchange with `COHDBB003`, and served again once its
+work succeeds; `Server_WorkerFailingOnOneDatabase_ShouldRefuseOnlyThatDatabase`), an offline
+database refused with `COHDBB002` while a worker's record of it lingers
+(`Server_FailingDatabaseGoesOffline_ShouldRefuseItAsOffline`), a refused exchange that aborts the
+host's transaction first (`Server_ExchangeRefusedForAFailingWorker_ShouldAbortTheHostTransactionFirst`),
+an index-maintenance worker's failure that refuses nothing
+(`Server_IndexMaintenanceWorkerFailing_ShouldServeTheDatabase`), both drain phases, and a blocked
+over-limit rejection. Hosting's
+`DatabaseWorkerHealthTests.CheckAsync_BlobWorkerFailingOnOneDatabase_ShouldBeDegradedWhileTheServerServesTheOthers`
+runs the same refusal through a hosted application whose health is `Degraded`. The
 client suite supplies in-memory end-to-end failure cases and the constrained-heap wire round trip.
 
 ## Storage operations (#1243, #1254, #1226)
@@ -679,7 +739,10 @@ pool. The reasoning is in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint 
 rollback's failed undo about 100 ms after the deferral, then at doubling delays up to
 `MaintenanceInterval`, so a transient failure releases the database writer lock within about a
 second (`Database.Transactions` DESIGN.md). A retry that fails makes the engine report
-`Faulted`; the first pass with no failure and no undo still deferred clears it.
+`Faulted`; the first pass with no failure and no undo still deferred clears it. A full pass that
+fails keeps the database's failure, and the server's `COHDBB003` refusal of it, until a later
+full pass completes: the retries between full passes do not redo its work (owner decision 42
+review; "Server lifecycle and failure semantics", above).
 
 
 ## Phase 29: deferred hosting composition

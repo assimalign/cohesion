@@ -6,16 +6,18 @@ namespace Assimalign.Cohesion.Database;
 
 /// <summary>
 /// The one copy of the worker limits every model engine checks and resolves from its options (owner
-/// decision 25 of 2026-10-06; database-area.md rule 8): how many failed passes in a row one database
-/// may take before its engine takes it offline, and how long a database's journal may grow while
-/// its checkpoints keep failing.
+/// decisions 25 of 2026-10-06 and 42 of 2026-10-07; database-area.md rule 8): how long, and across
+/// how many failed passes in a row, one database's worker failures may persist before its engine
+/// takes it offline, and how long a database's journal may grow while its checkpoints keep failing.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Compiled into each model assembly from the root's <c>shared</c> folder, as the engines'
 /// checkpointer is: each model has its own options type, and the root's public surface has no
-/// options type to put the checks on. The failure limit itself is enforced by the root engine base
-/// (<see cref="DatabaseEngine.WorkerFailureLimit"/>), which refuses one below one too.
+/// options type to put the checks on. The failure window and minimum themselves are enforced by
+/// the root engine base (<see cref="DatabaseEngine.WorkerFailureWindow"/>,
+/// <see cref="DatabaseEngine.WorkerFailureMinimumPasses"/>), which refuses the same values; the
+/// check here runs first, before the engine's worker threads start, and names the option.
 /// </para>
 /// <para>
 /// <b>The journal size limit.</b> Zero, the options' default, resolves to four times the engine's
@@ -42,19 +44,25 @@ internal static class DatabaseWorkerLimits
     /// <summary>
     /// Checks an engine's worker limits before the engine is created.
     /// </summary>
-    /// <param name="workerFailureLimit">The options' worker failure limit.</param>
+    /// <param name="workerFailureWindow">The options' worker failure window.</param>
+    /// <param name="workerFailureMinimumPasses">The options' minimum of failed passes.</param>
     /// <param name="journalSizeLimit">The options' journal size limit; zero for the default.</param>
     /// <param name="checkpointJournalSize">The options' checkpoint journal size, already checked.</param>
-    /// <param name="workerFailureLimitName">The worker failure limit option's name, for the exception.</param>
+    /// <param name="workerFailureWindowName">The worker failure window option's name, for the exception.</param>
+    /// <param name="workerFailureMinimumPassesName">The minimum of failed passes option's name, for the exception.</param>
     /// <param name="journalSizeLimitName">The journal size limit option's name, for the exception.</param>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// The worker failure limit is less than one; or the journal size limit is negative, or set and
-    /// smaller than the checkpoint journal size.
+    /// The worker failure window is not positive or is longer than
+    /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>; the minimum of failed passes is less
+    /// than one; or the journal size limit is negative, or set and smaller than the checkpoint
+    /// journal size.
     /// </exception>
-    internal static void Validate(int workerFailureLimit, long journalSizeLimit, long checkpointJournalSize,
-        string workerFailureLimitName, string journalSizeLimitName)
+    internal static void Validate(TimeSpan workerFailureWindow, int workerFailureMinimumPasses, long journalSizeLimit, long checkpointJournalSize,
+        string workerFailureWindowName, string workerFailureMinimumPassesName, string journalSizeLimitName)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(workerFailureLimit, 1, workerFailureLimitName);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(workerFailureWindow, TimeSpan.Zero, workerFailureWindowName);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(workerFailureWindow, DatabaseEngine.MaximumWorkerFailureWindow, workerFailureWindowName);
+        ArgumentOutOfRangeException.ThrowIfLessThan(workerFailureMinimumPasses, 1, workerFailureMinimumPassesName);
         ArgumentOutOfRangeException.ThrowIfNegative(journalSizeLimit, journalSizeLimitName);
         if (journalSizeLimit > 0 && journalSizeLimit < checkpointJournalSize)
         {

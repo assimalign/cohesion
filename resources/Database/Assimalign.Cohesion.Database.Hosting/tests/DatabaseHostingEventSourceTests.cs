@@ -68,13 +68,15 @@ public sealed class DatabaseHostingEventSourceTests
     public async Task Reopen_ShouldReportEachStepOnceWithItsPayload()
     {
         // Arrange: a real SQL engine whose database a failing checkpoint worker takes offline after
-        // one failed pass, and a reopen that fails once, then runs the engine's own reopen.
+        // two failed passes a millisecond apart (a window of a tick, owner decision 42), and a
+        // reopen that fails once, then runs the engine's own reopen.
         string engineName = "event-source-" + Guid.NewGuid().ToString("N");
-        FailOnce? worker = null;
+        FailTwice? worker = null;
         var builder = SqlDatabaseEngine.CreateBuilder();
         builder.EngineName = engineName;
-        builder.WorkerFailureLimit = 1;
-        builder.AddWorker(_ => worker = new FailOnce(engineName + "/probe"));
+        builder.WorkerFailureWindow = TimeSpan.FromTicks(1);
+        builder.WorkerFailureMinimumPasses = 2;
+        builder.AddWorker(_ => worker = new FailTwice(engineName + "/probe"));
         await using var engine = builder.Build();
         await engine.CreateDatabaseAsync(App);
 
@@ -99,8 +101,8 @@ public sealed class DatabaseHostingEventSourceTests
         using var recorder = new HostingEventRecorder(EventLevel.Informational);
 
         // Act: the engine takes the database offline on a thread-pool thread, a moment after the
-        // failed pass.
-        worker.ShouldNotBeNull().RunIteration(CancellationToken.None);
+        // second failed pass.
+        worker.ShouldNotBeNull().RunFailingPasses();
         var watch = Stopwatch.StartNew();
         while (engine.OfflineDatabases.Count == 0)
         {
@@ -164,11 +166,12 @@ public sealed class DatabaseHostingEventSourceTests
     {
         // Arrange: the first reopen waits a second or two; the database is dropped meanwhile.
         string engineName = "event-source-" + Guid.NewGuid().ToString("N");
-        FailOnce? worker = null;
+        FailTwice? worker = null;
         var builder = SqlDatabaseEngine.CreateBuilder();
         builder.EngineName = engineName;
-        builder.WorkerFailureLimit = 1;
-        builder.AddWorker(_ => worker = new FailOnce(engineName + "/probe"));
+        builder.WorkerFailureWindow = TimeSpan.FromTicks(1);
+        builder.WorkerFailureMinimumPasses = 2;
+        builder.AddWorker(_ => worker = new FailTwice(engineName + "/probe"));
         await using var engine = builder.Build();
         await engine.CreateDatabaseAsync(App);
         var options = new DatabaseApplicationOptions
@@ -182,7 +185,7 @@ public sealed class DatabaseHostingEventSourceTests
         using var recorder = new HostingEventRecorder(EventLevel.Informational);
 
         // Act
-        worker.ShouldNotBeNull().RunIteration(CancellationToken.None);
+        worker.ShouldNotBeNull().RunFailingPasses();
         var watch = Stopwatch.StartNew();
         while (engine.OfflineDatabases.Count == 0)
         {
@@ -218,17 +221,35 @@ public sealed class DatabaseHostingEventSourceTests
     }
 
     /// <summary>
-    /// A checkpoint worker whose first pass fails on the database and whose later passes finish.
+    /// A checkpoint worker whose first two passes fail on the database, with no backoff, and whose
+    /// later passes finish. Its one-hour interval keeps the engine's pump from running a pass the
+    /// test did not ask for.
     /// </summary>
-    private sealed class FailOnce(string name) : DatabaseEngineWorker(name, DatabaseEngineWorkerKind.Checkpoint, TimeSpan.FromHours(1))
+    private sealed class FailTwice : DatabaseEngineWorker
     {
         private int _passes;
 
+        public FailTwice(string name)
+            : base(name, DatabaseEngineWorkerKind.Checkpoint, TimeSpan.FromHours(1))
+        {
+        }
+
+        /// <summary>
+        /// Runs the two failing passes, a millisecond apart: past an engine window of a tick, and
+        /// at a minimum of two passes, the second gives up on the database (owner decision 42).
+        /// </summary>
+        public void RunFailingPasses()
+        {
+            RunIteration(CancellationToken.None);
+            Thread.Sleep(1);
+            RunIteration(CancellationToken.None);
+        }
+
         protected override void RunIterationCore(CancellationToken cancellationToken)
         {
-            if (BeginDatabase(App) && Interlocked.Increment(ref _passes) == 1)
+            if (BeginDatabase(App) && Interlocked.Increment(ref _passes) <= 2)
             {
-                ReportFailure(App, new IOException("Injected checkpoint failure"));
+                ReportFailure(App, new IOException("Injected checkpoint failure"), TimeSpan.Zero);
             }
         }
     }

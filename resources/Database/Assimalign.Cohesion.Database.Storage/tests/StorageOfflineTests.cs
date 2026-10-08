@@ -336,7 +336,7 @@ public sealed class StorageOfflineTests
         var raised = new System.Collections.Generic.List<StorageOfflineException>();
         storage.OnOffline = raised.Add;
         var failure = new IOException("Injected page write failure");
-        const string reason = "the engine's checkpoint worker 'engine/checkpoint' failed on database 'd' on 3 passes in a row, the engine's limit";
+        const string reason = "the engine's checkpoint worker 'engine/checkpoint' failed on database 'd' on 3 passes in a row over 100 s, at least the engine's window of 100 s";
 
         // Act
         bool taken = storage.TakeOffline(cause, reason, failure);

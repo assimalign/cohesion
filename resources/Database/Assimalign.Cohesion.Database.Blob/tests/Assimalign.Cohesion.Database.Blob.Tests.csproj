@@ -21,6 +21,8 @@
     <Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DeviceFaults.cs" Link="TestObjects\DeviceFaults.cs" />
     <!-- Samples the journal for the checkpoint size trigger's test (#1254). -->
     <Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalSamples.cs" Link="TestObjects\JournalSamples.cs" />
+    <!-- A clock the worker failure window tests move by hand (owner decision 42). -->
+    <Compile Include="..\..\Assimalign.Cohesion.Database\tests\TestObjects\ManualTimeProvider.cs" Link="TestObjects\ManualTimeProvider.cs" />
   </ItemGroup>
   <Target Name="CopyBlobStreamingFixture" AfterTargets="Build">
     <ItemGroup>

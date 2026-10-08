@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 
@@ -36,7 +37,9 @@ using Assimalign.Cohesion.Database.Storage;
 /// sets, and unpurged versions cost space, never consistency. The worker adds no backoff of its own
 /// to a database whose undo failed (the coordinator already doubles each retry's delay), and a
 /// failure of one database delays no other's retry. A database whose undo is still deferred, or
-/// whose storage was busy, keeps a failure recorded for it until a pass leaves nothing over; a
+/// whose storage was busy, keeps a failure recorded for it until a pass leaves nothing over, and
+/// one whose full pass failed keeps it until a later full pass completes: a pass that only retries
+/// deferred undo does not redo the full pass's work (owner decision 42 review). A
 /// failure of another database does not keep it, so a transient fault does not leave the engine
 /// Faulted for good. An offline database (#1243) is skipped, and so is a database its holder
 /// disposed while the engine keeps it registered, in a pass and in the trigger wait.
@@ -49,6 +52,11 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
 
     private readonly GraphDatabaseEngine _engine;
     private long _lastFullPass = Stopwatch.GetTimestamp();
+
+    // The databases whose last full pass failed (owner decision 42 review): a pass that only retries
+    // deferred undo does not redo that work, so it reports them unfinished and their streaks last
+    // until a full pass completes them. Touched only by passes, which never overlap.
+    private readonly HashSet<GraphDatabase> _fullPassFailed = new(ReferenceEqualityComparer.Instance);
 
     internal GraphVersionPurgeWorker(GraphDatabaseEngine engine)
         : base(engine.Name + "/version-purge", DatabaseEngineWorkerKind.VersionPurge, engine.EngineOptions.MaintenanceInterval)
@@ -99,6 +107,12 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
             Volatile.Write(ref _lastFullPass, Stopwatch.GetTimestamp());
         }
 
+        // A database closed since its full pass failed is gone; a reopened one is a new instance.
+        if (_fullPassFailed.Count > 0)
+        {
+            _fullPassFailed.RemoveWhere(static database => database.IsClosed);
+        }
+
         foreach (GraphDatabase database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
@@ -110,7 +124,13 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
             // worker recorded for it ends. Nor is a database its holder closed: the engine keeps
             // it registered until its close ends, then forgets it, and its disposed coordinator has nothing
             // left to purge.
-            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
+            if (database.IsClosed || database.IsOffline)
+            {
+                _fullPassFailed.Remove(database);
+                continue;
+            }
+
+            if (!BeginDatabase(database.Name))
             {
                 continue;
             }
@@ -120,13 +140,16 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
                 if (fullPass)
                 {
                     database.Coordinator.RunVersionPurgePass(cancellationToken);
+                    _fullPassFailed.Remove(database);
                 }
                 else
                 {
                     database.Coordinator.RetryDeferredUndo(cancellationToken);
                 }
 
-                if (database.Coordinator.NextDeferredUndoRetry is not null)
+                // A deferred undo still waiting, or a failed full pass this retry did not redo,
+                // keeps the database's failure recorded until a pass leaves nothing over.
+                if (database.Coordinator.NextDeferredUndoRetry is not null || _fullPassFailed.Contains(database))
                 {
                     ReportUnfinished(database.Name);
                 }
@@ -153,6 +176,10 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
                 if (!database.IsOffline)
                 {
                     ReportFailure(database.Name, exception, TimeSpan.Zero);
+                    if (fullPass)
+                    {
+                        _fullPassFailed.Add(database);
+                    }
                 }
             }
         }
