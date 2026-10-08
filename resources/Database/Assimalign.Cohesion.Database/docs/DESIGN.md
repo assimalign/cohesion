@@ -445,7 +445,18 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
     failure. The minimum of passes is for the slow ones: a worker that visits a failing
     database seldom, or whose one attempt outlasted the window (a checkpoint that hung on its
     lane), would otherwise give up after one or two failures; three mean the failure was
-    retried twice. At the defaults:
+    retried twice. A busy, deferred or still-running pass neither ends the streak nor stops its
+    clock: a pass that reports the database's work unfinished without a failure (a storage busy
+    with a transaction, a checkpoint deferred to a running statement or still on its lane) keeps
+    the record, and the window runs from the streak's first failed pass, so one failure, a long
+    busy stretch and two more failures give up on the third, where decision 35 needed a hundred
+    (`ReportUnfinished_BetweenFailures_ShouldKeepTheStreaksClockRunning`; the decision 42 review
+    kept it and recorded it for owner review). A version purge's full pass keeps its streak across
+    the deferred-undo retries between full passes: those passes do not redo the full pass's work,
+    so each model's purge worker reports a database whose last full pass failed unfinished until
+    a full pass completes it (before the review such a retry ended the streak as recovered, so a
+    full pass that kept failing never reached the window while another database deferred an
+    undo). At the defaults:
 
     | Worker | Visits a failing database | Gives up (decision 42) | Was (decision 35, 100 passes) |
     |---|---|---|---|
@@ -490,9 +501,10 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
     `GiveUpOnDatabase` therefore queues the leaf's `TakeDatabaseOfflineCore` to the thread pool,
     at most one per database at a time, and the pass goes on; until the database is offline the
     worker's record of it still backs it off. A failure of the leaf's core is recorded on the
-    worker as a failure of its own (`Fault`, until its next pass runs to its end), and the
-    database's next failure asks again. The engine's disposal waits for a give-up still running
-    before the leaf closes its databases.
+    worker (`Fault`, until its next pass runs to its end) as that database's failure, not the
+    worker's own: the database's record stays and names it, `HasEngineWideFailure` does not read
+    it (owner decision 42 review), and the database's next failure asks again. The engine's
+    disposal waits for a give-up still running before the leaf closes its databases.
   - *What does not count.* A failure of a database already offline or closed (the workers
     skip both, and the leaf refuses them), a worker no engine owns, and an engine whose
     disposal started. Only the failing database goes offline; the workers keep serving the
@@ -506,18 +518,23 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
     on its first transient failure. A record a pass no longer visits still ends with that pass.
     Each give-up is written to the event source (event 3, "Diagnostics" below).
   - *A failing worker refuses its database alone (owner decision 42 of 2026-10-07).* A worker
-    failure is one database's (its record) or the worker's own (a pass that failed before it
-    settled its databases, a trigger wait that failed, a give-up the leaf could not complete).
-    The engine reports the two apart, beside the `Faulted` state that folds them:
-    `DatabaseEngine.HasFailingWorker(name)` is true while a worker holds a record of that
-    database, and `HasEngineWideFailure` while a worker holds a failure of its own or a worker's
-    loop escaped. Both are non-virtual reads over the workers' records (internal
-    `DatabaseEngineWorker.HoldsFailure` and `HoldsOwnFailure`; a worker holding no database
-    record answers without its lock), and neither checks disposal, so a server's gate can read
-    them beside the state. Blob's server, the one model server that gated on the engine's
-    state, refused every start, connection, handshake and exchange while the engine was not
-    `Running`, so one database's failing checkpoint made the whole server unavailable for the
-    window; it now refuses a database's handshakes and exchanges with `Unavailable` and
+    failure is one database's (its record, and a give-up of it the leaf could not complete) or
+    the worker's own (a pass that failed before it settled its databases, a trigger wait that
+    failed). The engine reports the two apart, beside the `Faulted` state that folds them:
+    `DatabaseEngine.HasFailingWorker(name)` is true while a worker whose failures can take a
+    database offline (not an index-maintenance worker, whose failures cost space only and would
+    otherwise refuse a database for as long as they lasted) holds a record of that database, and
+    `HasEngineWideFailure` while a worker holds a failure of its own or a worker's loop escaped.
+    Both are non-virtual reads over the workers' records (internal
+    `DatabaseEngineWorker.HoldsFailure`, `TakesDatabasesOffline` and `HoldsOwnFailure`; a worker
+    holding no database record answers without its lock), and neither checks disposal, so a
+    server's gate can read them beside the state. A record ends at once when the engine gives up
+    on the database or the database closes; a database a failure of its own storage took
+    offline keeps it until the worker's next pass, so a gate checks that the database is online
+    first and the offline refusal wins. Blob's server, the one model server that gated on the
+    engine's state, refused every start, connection, handshake and exchange while the engine was
+    not `Running`, so one database's failing checkpoint made the whole server unavailable for
+    the window; it now refuses a database's handshakes and exchanges with `Unavailable` and
     `COHDBB003` while that database has a failing worker, serves the others, and refuses
     everything only while the engine is disposed or has an engine-wide failure (Blob
     `DESIGN.md`). The Sql, KeyValuePair and Graph servers never gated on the engine's state (a

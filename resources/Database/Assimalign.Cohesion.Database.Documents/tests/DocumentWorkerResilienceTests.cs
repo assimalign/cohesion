@@ -810,7 +810,8 @@ public sealed class DocumentWorkerResilienceTests
 
         // Assert
         offline.ShouldBeTrue();
-        failedPasses.ShouldBeLessThan(DatabaseEngine.DefaultWorkerFailureMinimumPasses);
+        // Long before the window: fewer failed passes than the window holds at the backoff.
+        failedPasses.ShouldBeLessThan((long)(DatabaseEngine.DefaultWorkerFailureWindow / DatabaseEngineWorker.FailureBackoff));
         failedTwice.ShouldBeTrue();
         refusal.Code.ShouldBe("COHDBD002");
         refusal.Message.ShouldContain("its journal grew past its engine's limit while its checkpoints kept failing");

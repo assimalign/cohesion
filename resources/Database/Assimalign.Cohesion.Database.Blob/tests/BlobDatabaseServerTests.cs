@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Security;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -319,6 +321,149 @@ public sealed class BlobDatabaseServerTests
     }
 
     /// <summary>
+    /// The offline refusal wins over the worker-failure refusal (owner decision 42 review). A
+    /// database a failure of its own storage takes offline, not the engine's give-up, keeps a
+    /// worker's record of it until that worker's next pass, which for the version purge can be a
+    /// whole maintenance interval away; meanwhile its handshakes and the exchanges of its open
+    /// sessions are refused with <c>COHDBB002</c>, not <c>COHDBB003</c>, because the database is
+    /// offline, not merely failing.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Blob server: an offline database is refused as offline while a worker's record of it lingers")]
+    public async Task Server_FailingDatabaseGoesOffline_ShouldRefuseItAsOffline()
+    {
+        // Arrange: a session of the database is open; the probe worker's give-up is out of reach.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        CancellationToken token = deadline.Token;
+        DatabaseFailingWorker? registered = null;
+        var builder = BlobDatabaseEngine.CreateBuilder();
+        builder.WorkerFailureMinimumPasses = int.MaxValue;
+        builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/probe", "failing"));
+        await using var engine = builder.Build();
+        var worker = registered.ShouldNotBeNull();
+        var failing = await engine.CreateDatabaseAsync("failing", token);
+        await AutocommitContainer.CreateAsync(failing, "files", token);
+        var listener = new InMemoryConnectionListener();
+        await using var server = BlobDatabaseServer.Create(engine, new() { Listener = listener });
+        await server.StartAsync(token);
+        await using IConnection openConnection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using var openChannel = new ProtocolChannel(openConnection.AsStream(), BlobProtocol.Family);
+        await HandshakeAsync(openChannel, "failing", token);
+
+        // Act: the worker fails on the database, then the database's storage goes offline outside
+        // the engine's give-up, so nothing ends the worker's record of it.
+        worker.Failure = new IOException("Injected checkpoint failure");
+        worker.RunIteration(token);
+        bool takenOffline = failing.DataStorage.TakeOffline(
+            StorageOfflineCause.CheckpointFailures, "the test took the storage offline", new IOException("Injected device failure"));
+        bool lingering = engine.HasFailingWorker("failing");
+        await using IConnection refusedConnection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using var refusedChannel = new ProtocolChannel(refusedConnection.AsStream(), BlobProtocol.Family);
+        var handshakeRefusal = await HandshakeRefusedAsync(refusedChannel, "failing", token);
+        await WriteAsync(openChannel, BlobProtocolMessageType.List, new BlobListMessage("files", "").Encode(), token);
+        var exchangeFrame = await ReadAsync(openChannel, token);
+
+        // Assert
+        takenOffline.ShouldBeTrue();
+        lingering.ShouldBeTrue();
+        handshakeRefusal.Code.ShouldBe(ProtocolErrorCode.Unavailable);
+        handshakeRefusal.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+        exchangeFrame.Type.ShouldBe(ProtocolMessageType.Error);
+        var exchangeRefusal = ProtocolErrorMessage.Decode(exchangeFrame.Payload.Span);
+        exchangeRefusal.Code.ShouldBe(ProtocolErrorCode.Unavailable);
+        exchangeRefusal.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// An exchange refused because a worker is failing on its database is terminal like every Blob
+    /// wire failure, so it ends a host-opened transaction too (owner decision 42 review, #1225): the
+    /// server aborts the transaction with the refusal before it writes the error, so the host's
+    /// COMMIT fails with <c>COHDBB001</c> naming <c>COHDBB003</c> whichever of the commit and the
+    /// connection's teardown runs first, and the transaction's earlier wire delete is undone.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Blob server: a worker-failure refusal ends the host's transaction, and COMMIT fails with COHDBB001 naming COHDBB003")]
+    public async Task Server_ExchangeRefusedForAFailingWorker_ShouldAbortTheHostTransactionFirst()
+    {
+        // Arrange: a host transaction on the connection's engine session deletes a blob over the wire.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        CancellationToken token = deadline.Token;
+        DatabaseFailingWorker? registered = null;
+        var builder = BlobDatabaseEngine.CreateBuilder();
+        builder.WorkerFailureMinimumPasses = int.MaxValue;
+        builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/probe", "failing"));
+        await using var engine = builder.Build();
+        var worker = registered.ShouldNotBeNull();
+        var failing = await engine.CreateDatabaseAsync("failing", token);
+        var files = await AutocommitContainer.CreateAsync(failing, "files", token);
+        await WriteBlobAsync(files, "keep", "original"u8.ToArray(), token);
+        var listener = new InMemoryConnectionListener();
+        await using var server = BlobDatabaseServer.Create(engine, new() { Listener = listener });
+        await server.StartAsync(token);
+        await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
+        await HandshakeAsync(channel, "failing", token);
+        var transaction = await server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(token);
+        await WriteAsync(channel, BlobProtocolMessageType.Delete, new BlobDeleteMessage("files", "keep").Encode(), token);
+        var deleted = BlobOperationCompleteMessage.Decode((await ReadAsync(channel, token)).Payload.Span);
+
+        // Act: the worker fails on the database, and the next exchange is refused.
+        worker.Failure = new IOException("Injected checkpoint failure");
+        worker.RunIteration(token);
+        await WriteAsync(channel, BlobProtocolMessageType.List, new BlobListMessage("files", "").Encode(), token);
+        var refusalFrame = await ReadAsync(channel, token);
+        var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(token));
+
+        // Assert
+        deleted.Count.ShouldBe(1);
+        refusalFrame.Type.ShouldBe(ProtocolMessageType.Error);
+        var refusal = ProtocolErrorMessage.Decode(refusalFrame.Payload.Span);
+        refusal.Code.ShouldBe(ProtocolErrorCode.Unavailable);
+        refusal.Message.ShouldStartWith("COHDBB003", Case.Sensitive);
+        commit.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        commit.Message.ShouldContain(refusal.Message, Case.Sensitive);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await ReadBlobAsync(files, "keep", token)).ShouldBe("original"u8.ToArray());
+    }
+
+    /// <summary>
+    /// An index-maintenance worker's failure never takes its database offline (its work costs space,
+    /// not durability), so the server does not refuse the database for it (owner decision 42
+    /// review): a refusal would last for as long as the work kept failing. The engine still reports
+    /// <see cref="EngineState.Faulted"/>.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Blob server: an index-maintenance worker failing on a database does not refuse it")]
+    public async Task Server_IndexMaintenanceWorkerFailing_ShouldServeTheDatabase()
+    {
+        // Arrange
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        CancellationToken token = deadline.Token;
+        DatabaseFailingWorker? registered = null;
+        var builder = BlobDatabaseEngine.CreateBuilder();
+        builder.AddWorker(built => registered = new DatabaseFailingWorker(built.Name + "/maintenance", "objects", DatabaseEngineWorkerKind.IndexMaintenance));
+        await using var engine = builder.Build();
+        var worker = registered.ShouldNotBeNull();
+        var database = await engine.CreateDatabaseAsync("objects", token);
+        await AutocommitContainer.CreateAsync(database, "files", token);
+        var listener = new InMemoryConnectionListener();
+        await using var server = BlobDatabaseServer.Create(engine, new() { Listener = listener });
+
+        // Act
+        worker.Failure = new IOException("Injected index maintenance failure");
+        worker.RunIteration(token);
+        var faulted = (engine.State, Failing: engine.HasFailingWorker("objects"));
+        await server.StartAsync(token);
+        await using IConnection connection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(connection.AsStream(), BlobProtocol.Family);
+        await HandshakeAsync(channel, "objects", token);
+        await WriteAsync(channel, BlobProtocolMessageType.List, new BlobListMessage("files", "").Encode(), token);
+        var listed = BlobOperationCompleteMessage.Decode((await ReadAsync(channel, token)).Payload.Span);
+
+        // Assert
+        faulted.ShouldBe((EngineState.Faulted, false));
+        worker.Fault.ShouldNotBeNull().Message.ShouldBe("Injected index maintenance failure");
+        listed.Count.ShouldBe(0);
+    }
+
+    /// <summary>
     /// Disposing a session's database (option B of the concrete-types plan, §6.6: the session's
     /// <see cref="BlobDatabaseSession.Database"/> is the unbound database) closes that database
     /// alone. Its workers skip it, so the engine stays <see cref="EngineState.Running"/> and its
@@ -511,9 +656,10 @@ public sealed class BlobDatabaseServerTests
     }
 
     /// <summary>
-    /// A checkpoint worker the test drives pass by pass: each pass reports <see cref="Failure"/> for
-    /// one database while it is set, with no backoff, and finishes that database's work otherwise.
-    /// Its one-hour interval keeps the engine's pump from running a pass the test did not ask for.
+    /// A worker the test drives pass by pass, a checkpoint worker unless the test names another
+    /// kind: each pass reports <see cref="Failure"/> for one database while it is set, with no
+    /// backoff, and finishes that database's work otherwise. Its one-hour interval keeps the
+    /// engine's pump from running a pass the test did not ask for.
     /// </summary>
     private sealed class DatabaseFailingWorker : DatabaseEngineWorker
     {
@@ -525,8 +671,9 @@ public sealed class BlobDatabaseServerTests
         /// </summary>
         /// <param name="name">The worker's name, unique within its engine.</param>
         /// <param name="database">The database whose work fails while a failure is set.</param>
-        public DatabaseFailingWorker(string name, string database)
-            : base(name, DatabaseEngineWorkerKind.Checkpoint, TimeSpan.FromHours(1))
+        /// <param name="kind">The worker's role.</param>
+        public DatabaseFailingWorker(string name, string database, DatabaseEngineWorkerKind kind = DatabaseEngineWorkerKind.Checkpoint)
+            : base(name, kind, TimeSpan.FromHours(1))
         {
             _database = database;
         }

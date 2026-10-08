@@ -762,7 +762,10 @@ triggers").
 rollback's failed undo about 100 ms after the deferral, then at doubling delays up to
 `MaintenanceInterval`, so a transient failure releases the database writer lock within about a
 second (`Database.Transactions` DESIGN.md). A retry that fails makes the engine report
-`Faulted`; the first pass with no failure and no undo still deferred clears it.
+`Faulted`; the first pass with no failure and no undo still deferred clears it. A full pass that
+fails keeps the database's failure until a later full pass completes: the retries between full
+passes do not redo its work (owner decision 42 review; Sql DESIGN.md, "Deferred undo is retried
+on its own backoff").
 
 ## Graph wire family
 

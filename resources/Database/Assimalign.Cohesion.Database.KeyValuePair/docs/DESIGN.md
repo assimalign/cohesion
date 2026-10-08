@@ -541,7 +541,9 @@ other databases' checkpoints.
 **Deferred undo is retried on its own backoff (#1226).** The version-purge worker retries a
 failed undo about 100 ms after the deferral, then at doubling delays up to `MaintenanceInterval`.
 A retry that fails makes the engine report `Faulted`; the first pass with no failure and no undo
-still deferred clears it.
+still deferred clears it. A full pass that fails keeps the database's failure until a later full
+pass completes: the retries between full passes do not redo its work (owner decision 42 review;
+Sql DESIGN.md, "Deferred undo is retried on its own backoff").
 
 ## Two file sets per database
 

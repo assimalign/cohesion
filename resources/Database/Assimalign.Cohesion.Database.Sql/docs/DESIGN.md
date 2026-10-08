@@ -1370,6 +1370,11 @@ a failed retry with no backoff of its own (`ReportFailure(name, exception, TimeS
 coordinator's schedule already paces each retry, so the retries keep the 0.1, 0.2, 0.4 … second
 schedule, and a failing undo in one database delays no other database's retry (#1268 review;
 before it, any failed pass slept the worker a second and held every database's retries with it).
+A full pass that fails (its prune, or its own retry of a deferred undo) keeps the database's
+failure until a later full pass completes: the retries between full passes do not redo the full
+pass's work, so they report the database unfinished, and its streak reaches the failure window
+on its third failed full pass (owner decision 42 review; before it, such a retry ended the
+streak, so a failing full pass never went offline while any database deferred an undo).
 
 ## The SQL server runtime (`SqlDatabaseServer`)
 

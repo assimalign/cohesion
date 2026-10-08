@@ -325,7 +325,7 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
     {
         if (_engine.RefusesEveryDatabase(out var state))
         {
-            await WriteErrorAsync(ProtocolErrorCode.Unavailable, $"The Blob engine is {state}.", cancellationToken).ConfigureAwait(false);
+            await RefuseExchangeAsync($"The Blob engine is {state}.", cancellationToken).ConfigureAwait(false);
             return false;
         }
 
@@ -333,7 +333,7 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
         // exchange for another database's session is served meanwhile (owner decision 42).
         if (_databaseSession!.Database.GetWorkerFailureRefusal() is { } failing)
         {
-            await WriteErrorAsync(ProtocolErrorCode.Unavailable, failing, cancellationToken).ConfigureAwait(false);
+            await RefuseExchangeAsync(failing, cancellationToken).ConfigureAwait(false);
             return false;
         }
 
@@ -390,22 +390,39 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
             // boundary or partially consumed content is returned to the connection pool. The
             // teardown ends the session's transaction; a host-opened one is aborted first, so the
             // host's commit names this failure whenever it runs (#1225).
-            if (_databaseSession is { } session)
-            {
-                try
-                {
-                    await session.AbortTransactionAsync(exception).ConfigureAwait(false);
-                }
-                catch (Exception abortError) when (abortError is not OutOfMemoryException)
-                {
-                    // The transaction stays Faulted with the rollback failure recorded, and the
-                    // teardown retries the rollback; the client still gets the original failure.
-                }
-            }
+            await AbortHostTransactionAsync(exception).ConfigureAwait(false);
             // An offline database (#1243) refuses every exchange with its coded reason.
             var code = exception is DatabaseOfflineException ? ProtocolErrorCode.Unavailable : ProtocolErrorCode.ExecutionFailure;
             await TryWriteErrorAsync(code, exception.Message).ConfigureAwait(false);
             return false;
+        }
+    }
+
+    // An exchange refused before it starts (an engine that refuses every database, a database a
+    // worker is failing on) is terminal like every wire failure, so it ends a host-opened
+    // transaction too: aborted with the refusal before the error is written, so the host's commit
+    // names the refusal whichever of the commit and the teardown runs first (#1225; owner decision
+    // 42 review).
+    private async Task RefuseExchangeAsync(string message, CancellationToken cancellationToken)
+    {
+        await AbortHostTransactionAsync(new DatabaseException(message)).ConfigureAwait(false);
+        await WriteErrorAsync(ProtocolErrorCode.Unavailable, message, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Aborts the session's still-usable host transaction with the failure the client is told about.
+    private async Task AbortHostTransactionAsync(Exception cause)
+    {
+        if (_databaseSession is { } session)
+        {
+            try
+            {
+                await session.AbortTransactionAsync(cause).ConfigureAwait(false);
+            }
+            catch (Exception abortError) when (abortError is not OutOfMemoryException)
+            {
+                // The transaction stays Faulted with the rollback failure recorded, and the
+                // teardown retries the rollback; the client still gets the original failure.
+            }
         }
     }
 

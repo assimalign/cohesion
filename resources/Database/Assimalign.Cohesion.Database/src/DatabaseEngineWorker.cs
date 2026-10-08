@@ -55,6 +55,15 @@ namespace Assimalign.Cohesion.Database;
 /// clears it.
 /// </para>
 /// <para>
+/// <b>A streak's clock runs while its database is busy</b> (owner decision 42 review). A pass that
+/// skips a database still backing off, or reports its work unfinished
+/// (<see cref="ReportUnfinished"/>: a storage busy with a transaction, a checkpoint deferred or
+/// still running on its lane), neither ends the database's streak nor stops its clock: the window is
+/// measured from the streak's first failed pass to the pass that reports the latest failure, so
+/// three failures with a long busy stretch between them reach the window as surely as three in a
+/// row would. Only a pass that finishes the database's work ends the streak.
+/// </para>
+/// <para>
 /// <see cref="Fault"/> is set while the worker holds any failure, so the owning engine reports
 /// <see cref="EngineState.Faulted"/> exactly while one of its workers has a database, or a pass,
 /// whose failure it has not yet worked off. Every failure and every recovery is also written to
@@ -97,11 +106,12 @@ namespace Assimalign.Cohesion.Database;
 /// </para>
 /// <para>
 /// <b>The engine reads which databases are failing</b> (owner decision 42). A failure the worker
-/// holds is a database's (its record, until a pass finishes that database's work) or the worker's
-/// own (a pass, trigger wait or give-up that failed as a whole); the owning engine reports the
-/// first per database (<see cref="DatabaseEngine.HasFailingWorker"/>) and the second as the
-/// engine's (<see cref="DatabaseEngine.HasEngineWideFailure"/>), so a server refuses only the
-/// database whose work fails.
+/// holds is a database's (its record, until a pass finishes that database's work, and a give-up of
+/// it the engine's leaf could not complete) or the worker's own (a pass or trigger wait that failed
+/// as a whole); the owning engine reports the first per database
+/// (<see cref="DatabaseEngine.HasFailingWorker"/>, for the kinds whose failures can take a database
+/// offline) and the second as the engine's (<see cref="DatabaseEngine.HasEngineWideFailure"/>), so
+/// a server refuses only the database whose work fails.
 /// </para>
 /// <para>
 /// <b>Release belongs to the engine that owns the worker.</b> A worker belongs to one engine: the
@@ -163,11 +173,16 @@ public abstract class DatabaseEngineWorker
     private bool _passReported;
     private long _order;
 
-    // The failure of a whole pass (its work threw), of a trigger wait, or of the owning engine's
-    // give-up on a database for this worker, and how many in a row; cleared by the next pass that
-    // runs to its end.
+    // The failure of a whole pass (its work threw) or of a trigger wait, and how many in a row;
+    // cleared by the next pass that runs to its end.
     private Exception? _passFault;
     private int _passFailures;
+
+    // The failure of the owning engine's give-up on a database for this worker, which the leaf
+    // could not complete, and how many in a row: held in Fault, but one database's, not the
+    // worker's as a whole (owner decision 42 review); cleared by the next pass that runs to its end.
+    private Exception? _giveUpFault;
+    private int _giveUpFailures;
 
     private Exception? _fault;
     private int _consecutiveFailures;
@@ -440,10 +455,11 @@ public abstract class DatabaseEngineWorker
         var engine = Volatile.Read(ref _owner);
         int failures;
         TimeSpan persisted;
+        DatabaseFailure? record;
         lock (_sync)
         {
             ThrowIfNoPassLocked();
-            if (!_databases.TryGetValue(database, out var record))
+            if (!_databases.TryGetValue(database, out record))
             {
                 record = new DatabaseFailure(engine?.TimeProvider ?? TimeProvider.System);
                 _databases.Add(database, record);
@@ -470,9 +486,6 @@ public abstract class DatabaseEngineWorker
 
         DatabaseEventSource.Log.WorkerFailed(this, database, exception, failures);
 
-        // Outside the lock: the engine queues the give-up and returns at once (it takes the
-        // database's storages offline on a thread-pool thread), and a pass may report from any
-        // thread it starts.
         if (engine is not null
             && failures >= engine.WorkerFailureMinimumPasses
             && persisted >= engine.WorkerFailureWindow
@@ -481,7 +494,21 @@ public abstract class DatabaseEngineWorker
             string reason = string.Create(
                 CultureInfo.InvariantCulture,
                 $"the engine's {Describe(_kind)} worker '{_name}' failed on database '{database}' on {failures} passes in a row over {persisted.TotalSeconds:0.###} s, at least the engine's window of {engine.WorkerFailureWindow.TotalSeconds:0.###} s");
-            engine.GiveUpOnDatabase(this, database, cause, reason, exception);
+
+            // Only while the streak that reached the window is still recorded. A give-up an earlier
+            // report of this streak queued may have run since the lock above was released, taken
+            // the database offline and ended the record; a request built from the ended streak
+            // would ask again, for a database already offline or, once reopened, a new instance
+            // (owner decision 42 review). The engine only queues the give-up and returns at once
+            // (it takes the storages offline on a thread-pool thread, whose end of the record
+            // waits for this lock), so holding the lock here holds no pass.
+            lock (_sync)
+            {
+                if (_databases.TryGetValue(database, out var current) && ReferenceEquals(current, record))
+                {
+                    engine.GiveUpOnDatabase(this, database, cause, reason, exception);
+                }
+            }
         }
 
         return failures;
@@ -647,6 +674,14 @@ public abstract class DatabaseEngineWorker
     }
 
     /// <summary>
+    /// Gets whether the worker's failures can take a database offline: true for a checkpoint, page
+    /// write-back, write-ahead flush or version-purge worker; false for an index-maintenance worker,
+    /// whose failures cost space, not durability (owner decision 25). Read by
+    /// <see cref="DatabaseEngine.HasFailingWorker"/> (owner decision 42 review).
+    /// </summary>
+    internal bool TakesDatabasesOffline => GetFailureCause(_kind) is not null;
+
+    /// <summary>
     /// Gets whether the worker holds a failure of <paramref name="database"/>: its record, from the
     /// failure to the pass that finishes the database's work, or until the engine ends it (owner
     /// decision 42). Read by <see cref="DatabaseEngine.HasFailingWorker"/>.
@@ -669,31 +704,34 @@ public abstract class DatabaseEngineWorker
 
     /// <summary>
     /// Gets whether the worker holds a failure of its own, no database's: a pass that failed as a
-    /// whole, a trigger wait that failed, or a give-up the engine's leaf could not complete, until
-    /// its next pass runs to its end (owner decision 42). Read by
-    /// <see cref="DatabaseEngine.HasEngineWideFailure"/>.
+    /// whole or a trigger wait that failed, until its next pass runs to its end (owner decision 42).
+    /// Read by <see cref="DatabaseEngine.HasEngineWideFailure"/>. A give-up of one database that the
+    /// engine's leaf could not complete is that database's, not the worker's as a whole: the
+    /// database's record still names it.
     /// </summary>
     internal bool HoldsOwnFailure => Volatile.Read(ref _passFault) is not null;
 
     /// <summary>
     /// Records that the owning engine's give-up on <paramref name="database"/> failed in the leaf
-    /// (owner decision 25): a failure of the worker as a whole, as a failed trigger wait is, held in
-    /// <see cref="Fault"/> until the worker's next pass runs to its end. The database's failure
-    /// record stays, so its next failure asks the engine again.
+    /// (owner decision 25): held in <see cref="Fault"/>, so the engine stays
+    /// <see cref="EngineState.Faulted"/>, until the worker's next pass runs to its end. It concerns
+    /// that database alone (owner decision 42 review): the database's failure record stays, so
+    /// <see cref="DatabaseEngine.HasFailingWorker"/> keeps naming it and its next failure asks the
+    /// engine again, while <see cref="DatabaseEngine.HasEngineWideFailure"/> does not read it.
     /// </summary>
     /// <param name="database">The database the engine could not take offline.</param>
     /// <param name="exception">The leaf's failure.</param>
     internal void RecordGiveUpFailure(string database, Exception exception)
     {
-        int passFailures;
+        int giveUpFailures;
         lock (_sync)
         {
-            _passFault = exception;
-            passFailures = ++_passFailures;
+            _giveUpFault = exception;
+            giveUpFailures = ++_giveUpFailures;
             PublishFaultLocked();
         }
 
-        DatabaseEventSource.Log.WorkerFailed(this, database, exception, passFailures);
+        DatabaseEventSource.Log.WorkerFailed(this, database, exception, giveUpFailures);
     }
 
     private bool RunPass(CancellationToken cancellationToken, out bool threw)
@@ -774,6 +812,11 @@ public abstract class DatabaseEngineWorker
                     _passFault = null;
                     _passFailures = 0;
                 }
+
+                // A give-up the leaf failed ends here too; the database's record, which asks again
+                // at its next failure, is settled below with the others.
+                _giveUpFault = null;
+                _giveUpFailures = 0;
 
                 // A cancelled pass stopped early: what it did not visit is not done.
                 if (!cancelled && _databases.Count > 0)
@@ -861,7 +904,7 @@ public abstract class DatabaseEngineWorker
     /// </summary>
     private void PublishFaultLocked()
     {
-        Exception? fault = _passFault;
+        Exception? fault = _passFault ?? _giveUpFault;
         if (fault is null)
         {
             long newest = 0;

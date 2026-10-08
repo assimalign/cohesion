@@ -340,6 +340,93 @@ public sealed class DatabaseWorkerFailureWindowTests
         engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain("5 passes in a row over 100 s", Case.Sensitive);
     }
 
+    /// <summary>
+    /// A pass that leaves a database's work unfinished without a failure (a storage busy with a
+    /// transaction, a checkpoint deferred or still on its lane) neither ends the database's streak
+    /// nor stops its clock (owner decision 42 review): one failure, a long busy stretch, then two
+    /// more failures reach the window and the minimum, and the engine gives up on the third failed
+    /// pass, 202 s after the first. Under owner decision 35 the same streak needed a hundred
+    /// failures.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker failure window: unfinished passes keep the streak's clock running")]
+    public async Task ReportUnfinished_BetweenFailures_ShouldKeepTheStreaksClockRunning()
+    {
+        // Arrange: a fails on the first pass and the last two; every pass between leaves its work
+        // unfinished.
+        var clock = new ManualTimeProvider();
+        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await engine.CreateDatabaseAsync("a");
+        bool fail = true;
+        var worker = new ScriptedWorker((self, _) =>
+        {
+            self.Begin("a").ShouldBeTrue();
+            if (fail)
+            {
+                self.Fail("a", new InvalidOperationException("checkpoint failed"), TimeSpan.Zero);
+            }
+            else
+            {
+                self.Unfinished("a");
+            }
+        }, name: WorkerName);
+        engine.Attach(worker);
+
+        // Act: one failed pass, two hundred unfinished passes a second apart, then two failed passes.
+        worker.RunIteration(CancellationToken.None);
+        fail = false;
+        for (int pass = 0; pass < 200; pass++)
+        {
+            clock.Advance(TimeSpan.FromSeconds(1));
+            worker.RunIteration(CancellationToken.None);
+        }
+
+        var busy = (Failing: engine.HasFailingWorker("a"), worker.ConsecutiveFailures);
+        fail = true;
+        clock.Advance(TimeSpan.FromSeconds(1));
+        worker.RunIteration(CancellationToken.None);
+        await Task.Delay(50);
+        var underTheMinimum = engine.GiveUps;
+        clock.Advance(TimeSpan.FromSeconds(1));
+        worker.RunIteration(CancellationToken.None);
+        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+
+        // Assert: the busy stretch kept the streak and its clock; the third failure gives up.
+        busy.ShouldBe((true, 1));
+        underTheMinimum.ShouldBeEmpty();
+        taken.ShouldBeTrue();
+        engine.TakenOffline.ShouldBe(["a"]);
+        engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain("3 passes in a row over 202 s", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// An index-maintenance worker's failure of a database never takes it offline (its work costs
+    /// space, not durability), so it does not name the database as failing either (owner decision
+    /// 42 review): a server that refuses a failing database would otherwise refuse it for as long
+    /// as the work kept failing. The engine still reports Faulted and the worker its fault.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database] - Engine: an index-maintenance worker's failure does not name its database as failing")]
+    public async Task HasFailingWorker_IndexMaintenanceFails_ShouldNotNameTheDatabase()
+    {
+        // Arrange
+        await using var engine = new TestEngine(EngineName);
+        await engine.CreateDatabaseAsync("a");
+        var maintenance = new ScriptedWorker((self, _) =>
+        {
+            self.Begin("a").ShouldBeTrue();
+            self.Fail("a", new InvalidOperationException("index maintenance failed"), TimeSpan.Zero);
+        }, name: EngineName + "/index-maintenance", kind: DatabaseEngineWorkerKind.IndexMaintenance);
+        engine.Attach(maintenance);
+
+        // Act
+        maintenance.RunIteration(CancellationToken.None);
+
+        // Assert
+        engine.HasFailingWorker("a").ShouldBeFalse();
+        engine.HasEngineWideFailure.ShouldBeFalse();
+        engine.State.ShouldBe(EngineState.Faulted);
+        maintenance.Fault.ShouldNotBeNull().Message.ShouldBe("index maintenance failed");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - Worker failure window: several failures of one database in a pass count as one failed pass")]
     public async Task ReportFailure_SeveralInOnePass_ShouldCountOnePass()
     {
@@ -691,10 +778,11 @@ public sealed class DatabaseWorkerFailureWindowTests
     }
 
     /// <summary>
-    /// A give-up the leaf's core fails is the worker's own failure (owner decision 25 review): it is
-    /// held in the worker's fault, the engine reports Faulted and a failure of its own as a whole
-    /// (the database's record stays too), nothing escapes the thread-pool thread, and the
-    /// database's next failure asks again.
+    /// A give-up the leaf's core fails is held in the worker's fault (owner decision 25 review), so
+    /// the engine reports Faulted, but it concerns that database alone (owner decision 42 review):
+    /// the database's record stays, so the engine names it as failing, and the engine has not
+    /// failed as a whole. Nothing escapes the thread-pool thread, and the database's next failure
+    /// asks again.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database] - Worker failure window: a give-up the leaf fails is recorded on the worker, and the next failure asks again")]
     public async Task GiveUp_LeafThrows_ShouldRecordTheFailureOnTheWorker()
@@ -736,7 +824,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         // Assert
         recorded.ShouldBeTrue();
         state.ShouldBe(EngineState.Faulted);
-        engineWide.ShouldBeTrue();
+        engineWide.ShouldBeFalse();
         failing.ShouldBeTrue();
         engine.TakenOffline.ShouldBe(["a"]);
         engine.TakeOfflineCalls.ShouldBeGreaterThanOrEqualTo(2);

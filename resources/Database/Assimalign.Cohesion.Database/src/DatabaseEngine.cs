@@ -51,9 +51,10 @@ namespace Assimalign.Cohesion.Database;
 /// or a worker's loop escaped, and <see cref="EngineState.Running"/> otherwise. An offline database
 /// is not a worker failure; <see cref="OfflineDatabases"/> lists it. A worker failure is either one
 /// database's or the engine's as a whole, and the engine tells the two apart (owner decision 42 of
-/// 2026-10-07): <see cref="HasFailingWorker"/> says whether a worker holds a failure of a named
-/// database, and <see cref="HasEngineWideFailure"/> whether one holds a failure no database owns,
-/// so a server can refuse only the database whose work fails.
+/// 2026-10-07): <see cref="HasFailingWorker"/> says whether a worker whose failures can take a
+/// database offline holds a failure of a named database, and <see cref="HasEngineWideFailure"/>
+/// whether one holds a failure no database owns, so a server can refuse only the database whose
+/// work fails.
 /// </para>
 /// <para>
 /// <b>Persistent worker failures take a database offline</b> (owner decisions 25 of 2026-10-06 and
@@ -261,6 +262,13 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// neither way, and keeps the streak's start.
     /// </para>
     /// <para>
+    /// The clock keeps running while the database is only busy: a pass that leaves its work
+    /// unfinished without a failure (a storage busy with a transaction, a checkpoint deferred to a
+    /// running statement or still running on its lane) neither ends the streak nor stops its clock,
+    /// so three failed passes with a long busy stretch between them reach the window (owner decision
+    /// 42 review).
+    /// </para>
+    /// <para>
     /// A failure on a database already offline, or one its holder closed, is not counted, and the
     /// streak ends when the engine takes the database offline or the database closes, so a
     /// reopened database starts a new one.
@@ -325,8 +333,8 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Gets whether the engine has failed as a whole: a worker holds a failure no database owns (a
-    /// pass that failed before it settled its databases, a trigger wait that failed, or a give-up
-    /// of a database the leaf could not complete), or a worker's loop escaped. A point-in-time read.
+    /// pass that failed before it settled its databases, or a trigger wait that failed), or a
+    /// worker's loop escaped. A point-in-time read.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -339,7 +347,11 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// </para>
     /// <para>
     /// A failure of one database is not the engine's as a whole: <see cref="HasFailingWorker"/>
-    /// reports it for that database alone.
+    /// reports it for that database alone. Nor is a give-up of one database that the leaf could not
+    /// complete (<see cref="TakeDatabaseOfflineCore"/> threw): the worker holds it in its
+    /// <see cref="DatabaseEngineWorker.Fault"/>, so the engine stays
+    /// <see cref="EngineState.Faulted"/>, but it concerns that database, whose record still names it
+    /// (owner decision 42 review).
     /// </para>
     /// </remarks>
     public bool HasEngineWideFailure
@@ -365,16 +377,21 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Gets whether a background worker of the engine holds a failure of the named database that
-    /// it has not worked off yet: its work on the database failed, and no pass has finished that
-    /// work since (owner decision 42 of 2026-10-07). A point-in-time read over the workers' failure
-    /// records, the per-database part of <see cref="EngineState.Faulted"/>.
+    /// Gets whether a background worker of the engine whose failures can take a database offline
+    /// (a checkpoint, page write-back, write-ahead flush or version-purge worker) holds a failure of
+    /// the named database that it has not worked off yet: its work on the database failed, and no
+    /// pass has finished that work since (owner decision 42 of 2026-10-07). A point-in-time read
+    /// over the workers' failure records, the per-database part of <see cref="EngineState.Faulted"/>
+    /// that can end with the database offline.
     /// </summary>
     /// <param name="name">The name of the database.</param>
     /// <returns>
-    /// True while a worker holds a failure of the database; false once a pass finished the
-    /// database's work again, once the engine took the database offline or the database closed
-    /// (the engine then ends every worker's record of it), and for a database no worker failed on.
+    /// True while such a worker holds a failure of the database; false once a pass finished the
+    /// database's work again, once the engine gave up on the database and took it offline, or the
+    /// database closed (the engine then ends every worker's record of it), and for a database no
+    /// such worker failed on. A database that went offline for a failure of its own storage (a
+    /// failed durable flush, journal write or header write) keeps a worker's record until that
+    /// worker's next pass, which skips the offline database and so ends it.
     /// </returns>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
     /// <remarks>
@@ -382,8 +399,17 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// A server that refuses work for a failing worker reads this for the database a session or
     /// exchange targets, so it refuses that database alone while the engine's other databases are
     /// served: Blob's server does, with its model's code, until the failure ends or the engine
-    /// gives up on the database, which is then refused as offline. A failure of the engine as a
-    /// whole is not a database's: <see cref="HasEngineWideFailure"/> reports it.
+    /// gives up on the database, which is then refused as offline. The server checks that the
+    /// database is online first, so an offline database is refused as offline even while a
+    /// worker's record of it lingers. A failure of the engine as a whole is not a database's:
+    /// <see cref="HasEngineWideFailure"/> reports it.
+    /// </para>
+    /// <para>
+    /// An index-maintenance worker's failures do not count (owner decision 42 review): they cost
+    /// space, not durability, and never take a database offline, so a refusal they caused would
+    /// last for as long as the work kept failing. They still make the engine
+    /// <see cref="EngineState.Faulted"/> and show in the worker's
+    /// <see cref="DatabaseEngineWorker.Fault"/>.
     /// </para>
     /// <para>
     /// It does not check disposal, as <see cref="State"/> does not, so a server's gate can read it
@@ -397,7 +423,8 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         var workers = Volatile.Read(ref _workerView);
         for (int index = 0; index < workers.Count; index++)
         {
-            if (workers[index].HoldsFailure(name))
+            var worker = workers[index];
+            if (worker.TakesDatabasesOffline && worker.HoldsFailure(name))
             {
                 return true;
             }
@@ -979,9 +1006,11 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// </para>
     /// <para>
     /// A database whose close raced the give-up is not taken offline. Any other failure of the
-    /// leaf's core is recorded on the worker as a failure of its own
-    /// (<see cref="DatabaseEngineWorker.Fault"/>, until its next pass runs to its end): the worker
-    /// keeps running, and the database's next failure tries again.
+    /// leaf's core is recorded on the worker (<see cref="DatabaseEngineWorker.Fault"/>, until its
+    /// next pass runs to its end) as a failure of that database, not of the engine as a whole
+    /// (owner decision 42 review): <see cref="HasFailingWorker"/> keeps naming the database, whose
+    /// record stays, and <see cref="HasEngineWideFailure"/> does not turn true. The worker keeps
+    /// running, and the database's next failure tries again.
     /// </para>
     /// </remarks>
     internal bool GiveUpOnDatabase(DatabaseEngineWorker worker, string database, StorageOfflineCause cause, string reason, Exception failure)

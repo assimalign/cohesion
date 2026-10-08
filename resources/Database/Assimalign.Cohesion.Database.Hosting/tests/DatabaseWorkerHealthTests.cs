@@ -32,8 +32,10 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 /// typed <see cref="SqlDatabaseEngineBuilder.AddWorker"/> fails a pass the test runs, and the root
 /// engine base folds the engine's state from it. The offline half here drives the engine double,
 /// a leaf of the root engine base that reports the offline databases the test sets. A real
-/// engine's database goes offline in <c>DatabaseReopenTests</c>: since owner decision 25 such a
-/// registered worker takes it offline once its failures reach the engine's limit.
+/// engine's database goes offline in <c>DatabaseReopenTests</c>: since owner decisions 25 and 42
+/// such a registered worker takes it offline once its failures have lasted the engine's
+/// <see cref="DatabaseEngine.WorkerFailureWindow"/> across its
+/// <see cref="DatabaseEngine.WorkerFailureMinimumPasses"/> failed passes.
 /// </remarks>
 public sealed class DatabaseWorkerHealthTests
 {

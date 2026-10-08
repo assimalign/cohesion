@@ -50,7 +50,10 @@ refuses further operations and BEGIN with `COHDBB001` until the caller rolls bac
 fails without committing.
 A failed journal or data fsync takes the database offline: every later operation, streams and
 the server included, is refused with `DatabaseOfflineException` (`COHDBB002`) until
-`OpenDatabaseAsync` reopens it and recovery decides the unconfirmed upload (#1243).
+`OpenDatabaseAsync` reopens it and recovery decides the unconfirmed upload (#1243). While an
+engine worker's work on a database keeps failing, the server refuses that database alone with
+`COHDBB003` until the work succeeds or the engine gives up on the database
+(`WorkerFailureWindow`, `WorkerFailureMinimumPasses`) and takes it offline.
 `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and `CheckpointInterval`
 (5 minutes) size the buffer pool and trigger checkpoints (#1254); a failed undo is retried on a
 100 ms backoff (#1226). See DESIGN.md, "Storage operations".
@@ -66,8 +69,13 @@ listener. The composition root retains engine ownership. Startup binds each auth
 session to one database; requests identify only containers and objects in that database.
 The default authenticator trusts every principal; configure `Authenticator` for authenticated
 access. Session limits, authentication deadlines, idle eviction, and bounded two-phase shutdown
-are configurable. A non-running engine rejects new sessions and operations, and a start refused
-because the engine is not running releases the listener and leaves the server stopped for good.
+are configurable. While a background worker fails on one database, the server refuses only that
+database's handshakes and exchanges (`Unavailable`, `COHDBB003`) and serves the others; an
+offline database is refused as offline (`COHDBB002`). Only a disposed engine, or one that has
+failed as a whole (`DatabaseEngine.HasEngineWideFailure`), rejects every session, and a start
+refused for that reason releases the listener and leaves the server stopped for good (owner
+decision 42). A refused exchange, like every wire failure, ends the connection and aborts a
+host-opened transaction first.
 
 The package owns the Blob wire message family. Bind a `ProtocolChannel` to `BlobProtocol.Family`
 at the Blob endpoint. `BlobReadMessage` and `BlobWriteMessage` identify an object;

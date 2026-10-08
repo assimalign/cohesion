@@ -588,7 +588,9 @@ rollback's failed undo about 100 ms after the deferral, then at doubling delays 
 `MaintenanceInterval`, so a transient failure releases the database writer lock within about a
 second; a failure that persists is recorded as a worker fault and retried without stopping the
 worker, and the first pass with no failure and no undo still deferred clears the fault
-(`Database.Transactions` DESIGN.md).
+(`Database.Transactions` DESIGN.md). A full pass that fails keeps the database's failure until a
+later full pass completes: the retries between full passes do not redo its work (owner decision
+42 review; Sql DESIGN.md, "Deferred undo is retried on its own backoff").
 
 ## Limits and verification
 

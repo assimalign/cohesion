@@ -573,21 +573,42 @@ the server context).
 **A failing worker refuses its database alone (owner decision 42 of 2026-10-07).** The server
 reads the engine's per-database view of its workers' failures, not its state:
 
-- While a background worker holds a failure of one database (`DatabaseEngine.HasFailingWorker`),
-  that database's handshakes, after authentication, and the exchanges of its sessions already
-  open are refused with `Unavailable` and a message led by `COHDBB003` ("Database '{name}' is
-  unavailable while its engine's background work on it keeps failing; …"), and the session
-  closes, as on every refusal. Every other database of the engine is served: the server starts,
-  accepts connections, completes their handshakes and runs their exchanges. The refusal ends
-  with the failure (the next pass that finishes the database's work), or turns into the offline
-  refusal, `COHDBB002`, once the engine gives up on the database and takes it offline.
+- While a background worker whose failures can take a database offline (checkpoint, page
+  write-back, write-ahead flush, version purge) holds a failure of one database
+  (`DatabaseEngine.HasFailingWorker`), that database's handshakes, after authentication, and the
+  exchanges of its sessions already open are refused with `Unavailable` and a message led by
+  `COHDBB003` ("Database '{name}' is unavailable while its engine's background work on it keeps
+  failing; …"), and the session closes, as on every refusal. Every other database of the engine
+  is served: the server starts, accepts connections, completes their handshakes and runs their
+  exchanges. The refusal ends with the failure (the next pass that finishes the database's
+  work), or turns into the offline refusal, `COHDBB002`, once the engine gives up on the
+  database and takes it offline. A give-up the engine's leaf could not complete is that
+  database's failure too, and keeps refusing it alone.
+- The offline refusal wins: a database that is offline is refused with `COHDBB002` even while a
+  worker's record of it lingers. A database a failure of its own storage took offline (a failed
+  fsync, journal write or header write), not the engine's give-up, keeps the record until that
+  worker's next pass, which for the version purge's full pass can be a whole
+  `MaintenanceInterval` away (owner decision 42 review).
+- A version purge whose full pass failed keeps its failure until a later full pass completes:
+  the passes between them only retry deferred undo, which does not redo the full pass's work. So
+  a failing full pass refuses its database for at least one `MaintenanceInterval` (a minute by
+  default), and until the third failed full pass (two minutes) takes the database offline when
+  the failure persists (owner decision 42 review; recorded for owner review in the plan).
+- An index-maintenance worker's failure refuses nothing: its work costs space, not durability,
+  and never takes a database offline, so a refusal would last for as long as the work kept
+  failing. Blob ships no such worker; one attached through `AddWorker` still makes the engine
+  `Faulted` and Hosting's health `Degraded`.
 - The server refuses everything, its start, new connections, every handshake before it reads
   the database and every exchange, only while the engine is disposed or has failed as a whole
   (`DatabaseEngine.HasEngineWideFailure`: a worker's pass that failed before it settled its
-  databases, a trigger wait that failed, a give-up the engine could not complete, or a worker
-  loop that escaped). Nothing then tells which databases the failing work concerns. The
-  messages name the state: "The Blob engine is {State} and cannot accept sessions." for a start,
-  "The Blob engine is {State}." for a handshake or an exchange.
+  databases, a trigger wait that failed, or a worker loop that escaped). Nothing then tells
+  which databases the failing work concerns. The messages name the state: "The Blob engine is
+  {State} and cannot accept sessions." for a start, "The Blob engine is {State}." for a
+  handshake or an exchange.
+- A refused exchange is a wire failure like any other, so it ends a host-opened transaction: the
+  server aborts the session's still-usable transaction with the refusal before it writes the
+  error, and the host's COMMIT fails with `COHDBB001` naming the refusal whichever of the commit
+  and the teardown runs first ("Failed operations in explicit transactions", above).
 
 `BlobDatabaseEngine.RefusesEveryDatabase` and `BlobDatabase.GetWorkerFailureRefusal` hold the two
 checks. Until the decision the server refused its start, connections, handshakes and exchanges
@@ -647,8 +668,13 @@ lifecycle, engine-state rejection (a start refused for an engine failed as a who
 listener once and stays stopped), a worker failing on one database (the engine `Faulted`, the
 server started, the healthy database written and read over the wire, the failing one refused at
 its handshake and at an open session's next exchange with `COHDBB003`, and served again once its
-work succeeds; `Server_WorkerFailingOnOneDatabase_ShouldRefuseOnlyThatDatabase`), both drain
-phases, and a blocked over-limit rejection. Hosting's
+work succeeds; `Server_WorkerFailingOnOneDatabase_ShouldRefuseOnlyThatDatabase`), an offline
+database refused with `COHDBB002` while a worker's record of it lingers
+(`Server_FailingDatabaseGoesOffline_ShouldRefuseItAsOffline`), a refused exchange that aborts the
+host's transaction first (`Server_ExchangeRefusedForAFailingWorker_ShouldAbortTheHostTransactionFirst`),
+an index-maintenance worker's failure that refuses nothing
+(`Server_IndexMaintenanceWorkerFailing_ShouldServeTheDatabase`), both drain phases, and a blocked
+over-limit rejection. Hosting's
 `DatabaseWorkerHealthTests.CheckAsync_BlobWorkerFailingOnOneDatabase_ShouldBeDegradedWhileTheServerServesTheOthers`
 runs the same refusal through a hosted application whose health is `Degraded`. The
 client suite supplies in-memory end-to-end failure cases and the constrained-heap wire round trip.
@@ -713,7 +739,10 @@ pool. The reasoning is in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint 
 rollback's failed undo about 100 ms after the deferral, then at doubling delays up to
 `MaintenanceInterval`, so a transient failure releases the database writer lock within about a
 second (`Database.Transactions` DESIGN.md). A retry that fails makes the engine report
-`Faulted`; the first pass with no failure and no undo still deferred clears it.
+`Faulted`; the first pass with no failure and no undo still deferred clears it. A full pass that
+fails keeps the database's failure, and the server's `COHDBB003` refusal of it, until a later
+full pass completes: the retries between full passes do not redo its work (owner decision 42
+review; "Server lifecycle and failure semantics", above).
 
 
 ## Phase 29: deferred hosting composition
