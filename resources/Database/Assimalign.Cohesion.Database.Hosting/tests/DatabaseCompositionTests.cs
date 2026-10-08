@@ -370,6 +370,37 @@ public sealed class DatabaseCompositionTests
         }
     }
 
+    /// <summary>
+    /// Verifies the options Build copies take the environment and content root from the builder's
+    /// <see cref="DatabaseApplicationBuilder.Environment"/>, read when the builder was created: a
+    /// later change to <see cref="DatabaseApplicationBuilder.Options"/> reaches neither the
+    /// application's environment nor its options, so the two never disagree.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: the options snapshot keeps the environment the builder read at creation")]
+    public async Task Build_EnvironmentChangedAfterCreation_ShouldSnapshotTheBuildersEnvironment()
+    {
+        // Arrange
+        FileSystemPath root = FileSystemPath.Parse(AppContext.BaseDirectory);
+        var builder = DatabaseApplication.CreateBuilder(new DatabaseApplicationOptions
+        {
+            Environment = "Testing",
+            ContentRootPath = root,
+        });
+
+        // Act
+        builder.Options.Environment = "Mutated";
+        builder.Options.ContentRootPath = FileSystemPath.Parse(System.IO.Path.GetTempPath());
+        var composition = builder.BuildComposition();
+        await using var application = new DatabaseApplication(composition);
+
+        // Assert
+        composition.Options.Environment.ShouldBe("Testing");
+        composition.Options.ContentRootPath.ShouldBe(root);
+        application.Context.Environment.ShouldBeSameAs(builder.Environment);
+        application.Context.Environment.Name.ShouldBe("Testing");
+        application.Context.Environment.ContentRootPath.ShouldBe(root);
+    }
+
     /// <summary>Verifies hosting rejects reflective activation and open generic service descriptors.</summary>
     [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Services: rejects constructor activation and open generic registrations")]
     [InlineData(false)]

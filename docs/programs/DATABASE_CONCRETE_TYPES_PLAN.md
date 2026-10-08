@@ -69,7 +69,7 @@ otherwise, this list wins.
 | 45 | Busy (unfinished) passes between failed passes | Count toward the 100 s window: one unresolved streak (2026-10-08). |
 | 46 | A failed full version purge | Retried after the worker backoff, not a whole maintenance interval (2026-10-08). **Landed** on `feat/hosting-builder-concrete-and-decisions-46-48`: all five purge workers retry a failed full pass for its database alone a `FailureBackoff` later, on the engine's clock, so it gives up at about 101 s (§7, "Owner decisions 46 and 48, and the Hosting builder's host-level pieces, as landed"). |
 | 47 | Index-maintenance workers and Blob's per-database refusal | Never refuse a database: they cannot take one offline (2026-10-08). |
-| 48 | Hosting's flapping carry-over window | Tied to the engine's `WorkerFailureWindow` (2026-10-08). **Landed** on the same branch: the engine's window plus the backoff step reached, at least `ReopenMaximumDelay` (§7, same entry; §12). |
+| 48 | Hosting's flapping carry-over window | Tied to the engine's `WorkerFailureWindow` (2026-10-08). **Implemented, formula pending the owner's acceptance.** As first implemented on the same branch, the engine's window plus the backoff step reached, measured from the reopen, missed most worker give-ups at the defaults; the review on `feat/hosting-builder-concrete-and-decisions-46-48-review` made it the engine's window plus its slowest offline-capable worker's interval plus `ReopenMaximumDelay` (460 s at the defaults), and carries the backoff over only for the instance the service reopened (§7, "Owner decisions 46 and 48 review, as applied"; §12). |
 | 42 | Decision 35's pass count gives slow workers a much longer window (a version purge ~100 maintenance intervals), and Blob's server refuses every database while one worker fails | Time-based give-up: offline once a database's failures have persisted at least 100 s and spanned at least 3 passes (supersedes 35's count); and Blob's server refuses only the failing database (2026-10-07). **Landed** on `feat/owner-decision-42`: `WorkerFailureWindow` (100 s) and `WorkerFailureMinimumPasses` (3) replace `WorkerFailureLimit` on the engine base and every model's options and builder, measured on a `TimeProvider` the engine owns; `DatabaseEngine.HasFailingWorker(name)` and `HasEngineWideFailure` let Blob's server refuse only the failing database, with `COHDBB003`; the Sql, KeyValuePair and Graph servers had no engine-state gate (§7, "Owner decision 42, as landed"; §12). **Reviewed** on `feat/owner-decision-42-review`: a give-up the leaf fails is the database's failure, not the engine's; the offline refusal wins over `COHDBB003`; a refused exchange aborts the host's transaction first; index maintenance refuses nothing; a full purge pass's streak survives the deferred-undo retries; a stale second give-up is no longer queued; busy time counting toward the window is kept and put to the owner (§7, "Owner decision 42 review, as applied"). |
 
 Decisions 32 and 33, with decision 24 and #1272, landed on 2026-10-06 on
@@ -3974,12 +3974,13 @@ replaces it in a later change, and P7 stays on hold.
   for the owner: a retry runs the coordinator's whole pass, deferred undo included, so while a
   full pass keeps failing its database's deferred undo is retried at least once a backoff, not
   only on the coordinator's doubling schedule.
-- *Decision 48.* A remembered reopen carries its own window, `GetCarryOverWindow(engine, level)`:
-  the engine's `WorkerFailureWindow` plus the backoff step the episode reached, never shorter than
-  `ReopenMaximumDelay`. At the defaults that is 102 s after a one-step episode and up to 160 s,
-  where it was 60 s; the floor keeps a device failure's carry-over on an engine whose window is
-  shorter (the main session's text said "instead of `ReopenMaximumDelay`"; the floor changes
-  nothing at the defaults, and is an owner call).
+- *Decision 48 (replaced by its review, below).* A remembered reopen carried its own window,
+  `GetCarryOverWindow(engine, level)`: the engine's `WorkerFailureWindow` plus the backoff step the
+  episode reached, never shorter than `ReopenMaximumDelay`, measured from the reopen. The floor
+  keeps a device failure's carry-over on an engine whose window is shorter (the main session's
+  text said "instead of `ReopenMaximumDelay`"; an owner call). The review found that this window
+  ends before most worker give-ups at the defaults arrive, because a worker first fails on the
+  reopened database only at its own pace.
 - *The builder (owner request of 2026-10-08, item 1).* `DatabaseApplicationBuilder.Environment`
   (`HostEnvironment`), `.Configuration` (`ConfigurationManager`), `.Logging`
   (`LoggerFactoryBuilder`) and `.Services` (`ServiceProviderBuilder`, `EnableDynamicCode = false`,
@@ -4017,8 +4018,9 @@ replaces it in a later change, and P7 stays on hold.
   database offline on its third failed pass, 101 s after its first, with
   `VersionPurgeFailures` and the model's offline code. Hosting: the reopen tests' host takes an
   engine window; a worker give-up past a 400 ms maximum delay but within the 500 ms engine window
-  plus the step keeps the backoff; the window's arithmetic (102 s, 160 s, and the floor for a
-  one-tick engine); the reserved registrations (three cases); the composition tests' freeze test
+  plus the step keeps the backoff, with the worker failing right after the reopen, the one case
+  that window covered; the window's arithmetic (both replaced by the review, below); the reserved
+  registrations (three cases); the composition tests' freeze test
   is now "defers factories and closes engine, service and logging registration", the defaults
   test creates the builder with the environment set and asserts the build context's four pieces
   and the three registrations, and the telemetry-off test asserts no telemetry service and an
@@ -4048,10 +4050,103 @@ replaces it in a later change, and P7 stays on hold.
 - *Owner review.*
   - **Deferred undo retried with a failing full pass**: about once a backoff, besides its
     coordinator's doubling schedule (decision 46, above).
-  - **`ReopenMaximumDelay` kept as the carry-over window's floor** (decision 48, above).
-  - **The first step's carry-over at the defaults is not guaranteed** (§12).
+  - **`ReopenMaximumDelay` kept as the carry-over window's floor** (decision 48, above; the
+    review keeps it as a term of the sum, so it stays the floor).
+  - **The carry-over at the defaults** (superseded by the review, below, which found the landed
+    window missed most give-ups, not only the first step's).
   - **Default configuration only with `CreateBuilder(args)`**, and the ambient resource settings
     now in the configuration, both for parity with Web (above).
+
+**Owner decisions 46 and 48 review, as applied (2026-10-08,
+`feat/hosting-builder-concrete-and-decisions-46-48-review`, on `b58efd7a`).** One reviewer asked for
+changes: one major finding (decision 48 missed its goal) and three minor ones. All four are
+applied. Decision 46 and the builder's four pieces were checked and found sound: the five purge
+workers retry a failed full pass for its database alone a backoff later, with no spin (a probe
+with the real pump and the system clock), and the four pieces are the same instances in the
+builder, the application context, the build context and the provider.
+
+- *Decision 48 missed its goal.* The landed window, the engine's `WorkerFailureWindow` plus the
+  step reached and measured from the reopen, was 102 s after a one-step episode at the defaults.
+  But a worker first fails on a reopened database only when its own pace brings it there. A
+  version purge's full pass runs on one engine-wide `MaintenanceInterval` timer (60 s by
+  default), so its first failure lands 0-60 s after the reopen and its give-up about 101 s later;
+  it carried the backoff over only when that first full pass fell in about the first second. A
+  checkpoint is due a `CheckpointInterval` after the storage opened (5 min by default,
+  `Storage.IsCheckpointDue`, `Storage.cs:530-545`, time-backstopped from the open; the worker
+  checks each second), so a time-triggered checkpoint give-up comes about 400 s after the reopen
+  and never carried over. A miss also restarted the episode at level 0, so the window never grew.
+  The claim that "a checkpoint give-up reaches the service between about 100 and 103 s after the
+  reopen" held only if a checkpoint was due the moment the database reopened. `GetCarryOverWindow(engine)`
+  is now the engine's window, plus the largest `Interval` among `engine.Workers` whose kind is not
+  `IndexMaintenance` (owner decision 47: it never takes a database offline), plus
+  `ReopenMaximumDelay`, saturating at `TimeSpan.MaxValue`. `ReopenMaximumDelay` is at least every
+  backoff step, so it covers the backoff to the pass that gives up, the give-up on the thread pool
+  and the service's one-second poll, and the step term is gone. At the defaults the window is
+  100 s + 5 min + 1 min, 460 s, at every step: it covers the time-triggered checkpoint (about 404 s
+  at the latest) and the version purge (about 163 s). The window no longer depends on the episode.
+- *A remembered reopen carried over across a drop.* Entries were keyed by engine and name and
+  pruned by time only, so a database dropped and created again under the same name within the
+  window, then taken offline, started at the carried step; the wider window made that likelier.
+  The service now keeps the `DatabaseInstance` its reopen returned (the internal `Reopen` hook
+  returns it; `DatabaseEngine.OpenDatabaseAsync` already did). A database found offline with a
+  remembered reopen is first checked, off the loop's thread because `TryGetDatabase` takes the
+  engine's registry lock, to be that instance (an offline instance is still held, so it is found).
+  Another instance drops the level and starts at the initial delay, counted from when it was
+  found. Its `OfflineDatabaseFound` event is written once the check has settled the delay.
+- *The `Options` documentation and the content root.* `Options` was still documented as "copied at
+  Build", though `Environment` and `ContentRootPath` are read when the builder is created, and
+  Hosting `DESIGN.md` said `CreateBuilder(args)` reads the files under `Options.ContentRootPath`,
+  which that overload's fresh options never let a plain application set. The summary now says
+  which settings are read at creation. `DESIGN.md` says `CreateBuilder(args)` reads under the
+  ambient resource's `ContentRootPath`, else `AppContext.BaseDirectory`, and that
+  `Options.ContentRootPath` applies to `CreateBuilder(options)` and the constructor. Build's
+  snapshot now takes both settings from `Environment`, so the application's options and its
+  context cannot disagree.
+- *Building `Services` or `Logging` directly.* `((IServiceProviderBuilder)builder.Services).Build()`
+  yields a separate provider whose singletons are created a second time, and `builder.Logging.Build()`
+  yields a separate logger factory, after which the application's own Build fails. The deleted
+  facades refused both. This is parity with `WebApplicationBuilder`, so no code changed. The
+  remarks on both members, Hosting `DESIGN.md` ("Host-level pieces"), `OVERVIEW.md` and
+  `README.md` now say so.
+- *Tests.* `Reopen_WorkerFailsOneIntervalAfterTheReopen_ShouldCarryTheBackoffOver` replaces the
+  landed reopen test. It uses an engine scaled down the way the defaults relate: workers paced at
+  1.5 s (the test's worker, checkpoint, page write-back and maintenance), a 500 ms window and a
+  1.2 s maximum delay. The worker first fails one interval after the reopen, and the give-up comes
+  past the landed window but within the new one. The test worker's trigger now waits only for the
+  pump's stop, so its interval is a pace the window reads and no pass runs that the test did not
+  ask for. `Reopen_DroppedAndCreatedAgainWithinTheWindow_ShouldStartOver` covers the drop case.
+  `GetCarryOverWindow_ShouldBeTheEnginesWindowPlusItsSlowestWorkerPlusTheMaximumDelay` asserts
+  460 s at the defaults, at least `DefaultWorkerFailureWindow + CheckpointInterval + 2 ×
+  FailureBackoff + 1 s` (and the same with `MaintenanceInterval`), an index-maintenance worker paced
+  at a day ignored, and saturation for a worker paced at `TimeSpan.MaxValue`.
+  `Build_EnvironmentChangedAfterCreation_ShouldSnapshotTheBuildersEnvironment` pins the snapshot.
+- *Mutations.* With the slowest worker's interval dropped from the window, the one-interval test
+  fails. With the instance check made to always match, the drop test fails.
+- *Docs.* Hosting `DESIGN.md` (the carry-over window and the instance check, "Host-level pieces",
+  the tests), `OVERVIEW.md`, `README.md`; the service's and the builder's remarks; row 48 and §12.
+- *Gate.* Hosting builds with no Database warning. Every Database suite passes: Hosting 77 (75 +
+  the drop test + the snapshot test; the one-interval test replaces the landed reopen test and
+  the window test is rewritten), and at their counts before the review Database.Tests 156,
+  Language 105, Types 93, Storage 315, Transactions 108, Indexing 77, Execution 2, Protocol 23,
+  Security 5, Sql 1145, Sql.Language 999, Sql.Catalog 47, Sql.Schema 39, Sql.Storage 14,
+  Sql.Client 319, Documents 203, Documents.Language 288, Documents.Catalog 9, Documents.Storage
+  31, Graph 410, Graph.Language 387, Graph.Catalog 19, Graph.Storage 17, Graph.Client 59, Blob
+  183, Blob.Catalog 5, Blob.Storage 14, Blob.Client 23, KeyValuePair 205, KeyValuePair.Catalog 4,
+  KeyValuePair.Storage 3, KeyValuePair.Client 14, Client 61, Embedded 4, ApplicationModel 15 and
+  Sdk.Database 18. The reopen tests passed four more runs in a row. Studio builds with no warning
+  to an output folder under `%TEMP%`, and its `--smoke` run gives 83 passed, 0 failed, 1 skipped;
+  the dependency graph check passes; the Database runtime producer packs. Database.Testing's
+  suite, which needs canonical packs, was not rerun.
+- *Owner review (added).*
+  - **Accept the carry-over formula** (the engine's window, plus the slowest offline-capable
+    worker's interval, plus `ReopenMaximumDelay`), or take the exact alternative. The engine
+    would record the give-up streak's first-failure time on the database's offline error, and the
+    backoff would carry over when that streak began within `ReopenMaximumDelay` of the reopen.
+    That does not depend on worker pace or workload. A page write-back fault surfaces at the first
+    write after the reopen, however late, which no reopen-anchored window bounds.
+  - **A wider window remembers each reopen longer** (460 s at the defaults, unbounded for an
+    engine with a slow custom worker, since the sum saturates). Only the reopened instance
+    carries over, so a dropped and recreated database is not affected.
 
 **P7, #1263: ApplicationModel, templates, Studio and cohesion-examples.**
 
@@ -4339,15 +4434,18 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
     count could. At the defaults the window is still longer than the one-minute
     `ReopenMaximumDelay`, so no worker give-up carries its backoff over; an engine whose window is
     shorter does. Still an owner item: tie the flapping window to the engine's, or keep it.
-    **Done** by owner decision 48 (§7, "Owner decisions 46 and 48, and the Hosting builder's
-    host-level pieces, as landed"): the carry-over window is the engine's `WorkerFailureWindow`
-    plus the backoff step the episode reached, at least `ReopenMaximumDelay`, so 102 s after a
-    one-step episode at the defaults and up to 160 s. Left: the first step's carry-over is not
-    guaranteed (a checkpoint give-up reaches the service about 100-103 s after the reopen,
-    against 102 s; from the second step, 104 s, it is), and a version purge whose first full pass
-    after the reopen comes up to a `MaintenanceInterval` later can miss the window at every step.
-    A window with more slack (the engine's window plus `ReopenMaximumDelay`, 160 s at every step)
-    would cover both; an owner call.
+    **Implemented** by owner decision 48 and its review (§7, "Owner decisions 46 and 48, and the
+    Hosting builder's host-level pieces, as landed" and "Owner decisions 46 and 48 review, as
+    applied"). The carry-over window is the engine's `WorkerFailureWindow`, plus the largest
+    interval among its workers that can take a database offline, plus `ReopenMaximumDelay`: 460 s
+    at every step at the defaults. That covers a time-triggered checkpoint give-up (its first
+    failure a `CheckpointInterval` after the reopen) and a version purge's (its first failure up to
+    a `MaintenanceInterval` after it). The window as first landed, the engine's window plus the
+    step reached, missed both in most episodes. Only the instance the service reopened carries its
+    backoff over. Left for the owner: accepting the formula, or the exact alternative (the give-up
+    streak's first-failure time on the offline error, compared with the reopen). A page write-back
+    fault, which surfaces at the first write after the reopen however late, is bounded by no
+    reopen-anchored window.
   - *Hosting reads the cause through a type test* (`engine is DatabaseEngine`) until P6 retypes
     Hosting onto the root bases; an engine of the root interface alone reports no cause. **Done at
     P6:** health and the reopen service read every engine's cause through

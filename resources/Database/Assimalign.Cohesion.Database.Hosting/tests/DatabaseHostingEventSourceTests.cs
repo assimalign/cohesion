@@ -96,7 +96,7 @@ public sealed class DatabaseHostingEventSourceTests
                 throw new IOException("Injected reopen failure");
             }
 
-            await target.OpenDatabaseAsync(name, token);
+            return await target.OpenDatabaseAsync(name, token);
         };
         using var recorder = new HostingEventRecorder(EventLevel.Informational);
 

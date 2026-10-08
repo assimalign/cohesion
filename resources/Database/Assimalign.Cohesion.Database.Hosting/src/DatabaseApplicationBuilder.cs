@@ -104,7 +104,16 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         }
     }
 
-    /// <summary>Gets host settings and legacy borrowed input lists, copied at Build.</summary>
+    /// <summary>
+    /// Gets host settings and legacy borrowed input lists: <c>Environment</c> and
+    /// <see cref="DatabaseApplicationOptions.ContentRootPath"/> are read when the builder is created
+    /// (see <see cref="Environment"/>); the rest is copied at Build.
+    /// </summary>
+    /// <remarks>
+    /// Setting the environment or the content root here after the builder exists changes nothing:
+    /// Build's snapshot takes both from <see cref="Environment"/>, so the application's options and
+    /// its context never disagree.
+    /// </remarks>
     public DatabaseApplicationOptions Options => _options;
 
     /// <summary>
@@ -141,6 +150,10 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <see cref="ILoggerFactory"/>, and hands it to the engine factories; the application owns and
     /// disposes it after every service and engine. The builder refuses changes after Build. An
     /// enabled resource's telemetry adds its exporter here when the builder is created.
+    /// <see cref="Build"/> creates the application's one logger factory; building this builder
+    /// directly yields a separate factory the application never uses, and makes the application's
+    /// Build fail, since the builder builds once. <c>WebApplicationBuilder</c>'s <c>Logging</c> is
+    /// the same.
     /// </remarks>
     public LoggerFactoryBuilder Logging { get; }
 
@@ -153,7 +166,10 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// application accepts closed factory and instance registrations only, and reserves
     /// <see cref="IHostEnvironment"/>, <see cref="IConfiguration"/> and <see cref="ILoggerFactory"/>
     /// for its own pieces. A factory-created service is owned by the provider and disposed with the
-    /// application; an instance stays owned by its caller.
+    /// application; an instance stays owned by its caller. <see cref="Build"/> creates the
+    /// application's one provider; building these registrations directly yields a separate provider
+    /// the application never uses, which creates its singletons a second time and is the caller's to
+    /// dispose. <c>WebApplicationBuilder</c>'s <c>Services</c> is the same.
     /// </remarks>
     public ServiceProviderBuilder Services { get; }
 
@@ -386,6 +402,11 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             ServiceProvider services = BuildServiceProvider(loggerFactory);
             ownership.Infrastructure.Add(services);
             DatabaseApplicationOptions options = SnapshotOptions(_options);
+
+            // The environment was read when the builder was created; a later change to the options
+            // must not leave the snapshot disagreeing with the context.
+            options.Environment = Environment.Name;
+            options.ContentRootPath = Environment.ContentRootPath;
             var context = new DatabaseApplicationContext(options, Environment, Configuration, services, loggerFactory);
 
             var products = new HashSet<object>(ReferenceEqualityComparer.Instance);
