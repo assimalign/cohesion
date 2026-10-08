@@ -96,7 +96,7 @@ replaced decision 35's count of a hundred passes: the window of Neo4j's ten fail
 `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`, at its
 ten-second checkpoint check, `CheckPointThreshold.java:40`, measured on the engine's clock from
 the first failed pass, so every worker gives up about that long after its first failure: about
-100 s for a failing checkpoint, page write-back or write-ahead flush, 120 s for a version purge's
+100 s for a failing checkpoint, page write-back or write-ahead flush, about 101 s for a version purge's
 full pass and about 102 s for a deferred undo, where the count took about 100 and 92 minutes;
 the root `DESIGN.md`, "Why time, not a count"),
 the root worker base asks the engine to give up on it, and
@@ -587,13 +587,16 @@ reads the engine's per-database view of its workers' failures, not its state:
 - The offline refusal wins: a database that is offline is refused with `COHDBB002` even while a
   worker's record of it lingers. A database a failure of its own storage took offline (a failed
   fsync, journal write or header write), not the engine's give-up, keeps the record until that
-  worker's next pass, which for the version purge's full pass can be a whole
-  `MaintenanceInterval` away (owner decision 42 review).
+  worker's next pass, which for the version purge is a full pass's retry a `FailureBackoff` after
+  its failure (owner decisions 42 review and 46).
 - A version purge whose full pass failed keeps its failure until a later full pass completes:
-  the passes between them only retry deferred undo, which does not redo the full pass's work. So
-  a failing full pass refuses its database for at least one `MaintenanceInterval` (a minute by
-  default), and until the third failed full pass (two minutes) takes the database offline when
-  the failure persists (owner decision 42 review; recorded for owner review in the plan).
+  the passes between them only retry deferred undo, which does not redo the full pass's work
+  (owner decision 42 review). That later full pass is the database's own retry, a
+  `FailureBackoff` after the failure, not the next `MaintenanceInterval` (owner decision 46 of
+  2026-10-08), so a full pass whose fault cleared stops refusing its database within a backoff,
+  and one that keeps failing takes the database offline at about 101 s, like the other workers.
+  Before the decision it refused the database for at least one `MaintenanceInterval` (a minute by
+  default), and until its third failed full pass (two minutes).
 - An index-maintenance worker's failure refuses nothing: its work costs space, not durability,
   and never takes a database offline, so a refusal would last for as long as the work kept
   failing. Blob ships no such worker; one attached through `AddWorker` still makes the engine
@@ -742,7 +745,8 @@ second (`Database.Transactions` DESIGN.md). A retry that fails makes the engine 
 `Faulted`; the first pass with no failure and no undo still deferred clears it. A full pass that
 fails keeps the database's failure, and the server's `COHDBB003` refusal of it, until a later
 full pass completes: the retries between full passes do not redo its work (owner decision 42
-review; "Server lifecycle and failure semantics", above).
+review; "Server lifecycle and failure semantics", above). That later full pass is the database's
+own retry, a `FailureBackoff` after the failure (owner decision 46).
 
 
 ## Phase 29: deferred hosting composition

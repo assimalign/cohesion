@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -27,22 +29,31 @@ using Assimalign.Cohesion.Hosting.Health;
 /// </remarks>
 public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicationContext, IHealthContributor
 {
-    private readonly IHostEnvironment _environment;
+    private readonly HostEnvironment _environment;
     private IReadOnlyList<DatabaseEngine> _engines;
     private IReadOnlyList<DatabaseServer> _servers;
     private IReadOnlyList<IHostService> _hostedServices = [];
 
-    internal DatabaseApplicationContext(DatabaseApplicationOptions options, IConfiguration configuration, IServiceProvider services)
+    internal DatabaseApplicationContext(
+        DatabaseApplicationOptions options,
+        HostEnvironment environment,
+        ConfigurationManager configuration,
+        ServiceProvider services,
+        LoggerFactory loggerFactory)
     {
         Configuration = configuration;
         Services = services;
-        _environment = new HostEnvironment(options.Environment ?? "production")
-        {
-            ContentRootPath = options.ContentRootPath,
-        };
+        _environment = environment;
+        BuildContext = new DatabaseApplicationBuildContext(environment, configuration, services, loggerFactory);
         _engines = new ReadOnlyCollection<DatabaseEngine>(options.Engines);
         _servers = new ReadOnlyCollection<DatabaseServer>(options.Servers);
     }
+
+    /// <summary>
+    /// Gets the built host-level pieces handed to every owned engine factory of
+    /// <see cref="DatabaseApplicationBuilder.AddEngine(string, Func{DatabaseApplicationBuildContext, DatabaseEngine})"/>.
+    /// </summary>
+    internal DatabaseApplicationBuildContext BuildContext { get; }
 
     /// <summary>
     /// Gets the host environment information.

@@ -426,7 +426,7 @@ replaced decision 35's count of a hundred passes: the window of Neo4j's ten fail
 `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`, at its
 ten-second checkpoint check, `CheckPointThreshold.java:40`, measured on the engine's clock from
 the first failed pass, so every worker gives up about that long after its first failure: about
-100 s for a failing checkpoint, page write-back or write-ahead flush, 120 s for a version purge's
+100 s for a failing checkpoint, page write-back or write-ahead flush, about 101 s for a version purge's
 full pass and about 102 s for a deferred undo, where the count took about 100 and 92 minutes;
 the root `DESIGN.md`, "Why time, not a count"),
 the root worker base asks the engine to give up on it, and
@@ -590,7 +590,10 @@ second; a failure that persists is recorded as a worker fault and retried withou
 worker, and the first pass with no failure and no undo still deferred clears the fault
 (`Database.Transactions` DESIGN.md). A full pass that fails keeps the database's failure until a
 later full pass completes: the retries between full passes do not redo its work (owner decision
-42 review; Sql DESIGN.md, "Deferred undo is retried on its own backoff").
+42 review; Sql DESIGN.md, "Deferred undo is retried on its own backoff"). That later full pass is
+the database's own retry, a `FailureBackoff` after the failure, not the next
+`MaintenanceInterval` (owner decision 46), so a full pass that keeps failing gives up at about
+101 s, like the other workers.
 
 ## Limits and verification
 

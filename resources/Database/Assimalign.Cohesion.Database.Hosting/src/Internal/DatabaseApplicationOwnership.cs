@@ -23,9 +23,13 @@ internal sealed class DatabaseApplicationOwnership
         {
             try
             {
-                // Configuration exposes disposal as a concrete member rather than
+                // Configuration and its manager expose disposal as a concrete member rather than
                 // implementing IAsyncDisposable; retain that owning contract explicitly.
-                if (products[index] is Assimalign.Cohesion.Configuration.Configuration configuration)
+                if (products[index] is Assimalign.Cohesion.Configuration.ConfigurationManager manager)
+                {
+                    await manager.DisposeAsync().ConfigureAwait(false);
+                }
+                else if (products[index] is Assimalign.Cohesion.Configuration.Configuration configuration)
                 {
                     await configuration.DisposeAsync().ConfigureAwait(false);
                 }

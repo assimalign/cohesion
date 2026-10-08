@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -44,6 +44,18 @@ using Assimalign.Cohesion.Database.Storage;
 /// Faulted for good. An offline database (#1243) is skipped, and so is a database its holder
 /// disposed while the engine keeps it registered (directly, or through a session's database).
 /// </para>
+/// <para>
+/// <b>A failed full pass is retried after the backoff (owner decision 46).</b> A database whose
+/// full pass failed has that pass run again for it alone <see cref="DatabaseEngineWorker.FailureBackoff"/>
+/// after the failure, not at the next maintenance interval, so a full pass that keeps failing
+/// reaches the engine's worker failure window at about the same time as every other worker (about
+/// 101 s at the defaults, where waiting for the next interval took 120 s), and one whose fault
+/// cleared stops holding its database's failure within a backoff. The other databases keep the
+/// interval. The schedule, full passes and retries alike, is kept on the engine's clock, the one
+/// its failure window is timed on. A retry runs the coordinator's whole pass, deferred undo
+/// included, so while it keeps failing a deferred undo of that database is retried at least once
+/// a backoff, not only on its coordinator's doubling schedule.
+/// </para>
 /// </remarks>
 internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
 {
@@ -51,24 +63,52 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
     private static readonly TimeSpan _maximumWait = TimeSpan.FromMilliseconds(int.MaxValue);
 
     private readonly SqlDatabaseEngine _engine;
-    private long _lastFullPass = Stopwatch.GetTimestamp();
 
-    // The databases whose last full pass failed (owner decision 42 review): a pass that only retries
-    // deferred undo does not redo that work, so it reports them unfinished and their streaks last
-    // until a full pass completes them. Touched only by passes, which never overlap.
-    private readonly HashSet<SqlDatabase> _fullPassFailed = new(ReferenceEqualityComparer.Instance);
+    // The engine's clock: full passes and their retries are scheduled on it (owner decision 46).
+    private readonly TimeProvider _clock;
+    private long _lastFullPass;
+
+    // The databases whose last full pass failed, each with the timestamp, on the engine's clock, at
+    // which its full pass is retried (owner decisions 42 review and 46): until then a pass that only
+    // retries deferred undo does not redo that work, so it reports them unfinished and their streaks
+    // last until a full pass completes them. Touched only by passes, which never overlap.
+    private readonly Dictionary<SqlDatabase, long> _fullPassFailed = new(ReferenceEqualityComparer.Instance);
+
+    // The earliest of those retries, or long.MaxValue when there is none: published for the trigger
+    // wait, which can run beside a pass a test runs.
+    private long _nextFullPassRetry = long.MaxValue;
 
     internal SqlVersionPurgeWorker(SqlDatabaseEngine engine)
         : base(engine.Name + "/version-purge", DatabaseEngineWorkerKind.VersionPurge, engine.EngineOptions.MaintenanceInterval)
     {
         _engine = engine;
+        _clock = engine.EngineOptions.TimeProvider ?? TimeProvider.System;
+        _lastFullPass = _clock.GetTimestamp();
     }
+
+    /// <summary>
+    /// Gets or sets a hook run before a database's full pass, or null. Internal, set by this
+    /// assembly's tests to fail a full pass alone, which no storage fault does without failing the
+    /// deferred-undo retries too (the hook is on the type that makes the call, <c>database-area.md</c>).
+    /// </summary>
+    internal Action<SqlDatabase>? BeforeFullPass { get; set; }
 
     /// <inheritdoc />
     protected override void WaitForTrigger(CancellationToken cancellationToken)
     {
-        // Until the next full pass, or the next deferred-undo retry when one is sooner.
-        var wait = Interval - Stopwatch.GetElapsedTime(Volatile.Read(ref _lastFullPass));
+        // Until the next full pass, a failed full pass's retry (owner decision 46), or the next
+        // deferred-undo retry, whichever is soonest.
+        var wait = Interval - _clock.GetElapsedTime(Volatile.Read(ref _lastFullPass));
+        long fullPassRetry = Volatile.Read(ref _nextFullPassRetry);
+        if (fullPassRetry != long.MaxValue)
+        {
+            var untilRetry = _clock.GetElapsedTime(_clock.GetTimestamp(), fullPassRetry);
+            if (untilRetry < wait)
+            {
+                wait = untilRetry;
+            }
+        }
+
         foreach (SqlDatabase database in _engine.GetInstanceSnapshot())
         {
             if (!database.IsClosed && !database.IsOffline && database.Coordinator.NextDeferredUndoRetry is { } retry && retry < wait)
@@ -101,87 +141,130 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
     protected override void RunIterationCore(CancellationToken cancellationToken)
     {
         _engine.UndoDeferredSignal.Reset();
-        bool fullPass = Stopwatch.GetElapsedTime(Volatile.Read(ref _lastFullPass)) >= Interval;
+        long now = _clock.GetTimestamp();
+        bool fullPass = _clock.GetElapsedTime(Volatile.Read(ref _lastFullPass), now) >= Interval;
         if (fullPass)
         {
-            Volatile.Write(ref _lastFullPass, Stopwatch.GetTimestamp());
+            Volatile.Write(ref _lastFullPass, now);
         }
 
-        // A database closed since its full pass failed is gone; a reopened one is a new instance.
-        if (_fullPassFailed.Count > 0)
+        try
         {
-            _fullPassFailed.RemoveWhere(static database => database.IsClosed);
-        }
-
-        foreach (SqlDatabase database in _engine.GetInstanceSnapshot())
-        {
-            if (cancellationToken.IsCancellationRequested)
+            // A database closed or no longer the engine's since its full pass failed is gone (a reopened
+            // one is a new instance), so its retry, due or not, no longer wakes the worker.
+            if (_fullPassFailed.Count > 0)
             {
-                break;
-            }
-
-            // An offline database is not begun: the engine reports it (#1243), and a failure the
-            // worker recorded for it ends. Nor is a database its holder closed: the engine keeps it
-            // registered until its close ends, then forgets it, and its disposed coordinator has nothing left
-            // to purge.
-            if (database.IsClosed || database.IsOffline)
-            {
-                _fullPassFailed.Remove(database);
-                continue;
-            }
-
-            if (!BeginDatabase(database.Name))
-            {
-                continue;
-            }
-
-            try
-            {
-                if (fullPass)
+                foreach (SqlDatabase gone in _fullPassFailed.Keys.Where(database => !_engine.IsOpen(database)).ToArray())
                 {
-                    database.Coordinator.RunVersionPurgePass(cancellationToken);
+                    _fullPassFailed.Remove(gone);
+                }
+            }
+
+            foreach (SqlDatabase database in _engine.GetInstanceSnapshot())
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                // An offline database is not begun: the engine reports it (#1243), and a failure the
+                // worker recorded for it ends. Nor is a database its holder closed: the engine keeps it
+                // registered until its close ends, then forgets it, and its disposed coordinator has nothing left
+                // to purge.
+                if (database.IsClosed || database.IsOffline)
+                {
                     _fullPassFailed.Remove(database);
-                }
-                else
-                {
-                    database.Coordinator.RetryDeferredUndo(cancellationToken);
+                    continue;
                 }
 
-                // A deferred undo still waiting, or a failed full pass this retry did not redo,
-                // keeps the database's failure recorded until a pass leaves nothing over.
-                if (database.Coordinator.NextDeferredUndoRetry is not null || _fullPassFailed.Contains(database))
+                if (!BeginDatabase(database.Name))
                 {
+                    continue;
+                }
+
+                // The engine's full pass, or the retry of a full pass that failed on this database
+                // once the backoff has passed (owner decision 46).
+                bool full = fullPass || (_fullPassFailed.TryGetValue(database, out long retryAt) && now >= retryAt);
+                try
+                {
+                    if (full)
+                    {
+                        BeforeFullPass?.Invoke(database);
+                        database.Coordinator.RunVersionPurgePass(cancellationToken);
+                        _fullPassFailed.Remove(database);
+                    }
+                    else
+                    {
+                        database.Coordinator.RetryDeferredUndo(cancellationToken);
+                    }
+
+                    // A deferred undo still waiting, or a failed full pass this retry did not redo,
+                    // keeps the database's failure recorded until a pass leaves nothing over.
+                    if (database.Coordinator.NextDeferredUndoRetry is not null || _fullPassFailed.ContainsKey(database))
+                    {
+                        ReportUnfinished(database.Name);
+                    }
+                }
+                catch (StorageTransactionException)
+                {
+                    // A storage bracket is active on this database; retry next pass. A failed full
+                    // pass found busy is retried a backoff later, so the retry does not spin.
+                    if (full && _fullPassFailed.ContainsKey(database))
+                    {
+                        ScheduleRetry(database);
+                    }
+
                     ReportUnfinished(database.Name);
                 }
-            }
-            catch (StorageTransactionException)
-            {
-                // A storage bracket is active on this database; retry next pass.
-                ReportUnfinished(database.Name);
-            }
-            catch (ObjectDisposedException) when (!_engine.IsOpen(database))
-            {
-                // The snapshot can race a database drop; nothing left to purge.
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                // Recorded, not fatal: the writer whose undo failed again keeps its place in the
-                // retry schedule its coordinator paces (#1226), so the worker holds nothing back,
-                // and every other database keeps its maintenance. A database that went offline
-                // during the pass (#1243) is skipped by the next pass instead.
-                if (!database.IsOffline)
+                catch (ObjectDisposedException) when (!_engine.IsOpen(database))
                 {
-                    ReportFailure(database.Name, exception, TimeSpan.Zero);
-                    if (fullPass)
+                    // The snapshot can race a database drop; nothing left to purge.
+                    _fullPassFailed.Remove(database);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    // Recorded, not fatal: the writer whose undo failed again keeps its place in the
+                    // retry schedule its coordinator paces (#1226), so the worker holds nothing back,
+                    // and every other database keeps its maintenance. A database that went offline
+                    // during the pass (#1243) is skipped by the next pass instead. A failed full
+                    // pass is retried a backoff later (owner decision 46).
+                    if (!database.IsOffline)
                     {
-                        _fullPassFailed.Add(database);
+                        ReportFailure(database.Name, exception, TimeSpan.Zero);
+                        if (full)
+                        {
+                            ScheduleRetry(database);
+                        }
                     }
                 }
             }
         }
+        finally
+        {
+            PublishNextRetry();
+        }
+    }
+
+    // Retries the database's full pass a backoff from now, on the engine's clock.
+    private void ScheduleRetry(SqlDatabase database)
+        => _fullPassFailed[database] = _clock.GetTimestamp() + (long)(FailureBackoff.TotalSeconds * _clock.TimestampFrequency);
+
+    // Publishes the earliest full-pass retry for the trigger wait.
+    private void PublishNextRetry()
+    {
+        long next = long.MaxValue;
+        foreach (long retryAt in _fullPassFailed.Values)
+        {
+            if (retryAt < next)
+            {
+                next = retryAt;
+            }
+        }
+
+        Volatile.Write(ref _nextFullPassRetry, next);
     }
 }

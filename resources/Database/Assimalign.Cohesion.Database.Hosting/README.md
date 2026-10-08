@@ -35,7 +35,20 @@ Concurrent service start/stop options are rejected at construction and lifecycle
 settings are snapshotted, so retained mutable options cannot bypass this ordering.
 
 The no-argument and options overloads remain plain-host entry points. They do
-not create a control plane or bind an admin listener.
+not create a control plane or bind an admin listener, and start with an empty
+configuration; `CreateBuilder(args)` loads the default sources.
+
+`DatabaseApplicationBuilder` exposes the host-level pieces `WebApplicationBuilder`
+does, created the same way: `Environment` (`HostEnvironment`), `Configuration`
+(`ConfigurationManager`), `Logging` (`LoggerFactoryBuilder`) and `Services`
+(`ServiceProviderBuilder`). Build registers the environment, the configuration and
+the logger factory in the one provider, and an owned engine factory
+(`AddEngine(name, factory)`) receives their built counterparts in
+`DatabaseApplicationBuildContext`. The root `IDatabaseApplicationBuilder` carries
+none of them (COHRES004). `Build` creates the application's one provider and
+logger factory: building `Services` or `Logging` directly yields a separate
+instance the application never uses, and building `Logging` makes the
+application's `Build` fail, as with Web's builder.
 
 While the application runs, its own reopen service (owner decision 22) reopens a
 database an engine reports offline through the engine's `OpenDatabaseAsync`, with
@@ -44,7 +57,11 @@ exponential backoff and jitter (`Options.ReopenInitialDelay`, one second, up to
 turns it off). Health stays unhealthy, naming each offline database with its cause
 and its failed reopen attempts, until the reopen succeeds; a dropped database is
 never reopened, and Stop never waits for an attempt. Databases are reopened side by
-side, and one that goes offline again soon after its reopen keeps its backoff.
+side, and one that goes offline again soon after its reopen keeps its backoff:
+within its engine's `WorkerFailureWindow`, plus the longest interval among its
+workers that can take a database offline, plus `Options.ReopenMaximumDelay` (460 s
+at the defaults), and only while it is the instance the service reopened (owner
+decision 48, as its review revised it; the formula awaits the owner's acceptance).
 Every finding, attempt and
 outcome is an event of the `Assimalign.Cohesion.Database.Hosting` event source
 (`docs/DESIGN.md`, "Reopening offline databases" and "Diagnostics").

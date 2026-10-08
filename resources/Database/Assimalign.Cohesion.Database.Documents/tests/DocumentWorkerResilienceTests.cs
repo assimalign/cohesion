@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -8,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Tests;
@@ -962,6 +964,126 @@ public sealed class DocumentWorkerResilienceTests
         engine.GetOfflineError(Failing).ShouldBeNull();
         engine.State.ShouldBe(EngineState.Running);
         (await CountAsync(failing)).ShouldBe(40);
+    }
+
+    /// <summary>
+    /// A full version-purge pass that fails on one database is run again for that database alone a
+    /// backoff after the failure, not at the next maintenance interval (owner decision 46), and the
+    /// database's failure ends with the first retry that completes once the fault clears. The full
+    /// pass and its retries are scheduled on the engine's clock, which the test moves, and the test
+    /// runs the passes; the maintenance interval is an hour, so only the retry runs the full pass
+    /// again. Before the decision a pass between full passes only retried deferred undo, so a failing
+    /// full pass held its database's failure, and Blob's refusal of it, for a whole interval.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Workers: a failed full version-purge pass is retried for its database alone after the backoff, and its failure ends once a retry completes")]
+    public async Task VersionPurgeWorker_FullPassFails_ShouldRetryItAfterTheBackoffAndRecover()
+    {
+        // Arrange: a full pass due once an hour on a clock the test moves; a hook fails one
+        // database's full pass until the test clears it.
+        var clock = new ManualTimeProvider();
+        var options = Options(new FaultInjectingJournalStorageStrategy());
+        options.TimeProvider = clock;
+        await using var engine = DocumentDatabaseEngine.Create(options);
+        await engine.CreateDatabaseAsync(Failing);
+        await engine.CreateDatabaseAsync(Healthy);
+        var worker = (DocumentVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
+        var fullPasses = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+        bool fail = true;
+        worker.BeforeFullPass = database =>
+        {
+            fullPasses.AddOrUpdate(database.Name, 1, static (_, count) => count + 1);
+            if (Volatile.Read(ref fail) && database.Name == Failing)
+            {
+                throw new InvalidOperationException("Injected version purge failure");
+            }
+        };
+
+        // Act: the first full pass fails on one database.
+        clock.Advance(options.MaintenanceInterval);
+        worker.RunIteration(CancellationToken.None);
+        var afterTheFailure = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Refused: engine.HasFailingWorker(Failing));
+
+        // A pass before the backoff has passed does not run it again, and keeps the failure.
+        worker.RunIteration(CancellationToken.None);
+        var beforeTheBackoff = (Failing: fullPasses.GetValueOrDefault(Failing), Refused: engine.HasFailingWorker(Failing));
+
+        // The backoff passes: the full pass runs again for the failing database alone, and fails.
+        clock.Advance(DatabaseEngineWorker.FailureBackoff);
+        worker.RunIteration(CancellationToken.None);
+        var afterTheRetry = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Failures: worker.ConsecutiveFailures);
+
+        // The fault clears; the next retry, a backoff later, completes.
+        Volatile.Write(ref fail, false);
+        clock.Advance(DatabaseEngineWorker.FailureBackoff);
+        worker.RunIteration(CancellationToken.None);
+
+        // Assert
+        afterTheFailure.ShouldBe((1, 1, true));
+        beforeTheBackoff.ShouldBe((1, true));
+        afterTheRetry.ShouldBe((2, 1, 2));
+        fullPasses.GetValueOrDefault(Failing).ShouldBe(3);
+        fullPasses.GetValueOrDefault(Healthy).ShouldBe(1);
+        worker.Fault.ShouldBeNull();
+        worker.ConsecutiveFailures.ShouldBe(0);
+        engine.HasFailingWorker(Failing).ShouldBeFalse();
+        engine.State.ShouldBe(EngineState.Running);
+        engine.OfflineDatabases.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A full version-purge pass that keeps failing takes only its database offline at about the
+    /// engine's worker failure window (owner decisions 42 and 46): retried a backoff after each
+    /// failure, its third failed pass in a row comes 101 s after its first on the engine's clock,
+    /// which the test moves, past the default window of 100 s. Retried only at the next maintenance
+    /// interval, an hour here, it took two more intervals.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Workers: a full version-purge pass that keeps failing takes only its database offline at about the window, not intervals later")]
+    public async Task VersionPurgeWorker_FullPassKeepsFailing_ShouldTakeOnlyItsDatabaseOfflineAtAboutTheWindow()
+    {
+        // Arrange: the default window of 100 s and minimum of three failed passes, and a full pass
+        // due once an hour, on a clock the test moves; a hook fails one database's full pass.
+        var clock = new ManualTimeProvider();
+        var options = Options(new FaultInjectingJournalStorageStrategy());
+        options.WorkerFailureWindow = DatabaseEngine.DefaultWorkerFailureWindow;
+        options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
+        options.TimeProvider = clock;
+        await using var engine = DocumentDatabaseEngine.Create(options);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
+        var worker = (DocumentVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
+        worker.BeforeFullPass = database =>
+        {
+            if (database.Name == Failing)
+            {
+                throw new InvalidOperationException("Injected version purge failure");
+            }
+        };
+
+        // Act: the full pass fails, its retry a backoff later fails, and the retry once the window
+        // has passed is the third failed pass in a row.
+        clock.Advance(options.MaintenanceInterval);
+        worker.RunIteration(CancellationToken.None);
+        clock.Advance(DatabaseEngineWorker.FailureBackoff);
+        worker.RunIteration(CancellationToken.None);
+        bool onlineInsideTheWindow = !failing.IsOffline && engine.OfflineDatabases.Count == 0;
+        clock.Advance(DatabaseEngine.DefaultWorkerFailureWindow);
+        worker.RunIteration(CancellationToken.None);
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
+
+        // Assert
+        onlineInsideTheWindow.ShouldBeTrue();
+        offline.ShouldBeTrue();
+        refusal.Code.ShouldBe("COHDBD002");
+        refusal.Message.ShouldContain("its version purge kept failing");
+        var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
+        cause.Cause.ShouldBe(StorageOfflineCause.VersionPurgeFailures);
+        cause.Message.ShouldContain($"'{worker.Name}'");
+        cause.Message.ShouldContain("on 3 passes in a row over 101 s, at least the engine's window of 100 s", Case.Sensitive);
+        Mentions(refusal, "Injected version purge failure").ShouldBeTrue(refusal.ToString());
+        engine.OfflineDatabases.ShouldBe([(DatabaseName)Failing]);
+        healthy.IsOffline.ShouldBeFalse();
+        await using var healthySession = await healthy.CreateSessionAsync();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Workers: the worker failure window, its minimum of passes and the journal cap have their defaults, are validated, and reach the engine through the builder")]

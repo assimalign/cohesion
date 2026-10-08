@@ -456,14 +456,21 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
     so each model's purge worker reports a database whose last full pass failed unfinished until
     a full pass completes it (before the review such a retry ended the streak as recovered, so a
     full pass that kept failing never reached the window while another database deferred an
-    undo). At the defaults:
+    undo). Since owner decision 46 of 2026-10-08 a failed full pass is retried for its database
+    alone a `FailureBackoff` after the failure, not at the next `MaintenanceInterval`, so a full
+    pass that keeps failing gives up at about the window like every other worker (101 s, where
+    waiting for the next interval took 120 s), and one whose fault cleared ends its record, and
+    Blob's refusal of its database, within a backoff instead of an interval. The purge workers
+    schedule full passes and their retries on the engine's clock, the one the window is timed on;
+    a retry runs the coordinator's whole pass, deferred undo included, so while a full pass keeps
+    failing its database's deferred undo is retried at least once a backoff. At the defaults:
 
-    | Worker | Visits a failing database | Gives up (decision 42) | Was (decision 35, 100 passes) |
+    | Worker | Visits a failing database | Gives up (decisions 42 and 46) | Was (decision 35, 100 passes) |
     |---|---|---|---|
     | Checkpoint | every poll, once a second, after the one-second backoff | at about 100 s, on about its 101st failed pass | about 100 s, more when each attempt took time |
     | Page write-back | every `PageWriteBackInterval` (1 s) after the backoff | at about 100 s | about 100 s |
     | Write-ahead flush | when a commit wakes it or its window (the group-commit window, else 1 s) passes, after the backoff | at about 100 s while commits stay pending | about 100 s while commits stay pending |
-    | Version purge, full pass | once per `MaintenanceInterval` (60 s) | at 120 s, its third failed pass | about 100 minutes |
+    | Version purge, full pass | once per `MaintenanceInterval` (60 s); after a failure, a backoff later (decision 46) | at about 101 s, on about its 101st failed pass (120 s, its third, before decision 46) | about 100 minutes |
     | Version purge, deferred undo (#1226) | at its coordinator's retry, 100 ms doubling up to `MaintenanceInterval` | at 102.2 s, its tenth retry | about 92 minutes |
 
     The measured clock is a `System.TimeProvider` the engine owns: `TimeProvider.System` unless

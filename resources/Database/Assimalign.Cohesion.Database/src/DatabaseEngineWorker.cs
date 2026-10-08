@@ -93,9 +93,11 @@ namespace Assimalign.Cohesion.Database;
 /// passes the engine's cap while its checkpoints keep failing. Neo4j panics a database after ten
 /// consecutive checkpoint failures the same way
 /// (<c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-75</c>).
-/// The window is time, not a count, so a worker that visits a failing database seldom (a version
-/// purge's full pass, a deferred undo on its doubling backoff) gives up about as soon as one that
-/// visits it every second; the minimum of passes makes even the slowest retry before it gives up.
+/// The window is time, not a count, so a worker that visits a failing database seldom (a deferred
+/// undo on its doubling backoff) gives up about as soon as one that visits it every second; the
+/// minimum of passes makes even the slowest retry before it gives up. The model engines' version
+/// purge retries a failed full pass a <see cref="FailureBackoff"/> after it failed, not at its next
+/// maintenance interval (owner decision 46).
 /// The engine takes the database offline on a thread-pool thread, never the worker's, so a pass
 /// that gives up on a database whose journal is held by a hung fsync goes on to the others at once
 /// (<see cref="DatabaseEngine"/>, "The give-up never runs on a worker's thread"). Once the database
