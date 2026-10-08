@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-// The tests reach this assembly's internals for five purposes:
+// The tests reach this assembly's internals for six purposes:
 // - the deferred-undo retry schedule, driven by their own clock (TransactionCoordinator's
 //   internal TimeProvider constructor, DeferredUndoBackoff);
 // - the internal TransactionLog base and its CreateInMemory/CreateJournalBound factories, which
@@ -11,5 +11,7 @@ using System.Runtime.CompilerServices;
 // - the coordinator's BeforeCheckpoint, SequenceReserved and BeforeAbortRecord hooks, which
 //   replaced the deleted IStorage/IStorageJournal test doubles (#1257);
 // - the private protected VersionStore constructor, which the fault-injecting
-//   ControlledVersionStore derives through (#1258).
+//   ControlledVersionStore derives through (#1258);
+// - the internal TransactionEventSource, whose name, manifest, events and counters the
+//   TransactionEventSourceTests check (event-source.md, "Tests").
 [assembly: InternalsVisibleTo("Assimalign.Cohesion.Database.Transactions.Tests")]

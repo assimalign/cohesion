@@ -774,6 +774,100 @@ takes the storage offline. The tests of an undo whose journal writes fail
 (`FaultingMemoryStream.FailWrites`) and need no hook. The abort-record hook stays because
 no stream-level failure rejects one record and leaves the storage online.
 
+## Diagnostics
+
+The kernel raises its own events through one internal event source, named for the assembly:
+`Assimalign.Cohesion.Database.Transactions` (`src/Internal/EventSource/TransactionEventSource.cs`;
+catalog: `docs/programs/DATABASE_EVENT_SOURCES_PLAN.md` §4.3). Every engine model composes its
+database's kernel through `TransactionCoordinator`, so the one source covers the transactions of
+all five engines. The explicit transaction a session runs is the root's
+(`Assimalign.Cohesion.Database`); the events here are the kernel transactions under it, one per
+autocommit statement.
+
+**The `database` payload is the storage's name.** The kernel types do not know their database,
+so the coordinator hands `Storage.Name` to the two it builds, through internal members only: the
+`TransactionManager` constructor's `database` parameter and `LockManager.EnterEngineMode`. The
+events the coordinator writes itself read the name from its storage inside the enabled check. A
+standalone `TransactionManager.Create` or `LockManager.Create` reports an empty `database`.
+
+**Payloads carry identifiers only** (event-source.md rule 11; plan D8): a sequence, a lock mode,
+a `LockResource` (its kind, object id and entry id; a unique index's entry id is the key's hash,
+never the key), a storage-offline cause, counts, and an exception's type full name and
+`Message`. No record, key or value.
+
+Keywords: `Transactions = 0x1`, `Locks = 0x2`, `Checkpoints = 0x4`, `Purge = 0x8`; the other
+events check `EventKeywords.None`.
+
+| Id | Event | Level | Keyword | Payload | Written by |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `TransactionBegun` | Verbose | Transactions | `database`, `transactionSequence`, `isolationLevel` | `TransactionCoordinator.BeginAsync`, once the context is tracked |
+| 2 | `TransactionCommitted` | Verbose | Transactions | `database`, `transactionSequence` | `TransactionCoordinator.CommitAsync`, after the manager's commit |
+| 3 | `TransactionRolledBack` | Verbose | Transactions | `database`, `transactionSequence` | `TransactionCoordinator.RollbackAsync`, after the manager's rollback, also when its undo was deferred |
+| 4 | `TransactionAborted` | Warning | — | `database`, `transactionSequence`, `exceptionType`, `exceptionMessage` | `TransactionManager.CommitAsync`: the commit record could not be written, so the kernel rolled the transaction back (the caller's failed commit is the root's Error) |
+| 5 | `CommitUnconfirmed` | Error | — | `database`, `transactionSequence`, `exceptionMessage` (the flush failure's: the inner exception's message) | `TransactionCoordinator.CommitAsync`, on `TransactionCommitUnconfirmedException` |
+| 6 | `DeadlockDetected` | Warning | — | `database`, `transactionSequence` (the victim), `resource`, `mode` | `LockManager`, when a request's wait would close a cycle |
+| 7 | `LockWaitStart` | Verbose | Locks | `database`, `transactionSequence`, `resource`, `mode` | `LockManager`, when a request is queued |
+| 8 | `LockWaitStop` | Verbose | Locks | `database`, `transactionSequence`, `outcome`, `durationMilliseconds` | `LockManager`, when the queued wait ends, on the waiting flow |
+| 9 | `SlowLockWait` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `thresholdMilliseconds` | with 8, written before it, when the wait lasted at least the threshold |
+| 10 | `LockWaitsAbandoned` | Warning | — | `database`, `cause` (the `StorageOfflineCause` name) | `LockManager.Abandon`, from `AbandonLockWaits`, once per lock manager |
+| 11 | `UndoDeferred` | Warning | — | `database`, `transactionSequence`, `exceptionType`, `exceptionMessage` | `TransactionManager`, when an abort's undo failed: the writer keeps its locks until a retry completes it |
+| 12 | `DeferredUndoCompleted` | Informational | — | `database`, `transactionSequence`, `undone` | `TransactionManager`, when a retry completed a deferred undo and released the writer |
+| 13 | `AbortRecordWriteFailed` | Warning | — | `database`, `transactionSequence`, `exceptionType`, `exceptionMessage` | `TransactionManager`, when the advisory abort record could not be appended (swallowed before this source) |
+| 14 | `RecoveryAnalyzed` | Informational | — | `database`, `committed`, `aborted`, `maxSequence` | `TransactionCoordinator.AnalyzeAndScrub`, after the scrub |
+| 15 | `CheckpointDeferred` | Verbose | Checkpoints | `database` | `TransactionCoordinator.TryCheckpoint`, when a statement held the apply gate (owner decision 23) |
+| 16 | `DeferredCheckpointSkipped` | Verbose | Checkpoints | `database`, `reason` (`BracketOpen`: the request stays; `StorageOffline`: it is dropped) | the deferred checkpoint a statement runs as it ends |
+| 17 | `DeferredCheckpointFailed` | Warning | — | `database`, `exceptionType`, `exceptionMessage` | the same, when it failed; the next `TryCheckpoint` throws the failure and its worker reports it (root event 1) |
+| 18 | `VersionPurgePass` | Verbose | Purge | `database`, `versionsPurged`, `durationMilliseconds` | `TransactionCoordinator.RunVersionPurgePass`, when the pass ran to its end (a retry failure it rethrows included) |
+
+**Lock waits.** Only a request that queues writes 7 and 8; one the table grants at once, one it
+refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on one flow
+(event-source.md rule 8): the stop is written in the `finally` around the waiter's await, whatever
+ended it, and names how: `Granted`; `Canceled` by the caller's token; `Ended`, because the owner's
+transaction ended while it waited; or `Abandoned`, because the storage went offline (the same
+decision `WaitAbandonableAsync` makes). The wait is timed whether or not anyone listens: it
+already costs a queued waiter, a completion source and a registration, and a listener that
+attaches during a long wait then learns its full length (plan D5 (b)). The deadlock victim's
+event is written after the lock table's lock is released, just before the refusal is thrown.
+
+**The slow-lock-wait threshold** is an EventSource argument, not API (plan D7): each session that
+enables the source sets it to its `SlowLockWaitThresholdMs` argument, or to 1000 ms when it passes
+none, as the in-process forwarder does. The last enabling session wins. PostgreSQL logs lock waits
+past `deadlock_timeout` (1 s) by default (`log_lock_waits`, `src/backend/storage/lmgr/proc.c:1700`);
+the 1000 ms default follows it, pending owner question Q2 of the plan:
+
+```bash
+dotnet-trace collect --process-id <pid> \
+    --providers "Assimalign.Cohesion.Database.Transactions:0x2:4:SlowLockWaitThresholdMs=250"
+```
+
+**Counters.** All six are created on the first enable command; their backing fields are updated
+with `Interlocked` on every transition whether or not anyone listens, so a tool that attaches late
+reads exact values.
+
+| Counter | Kind | Transition |
+| --- | --- | --- |
+| `current-transactions` | gauge | +1 when the coordinator tracks a context (`BeginAsync`); −1 once per context when it stops: `UntrackEnded`, which only the end that removes the context reaches, or `DisposeAsync`, for each context its disposal still held |
+| `transactions-per-second` | rate | the gauge's +1 |
+| `commits-per-second` | rate | the gauge's −1 of a context that ended `Committed` (an unconfirmed commit included) |
+| `rollbacks-per-second` | rate | the gauge's −1 of any other end: a rollback, an aborted commit, a disposal's abort |
+| `total-deadlocks` | total | each deadlock victim (event 6) |
+| `lock-waits-per-second` | rate | each queued request (event 7) |
+
+The transaction counters count the coordinator's transactions, the same population as the gauge;
+the lock counters count every lock manager. The begin and end transitions already take the
+coordinator's lock and append a journal record, so the `Interlocked` update is noise beside them,
+and no counter moves on a per-row or per-statement path (plan D6).
+
+**Cost when nobody listens** (event-source.md rule 9): every write is behind
+`IsEnabled(level, keywords)`, and every `ToString` and the storage name read are inside it. An
+uncontended `LockManager.AcquireAsync` reaches no instrumentation before its grant. The
+`TransactionEventSourceTests` delta test pins the engine-mode path every engine uses: a re-grant
+allocates 0 bytes, and a new resource allocates exactly what the `TryAcquire` it runs does. A
+Release probe of the standalone and engine paths, run against this project at `96d3caac` and with
+this source, measured the same bytes per uncontended request in both builds: 56 (the existing
+closure of the standalone path's cancellation registration, allocated at its method's entry) and 0.
+`RunVersionPurgePass` takes its timestamp only while a listener takes event 18.
+
 ## Non-goals
 
 - No distributed transactions / two-phase commit — single-node ACID first.
@@ -785,3 +879,6 @@ no stream-level failure rejects one record and leaves the storage online.
 Static composition, contracts and value objects; `FrozenSet<ulong>` for the active
 set. The shared composition and engine adapters use ordinary calls and BCL
 synchronization. No reflection, dynamic code generation, or `Microsoft.Extensions.*`.
+The event source writes only strings, integers and doubles, which bind to the trim-safe
+`WriteEvent` overloads; a NativeAOT application receives its events only with
+`<EventSourceSupport>true</EventSourceSupport>`, and nothing depends on delivery.

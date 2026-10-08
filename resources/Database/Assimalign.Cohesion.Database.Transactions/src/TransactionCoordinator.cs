@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Tracing;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -113,14 +115,16 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         // drives its deferred-undo retry. It releases a transaction's locks through the
         // lock manager's unfiltered release; engine code shares the same lock manager in
         // its engine mode, whose release-all leaves a tracked transaction to the manager
-        // (see LockManager).
+        // (see LockManager). Both learn the storage's name here, for their diagnostics only.
+        string database = storage.Name;
         _manager = new TransactionManager(
             _log,
             locks,
             _versionStore,
             ReserveSequence,
-            time);
-        locks.EnterEngineMode(_manager.IsTracked);
+            time,
+            database);
+        locks.EnterEngineMode(_manager.IsTracked, database);
         _lockManager = locks;
     }
 
@@ -359,8 +363,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         lock (_sync)
         {
             _openContexts[context.Sequence.Value] = context;
+            TransactionEventSource.Log.TransactionTracked();
         }
 
+        TransactionEventSource.Log.TransactionBegun(_storage, context);
         return context;
     }
 
@@ -385,10 +391,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             await _manager.CommitAsync(context, cancellationToken).ConfigureAwait(false);
             _versionStore.OnCommitted(context.Sequence);
+            TransactionEventSource.Log.TransactionCommitted(_storage, context);
         }
-        catch (TransactionCommitUnconfirmedException)
+        catch (TransactionCommitUnconfirmedException exception)
         {
             _versionStore.OnCommitted(context.Sequence);
+            TransactionEventSource.Log.CommitUnconfirmed(_storage, context, exception);
             throw;
         }
         finally
@@ -420,6 +428,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         try
         {
             await _manager.RollbackAsync(context, cancellationToken).ConfigureAwait(false);
+            TransactionEventSource.Log.TransactionRolledBack(_storage, context);
         }
         finally
         {
@@ -599,6 +608,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         // proven ceiling over every stamp the record space can carry.
         _recoveredSequenceFloor = new TransactionSequence((ulong)_storage.ReserveTransactionSequence());
 
+        TransactionEventSource.Log.RecoveryAnalyzed(_storage, plan);
         return plan;
     }
 
@@ -724,6 +734,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             // Set after the failed wait: a statement that releases the gate before this write is
             // seen leaves the request for the next statement, or for the worker's next look.
             Volatile.Write(ref _checkpointDeferred, 1);
+            TransactionEventSource.Log.CheckpointDeferred(_storage);
             return false;
         }
 
@@ -755,19 +766,26 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             // A storage bracket outside the apply gate is open; the next statement to end, or
             // the worker's next look, retries.
+            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, DeferredCheckpointBracketOpen);
         }
         catch (StorageOfflineException)
         {
             // A durable flush failed and took the storage offline (#1243): nothing more is
             // written, and every later operation on the database is refused.
             Volatile.Write(ref _checkpointDeferred, 0);
+            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, DeferredCheckpointStorageOffline);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             Volatile.Write(ref _checkpointDeferred, 0);
             Volatile.Write(ref _deferredCheckpointFailure, ExceptionDispatchInfo.Capture(exception));
+            TransactionEventSource.Log.DeferredCheckpointFailed(_storage, exception);
         }
     }
+
+    // The reasons a deferred checkpoint did not run, as the DeferredCheckpointSkipped event names them.
+    private const string DeferredCheckpointBracketOpen = "BracketOpen";
+    private const string DeferredCheckpointStorageOffline = "StorageOffline";
 
     /// <summary>
     /// Refuses a checkpoint asked for from inside one of this coordinator's statement applies:
@@ -806,6 +824,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// </remarks>
     public long RunVersionPurgePass(CancellationToken cancellationToken)
     {
+        // Timed only while a listener takes the pass event (event-source.md, rule 9).
+        bool timed = TransactionEventSource.Log.IsEnabled(EventLevel.Verbose, TransactionEventSource.Keywords.Purge);
+        long started = timed ? Stopwatch.GetTimestamp() : 0;
         long total = 0;
         ExceptionDispatchInfo? deferredFailure = null;
 
@@ -838,6 +859,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
         total += _versionStore.PruneAsync(GetSafePruneBound(), cancellationToken)
             .AsTask().GetAwaiter().GetResult();
+
+        if (timed)
+        {
+            TransactionEventSource.Log.VersionPurgePass(_storage, total, started);
+        }
 
         deferredFailure?.Throw();
         return total;
@@ -927,6 +953,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             lock (_sync)
             {
                 _statementBrackets.Clear();
+
+                // Each context still tracked leaves the current-transactions gauge here, once:
+                // a commit or rollback that untracks it later finds it gone.
+                foreach (var context in _openContexts.Values)
+                {
+                    TransactionEventSource.Log.TransactionUntracked(committed: context.State == TransactionState.Committed);
+                }
+
                 _openContexts.Clear();
             }
         }
@@ -955,7 +989,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         lock (_sync)
         {
             _statementBrackets.Remove(context.Sequence.Value);
-            _openContexts.Remove(context.Sequence.Value);
+            if (_openContexts.Remove(context.Sequence.Value))
+            {
+                TransactionEventSource.Log.TransactionUntracked(committed: context.State == TransactionState.Committed);
+            }
         }
     }
 

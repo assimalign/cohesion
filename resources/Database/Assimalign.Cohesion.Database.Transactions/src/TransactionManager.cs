@@ -67,6 +67,10 @@ public sealed class TransactionManager : IAsyncDisposable
     private readonly LockManager _lockManager;
     private readonly VersionStore _versionStore;
     private readonly Func<TransactionSequence>? _sequenceAllocator;
+
+    // The storage name the coordinator hands its manager, for the event source's database
+    // payload; empty for a standalone manager.
+    private readonly string _database;
     private readonly Dictionary<ulong, TransactionContext> _active = new();
 
     // Writers whose transaction ended but whose undo did not complete. Each one is still
@@ -94,13 +98,15 @@ public sealed class TransactionManager : IAsyncDisposable
         LockManager lockManager,
         VersionStore versionStore,
         Func<TransactionSequence>? sequenceAllocator = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        string? database = null)
     {
         _log = log;
         _lockManager = lockManager;
         _versionStore = versionStore;
         _sequenceAllocator = sequenceAllocator;
         _undoBackoff = new DeferredUndoBackoff(time ?? TimeProvider.System);
+        _database = database ?? string.Empty;
     }
 
     /// <summary>
@@ -403,6 +409,7 @@ public sealed class TransactionManager : IAsyncDisposable
             catch (Exception exception)
             {
                 await EndAbortedAsync(owned, TransactionState.Faulted).ConfigureAwait(false);
+                TransactionEventSource.Log.TransactionAborted(_database, owned.Sequence, exception);
                 throw new TransactionAbortedException(
                     $"Transaction {owned.Sequence} aborted: the commit record could not be written.", exception);
             }
@@ -688,7 +695,7 @@ public sealed class TransactionManager : IAsyncDisposable
         {
             await _versionStore.PurgeWriterAsync(sequence, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             // The versions are still in the record space. Releasing the writer now would
             // let every new snapshot read them as committed and let the next lock holder
@@ -712,6 +719,7 @@ public sealed class TransactionManager : IAsyncDisposable
             // it still queued fails now, as the release at any other end fails it,
             // instead of waiting for a grant the ended transaction could only give back.
             AbandonPendingRequests(sequence);
+            TransactionEventSource.Log.UndoDeferred(_database, sequence, exception);
             UndoDeferred?.Invoke();
             return;
         }
@@ -730,13 +738,15 @@ public sealed class TransactionManager : IAsyncDisposable
         {
             await _log.AppendAbortAsync(sequence, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             // The abort record is advisory: recovery classifies every sequence without a
             // durable commit record as aborted (TransactionRecovery.Analyze), so a lost
             // abort record changes nothing. PostgreSQL does not even flush its abort
             // record, "since the default assumption after a crash would be that we
-            // aborted, anyway" (xact.c:1825-1827).
+            // aborted, anyway" (xact.c:1825-1827). The loss is still reported: the failed
+            // append is usually a journal fault the operator needs to see (plan D9).
+            TransactionEventSource.Log.AbortRecordWriteFailed(_database, sequence, exception);
         }
 
         lock (_sync)
@@ -797,6 +807,7 @@ public sealed class TransactionManager : IAsyncDisposable
             }
 
             await ReleaseUndoneAsync(sequence).ConfigureAwait(false);
+            TransactionEventSource.Log.DeferredUndoCompleted(_database, sequence, undone);
             total += undone;
         }
 

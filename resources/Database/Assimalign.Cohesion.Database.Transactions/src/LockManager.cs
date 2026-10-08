@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions.Internal;
 
 namespace Assimalign.Cohesion.Database.Transactions;
 
@@ -60,6 +62,16 @@ public sealed class LockManager
     private CancellationTokenSource? _abandon;
     private StorageOfflineException? _abandonCause;
 
+    // The storage name the coordinator hands over with the engine mode, for the event source's
+    // database payload; empty for a standalone lock manager.
+    private string _database = string.Empty;
+
+    // How a lock request's wait ended, as the LockWaitStop event names it.
+    private const string WaitGranted = "Granted";
+    private const string WaitCanceled = "Canceled";
+    private const string WaitEnded = "Ended";
+    private const string WaitAbandoned = "Abandoned";
+
     internal LockManager()
     {
     }
@@ -102,7 +114,7 @@ public sealed class LockManager
     {
         if (_abandon is null)
         {
-            return AcquireCoreAsync(owner, resource, mode, cancellationToken);
+            return AcquireCoreAsync(owner, resource, mode, cancellationToken, cancellationToken);
         }
 
         return TryAcquire(owner, resource, mode)
@@ -117,8 +129,9 @@ public sealed class LockManager
     /// be abandoned. Called once, by the coordinator, before the lock manager is shared.
     /// </summary>
     /// <param name="releaseOwedByManager">True for an owner the transaction manager still tracks.</param>
+    /// <param name="database">The name of the database whose locks this manager arbitrates, for its diagnostics.</param>
     /// <exception cref="InvalidOperationException">The mode is already installed.</exception>
-    internal void EnterEngineMode(Func<ulong, bool> releaseOwedByManager)
+    internal void EnterEngineMode(Func<ulong, bool> releaseOwedByManager, string database)
     {
         ArgumentNullException.ThrowIfNull(releaseOwedByManager);
 
@@ -128,6 +141,7 @@ public sealed class LockManager
         }
 
         _releaseOwedByManager = releaseOwedByManager;
+        _database = database ?? string.Empty;
         _abandon = new CancellationTokenSource();
     }
 
@@ -147,6 +161,7 @@ public sealed class LockManager
         {
             // Asynchronously: the storage's offline hook may run under its locks.
             _ = abandon.CancelAsync();
+            TransactionEventSource.Log.LockWaitsAbandoned(_database, cause);
         }
     }
 
@@ -160,7 +175,7 @@ public sealed class LockManager
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _abandon!.Token);
         try
         {
-            await AcquireCoreAsync(owner, resource, mode, wait.Token).ConfigureAwait(false);
+            await AcquireCoreAsync(owner, resource, mode, wait.Token, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && Volatile.Read(ref _abandonCause) is { } cause)
         {
@@ -177,13 +192,19 @@ public sealed class LockManager
     /// with <see cref="TransactionAbortedException"/> unless it already holds the resource in a
     /// mode at least as strong as the one requested.
     /// </remarks>
+    /// <param name="owner">The transaction requesting the lock.</param>
+    /// <param name="resource">The resource to lock.</param>
+    /// <param name="mode">The requested lock mode.</param>
+    /// <param name="cancellationToken">The token the wait observes: the caller's, or in engine mode the caller's linked with the abandonment.</param>
+    /// <param name="callerToken">The caller's own token, which tells a canceled wait from an abandoned one in the diagnostics.</param>
     private async ValueTask AcquireCoreAsync(
         TransactionSequence owner,
         LockResource resource,
         LockMode mode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CancellationToken callerToken)
     {
-        Waiter waiter;
+        Waiter? waiter = null;
 
         lock (_sync)
         {
@@ -209,18 +230,56 @@ public sealed class LockManager
             if (CreatesCycleLocked(owner.Value))
             {
                 RemoveWaitEdgesLocked(owner.Value);
-                throw new TransactionDeadlockException(
-                    $"Transaction {owner} was chosen as the deadlock victim requesting {mode} on {resource}.");
             }
-
-            waiter = new Waiter(owner.Value, mode);
-            entry.Waiters.Add(waiter);
+            else
+            {
+                waiter = new Waiter(owner.Value, mode);
+                entry.Waiters.Add(waiter);
+            }
         }
+
+        // The victim's refusal is raised after the lock is released, so the event is not written
+        // under it; the lock table is already back to its state before the request.
+        if (waiter is null)
+        {
+            TransactionEventSource.Log.DeadlockDetected(_database, owner, resource, mode);
+            throw new TransactionDeadlockException(
+                $"Transaction {owner} was chosen as the deadlock victim requesting {mode} on {resource}.");
+        }
+
+        // A wait already costs a queued waiter and a registration, so its start is timed
+        // whether or not anyone listens (plan D5 (b)): a listener that attaches during a long
+        // wait still learns how long it lasted. Start and stop are written on this flow.
+        long started = Stopwatch.GetTimestamp();
+        TransactionEventSource.Log.LockWaitStart(_database, owner, resource, mode);
 
         using var registration = cancellationToken.Register(() => CancelWaiter(resource, waiter));
 
-        await waiter.Completion.Task.ConfigureAwait(false);
+        try
+        {
+            await waiter.Completion.Task.ConfigureAwait(false);
+        }
+        finally
+        {
+            if (TransactionEventSource.Log.IsEnabled())
+            {
+                TransactionEventSource.Log.LockWaitStop(_database, owner, resource, mode, WaitOutcome(waiter, callerToken), started);
+            }
+        }
     }
+
+    /// <summary>
+    /// Names how a finished wait ended: granted; canceled by its caller; failed because its owner's
+    /// transaction ended (<see cref="FailEnded"/>); or abandoned because the storage went offline,
+    /// which <see cref="WaitAbandonableAsync"/> decides the same way.
+    /// </summary>
+    private string WaitOutcome(Waiter waiter, CancellationToken callerToken) => waiter.Completion.Task.Status switch
+    {
+        TaskStatus.RanToCompletion => WaitGranted,
+        TaskStatus.Canceled when !callerToken.IsCancellationRequested && Volatile.Read(ref _abandonCause) is not null => WaitAbandoned,
+        TaskStatus.Canceled => WaitCanceled,
+        _ => WaitEnded,
+    };
 
     /// <summary>
     /// Attempts to acquire a lock without waiting.
