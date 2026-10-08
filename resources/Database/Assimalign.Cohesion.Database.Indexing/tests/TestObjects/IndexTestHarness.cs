@@ -20,9 +20,9 @@ public sealed class IndexTestHarness : IAsyncDisposable
     private readonly Dictionary<TransactionContext, StorageTransaction> _pairs = new();
     private readonly object _sync = new();
 
-    public IndexTestHarness(IFileSystemFileHandle? data = null, IFileSystemFileHandle? journal = null)
+    public IndexTestHarness(IFileSystemFileHandle? data = null, IFileSystemFileHandle? journal = null, string? name = null)
     {
-        Storage = HarnessStorage.Create(data ?? new SimulatedDurableFileHandle(), journal ?? new SimulatedDurableFileHandle());
+        Storage = HarnessStorage.Create(data ?? new SimulatedDurableFileHandle(), journal ?? new SimulatedDurableFileHandle(), name);
         LockManager = Transactions.LockManager.Create();
         Manager = TransactionManager.Create(LockManager, VersionStore.CreateInMemory());
         IndexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
@@ -168,10 +168,14 @@ public sealed class IndexTestHarness : IAsyncDisposable
         {
         }
 
-        public static HarnessStorage Create(IFileSystemFileHandle data, IFileSystemFileHandle journal)
+        /// <summary>
+        /// Creates and initializes a storage, named <paramref name="name"/> (the event source tests
+        /// tell their database's events apart by it) or <c>index-harness</c>.
+        /// </summary>
+        public static HarnessStorage Create(IFileSystemFileHandle data, IFileSystemFileHandle journal, string? name = null)
         {
             var storage = new HarnessStorage(new StorageStream(data), new StorageStream(journal));
-            storage.InitializeNew((Name)"index-harness");
+            storage.InitializeNew((Name)(name ?? "index-harness"));
             return storage;
         }
 

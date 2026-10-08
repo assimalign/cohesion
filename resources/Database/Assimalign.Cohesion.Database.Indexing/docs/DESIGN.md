@@ -596,11 +596,49 @@ is a constant on its exception type (`ErrorCode`) and leads its message. An inse
 whose `(key, reference, writer)` identity is already present is a caller defect and
 fails with a plain `IndexException` before it changes anything. Model engines that
 expose index failures on the area's error surface translate at their own boundary
-and keep the code and the original exception as the inner exception.
+and keep the code and the original exception as the inner exception. The format
+refusal, the damage failure and the split invariants are also Error events of this
+package's event source before they are thrown (see Diagnostics); a unique violation
+and a duplicate identity are the caller's and write none.
 
 ## Relationship to `Database.Storage`
 
 `Database.Storage` provides the *physical* substrate through `StoragePageManager` — index pages (`PageType.Index`) are allocated, pinned, and flushed like any other page and live in the same storage files. This project is the *logical* layer: structures, keys, cursors, uniqueness, and the node page format inside each index page's body. The B+Tree implementation binds the two. (An earlier string-based `IStorageIndexManager` stub in `Database.Storage` was removed during the #157 alignment — it duplicated this project's index manager (then `IIndexManager`, now `BTreeIndexManager`) at the wrong layer with no design behind it.)
+
+## Diagnostics
+
+The index raises its own events through one internal event source, named for the assembly:
+`Assimalign.Cohesion.Database.Indexing` (`src/Internal/EventSource/IndexEventSource.cs`; catalog:
+`docs/programs/DATABASE_EVENT_SOURCES_PLAN.md` §4.4). Every engine model's secondary indexes are
+`BTreeIndex` trees under a `BTreeIndexManager`, so the one source covers the indexes of every
+engine. The `database` payload is the name of the storage whose pages hold the tree: the manager
+reads it from `BTreeIndexManagerOptions.Storage`, and a tree from the storage it was attached
+over, inside the enabled check. Payloads name an index by its owning object's id and its name and
+a page by its id; no key, entry reference or other indexed value is ever written (event-source.md
+rule 11; plan D8).
+
+Keyword: `Splits = 0x1`; the other events check `EventKeywords.None`.
+
+| Id | Event | Level | Keyword | Payload | Written by |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `IndexCreated` | Verbose | — | `database`, `objectId`, `index`, `kind` | `BTreeIndexManager.CreateIndexAsync`, once the tree's root is allocated and registered |
+| 2 | `IndexDropped` | Verbose | — | `database`, `objectId`, `index` | `BTreeIndexManager.DropIndexAsync` |
+| 3 | `IndexFormatRefused` | Error | — | `database`, `objectId`, `index`, `rootPageId`, `foundFormat` | the attach-time format check (`BTreeIndexManager.Create`/`EnsureFormat`), before `IndexFormatException` (`COHDBI001`) |
+| 4 | `IndexCorruptionDetected` | Error | — | `database`, `index`, `pageId`, `formatVersion` (what the page claims) | any operation that reaches a page of an attached tree that is not a current-format node, before `IndexCorruptionException` (`COHDBI002`); once per failing operation |
+| 5 | `IndexInvariantViolated` | Error | — | `database`, `index`, `pageId`, `detail` (the `IndexException` message, which names pages and positions, never keys) | the five split checks: a leaf or internal node too small to split, a leaf out of order, a separator position out of range, a separator that would misorder its parent |
+| 6 | `PageSplit` | Verbose | Splits | `database`, `index`, `pageId`, `leaf`, `entries` (before the split) | `SplitLeaf` and `SplitInternal`, once the page's halves are written and before the parent takes the separator |
+| 7 | `RootGrown` | Verbose | Splits | `database`, `index`, `rootPageId` | `GrowRoot`: the root split in place and the tree grew a level |
+| 8 | `WritersPurged` | Verbose | — | `database`, `writers`, `entriesRemoved`, `durationMilliseconds` | `BTreeIndexManager.PurgeWritersAsync` with at least one writer: open-time recovery's scrub of unproven writers |
+
+A split is written as it happens, inside the statement's storage bracket: a split whose parent
+insertion then fails an invariant writes `PageSplit` and then `IndexInvariantViolated`, and the
+bracket's rollback takes both changes back. A root leaf's first split writes `PageSplit` for the
+root page and then `RootGrown`. `WritersPurged` is timed only while a listener takes it.
+
+No counters: a tree has no transition its storage does not already count (page reads and writes
+are the storage source's), and a split rate would be a process-global counter on the insert path
+(plan D6). The split and invariant checks add one `IsEnabled` test to a split, which already
+writes two or three pages; no event is written on a lookup, a cursor or an insert that fits.
 
 ## Non-goals
 
@@ -611,4 +649,8 @@ and keep the code and the original exception as the inner exception.
 
 ## AOT posture
 
-Pure contracts and span-based value objects. No reflection.
+Pure contracts and span-based value objects. No reflection. The event source writes only
+strings, integers and booleans, which bind to the trim-safe `WriteEvent` overloads; a NativeAOT
+application receives its events only with `<EventSourceSupport>true</EventSourceSupport>`, and
+nothing depends on delivery. The assembly grants `InternalsVisibleTo` to its own test assembly
+only, for the event source's tests (`src/Properties/AssemblyInfo.cs`).
