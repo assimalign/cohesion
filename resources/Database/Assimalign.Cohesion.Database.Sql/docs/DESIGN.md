@@ -1124,7 +1124,7 @@ replaced decision 35's count of a hundred passes: the window of Neo4j's ten fail
 `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:41-42`, at its
 ten-second checkpoint check, `CheckPointThreshold.java:40`, measured on the engine's clock from
 the first failed pass, so every worker gives up about that long after its first failure: about
-100 s for a failing checkpoint, page write-back or write-ahead flush, 120 s for a version purge's
+100 s for a failing checkpoint, page write-back or write-ahead flush, about 101 s for a version purge's
 full pass and about 102 s for a deferred undo, where the count took about 100 and 92 minutes;
 the root `DESIGN.md`, "Why time, not a count";
 a pass that fails both file sets counts once), the root worker base asks the engine to give up on
@@ -1372,9 +1372,18 @@ schedule, and a failing undo in one database delays no other database's retry (#
 before it, any failed pass slept the worker a second and held every database's retries with it).
 A full pass that fails (its prune, or its own retry of a deferred undo) keeps the database's
 failure until a later full pass completes: the retries between full passes do not redo the full
-pass's work, so they report the database unfinished, and its streak reaches the failure window
-on its third failed full pass (owner decision 42 review; before it, such a retry ended the
-streak, so a failing full pass never went offline while any database deferred an undo).
+pass's work, so they report the database unfinished (owner decision 42 review; before it, such a
+retry ended the streak, so a failing full pass never went offline while any database deferred an
+undo). That later full pass is the database's own retry, a `FailureBackoff` after the failure,
+not the next `MaintenanceInterval` (owner decision 46 of 2026-10-08): a full pass that keeps
+failing reaches the failure window at about 101 s, like the other workers, where waiting for the
+interval took its third failed full pass (120 s), and one whose fault cleared ends its record
+within a backoff. Only that database's full pass runs early; the others keep the interval. The
+worker schedules full passes and their retries on the engine's clock, the one the window is
+timed on, and a retry runs the coordinator's whole pass, so while it keeps failing the
+database's deferred undo is retried at least once a backoff besides its own schedule.
+`SqlWorkerResilienceTests` fails a full pass alone through the worker's internal
+`BeforeFullPass` hook, which no storage fault can do without failing the retries too.
 
 ## The SQL server runtime (`SqlDatabaseServer`)
 

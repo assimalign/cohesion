@@ -432,6 +432,16 @@ continue after every one of their own child disposals fails (§10).
 
 ## 6. Where Configuration, DI, and Hosting enter
 
+> **Superseded in part (owner request of 2026-10-08).** The concrete builder now exposes the
+> host-level pieces `WebApplicationBuilder` does, as concrete types created when the builder is
+> created: `HostEnvironment Environment`, `ConfigurationManager Configuration` (which loads each
+> provider as it is added; `CreateBuilder(args)` adds the default sources), `LoggerFactoryBuilder
+> Logging` and `ServiceProviderBuilder Services`. `DatabaseApplicationBuildContext` carries their
+> built counterparts (`HostEnvironment`, `ConfigurationManager`, `ServiceProvider`,
+> `LoggerFactory`). The registration facades and their Build-time loading below describe the
+> design before that change; the current text is `Database.Hosting`'s `docs/DESIGN.md`,
+> "Host-level pieces".
+
 ### 6.1 Configuration
 
 The concrete builder owns a Cohesion `IConfigurationBuilder` registration surface. The proposed

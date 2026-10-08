@@ -105,9 +105,9 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <remarks>
     /// The window does the work at every worker's pace (<see cref="DefaultWorkerFailureWindow"/>);
     /// the minimum is there for the slow ones. A worker that visits a failing database seldom, or
-    /// whose one attempt took long, can see the window pass after one or two failures: a version
-    /// purge whose full pass runs every few minutes, a checkpoint that hung on its lane for longer
-    /// than the window before it failed. Three failed passes in a row mean the failure was retried,
+    /// whose one attempt took long, can see the window pass after one or two failures: a deferred
+    /// undo on its doubling backoff, a checkpoint that hung on its lane for longer than the window
+    /// before it failed. Three failed passes in a row mean the failure was retried,
     /// twice, before the database goes offline. The journal cap (owner decision 41) needs two
     /// failed checkpoints in a row and is not held back by this minimum.
     /// </remarks>
@@ -221,8 +221,9 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// database goes offline at the first failed pass at least this long after its first, once
     /// <see cref="DefaultWorkerFailureMinimumPasses"/> passes in a row failed. At the defaults
     /// that is about a hundred seconds for the checkpoint, page write-back and write-ahead flush
-    /// workers, about 102 s for a deferred undo (its tenth retry) and two minutes for a failing
-    /// version purge's full pass (its third).
+    /// workers, about 102 s for a deferred undo (its tenth retry) and about 101 s for a failing
+    /// version purge's full pass, which the model engines retry a backoff after each failure (owner
+    /// decision 46; two minutes, its third pass, while they retried it only at the next interval).
     /// </para>
     /// </remarks>
     public static TimeSpan DefaultWorkerFailureWindow { get; } = TimeSpan.FromSeconds(100);

@@ -19,7 +19,10 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     private Task? _disposeTask;
     private bool _startAttempted;
 
-    /// <summary>Builds an application from copied legacy borrowed inputs and local default infrastructure.</summary>
+    /// <summary>
+    /// Builds an application from copied legacy borrowed inputs, with an empty configuration and no
+    /// service registrations, as <see cref="DatabaseApplicationBuilder(DatabaseApplicationOptions)"/> creates them.
+    /// </summary>
     /// <param name="options">The host settings and caller-owned inputs.</param>
     public DatabaseApplication(DatabaseApplicationOptions options)
         : this(new DatabaseApplicationBuilder(options).BuildComposition()) { }
@@ -40,12 +43,20 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     /// <summary>Gets final infrastructure and the fixed runtime engine/server registry.</summary>
     public override DatabaseApplicationContext Context => _context;
 
-    /// <summary>Creates a builder with default settings and no command-line arguments.</summary>
+    /// <summary>
+    /// Creates a builder with default settings, an empty configuration and no command-line
+    /// arguments, as <c>WebApplication.CreateBuilder()</c> does.
+    /// </summary>
     /// <returns>A new builder.</returns>
     public static DatabaseApplicationBuilder CreateBuilder() => new(new DatabaseApplicationOptions());
 
-    /// <summary>Captures application arguments for configuration loaded at Build.</summary>
-    /// <param name="args">The arguments, copied before returning.</param>
+    /// <summary>
+    /// Creates a builder whose configuration loads the default sources now: optional
+    /// <c>appsettings.json</c> and <c>appsettings.{Environment}.json</c> under the content root,
+    /// environment variables prefixed <c>COHESION_CONFIG__</c>, the ambient resource settings and
+    /// <paramref name="args"/>, later sources winning.
+    /// </summary>
+    /// <param name="args">The arguments, loaded before returning.</param>
     /// <returns>A new builder honoring the existing enabled-resource host integration when present.</returns>
     public static DatabaseApplicationBuilder CreateBuilder(string[] args)
     {
@@ -54,8 +65,10 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
         return new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), resourceAssembly, args);
     }
 
-    /// <summary>Creates a builder from host settings and borrowed legacy inputs.</summary>
-    /// <param name="options">The options copied at Build.</param>
+    /// <summary>Creates a builder from host settings and borrowed legacy inputs, with an empty configuration.</summary>
+    /// <param name="options">
+    /// The options: their environment and content root are read now, the rest is copied at Build.
+    /// </param>
     /// <returns>A new builder.</returns>
     public static DatabaseApplicationBuilder CreateBuilder(DatabaseApplicationOptions options) => new(options);
 

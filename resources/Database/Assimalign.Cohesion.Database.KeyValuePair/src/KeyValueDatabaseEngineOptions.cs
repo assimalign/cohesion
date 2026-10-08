@@ -71,8 +71,8 @@ public sealed class KeyValueDatabaseEngineOptions
     /// from the first failed pass of the database's current streak, so every worker gives up about
     /// that long after its first failure whatever its pace: a failing checkpoint, page write-back or
     /// write-ahead flush after about a hundred seconds, a deferred undo on its tenth retry (about
-    /// 102 s), and a version purge's full pass, once per <see cref="MaintenanceInterval"/>, on its
-    /// third (two minutes at the default). Widen it to ride out a longer device outage, or narrow it
+    /// 102 s), and a version purge's full pass, retried a backoff after each failure rather than at the
+    /// next <see cref="MaintenanceInterval"/> (owner decision 46), after about 101 s. Widen it to ride out a longer device outage, or narrow it
     /// to give up sooner. Must be positive and at most
     /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>.
     /// </summary>

@@ -45,12 +45,16 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 /// the next access tries again (<c>:831-835</c>).
 /// </para>
 /// <para>
-/// <b>A database that flaps keeps its backoff.</b> A database found offline again within
-/// <see cref="DatabaseApplicationOptions.ReopenMaximumDelay"/> of a successful reopen does not
-/// start over at the initial delay: its first attempt waits the step after the last one its
-/// previous episode reached, so a fault the reopen does not clear (a version purge, a page
-/// write-back) is reopened less and less often instead of every few seconds, each time with a full
-/// recovery under the engine's lock.
+/// <b>A database that flaps keeps its backoff.</b> A database found offline again soon after a
+/// successful reopen does not start over at the initial delay: its first attempt waits the step
+/// after the last one its previous episode reached, so a fault the reopen does not clear (a version
+/// purge, a page write-back) is reopened less and less often instead of every few seconds, each time
+/// with a full recovery under the engine's lock. "Soon" is the carry-over window
+/// (<see cref="GetCarryOverWindow"/>, owner decision 48): the engine's
+/// <see cref="DatabaseEngine.WorkerFailureWindow"/> plus the backoff step the episode reached, since
+/// a worker gives up on a database no sooner than that window after its first failure, and never
+/// shorter than <see cref="DatabaseApplicationOptions.ReopenMaximumDelay"/>, which covers a device
+/// failure that takes the database offline again at once.
 /// </para>
 /// <para>
 /// <b>Databases are reopened side by side.</b> Each database's attempt, and each check, runs on
@@ -230,6 +234,35 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
         return step >= _maximumDelay.Ticks ? _maximumDelay : TimeSpan.FromTicks((long)step);
     }
 
+    /// <summary>
+    /// Gets how long the service remembers a successful reopen of a database of
+    /// <paramref name="engine"/> whose episodes reached <paramref name="level"/> backoff steps: a
+    /// database found offline again within it carries its backoff over (owner decision 48 of
+    /// 2026-10-08).
+    /// </summary>
+    /// <param name="engine">The database's engine.</param>
+    /// <param name="level">The backoff steps the database's episodes reached, its next episode's first.</param>
+    /// <returns>
+    /// The engine's <see cref="DatabaseEngine.WorkerFailureWindow"/> plus the step at
+    /// <paramref name="level"/>, or the maximum delay when that is longer.
+    /// </returns>
+    /// <remarks>
+    /// A worker's failures take a database offline no sooner than the engine's window after their
+    /// first failed pass (owner decision 42), so a window of the maximum delay alone, a minute by
+    /// default, ended before a worker could give up on a reopened database again (100 s at the
+    /// engines' defaults), and every such episode started over at the initial delay. The step adds
+    /// the slack for the worker to fail again after the reopen and for the service to find the
+    /// database, growing with each episode as the backoff does. The maximum delay stays the floor:
+    /// a device failure takes a database offline at once, whatever the engine's window.
+    /// </remarks>
+    internal TimeSpan GetCarryOverWindow(DatabaseEngine engine, int level)
+    {
+        // Both terms are at most int.MaxValue milliseconds (DatabaseEngine.MaximumWorkerFailureWindow
+        // and DatabaseApplicationOptions.MaximumReopenDelay), so the sum cannot overflow.
+        TimeSpan window = engine.WorkerFailureWindow + GetBackoffStep(level);
+        return window > _maximumDelay ? window : _maximumDelay;
+    }
+
     // The engine's own offline-reopen path; what the reopen returns is the engine's to track.
     private static async ValueTask OpenAsync(DatabaseEngine engine, DatabaseName name, CancellationToken cancellationToken)
         => await engine.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
@@ -326,8 +359,8 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
         long now = Stopwatch.GetTimestamp();
         lock (_sync)
         {
-            // A reopen remembered past the window no longer carries its backoff over.
-            _reopened.RemoveAll(reopened => Stopwatch.GetElapsedTime(reopened.At, now) > _maximumDelay);
+            // A reopen remembered past its carry-over window no longer carries its backoff over.
+            _reopened.RemoveAll(reopened => Stopwatch.GetElapsedTime(reopened.At, now) > reopened.Window);
         }
 
         foreach (DatabaseEngine engine in _engines)
@@ -563,14 +596,15 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
         {
             _offline.Remove(entry);
 
-            // Remembered for the window: a database that goes offline again within it goes on from
-            // the step after the last one this episode reached.
+            // Remembered for the carry-over window: a database that goes offline again within it
+            // goes on from the step after the last one this episode reached (owner decision 48).
             if (FindReopened(entry.Engine, entry.Name) is { } earlier)
             {
                 _reopened.Remove(earlier);
             }
 
-            _reopened.Add(new ReopenedDatabase(entry.Engine, entry.Name, entry.Level + attempt, Stopwatch.GetTimestamp()));
+            int level = entry.Level + attempt;
+            _reopened.Add(new ReopenedDatabase(entry.Engine, entry.Name, level, Stopwatch.GetTimestamp(), GetCarryOverWindow(entry.Engine, level)));
         }
 
         DatabaseHostingEventSource.Log.ReopenSucceeded(entry.Engine, entry.Name, attempt);
@@ -703,8 +737,9 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     }
 
     /// <summary>
-    /// A database the service reopened, remembered for the maximum delay so that a database that
-    /// goes offline again keeps its backoff.
+    /// A database the service reopened, remembered for its carry-over window
+    /// (<see cref="GetCarryOverWindow"/>) so that a database that goes offline again keeps its
+    /// backoff.
     /// </summary>
-    private sealed record ReopenedDatabase(DatabaseEngine Engine, string Name, int Level, long At);
+    private sealed record ReopenedDatabase(DatabaseEngine Engine, string Name, int Level, long At, TimeSpan Window);
 }

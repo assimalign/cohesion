@@ -16,6 +16,7 @@ using Assimalign.Cohesion.Database.Documents;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
@@ -46,14 +47,18 @@ public sealed class DatabaseCompositionTests
         }
     }
 
-    /// <summary>Verifies deferred construction and registration freeze through retained surfaces.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: defers factories and freezes every registration surface")]
-    public async Task Build_WithDeferredFactories_ShouldConstructOnceAndFreezeRegistrations()
+    /// <summary>
+    /// Verifies deferred engine construction and the registration Build closes. The configuration
+    /// is a manager, as Web's is: it loads a provider as it is added, and stays live after Build.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Build: defers factories and closes engine, service and logging registration")]
+    public async Task Build_WithDeferredFactories_ShouldConstructOnceAndCloseRegistrations()
     {
         var builder = DatabaseApplication.CreateBuilder([]);
-        var configuration = builder.Configuration;
-        var services = builder.Services;
-        var container = services.Container;
+        ConfigurationManager configuration = builder.Configuration;
+        ServiceProviderBuilder services = builder.Services;
+        LoggerFactoryBuilder logging = builder.Logging;
+        var container = (ServiceContainer)services.Container;
         int engineCalls = 0;
         int configurationCalls = 0;
         configuration.AddProvider(_ =>
@@ -69,20 +74,41 @@ public sealed class DatabaseCompositionTests
             return new RecordingEngine();
         });
         engineCalls.ShouldBe(0);
-        configurationCalls.ShouldBe(0);
-        Should.Throw<InvalidOperationException>(() => services.Build());
-        Should.Throw<InvalidOperationException>(() => configuration.Build());
+        configurationCalls.ShouldBe(1);
+        configuration["Phase29:Custom"].ShouldBe("custom");
+        container.IsReadOnly.ShouldBeFalse();
 
         await using var application = builder.Build();
 
         engineCalls.ShouldBe(1);
         configurationCalls.ShouldBe(1);
+        container.IsReadOnly.ShouldBeTrue();
         Should.Throw<InvalidOperationException>(() => builder.Build());
         Should.Throw<InvalidOperationException>(() => builder.AddEngine(_ => new RecordingEngine()));
         Should.Throw<InvalidOperationException>(() => builder.AddService(new RecordingService([])));
-        Should.Throw<InvalidOperationException>(() => configuration.AddProvider(_ => new TestConfigurationProvider()));
         Should.Throw<InvalidOperationException>(() => services.AddSingleton(new Marker()));
         Should.Throw<InvalidOperationException>(() => container.Clear());
+        Should.Throw<InvalidOperationException>(() => logging.SetMinimumLevel(LogLevel.Debug));
+        application.Context.Configuration.ShouldBeSameAs(configuration);
+    }
+
+    /// <summary>
+    /// Verifies the application reserves the host-level service types it registers itself: a
+    /// registration of the environment, the configuration or the logger factory fails Build.
+    /// </summary>
+    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Services: rejects registrations of the reserved host-level types")]
+    [InlineData(typeof(IHostEnvironment))]
+    [InlineData(typeof(IConfiguration))]
+    [InlineData(typeof(ILoggerFactory))]
+    public void Build_WithReservedServiceRegistration_ShouldReject(Type reserved)
+    {
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.Services.Add(new ServiceDescriptor(reserved, _ => new object(), ServiceLifetime.Singleton));
+
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        failure.Message.ShouldStartWith($"{reserved.Name} is reserved for the application's own");
+        ((ServiceContainer)builder.Services.Container).IsReadOnly.ShouldBeTrue();
     }
 
     /// <summary>Verifies that failed construction compensates accepted products and consumes Build.</summary>
@@ -268,8 +294,14 @@ public sealed class DatabaseCompositionTests
         log.ShouldBe(["first:start", "first:stop"]);
     }
 
-    /// <summary>Verifies JSON, environment, arguments, and final provider registrations are loaded at Build.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Configuration: defaults and final services reach named engine construction")]
+    /// <summary>
+    /// Verifies the default configuration sources the builder adds when it is created with
+    /// arguments (JSON, environment-specific JSON, environment variables, then arguments), a
+    /// provider registered after them, and the built host-level pieces an owned engine factory
+    /// receives: the builder's environment and configuration, and the application's one provider
+    /// and logger factory, each registered in that provider.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Configuration: defaults and the built host-level pieces reach named engine construction")]
     public async Task Build_WithConfigurationAndServices_ShouldApplyDefaultsAndBuildTimeFactory()
     {
         DirectoryInfo directory = Directory.CreateTempSubdirectory("cohesion-phase29-");
@@ -283,9 +315,14 @@ public sealed class DatabaseCompositionTests
                 """{"Phase29":{"Json":"environment-json"}}""");
             Environment.SetEnvironmentVariable(environmentKey, "environment");
             string[] args = ["--Phase29:Arguments=arguments"];
-            var builder = DatabaseApplication.CreateBuilder(args);
-            builder.Options.ContentRootPath = FileSystemPath.Parse(directory.FullName);
-            builder.Options.Environment = "Testing";
+
+            // The environment and content root are read when the builder is created, as Web's are.
+            var options = new DatabaseApplicationOptions
+            {
+                ContentRootPath = FileSystemPath.Parse(directory.FullName),
+                Environment = "Testing",
+            };
+            var builder = new DatabaseApplicationBuilder(options, resourceAssembly: null, args);
             args[0] = "--Phase29:Arguments=mutated";
             var provider = new TestConfigurationProvider();
             builder.Configuration.AddProvider(_ => provider);
@@ -300,7 +337,9 @@ public sealed class DatabaseCompositionTests
                 engine.AddServer(owner => SqlDatabaseServer.Create(owner, new SqlDatabaseServerOptions { Listener = new InMemoryConnectionListener() }));
                 return engine.Build();
             });
-            provider.LoadCount.ShouldBe(0);
+            provider.LoadCount.ShouldBe(1);
+            builder.Environment.Name.ShouldBe("Testing");
+            builder.Environment.ContentRootPath.ShouldBe(FileSystemPath.Parse(directory.FullName));
 
             await using var application = builder.Build();
 
@@ -308,9 +347,16 @@ public sealed class DatabaseCompositionTests
             application.Context.Configuration["Phase29:Json"].ShouldBe("environment-json");
             application.Context.Configuration["Phase29:Environment"].ShouldBe("environment");
             application.Context.Configuration["Phase29:Arguments"].ShouldBe("arguments");
-            observed.ShouldNotBeNull().Configuration.ShouldBeSameAs(application.Context.Configuration);
-            observed.Services.ShouldBeSameAs(application.Context.Services);
+            DatabaseApplicationBuildContext built = observed.ShouldNotBeNull();
+            built.Configuration.ShouldBeSameAs(builder.Configuration);
+            built.Configuration.ShouldBeSameAs(application.Context.Configuration);
+            built.Environment.ShouldBeSameAs(builder.Environment);
+            built.Environment.ShouldBeSameAs(application.Context.Environment);
+            built.Services.ShouldBeSameAs(application.Context.Services);
+            built.LoggerFactory.ShouldNotBeNull();
             application.Context.Services.GetRequiredService<IConfiguration>().ShouldBeSameAs(application.Context.Configuration);
+            application.Context.Services.GetRequiredService<IHostEnvironment>().ShouldBeSameAs(builder.Environment);
+            application.Context.Services.GetRequiredService<ILoggerFactory>().ShouldBeSameAs(built.LoggerFactory);
             application.Context.GetEngine("custom").ShouldBeOfType<SqlDatabaseEngine>();
             application.Context.Servers.ShouldHaveSingleItem().Engine
                 .ShouldBeSameAs(application.Context.GetEngine("custom"));

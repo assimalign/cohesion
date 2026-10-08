@@ -20,7 +20,10 @@ with owner decision 35, and reviewed the same day, with one new owner-review ite
 landed"; §5.1, §5.2, §6.9, §8, §12); owner decision 42 (a time-based worker give-up, and Blob's
 server refusing only the failing database) landed on 2026-10-07 and its review was applied the
 same day, with four new owner-review items (§7, "Owner decision 42, as landed" and "Owner
-decision 42 review, as applied"; §12) ·
+decision 42 review, as applied"; §12); owner decisions 46 and 48 and the Hosting builder's
+concrete host-level pieces (item 1 of the owner request of 2026-10-08) landed on 2026-10-08, with
+four owner-review items (§7, "Owner decisions 46 and 48, and the Hosting builder's host-level
+pieces, as landed"; §12) ·
 **Created:** 2026-10-04 · **Owner:** Chase Crawford
 **Epic:** #1255 (`L03.02.01.56`) · **Phases:** #1256 to #1264 · **Rule:** `.claude/rules/database-area.md`
 · **Owner decision:** O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md` · **Supersedes:** #1232
@@ -64,9 +67,9 @@ otherwise, this list wins.
 | 43 | Blob's code for a database refused while a worker fails on it | `COHDBB003` (2026-10-08). |
 | 44 | A refused Blob exchange | Closes the session, as every Blob error frame does (2026-10-08). |
 | 45 | Busy (unfinished) passes between failed passes | Count toward the 100 s window: one unresolved streak (2026-10-08). |
-| 46 | A failed full version purge | Retried after the worker backoff, not a whole maintenance interval (2026-10-08). |
+| 46 | A failed full version purge | Retried after the worker backoff, not a whole maintenance interval (2026-10-08). **Landed** on `feat/hosting-builder-concrete-and-decisions-46-48`: all five purge workers retry a failed full pass for its database alone a `FailureBackoff` later, on the engine's clock, so it gives up at about 101 s (§7, "Owner decisions 46 and 48, and the Hosting builder's host-level pieces, as landed"). |
 | 47 | Index-maintenance workers and Blob's per-database refusal | Never refuse a database: they cannot take one offline (2026-10-08). |
-| 48 | Hosting's flapping carry-over window | Tied to the engine's `WorkerFailureWindow` (2026-10-08). |
+| 48 | Hosting's flapping carry-over window | Tied to the engine's `WorkerFailureWindow` (2026-10-08). **Landed** on the same branch: the engine's window plus the backoff step reached, at least `ReopenMaximumDelay` (§7, same entry; §12). |
 | 42 | Decision 35's pass count gives slow workers a much longer window (a version purge ~100 maintenance intervals), and Blob's server refuses every database while one worker fails | Time-based give-up: offline once a database's failures have persisted at least 100 s and spanned at least 3 passes (supersedes 35's count); and Blob's server refuses only the failing database (2026-10-07). **Landed** on `feat/owner-decision-42`: `WorkerFailureWindow` (100 s) and `WorkerFailureMinimumPasses` (3) replace `WorkerFailureLimit` on the engine base and every model's options and builder, measured on a `TimeProvider` the engine owns; `DatabaseEngine.HasFailingWorker(name)` and `HasEngineWideFailure` let Blob's server refuse only the failing database, with `COHDBB003`; the Sql, KeyValuePair and Graph servers had no engine-state gate (§7, "Owner decision 42, as landed"; §12). **Reviewed** on `feat/owner-decision-42-review`: a give-up the leaf fails is the database's failure, not the engine's; the offline refusal wins over `COHDBB003`; a refused exchange aborts the host's transaction first; index maintenance refuses nothing; a full purge pass's streak survives the deferred-undo retries; a stale second give-up is no longer queued; busy time counting toward the window is kept and put to the owner (§7, "Owner decision 42 review, as applied"). |
 
 Decisions 32 and 33, with decision 24 and #1272, landed on 2026-10-06 on
@@ -3936,6 +3939,120 @@ but one, which the review kept as it was and put to the owner.
   - **A give-up the leaf fails is the database's** (the implementer's item, applied as the
     reviewers proposed): confirm.
 
+**Owner decisions 46 and 48, and the Hosting builder's host-level pieces, as landed (2026-10-08,
+`feat/hosting-builder-concrete-and-decisions-46-48`, from `eec49a27`).** Storage and hosting
+runtime again, with item 1 of the owner request of 2026-10-08 (Database Hosting). Provisioning
+(`Provision`, `AddDatabase(..., CompiledSchema)`) is untouched: the owner's provisioning rework
+replaces it in a later change, and P7 stays on hold.
+
+- *Re-verification at `eec49a27`.* Each model's version-purge worker kept a failed full pass in
+  `_fullPassFailed` and ran the full pass again only when its single `_lastFullPass` timer
+  reached `MaintenanceInterval`, so a failing full pass gave up on its third failed pass at 120 s
+  and refused its Blob database for at least an interval (§7, "Owner decision 42 review, as
+  applied", owner review). `DatabaseReopenService.Discover` forgot every remembered reopen after
+  `ReopenMaximumDelay`. `DatabaseApplicationBuilder` exposed `IConfigurationBuilder Configuration`
+  and `IServiceProviderBuilder Services` as deferred facades (`Internal/DatabaseConfigurationRegistrations`,
+  `Internal/DatabaseServiceRegistrations`) that loaded nothing until Build; it had no environment
+  or logging member, and the enabled-resource telemetry built a logger factory nothing used.
+  `WebApplicationBuilder` exposes `HostEnvironment Environment`, `ConfigurationManager
+  Configuration`, `LoggerFactoryBuilder Logging` and `ServiceProviderBuilder Services`
+  (`Web.Hosting/src/WebApplicationBuilder.cs:87-105`), and registers the environment, the
+  configuration and `Logging.Build()` in the container at Build (`:242-244`).
+- *Decision 46.* The five purge workers (identical but for their types and comments) keep, per
+  database whose full pass failed, the timestamp at which it is retried: a `FailureBackoff` after
+  the failure. A pass runs a database's full pass when the engine's interval is due or its retry
+  is, so a retry runs for that database alone; `WaitForTrigger` wakes for the earliest retry,
+  published through a field because a test's pass can run beside the trigger wait; a failed full
+  pass found busy is retried a backoff later instead of at once, and the set is pruned of every
+  instance the engine no longer holds open (it was closed only before), so a retry that came due
+  for a database that left cannot keep waking the worker. The decision-42 streak handling
+  is unchanged: a deferred-undo-only pass between them reports the database unfinished. The
+  schedule, full passes and retries alike, moved from `Stopwatch` to the engine's clock (the
+  options' internal `TimeProvider`, `TimeProvider.System` in production), the one the window is
+  timed on, so a test crosses both on a clock it moves. Each worker gained an internal
+  `BeforeFullPass` hook its own test assembly uses to fail a full pass alone (§12). Side effect,
+  for the owner: a retry runs the coordinator's whole pass, deferred undo included, so while a
+  full pass keeps failing its database's deferred undo is retried at least once a backoff, not
+  only on the coordinator's doubling schedule.
+- *Decision 48.* A remembered reopen carries its own window, `GetCarryOverWindow(engine, level)`:
+  the engine's `WorkerFailureWindow` plus the backoff step the episode reached, never shorter than
+  `ReopenMaximumDelay`. At the defaults that is 102 s after a one-step episode and up to 160 s,
+  where it was 60 s; the floor keeps a device failure's carry-over on an engine whose window is
+  shorter (the main session's text said "instead of `ReopenMaximumDelay`"; the floor changes
+  nothing at the defaults, and is an owner call).
+- *The builder (owner request of 2026-10-08, item 1).* `DatabaseApplicationBuilder.Environment`
+  (`HostEnvironment`), `.Configuration` (`ConfigurationManager`), `.Logging`
+  (`LoggerFactoryBuilder`) and `.Services` (`ServiceProviderBuilder`, `EnableDynamicCode = false`,
+  `ValidateOnBuild`, `ValidateScopes`) are created when the builder is, as Web's are; the owner's
+  `LoggingFactoryBuilder` is `LoggerFactoryBuilder`. `CreateBuilder(args)` adds the default
+  configuration sources then (the JSON files, `COHESION_CONFIG__` variables, and, new, the ambient
+  resource settings ahead of the arguments, as Web adds them); `CreateBuilder()`,
+  `CreateBuilder(options)` and `new DatabaseApplicationBuilder(options)` start empty, as Web's do,
+  where every overload used to load the defaults at Build. The environment and content root are
+  read when the builder is created. Build builds the logger factory (owned by the application,
+  disposed after the provider), checks the registrations (closed factories and instances only;
+  `IHostEnvironment`, `IConfiguration` and `ILoggerFactory` reserved), registers the three pieces
+  as borrowed instances, makes the container read-only, and builds the provider once.
+  `DatabaseApplicationBuildContext`, which the owner named `DatabaseApplicationBuilderContext`,
+  carries the built counterparts, not the builders, because its factories run after the container
+  closed: `HostEnvironment Environment`, `ConfigurationManager Configuration`, `ServiceProvider
+  Services` (the DependencyInjection library's provider type is public) and `LoggerFactory
+  LoggerFactory`. The root `IDatabaseApplicationBuilder` gained nothing (COHRES004). The Hosting
+  project references `Assimalign.Cohesion.Logging` directly, as Web.Hosting does, since its
+  public API now names it. `DatabaseApplicationContext`'s public surface is unchanged
+  (`IConfiguration Configuration`, `IServiceProvider Services`); it holds the build context.
+  `Provision` and `AddDatabase` stay, for the provisioning rework. No caller outside Hosting's
+  tests used the retyped members: the templates, the SampleHost fixture, the Testing test host and
+  Studio compose through `CreateBuilder(args)`, the model verbs and `AddDatabase`.
+- *Behavior changes.* A configuration provider loads when it is added, so a provider that fails
+  fails the call that added it, not Build; one added after Build loads into the running
+  configuration (nothing recomposes); `Configuration` and `Services` no longer refuse their own
+  `Build`; service registration after Build throws the container's read-only error. Setting
+  `Options.Environment` or `.ContentRootPath` after the builder exists no longer changes the
+  environment.
+- *Tests.* Each model's `*WorkerResilienceTests` gains two, on the manual clock with the test
+  running the passes: a failed full pass is run again for its database alone a backoff later (not
+  before, and not for the healthy database), and its failure, and Blob's refusal predicate
+  `HasFailingWorker`, end once a retry completes; a full pass that keeps failing takes only its
+  database offline on its third failed pass, 101 s after its first, with
+  `VersionPurgeFailures` and the model's offline code. Hosting: the reopen tests' host takes an
+  engine window; a worker give-up past a 400 ms maximum delay but within the 500 ms engine window
+  plus the step keeps the backoff; the window's arithmetic (102 s, 160 s, and the floor for a
+  one-tick engine); the reserved registrations (three cases); the composition tests' freeze test
+  is now "defers factories and closes engine, service and logging registration", the defaults
+  test creates the builder with the environment set and asserts the build context's four pieces
+  and the three registrations, and the telemetry-off test asserts no telemetry service and an
+  empty provider list.
+- *Mutations.* With the retry condition removed from Sql's worker, both new Sql tests fail; with
+  the carry-over window back to `ReopenMaximumDelay`, the new Hosting reopen test fails.
+- *Docs.* The five purge workers' remarks; the root `DESIGN.md` window table and
+  `DatabaseEngine`/`DatabaseEngineWorker` remarks; the five model `DESIGN.md` files and options;
+  Blob's server section; Hosting's `DESIGN.md` ("Host-level pieces", the carry-over window, the
+  ownership table, the tests), `OVERVIEW.md` and `README.md`; `DATABASE_HOSTING_DESIGN.md` §6 marked
+  superseded in part.
+- *Gate.* A no-incremental build of the Database solution has no error and no Database warning
+  but CS2008 on Database.Refs (the others are DependencyInjection's and Configuration's), so
+  COHRES001, COHRES002 and COHRES004 hold. Every Database suite passes: Sql 1145, Documents 203,
+  Graph 410, Blob 183 and KeyValuePair 205 (each + 2), Hosting 75 (70 + 2 reopen + 3 reserved
+  registrations), and at their counts before the change Database.Tests 156, Language 105, Types
+  93, Storage 315, Transactions 108, Indexing 77, Execution 2, Protocol 23, Security 5,
+  Sql.Language 999, Sql.Catalog 47, Sql.Schema 39, Sql.Storage 14, Sql.Client 319,
+  Documents.Language 288, Documents.Catalog 9, Documents.Storage 31, Graph.Language 387,
+  Graph.Catalog 19, Graph.Storage 17, Graph.Client 59, Blob.Catalog 5, Blob.Storage 14,
+  Blob.Client 23, KeyValuePair.Catalog 4, KeyValuePair.Storage 3, KeyValuePair.Client 14, Client
+  61, Embedded 4, ApplicationModel 15 and Sdk.Database 18. Studio builds with no warning to an
+  output folder under `%TEMP%`, and its `--smoke` run gives 83 passed, 0 failed, 1 skipped; the
+  dependency graph, regenerated for the Hosting project's direct `Logging` reference, passes its
+  check; the Database runtime producer packs. Database.Testing's suite, which needs canonical
+  packs, was not rerun.
+- *Owner review.*
+  - **Deferred undo retried with a failing full pass**: about once a backoff, besides its
+    coordinator's doubling schedule (decision 46, above).
+  - **`ReopenMaximumDelay` kept as the carry-over window's floor** (decision 48, above).
+  - **The first step's carry-over at the defaults is not guaranteed** (§12).
+  - **Default configuration only with `CreateBuilder(args)`**, and the ambient resource settings
+    now in the configuration, both for parity with Web (above).
+
 **P7, #1263: ApplicationModel, templates, Studio and cohesion-examples.**
 
 - **ApplicationModel is verify-only.** The descriptor is kept and the COHAM001 closure contains no
@@ -4222,6 +4339,15 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
     count could. At the defaults the window is still longer than the one-minute
     `ReopenMaximumDelay`, so no worker give-up carries its backoff over; an engine whose window is
     shorter does. Still an owner item: tie the flapping window to the engine's, or keep it.
+    **Done** by owner decision 48 (§7, "Owner decisions 46 and 48, and the Hosting builder's
+    host-level pieces, as landed"): the carry-over window is the engine's `WorkerFailureWindow`
+    plus the backoff step the episode reached, at least `ReopenMaximumDelay`, so 102 s after a
+    one-step episode at the defaults and up to 160 s. Left: the first step's carry-over is not
+    guaranteed (a checkpoint give-up reaches the service about 100-103 s after the reopen,
+    against 102 s; from the second step, 104 s, it is), and a version purge whose first full pass
+    after the reopen comes up to a `MaintenanceInterval` later can miss the window at every step.
+    A window with more slack (the engine's window plus `ReopenMaximumDelay`, 160 s at every step)
+    would cover both; an owner call.
   - *Hosting reads the cause through a type test* (`engine is DatabaseEngine`) until P6 retypes
     Hosting onto the root bases; an engine of the root interface alone reports no cause. **Done at
     P6:** health and the reopen service read every engine's cause through
@@ -4245,7 +4371,8 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
   `DatabaseEngineWorker.ReportFailure`, or Blob gating on the target database's offline state, is a
   separate owner-approved change if the owner wants either. **Done** by owner decision 42 (§7,
   "Owner decision 42, as landed"): the give-up is timed (100 s across at least three failed
-  passes), so a version purge gives up at 120 s and a deferred undo at about 102 s, and Blob's
+  passes), so a version purge gives up at 120 s (about 101 s since owner decision 46, which
+  retries a failed full pass after the backoff) and a deferred undo at about 102 s, and Blob's
   server refuses only the database a worker fails on, with `COHDBB003`, serving the others.
 - Left by the owner decision 42 review (§7, "Owner decision 42 review, as applied"):
   - *No model test fails a full purge pass alone.* The five purge workers now keep a full pass's
@@ -4254,10 +4381,16 @@ sub-components, each changing namespace, plus the `using …Internal` lines in t
     unfinished), so the fix is pinned by the root's window tests and by review, not by a model
     test. The same gap leaves the deferred-undo give-up without a real-engine test (the
     implementer's follow-up). A test-only seam on the coordinator, or a shared purge worker in the
-    root's `shared` folder that one test could drive, would close both.
-  - *Owner items:* busy time counting toward the window; a failing full purge pass refusing its
-    Blob database for at least a `MaintenanceInterval` (or retrying it after `FailureBackoff`);
-    index maintenance left out of `HasFailingWorker`; and a give-up the leaf fails counting as the
+    root's `shared` folder that one test could drive, would close both. **The first half is done**
+    with owner decision 46: each model's purge worker has an internal `BeforeFullPass` hook (the
+    hook on the type that makes the call, `database-area.md`), and each model's
+    `*WorkerResilienceTests` fails a full pass alone through it (§7, "Owner decisions 46 and 48,
+    and the Hosting builder's host-level pieces, as landed"). The deferred-undo give-up still has
+    no real-engine test.
+  - *Owner items:* busy time counting toward the window (decision 45: kept); a failing full purge
+    pass refusing its Blob database for at least a `MaintenanceInterval` (or retrying it after
+    `FailureBackoff`; decision 46: retried after the backoff, **done**, §7); index maintenance left
+    out of `HasFailingWorker` (decision 47: kept); and a give-up the leaf fails counting as the
     database's failure.
 - Public exception leaves are not sealed yet: `DatabaseClientException`
   (`Client/src/Exceptions/DatabaseClientException.cs:16`, no derived type, found at P5),

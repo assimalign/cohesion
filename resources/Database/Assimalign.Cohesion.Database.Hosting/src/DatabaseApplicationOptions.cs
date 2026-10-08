@@ -16,7 +16,12 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     /// </summary>
     public static readonly TimeSpan MaximumReopenDelay = TimeSpan.FromMilliseconds(int.MaxValue);
 
-    /// <summary>Gets or sets the content root for configuration files; defaults to the application base directory.</summary>
+    /// <summary>
+    /// Gets or sets the content root for configuration files; defaults to the application base
+    /// directory. Read, with the environment, when the builder is created
+    /// (<see cref="DatabaseApplicationBuilder.Environment"/>), as an enabled resource's ambient
+    /// context sets both then.
+    /// </summary>
     public FileSystemPath? ContentRootPath { get; set; }
 
     /// <summary>Gets caller-owned engines to borrow. Nested servers are discovered during Build.</summary>
