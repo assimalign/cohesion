@@ -40,7 +40,7 @@ this tree on 2026-10-04 or in a cited reference source. **[Likely]** means a str
 
 ### Owner decisions of 2026-10-06
 
-The owner accepted every open recommendation on 2026-10-06, and decisions 35-42 on 2026-10-07. They settle the questions this file
+The owner accepted every open recommendation on 2026-10-06, and decisions 35-42 on 2026-10-07 and 43-48 on 2026-10-08. P7 (#1263) is on hold while the owner reworks the Hosting builder, schema provisioning and engine extensibility (2026-10-08). They settle the questions this file
 records as open or "pending owner confirmation" elsewhere; where an older paragraph says
 otherwise, this list wins.
 
@@ -61,6 +61,12 @@ otherwise, this list wins.
 | 39 | P5: transport dial failures | Wrapped in `DatabaseClientException` with its connection-failure code, as Npgsql wraps socket errors (2026-10-07). **Landed** on `feat/database-client-dial-failures`, with the client-local code `ProtocolErrorCode.ConnectionFailure`, and reviewed on `feat/database-client-dial-failures-review`, which also stops a handshake-phase reset's `SocketException` escaping raw (§7, "P5, as landed", owner review 39 and its "Review, as applied"; §12). |
 | 40 | Decision 22: how Hosting reports reopen attempts | Its internal `EventSource`, forwarded into logging (`event-source.md`) (2026-10-07). |
 | 41 | Decision 25: the journal cap | Needs two failed checkpoints in a row (2026-10-07). |
+| 43 | Blob's code for a database refused while a worker fails on it | `COHDBB003` (2026-10-08). |
+| 44 | A refused Blob exchange | Closes the session, as every Blob error frame does (2026-10-08). |
+| 45 | Busy (unfinished) passes between failed passes | Count toward the 100 s window: one unresolved streak (2026-10-08). |
+| 46 | A failed full version purge | Retried after the worker backoff, not a whole maintenance interval (2026-10-08). |
+| 47 | Index-maintenance workers and Blob's per-database refusal | Never refuse a database: they cannot take one offline (2026-10-08). |
+| 48 | Hosting's flapping carry-over window | Tied to the engine's `WorkerFailureWindow` (2026-10-08). |
 | 42 | Decision 35's pass count gives slow workers a much longer window (a version purge ~100 maintenance intervals), and Blob's server refuses every database while one worker fails | Time-based give-up: offline once a database's failures have persisted at least 100 s and spanned at least 3 passes (supersedes 35's count); and Blob's server refuses only the failing database (2026-10-07). **Landed** on `feat/owner-decision-42`: `WorkerFailureWindow` (100 s) and `WorkerFailureMinimumPasses` (3) replace `WorkerFailureLimit` on the engine base and every model's options and builder, measured on a `TimeProvider` the engine owns; `DatabaseEngine.HasFailingWorker(name)` and `HasEngineWideFailure` let Blob's server refuse only the failing database, with `COHDBB003`; the Sql, KeyValuePair and Graph servers had no engine-state gate (§7, "Owner decision 42, as landed"; §12). **Reviewed** on `feat/owner-decision-42-review`: a give-up the leaf fails is the database's failure, not the engine's; the offline refusal wins over `COHDBB003`; a refused exchange aborts the host's transaction first; index maintenance refuses nothing; a full purge pass's streak survives the deferred-undo retries; a stale second give-up is no longer queued; busy time counting toward the window is kept and put to the owner (§7, "Owner decision 42 review, as applied"). |
 
 Decisions 32 and 33, with decision 24 and #1272, landed on 2026-10-06 on
