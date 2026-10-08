@@ -1386,6 +1386,12 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     private void FlushCore(bool forceDurable)
     {
         _handle.Flush(durable: forceDurable);
+        if (forceDurable)
+        {
+            // The journal-flushes-per-second counter: completed durable flushes only, on a path
+            // that just waited on the device.
+            StorageEventSource.Log.CountJournalFlush();
+        }
     }
 
     /// <summary>

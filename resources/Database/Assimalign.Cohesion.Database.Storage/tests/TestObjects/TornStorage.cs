@@ -73,6 +73,10 @@ internal sealed class TornStorage : Storage
     /// The commit durability, set before the storage is initialized: an initialized storage never
     /// enters or leaves <see cref="StorageCommitDurability.None"/>.
     /// </param>
+    /// <param name="name">
+    /// The storage's name, which its file header keeps and its events report as their
+    /// <c>database</c>; a test that observes events gives each storage its own.
+    /// </param>
     public static TornStorage Create(
         CrashPoint? point = null,
         int poolCapacity = 8,
@@ -80,7 +84,8 @@ internal sealed class TornStorage : Storage
         bool dataWriteThrough = true,
         bool consistencyChecks = false,
         bool journalDurableFlushesOnly = false,
-        StorageCommitDurability durability = StorageCommitDurability.Synchronous)
+        StorageCommitDurability durability = StorageCommitDurability.Synchronous,
+        string name = "torn-harness")
     {
         var storage = new TornStorage(
             new CrashSimulationStream(dataWriteThrough, point, "data"),
@@ -92,7 +97,7 @@ internal sealed class TornStorage : Storage
         }
 
         storage.CommitDurability = durability;
-        storage.InitializeNew((Name)"torn-harness");
+        storage.InitializeNew((Name)name);
         return storage;
     }
 
