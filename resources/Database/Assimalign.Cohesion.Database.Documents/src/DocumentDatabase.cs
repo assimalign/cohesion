@@ -86,8 +86,10 @@ public sealed class DocumentDatabase : DatabaseInstance
         {
             var recovery = Coordinator.AnalyzeAndScrub();
             Catalog = DocumentCatalog.Open(storage, Coordinator);
+            long recoveryStarted = DocumentDatabaseEventSource.Log.IndexRecoveryStart(name, recovery.Aborted.Count);
             Catalog.RecoverIndexesAsync(recovery.Aborted).AsTask().GetAwaiter().GetResult();
             Coordinator.CompleteRecovery();
+            DocumentDatabaseEventSource.Log.IndexRecoveryStop(name, recoveryStarted);
         }
         else { Catalog = DocumentCatalog.Open(storage, Coordinator); }
     }

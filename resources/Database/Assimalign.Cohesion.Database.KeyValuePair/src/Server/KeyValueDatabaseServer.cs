@@ -169,10 +169,14 @@ public sealed class KeyValueDatabaseServer : DatabaseServer
                 {
                     _hardAbortSource!.Cancel();
 
+                    int aborted = 0;
                     foreach (KeyValueDatabaseServerSession session in _sessions.Values)
                     {
                         session.Abort();
+                        aborted++;
                     }
+
+                    KeyValueDatabaseEventSource.Log.SessionsAborted(_engine, aborted, _options.ShutdownDrainTimeout);
                 }
 
                 await drain.ConfigureAwait(false);
@@ -217,15 +221,23 @@ public sealed class KeyValueDatabaseServer : DatabaseServer
                 break;
             }
 
-            if (_sessions.Count >= _options.MaxSessions)
+            int activeSessions = _sessions.Count;
+            if (activeSessions >= _options.MaxSessions)
             {
+                KeyValueDatabaseEventSource.Log.SessionRejected(_engine, KeyValueDatabaseEventSource.RejectReason.SessionLimit, activeSessions, _options.MaxSessions);
                 _ = RejectAsync(connection, hardAbort);
                 continue;
             }
 
             var session = new KeyValueDatabaseServerSession(this, connection, _options, _engine, _authenticator);
 
-            _sessions.TryAdd(session.Id, session);
+            // The server-session gauge follows the registry exactly: up once here, down once when
+            // OnSessionCompleted removes the session.
+            if (_sessions.TryAdd(session.Id, session))
+            {
+                KeyValueDatabaseEventSource.Log.SessionAccepted(_engine, session, activeSessions + 1);
+            }
+
             session.Start(softStop, hardAbort);
         }
     }
@@ -258,6 +270,9 @@ public sealed class KeyValueDatabaseServer : DatabaseServer
 
     internal void OnSessionCompleted(KeyValueDatabaseServerSession session)
     {
-        _sessions.TryRemove(session.Id, out _);
+        if (_sessions.TryRemove(session.Id, out _))
+        {
+            KeyValueDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
+        }
     }
 }

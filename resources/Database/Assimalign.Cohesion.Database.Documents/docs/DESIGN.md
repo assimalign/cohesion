@@ -847,3 +847,24 @@ session leaf.
   before starting another operation on this session."; the worker disposal order (last attached
   first); and the collection's refusal of a session of another database or of another session
   than the one it is bound to.
+
+## Diagnostics
+
+The model raises its own events through one internal event source, named for the assembly:
+`Assimalign.Cohesion.Database.Documents`
+(`src/Internal/EventSource/DocumentDatabaseEventSource.cs`; database event-sources plan, batch
+B5). The model has no wire server, and its sessions, statements, transactions and storage are
+reported by the root (`Assimalign.Cohesion.Database`), Transactions and Storage sources, so this
+source writes only what the model owns: the recovery of a reopened database's secondary indexes.
+The Graph model writes the same two events, as its ids 10 and 11.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `IndexRecoveryStart` | Informational | `database`, `abortedWriters` (the writers the journal's analysis found aborted) |
+| 2 | `IndexRecoveryStop` | Informational | `database`, `durationMilliseconds` |
+
+Every open of an existing database writes both around `DocumentCatalog.RecoverIndexesAsync`,
+from the constructor that recovers it; a create writes neither, and a failed recovery writes no
+stop (the root's failed open reports it). No counters. The start reads its timestamp only while
+it is written. `DocumentDatabaseEventSourceTests` checks the name, the strict manifest, a reopen
+with an aborted writer, a create, and that neither write allocates while nobody listens.

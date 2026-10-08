@@ -32,12 +32,14 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     private readonly GraphDatabaseEngine _engine;
     private readonly DatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
+    private readonly long _acceptedTimestamp;
 
     private ProtocolChannel? _channel;
     private ProtocolFrameReader? _reader;
     private ProtocolFrameWriter? _writer;
     private GraphDatabaseSession? _databaseSession;
     private Task _completion = Task.CompletedTask;
+    private string _closeReason = GraphDatabaseEventSource.CloseReason.Unknown;
 
     internal GraphDatabaseServerSession(
         GraphDatabaseServer server,
@@ -52,6 +54,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         _engine = engine;
         _authenticator = authenticator;
         _lifetimeSource = CancellationTokenSource.CreateLinkedTokenSource(connection.ConnectionClosed);
+        _acceptedTimestamp = GraphDatabaseEventSource.Log.SessionTimestamp();
     }
 
     /// <inheritdoc />
@@ -62,6 +65,18 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     /// Never faults — the pump owns its errors.
     /// </summary>
     internal Task Completion => _completion;
+
+    /// <summary>
+    /// Gets why the session ended, for its <c>SessionClosed</c> event; the pump sets it on the
+    /// path that ends it.
+    /// </summary>
+    internal string CloseReason => _closeReason;
+
+    /// <summary>
+    /// Gets the timestamp the session's <c>SessionClosed</c> duration starts from; zero when the
+    /// event was disabled at accept.
+    /// </summary>
+    internal long AcceptedTimestamp => _acceptedTimestamp;
 
     internal void Start(CancellationToken softStop, CancellationToken hardAbort)
     {
@@ -115,21 +130,29 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         catch (ProtocolException exception)
         {
             // Framing or message-order violation: report and terminate.
+            _closeReason = GraphDatabaseEventSource.CloseReason.ProtocolViolation;
+            GraphDatabaseEventSource.Log.SessionProtocolViolation(this, exception.Message);
             await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, exception.Message).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             // Aborted, connection closed, or stop signaled mid-frame.
+            _closeReason = GraphDatabaseEventSource.CloseReason.Canceled;
         }
         catch (ConnectionAbortedException)
         {
+            _closeReason = GraphDatabaseEventSource.CloseReason.ConnectionAborted;
         }
         catch (IOException)
         {
             // The transport failed under the pump; nothing to report to the peer.
+            _closeReason = GraphDatabaseEventSource.CloseReason.TransportFailed;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
+            // The peer gets an internal error frame only; the event carries the failure.
+            _closeReason = GraphDatabaseEventSource.CloseReason.Faulted;
+            GraphDatabaseEventSource.Log.SessionFaulted(this, exception);
             await TryWriteErrorAsync(ProtocolErrorCode.Internal, "An unexpected server error terminated the session.").ConfigureAwait(false);
         }
         finally
@@ -160,17 +183,19 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
         {
             // Authentication timeout: drop the unauthenticated connection.
+            ReportHandshakeTimeout();
             return false;
         }
 
         if (frame is null)
         {
+            _closeReason = GraphDatabaseEventSource.CloseReason.PeerClosed;
             return false; // The peer closed before starting up.
         }
 
         if (frame.Value.Type != ProtocolMessageType.Startup)
         {
-            await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, $"Expected a startup frame but received {frame.Value.Type}.").ConfigureAwait(false);
+            await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected a startup frame but received {frame.Value.Type}.", string.Empty, string.Empty).ConfigureAwait(false);
             return false;
         }
 
@@ -178,7 +203,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
         if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiated))
         {
-            await TryWriteErrorAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.").ConfigureAwait(false);
+            await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.", startup.Database, startup.Principal).ConfigureAwait(false);
             return false;
         }
 
@@ -188,7 +213,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
         if (database is null)
         {
-            await TryWriteErrorAsync(ProtocolErrorCode.DatabaseNotFound, $"The server's engine has no database named '{startup.Database}'.").ConfigureAwait(false);
+            await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, $"The server's engine has no database named '{startup.Database}'.", startup.Database, startup.Principal).ConfigureAwait(false);
             return false;
         }
 
@@ -203,17 +228,19 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         }
         catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
         {
+            ReportHandshakeTimeout();
             return false;
         }
 
         if (frame is null)
         {
+            _closeReason = GraphDatabaseEventSource.CloseReason.PeerClosed;
             return false;
         }
 
         if (frame.Value.Type != ProtocolMessageType.AuthenticateResponse)
         {
-            await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate response but received {frame.Value.Type}.").ConfigureAwait(false);
+            await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate response but received {frame.Value.Type}.", startup.Database, startup.Principal).ConfigureAwait(false);
             return false;
         }
 
@@ -221,7 +248,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
         if (!authenticated)
         {
-            await TryWriteErrorAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.").ConfigureAwait(false);
+            await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.", startup.Database, startup.Principal).ConfigureAwait(false);
             return false;
         }
 
@@ -233,7 +260,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         {
             // The database went offline after a failed durable flush (#1243): every session is
             // refused, with the coded reason, until it is reopened.
-            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message).ConfigureAwait(false);
+            await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, exception.Message, startup.Database, startup.Principal).ConfigureAwait(false);
             return false;
         }
 
@@ -262,12 +289,14 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                 catch (OperationCanceledException) when (softStop.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested)
                 {
                     // Graceful drain: the session was idle at the frame boundary.
+                    _closeReason = GraphDatabaseEventSource.CloseReason.Shutdown;
                     await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
                     return;
                 }
                 catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested)
                 {
                     // Idle timeout eviction.
+                    _closeReason = GraphDatabaseEventSource.CloseReason.IdleTimeout;
                     await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The session was closed after exceeding the idle timeout.").ConfigureAwait(false);
                     return;
                 }
@@ -275,6 +304,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             if (frame is null)
             {
+                _closeReason = GraphDatabaseEventSource.CloseReason.PeerClosed;
                 return; // The peer closed cleanly between frames.
             }
 
@@ -292,10 +322,11 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                     break;
 
                 case ProtocolMessageType.Terminate:
+                    _closeReason = GraphDatabaseEventSource.CloseReason.Terminated;
                     return;
 
                 default:
-                    await TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, $"Unexpected {frame.Value.Type} frame in the ready state.").ConfigureAwait(false);
+                    await RejectUnexpectedFrameAsync(frame.Value.Type).ConfigureAwait(false);
                     return;
             }
         }
@@ -330,16 +361,22 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         {
             if (string.IsNullOrWhiteSpace(message.Statement))
             {
-                throw new DatabaseParseException("A graph statement must not be empty.");
+                // The root never sees an empty wire statement either, so it is reported as a
+                // parse failure, as the parse delegates below report theirs.
+                var empty = new DatabaseParseException("A graph statement must not be empty.");
+                GraphDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, empty);
+                throw empty;
             }
             // The engine session parses and validates the statement, so a statement that fails
             // here aborts an explicit transaction exactly as one that fails in process (#1188).
             // A successful result's warnings (an unknown label or relationship type, #1228) have
             // no frame in protocol 1.0, so the client receives the rows alone; protocol 1.1 (#1105)
             // sends them in the core Diagnostics frame before ResultComplete or PathsComplete.
+            // The parse delegates write StatementParseFailed for a statement that fails to parse:
+            // it fails before the root session sees it, so the root's statement events do not.
             var result = paths
                 ? await _databaseSession!.ExecuteStatementAsync(
-                    () => GraphPathsQueryRequest.FromGql(message.Statement, parameters), cancellationToken).ConfigureAwait(false)
+                    () => ParsePathsRequest(message.Statement, parameters), cancellationToken).ConfigureAwait(false)
                 : await _databaseSession!.ExecuteStatementAsync(
                     () => ParseScalarRequest(message.Statement, parameters), cancellationToken).ConfigureAwait(false);
             try
@@ -387,17 +424,41 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     }
 
     // The Execute exchange carries scalar rows only; entity and path projections use ExecutePaths.
-    private static GraphQueryRequest ParseScalarRequest(string statement, IReadOnlyDictionary<string, object?>? parameters)
+    // A parse or validation failure is written and propagates unchanged.
+    private GraphQueryRequest ParseScalarRequest(string statement, IReadOnlyDictionary<string, object?>? parameters)
     {
-        var request = GraphQueryRequest.FromGql(statement, parameters);
-        foreach (var projection in request.Statement.GqlExpression.Projections)
+        try
         {
-            if (projection.Property is null)
+            var request = GraphQueryRequest.FromGql(statement, parameters);
+            foreach (var projection in request.Statement.GqlExpression.Projections)
             {
-                throw new DatabaseException("Execute accepts scalar property projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.");
+                if (projection.Property is null)
+                {
+                    throw new DatabaseException("Execute accepts scalar property projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.");
+                }
             }
+            return request;
         }
-        return request;
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            GraphDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, exception);
+            throw;
+        }
+    }
+
+    // The ExecutePaths exchange's parse delegate. A parse or validation failure is written and
+    // propagates unchanged.
+    private GraphPathsQueryRequest ParsePathsRequest(string statement, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        try
+        {
+            return GraphPathsQueryRequest.FromGql(statement, parameters);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            GraphDatabaseEventSource.Log.StatementParseFailed(this, _databaseSession!.Database.Name, exception);
+            throw;
+        }
     }
 
     private async Task WritePathsAsync(QueryResult result, CancellationToken cancellationToken)
@@ -512,6 +573,39 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         }
     }
 
+    /// <summary>
+    /// Refuses the handshake: records why the session ends, writes the <c>HandshakeRefused</c>
+    /// event, and sends the coded error frame (best effort).
+    /// </summary>
+    private ValueTask RefuseHandshakeAsync(ProtocolErrorCode code, string detail, string database, string principal)
+    {
+        _closeReason = GraphDatabaseEventSource.CloseReason.HandshakeRefused;
+        GraphDatabaseEventSource.Log.HandshakeRefused(this, database, principal, code, detail);
+        return TryWriteErrorAsync(code, detail);
+    }
+
+    /// <summary>
+    /// Records that the handshake outlived the authentication timeout, which drops the connection
+    /// without an error frame.
+    /// </summary>
+    private void ReportHandshakeTimeout()
+    {
+        _closeReason = GraphDatabaseEventSource.CloseReason.HandshakeTimedOut;
+        GraphDatabaseEventSource.Log.HandshakeTimedOut(this, _options.AuthenticationTimeout);
+    }
+
+    /// <summary>
+    /// Terminates the session on a frame the ready state does not accept: records the violation
+    /// and sends the error frame (best effort).
+    /// </summary>
+    private ValueTask RejectUnexpectedFrameAsync(ProtocolMessageType type)
+    {
+        string violation = $"Unexpected {type} frame in the ready state.";
+        _closeReason = GraphDatabaseEventSource.CloseReason.ProtocolViolation;
+        GraphDatabaseEventSource.Log.SessionProtocolViolation(this, violation);
+        return TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, violation);
+    }
+
     private async ValueTask CleanupAsync()
     {
         try
@@ -529,6 +623,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                 catch (Exception exception) when (exception is not OutOfMemoryException)
                 {
                     // This session is terminal; remaining resources still need cleanup.
+                    GraphDatabaseEventSource.Log.SessionCleanupFailed(this, exception);
                 }
             }
         }

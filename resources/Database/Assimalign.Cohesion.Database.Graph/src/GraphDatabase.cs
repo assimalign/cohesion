@@ -84,8 +84,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
         Store = GraphStore.Open(storage, Coordinator);
         if (recovery is not null)
         {
+            long recoveryStarted = GraphDatabaseEventSource.Log.IndexRecoveryStart(name, recovery.Aborted.Count);
             Store.RecoverIndexesAsync(recovery.Aborted).AsTask().GetAwaiter().GetResult();
             Coordinator.CompleteRecovery();
+            GraphDatabaseEventSource.Log.IndexRecoveryStop(name, recoveryStarted);
         }
     }
 
