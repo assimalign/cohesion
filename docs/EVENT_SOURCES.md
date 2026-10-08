@@ -70,13 +70,29 @@ Without it, no tool and no forwarder receives any event; the libraries behave id
 | `Assimalign.Cohesion.Connections.Quic` | Listener bound/closed; connection opened/closed; stream opened/closed (Verbose) | `current-connections`, `total-connections`, `connections-per-second`, `current-streams`, `streams-per-second` | [Quic DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Quic/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Connections.NamedPipes` | Listener bound/closed; connection opened/closed | `current-connections`, `total-connections`, `connections-per-second` | [NamedPipes DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Connections.Udp` | Datagram connection opened (bind or connect)/closed | `current-connections`, `total-connections` | [Udp DESIGN.md](../libraries/Connections/Assimalign.Cohesion.Connections.Udp/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Database` | Engine worker failed (per database, or a whole pass; Warning); engine worker recovered; database taken offline after a worker's failures persisted (Error) | none | [Database DESIGN.md](../resources/Database/Assimalign.Cohesion.Database/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Database` | Engine created, composed, dispose start/stop; engine dispose failed (Error); engine worker failed (per database, or a whole pass; Warning), recovered, loop faulted (Error), give-up failed (Error), pass start/stop and unfinished work (Verbose, `Workers`); database created, opened, dropped, closed; database operation failed (Error); database taken offline after a worker's failures persisted (Error); server started, stopped; server start failed (Error); server session negotiated (Verbose, `Sessions`), authenticated; session opened/closed (Verbose, `Sessions`); statement start/stop (Verbose, `Statements`); slow statement (Warning; `SlowStatementThresholdMs` argument, default 1000); statement failed (Error); explicit transaction begun, committed, rolled back, aborted (Verbose, `Transactions`); commit failed (Error) | `current-sessions` | [Database DESIGN.md](../resources/Database/Assimalign.Cohesion.Database/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Database.Hosting` | Offline database found (Warning); reopen attempted, succeeded; reopen failed (Warning); reopen abandoned; reopen loop failed (Error) | none | [Database.Hosting DESIGN.md](../resources/Database/Assimalign.Cohesion.Database.Hosting/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.DependencyInjection` | Provider built; call site built, service resolved, scope disposed, provider descriptors, resolver compiled (Verbose); resolver compilation failed | none | [DependencyInjection DESIGN.md](../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/docs/DESIGN.md#diagnostics) |
 
 Deliberately not instrumented: `Assimalign.Cohesion.Connections` (contracts; it performs no network
 operations of its own), `Connections.InMemory` (a test driver), and `Connections.Security` (TLS
 handshakes are already reported by the runtime's `System.Net.Security` source).
+
+In the Database area (the per-project decisions are in
+[`docs/programs/DATABASE_EVENT_SOURCES_PLAN.md`](programs/DATABASE_EVENT_SOURCES_PLAN.md), §3):
+`Database.Types` (value types and codecs: pure functions whose failures are exceptions to the
+caller); `Database.Language`, `Database.Sql.Language`, `Database.Graph.Language` and
+`Database.Documents.Language` (parsers with no I/O and no lifecycle; a parse error reaches the
+session, which the root reports as a failed statement); `Database.Execution` (request and result
+contracts); the five `<Model>.Catalog` and five `<Model>.Storage` packages (catalog and record-format
+adapters over `Database.Storage`, which reports their I/O; a DDL refusal is a failed statement, and
+the catalogs' swallowed reads skip reclaimed MVCC versions, an expected outcome); `Database.Sql.Tcp`
+(one extension method configuring a listener `Connections.Tcp` reports); `Database.Embedded` (holds
+and disposes engines, whose lifecycle the root reports); `Database.Testing` (a test harness);
+`Database.ApplicationModel` (a declarative planner a gateway runs at build, with no run-time work);
+and `Sdk.Database.Tasks` (MSBuild tasks log through `TaskLoggingHelper` into the build log, inside a
+node no application tool attaches to). `Database.Sql.Schema` is expected to need none; that is
+decided after the schema-provisioning redesign lands.
 
 ## Not yet conforming
 

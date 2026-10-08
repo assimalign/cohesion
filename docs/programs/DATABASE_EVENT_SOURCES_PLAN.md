@@ -1,6 +1,6 @@
 # Database event sources: plan of record
 
-**Status:** proposed, 2026-10-08; awaiting owner review of §9 before batch B1 starts ·
+**Status:** in progress: batches B1-B5 implemented 2026-10-08 with the section 9 recommendations applied pending owner confirmation ·
 **Created:** 2026-10-08 · **Owner:** Chase Crawford
 **Request:** the owner's request of 2026-10-08, "Event Source Tracing: add extensive EventSource
 tracing to all the Database projects … follow the EventSource pattern within the repository and
