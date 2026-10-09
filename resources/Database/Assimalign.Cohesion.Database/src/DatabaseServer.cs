@@ -108,7 +108,14 @@ public abstract class DatabaseServer : IAsyncDisposable
                 // A failed start is terminal: the leaf released what the start acquired, and a
                 // later stop has nothing left to do.
                 Volatile.Write(ref _lifecycle, stopped);
-                DatabaseEventSource.Log.ServerStartFailed(this, exception);
+
+                // A canceled start is not a failure, as for every other failure event of the
+                // source: a host stopped during its startup reports no error per server.
+                if (exception is not OperationCanceledException)
+                {
+                    DatabaseEventSource.Log.ServerStartFailed(this, exception);
+                }
+
                 throw;
             }
 

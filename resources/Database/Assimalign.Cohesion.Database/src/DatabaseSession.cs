@@ -245,7 +245,7 @@ public abstract class DatabaseSession : IAsyncDisposable
             return ExecuteCoreAsync(request, cancellationToken);
         }
 
-        return ExecuteTracedAsync(request, statement: null, parameters: null, cancellationToken);
+        return ExecuteTraced(request, statement: null, parameters: null, cancellationToken);
     }
 
     /// <summary>
@@ -270,7 +270,7 @@ public abstract class DatabaseSession : IAsyncDisposable
             return ExecuteCoreAsync(statement, parameters, cancellationToken);
         }
 
-        return ExecuteTracedAsync(request: null, statement, parameters, cancellationToken);
+        return ExecuteTraced(request: null, statement, parameters, cancellationToken);
     }
 
     /// <summary>
@@ -434,12 +434,15 @@ public abstract class DatabaseSession : IAsyncDisposable
     protected virtual ValueTask DisposeAsyncCore() => ValueTask.CompletedTask;
 
     // The traced statement (event-sources plan, D5 a and §4.1 "Re-entry"): entered only while the
-    // source is enabled, for the outermost statement on the session. Its timestamp and the pooled
-    // wrapper cost nothing while nobody listens. The filter writes the failure of a core that threw
-    // and never catches it, so the exception leaves exactly as it would untraced; the events of a
-    // core that returned are written once the flag is cleared.
-    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
-    private async ValueTask<QueryResult> ExecuteTracedAsync(
+    // source is enabled, for the outermost statement on the session; its timestamp costs nothing
+    // while nobody listens. It calls the core exactly as the untraced path does, so a core that
+    // throws synchronously throws from the call whether or not anyone listens (event-source.md,
+    // rule 12), and a core that completed returns without a wrapper; only a core that has not
+    // completed successfully is awaited, in a pooled wrapper. A failure is captured by the filter,
+    // which catches nothing, and written from the finally, once the core's own finally blocks
+    // released what they held. The events of a core that returned are written once the flag is
+    // cleared.
+    private ValueTask<QueryResult> ExecuteTraced(
         QueryRequest? request,
         string? statement,
         IReadOnlyDictionary<string, object?>? parameters,
@@ -447,33 +450,66 @@ public abstract class DatabaseSession : IAsyncDisposable
     {
         long started = Stopwatch.GetTimestamp();
         _tracingStatement = true;
-        QueryResult result;
+        ValueTask<QueryResult> pending;
+        Exception? thrown = null;
         try
         {
             DatabaseEventSource.Log.StatementStart(this, request);
-            result = await (request is not null
+            pending = request is not null
                 ? ExecuteCoreAsync(request, cancellationToken)
-                : ExecuteCoreAsync(statement!, parameters, cancellationToken)).ConfigureAwait(false);
+                : ExecuteCoreAsync(statement!, parameters, cancellationToken);
         }
-        catch (Exception exception) when (TraceStatementFailure(request, exception, started))
+        catch (Exception exception) when (DatabaseEventSource.CaptureFailure(exception, out thrown))
+        {
+            throw;
+        }
+        finally
+        {
+            if (thrown is not null)
+            {
+                _tracingStatement = false;
+                DatabaseEventSource.Log.StatementThrew(this, request, thrown, started);
+            }
+        }
+
+        if (!pending.IsCompletedSuccessfully)
+        {
+            // Still running, or already faulted or canceled: the wrapper observes the outcome and
+            // hands it on as the core's task would.
+            return AwaitTracedAsync(pending, request, started);
+        }
+
+        var result = pending.Result;
+        _tracingStatement = false;
+        DatabaseEventSource.Log.StatementCompleted(this, request, result, started);
+        return new ValueTask<QueryResult>(result);
+    }
+
+    // The rest of a traced statement whose core did not complete successfully at once.
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<QueryResult> AwaitTracedAsync(ValueTask<QueryResult> pending, QueryRequest? request, long started)
+    {
+        QueryResult result;
+        Exception? thrown = null;
+        try
+        {
+            result = await pending.ConfigureAwait(false);
+        }
+        catch (Exception exception) when (DatabaseEventSource.CaptureFailure(exception, out thrown))
         {
             throw;
         }
         finally
         {
             _tracingStatement = false;
+            if (thrown is not null)
+            {
+                DatabaseEventSource.Log.StatementThrew(this, request, thrown, started);
+            }
         }
 
         DatabaseEventSource.Log.StatementCompleted(this, request, result, started);
         return result;
-    }
-
-    // An exception filter: writes the end of a statement whose core threw and returns false, so
-    // nothing is caught.
-    private bool TraceStatementFailure(QueryRequest? request, Exception exception, long started)
-    {
-        DatabaseEventSource.Log.StatementThrew(this, request, exception, started);
-        return false;
     }
 
     private void ThrowIfClosedLocked()

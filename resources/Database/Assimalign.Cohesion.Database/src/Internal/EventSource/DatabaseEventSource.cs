@@ -36,20 +36,31 @@ namespace Assimalign.Cohesion.Database.Internal;
 /// <b>Cost.</b> Every write is behind <see cref="EventSource.IsEnabled(EventLevel, EventKeywords)"/>,
 /// and every string a payload needs is computed inside that check. The members that time their
 /// work (statements, database create, open and drop) return their core directly while the source is
-/// disabled and enter a pooled async wrapper only while it is enabled at
-/// <see cref="EventLevel.Error"/> or a more verbose level; timestamps are taken only inside such a
-/// check. The one counter, <c>current-sessions</c>, is maintained whether or not anyone listens.
+/// disabled; while it is enabled at <see cref="EventLevel.Error"/> or a more verbose level they call
+/// the core the same way and enter a pooled async wrapper only for a core that has not completed
+/// successfully, so a core that throws synchronously throws from the call whether or not anyone
+/// listens (rule 12); the open, asynchronous untraced too, is one pooled wrapper.
+/// Timestamps are taken only inside such a check. A failure is captured by an exception filter
+/// (<see cref="CaptureFailure"/>) and written from the <c>finally</c> that follows, once the core's
+/// own <c>finally</c> blocks released the locks they held. The one counter, <c>current-sessions</c>,
+/// is maintained whether or not anyone listens.
 /// </para>
 /// <para>
 /// <b>Arguments.</b> <c>SlowStatementThresholdMs</c> sets how long a statement runs before
 /// <c>SlowStatement</c> reports it (default <see cref="DefaultSlowStatementThresholdMilliseconds"/>,
 /// event-sources plan D7). Each enabling session sets it: to its argument, or to the default when it
-/// passes none, so the last session to enable the source wins.
+/// passes none, so the last session to enable the source wins. A session that disables the source
+/// restores the default, so a brief tool session's threshold never outlives it.
 /// </para>
 /// <para>
 /// <b>Payloads</b> never carry statement text, parameter values, keys, values or authentication
-/// evidence (rule 11; plan D8). A failed statement is identified by its request kind, its session and
-/// its diagnostic code; an exception by its type's full name and its <see cref="Exception.Message"/>.
+/// evidence (rule 11; plan D8, owner question Q3). An exception is written as its type's full name
+/// and its <see cref="Exception.Message"/>, except where the message can quote the statement: a
+/// parser quotes the token it stopped at, string literals included, and every model's
+/// aborted-transaction refusal repeats the failed operation's message. A failed statement is
+/// therefore identified by its request kind, its session and its diagnostic code or exception type;
+/// an aborted transaction by its cause's type; and a commit refused because an operation aborted the
+/// transaction writes an empty message.
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database")]
@@ -103,6 +114,21 @@ internal sealed class DatabaseEventSource : EventSource
     [NonEvent]
     public long StartTimer(EventLevel level, EventKeywords keywords)
         => IsEnabled(level, keywords) ? Stopwatch.GetTimestamp() : 0;
+
+    /// <summary>
+    /// The exception filter of a traced member: records what its core threw and returns false, so
+    /// nothing is caught. The member writes the failure from the <c>finally</c> of the same
+    /// <c>try</c>, which runs once the core's own <c>finally</c> blocks released what they held; a
+    /// filter runs before them, while a core that threw inside a lock still holds it.
+    /// </summary>
+    /// <param name="exception">What the core threw.</param>
+    /// <param name="captured">Receives <paramref name="exception"/>.</param>
+    /// <returns>False, always.</returns>
+    public static bool CaptureFailure(Exception exception, out Exception captured)
+    {
+        captured = exception;
+        return false;
+    }
 
     /// <summary>
     /// Writes a failure of an engine worker: of one database's work, or of a whole pass when
@@ -548,13 +574,13 @@ internal sealed class DatabaseEventSource : EventSource
         double duration = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
         if (status == QueryResultStatus.Error && IsEnabled(EventLevel.Error, EventKeywords.None))
         {
+            // The code only: a diagnostic's message can quote the statement (owner question Q3).
             var diagnostic = FindFailureDiagnostic(result!.Diagnostics);
             StatementFailed(
                 session.Database.Name.ToString(),
                 session.SessionNumber,
                 GetRequestKind(request),
                 diagnostic?.Code ?? nameof(QueryResultStatus.Error),
-                diagnostic?.Message ?? string.Empty,
                 duration);
         }
 
@@ -579,12 +605,12 @@ internal sealed class DatabaseEventSource : EventSource
             status = QueryResultStatus.Error;
             if (IsEnabled(EventLevel.Error, EventKeywords.None))
             {
+                // The type only: a parse error quotes the token it stopped at (owner question Q3).
                 StatementFailed(
                     session.Database.Name.ToString(),
                     session.SessionNumber,
                     GetRequestKind(request),
                     GetTypeName(exception),
-                    exception.Message,
                     duration);
             }
         }
@@ -637,7 +663,9 @@ internal sealed class DatabaseEventSource : EventSource
 
     /// <summary>
     /// Writes that an operation's failure aborted an explicit transaction, which now refuses work
-    /// until its caller rolls it back. The operation's own failure is <c>StatementFailed</c>.
+    /// until its caller rolls it back. The operation's own failure is <c>StatementFailed</c>; the
+    /// cause is written by its type only, since its message can quote the statement (owner question
+    /// Q3).
     /// </summary>
     /// <param name="transaction">The transaction.</param>
     /// <param name="cause">The operation's failure.</param>
@@ -646,7 +674,7 @@ internal sealed class DatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, Keywords.Transactions))
         {
-            TransactionAborted(transaction.Id.ToString(), GetTypeName(cause), cause.Message);
+            TransactionAborted(transaction.Id.ToString(), GetTypeName(cause));
         }
     }
 
@@ -657,12 +685,17 @@ internal sealed class DatabaseEventSource : EventSource
     /// </summary>
     /// <param name="transaction">The transaction.</param>
     /// <param name="exception">The failure.</param>
+    /// <param name="aborted">
+    /// Whether an operation's failure had aborted the transaction. Every model's refusal of such a
+    /// commit repeats the operation's message, which can quote the statement, so the message is
+    /// written empty (owner question Q3).
+    /// </param>
     [NonEvent]
-    public void TransactionCommitFailed(DatabaseTransaction transaction, Exception exception)
+    public void TransactionCommitFailed(DatabaseTransaction transaction, Exception exception, bool aborted)
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            TransactionCommitFailed(transaction.Id.ToString(), GetTypeName(exception), exception.Message);
+            TransactionCommitFailed(transaction.Id.ToString(), GetTypeName(exception), aborted ? string.Empty : exception.Message);
         }
     }
 
@@ -774,9 +807,9 @@ internal sealed class DatabaseEventSource : EventSource
     private void SlowStatement(string engineName, string model, string database, long sessionNumber, string requestKind, string status, double durationMilliseconds, double thresholdMilliseconds)
         => WriteEvent(27, engineName, model, database, sessionNumber, requestKind, status, durationMilliseconds, thresholdMilliseconds);
 
-    [Event(28, Level = EventLevel.Error, Message = "A {2} statement of session {1} on database '{0}' failed after {5} ms: {3}: {4}")]
-    private void StatementFailed(string database, long sessionNumber, string requestKind, string failure, string message, double durationMilliseconds)
-        => WriteEvent(28, database, sessionNumber, requestKind, failure, message, durationMilliseconds);
+    [Event(28, Level = EventLevel.Error, Message = "A {2} statement of session {1} on database '{0}' failed after {4} ms: {3}.")]
+    private void StatementFailed(string database, long sessionNumber, string requestKind, string failure, double durationMilliseconds)
+        => WriteEvent(28, database, sessionNumber, requestKind, failure, durationMilliseconds);
 
     [Event(29, Level = EventLevel.Verbose, Keywords = Keywords.Transactions, Message = "Session {1} on database '{0}' began transaction {2} at {3}.")]
     private void TransactionBegun(string database, long sessionNumber, string transactionId, string isolationLevel)
@@ -790,9 +823,9 @@ internal sealed class DatabaseEventSource : EventSource
     private void TransactionRolledBack(string transactionId, string cause)
         => WriteEvent(31, transactionId, cause);
 
-    [Event(32, Level = EventLevel.Verbose, Keywords = Keywords.Transactions, Message = "Transaction {0} aborted because an operation in it failed: {1}: {2}. It refuses work until its caller rolls it back.")]
-    private void TransactionAborted(string transactionId, string exceptionType, string exceptionMessage)
-        => WriteEvent(32, transactionId, exceptionType, exceptionMessage);
+    [Event(32, Level = EventLevel.Verbose, Keywords = Keywords.Transactions, Message = "Transaction {0} aborted because an operation in it failed with {1}. It refuses work until its caller rolls it back.")]
+    private void TransactionAborted(string transactionId, string exceptionType)
+        => WriteEvent(32, transactionId, exceptionType);
 
     [Event(33, Level = EventLevel.Error, Message = "Transaction {0} failed to commit: {1}: {2}")]
     private void TransactionCommitFailed(string transactionId, string exceptionType, string exceptionMessage)
@@ -805,6 +838,14 @@ internal sealed class DatabaseEventSource : EventSource
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)
     {
+        if (command.Command == EventCommand.Disable)
+        {
+            // A session that ends takes its threshold with it: a brief tool session that set 0 ms
+            // must not leave a forwarder that is still enabled reporting every statement as slow.
+            Volatile.Write(ref _slowStatementThresholdMilliseconds, DefaultSlowStatementThresholdMilliseconds);
+            return;
+        }
+
         if (command.Command != EventCommand.Enable)
         {
             return;

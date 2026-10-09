@@ -410,7 +410,11 @@ durable record of its events. The decisions every source shares:
 - **Payload hygiene.** Never statement text, parameter values, keys, values, document or blob
   content, authentication evidence, connection strings or tokens. Identifiers (engine, database,
   storage, container, index and principal names, session and transaction ids, protocol and
-  diagnostic codes) are fine; an exception is its type's full name and its `Message`.
+  diagnostic codes) are fine; an exception is its type's full name and its `Message`, except where
+  the message can quote the statement: parse errors quote the token they stopped at, string
+  literals included, and the models' aborted-transaction refusals repeat the failed operation's
+  message. A statement or command failure is written by its diagnostic code or exception type only
+  (the root's `StatementFailed`, `TransactionAborted` and aborted `TransactionCommitFailed`).
 - **Thresholds are EventSource arguments**, not public API: `SlowStatementThresholdMs` (root) and
   `SlowLockWaitThresholdMs` (Transactions), 1000 ms by default.
 

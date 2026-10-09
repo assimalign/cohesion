@@ -197,8 +197,9 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         cancellationToken.ThrowIfCancellationRequested();
         long started = DatabaseEventSource.Log.StartTimer(EventLevel.Verbose, DatabaseEventSource.Keywords.Transactions);
 
-        // The filter writes a failed commit and never catches it: the exception leaves exactly as
-        // it would untraced.
+        // The filter captures a failed commit and catches nothing; the outer finally writes it once
+        // the inner blocks released the lock and the end gate.
+        Exception? thrown = null;
         try
         {
             // An offline database refuses the commit before it starts (#1243): nothing is written,
@@ -254,9 +255,16 @@ public abstract class DatabaseTransaction : IAsyncDisposable
                 _endGate.Release();
             }
         }
-        catch (Exception exception) when (TraceCommitFailure(exception))
+        catch (Exception exception) when (DatabaseEventSource.CaptureFailure(exception, out thrown))
         {
             throw;
+        }
+        finally
+        {
+            if (thrown is not null)
+            {
+                TraceCommitFailure(thrown);
+            }
         }
     }
 
@@ -566,15 +574,23 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         return RollbackCoreAsync();
     }
 
-    // An exception filter: writes a failed commit and returns false, so nothing is caught. A token
-    // canceled before the commit started is not a failed commit.
-    private bool TraceCommitFailure(Exception exception)
+    // Writes a failed commit, after the commit released its lock and its end gate. A token canceled
+    // before the commit started is not a failed commit. A commit an operation's failure aborted is
+    // refused with the model's error, which repeats that failure's message, so it is written
+    // without its message (owner question Q3).
+    private void TraceCommitFailure(Exception exception)
     {
-        if (exception is not OperationCanceledException)
+        if (exception is OperationCanceledException || !DatabaseEventSource.Log.IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            DatabaseEventSource.Log.TransactionCommitFailed(this, exception);
+            return;
         }
 
-        return false;
+        bool aborted;
+        lock (_sync)
+        {
+            aborted = _failure is not null;
+        }
+
+        DatabaseEventSource.Log.TransactionCommitFailed(this, exception, aborted);
     }
 }
