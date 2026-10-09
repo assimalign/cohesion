@@ -96,8 +96,8 @@ regardless, so a listener without it receives extended CONNECT requests and surf
 registers it by default, after the protocol-upgrade interceptor (Web.Hosting DESIGN); a host that
 clears `options.Interceptors` loses it, as it loses HTTP/1.1 WebSockets with the upgrade interceptor.
 Because the advertisement is unconditional, a listener that registers `HttpProtocolUpgrade` but not
-`HttpExtendedConnect` accepts HTTP/2 and HTTP/3 extended CONNECT handshakes it cannot surface: a
-WebSocket client that chose HTTP/2 or HTTP/3 on the strength of the setting then fails, instead of
+`HttpExtendedConnect` receives HTTP/2 and HTTP/3 extended CONNECT handshakes and dispatches them as
+plain `CONNECT` requests it cannot answer with a tunnel: a WebSocket client that chose HTTP/2 or HTTP/3 on the strength of the setting then fails, instead of
 falling back to HTTP/1.1, where that listener would have served it.
 
 ## Behavior change from 10.0.0-preview.1
@@ -105,8 +105,10 @@ falling back to HTTP/1.1, where that listener would have served it.
 Checked against the `v10.0.0-preview.1` tag:
 
 - **The listener must register the interceptor.** In preview.1 the HTTP/2 and HTTP/3 transports
-  published the validated `:protocol` under the `IHttpContext.Items` key `":protocol"`, and
-  `context.ExtendedConnect` built the feature from that string on every read. Extended CONNECT
+  published the `:protocol` value under the `IHttpContext.Items` key `":protocol"`, and
+  `context.ExtendedConnect` built the feature from a non-empty string on every read. A non-empty value
+  had been validated; an empty one passed validation on any method and was published too, and the
+  accessor ignored it (#1369 now rejects it). Extended CONNECT
   detection therefore worked on a bare listener, with nothing registered, although the feature
   could only report `Protocol`. The transport now publishes nothing to `Items`, and the feature
   exists only on a listener that registers `HttpExtendedConnect.CreateInterceptor()`. The Web host
