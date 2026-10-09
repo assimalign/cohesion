@@ -11,12 +11,38 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// Evaluates SQL scalar expressions against a row. Null propagates SQL-style:
-/// any null operand makes a comparison or arithmetic result null, and a null
+/// Binds SQL scalar expressions to a row shape and evaluates the bound form against rows. Null
+/// propagates SQL-style: any null operand makes a comparison or arithmetic result null, and a null
 /// predicate result filters the row out.
 /// </summary>
-internal sealed class SqlExpressionEvaluator
+/// <remarks>
+/// <para>
+/// An instance is a binding scope: the columns of the row an expression is evaluated over (with
+/// the join bindings that qualify them), the statement's parameter values, the slots a grouping or
+/// an ordering bound whole expressions to, the subquery slots of the statement and the database
+/// default collation. <see cref="Bind(SqlExpression)"/> compiles an expression against the scope
+/// once (<c>SqlExpressionEvaluator.Binding.cs</c>); <see cref="Evaluate(SqlBoundExpression, object?[])"/>
+/// walks the bound tree for each row and resolves nothing by name. The planner binds every
+/// expression a plan evaluates, and the executor evaluates them with the statement's materialized
+/// subquery values (<see cref="ForExecution"/>).
+/// </para>
+/// <para>
+/// The scope also answers the planner's own questions, which it asks once per statement, never per
+/// row: a column's ordinal, type and collation, the collation two expressions compare under, and a
+/// parameter's supplied value.
+/// </para>
+/// </remarks>
+internal sealed partial class SqlExpressionEvaluator
 {
+    /// <summary>The boxed Boolean results every predicate returns, shared rather than boxed per row.</summary>
+    private static readonly object True = true;
+
+    /// <summary>The boxed Boolean results every predicate returns, shared rather than boxed per row.</summary>
+    private static readonly object False = false;
+
+    /// <summary>Backs <see cref="ForExecution"/> for a statement without subquery values.</summary>
+    private static readonly SqlExpressionEvaluator RowEvaluator = new(Array.Empty<SqlCatalogColumn>(), null);
+
     private readonly IReadOnlyList<SqlCatalogColumn> _columns;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly IReadOnlyList<SqlTableBinding>? _bindings;
@@ -25,18 +51,25 @@ internal sealed class SqlExpressionEvaluator
     private readonly IReadOnlyDictionary<SqlExpression, SqlProjection>? _projectionSources;
 
     /// <summary>
-    /// Values materialized by the enclosing subquery plan, keyed by the slot the planner
-    /// left in the expression tree. Resolved here rather than substituted into a rebuilt
-    /// tree, so the executor never reconstructs the language package's AST nodes.
+    /// The subquery slots the planner lowered this statement's subqueries to, keyed by the node that
+    /// spells each one; binding turns such a node into a slot read.
     /// </summary>
-    private readonly IReadOnlyDictionary<SqlExpression, SqlExpression[]>? _subqueryValues;
+    private readonly IReadOnlyDictionary<SqlExpression, SqlSubquerySlot>? _subquerySlots;
+
+    /// <summary>
+    /// Values the enclosing subquery plans materialized, by slot. Read by bound subquery nodes
+    /// instead of substituting values into a rebuilt tree, so the executor never reconstructs the
+    /// language package's AST nodes.
+    /// </summary>
+    private readonly SqlSubqueryValues? _subqueryValues;
 
     internal SqlExpressionEvaluator(IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyDictionary<string, object?>? parameters,
         IReadOnlyList<SqlTableBinding>? bindings = null,
         IReadOnlyDictionary<SqlExpression, int>? valueOrdinals = null,
         Collation? defaultCollation = null,
         IReadOnlyDictionary<SqlExpression, SqlProjection>? projectionSources = null,
-        IReadOnlyDictionary<SqlExpression, SqlExpression[]>? subqueryValues = null)
+        IReadOnlyDictionary<SqlExpression, SqlSubquerySlot>? subquerySlots = null,
+        SqlSubqueryValues? subqueryValues = null)
     {
         _columns = columns;
         _parameters = parameters;
@@ -44,13 +77,32 @@ internal sealed class SqlExpressionEvaluator
         _valueOrdinals = valueOrdinals;
         _defaultCollation = defaultCollation ?? Collation.Binary;
         _projectionSources = projectionSources;
+        _subquerySlots = subquerySlots;
         _subqueryValues = subqueryValues;
     }
 
     /// <summary>
-    /// Resolves ordering references against materialized output slots while retaining
-    /// the source scope for other keys and each projection's comparison collation.
+    /// Gets the evaluator an executing plan evaluates its bound expressions with. Bound nodes carry
+    /// their ordinals, values and collations, so it needs no scope: only the statement's materialized
+    /// subquery values, which bound subquery nodes read.
     /// </summary>
+    /// <param name="subqueryValues">The statement's materialized subquery values, or null when it has none.</param>
+    /// <returns>The evaluator; a shared instance when there are no subquery values.</returns>
+    internal static SqlExpressionEvaluator ForExecution(SqlSubqueryValues? subqueryValues)
+        => subqueryValues is null ? RowEvaluator : new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), null, subqueryValues: subqueryValues);
+
+    /// <summary>Gets the statement's materialized subquery values, which a deferred collation reads.</summary>
+    internal SqlSubqueryValues? SubqueryValues => _subqueryValues;
+
+    /// <summary>
+    /// Creates the scope ordering keys bind in: references to ordering aliases and ordinals resolve
+    /// to the completed output slots that follow the source row, while other keys keep the source
+    /// scope, and each output slot takes its projection's collation.
+    /// </summary>
+    /// <param name="projections">The plan's projections, in output order.</param>
+    /// <param name="outputSlots">The ORDER BY nodes bound to output ordinals, or null when none are.</param>
+    /// <param name="projectionStart">The ordinal of the first output slot: the source row's width.</param>
+    /// <returns>The ordering scope; this scope when no ordering node names an output.</returns>
     internal SqlExpressionEvaluator ForOrdering(IReadOnlyList<SqlProjection> projections,
         IReadOnlyDictionary<SqlExpression, int>? outputSlots, int projectionStart)
     {
@@ -67,14 +119,14 @@ internal sealed class SqlExpressionEvaluator
             sources[expression] = projections[index];
         }
         return new SqlExpressionEvaluator(_columns, _parameters, _bindings, ordinals,
-            _defaultCollation, sources, _subqueryValues);
+            _defaultCollation, sources, _subquerySlots, _subqueryValues);
     }
 
     /// <summary>
-    /// Evaluates a predicate: true only when the expression evaluates to true
+    /// Evaluates a bound predicate: true only when the expression evaluates to true
     /// (false and null both reject the row).
     /// </summary>
-    internal bool Matches(SqlExpression? predicate, object?[] row)
+    internal bool Matches(SqlBoundExpression? predicate, object?[] row)
     {
         if (predicate is null)
         {
@@ -85,13 +137,22 @@ internal sealed class SqlExpressionEvaluator
     }
 
     /// <summary>
-    /// Evaluates a scalar expression against a row. An arithmetic fault anywhere in
-    /// the tree fails the statement with a coded <see cref="SqlEvaluationException"/>;
-    /// a raw runtime <see cref="ArithmeticException"/> never escapes evaluation.
+    /// Binds an expression in this scope and evaluates it once: the planner's way to compute a value
+    /// before any row exists (a <c>LIMIT</c> count, a seek bound, a parameter's type). An expression
+    /// a plan evaluates for every row is bound once instead (<see cref="Bind(SqlExpression)"/>).
     /// </summary>
     /// <exception cref="SqlEvaluationException">Division by zero or a numeric value out of range.</exception>
     /// <exception cref="DatabaseException">Any other evaluation error.</exception>
-    internal object? Evaluate(SqlExpression expression, object?[] row)
+    internal object? Evaluate(SqlExpression expression, object?[] row) => Evaluate(Bind(expression), row);
+
+    /// <summary>
+    /// Evaluates a bound expression against a row. An arithmetic fault anywhere in the tree fails
+    /// the statement with a coded <see cref="SqlEvaluationException"/>; a raw runtime
+    /// <see cref="ArithmeticException"/> never escapes evaluation.
+    /// </summary>
+    /// <exception cref="SqlEvaluationException">Division by zero or a numeric value out of range.</exception>
+    /// <exception cref="DatabaseException">Any other evaluation error.</exception>
+    internal object? Evaluate(SqlBoundExpression expression, object?[] row)
     {
         try
         {
@@ -106,41 +167,59 @@ internal sealed class SqlExpressionEvaluator
         }
     }
 
-    private object? EvaluateCore(SqlExpression expression, object?[] row)
+    private object? EvaluateCore(SqlBoundExpression expression, object?[] row)
     {
         // Every operator recurses through here, once per level of the tree, never once per term
         // of an AND/OR chain. A tree the thread has too little stack left for fails the statement
         // instead of overflowing the stack (#1151).
         RuntimeHelpers.EnsureSufficientExecutionStack();
 
-        // A grouping plan binds complete key expressions and aggregate calls
-        // to result slots; scalar expressions compose over those values.
-        if (_valueOrdinals is not null && _valueOrdinals.TryGetValue(expression, out int ordinal))
+        switch (expression.Kind)
         {
-            return row[ordinal];
+            case SqlBoundExpressionKind.Column:
+                return row[((SqlBoundColumn)expression).Ordinal];
+            case SqlBoundExpressionKind.Constant:
+                return ((SqlBoundConstant)expression).Value;
+            case SqlBoundExpressionKind.Binary:
+                return EvaluateBinary((SqlBoundBinary)expression, row);
+            case SqlBoundExpressionKind.Logical:
+                return EvaluateLogical((SqlBoundLogical)expression, row);
+            case SqlBoundExpressionKind.Call:
+                return EvaluateCall((SqlBoundCall)expression, row);
+            case SqlBoundExpressionKind.Slot:
+                return row[((SqlBoundSlot)expression).Ordinal];
+            case SqlBoundExpressionKind.Parameter:
+                return ((SqlBoundParameter)expression).Value;
+            case SqlBoundExpressionKind.Unary:
+                return EvaluateUnary((SqlBoundUnary)expression, row);
+            case SqlBoundExpressionKind.IsNull:
+                var isNull = (SqlBoundIsNull)expression;
+                return Box(EvaluateCore(isNull.Operand, row) is null != isNull.IsNegated);
+            case SqlBoundExpressionKind.Coalesce:
+                return Coalesce(((SqlBoundCoalesce)expression).Arguments, row);
+            case SqlBoundExpressionKind.Between:
+                return EvaluateBetween((SqlBoundBetween)expression, row);
+            case SqlBoundExpressionKind.In:
+                return EvaluateIn((SqlBoundIn)expression, row);
+            case SqlBoundExpressionKind.InSubquery:
+                return EvaluateInSubquery((SqlBoundInSubquery)expression, row);
+            case SqlBoundExpressionKind.Like:
+                return EvaluateLike((SqlBoundLike)expression, row);
+            case SqlBoundExpressionKind.Case:
+                return EvaluateCase((SqlBoundCase)expression, row);
+            case SqlBoundExpressionKind.Cast:
+                return EvaluateCast((SqlBoundCast)expression, row);
+            case SqlBoundExpressionKind.Subquery:
+                return SqlSubqueryValues.Get(_subqueryValues, ((SqlBoundSubquery)expression).Slot)[0];
+            case SqlBoundExpressionKind.Failure:
+                return ((SqlBoundFailure)expression).Raise();
+            default:
+                throw new DatabaseException($"Bound expression '{expression.Kind}' is not supported by the executor yet.");
         }
-
-        return expression switch
-        {
-            SqlConstantExpression constant => constant.Value,
-            SqlSubqueryExpression or SqlExistsExpression => EvaluateCore(ResolveSubquery(expression)[0], row),
-            SqlLiteralExpression literal => EvaluateLiteral(literal),
-            SqlColumnReferenceExpression column => row[ResolveColumn(column)],
-            SqlParameterExpression parameter => ResolveParameter(parameter),
-            SqlLogicalExpression logical => EvaluateLogical(logical, row),
-            SqlBinaryExpression binary => EvaluateBinary(binary, row),
-            SqlUnaryExpression unary => EvaluateUnary(unary, row),
-            SqlIsNullExpression isNull => EvaluateIsNull(isNull, row),
-            SqlBetweenExpression between => EvaluateBetween(between, row),
-            SqlInExpression inExpression => EvaluateIn(inExpression, row),
-            SqlLikeExpression like => EvaluateLike(like, row),
-            SqlCaseExpression caseExpression => EvaluateCase(caseExpression, row),
-            SqlFunctionCallExpression function => EvaluateFunction(function, row),
-            SqlCastExpression cast => EvaluateCast(cast, row),
-            SqlCollateExpression collate => EvaluateCore(collate.Operand, row),
-            _ => throw new DatabaseException($"Expression '{expression.GetType().Name}' is not supported by the executor yet."),
-        };
     }
+
+    /// <summary>Returns the shared box of a Boolean result.</summary>
+    private static object Box(bool value) => value ? True : False;
 
     internal int ResolveColumn(SqlColumnReferenceExpression column)
     {
@@ -195,68 +274,152 @@ internal sealed class SqlExpressionEvaluator
         return ordinal >= 0 && ordinal < _columns.Count ? _columns[ordinal].Type.Type : null;
     }
 
-    /// <summary>Resolves explicit expression, column, then database collation in that order.</summary>
+    /// <summary>
+    /// Resolves the collation two expressions compare under, explicit expression, column, then
+    /// database collation in that order: the planner's question, asked once per statement. A
+    /// subquery is opaque here, as it was while planning: its values' collation applies once the
+    /// expression is bound (<see cref="Bind(SqlExpression)"/>).
+    /// </summary>
     internal Collation ResolveCollation(SqlExpression? expression, SqlExpression? other = null)
-    {
-        var first = FindCollation(expression);
-        var second = FindCollation(other);
-        return (second.Priority > first.Priority ? second.Collation : first.Collation) ?? _defaultCollation;
-    }
+        => SqlCollationCandidate.Choose(FindCollation(expression, bound: false), FindCollation(other, bound: false))
+            ?? _defaultCollation;
 
     /// <summary>Resolves a directly projected column against the database default.</summary>
     internal Collation ResolveColumnCollation(int ordinal) => _columns[ordinal].Collation ?? _defaultCollation;
 
-    private (Collation? Collation, int Priority) FindCollation(SqlExpression? expression)
+    /// <summary>The collation a column contributes: 2 when declared on the column, 1 when inherited.</summary>
+    private SqlCollationCandidate ColumnCollation(int ordinal)
+        => new(ResolveColumnCollation(ordinal), _columns[ordinal].Collation is null ? 1 : 2);
+
+    /// <summary>
+    /// Finds the collation an expression contributes to a comparison, and how strongly it binds,
+    /// by walking the expression.
+    /// </summary>
+    /// <param name="expression">The expression, or null for none.</param>
+    /// <param name="bound">
+    /// <see langword="false"/> for the planner's question: a subquery is opaque, and a column or
+    /// collation that does not resolve throws now. <see langword="true"/> for a bound expression,
+    /// which evaluation compares: a subquery contributes its values' collation, and a failure is
+    /// deferred to the comparison that would have raised it.
+    /// </param>
+    /// <returns>The candidate.</returns>
+    private SqlCollationCandidate FindCollation(SqlExpression? expression, bool bound)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is null)
+        {
+            return default;
+        }
 
         // A materialized subquery carries its child column's collation on each value.
-        if (expression is SqlSubqueryExpression or SqlExistsExpression or SqlInExpression { Subquery: not null }
-            && _subqueryValues is not null && _subqueryValues.TryGetValue(expression, out var materialized)
-            && materialized.Length > 0)
+        if (bound && expression is SqlSubqueryExpression or SqlExistsExpression or SqlInExpression { Subquery: not null }
+            && _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot))
         {
-            return FindCollation(materialized[0]);
+            return SubqueryCollation(slot, slot.Kind == SqlSubqueryKind.Set ? FindCollationCore(expression, bound) : default);
         }
+
+        return FindCollationCore(expression, bound);
+    }
+
+    private SqlCollationCandidate FindCollationCore(SqlExpression expression, bool bound)
+    {
         if (expression is SqlConstantExpression { Collation: not null } constant)
         {
-            return (constant.Collation, 2);
+            return new(constant.Collation, 2);
         }
-        if (expression is not null && _projectionSources is not null
-            && _projectionSources.TryGetValue(expression, out var source))
+        if (_projectionSources is not null && _projectionSources.TryGetValue(expression, out var source))
         {
-            return source.ColumnOrdinal is int ordinal
-                ? (ResolveColumnCollation(ordinal), _columns[ordinal].Collation is null ? 1 : 2)
-                : FindCollation(source.Expression);
+            return source.ColumnOrdinal is int ordinal ? ColumnCollation(ordinal) : FindCollation(source.Expression, bound);
         }
         if (expression is SqlCollateExpression collate)
         {
-            var inner = FindCollation(collate.Operand);
-            return inner.Priority == 3 ? inner : (Collation.FromName(collate.CollationName), 3);
+            return CollateCollation(FindCollation(collate.Operand, bound), collate.CollationName, bound);
         }
         if (expression is SqlColumnReferenceExpression column)
         {
-            int ordinal = ResolveColumn(column);
-            return (ResolveColumnCollation(ordinal), _columns[ordinal].Collation is null ? 1 : 2);
+            return ColumnReferenceCollation(column, bound);
         }
-        (Collation? Collation, int Priority) best = (null, 0);
-        if (expression is not null)
+
+        // CASE conditions select a result; their collation does not describe that result.
+        var children = expression is SqlCaseExpression conditional
+            ? conditional.WhenClauses.Select(clause => clause.Result).Concat(
+                conditional.ElseResult is null ? [] : new[] { conditional.ElseResult })
+            : SqlPlanner.Children(expression);
+        var candidates = new List<SqlCollationCandidate>();
+        foreach (var child in children)
         {
-            // CASE conditions select a result; their collation does not describe that result.
-            var children = expression is SqlCaseExpression conditional
-                ? conditional.WhenClauses.Select(clause => clause.Result).Concat(
-                    conditional.ElseResult is null ? [] : new[] { conditional.ElseResult })
-                : SqlPlanner.Children(expression);
-            foreach (var child in children)
-            {
-                var candidate = FindCollation(child);
-                if (candidate.Priority > best.Priority)
-                {
-                    best = candidate;
-                }
-            }
+            candidates.Add(FindCollation(child, bound));
         }
-        return best;
+        return SqlCollationCandidate.Fold(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(candidates));
     }
+
+    /// <summary>
+    /// The collation a materialized subquery contributes: a scalar's value carries the subquery
+    /// column's collation, an <c>EXISTS</c>'s Boolean none, and an <c>IN</c> subquery's values the
+    /// column's collation when it returned rows and the IN's operand's otherwise.
+    /// </summary>
+    /// <param name="slot">The subquery's slot.</param>
+    /// <param name="unmaterialized">
+    /// For an <c>IN</c> subquery, the collation the node contributes when the subquery returned no
+    /// rows; unused for the other kinds.
+    /// </param>
+    private static SqlCollationCandidate SubqueryCollation(SqlSubquerySlot slot, SqlCollationCandidate unmaterialized) => slot.Kind switch
+    {
+        SqlSubqueryKind.Scalar => new(slot.Collation, 2),
+        SqlSubqueryKind.Exists => default,
+        _ => SqlCollationCandidate.Deferred(new SqlCollationSubqueryTerm(slot.Id, slot.Collation, unmaterialized)),
+    };
+
+    /// <summary>An explicit <c>COLLATE</c>: an inner explicit collation still wins.</summary>
+    private static SqlCollationCandidate CollateCollation(SqlCollationCandidate operand, string name, bool bound)
+    {
+        if (operand.IsDeferred)
+        {
+            return SqlCollationCandidate.Deferred(new SqlCollationCollateTerm(operand, name));
+        }
+        if (operand.Priority == 3)
+        {
+            return operand;
+        }
+        if (!bound)
+        {
+            return new(Collation.FromName(name), 3);
+        }
+
+        try
+        {
+            return new(Collation.FromName(name), 3);
+        }
+        catch (Exception exception) when (IsDeferrable(exception))
+        {
+            return SqlCollationCandidate.Deferred(new SqlCollationFailureTerm(() => Collation.FromName(name)));
+        }
+    }
+
+    /// <summary>A column reference's collation; one that does not resolve fails now or, bound, when compared.</summary>
+    private SqlCollationCandidate ColumnReferenceCollation(SqlColumnReferenceExpression column, bool bound)
+    {
+        if (!bound)
+        {
+            return ColumnCollation(ResolveColumn(column));
+        }
+
+        try
+        {
+            return ColumnCollation(ResolveColumn(column));
+        }
+        catch (Exception exception) when (IsDeferrable(exception))
+        {
+            return SqlCollationCandidate.Deferred(new SqlCollationFailureTerm(() => ResolveColumn(column)));
+        }
+    }
+
+    /// <summary>
+    /// Whether binding defers an exception to evaluation rather than raising it: every exception but
+    /// an exhausted stack or memory, which fail the statement wherever they happen.
+    /// </summary>
+    private static bool IsDeferrable(Exception exception)
+        => exception is not (InsufficientExecutionStackException or OutOfMemoryException);
 
     /// <summary>An alias replaces the base relation name within the join scope.</summary>
     private static bool MatchesQualifier(SqlTableBinding binding, SqlColumnReferenceExpression column)
@@ -283,8 +446,9 @@ internal sealed class SqlExpressionEvaluator
 
     /// <remarks>
     /// A numeric literal its type cannot hold raises <see cref="OverflowException"/> with
-    /// the literal's text. <see cref="Evaluate"/> codes it as out of range, and a CAST
-    /// operand still reports it as a conversion failure.
+    /// the literal's text. <see cref="Evaluate(SqlBoundExpression, object?[])"/> codes it as out of
+    /// range, and a CAST operand still reports it as a conversion failure. Binding parses each
+    /// literal once; one that does not parse raises this when it is evaluated.
     /// </remarks>
     private static object? EvaluateLiteral(SqlLiteralExpression literal)
     {
@@ -292,7 +456,7 @@ internal sealed class SqlExpressionEvaluator
         {
             SqlLiteralType.Null => null,
             SqlLiteralType.String => literal.Value,
-            SqlLiteralType.Boolean => literal.Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase),
+            SqlLiteralType.Boolean => Box(literal.Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase)),
             SqlLiteralType.Integer => ParseIntegerLiteral(literal.Value),
             SqlLiteralType.Float => ParseFractionalLiteral(literal.Value),
             _ => throw new DatabaseException($"Literal type {literal.LiteralType} is not supported."),
@@ -328,22 +492,17 @@ internal sealed class SqlExpressionEvaluator
     /// Arithmetic inside the operand keeps its own coded fault: a division by zero or an
     /// overflowing operator is not a conversion failure.
     /// </summary>
-    private object? EvaluateCast(SqlCastExpression cast, object?[] row)
+    private object? EvaluateCast(SqlBoundCast cast, object?[] row)
     {
         try
         {
-            return SqlCastConverter.Convert(EvaluateCore(cast.Operand, row), cast);
+            return SqlCastConverter.Convert(EvaluateCore(cast.Operand, row), cast.Cast);
         }
         catch (Exception exception) when (exception is FormatException or OverflowException)
         {
-            throw new DatabaseException($"CAST to {cast.TargetType} failed: operand cannot be represented exactly.", exception);
+            throw new DatabaseException($"CAST to {cast.Cast.TargetType} failed: operand cannot be represented exactly.", exception);
         }
     }
-
-    private object? ResolveParameter(SqlParameterExpression parameter)
-        => TryGetParameterValue(parameter, out object? value)
-            ? value
-            : throw new DatabaseException($"No value was supplied for parameter '{parameter.ParameterName.TrimStart('@', '$')}'.");
 
     /// <summary>
     /// Gets the value the statement supplied for a parameter, which lets the planner check what
@@ -387,12 +546,12 @@ internal sealed class SqlExpressionEvaluator
     /// <c>(a AND b) AND c</c> left operand first visits a, b, c in turn and stops at the same
     /// term (the #1069 short-circuit contract).
     /// </remarks>
-    private object? EvaluateLogical(SqlLogicalExpression logical, object?[] row)
+    private object? EvaluateLogical(SqlBoundLogical logical, object?[] row)
     {
-        bool deciding = logical.Operator == SqlLogicalOperator.Or;
+        bool deciding = logical.IsOr;
         bool unknown = false;
         var operands = logical.Operands;
-        for (int index = 0; index < operands.Count; index++)
+        for (int index = 0; index < operands.Length; index++)
         {
             bool? value = EvaluateCore(operands[index], row) as bool?;
             if (value is null)
@@ -401,14 +560,14 @@ internal sealed class SqlExpressionEvaluator
             }
             else if (value.Value == deciding)
             {
-                return deciding;
+                return Box(deciding);
             }
         }
 
-        return unknown ? null : !deciding;
+        return unknown ? null : Box(!deciding);
     }
 
-    private object? EvaluateBinary(SqlBinaryExpression binary, object?[] row)
+    private object? EvaluateBinary(SqlBoundBinary binary, object?[] row)
     {
         object? leftValue = EvaluateCore(binary.Left, row);
         object? rightValue = EvaluateCore(binary.Right, row);
@@ -418,16 +577,16 @@ internal sealed class SqlExpressionEvaluator
             return null; // SQL null propagation
         }
 
-        var collation = ResolveCollation(binary.Left, binary.Right);
+        var collation = binary.Collation.Resolve(_subqueryValues);
 
         return binary.Operator switch
         {
-            SqlBinaryOperator.Equal => Compare(leftValue, rightValue, collation) == 0,
-            SqlBinaryOperator.NotEqual => Compare(leftValue, rightValue, collation) != 0,
-            SqlBinaryOperator.LessThan => Compare(leftValue, rightValue, collation) < 0,
-            SqlBinaryOperator.GreaterThan => Compare(leftValue, rightValue, collation) > 0,
-            SqlBinaryOperator.LessOrEqual => Compare(leftValue, rightValue, collation) <= 0,
-            SqlBinaryOperator.GreaterOrEqual => Compare(leftValue, rightValue, collation) >= 0,
+            SqlBinaryOperator.Equal => Box(Compare(leftValue, rightValue, collation) == 0),
+            SqlBinaryOperator.NotEqual => Box(Compare(leftValue, rightValue, collation) != 0),
+            SqlBinaryOperator.LessThan => Box(Compare(leftValue, rightValue, collation) < 0),
+            SqlBinaryOperator.GreaterThan => Box(Compare(leftValue, rightValue, collation) > 0),
+            SqlBinaryOperator.LessOrEqual => Box(Compare(leftValue, rightValue, collation) <= 0),
+            SqlBinaryOperator.GreaterOrEqual => Box(Compare(leftValue, rightValue, collation) >= 0),
             SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo => Arithmetic(binary.Operator, leftValue, rightValue),
             SqlBinaryOperator.Concat => Convert.ToString(leftValue, CultureInfo.InvariantCulture) + Convert.ToString(rightValue, CultureInfo.InvariantCulture),
@@ -435,19 +594,8 @@ internal sealed class SqlExpressionEvaluator
         };
     }
 
-    private object? EvaluateUnary(SqlUnaryExpression unary, object?[] row)
+    private object? EvaluateUnary(SqlBoundUnary unary, object?[] row)
     {
-        // The BIGINT minimum's magnitude is one past BIGINT's maximum, so its literal
-        // cannot be parsed before the sign applies. A negated integer literal of exactly
-        // that magnitude is read as the signed literal it spells.
-        if (unary.Operator == SqlUnaryOperator.Negate
-            && unary.Operand is SqlLiteralExpression { LiteralType: SqlLiteralType.Integer } magnitude
-            && ulong.TryParse(magnitude.Value, NumberStyles.None, CultureInfo.InvariantCulture, out ulong digits)
-            && digits == BigIntMinimumMagnitude)
-        {
-            return long.MinValue;
-        }
-
         object? operand = EvaluateCore(unary.Operand, row);
 
         if (operand is null)
@@ -475,7 +623,7 @@ internal sealed class SqlExpressionEvaluator
             SqlUnaryOperator.Plus => IsSignOperand(SqlUnaryOperator.Plus, operand)
                 ? operand
                 : throw SqlEvaluationException.InvalidOperandType("+", OperandTypeName(operand)),
-            SqlUnaryOperator.Not => operand is bool flag ? !flag : throw new DatabaseException("NOT requires a boolean operand."),
+            SqlUnaryOperator.Not => operand is bool flag ? Box(!flag) : throw new DatabaseException("NOT requires a boolean operand."),
             _ => throw new DatabaseException($"Unary operator {unary.Operator} is not supported."),
         };
     }
@@ -495,13 +643,7 @@ internal sealed class SqlExpressionEvaluator
         _ => value.GetType().Name,
     };
 
-    private object? EvaluateIsNull(SqlIsNullExpression expression, object?[] row)
-    {
-        bool isNull = EvaluateCore(expression.Operand, row) is null;
-        return expression.IsNegated ? !isNull : isNull;
-    }
-
-    private object? EvaluateBetween(SqlBetweenExpression expression, object?[] row)
+    private object? EvaluateBetween(SqlBoundBetween expression, object?[] row)
     {
         object? value = EvaluateCore(expression.Operand, row);
         object? lower = EvaluateCore(expression.Low, row);
@@ -512,38 +654,19 @@ internal sealed class SqlExpressionEvaluator
             return null;
         }
 
-        bool between = Compare(value, lower, ResolveCollation(expression.Operand, expression.Low)) >= 0
-            && Compare(value, upper, ResolveCollation(expression.Operand, expression.High)) <= 0;
-        return expression.IsNegated ? !between : between;
+        bool between = Compare(value, lower, expression.LowCollation.Resolve(_subqueryValues)) >= 0
+            && Compare(value, upper, expression.HighCollation.Resolve(_subqueryValues)) <= 0;
+        return Box(between != expression.IsNegated);
     }
 
-    /// <summary>
-    /// Resolves the values a subquery slot stands for. A slot reaching evaluation without
-    /// its plan having materialized it is an executor bug, not a user error.
-    /// </summary>
-    private SqlExpression[] ResolveSubquery(SqlExpression source)
+    private object? EvaluateIn(SqlBoundIn expression, object?[] row)
     {
-        if (_subqueryValues is null || !_subqueryValues.TryGetValue(source, out var values))
-        {
-            throw new DatabaseException("A subquery must be materialized by its plan before scalar evaluation.");
-        }
-
-        return values;
-    }
-
-    private object? EvaluateIn(SqlInExpression expression, object?[] row)
-    {
-        // A subquery contributes its whole result set as the candidate list, resolved
-        // before the empty-set rule below applies: IN over a subquery that returned no
-        // rows is an empty set, not a one-value set.
-        IReadOnlyList<SqlExpression> candidates = expression.Subquery is not null
-            ? ResolveSubquery(expression)
-            : expression.Values ?? throw new DatabaseException("An IN query requires a value list or a subquery.");
+        var candidates = expression.Candidates;
 
         // Membership of an empty set is FALSE, even for a NULL left operand.
-        if (candidates.Count == 0)
+        if (candidates.Length == 0)
         {
-            return expression.IsNegated;
+            return Box(expression.IsNegated);
         }
 
         object? value = EvaluateCore(expression.Operand, row);
@@ -554,26 +677,62 @@ internal sealed class SqlExpressionEvaluator
         }
 
         bool hasUnknown = false;
-        foreach (var candidate in candidates)
+        for (int index = 0; index < candidates.Length; index++)
         {
-            object? candidateValue = EvaluateCore(candidate, row);
+            object? candidateValue = EvaluateCore(candidates[index], row);
 
             if (candidateValue is null)
             {
                 hasUnknown = true;
             }
-            else if (Compare(value, candidateValue, ResolveCollation(expression.Operand, candidate)) == 0)
+            else if (Compare(value, candidateValue, expression.Collations[index].Resolve(_subqueryValues)) == 0)
             {
-                return !expression.IsNegated;
+                return Box(!expression.IsNegated);
             }
         }
 
         // No match with a NULL candidate is UNKNOWN for both IN and NOT IN.
         // CHECK permits UNKNOWN; WHERE filters it out.
-        return hasUnknown ? null : expression.IsNegated;
+        return hasUnknown ? null : Box(expression.IsNegated);
     }
 
-    private object? EvaluateLike(SqlLikeExpression expression, object?[] row)
+    private object? EvaluateInSubquery(SqlBoundInSubquery expression, object?[] row)
+    {
+        // A subquery contributes its whole result set as the candidate list, resolved
+        // before the empty-set rule below applies: IN over a subquery that returned no
+        // rows is an empty set, not a one-value set.
+        var candidates = SqlSubqueryValues.Get(_subqueryValues, expression.Slot);
+
+        // Membership of an empty set is FALSE, even for a NULL left operand.
+        if (candidates.Length == 0)
+        {
+            return Box(expression.IsNegated);
+        }
+
+        object? value = EvaluateCore(expression.Operand, row);
+
+        if (value is null)
+        {
+            return null;
+        }
+
+        bool hasUnknown = false;
+        foreach (object? candidateValue in candidates)
+        {
+            if (candidateValue is null)
+            {
+                hasUnknown = true;
+            }
+            else if (Compare(value, candidateValue, expression.Collation.Resolve(_subqueryValues)) == 0)
+            {
+                return Box(!expression.IsNegated);
+            }
+        }
+
+        return hasUnknown ? null : Box(expression.IsNegated);
+    }
+
+    private object? EvaluateLike(SqlBoundLike expression, object?[] row)
     {
         object? value = EvaluateCore(expression.Operand, row);
         object? pattern = EvaluateCore(expression.Pattern, row);
@@ -586,16 +745,16 @@ internal sealed class SqlExpressionEvaluator
         bool matches = LikeMatches(
             Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
             Convert.ToString(pattern, CultureInfo.InvariantCulture) ?? string.Empty,
-            ResolveCollation(expression.Operand, expression.Pattern));
+            expression.Collation.Resolve(_subqueryValues));
 
-        return expression.IsNegated ? !matches : matches;
+        return Box(matches != expression.IsNegated);
     }
 
-    private object? EvaluateCase(SqlCaseExpression expression, object?[] row)
+    private object? EvaluateCase(SqlBoundCase expression, object?[] row)
     {
         object? input = expression.Input is null ? null : EvaluateCore(expression.Input, row);
 
-        foreach (var when in expression.WhenClauses)
+        foreach (var when in expression.Whens)
         {
             if (expression.Input is null)
             {
@@ -609,7 +768,7 @@ internal sealed class SqlExpressionEvaluator
                 object? candidate = EvaluateCore(when.Condition, row);
 
                 if (input is not null && candidate is not null && Compare(input, candidate,
-                    ResolveCollation(expression.Input, when.Condition)) == 0)
+                    when.Collation.Resolve(_subqueryValues)) == 0)
                 {
                     return EvaluateCore(when.Result, row);
                 }
@@ -620,46 +779,27 @@ internal sealed class SqlExpressionEvaluator
     }
 
     /// <summary>
-    /// Computes a scalar function call. The call is matched against its signature first
-    /// (<see cref="SqlFunctionSignatures"/>), the table the planner resolved it against before any
-    /// row was read; a tree that reaches evaluation without planning fails here with the same
-    /// <c>COHSQLE006</c>, instead of computing a wrong-arity call (#1189: one used to evaluate no
-    /// argument and return NULL).
+    /// Computes a scalar function call. The binder matched the call against its signature
+    /// (<see cref="SqlFunctionSignatures"/>) once, before any row was read, and a call whose arguments
+    /// the signature refuses bound as a <see cref="SqlBoundFailure"/> raising <c>COHSQLE006</c>; so
+    /// the call evaluates exactly the arguments its function's signature admits, and no more.
     /// </summary>
-    /// <exception cref="SqlEvaluationException">
-    /// The call's arguments do not match its signature (<c>COHSQLE006</c>), or <c>ABS</c> of the
-    /// BIGINT minimum overflows (<c>COHSQLE002</c>).
-    /// </exception>
-    /// <exception cref="DatabaseException">The function does not execute as a scalar, or <c>ABS</c> receives a non-number.</exception>
-    private object? EvaluateFunction(SqlFunctionCallExpression function, object?[] row)
+    /// <exception cref="SqlEvaluationException"><c>ABS</c> of the BIGINT minimum overflows (<c>COHSQLE002</c>).</exception>
+    /// <exception cref="DatabaseException"><c>ABS</c> receives a non-number.</exception>
+    private object? EvaluateCall(SqlBoundCall call, object?[] row) => call.Function switch
     {
-        var signature = SqlFunctionSignatures.Resolve(function);
-        if (signature is null || signature.Kind != SqlFunctionKind.Scalar)
-        {
-            // A declared name outside the table (NULLIF, TRIM, ...), or an aggregate outside the
-            // grouping plan that binds it to a slot.
-            throw new DatabaseException($"Function '{function.FunctionName}' is not supported by the executor yet.");
-        }
-
-        // Each case evaluates the arguments its signature admits, and no more: the signature has
-        // just proven the count, and no case reads an argument another function's count implies.
-        var arguments = function.Arguments;
-        return signature.Function switch
-        {
-            SqlBuiltinFunction.Coalesce => Coalesce(arguments, row),
-            SqlBuiltinFunction.Upper => Upper(EvaluateCore(arguments[0], row)),
-            SqlBuiltinFunction.Lower => Lower(EvaluateCore(arguments[0], row)),
-            SqlBuiltinFunction.Length => Length(EvaluateCore(arguments[0], row)),
-            SqlBuiltinFunction.Abs => Abs(EvaluateCore(arguments[0], row)),
-            // A scalar entry added to the signature table without a case here.
-            _ => throw new DatabaseException($"Function '{function.FunctionName}' is not supported by the executor yet."),
-        };
-    }
+        SqlBuiltinFunction.Upper => Upper(EvaluateCore(call.Arguments[0], row)),
+        SqlBuiltinFunction.Lower => Lower(EvaluateCore(call.Arguments[0], row)),
+        SqlBuiltinFunction.Length => Length(EvaluateCore(call.Arguments[0], row)),
+        SqlBuiltinFunction.Abs => Abs(EvaluateCore(call.Arguments[0], row)),
+        // The binder builds a call only for the functions above.
+        _ => throw new DatabaseException($"Function '{call.Function}' is not supported by the executor yet."),
+    };
 
     /// <summary>The first non-NULL argument, evaluated left to right and no further.</summary>
-    private object? Coalesce(IReadOnlyList<SqlExpression> arguments, object?[] row)
+    private object? Coalesce(SqlBoundExpression[] arguments, object?[] row)
     {
-        for (int index = 0; index < arguments.Count; index++)
+        for (int index = 0; index < arguments.Length; index++)
         {
             object? value = EvaluateCore(arguments[index], row);
 

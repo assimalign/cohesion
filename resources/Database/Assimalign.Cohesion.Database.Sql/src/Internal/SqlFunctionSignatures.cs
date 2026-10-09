@@ -11,9 +11,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// The engine's one table of executable function signatures (#1189). Every check of a call's
 /// arguments reads it here, so a function added to the table is checked everywhere at once: the
 /// planner, which resolves every call in every expression position before it binds the catalog
-/// or reads a row; the evaluator, which checks a call again before it computes it; CHECK
-/// validation, which admits the scalars listed here; persisted-definition binding when a database
-/// opens; and aggregate detection.
+/// or reads a row; the expression binder, which resolves a call once and keeps the function in the
+/// bound call the evaluator computes; CHECK validation, which admits the scalars listed here;
+/// persisted-definition binding when a database opens; and aggregate detection.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -36,7 +36,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Until those members exist, a reader whose behaviour differs per function finds the function
 /// here (<see cref="FunctionOf"/>, or the signature <see cref="Resolve"/> returns) and switches on
 /// <see cref="SqlBuiltinFunction"/>; none compares the written name against a literal. Those
-/// switches are the evaluator's dispatch (<c>SqlExpressionEvaluator.EvaluateFunction</c>), the
+/// switches are the binder's and evaluator's dispatch (<c>SqlExpressionEvaluator.BindCall</c>,
+/// <c>SqlExpressionEvaluator.EvaluateCall</c>), the
 /// grouping planner's result types and SUM/AVG argument rule (<c>SqlPlanner.GroupExpressionTypeCore</c>,
 /// <c>SqlPlanner.PlanGroup</c>), the static operand type (<c>SqlPlanner.StaticOperandType</c>),
 /// CHECK's Boolean <c>COALESCE</c> rule (<c>SqlPlanExecutor.ValidateCheckSyntax</c>), and aggregate
@@ -48,7 +49,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <para>
 /// The table is a frozen dictionary built once from a fixed array: no reflection and no code
 /// generated at run time, so it is NativeAOT- and trimming-safe. A lookup compares the name
-/// case-insensitively without allocating, which the evaluator does once per call per row.
+/// case-insensitively without allocating; the binder does it once per call per statement, and no
+/// row looks a function up.
 /// </para>
 /// </remarks>
 internal static class SqlFunctionSignatures

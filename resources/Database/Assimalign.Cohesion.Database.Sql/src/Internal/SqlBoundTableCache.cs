@@ -176,10 +176,13 @@ internal sealed class SqlBoundTableCache
             string subject = $"CHECK constraint '{constraint.Name}' on table '{tableName}'";
             var predicate = SqlPersistedExpression.Load(constraint.CheckExpression!, subject);
             int[] ordinals;
+            SqlBoundExpression bound;
             try
             {
-                // Binding, not the DDL's acceptance rules: see SqlPersistedExpression.Bind.
-                SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation);
+                // Binding, not the DDL's acceptance rules: see SqlPersistedExpression.Bind. The
+                // bound tree is what every write to this version evaluates, so a write resolves no
+                // column, function or collation of the predicate again.
+                bound = SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation);
                 ordinals = ColumnOrdinals(table, predicate);
             }
             catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.FunctionSignatureMismatchCode)
@@ -207,7 +210,7 @@ internal sealed class SqlBoundTableCache
                 throw SqlPersistedExpression.OutOfStack(subject, exception);
             }
 
-            checks.Add(new SqlBoundCheck(constraint, predicate, ordinals));
+            checks.Add(new SqlBoundCheck(constraint, predicate, ordinals, bound));
         }
 
         var defaults = new string?[table.Columns.Count];

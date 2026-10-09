@@ -30,31 +30,33 @@ internal sealed partial class SqlPlanExecutor
     private readonly SqlCatalog _catalog;
     private readonly BTreeIndexManager _indexManager;
     private readonly SqlBoundTableCache _definitions;
-    private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
     /// <summary>
-    /// Values materialized by the enclosing subquery plan, scoped to the input plan it
-    /// wraps. Null outside a subquery plan; saved and restored around nesting.
+    /// The values this statement's subquery plans materialized, by slot: each slot is filled
+    /// while the input plan its subquery belongs to runs. Null until the statement runs its first
+    /// subquery plan.
     /// </summary>
-    private IReadOnlyDictionary<SqlExpression, SqlExpression[]>? _subqueryValues;
+    private SqlSubqueryValues? _subqueryValues;
 
     /// <summary>Initializes an executor for one statement.</summary>
     /// <param name="storage">The database's data storage.</param>
     /// <param name="catalog">The database's catalog.</param>
     /// <param name="indexManager">The database's index manager.</param>
     /// <param name="definitions">
-    /// The database's bound table versions: the parsed CHECK predicates and DEFAULT values every
+    /// The database's bound table versions: the bound CHECK predicates and DEFAULT values every
     /// write and every read of a missing trailing field use.
     /// </param>
-    /// <param name="parameters">The statement's bound parameter values.</param>
-    internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions,
-        IReadOnlyDictionary<string, object?>? parameters)
+    /// <remarks>
+    /// The executor takes no parameter values: the planner bound each parameter's supplied value
+    /// into the plan's expressions (<see cref="SqlBoundParameter"/>), so nothing looks one up by
+    /// name while the statement runs.
+    /// </remarks>
+    internal SqlPlanExecutor(SqlStorage storage, SqlCatalog catalog, BTreeIndexManager indexManager, SqlBoundTableCache definitions)
     {
         _storage = storage;
         _catalog = catalog;
         _indexManager = indexManager;
         _definitions = definitions;
-        _parameters = parameters;
     }
 
     /// <summary>
@@ -113,7 +115,7 @@ internal sealed partial class SqlPlanExecutor
 
     private QueryResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
         var matches = new List<object?[]>();
 
         // The access path narrows the candidate set; the full WHERE stays the
@@ -133,7 +135,7 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>Applies the common SELECT projection, ordering, distinctness and window.</summary>
     private static QueryResult MaterializeSelect(List<object?[]> matches, IReadOnlyList<SqlProjection> projections,
-        IReadOnlyList<SqlOrderByColumn> orderBy, long? limit, long? offset,
+        IReadOnlyList<SqlBoundOrdering> orderBy, long? limit, long? offset,
         bool isDistinct, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, int>? orderByProjections)
     {
@@ -173,7 +175,7 @@ internal sealed partial class SqlPlanExecutor
     /// once for aliases and ordinals, matching grouped-query ordering semantics.
     /// </summary>
     private static List<object?[]> ProjectAndSortRows(List<object?[]> matches,
-        IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlOrderByColumn> orderBy,
+        IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots)
     {
         if (matches.Count == 0)
@@ -182,6 +184,8 @@ internal sealed partial class SqlPlanExecutor
         }
         if (outputSlots is { Count: > 0 })
         {
+            // The ordering keys were bound with the outputs at the ordinals after the source row
+            // (SqlPlanner.BindOrdering), which is the source relation's width.
             int projectionStart = matches[0].Length;
             var rows = new List<object?[]>(matches.Count);
             foreach (var source in matches)
@@ -191,40 +195,46 @@ internal sealed partial class SqlPlanExecutor
                 Project(source).CopyTo(row, projectionStart);
                 rows.Add(row);
             }
-            return SortRows(rows, orderBy, evaluator.ForOrdering(projections, outputSlots, projectionStart))
+            return SortRows(rows, orderBy, evaluator)
                 .Select(row => row[projectionStart..]).ToList();
         }
         if (orderBy.Count > 0)
         {
             matches = SortRows(matches, orderBy, evaluator);
         }
-        return matches.Select(Project).ToList();
+
+        var projected = new List<object?[]>(matches.Count);
+        foreach (var row in matches)
+        {
+            projected.Add(Project(row));
+        }
+        return projected;
 
         object?[] Project(object?[] row)
         {
             var output = new object?[projections.Count];
-            for (int i = 0; i < projections.Count; i++)
+            for (int i = 0; i < output.Length; i++)
             {
                 var projection = projections[i];
                 output[i] = projection.ColumnOrdinal is int ordinal ? row[ordinal]
-                    : NormalizeGroupValue(evaluator.Evaluate(projection.Expression!, row), projection.Type);
+                    : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, row), projection.Type);
             }
             return output;
         }
     }
 
-    private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlOrderByColumn> orderBy,
+    private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator)
     {
         // Precompute sort keys; OrderBy is a stable sort, satisfying determinism.
-        var keyed = rows.Select(row => (Row: row, Keys: orderBy.Select(o => evaluator.Evaluate(o.Expression, row)).ToArray()));
+        var keyed = rows.Select(row => (Row: row, Keys: EvaluateKeys(row)));
 
         IOrderedEnumerable<(object?[] Row, object?[] Keys)>? ordered = null;
 
         for (int i = 0; i < orderBy.Count; i++)
         {
             int index = i;
-            var collation = evaluator.ResolveCollation(orderBy[index].Expression);
+            var collation = orderBy[index].Collation.Resolve(evaluator.SubqueryValues);
             var comparer = Comparer<object?>.Create((left, right) => (left, right) switch
             {
                 (null, null) => 0,
@@ -259,13 +269,23 @@ internal sealed partial class SqlPlanExecutor
             ExceptionDispatchInfo.Throw(inner);
             throw;
         }
+
+        object?[] EvaluateKeys(object?[] row)
+        {
+            var keys = new object?[orderBy.Count];
+            for (int i = 0; i < keys.Length; i++)
+            {
+                keys[i] = evaluator.Evaluate(orderBy[i].Key, row);
+            }
+            return keys;
+        }
     }
 
     /// <summary>Hashes each projected string with exactly the collation used for its equality.</summary>
     private static List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
         SqlExpressionEvaluator evaluator)
-        => rows.Distinct(new GroupKeyComparer(projections.Select(projection => projection.ColumnOrdinal is int ordinal
-            ? evaluator.ResolveColumnCollation(ordinal) : evaluator.ResolveCollation(projection.Expression)).ToArray())).ToList();
+        => rows.Distinct(new GroupKeyComparer(projections.Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues))
+            .ToArray())).ToList();
 
     // ── DML ────────────────────────────────────────────────────────────
     //
@@ -293,15 +313,20 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        // A VALUES row has no columns in scope: the planner rejects column references (#1165), and
-        // the evaluator's scope matches the empty row it is given, so no reference can resolve to an
-        // ordinal that row does not have.
-        var evaluator = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        // A VALUES row has no columns in scope: the planner rejects column references (#1165) and
+        // binds the values with no columns in scope, so no reference can resolve to an ordinal the
+        // empty row they are evaluated against does not have.
+        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
         var values = new List<object?[]>(plan.Rows.Count);
         foreach (var valueRow in plan.Rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            values.Add(valueRow.Select(expression => evaluator.Evaluate(expression, Array.Empty<object?>())).ToArray());
+            var row = new object?[valueRow.Length];
+            for (int i = 0; i < row.Length; i++)
+            {
+                row[i] = evaluator.Evaluate(valueRow[i], Array.Empty<object?>());
+            }
+            values.Add(row);
         }
         return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken).ConfigureAwait(false);
     }
@@ -313,7 +338,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
         var indexes = GetLiveIndexes(plan.Table);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
 
@@ -420,7 +445,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues);
         var targets = Scan(plan.Table, statement, cancellationToken).Where(row => evaluator.Matches(plan.Where, row.Values)).ToList();
 
         // Lock the directly targeted rows as one sorted batch before the cascade

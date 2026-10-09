@@ -15,10 +15,12 @@ empty input; compound constants such as `1 + 1` remain scalar expressions.
 
 The executor materializes each referenced projection before sorting and retains
 source values alongside it for other ordering keys. Grouped queries use the
-same binding against completed group outputs. `SqlExpressionEvaluator` resolves
-bound AST nodes by identity to these output slots and follows each projection's
-source for collation. It does not reconstruct language AST nodes or require
-cross-assembly internal access. Sorting is stable, with NULL first ascending and
+same binding against completed group outputs. The planner compiles each ordering
+key once, in the ordering scope (`SqlExpressionEvaluator.ForOrdering`): a node bound
+to an output becomes a slot read (`SqlBoundSlot`) at the ordinal after the source
+row, and the key's collation follows the projection's source, fixed before any row
+is sorted ([Bound expressions](#bound-expressions-e1)). Nothing reconstructs language
+AST nodes or requires cross-assembly internal access. Sorting is stable, with NULL first ascending and
 last descending, followed by DISTINCT and LIMIT/OFFSET. Explicit NULL placement
 and derived-table ordering remain capability errors. The exact syntax contract
 and execution evidence are in
@@ -27,13 +29,17 @@ and execution evidence are in
 ## Subquery and insert-source operators (#1021)
 
 `SqlPlanner.Subqueries.cs` binds each uncorrelated child SELECT in its own local
-scope and lowers its use sites to typed slots. `SqlSubqueryPlan` owns those child
-plans and the enclosing relation plan. `SqlPlanExecutor.Subqueries.cs` executes
-each child with the enclosing `SqlStatementContext`, materializes its results,
-and supplies typed constants or an IN value list by AST node identity while the
-enclosing plan runs. Expression evaluation never opens a query, session,
-transaction, or read view. Keeping the expression trees preserves grouping's
-expression-ordinal bindings, including subqueries in HAVING and aggregate arguments.
+scope and lowers its use sites to typed slots, numbered from zero across the
+statement (`SqlSubquerySlot`); the enclosing expressions bind each use site to a
+read of its slot (`SqlBoundSubquery`, `SqlBoundInSubquery`). `SqlSubqueryPlan` owns
+those child plans and the enclosing relation plan. `SqlPlanExecutor.Subqueries.cs`
+executes each child with the enclosing `SqlStatementContext`, materializes its
+results, and stores a scalar's value (a NULL when it returned no row), an EXISTS's
+Boolean or an IN's value list in the statement's `SqlSubqueryValues` under the slot
+while the enclosing plan runs, as PostgreSQL stores an init plan's output in a
+`PARAM_EXEC` parameter. Expression evaluation never opens a query, session,
+transaction, or read view. Grouping's expression-ordinal bindings hold for
+subqueries in HAVING and aggregate arguments, because the slot binding runs first.
 
 Scalar children require one output column and at most one row; an empty result
 is a typed null. IN children require one column and preserve SQL three-valued
@@ -55,10 +61,123 @@ Correlation is deliberately excluded: qualified outer references receive
 that cannot resolve in its local scope. Parsing and planning enforce at most 32
 subquery levels. UPDATE/DELETE, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
 subqueries, quantified comparisons, derived tables, CTEs and lateral joins remain
-outside the profile. SELECT continues to require FROM. Subquery resolution uses
-AST node identity at evaluation time; it needs no language-assembly friend access
-or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
+outside the profile. SELECT continues to require FROM. Subquery resolution binds
+each use site to its slot number when the statement is planned; it needs no
+language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
 for the exact supported forms and semantics.
+
+## Bound expressions (E1)
+
+The planner compiles every scalar expression a plan evaluates — a WHERE or JOIN
+condition, a projection, an ORDER BY key, a grouping key, an aggregate's operand,
+HAVING, an UPDATE assignment, a VALUES row — once per statement into an engine-owned
+`SqlBoundExpression` tree (`src/Internal/Expressions/`), and the executor's
+`SqlExpressionEvaluator` walks that tree for every row. A persisted CHECK compiles once
+per table version instead. This is PostgreSQL's executor shape: `ExecInitExpr` compiles
+an expression once per execution, and `ExecInitFunc` binds a call's function then, not
+per row (`src/backend/executor/execExpr.c:2696`). Phase E1 of
+`docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md` (decision 70); it changes no
+public API and no behavior.
+
+Who uses what, each arrow reading "references": the executor reads only bound trees,
+from the plan or from the table version's cache, and only the binder reads the AST.
+
+```mermaid
+flowchart TD
+    Executor["SqlPlanExecutor — evaluates per row"] --> Plan["SqlPlan"]
+    Executor --> Cache["SqlBoundTableCache — CHECK per table version"]
+    Planner["SqlPlanner — validates per statement"] --> Plan
+    Planner --> Binder["SqlExpressionEvaluator.Bind"]
+    Cache --> Binder
+    Plan --> Bound["SqlBoundExpression tree"]
+    Cache --> Bound
+    Binder --> Bound
+    Binder --> Ast["Sql.Language AST"]
+```
+
+- **What binding resolves.** A column reference becomes its ordinal (`SqlBoundColumn`);
+  a grouping key, an aggregate's result or a completed output that ORDER BY names
+  becomes a slot read (`SqlBoundSlot`, the aggregate slot); a parameter its supplied
+  value (`SqlBoundParameter`); a literal its parsed, boxed value (`SqlBoundConstant`);
+  a call the function its signature resolved to (`SqlBoundCall`, with `COALESCE` the
+  lazily evaluated special form `SqlBoundCoalesce`); a subquery the slot its plan fills
+  (`SqlBoundSubquery`, `SqlBoundInSubquery`); and every comparison — `=` and the other
+  comparison operators, BETWEEN, IN, LIKE, a simple CASE — the collation it uses. The
+  unbound evaluator did each of these on every row: a case-insensitive scan of the
+  column list per reference, a signature lookup and argument match per call, a parse
+  and a box per literal, and a search of both operand trees, allocating an iterator per
+  node, for every comparison's collation. The language AST is never rebuilt: a bound
+  CAST refers to the CAST node for its resolved target, and nothing constructs a
+  `Sql.Language` node (`general-rules.md`, `InternalsVisibleTo`).
+- **One scope type.** `SqlExpressionEvaluator` is both the binding scope (the row's
+  columns and join bindings, the statement's parameters, the slots a grouping or an
+  ordering bound whole expressions to, the statement's subquery slots, the database
+  default collation) and the evaluator. The planner binds through the scope it
+  validated with; the executor evaluates through `ForExecution`, which needs only the
+  statement's `SqlSubqueryValues`. `Evaluate(SqlExpression, row)` binds and evaluates
+  once, for what the planner computes before any row exists (a LIMIT count, a seek
+  bound, a parameter's type).
+- **Binding raises nothing evaluation raised only when it reached a node.** An
+  unsupported construct, a declared function that does not execute yet (`NULLIF`), an
+  aggregate outside a grouping plan, a call whose arguments its signature refuses, a
+  parameter with no supplied value, a column that does not resolve in a scope planning
+  did not validate, and a literal its type cannot hold each bind as a `SqlBoundFailure`
+  that raises the same exception, freshly constructed, when evaluated. So a statement
+  over an empty table, or one whose short circuit or CASE skips the node, succeeds
+  exactly as before, and an overflowing literal still codes as `COHSQLE002` at the
+  evaluation boundary and as a conversion failure under CAST. The walk checks the stack
+  as it descends, so a tree the thread cannot walk fails with `COHSQLE004` here.
+- **Collations in one pass.** Each node's collation candidate (the collation and its
+  priority: COLLATE 3, an explicitly collated column or a subquery's value 2, an
+  implicitly collated column 1) is computed from its operands' as the binding walk
+  returns, so a statement binds in time linear in its size however deeply its
+  comparisons nest. Two shapes resolve when the comparison runs instead
+  (`SqlDeferredCollation`): a term under `IN (subquery)`, whose collation was the
+  subquery's when it returned rows and the operand's when it returned none, and a term
+  whose collation failed to resolve, which still fails only when the comparison is
+  reached. The planner's own collation questions (seek bounds, join equalities, a
+  subquery's output collation) keep the plan-time rule, under which a subquery is
+  opaque.
+- **Persisted CHECK.** `SqlPlanExecutor.BindPersistedCheck` binds the loaded predicate
+  against the table version and returns its tree, which `SqlBoundTableCache` keeps in
+  `SqlBoundCheck.Bound` and every session writing the version evaluates. Bound trees
+  are immutable and failure nodes construct a new exception per throw, so sharing one
+  tree across threads is safe.
+- **Allocation.** Literals and parameters are boxed once per statement instead of per
+  row; predicates return shared boxed Booleans; `COUNT(*)` accumulates a shared boxed
+  sentinel; a projected value already of its declared type is not converted and boxed
+  again. Results that are computed still box once into the `object?[]` row, until the
+  row representation changes.
+- **Planner walkers.** `SqlPlanner.Children` returns the shared empty sequence for a
+  node without operands and a chain's or call's own operand list, so the walkers that
+  visit every node of every statement no longer allocate an iterator per leaf. With the
+  bound VALUES row and CHECK, an INSERT of three parameters into a checked table
+  allocates 2.2 KB (13%) less per statement (Q7 below).
+- **Not in E1.** A bound call carries no argument coercions: the built-ins take any
+  argument type and convert nothing, and overload resolution over typed signatures,
+  which introduces coercions, is phase E2. `SqlConstantExpression` is no longer
+  produced by the executor; a test still uses it as a node no SQL text spells.
+
+**Measurement.** `samples/Assimalign.Cohesion.Database.Sql.Benchmarks` is the program's
+§10 NativeAOT statement benchmark: an in-memory engine, a 100,000-row table, one warm-up
+and five measured iterations per case in each process, wall-clock nanoseconds per row
+(Q1 to Q3) or per statement (Q7) and the measuring thread's bytes
+(`GC.GetAllocatedBytesForCurrentThread`). Q7's CHECK calls the built-ins `LENGTH` and
+`ABS`; the registered-function variant arrives with E2. Published for win-arm64 from
+`27db14c7` and from E1 with the same harness and flags, and run as four alternating
+process pairs at high priority pinned to cores 8 to 11 (unpinned runs on the shared
+machine varied by about 30% with the cores a process landed on). Each cell is the range
+of the four runs' medians:
+
+| Case | Statement | Baseline ns | E1 ns | Baseline bytes | E1 bytes |
+| --- | --- | --- | --- | --- | --- |
+| Q1 | `SELECT UPPER(name), ABS(id), LENGTH(name) FROM t` | 1,406–1,533 | 1,160–1,350 | 1,076.6 | 1,015.6 |
+| Q2 | `SELECT id FROM t WHERE ABS(id) > 10` | 1,358–1,537 | 1,086–1,162 | 1,252.6 | 927.6 |
+| Q3 | `SELECT g, COUNT(*), SUM(v), AVG(v), MIN(s), MAX(s) FROM t GROUP BY g` | 1,747–1,913 | 1,458–1,589 | 1,257.1 | 1,041.8 |
+| Q7 | 100,000 autocommitted `INSERT`s under `CHECK (LENGTH(name) > 0 AND ABS(v) < 1000000000)` | 12,419–12,845 | 11,692–11,992 | 17,087 | 14,863 |
+
+Every E1 run was faster than every baseline run in each case. Most of a row's cost is
+the scan and materialization around the expressions, which E1 does not change.
 
 ## Compiled-schema provisioning
 
@@ -307,9 +426,10 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   `SqlFunctionSignature` per executable function: name, scalar or aggregate, the
   fewest and most arguments a call may pass, whether `*` is accepted (only
   `COUNT`), and the call forms a diagnostic shows. Its readers are the planner walk
-  above; the evaluator, which resolves each call against it again before computing
-  it (a tree that reaches evaluation unplanned gets the same `COHSQLE006`) and
-  dispatches on the entry instead of comparing upper-cased names per row; the
+  above; the expression binder, which resolves each call against it once when the
+  expression is bound and keeps the function it resolved to in the bound call (a
+  tree bound outside planning gets the same `COHSQLE006` when the call is
+  evaluated), so the evaluator dispatches on the function, never on a name, per row; the
   grouping planner and aggregate detection; CHECK validation, which admits exactly
   the table's scalars; and persisted-definition binding (below). The rule follows
   PostgreSQL's function resolution: `func_get_detail` keeps only candidates whose
@@ -651,8 +771,9 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   otherwise, ordinal string comparison, hand-rolled `LIKE`
   (`%`/`_`), `CASE`, `BETWEEN`, `IN` (lists), `IS NULL`, parameters (`@name`
   bound by bare name), and a small builtin set (`COALESCE`, `UPPER`, `LOWER`,
-  `LENGTH`, `ABS`) dispatched through the signature table above. Compiled
-  expression plans are a later optimization.
+  `LENGTH`, `ABS`) resolved through the signature table above. It walks the bound
+  expression tree the planner compiled once per statement, not the language AST
+  ([Bound expressions](#bound-expressions-e1)).
 - **Arithmetic faults are coded statement failures (#1069).** Division or
   modulo by zero raises `SqlEvaluationException` with `COHSQLE001`; a result,
   operand, literal, aggregate or CASE/COALESCE value outside its numeric type
@@ -734,7 +855,8 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   `ContainsStar`, the sargable and join
   equality collectors, ordering alias binding, grouping binding, `SameGroupExpression`,
   `GroupExpressionType`, the subquery source walk and `PlanSubqueries`), the
-  evaluator (`EvaluateCore`, `FindCollation`), CHECK validation
+  expression binder (`SqlExpressionEvaluator.Bind`), the evaluator (`EvaluateCore`,
+  `FindCollation`), CHECK validation
   (`ValidateCheckSyntax`), and persisted-definition binding and comparison
   (`SqlPersistedExpression.Bind`, `AreEquivalent`, `SqlBoundTableCache`'s column
   collector). `SqlPlanner.Children` documents the rule for the next walker.
@@ -1866,12 +1988,16 @@ and add it again" as the only remedy.
   instance, so the key *is* the table's schema version: ADD/DROP CONSTRAINT,
   ADD/DROP COLUMN and DROP + CREATE produce new keys, and a replaced version's entry
   is collected with it — invalidation is structural, with no hook to forget. A
-  `SqlBoundTable` holds the bound CHECK predicates (with the column ordinals a
-  violation reports) and each column's DEFAULT value. `SqlPlanExecutor.ValidateRows`
-  evaluates the cached predicates, `DecodeRow` and the INSERT path resolve defaults
-  from the cached values, and `EnsureCanDropColumn` re-binds the cached predicates
-  against the remaining columns. No write, read or DML statement parses catalog
-  text; `BindCount` lets tests prove it.
+  `SqlBoundTable` holds each CHECK predicate parsed, and compiled once to its bound
+  expression tree (`SqlBoundCheck.Bound`, [Bound expressions](#bound-expressions-e1)),
+  with the column ordinals a violation reports, and each column's DEFAULT value.
+  `SqlPlanExecutor.ValidateRows` evaluates the cached trees, so a write resolves no
+  column, function or collation of a predicate; `DecodeRow` and the INSERT path
+  resolve defaults from the cached values, and `EnsureCanDropColumn` re-binds the
+  cached predicates against the remaining columns. A DEFAULT is a literal, so its
+  bound form is its value text, which each use coerces to the column exactly as
+  before. No write, read or DML statement parses catalog text; `BindCount` lets
+  tests prove it.
 - **Binding is not re-validation.** DDL accepts a CHECK through
   `SqlPlanExecutor.ValidateCheck`: binding, plus the declaration rules (no casts,
   no sign over an operand the plan types as non-numeric). Loading binds it through
@@ -2130,8 +2256,9 @@ behavioral tests; they do not use reflection or widen the session contract.
 
 ## AOT posture
 
-Interpretive evaluation over the AST — no expression compilation, no reflection.
-Values are boxed scalars at this layer; span-based row codecs below.
+Interpretive evaluation over an engine-owned bound tree of sealed node classes — no
+runtime code generation, no reflection, no generic virtual methods. Values are boxed
+scalars at this layer; span-based row codecs below.
 
 ## Model-owned wire family (#1015)
 

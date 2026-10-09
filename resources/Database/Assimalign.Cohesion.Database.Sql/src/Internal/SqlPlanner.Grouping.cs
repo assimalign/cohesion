@@ -29,12 +29,12 @@ internal sealed partial class SqlPlanner
             ValidateExpression(select.Where, evaluator, _subqueryTypes);
         }
 
-        var aggregates = new List<SqlGroupAggregate>();
+        var aggregates = new List<(SqlFunctionCallExpression Call, SqlFunctionSignature Signature)>();
         var slots = new Dictionary<SqlExpression, int>();
         var projections = new List<SqlProjection>();
         foreach (var column in select.Columns)
         {
-            Bind(column.Expression);
+            BindSlots(column.Expression);
             string name = column.Alias ?? (column.Expression switch
             {
                 SqlColumnReferenceExpression reference => reference.ColumnName,
@@ -45,28 +45,65 @@ internal sealed partial class SqlPlanner
         }
         if (select.Having is not null)
         {
-            Bind(select.Having);
+            BindSlots(select.Having);
         }
 
         var orderByProjections = BindOrderByProjections(select, projections, columns.Count);
         foreach (var order in select.OrderBy)
         {
-            Bind(order.Expression, orderByProjections);
+            BindSlots(order.Expression, orderByProjections);
         }
 
-        var source = columns.Select((column, index) => new SqlProjection(column.Name, index, null, column.Type.Type)).ToArray();
+        // Every slot is known now. The input relation, the keys and the aggregates' operands bind
+        // over the source row; HAVING, the projections and ORDER BY over the grouped row (keys,
+        // then aggregate results, then the projected outputs that ordering may name). Both scopes
+        // resolve columns through the join bindings alone, as grouped execution always has.
+        var sourceScope = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
+            subquerySlots: _subquerySlots);
+        var groupScope = new SqlExpressionEvaluator(columns, _parameters, bindings, slots, _catalog.DefaultCollation,
+            subquerySlots: _subquerySlots);
+
+        var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
+        var where = select.Where is null ? null : evaluator.Bind(select.Where);
         SqlPlan input = bindings is not null
-            ? new SqlJoinPlan(bindings, columns, select.Joins[0].Condition!, source, select.Where,
+            ? new SqlJoinPlan(bindings, columns, evaluator.Bind(select.Joins[0].Condition!), source, where,
                 [], null, null, false, SelectJoinAccessPath(bindings, select.Joins[0].Condition!, evaluator))
             : view is not null
-                ? new SqlSystemViewPlan(view, source, select.Where, [], null, null, false)
-                : new SqlSelectPlan(table!, source, select.Where, [], null, null, false, SelectAccessPath(table!, select.Where));
+                ? new SqlSystemViewPlan(view, source, where, [], null, null, false)
+                : new SqlSelectPlan(table!, source, where, [], null, null, false, SelectAccessPath(table!, select.Where));
 
-        return new SqlGroupPlan(input, columns, bindings, select.GroupBy, aggregates, slots, projections,
-            select.Having, select.OrderBy, EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"),
-            select.IsDistinct, orderByProjections);
+        var keys = new SqlBoundKey[select.GroupBy.Count];
+        for (int i = 0; i < keys.Length; i++)
+        {
+            var value = sourceScope.Bind(select.GroupBy[i], out SqlBoundCollation collation);
+            keys[i] = new SqlBoundKey(value, collation);
+        }
 
-        void Bind(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)
+        var boundAggregates = new SqlGroupAggregate[aggregates.Count];
+        for (int i = 0; i < boundAggregates.Length; i++)
+        {
+            var (call, signature) = aggregates[i];
+            var argument = call.Arguments[0];
+            boundAggregates[i] = argument is SqlStarExpression
+                ? new SqlGroupAggregate(call, signature, null, sourceScope.BindCollation(argument))
+                : new SqlGroupAggregate(call, signature, sourceScope.Bind(argument, out SqlBoundCollation collation), collation);
+        }
+
+        for (int i = 0; i < projections.Count; i++)
+        {
+            var value = groupScope.Bind(projections[i].Expression!, out SqlBoundCollation collation);
+            projections[i] = projections[i] with { Value = value, Collation = collation };
+        }
+
+        var having = select.Having is null ? null : groupScope.Bind(select.Having);
+        var ordering = BindOrdering(select.OrderBy,
+            groupScope.ForOrdering(projections, orderByProjections, keys.Length + boundAggregates.Length));
+
+        return new SqlGroupPlan(input, columns, bindings, keys, boundAggregates, projections,
+            having, ordering, EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"),
+            select.IsDistinct);
+
+        void BindSlots(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
             if (outputSlots is not null && outputSlots.ContainsKey(expression))
@@ -101,7 +138,7 @@ internal sealed partial class SqlPlanner
                 if (index < 0)
                 {
                     index = aggregates.Count;
-                    aggregates.Add(new SqlGroupAggregate(call, signature));
+                    aggregates.Add((call, signature));
                 }
                 slots[expression] = select.GroupBy.Count + index;
                 return;
@@ -128,7 +165,7 @@ internal sealed partial class SqlPlanner
             ValidateExpression(expression, evaluator, _subqueryTypes, outputSlots);
             foreach (var child in Children(expression))
             {
-                Bind(child, outputSlots);
+                BindSlots(child, outputSlots);
             }
 
             bool ContainsOutput(SqlExpression candidate)

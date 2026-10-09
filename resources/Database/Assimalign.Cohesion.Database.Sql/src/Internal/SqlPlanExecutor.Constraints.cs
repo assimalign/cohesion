@@ -384,19 +384,19 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken, bool current = false, List<SqlParentReference>? references = null)
     {
         // The table version's CHECK predicates were parsed and bound once, when the catalog
-        // loaded or the DDL that produced this version ran; a write only evaluates them.
+        // loaded or the DDL that produced this version ran; a write only evaluates the bound
+        // trees, which carry their column ordinals, functions and collations.
         var bound = _definitions.Get(table);
-        SqlExpressionEvaluator? evaluator = null;
+        var evaluator = SqlExpressionEvaluator.ForExecution(null);
         foreach (var constraint in table.Constraints)
         {
             if (constraint.Kind == SqlCatalogConstraintKind.Check)
             {
                 var check = bound.GetCheck(constraint);
-                evaluator ??= new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation);
                 foreach (var row in rows)
                 {
                     // SQL UNKNOWN satisfies CHECK; only FALSE rejects a row.
-                    object? result = evaluator.Evaluate(check.Predicate, row);
+                    object? result = evaluator.Evaluate(check.Bound, row);
                     if (result is not null and not bool)
                     {
                         throw new DatabaseException($"CHECK '{constraint.Name}' must evaluate to BOOLEAN.");
@@ -740,11 +740,18 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="expression">The persisted predicate, parsed.</param>
     /// <param name="table">The table version the predicate constrains.</param>
     /// <param name="defaultCollation">The database default collation.</param>
+    /// <returns>
+    /// The predicate compiled to the bound tree every write to the table version evaluates: its
+    /// columns as ordinals of the version's rows, its calls bound to their functions and each
+    /// comparison's collation fixed, once per table version.
+    /// </returns>
     /// <exception cref="DatabaseException">The predicate cannot be evaluated against the table's rows.</exception>
-    internal static void BindPersistedCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation)
+    internal static SqlBoundExpression BindPersistedCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation)
     {
-        SqlPersistedExpression.Bind(expression, new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation));
+        var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation);
+        SqlPersistedExpression.Bind(expression, scope);
         ValidateCheckSyntax(expression, table, requireBoolean: true, declaring: false);
+        return scope.Bind(expression);
     }
 
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)

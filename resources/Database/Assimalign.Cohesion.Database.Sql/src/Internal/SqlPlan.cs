@@ -10,27 +10,29 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// The bound plan produced by <see cref="SqlPlanner"/>: the AST resolved against the
 /// catalog into executable shape. Rule-based and deliberately simple — a cost-based
 /// planner replaces the binding internals later without changing the executor seam.
+/// Every scalar expression a plan evaluates is a <see cref="SqlBoundExpression"/> the
+/// planner compiled once; the executor never resolves a name or a collation per row.
 /// </summary>
 internal abstract record SqlPlan;
 
 /// <summary>
-/// Groups the filtered rows of an input plan. Bound value ordinals address the
-/// group keys and aggregate results, never an arbitrary representative row.
+/// Groups the filtered rows of an input plan. A grouped row holds the group keys, then the
+/// aggregate results, then the projected outputs; <c>HAVING</c>, the projections and
+/// <c>ORDER BY</c> are bound to those slots (<see cref="SqlBoundSlot"/>), never to an
+/// arbitrary representative row.
 /// </summary>
 internal sealed record SqlGroupPlan(
     SqlPlan Input,
     IReadOnlyList<SqlCatalogColumn> SourceColumns,
     IReadOnlyList<SqlTableBinding>? Bindings,
-    IReadOnlyList<SqlExpression> Keys,
+    IReadOnlyList<SqlBoundKey> Keys,
     IReadOnlyList<SqlGroupAggregate> Aggregates,
-    IReadOnlyDictionary<SqlExpression, int> ValueOrdinals,
     IReadOnlyList<SqlProjection> Projections,
-    SqlExpression? Having,
-    IReadOnlyList<SqlOrderByColumn> OrderBy,
+    SqlBoundExpression? Having,
+    IReadOnlyList<SqlBoundOrdering> OrderBy,
     long? Limit,
     long? Offset,
-    bool IsDistinct,
-    IReadOnlyDictionary<SqlExpression, int> OrderByProjections) : SqlPlan;
+    bool IsDistinct) : SqlPlan;
 
 /// <summary>
 /// One distinct aggregate call of a grouping plan, bound to the signature it matched, so the
@@ -38,20 +40,41 @@ internal sealed record SqlGroupPlan(
 /// </summary>
 /// <param name="Call">The aggregate call; its one argument is the accumulated operand, or <c>*</c> for <c>COUNT(*)</c>.</param>
 /// <param name="Signature">The aggregate signature the call matched.</param>
-internal sealed record SqlGroupAggregate(SqlFunctionCallExpression Call, SqlFunctionSignature Signature);
+/// <param name="Argument">The bound operand over the input row, or null for <c>COUNT(*)</c>.</param>
+/// <param name="Collation">The collation <c>MIN</c> and <c>MAX</c> compare the operand's values under.</param>
+internal sealed record SqlGroupAggregate(SqlFunctionCallExpression Call, SqlFunctionSignature Signature,
+    SqlBoundExpression? Argument, SqlBoundCollation Collation);
+
+/// <summary>A grouping key bound over the input row, with the collation its values are grouped under.</summary>
+/// <param name="Value">The bound key expression.</param>
+/// <param name="Collation">The collation the key's values compare and hash under.</param>
+internal sealed record SqlBoundKey(SqlBoundExpression Value, SqlBoundCollation Collation);
+
+/// <summary>One bound <c>ORDER BY</c> key.</summary>
+/// <param name="Key">The bound key, over the source row, or over the row extended by the completed outputs when the plan orders by them.</param>
+/// <param name="IsDescending">Whether the key sorts descending.</param>
+/// <param name="Collation">The collation the key's values compare under.</param>
+internal sealed record SqlBoundOrdering(SqlBoundExpression Key, bool IsDescending, SqlBoundCollation Collation);
 
 /// <summary>One projected output column of a SELECT.</summary>
 /// <param name="Name">The output column name (alias, column name, or a synthesized name).</param>
 /// <param name="ColumnOrdinal">The source column ordinal for pass-through projections; null for computed ones.</param>
-/// <param name="Expression">The computed expression; null for pass-through projections.</param>
+/// <param name="Expression">The computed expression; null for pass-through projections. Planning reads it for types and collations.</param>
 /// <param name="Type">The declared output type (<see cref="DatabaseType.Null"/> when not statically known).</param>
-internal sealed record SqlProjection(string Name, int? ColumnOrdinal, SqlExpression? Expression, DatabaseType Type);
+internal sealed record SqlProjection(string Name, int? ColumnOrdinal, SqlExpression? Expression, DatabaseType Type)
+{
+    /// <summary>Gets the bound computed expression the executor evaluates; null for pass-through projections.</summary>
+    internal SqlBoundExpression? Value { get; init; }
+
+    /// <summary>Gets the collation <c>DISTINCT</c> compares and hashes the output's values under.</summary>
+    internal SqlBoundCollation Collation { get; init; }
+}
 
 internal sealed record SqlSelectPlan(
     SqlCatalogTable Table,
     IReadOnlyList<SqlProjection> Projections,
-    SqlExpression? Where,
-    IReadOnlyList<SqlOrderByColumn> OrderBy,
+    SqlBoundExpression? Where,
+    IReadOnlyList<SqlBoundOrdering> OrderBy,
     long? Limit,
     long? Offset,
     bool IsDistinct,
@@ -68,10 +91,10 @@ internal sealed record SqlTableBinding(SqlCatalogTable Table, SqlTableReference 
 internal sealed record SqlJoinPlan(
     IReadOnlyList<SqlTableBinding> Bindings,
     IReadOnlyList<SqlCatalogColumn> Columns,
-    SqlExpression Condition,
+    SqlBoundExpression Condition,
     IReadOnlyList<SqlProjection> Projections,
-    SqlExpression? Where,
-    IReadOnlyList<SqlOrderByColumn> OrderBy,
+    SqlBoundExpression? Where,
+    IReadOnlyList<SqlBoundOrdering> OrderBy,
     long? Limit,
     long? Offset,
     bool IsDistinct,
@@ -91,8 +114,8 @@ internal sealed record SqlJoinIndexPath(
 internal sealed record SqlSystemViewPlan(
     SqlSystemViewDefinition View,
     IReadOnlyList<SqlProjection> Projections,
-    SqlExpression? Where,
-    IReadOnlyList<SqlOrderByColumn> OrderBy,
+    SqlBoundExpression? Where,
+    IReadOnlyList<SqlBoundOrdering> OrderBy,
     long? Limit,
     long? Offset,
     bool IsDistinct,
@@ -133,17 +156,18 @@ internal sealed record SqlIndexSeekPath(
 /// <param name="Inclusive">Whether the bound itself is included.</param>
 internal readonly record struct SqlSeekBound(object? Value, bool Inclusive);
 
+/// <summary>An <c>INSERT ... VALUES</c>: each row's values bound with no columns in scope.</summary>
 internal sealed record SqlInsertPlan(
     SqlCatalogTable Table,
     IReadOnlyList<int> TargetOrdinals,
-    IReadOnlyList<IReadOnlyList<SqlExpression>> Rows) : SqlPlan;
+    IReadOnlyList<SqlBoundExpression[]> Rows) : SqlPlan;
 
 internal sealed record SqlUpdatePlan(
     SqlCatalogTable Table,
-    IReadOnlyList<(int Ordinal, SqlExpression Value)> Assignments,
-    SqlExpression? Where) : SqlPlan;
+    IReadOnlyList<(int Ordinal, SqlBoundExpression Value)> Assignments,
+    SqlBoundExpression? Where) : SqlPlan;
 
-internal sealed record SqlDeletePlan(SqlCatalogTable Table, SqlExpression? Where) : SqlPlan;
+internal sealed record SqlDeletePlan(SqlCatalogTable Table, SqlBoundExpression? Where) : SqlPlan;
 
 internal sealed record SqlCreateTablePlan(
     string Schema,

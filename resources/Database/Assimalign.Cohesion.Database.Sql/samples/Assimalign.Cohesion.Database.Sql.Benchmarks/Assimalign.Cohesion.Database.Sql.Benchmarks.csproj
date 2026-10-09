@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Sql.Benchmarks</RootNamespace>
+		<!--
+		    The SQL engine's NativeAOT statement benchmark (DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md
+		    section 10): an in-memory engine over a 100,000-row table, cases Q1 to Q3 and Q7, best of
+		    five medians with bytes per row from GC.GetAllocatedBytesForCurrentThread. It lives here,
+		    beside the library it measures, until cohesion-benchmarks has a Database harness. It is a
+		    harness, not a library: never packed, and outside the resource guards by its samples/ path.
+		    Every gate is NativeAOT, so publish it and run the published binary:
+
+		        dotnet publish resources/Database/Assimalign.Cohesion.Database.Sql/samples/Assimalign.Cohesion.Database.Sql.Benchmarks/Assimalign.Cohesion.Database.Sql.Benchmarks.csproj -c Release -r win-arm64
+
+		    Use the publishing host's RID, from a short path, with the Visual Studio installer
+		    directory on PATH (ILC runs vswhere to find the linker). PublishAot is set here, not on
+		    the command line: a global -p:PublishAot=true reaches the netstandard2.0 analyzers in the
+		    reference graph and fails them with NETSDK1207.
+		-->
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+		<PublishAot>true</PublishAot>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+	</ItemGroup>
+</Project>

@@ -61,7 +61,7 @@ internal sealed class SqlQueryExecutor
                 [new Diagnostic { Code = "COHDBL001", Message = exception.Message, Severity = DiagnosticSeverity.Error }]));
         }
 
-        var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions, sqlRequest.Parameters);
+        var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions);
         return executor.ExecuteAsync(plan, statement, cancellationToken);
     }
 }
