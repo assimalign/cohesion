@@ -166,11 +166,11 @@ internal sealed class TransactionEventSource : EventSource
     /// written; the caller's commit fails with <see cref="TransactionAbortedException"/>.
     /// </summary>
     [NonEvent]
-    public void TransactionAborted(string database, TransactionSequence sequence, Exception exception)
+    public void CommitRecordWriteFailed(string database, TransactionSequence sequence, Exception exception)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            TransactionAborted(database, (long)sequence.Value, TypeName(exception), exception.Message);
+            CommitRecordWriteFailed(database, (long)sequence.Value, TypeName(exception), exception.Message);
         }
     }
 
@@ -198,7 +198,7 @@ internal sealed class TransactionEventSource : EventSource
 
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            DeadlockDetected(database, (long)owner.Value, resource.ToString(), mode.ToString());
+            DeadlockDetected(database, (long)owner.Value, DescribeResource(resource), mode.ToString());
         }
     }
 
@@ -210,7 +210,7 @@ internal sealed class TransactionEventSource : EventSource
 
         if (IsEnabled(EventLevel.Verbose, Keywords.Locks))
         {
-            LockWaitStart(database, (long)owner.Value, resource.ToString(), mode.ToString());
+            LockWaitStart(database, (long)owner.Value, DescribeResource(resource), mode.ToString());
         }
     }
 
@@ -222,7 +222,7 @@ internal sealed class TransactionEventSource : EventSource
     /// <param name="owner">The waiting transaction.</param>
     /// <param name="resource">The resource it waited for.</param>
     /// <param name="mode">The mode it requested.</param>
-    /// <param name="outcome">How the wait ended: <c>Granted</c>, <c>Canceled</c>, <c>Ended</c> or <c>Abandoned</c>.</param>
+    /// <param name="outcome">How the wait ended: <c>Granted</c>, <c>Cancelled</c>, <c>Ended</c> or <c>Abandoned</c>.</param>
     /// <param name="startTimestamp">The <see cref="Stopwatch.GetTimestamp"/> taken when the wait began.</param>
     [NonEvent]
     public void LockWaitStop(string database, TransactionSequence owner, LockResource resource, LockMode mode, string outcome, long startTimestamp)
@@ -240,7 +240,7 @@ internal sealed class TransactionEventSource : EventSource
         // Written before the stop, so a tool that tracks the wait as an activity sees it inside.
         if (slow && duration >= threshold)
         {
-            SlowLockWait(database, (long)owner.Value, resource.ToString(), mode.ToString(), duration, threshold);
+            SlowLockWait(database, (long)owner.Value, DescribeResource(resource), mode.ToString(), duration, threshold);
         }
 
         if (stop)
@@ -360,7 +360,7 @@ internal sealed class TransactionEventSource : EventSource
         => WriteEvent(3, database, transactionSequence);
 
     [Event(4, Level = EventLevel.Warning, Message = "Database '{0}' aborted transaction {1}: its commit record could not be written ({2}: {3}), so the transaction was rolled back.")]
-    private void TransactionAborted(string database, long transactionSequence, string exceptionType, string exceptionMessage)
+    private void CommitRecordWriteFailed(string database, long transactionSequence, string exceptionType, string exceptionMessage)
         => WriteEvent(4, database, transactionSequence, exceptionType, exceptionMessage);
 
     [Event(5, Level = EventLevel.Error, Message = "Database '{0}' committed transaction {1}, but its commit record could not be made durable: {2}. The storage is offline; the reopen's recovery decides the outcome.")]
@@ -422,19 +422,29 @@ internal sealed class TransactionEventSource : EventSource
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)
     {
+        if (command.Command == EventCommand.Disable)
+        {
+            // A session that ends takes its threshold with it, as the root source's does: a brief
+            // tool session that set 0 ms must not leave a forwarder that is still enabled at
+            // Warning reporting every lock wait as slow.
+            Volatile.Write(ref _slowLockWaitThresholdMilliseconds, DefaultSlowLockWaitThresholdMilliseconds);
+            return;
+        }
+
         if (command.Command != EventCommand.Enable)
         {
             return;
         }
 
         // The last session that enables the source sets the threshold; one that passes no
-        // argument (the in-process forwarder) sets the default.
+        // argument (the in-process forwarder), or one that does not parse as a finite,
+        // non-negative number, sets the default.
         double threshold = DefaultSlowLockWaitThresholdMilliseconds;
         if (command.Arguments is { } arguments
             && arguments.TryGetValue(SlowLockWaitThresholdArgument, out string? value)
             && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
-            && parsed >= 0
-            && !double.IsInfinity(parsed))
+            && double.IsFinite(parsed)
+            && parsed >= 0)
         {
             threshold = parsed;
         }
@@ -475,4 +485,21 @@ internal sealed class TransactionEventSource : EventSource
     }
 
     private static string TypeName(Exception exception) => exception.GetType().FullName ?? exception.GetType().Name;
+
+    /// <summary>
+    /// Names a lock resource for a payload by its kind and object only. An entry's id is never
+    /// written: a unique-index or key-value key lock's entry is the key's unseeded 64-bit hash, and
+    /// a hash of a small-domain key is the key (plan D8). The lock manager cannot tell such an entry
+    /// from a Sql row-location entry, which share <see cref="LockResourceKind.Entry"/> and the
+    /// pre-acquire identity the Sql executor depends on, so every entry is written as its object;
+    /// the object id still locates the table, collection or key space.
+    /// </summary>
+    /// <param name="resource">The resource.</param>
+    /// <returns><c>Database</c>, <c>Object:&lt;objectId&gt;</c> or <c>Entry:&lt;objectId&gt;</c>.</returns>
+    internal static string DescribeResource(LockResource resource) => resource.Kind switch
+    {
+        LockResourceKind.Database => nameof(LockResourceKind.Database),
+        LockResourceKind.Object => string.Concat(nameof(LockResourceKind.Object), ":", resource.ObjectId.ToString(CultureInfo.InvariantCulture)),
+        _ => string.Concat(nameof(LockResourceKind.Entry), ":", resource.ObjectId.ToString(CultureInfo.InvariantCulture)),
+    };
 }

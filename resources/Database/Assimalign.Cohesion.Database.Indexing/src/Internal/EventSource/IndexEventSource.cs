@@ -49,7 +49,7 @@ internal sealed class IndexEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
-            IndexCreated(storage.Name, objectId, definition.Name, definition.Kind.ToString());
+            IndexCreated(storage.Name, (long)objectId, definition.Name, definition.Kind.ToString());
         }
     }
 
@@ -59,7 +59,7 @@ internal sealed class IndexEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
-            IndexDropped(storage.Name, objectId, index);
+            IndexDropped(storage.Name, (long)objectId, index);
         }
     }
 
@@ -69,7 +69,7 @@ internal sealed class IndexEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            IndexFormatRefused(storage.Name, registration.ObjectId, registration.Definition.Name, registration.RootPageId, foundFormat);
+            IndexFormatRefused(storage.Name, (long)registration.ObjectId, registration.Definition.Name, registration.RootPageId, foundFormat);
         }
     }
 
@@ -130,22 +130,22 @@ internal sealed class IndexEventSource : EventSource
     [NonEvent]
     public void WritersPurged(Storage.Storage storage, int writers, long entriesRemoved, long startTimestamp)
     {
-        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
             WritersPurged(storage.Name, writers, entriesRemoved, Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
         }
     }
 
     [Event(1, Level = EventLevel.Verbose, Message = "Database '{0}' created {3} index '{2}' on object {1}.")]
-    private void IndexCreated(string database, ulong objectId, string index, string kind)
+    private void IndexCreated(string database, long objectId, string index, string kind)
         => WriteEvent(1, database, objectId, index, kind);
 
     [Event(2, Level = EventLevel.Verbose, Message = "Database '{0}' dropped index '{2}' from object {1}.")]
-    private void IndexDropped(string database, ulong objectId, string index)
+    private void IndexDropped(string database, long objectId, string index)
         => WriteEvent(2, database, objectId, index);
 
     [Event(3, Level = EventLevel.Error, Message = "Database '{0}' refused index '{2}' on object {1}: its root page {3} is in page format {4}, not the engine's.")]
-    private void IndexFormatRefused(string database, ulong objectId, string index, long rootPageId, int foundFormat)
+    private void IndexFormatRefused(string database, long objectId, string index, long rootPageId, int foundFormat)
         => WriteEvent(3, database, objectId, index, rootPageId, foundFormat);
 
     [Event(4, Level = EventLevel.Error, Message = "Database '{0}' found index '{1}' corrupt: page {2} is not a node of the engine's page format (found format {3}).")]
@@ -164,7 +164,7 @@ internal sealed class IndexEventSource : EventSource
     private void RootGrown(string database, string index, long rootPageId)
         => WriteEvent(7, database, index, rootPageId);
 
-    [Event(8, Level = EventLevel.Verbose, Message = "Database '{0}' purged {1} unproven writers from its indexes: {2} entries removed or restored in {3} ms.")]
+    [Event(8, Level = EventLevel.Informational, Message = "Database '{0}' purged {1} unproven writers from its indexes: {2} entries removed or restored in {3} ms.")]
     private void WritersPurged(string database, int writers, long entriesRemoved, double durationMilliseconds)
         => WriteEvent(8, database, writers, entriesRemoved, durationMilliseconds);
 }

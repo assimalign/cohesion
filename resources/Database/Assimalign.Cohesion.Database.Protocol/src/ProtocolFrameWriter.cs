@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -70,20 +69,12 @@ public abstract class ProtocolFrameWriter : IAsyncDisposable
     /// the writer's core runs, or the core refused the frame (the channel's family check).
     /// </exception>
     /// <remarks>
-    /// <para>
     /// Every writer refuses an oversized payload here, the same way and before anything is
     /// written, whichever leaf it is (owner decision 29 of 2026-10-06, rule 4 of
     /// <c>database-area.md</c>): the bound is the envelope's, so no leaf may skip it. It runs before
     /// the core, so a frame that fails both the bound and <see cref="ProtocolChannel"/>'s family
     /// check reports the bound. The bound is thrown by the call itself, not through the returned
     /// task, as the channel's family check is.
-    /// </para>
-    /// <para>
-    /// The stream writer that <see cref="Create(Stream, bool)"/> returns writes each frame it writes
-    /// to the <c>Assimalign.Cohesion.Database.Protocol</c> event source while a listener takes its
-    /// frame trace. A decorating writer writes through the stream writer's public member, so it
-    /// writes nothing itself: each wire frame is reported once.
-    /// </para>
     /// </remarks>
     public ValueTask WriteFrameAsync(ProtocolFrame frame, CancellationToken cancellationToken = default)
     {
@@ -93,21 +84,7 @@ public abstract class ProtocolFrameWriter : IAsyncDisposable
                 $"Frame payload of {frame.Payload.Length} bytes exceeds the {ProtocolFrameHeader.MaxPayloadLength}-byte maximum.");
         }
 
-        // Disabled, or a decorator: the core's task is returned as it is, so the trace costs one check.
-        if (!ProtocolEventSource.Log.IsFrameTraceEnabled() || this is not ProtocolStreamFrameWriter)
-        {
-            return WriteFrameCoreAsync(frame, cancellationToken);
-        }
-
-        ValueTask pending = WriteFrameCoreAsync(frame, cancellationToken);
-        if (pending.IsCompletedSuccessfully)
-        {
-            pending.GetAwaiter().GetResult();
-            ProtocolEventSource.Log.FrameWritten(frame.Type, frame.Payload.Length);
-            return default;
-        }
-
-        return WriteFrameTracedAsync(pending, frame.Type, frame.Payload.Length);
+        return WriteFrameCoreAsync(frame, cancellationToken);
     }
 
     /// <summary>
@@ -146,15 +123,4 @@ public abstract class ProtocolFrameWriter : IAsyncDisposable
     /// <returns>A task that completes when the writer's resources are released.</returns>
     /// <remarks>The default body does nothing: a writer that owns nothing need not override it.</remarks>
     protected virtual ValueTask DisposeAsyncCore() => default;
-
-    /// <summary>
-    /// Awaits a write that did not complete synchronously and writes its frame to the frame trace.
-    /// Entered only while a listener takes the trace.
-    /// </summary>
-    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
-    private static async ValueTask WriteFrameTracedAsync(ValueTask pending, ProtocolMessageType type, int payloadLength)
-    {
-        await pending.ConfigureAwait(false);
-        ProtocolEventSource.Log.FrameWritten(type, payloadLength);
-    }
 }

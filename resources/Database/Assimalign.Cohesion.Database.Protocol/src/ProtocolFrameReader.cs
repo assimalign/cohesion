@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,30 +61,8 @@ public abstract class ProtocolFrameReader : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The next frame, or null when the transport completed gracefully.</returns>
     /// <exception cref="ProtocolException">Thrown when the incoming bytes violate the protocol framing.</exception>
-    /// <remarks>
-    /// The stream reader that <see cref="Create(Stream, bool)"/> returns writes each frame it reads to
-    /// the <c>Assimalign.Cohesion.Database.Protocol</c> event source while a listener takes its frame
-    /// trace. A decorating reader reads through the stream reader's public member, so it writes
-    /// nothing itself: each wire frame is reported once.
-    /// </remarks>
     public ValueTask<ProtocolFrame?> ReadFrameAsync(CancellationToken cancellationToken = default)
-    {
-        // Disabled, or a decorator: the core's task is returned as it is, so the trace costs one check.
-        if (!ProtocolEventSource.Log.IsFrameTraceEnabled() || this is not ProtocolStreamFrameReader)
-        {
-            return ReadFrameCoreAsync(cancellationToken);
-        }
-
-        ValueTask<ProtocolFrame?> pending = ReadFrameCoreAsync(cancellationToken);
-        if (pending.IsCompletedSuccessfully)
-        {
-            ProtocolFrame? frame = pending.Result;
-            ProtocolEventSource.Log.FrameRead(frame);
-            return new ValueTask<ProtocolFrame?>(frame);
-        }
-
-        return ReadFrameTracedAsync(pending);
-    }
+        => ReadFrameCoreAsync(cancellationToken);
 
     /// <summary>
     /// Releases the reader, and the transport stream when the reader owns it.
@@ -107,16 +84,4 @@ public abstract class ProtocolFrameReader : IAsyncDisposable
     /// <returns>A task that completes when the reader's resources are released.</returns>
     /// <remarks>The default body does nothing: a reader that owns nothing need not override it.</remarks>
     protected virtual ValueTask DisposeAsyncCore() => default;
-
-    /// <summary>
-    /// Awaits a read that did not complete synchronously and writes its frame to the frame trace.
-    /// Entered only while a listener takes the trace.
-    /// </summary>
-    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
-    private static async ValueTask<ProtocolFrame?> ReadFrameTracedAsync(ValueTask<ProtocolFrame?> pending)
-    {
-        ProtocolFrame? frame = await pending.ConfigureAwait(false);
-        ProtocolEventSource.Log.FrameRead(frame);
-        return frame;
-    }
 }

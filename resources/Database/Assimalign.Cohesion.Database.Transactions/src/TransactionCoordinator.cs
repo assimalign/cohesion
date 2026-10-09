@@ -366,6 +366,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             TransactionEventSource.Log.TransactionTracked();
         }
 
+        // Only the manager's disposal can have ended the context by now (it aborts every active
+        // one), and that abort completes before this coordinator's disposal clears the table. If
+        // the clearing already ran, the context was added after it and nothing would untrack it,
+        // so it leaves the current-transactions gauge here (UntrackEnded does nothing for an
+        // active context); if the clearing runs later, it counts the context and UntrackEnded's
+        // Remove finds nothing.
+        UntrackEnded(context);
+
         TransactionEventSource.Log.TransactionBegun(_storage, context);
         return context;
     }
