@@ -263,7 +263,7 @@ public class SqlClientTests
     {
         internal int Failures { get; private set; }
 
-        protected override void OnFailed(string commandText, SqlClientException exception, TimeSpan elapsed)
+        protected internal override void OnFailed(string commandText, SqlClientException exception, TimeSpan elapsed)
         {
             Failures++;
             throw new InvalidOperationException("The observer failed.");

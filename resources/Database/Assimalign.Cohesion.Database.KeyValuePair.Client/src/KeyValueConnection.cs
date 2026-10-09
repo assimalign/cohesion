@@ -331,20 +331,24 @@ public sealed class KeyValueConnection : IAsyncDisposable
         // The pooled connection may already serve another caller's rental; never reach it.
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 
-        NotifyExecuting(commandText, parameters?.Count ?? 0);
+        int parameterCount = parameters?.Count ?? 0;
+        NotifyExecuting(commandText, parameterCount);
 
         long startTimestamp = Stopwatch.GetTimestamp();
+        KeyValueClientEventSource.Log.CommandStart(this, parameterCount);
 
         try
         {
             KeyValueProtocolResult result = await _connection.ExecuteAsync(new KeyValueExecuteExchange(commandText, parameters), cancellationToken).ConfigureAwait(false);
 
+            KeyValueClientEventSource.Log.CommandStop(this, result.Rows.Count, result.AffectedCount, startTimestamp);
             NotifyExecuted(commandText, result.Rows.Count, result.AffectedCount, Stopwatch.GetElapsedTime(startTimestamp));
             return result;
         }
         catch (DatabaseClientException exception)
         {
             KeyValueClientException translated = KeyValueClientException.FromClientException(exception);
+            KeyValueClientEventSource.Log.CommandFailed(this, translated, parameters, startTimestamp);
             NotifyFailed(commandText, translated, Stopwatch.GetElapsedTime(startTimestamp));
             throw translated;
         }
@@ -364,6 +368,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // A telemetry observer must never fault the command it is observing.
+            KeyValueClientEventSource.Log.ObserverFailed(this, nameof(KeyValueClientObserver.OnExecuting), exception);
         }
     }
 
@@ -381,6 +386,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // A telemetry observer must never fault the command it is observing.
+            KeyValueClientEventSource.Log.ObserverFailed(this, nameof(KeyValueClientObserver.OnExecuted), exception);
         }
     }
 
@@ -398,6 +404,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
         catch (Exception observerException) when (observerException is not OutOfMemoryException)
         {
             // A telemetry observer must never mask the original failure.
+            KeyValueClientEventSource.Log.ObserverFailed(this, nameof(KeyValueClientObserver.OnFailed), observerException);
         }
     }
 }

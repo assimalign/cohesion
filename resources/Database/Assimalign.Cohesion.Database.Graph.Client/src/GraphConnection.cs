@@ -16,6 +16,11 @@ namespace Assimalign.Cohesion.Database.Graph.Client;
 /// An unfinished path exchange is discarded. Explicit graph transactions are not supported.</remarks>
 public sealed class GraphConnection : IAsyncDisposable
 {
+    // The operation names the event source writes: the public members that run a query.
+    private const string QueryOperation = "Query";
+    private const string ExecuteOperation = "Execute";
+    private const string QueryPathsOperation = "QueryPaths";
+
     private readonly DatabaseConnection _connection;
     private int _disposed;
 
@@ -40,20 +45,9 @@ public sealed class GraphConnection : IAsyncDisposable
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
     /// <exception cref="OperationCanceledException">The exchange is canceled, which marks the connection broken.</exception>
     /// <exception cref="GraphClientException">The server rejected the statement or the exchange failed.</exception>
-    public async ValueTask<GraphResultSet> QueryAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null,
+    public ValueTask<GraphResultSet> QueryAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null,
         CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        var exchange = new GraphExecuteExchange(statement, parameters);
-        try
-        {
-            return await _connection.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false);
-        }
-        catch (DatabaseClientException exception)
-        {
-            throw new GraphClientException(exception.Code, exception.Message, exception);
-        }
-    }
+        => QueryCoreAsync(QueryOperation, statement, parameters, cancellationToken);
 
     /// <summary>Executes a graph mutation and returns its affected entity count.</summary>
     /// <param name="statement">The GQL statement.</param>
@@ -67,7 +61,7 @@ public sealed class GraphConnection : IAsyncDisposable
     /// <exception cref="GraphClientException">The server rejected the statement or the exchange failed.</exception>
     public async ValueTask<long> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null,
         CancellationToken cancellationToken = default)
-        => (await QueryAsync(statement, parameters, cancellationToken).ConfigureAwait(false)).AffectedCount;
+        => (await QueryCoreAsync(ExecuteOperation, statement, parameters, cancellationToken).ConfigureAwait(false)).AffectedCount;
 
     /// <summary>Streams paths selected by a single bound path, node, or relationship variable.</summary>
     /// <param name="statement">A MATCH statement returning one bound path or entity variable.</param>
@@ -86,23 +80,31 @@ public sealed class GraphConnection : IAsyncDisposable
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        var exchange = new GraphPathsExchange(statement, parameters);
+        long startTimestamp = GraphClientEventSource.Log.GetTimestamp();
+        GraphClientEventSource.Log.QueryStart(this, QueryPathsOperation);
         Stream stream;
         try
         {
-            stream = await _connection.ExecuteStreamingAsync(new GraphPathsExchange(statement, parameters),
-                cancellationToken).ConfigureAwait(false);
+            stream = await _connection.ExecuteStreamingAsync(exchange, cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseClientException exception)
         {
+            GraphClientEventSource.Log.QueryFailed(this, QueryPathsOperation, exception, startTimestamp);
             throw new GraphClientException(exception.Code, exception.Message, exception);
         }
         await using (stream.ConfigureAwait(false))
         {
             byte[] length = new byte[sizeof(int)];
-            while (await ReadPathAsync(stream, length, cancellationToken).ConfigureAwait(false) is { } path)
+            long paths = 0;
+            while (await ReadPathAsync(stream, length, startTimestamp, cancellationToken).ConfigureAwait(false) is { } path)
             {
+                paths++;
                 yield return path;
             }
+
+            // The enumeration reached the server's terminal count: the query is complete.
+            GraphClientEventSource.Log.QueryStop(this, QueryPathsOperation, paths, startTimestamp);
         }
     }
 
@@ -129,7 +131,31 @@ public sealed class GraphConnection : IAsyncDisposable
         }
     }
 
-    private static async ValueTask<GraphPath?> ReadPathAsync(Stream stream, byte[] length, CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs a scalar exchange for <see cref="QueryAsync"/> and <see cref="ExecuteAsync"/>, which
+    /// differ only in the operation name the event source writes.
+    /// </summary>
+    private async ValueTask<GraphResultSet> QueryCoreAsync(string operation, string statement,
+        IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        var exchange = new GraphExecuteExchange(statement, parameters);
+        long startTimestamp = GraphClientEventSource.Log.GetTimestamp();
+        GraphClientEventSource.Log.QueryStart(this, operation);
+        try
+        {
+            GraphResultSet result = await _connection.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false);
+            GraphClientEventSource.Log.QueryStop(this, operation, result.Count, startTimestamp);
+            return result;
+        }
+        catch (DatabaseClientException exception)
+        {
+            GraphClientEventSource.Log.QueryFailed(this, operation, exception, startTimestamp);
+            throw new GraphClientException(exception.Code, exception.Message, exception);
+        }
+    }
+
+    private async ValueTask<GraphPath?> ReadPathAsync(Stream stream, byte[] length, long startTimestamp, CancellationToken cancellationToken)
     {
         try
         {
@@ -143,6 +169,7 @@ public sealed class GraphConnection : IAsyncDisposable
         }
         catch (DatabaseClientException exception)
         {
+            GraphClientEventSource.Log.QueryFailed(this, QueryPathsOperation, exception, startTimestamp);
             throw new GraphClientException(exception.Code, exception.Message, exception);
         }
     }

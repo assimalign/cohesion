@@ -30,7 +30,12 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
     private readonly string _response;
     private int _acceptedConnections;
 
-    internal StreamingClientTestHarness(string response = "complete")
+    /// <summary>Initializes a new instance of the <see cref="StreamingClientTestHarness"/> class.</summary>
+    /// <param name="response">The scripted peer's response to a transfer request.</param>
+    /// <param name="decorateFactory">Wraps the in-memory connection factory the client dials through, or <see langword="null"/> to use it as is.</param>
+    /// <param name="database">The database the client binds to.</param>
+    internal StreamingClientTestHarness(string response = "complete",
+        Func<IConnectionFactory, IConnectionFactory>? decorateFactory = null, string database = "documents")
     {
         _response = response;
         Payload = new byte[48 * ChunkLength];
@@ -39,13 +44,14 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
             Payload[index] = (byte)(index % 251);
         }
 
+        IConnectionFactory factory = _listener.CreateFactory();
         Client = DatabaseClient.Create(new DatabaseClientOptions
         {
             Settings = new DatabaseConnectionSettings
             {
-                Database = "documents", Principal = "tester", EndPoint = _listener.EndPoint, MaxPoolSize = 1,
+                Database = database, Principal = "tester", EndPoint = _listener.EndPoint, MaxPoolSize = 1,
             },
-            ConnectionFactory = _listener.CreateFactory(),
+            ConnectionFactory = decorateFactory is null ? factory : decorateFactory(factory),
             Family = Family,
         });
         _accepting = AcceptAsync();

@@ -223,9 +223,11 @@ internal sealed class DatabaseDownloadStream : Stream
                 {
                     await ReleaseConnectionAsync().ConfigureAwait(false);
                 }
-                catch (Exception)
+                catch (Exception releaseFailure)
                 {
-                    // The diagnostic remains the exchange failure if returning its broken lease fails.
+                    // The diagnostic remains the exchange failure if returning its broken lease fails;
+                    // the event source keeps the release failure visible.
+                    DatabaseClientEventSource.Log.DownloadReleaseFailed(_connection, releaseFailure);
                 }
             }
             Volatile.Write(ref _failure, ExceptionDispatchInfo.Capture(exception));

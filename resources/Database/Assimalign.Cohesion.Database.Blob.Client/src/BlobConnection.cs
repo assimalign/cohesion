@@ -20,6 +20,13 @@ namespace Assimalign.Cohesion.Database.Blob.Client;
 /// </remarks>
 public sealed class BlobConnection : IAsyncDisposable
 {
+    // The operation names the event source writes: the public members that run a transfer.
+    private const string UploadOperation = "Upload";
+    private const string DownloadOperation = "Download";
+    private const string DeleteOperation = "Delete";
+    private const string GetPropertiesOperation = "GetProperties";
+    private const string ListOperation = "List";
+
     private readonly DatabaseConnection _connection;
     private int _disposed;
     private int _returned;
@@ -59,7 +66,7 @@ public sealed class BlobConnection : IAsyncDisposable
         {
             throw new ArgumentException("The source must be readable and the length must be nonnegative or -1.");
         }
-        return ExecuteAsync<long>(async (reader, writer, token) =>
+        return ExecuteAsync<long>(UploadOperation, container, name, async (reader, writer, token) =>
         {
             await WriteAsync(writer, BlobProtocolMessageType.Write,
                 new BlobWriteMessage(container, name, overwrite).Encode(), token).ConfigureAwait(false);
@@ -93,14 +100,19 @@ public sealed class BlobConnection : IAsyncDisposable
     public async ValueTask<Stream> DownloadAsync(string container, string name, CancellationToken cancellationToken = default)
     {
         EnsureOpen();
+        long startTimestamp = BlobClientEventSource.Log.GetTimestamp();
+        BlobClientEventSource.Log.TransferStart(this, DownloadOperation, container);
         try
         {
+            // The exchange writes the transfer's stop, or a failure after its stream opened, when its
+            // copy ends: a download stops when its last chunk is verified, not when this returns.
             Stream stream = await _connection.ExecuteStreamingAsync(
-                new BlobDownloadExchange(container, name), cancellationToken).ConfigureAwait(false);
+                new BlobDownloadExchange(this, container, name, startTimestamp), cancellationToken).ConfigureAwait(false);
             return new BlobDownloadStream(stream);
         }
         catch (DatabaseClientException exception)
         {
+            BlobClientEventSource.Log.TransferFailed(this, DownloadOperation, container, name, exception.Code, exception, startTimestamp);
             throw new BlobClientException(exception.Code, exception.Message, exception);
         }
     }
@@ -115,7 +127,7 @@ public sealed class BlobConnection : IAsyncDisposable
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
     /// <exception cref="ObjectDisposedException">The connection is disposed or unusable.</exception>
     public ValueTask<bool> DeleteAsync(string container, string name, CancellationToken cancellationToken = default)
-        => ExecuteAsync<bool>(async (reader, writer, token) =>
+        => ExecuteAsync<bool>(DeleteOperation, container, name, async (reader, writer, token) =>
         {
             await WriteAsync(writer, BlobProtocolMessageType.Delete,
                 new BlobDeleteMessage(container, name).Encode(), token).ConfigureAwait(false);
@@ -137,7 +149,7 @@ public sealed class BlobConnection : IAsyncDisposable
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
     /// <exception cref="ObjectDisposedException">The connection is disposed or unusable.</exception>
     public ValueTask<BlobProperties?> GetPropertiesAsync(string container, string name, CancellationToken cancellationToken = default)
-        => ExecuteAsync<BlobProperties?>(async (reader, writer, token) =>
+        => ExecuteAsync<BlobProperties?>(GetPropertiesOperation, container, name, async (reader, writer, token) =>
         {
             await WriteAsync(writer, BlobProtocolMessageType.GetProperties,
                 new BlobGetPropertiesMessage(container, name).Encode(), token).ConfigureAwait(false);
@@ -180,6 +192,7 @@ public sealed class BlobConnection : IAsyncDisposable
             FullMode = BoundedChannelFullMode.Wait,
         });
         Task worker = ListCoreAsync(items.Writer, container, prefix ?? string.Empty, operation.Token);
+        bool workerAwaited = false;
         try
         {
             while (await items.Reader.WaitToReadAsync(operation.Token).ConfigureAwait(false))
@@ -191,13 +204,22 @@ public sealed class BlobConnection : IAsyncDisposable
             }
             // Completion is separate from the bounded queue so readers get the original
             // BlobClientException, never a ChannelClosedException around it.
+            workerAwaited = true;
             await worker.ConfigureAwait(false);
         }
         finally
         {
             operation.Cancel();
             try { await worker.ConfigureAwait(false); }
-            catch (Exception) { /* The primary enumeration failure has already surfaced. */ }
+            catch (Exception exception)
+            {
+                // The primary enumeration failure has already surfaced, or the cancellation above
+                // ended the worker. A failure the consumer never saw is written to the event source.
+                if (!workerAwaited && exception is not OperationCanceledException)
+                {
+                    BlobClientEventSource.Log.ListCleanupFailed(this, container, exception);
+                }
+            }
         }
     }
 
@@ -217,7 +239,7 @@ public sealed class BlobConnection : IAsyncDisposable
     {
         try
         {
-            await ExecuteCoreAsync<long>(async (reader, writer, token) =>
+            await ExecuteCoreAsync<long>(ListOperation, container, name: null, async (reader, writer, token) =>
             {
                 await WriteAsync(writer, BlobProtocolMessageType.List,
                     new BlobListMessage(container, prefix).Encode(), token).ConfigureAwait(false);
@@ -253,24 +275,31 @@ public sealed class BlobConnection : IAsyncDisposable
         }
     }
 
-    private ValueTask<TResult> ExecuteAsync<TResult>(
+    // name: the blob the operation addresses, which the failure event removes from the server's
+    // message; null for a listing.
+    private ValueTask<TResult> ExecuteAsync<TResult>(string operation, string container, string? name,
         Func<ProtocolFrameReader, ProtocolFrameWriter, CancellationToken, ValueTask<TResult>> action,
         CancellationToken cancellationToken)
     {
         EnsureOpen();
-        return ExecuteCoreAsync(action, cancellationToken);
+        return ExecuteCoreAsync(operation, container, name, action, cancellationToken);
     }
 
-    private async ValueTask<TResult> ExecuteCoreAsync<TResult>(
+    private async ValueTask<TResult> ExecuteCoreAsync<TResult>(string operation, string container, string? name,
         Func<ProtocolFrameReader, ProtocolFrameWriter, CancellationToken, ValueTask<TResult>> action,
         CancellationToken cancellationToken)
     {
+        long startTimestamp = BlobClientEventSource.Log.GetTimestamp();
+        BlobClientEventSource.Log.TransferStart(this, operation, container);
         try
         {
-            return await _connection.ExecuteAsync(new BlobExchange<TResult>(action), cancellationToken).ConfigureAwait(false);
+            TResult result = await _connection.ExecuteAsync(new BlobExchange<TResult>(action), cancellationToken).ConfigureAwait(false);
+            BlobClientEventSource.Log.TransferStop(this, operation, container, TransferredBytes(operation, result), startTimestamp);
+            return result;
         }
         catch (DatabaseClientException exception)
         {
+            BlobClientEventSource.Log.TransferFailed(this, operation, container, name, exception.Code, exception, startTimestamp);
             if (!_connection.IsOpen)
             {
                 await ReturnAsync().ConfigureAwait(false);
@@ -288,6 +317,16 @@ public sealed class BlobConnection : IAsyncDisposable
             throw;
         }
     }
+
+    /// <summary>
+    /// The content bytes a transfer moved, for its stop event: an upload's result is the length it
+    /// sent; the metadata operations move no content. It reads the result without boxing it, so the
+    /// call costs nothing while nobody listens, at every JIT tier.
+    /// </summary>
+    private static long TransferredBytes<TResult>(string operation, TResult result)
+        => ReferenceEquals(operation, UploadOperation) && typeof(TResult) == typeof(long)
+            ? Unsafe.As<TResult, long>(ref result)
+            : 0;
 
     private void EnsureOpen()
         => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0 ||
@@ -428,20 +467,26 @@ public sealed class BlobConnection : IAsyncDisposable
 
     private sealed class BlobDownloadExchange : DatabaseStreamingExchange
     {
+        private readonly BlobConnection _owner;
         private readonly string _container;
         private readonly string _name;
+        private readonly long _startTimestamp;
         private BlobTransferStartMessage? _metadata;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="BlobDownloadExchange"/> class.
         /// </summary>
+        /// <param name="owner">The connection that runs the download, for its transfer events.</param>
         /// <param name="container">The container that holds the Blob to download.</param>
         /// <param name="name">The name of the Blob to download.</param>
-        public BlobDownloadExchange(string container, string name)
+        /// <param name="startTimestamp">The timestamp the event source took when the download started, or zero.</param>
+        public BlobDownloadExchange(BlobConnection owner, string container, string name, long startTimestamp)
             : base(BlobProtocol.Family)
         {
+            _owner = owner;
             _container = container;
             _name = name;
+            _startTimestamp = startTimestamp;
         }
 
         protected override async ValueTask OpenCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
@@ -459,8 +504,45 @@ public sealed class BlobConnection : IAsyncDisposable
 
         protected override async ValueTask CopyToCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
             Stream destination, CancellationToken cancellationToken)
-            => await BlobProtocolTransfer.ReceiveAsync(new BlobErrorReader(reader), writer, destination,
-                _metadata ?? throw new InvalidOperationException("The download metadata has not been read."),
-                cancellationToken).ConfigureAwait(false);
+        {
+            BlobTransferStartMessage received;
+            try
+            {
+                received = await BlobProtocolTransfer.ReceiveAsync(new BlobErrorReader(reader), writer, destination,
+                    _metadata ?? throw new InvalidOperationException("The download metadata has not been read."),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (ReportFailure(exception))
+            {
+                // Unreachable: the filter writes the failure and declines the exception, so it
+                // propagates unchanged and the stream's reader observes it.
+                throw;
+            }
+
+            BlobClientEventSource.Log.TransferStop(_owner, DownloadOperation, _container, received.Length, _startTimestamp);
+        }
+
+        /// <summary>
+        /// Writes a failure of the download after its stream opened and declines it, so the
+        /// exception filter that calls it never catches. The code is the one the shared client
+        /// gives the failure: its own for a coded failure, a protocol violation for malformed
+        /// frames, and an internal failure otherwise. A cancellation is not a failure.
+        /// </summary>
+        /// <returns>Always false.</returns>
+        private bool ReportFailure(Exception exception)
+        {
+            if (exception is not OperationCanceledException)
+            {
+                ProtocolErrorCode code = exception switch
+                {
+                    DatabaseClientException coded => coded.Code,
+                    ProtocolException => ProtocolErrorCode.ProtocolViolation,
+                    _ => ProtocolErrorCode.Internal,
+                };
+                BlobClientEventSource.Log.TransferFailed(_owner, DownloadOperation, _container, _name, code, exception, _startTimestamp);
+            }
+
+            return false;
+        }
     }
 }

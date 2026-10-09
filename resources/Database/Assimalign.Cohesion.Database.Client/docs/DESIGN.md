@@ -225,6 +225,54 @@ Documents client implements only its startup and content protocol. No Blob-speci
 type enters the shared contract, and those clients need not copy Blob's former
 lifetime machinery.
 
+## Diagnostics
+
+The client core reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Client` (`src/Internal/EventSource/DatabaseClientEventSource.cs`).
+Every model client runs on `DatabaseClient`, so one source covers the connections of all of them;
+each model client's own source reports its commands. The pool's per-rental events carry the `Pool`
+keyword (`0x1`).
+
+| Id | Event | Level | Keyword | Payload | Written by |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `ConnectionOpened` | Informational | — | `database`, `endPoint` (as the dial failure names it), `serverVersion`, `durationMilliseconds` (dial and handshake) | `OpenAsync`, once the ready frame arrives |
+| 2 | `ConnectionOpenFailed` | Error | — | `database`, `endPoint`, `code`, `exceptionMessage`, `durationMilliseconds` | `OpenAsync`: a failed dial (`ConnectionFailure`), a handshake rejection (the server's code), a protocol violation, a transport break (`Internal`) |
+| 3 | `ConnectionClosed` | Informational | — | `database`, `endPoint` | the first `CloseAsync` of a connection that opened |
+| 4 | `ConnectionBroken` | Warning | — | `database`, `code`, `exceptionMessage` | `MarkBroken` on an open connection: a protocol or transport failure during an exchange |
+| 5 | `ConnectionRented` | Verbose | `Pool` | `database`, `reused`, `waitedMilliseconds` (the wait for a pool slot; a new connection's dial is event 1's duration) | `RentAsync` |
+| 6 | `ConnectionReturned` | Verbose | `Pool` | `database`, `pooled` (false when the connection closes instead) | `ReturnAsync` |
+| 7 | `ExchangeFailed` | Verbose | — | `database`, `code`, `exceptionMessage` (empty for a statement-level code, see below) | `ExecuteAsync`, for any coded failure of an exchange: a server error, or a client-detected one. When the response was incomplete the connection does not survive, and this Verbose event is the only record of the loss; it is not reported as `ConnectionBroken`. The model client's own failure event is the operator-facing record |
+| 8 | `DownloadReleaseFailed` | Warning | — | `database`, `exceptionType`, `exceptionMessage` | the download stream, when returning a failed download's rental fails (swallowed: the download's own failure stays the caller's) |
+
+A failure during the open is `ConnectionOpenFailed` only: a connection that never opened is not
+broken. Each failure is written by an exception filter that declines it, so it reaches the caller
+unchanged. Endpoints and database names are written; connection strings, credentials and
+statement text never are.
+
+A statement-level server error can quote user data the core cannot recognize: the key-value
+server names a conflicting key in hexadecimal, the Blob server names a missing or existing blob,
+and a parse error can quote a fragment of the statement. `ExchangeFailed` therefore writes its
+`exceptionMessage` only for the `Internal` and `ProtocolViolation` codes, which the client raises
+itself and a server sends only with fixed protocol text; for every other code it writes an empty
+string. The model client's own failure event writes the server's message, after removing the user
+data that client knows of (the Blob client's blob name, the key-value client's key and value
+bytes).
+
+Counters, created on the first enable command: `current-connections` (a connection that opened, +1
+in `OpenAsync`, −1 in its first `CloseAsync` behind an `Interlocked.Exchange` flag, because
+`_isClosed` is checked and set without synchronization), `current-rented-connections` (+1 when
+`MarkRented` turns a connection rented, −1 when `DisposeAsync` returns it), `connections-opened-per-second`
+and `total-connection-failures` (failed opens). The backing fields are updated whether or not anyone
+listens, so a tool that attaches late reads exact values. Timestamps are taken only while a listener
+takes the source (the pool wait only under `Pool`).
+
+`DatabaseClientEventSourceTests` checks the name, the strict manifest, a loopback client against a
+real SQL server (open, rent, return, re-rent, a failing statement, close: each event once, in order,
+and both gauges back where they started), a dial to a dead endpoint, a refused authentication, a
+protocol violation mid-exchange, a refused download over a transport whose disposal throws (event 8
+once, from the stream's swallowing catch, and event 7 without the server's message), and the four
+counters.
+
 ## Settings and compatibility
 
 Connection strings carry database, principal, endpoint, and pool size. Drivers are

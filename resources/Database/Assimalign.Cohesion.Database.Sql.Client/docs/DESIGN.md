@@ -92,6 +92,42 @@ command outcome. An observer derives from the abstract `SqlClientObserver`, whos
 three hooks are `protected internal virtual` with empty bodies: an observer overrides
 only the hooks it records, and only the owning `SqlConnection` fires them.
 
+## Diagnostics
+
+The client reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Sql.Client` (`src/Internal/EventSource/SqlClientEventSource.cs`),
+written by `SqlConnection`'s one command path. Start and stop carry the `Commands` keyword (`0x1`).
+The Key-Value client's source has the same ids, names and payloads, so one query reads both.
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `CommandStart` | Verbose | `Commands` | `database`, `parameterCount` |
+| 2 | `CommandStop` | Verbose | `Commands` | `database`, `rowCount`, `affectedCount`, `durationMilliseconds` |
+| 3 | `CommandFailed` | Error | — | `database`, `errorKind` (`SqlClientErrorKind`), `code` (the wire code), `exceptionMessage`, `durationMilliseconds` |
+| 4 | `ObserverFailed` | Warning | — | `database`, `callback` (`OnExecuting`, `OnExecuted` or `OnFailed`), `exceptionType`, `exceptionMessage` |
+
+A command fails with an Error whatever its cause, a statement the server rejects included (owner
+question Q1 of the event-source plan). Only a coded failure (`DatabaseClientException`) ends a
+start with event 3: a cancellation, which is how a timeout surfaces, or an uncoded exception (an
+overlapping exchange, a disposed connection) leaves the start without a stop or a failure, and
+because event 3 is not a stop, an activity-tracking tool leaves a failed command's activity open.
+Pairing every start with a stop is an owner decision on the plan's catalog. Event 4 makes visible
+an observer failure the client swallows; the command's outcome is unchanged. The statement text and
+the parameter values are not written (Q3), but event 3's `exceptionMessage` is the server's text,
+and a parse error's can quote a fragment of the statement, a literal included (`Malformed numeric
+literal '…'`). The client cannot tell such a fragment from the rest of the message; the shared
+core's `ExchangeFailed` writes no statement-level server message at all, and whether event 3 may
+carry it is owner question Q3. The connection itself is the shared core's
+(`Assimalign.Cohesion.Database.Client`). No counters: a process-wide count updated per command would
+be a contention point. The command path already takes the timestamp its observer receives, so the
+events add only `IsEnabled` checks while nobody listens.
+
+`SqlClientEventSourceTests` checks the name, the strict manifest, a succeeding and a failing command
+under an observer whose every hook throws (each event once, in order, with its payload, no
+statement text), and that start and stop need the `Commands` keyword. The test assembly's
+observers override the hooks as `protected internal`, which the project's test-only
+`InternalsVisibleTo` requires (CS0507); an application overrides them as `protected`.
+
 ## AOT and non-goals
 
 Encoding and materialization are hand-written, with no reflection or code

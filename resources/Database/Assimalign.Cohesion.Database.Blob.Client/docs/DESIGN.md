@@ -172,6 +172,50 @@ the core's `DESIGN.md`, "Lifecycle and errors"). `BlobClientException` keeps tha
 core exception, which keeps the transport's exception, is its inner exception. A canceled dial
 throws `OperationCanceledException` unchanged (`BlobClientDialFailureTests`).
 
+## Diagnostics
+
+The client reports through one internal event source named for its assembly,
+`Assimalign.Cohesion.Database.Blob.Client` (`src/Internal/EventSource/BlobClientEventSource.cs`).
+Start and stop carry the `Transfers` keyword (`0x1`).
+
+| Id | Event | Level | Keyword | Payload |
+| --- | --- | --- | --- | --- |
+| 1 | `TransferStart` | Verbose | `Transfers` | `database`, `operation` (`Upload`, `Download`, `Delete`, `GetProperties` or `List`), `container` |
+| 2 | `TransferStop` | Verbose | `Transfers` | `database`, `operation`, `container`, `bytes` (the content an upload sent or a download received; zero otherwise), `durationMilliseconds` |
+| 3 | `TransferFailed` | Error | — | `database`, `operation`, `container`, `code` (the wire code), `exceptionMessage`, `durationMilliseconds` |
+| 4 | `ListCleanupFailed` | Verbose | — | `database`, `container`, `exceptionType`, `exceptionMessage` |
+
+Upload, delete, properties and listing are written around the private `ExecuteCoreAsync` every one
+of them runs through. A download starts in `DownloadAsync` and stops when its last chunk is
+verified, inside the download exchange's copy, which can be after `DownloadAsync` returned its
+stream. A failure before the stream opens is written by `DownloadAsync`; one after it, by the copy,
+through an exception filter that declines it, with the code the shared client gives it (its own
+for a coded failure, `ProtocolViolation` for malformed frames, `Internal` otherwise). A
+cancellation, or an enumeration or download stream disposed early, writes neither stop nor
+failure. Event 4 reports a failure the listing's cleanup swallows only when its consumer never saw
+it: the failure the enumeration already surfaced, and the cancellation the cleanup itself causes,
+are not written.
+
+Only a coded failure (`DatabaseClientException`), or any failure of a download's copy, ends a start
+with event 3. A cancellation, which is how a timeout surfaces, or an uncoded exception before the
+copy (an overlapping exchange, a disposed connection) leaves the start without a stop or a failure,
+and because event 3 is not a stop, an activity-tracking tool leaves a failed transfer's activity
+open. Pairing every start with a stop, as `System.Net.Http`'s `RequestStart`/`RequestStop` do, is
+an owner decision on the event-source plan's catalog.
+
+Container names are identifiers and are written; blob names may be user data and are never
+written, nor is any content. The server names the blob in some of its failure messages
+(`Blob '…' does not exist.`, `Blob '…' already exists.`), so event 3 replaces the transfer's blob
+name in the message it writes with `<redacted>`. The shared core's `ExchangeFailed` writes no
+statement-level server message at all (Database.Client `DESIGN.md`, "Diagnostics"). Timestamps
+are taken only while a listener takes the source, and the byte count is read without boxing the
+result. No counters.
+
+`BlobClientEventSourceTests` checks the name, the strict manifest, each member's transfer once (the
+download's stop with its received bytes, and a refused download's failure), an upload refused over
+an existing blob, no blob name in any event (the refusals' messages included), and event 4 from a
+scripted listing whose worker fails after the consumer stopped taking items.
+
 ## Scope and verification
 
 This package does not provision databases or containers, expose SQL commands, multiplex
