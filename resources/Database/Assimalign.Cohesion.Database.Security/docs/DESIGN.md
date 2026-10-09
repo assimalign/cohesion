@@ -72,18 +72,28 @@ record of a rejection. A core that throws is an infrastructure failure, so an Er
 is not a failure and writes nothing, which narrows the plan's catalog ("when the core throws"): a
 server's authentication timeout cancels the core, so it leaves no Security event, and the model
 server's own handshake event is its record. The evidence is never written; the principal is (owner
-question Q4 of the event-source plan). No counters.
+question Q4 of the event-source plan). The database and principal are what an unauthenticated peer
+sent in its startup frame, which bounds neither below a frame's size, so each is cut to 256
+characters and marked with `...`, as the model servers cut the same names in `HandshakeRefused`
+and the root cuts the principal in `ServerSessionAuthenticated`. An authenticator's failure is an
+infrastructure failure, so event 3 keeps the exception's `Message` (the area's failure rule in
+[`docs/resources/Database/DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly)).
+No counters.
 
 **Nothing changes for the caller, and nothing is paid while nobody listens.** While the source is
 off, `AuthenticateAsync` returns the core's task unchanged. While it is on, a verdict that completed
 synchronously is reported at once and returned as a new completed task; otherwise a wrapper on a
-pooling builder awaits it. A failure is written by an exception filter that declines the exception,
-so it reaches the caller unchanged, and a core that throws before it returns a task still throws
-from the call itself.
+pooling builder awaits it. A failure is captured by an exception filter that declines it, so it
+reaches the caller unchanged, and is written from the `finally` of the same `try`, once the core's
+own `finally` blocks released what they held: an application's core that throws synchronously
+inside its own lock no longer runs every listener under that lock (the root's capture pattern). A
+core that throws before it returns a task still throws from the call itself.
 
 `DatabaseSecurityEventSourceTests` checks the name, the strict manifest, one event per verdict and
-failure with its payload, the synchronous throw, the silent cancellation, and that
-`AllowAll.AuthenticateAsync` allocates nothing while nobody listens.
+failure with its payload, the synchronous throw, a synchronous throw inside the core's lock written
+after the lock is released, 300-character names written at 259 characters, the silent cancellation,
+and that `AllowAll.AuthenticateAsync` allocates nothing while nobody listens (measured without an
+await, so the per-thread count sees all of it).
 
 ## AOT posture
 
