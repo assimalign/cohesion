@@ -1749,8 +1749,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// A page that cannot be read was not reclaimed. A failed checksum, a malformed page and an
     /// I/O error throw, so a reader fails rather than reading a damaged record as absent
     /// (#1342), as PostgreSQL raises <c>ERRCODE_DATA_CORRUPTED</c> for an invalid page instead
-    /// of skipping its tuples. A page freed between the allocation check and the pin is the one
-    /// read failure classified as reclamation, and only after the allocation check is repeated.
+    /// of skipping its tuples. No read failure is classified as reclamation: a page the free-space
+    /// map no longer allocates is not read at all, and a page freed, or reallocated, after that
+    /// check is pinned anyway and fails the type, owner or slot check.
     /// </para>
     /// </remarks>
     /// <param name="pageId">The page the reference names.</param>
@@ -1768,20 +1769,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     private bool TryReadRecordAt(PageId pageId, int slotIndex, ulong? ownerId, out ReadOnlyMemory<byte> record)
     {
         record = ReadOnlyMemory<byte>.Empty;
-        var freeSpaceMap = FreeSpaceMap;
-        var pageManager = PageManager;
 
-        if (!freeSpaceMap.IsAllocated(pageId))
-        {
-            return false;
-        }
-
-        StoragePageHandle handle;
-        try
-        {
-            handle = pageManager.GetPage(pageId);
-        }
-        catch (StorageIOException) when (!freeSpaceMap.IsAllocated(pageId))
+        // A page freed after this check, and perhaps reallocated, is pinned anyway and fails the
+        // type, owner or slot check below; catching the pin's "not allocated" failure and checking
+        // the map again would read a page freed and reallocated in between as an error.
+        if (!PageManager.TryGetPage(pageId, out var handle))
         {
             return false;
         }

@@ -2080,6 +2080,12 @@ PostgreSQL's heap fetch returns "not found" for a dead line pointer and raises
 `ERRCODE_DATA_CORRUPTED` for an invalid page. The engine does not wrap these
 storage errors in a `DatabaseException` yet, so over the wire one reaches the
 client as `Internal` and closes the session ("Session state machine", above).
+The scan had the opposite defect: the version purge deleting a slot, or freeing
+a page, while a statement scanned the table (an `UPDATE` or `DELETE` target scan,
+a `SELECT` without a seek) failed the statement with "Cannot read a deleted
+slot", an out-of-range slot index or "Page N is not allocated". The storage scan
+now skips what was reclaimed beneath it and still fails on a page it cannot read
+(Storage DESIGN, "Reading a record through a reference").
 
 ## The MVCC integration (scoped under #862)
 

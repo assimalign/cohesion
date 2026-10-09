@@ -1,7 +1,10 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
@@ -212,6 +215,164 @@ public sealed class StorageRecordReclamationTests
 
         // Assert
         failure.PageId.ShouldBe(location.PageId);
+    }
+
+    /// <summary>
+    /// The page a reference names can be freed and reallocated between the read's allocation check
+    /// and its pin. Before the fix the read caught the pin's "not allocated" failure and checked the
+    /// map again, which by then allocated the page once more, so it threw a reclaimed record's page
+    /// as an I/O error.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Reclaimed records: a read racing the free and reallocation of its page reads as reclaimed, never as an error")]
+    public async Task TryReadRecord_PageFreedAndReallocatedConcurrently_ShouldNeverThrow()
+    {
+        // Arrange: one record, then a writer that keeps freeing its page and taking it back.
+        using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
+        var stale = Insert(storage, Owner, "alpha");
+        Delete(storage, stale);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var writer = Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                Delete(storage, Insert(storage, OtherOwner, "gamma"));
+            }
+        });
+
+        // Act
+        long reads = 0;
+        long found = 0;
+        Exception? failure = null;
+        while (!stop.IsCancellationRequested && failure is null)
+        {
+            try
+            {
+                if (storage.TryReadRecord(stale.PageId, stale.SlotIndex, Owner, out _))
+                {
+                    found++;
+                }
+
+                reads++;
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        }
+
+        await writer;
+
+        // Assert: the record is gone for good, and its page always belonged to another owner or none.
+        failure.ShouldBeNull();
+        found.ShouldBe(0);
+        reads.ShouldBeGreaterThan(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Reclaimed records: a scan skips a slot deleted, a slot reverted and a page freed beneath its pinned page")]
+    public void MoveNext_SlotsAndPageReclaimedBetweenCalls_ShouldSkipThem()
+    {
+        // Arrange: three records on one page, a fourth page-mate inserted and reverted, and the
+        // scan standing on the first record with the page pinned.
+        using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
+        var first = Insert(storage, Owner, "alpha");
+        var second = Insert(storage, Owner, "beta");
+        var third = Insert(storage, Owner, "gamma");
+        using var iterator = storage.GetUnitIterator(Owner);
+        iterator.MoveNext().ShouldBeTrue();
+        Text(iterator.Current.Data).ShouldBe("alpha");
+
+        // Act: the purge deletes the second record, a failed statement's insert is reverted, and
+        // then the purge deletes the rest, which frees the page under the scan's pin.
+        Delete(storage, second);
+        using (var bracket = storage.BeginTransaction())
+        {
+            storage.Insert(bracket, Owner, Bytes("delta"));
+            bracket.Rollback();
+        }
+
+        bool movedToThird = iterator.MoveNext();
+        string thirdText = Text(iterator.Current.Data);
+        Delete(storage, first);
+        Delete(storage, third);
+        bool movedPastTheFreedPage = iterator.MoveNext();
+
+        // Assert
+        movedToThird.ShouldBeTrue();
+        thirdText.ShouldBe("gamma");
+        storage.FreeSpaceMap.IsAllocated(first.PageId).ShouldBeFalse();
+        movedPastTheFreedPage.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A scan pins its page but takes no latch, so a writer deletes slots, reverts inserts and
+    /// frees pages between the scan's checks of a slot and its read of it. Before the fix the scan
+    /// read the slot count, the slot's length and the slot itself as three separate reads, and
+    /// the allocation check and the pin as two, so a statement scanning beside the version purge
+    /// failed with "Cannot read a deleted slot", an out-of-range slot index, or "Page N is not
+    /// allocated". The writer here does what statements, failed statements and the purge do.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Storage] - Reclaimed records: a scan racing deletes, reverted inserts and page frees skips what they reclaim instead of failing")]
+    public async Task MoveNext_RacingReclamation_ShouldSkipWhatTheWriterReclaims()
+    {
+        // Arrange
+        using var storage = RecordStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
+        byte[] payload = new byte[900];
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var writer = Task.Run(() =>
+        {
+            var live = new List<(PageId PageId, int SlotIndex)>();
+            while (!stop.IsCancellationRequested)
+            {
+                using (var bracket = storage.BeginTransaction())
+                {
+                    for (int index = 0; index < 16; index++)
+                    {
+                        live.Add(storage.Insert(bracket, Owner, payload));
+                    }
+
+                    bracket.Commit();
+                }
+
+                using (var bracket = storage.BeginTransaction())
+                {
+                    storage.Insert(bracket, Owner, payload);
+                    bracket.Rollback();
+                }
+
+                foreach (var location in live)
+                {
+                    Delete(storage, location);
+                }
+
+                live.Clear();
+            }
+        });
+
+        // Act
+        long scans = 0;
+        Exception? failure = null;
+        while (!stop.IsCancellationRequested && failure is null)
+        {
+            try
+            {
+                using var iterator = storage.GetUnitIterator(Owner);
+                while (iterator.MoveNext())
+                {
+                }
+
+                scans++;
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        }
+
+        await writer;
+
+        // Assert
+        failure.ShouldBeNull();
+        scans.ShouldBeGreaterThan(0);
     }
 
     private static (PageId PageId, int SlotIndex) Insert(RecordStorage storage, ulong owner, string text)

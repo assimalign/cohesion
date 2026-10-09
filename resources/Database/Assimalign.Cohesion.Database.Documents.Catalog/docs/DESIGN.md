@@ -41,6 +41,13 @@ allocated": 250 versions of one document and a purge pass were enough. Reads cho
 deleter is not visible. Enumeration is ordinal name/identity order, independent of insertion,
 page allocation, or B+Tree scan order.
 
+`SearchIndexAsync` fetches the catalog record behind each visible index entry the same way:
+`TryReadRecord` with owner zero skips an entry whose record was reclaimed beneath it, the
+collection and stamp checks reject a slot that now holds another record, and a page that fails
+its checksum or cannot be read fails the search. Until #1342 the search read the record without
+the reclamation check, so an entry over a deleted slot failed the search with "Cannot read a
+deleted slot", and one over a freed page with "Page N is not allocated", instead of being skipped.
+
 Collections carry `DatabaseObjectOwner` plus an optional owning schema. `Schema` requires a
 nonempty schema name. The engine creates live-session collections as `Adhoc` and rejects
 `DROP COLLECTION`, OQL `CREATE INDEX`, and OQL `DROP INDEX` against a schema-owned collection with

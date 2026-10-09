@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -9,6 +10,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 
 using static KeyValueTestHarness;
 
@@ -108,6 +110,38 @@ public sealed class KeyValueIndexReadIntegrityTests
         alpha.ShouldBeNull();
         Text(bravo.ShouldNotBeNull().Value).ShouldBe("two");
         database.DataStorage.FreeSpaceMap.IsAllocated(reclaimed.PageId).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// The seek reads a record only from a data page of the key space, so a record that passes the
+    /// page checksum and does not decode is damaged, not reclaimed. Before the fix it read as an
+    /// absent key, the way a failed checksum used to.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Index reads: a Get over an entry record that does not decode fails instead of reading the key as missing (#1342)")]
+    public async Task Get_EntryRecordDoesNotDecode_ShouldFailWithStorageCorruption()
+    {
+        // Arrange: two keys on one page; the first byte of one record's payload, the key's type
+        // tag, overwritten in the buffer pool after the page passed its checksum.
+        await using var engine = CreateEngine(strategy: null);
+        var database = await engine.CreateDatabaseAsync(DatabaseName, TestTimeout.Token());
+        await using var session = await database.CreateSessionAsync();
+        await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+        await database.PutAsync(session, Bytes("bravo"), Bytes("two"), cancellationToken: TestTimeout.Token());
+        var damaged = EntryLocation(database, "alpha");
+        using (var handle = database.DataStorage.PageManager.GetPage(damaged.PageId))
+        {
+            var page = handle.Page.AsSpan();
+            int offset = BinaryPrimitives.ReadUInt16LittleEndian(page.Slice(Page.Size - ((damaged.SlotIndex + 1) * 4), 2));
+            page[offset + KeyValueRecordCodec.StampHeaderSize] = 0xFF;
+        }
+
+        // Act
+        var failure = await Should.ThrowAsync<StorageCorruptionException>(() => database.GetAsync(session, Bytes("alpha"), TestTimeout.Token()).AsTask());
+        var bravo = await database.GetAsync(session, Bytes("bravo"), TestTimeout.Token());
+
+        // Assert
+        failure.PageId.ShouldBe(damaged.PageId);
+        Text(bravo.ShouldNotBeNull().Value).ShouldBe("two");
     }
 
     private static KeyValueDatabaseEngine CreateEngine(FaultInjectingJournalStorageStrategy? strategy)

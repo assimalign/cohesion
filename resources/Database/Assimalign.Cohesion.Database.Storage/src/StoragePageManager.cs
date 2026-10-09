@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -167,6 +168,40 @@ public sealed class StoragePageManager
         }
 
         return _bufferPool.Pin(pageId, _stream);
+    }
+
+    /// <summary>
+    /// Pins a page a reader found through a reference it captured earlier, when the page is still
+    /// allocated. Unlike <see cref="GetPage"/>, a page that is not allocated returns <c>false</c>
+    /// instead of throwing, so the reader never has to tell "freed" apart from a failed read by the
+    /// exception (#1342).
+    /// </summary>
+    /// <remarks>
+    /// The allocation check and the pin are not atomic: the page can be freed, and even reallocated,
+    /// after the check. The caller therefore checks the pinned page's type and owner before it reads
+    /// it. The one alternative, catching the "not allocated" failure and checking the map again, reads
+    /// a page that was freed and reallocated in between as an error.
+    /// </remarks>
+    /// <param name="pageId">The page to pin.</param>
+    /// <param name="handle">The pinned page when the method returns <c>true</c>.</param>
+    /// <returns><c>true</c> when the page is allocated and pinned; <c>false</c> when it is not allocated.</returns>
+    /// <exception cref="StorageIOException">
+    /// The page is page 0, the file header, which never enters the buffer pool; the stream ended inside
+    /// the page; or every buffer-pool frame is pinned.
+    /// </exception>
+    /// <exception cref="StorageCorruptionException">The page failed its checksum.</exception>
+    internal bool TryGetPage(PageId pageId, [NotNullWhen(true)] out StoragePageHandle? handle)
+    {
+        ThrowIfHeaderPage(pageId);
+
+        if (!_freeSpaceMap.IsAllocated(pageId))
+        {
+            handle = null;
+            return false;
+        }
+
+        handle = _bufferPool.Pin(pageId, _stream);
+        return true;
     }
 
     private static void ThrowIfHeaderPage(PageId pageId)

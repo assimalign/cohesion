@@ -828,7 +828,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// the undo completes. A retry that fails again is rethrown at the end of the pass,
     /// after every deferred writer was attempted and the rest of the pass ran, so a
     /// writer whose undo keeps failing does not stop the reclamation of committed
-    /// tombstones below it; the writer waits for the next pass.
+    /// tombstones below it; the writer waits for the next pass. A writer queued by a
+    /// direct <see cref="VersionStore.PurgeWriterAsync"/> caller is retried the same way,
+    /// and the prune reclaims every tombstone it can read before it throws for one whose
+    /// version page it cannot read (a failed checksum or an I/O error, #1342), which keeps
+    /// that tombstone for the next pass.
     /// </remarks>
     public long RunVersionPurgePass(CancellationToken cancellationToken)
     {
@@ -850,7 +854,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             deferredFailure = ExceptionDispatchInfo.Capture(exception);
         }
 
-        // Writers queued by a direct PurgeWriterAsync caller; the manager owns the rest.
+        // Writers queued by a direct PurgeWriterAsync caller; the manager owns the rest. A failed
+        // undo requeues its writer and is rethrown at the end of the pass, as a deferred one is,
+        // so a version page that cannot be read does not stop the prune below (#1342).
         foreach (ulong writer in _versionStore.PendingAbortedPurges)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -859,8 +865,15 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 continue;
             }
 
-            total += _versionStore.PurgeWriterAsync(new TransactionSequence(writer), cancellationToken)
-                .AsTask().GetAwaiter().GetResult();
+            try
+            {
+                total += _versionStore.PurgeWriterAsync(new TransactionSequence(writer), cancellationToken)
+                    .AsTask().GetAwaiter().GetResult();
+            }
+            catch (Exception exception) when (exception is not ObjectDisposedException && !cancellationToken.IsCancellationRequested)
+            {
+                deferredFailure ??= ExceptionDispatchInfo.Capture(exception);
+            }
         }
 
         cancellationToken.ThrowIfCancellationRequested();

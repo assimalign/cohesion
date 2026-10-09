@@ -12,7 +12,9 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// (<see cref="Storage.GetUnitIterator(ulong)"/>) — across only that owner's record chain.
 /// </summary>
 /// <remarks>
-/// The iterator pins at most one page at a time; disposing it releases that pin.
+/// The iterator pins at most one page at a time; disposing it releases that pin. The pin is not a
+/// latch: a slot deleted or reverted and a page freed while the scan runs are skipped, and a page
+/// the scan cannot read (a failed checksum, a malformed page, an I/O error) fails it (#1342).
 /// </remarks>
 public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
 {
@@ -105,7 +107,16 @@ public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
 
             if (_currentHandle == null)
             {
-                _currentHandle = _pageManager.GetPage((PageId)pageId);
+                // The page can be freed between the check above and the pin. A page found
+                // freed is skipped like one the check skips; one freed, or reallocated, after
+                // the pin's own check is pinned and fails the type and owner check below. Every
+                // read failure (a failed checksum, a short read, a full pool) fails the scan (#1342).
+                if (!_pageManager.TryGetPage((PageId)pageId, out _currentHandle))
+                {
+                    AdvancePage();
+                    continue;
+                }
+
                 _pagesVisited++;
             }
 
@@ -120,14 +131,14 @@ public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
                 var slotted = new SlottedPage(_currentHandle.Page);
                 _currentSlotIndex++;
 
+                // The pin holds no latch, so a writer can delete a slot or revert the page to
+                // fewer slots between any two reads here. TryReadSlot checks and copies one
+                // snapshot of the slot entry against the live slot count, and reads a slot that
+                // stopped holding a record as one to skip, not as an error (#1342).
                 while (_currentSlotIndex < slotted.SlotCount)
                 {
-                    int slotLength = slotted.GetSlotLength(_currentSlotIndex);
-
-                    if (slotLength > 0)
+                    if (slotted.TryReadSlot(_currentSlotIndex, out byte[] data))
                     {
-                        var data = new byte[slotLength];
-                        slotted.ReadSlot(_currentSlotIndex, data);
                         _current = new StorageUnit((PageId)pageId, _currentSlotIndex, data);
                         return true;
                     }

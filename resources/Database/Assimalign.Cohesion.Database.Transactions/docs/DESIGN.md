@@ -432,7 +432,7 @@ Storage owns the physical journal (`Database.Storage`); the transaction log is t
 
 `TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). `TransactionCommitUnconfirmedException : Exception`, a second independent root, for a commit whose record was written but not made durable: the transaction is committed, so it is deliberately not an abort and not retryable ("A commit record that was written but not made durable", above); engines wrap it in the area's `DatabaseTransactionCommitUnconfirmedException`. Caller-initiated rollback is not an error: once started it throws nothing (#1226); before the start it throws only for a canceled token or a context it cannot end, and `ObjectDisposedException` once the manager's disposal began.
 
-The version store throws the storage library's errors unchanged when a version page cannot be read: `PurgeWriterAsync` (a failed undo, which requeues the writer), `PruneAsync` and so `RunVersionPurgePass`, and `GetVisibleVersionAsync`. A version reclaimed beneath its ledger entry is not one of them (#1342; "Shared per-database composition (#918)", below).
+The version store throws the storage library's errors unchanged when a version page cannot be read: `PurgeWriterAsync` (a failed undo, which requeues the writer), `PruneAsync` and so `RunVersionPurgePass` (each after reclaiming everything else it can), and `GetVisibleVersionAsync`. A version reclaimed beneath its ledger entry is not one of them (#1342; "Shared per-database composition (#918)", below).
 
 ## The engine binding (first adopter: the SQL engine)
 
@@ -522,8 +522,20 @@ A version page the store cannot read is not a reclaimed location (#1342): the
 undo or the prune throws the storage error (`StorageCorruptionException` for a
 page that fails its checksum or is malformed, `StorageIOException`, or the
 device's `IOException`). A failed undo requeues the writer for the purge worker,
-which keeps it in flight and its versions hidden until a retry completes; a
-failed prune keeps its candidates for the next pass. Before #1342 the store read
+which keeps it in flight and its versions hidden until a retry completes. A prune
+keeps the candidate it cannot read, reclaims every other candidate and commits
+their batches, and then throws the first such failure; `RunVersionPurgePass`
+likewise attempts every queued writer and runs the prune before it rethrows a
+failed undo. One unreadable page therefore costs one tombstone or one writer, not
+the whole record space's reclamation: a prune that stopped at the page would roll
+back the batch beside it and never reach the ones after it, on every pass. The
+failure still reaches the purge worker, which reports it and retries with backoff.
+PostgreSQL's `VACUUM` errors out of the relation instead: its heap pass reads each
+block through the buffer manager (`src/backend/access/heap/vacuumlazy.c:1401`),
+which raises `ERRCODE_DATA_CORRUPTED` for an invalid page
+(`src/backend/storage/buffer/bufmgr.c:8889`, `:8913-8919`). The per-candidate split
+is affordable here because a prune candidate is one record, not a page to rewrite.
+Before #1342 the store read
 every `StorageException` as "the slot is gone": an undo that met an unreadable
 page forgot the aborted writer with its version still on the page, and once the
 page read again every snapshot read the rolled-back write as committed

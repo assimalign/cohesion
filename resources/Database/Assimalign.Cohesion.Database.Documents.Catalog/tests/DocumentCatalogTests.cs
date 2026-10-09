@@ -102,6 +102,60 @@ public sealed class DocumentCatalogTests
         await fixture.Coordinator.CommitAsync(reader);
     }
 
+    /// <summary>
+    /// An index entry whose document catalog record was reclaimed beneath it is stale, as a
+    /// directory reference is in a lookup. Before the fix the search read the record without the
+    /// reclamation check and failed with "Cannot read a deleted slot".
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents.Catalog] - Reclaimed versions: an index search skips an entry whose catalog record was reclaimed beneath it (#1342)")]
+    public async Task SearchIndex_CatalogRecordReclaimedBeneathEntry_ShouldSkipTheEntry()
+    {
+        // Arrange: two indexed documents share a key; one's catalog record is deleted beneath its
+        // entry, the state a purge or an undo leaves under an entry a reader already holds.
+        await using var fixture = await Fixture.Create();
+        await fixture.CreateIndex("age", "age");
+        await fixture.Write("reclaimed-document", "{\"age\":1}");
+        await fixture.Write("kept-document", "{\"age\":1}");
+        var reclaimed = CatalogRecordLocation(fixture, "reclaimed-document");
+        using (var bracket = fixture.Storage.BeginTransaction())
+        {
+            fixture.Storage.DeleteEntry(bracket, reclaimed.PageId, reclaimed.SlotIndex);
+            bracket.Commit();
+        }
+
+        // Act
+        var matches = await fixture.Search("age", 1m, true, 1m, true);
+
+        // Assert
+        matches.ShouldBe(["kept-document"]);
+        fixture.Storage.FreeSpaceMap.IsAllocated(reclaimed.PageId).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A catalog record that cannot be read under an index entry is not a reclaimed one: the search
+    /// fails instead of leaving the document out of its result (#1342).
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Documents.Catalog] - Reclaimed versions: an index search over a malformed catalog record throws instead of leaving the document out (#1342)")]
+    public async Task SearchIndex_CatalogRecordSlotMalformed_ShouldThrowStorageCorruption()
+    {
+        // Arrange: the indexed document's catalog slot entry made to address bytes past its page.
+        await using var fixture = await Fixture.Create();
+        await fixture.CreateIndex("age", "age");
+        await fixture.Write("malformed-document", "{\"age\":1}");
+        var location = CatalogRecordLocation(fixture, "malformed-document");
+        using (var handle = fixture.Storage.PageManager.GetPage(location.PageId))
+        {
+            var entry = handle.Page.AsSpan().Slice(Page.Size - ((location.SlotIndex + 1) * 4), 2);
+            BinaryPrimitives.WriteUInt16LittleEndian(entry, Page.Size - 1);
+        }
+
+        // Act
+        var failure = await Should.ThrowAsync<StorageCorruptionException>(() => fixture.Search("age", 1m, true, 1m, true));
+
+        // Assert
+        failure.PageId.ShouldBe(location.PageId);
+    }
+
     [Fact]
     public async Task MixedShapesNestedPathsAndArraySubscriptsUseScalarIndexes()
     {
@@ -294,6 +348,26 @@ public sealed class DocumentCatalogTests
         nullCreateContext.ParamName.ShouldBe("context");
         nullDropName.ParamName.ShouldBe("name");
         nullDropContext.ParamName.ShouldBe("context");
+    }
+
+    /// <summary>
+    /// Finds the one catalog record that names a document: the shared space's records are scanned
+    /// for the identity's bytes, which no other record of the test carries.
+    /// </summary>
+    private static (PageId PageId, int SlotIndex) CatalogRecordLocation(Fixture fixture, string documentId)
+    {
+        byte[] identity = Encoding.UTF8.GetBytes(documentId);
+        var matches = new System.Collections.Generic.List<(PageId PageId, int SlotIndex)>();
+        using var iterator = fixture.Storage.GetUnitIterator(0);
+        while (iterator.MoveNext())
+        {
+            if (iterator.Current.Data.Span.IndexOf(identity) >= 0)
+            {
+                matches.Add((iterator.Current.PageId, iterator.Current.SlotIndex));
+            }
+        }
+
+        return matches.ShouldHaveSingleItem();
     }
 
     private sealed class Fixture : IAsyncDisposable

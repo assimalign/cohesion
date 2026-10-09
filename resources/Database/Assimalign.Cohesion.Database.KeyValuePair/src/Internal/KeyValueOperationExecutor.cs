@@ -373,6 +373,13 @@ internal sealed class KeyValueOperationExecutor
     /// reverted slot, a freed or reallocated page) reads as absence; a page that
     /// fails its checksum or cannot be read fails the command (#1342).
     /// </summary>
+    /// <exception cref="StorageCorruptionException">
+    /// The entry page failed its checksum or is malformed, or the record does not decode. The read
+    /// checked the page's type and owner, so a record it returned is a key-space entry record, and
+    /// one that does not decode is damaged, not reclaimed or reused: it fails the command instead
+    /// of reading the key as missing (#1342), as the Graph, Documents and Blob codecs raise on a
+    /// malformed record.
+    /// </exception>
     private ResolvedVersion? ReadVisibleVersion(ulong entryReference, TransactionSnapshot snapshot)
     {
         var (pageId, slotIndex) = KeyValueRecordLocation.Unpack(entryReference);
@@ -384,7 +391,8 @@ internal sealed class KeyValueOperationExecutor
 
         if (!KeyValueRecordCodec.TryDecode(record.Span, out byte[] key, out byte[] value, out var writer, out var deleter))
         {
-            return null;
+            throw new StorageCorruptionException(
+                pageId, $"The key-value entry record in slot {slotIndex} of page {(long)pageId} does not decode.");
         }
 
         bool visible = snapshot.IsVisible(writer)

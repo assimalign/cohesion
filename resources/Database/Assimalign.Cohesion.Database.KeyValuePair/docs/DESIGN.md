@@ -585,6 +585,11 @@ them yet. Every command resolves its key by a primary-index seek, and the seek f
 entry record with `Storage.TryReadRecord` and the key space's owner id (#1342): an index
 entry whose record was reclaimed beneath it (its slot deleted or reverted, its page freed
 or reallocated) reads as absence, and anything else that stops the read fails the command.
+That includes a record that passes its page checksum and does not decode: the read checked the
+page's type and owner, so the record is a key-space entry record, and one that does not decode
+is damaged, not reclaimed. It fails the command with `StorageCorruptionException` (carrying the
+page id), as the Graph, Documents and Blob codecs raise on a malformed record; before, the key
+read as missing.
 The latest-version check under the key lock makes the same split: a reclaimed version is the
 retryable write-write conflict, a page it cannot read is the storage error. Until #1342
 both caught `StorageException`: a corrupt entry page made its keys read as missing, and a
