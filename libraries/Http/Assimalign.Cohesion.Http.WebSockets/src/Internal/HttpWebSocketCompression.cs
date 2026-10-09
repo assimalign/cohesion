@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <para>
 /// The header is parsed with RFC 6455 §9.1's grammar: comma-separated extensions, each a token
 /// with <c>;</c>-separated parameters whose values are tokens or quoted strings. An offer the
-/// server cannot honor is declined, never an error (§5.1): an unknown parameter, a parameter
+/// server cannot honor is declined, never an error (§7): an unknown parameter, a parameter
 /// given twice, a value where none belongs or a missing or malformed one, and a request for an
 /// 8-bit server window, which zlib cannot produce. Declining every offer leaves the socket
 /// uncompressed.
@@ -153,7 +153,7 @@ internal static class HttpWebSocketCompression
             }
             else
             {
-                // §5.1: a parameter not defined for use in an offer.
+                // §7: a parameter not defined for use in an offer.
                 return false;
             }
         }
@@ -205,7 +205,7 @@ internal static class HttpWebSocketCompression
         return true;
     }
 
-    // RFC 7692 §7.1.2: a decimal integer from 8 to 15 without leading zeros.
+    // RFC 7692 §7.1.2.1 and §7.1.2.2: a decimal integer from 8 to 15 without leading zeros.
     private static bool TryParseWindowBits(string? value, out int bits)
     {
         bits = 0;

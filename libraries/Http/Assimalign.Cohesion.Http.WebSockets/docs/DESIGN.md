@@ -181,6 +181,15 @@ The client's offer is exposed as `RequestedProtocols`, in its order of preferenc
 chooses. No helper picks for it: the right order (the client's preference or the server's) is the
 application's decision, and a one-line loop over `RequestedProtocols` expresses either.
 
+Two rules apply to subprotocol names:
+
+- **Names compare case-sensitively.** RFC 7936 §2 has the IANA WebSocket Subprotocol Name Registry
+  treat names that differ only in case as different. The selected name must therefore match an
+  offered one ordinally: offering `chat` and selecting `Chat` throws.
+- **Names are syntax-checked, not registered.** Each name must be an RFC 9110 token, and nothing
+  checks it against the registry. RFC 7936 §3 places no requirement on implementations, and RFC
+  6455 §1.9's advice to register a subprotocol is not normative.
+
 ## permessage-deflate
 
 Compression is negotiated only when the accept asks for it
@@ -201,7 +210,7 @@ the server can honor wins (RFC 7692 §5); every other is declined, never an erro
 | `server_max_window_bits=8` | offer declined: zlib cannot produce an 8-bit window | — |
 | `client_max_window_bits=N`, N from 9 to 15 | echoed (§7.1.2.2) | `ClientMaxWindowBits = N` |
 | `client_max_window_bits` without a value, or `=8` | not echoed: §7.1.2.2 lets the server ignore it, and a 15-bit inflater reads any smaller window | `ClientMaxWindowBits = 15` |
-| an unknown parameter, a parameter twice, a value where none belongs, a malformed value | offer declined (§5.1) | — |
+| an unknown parameter, a parameter twice, a value where none belongs, a malformed value | offer declined (§7) | — |
 
 `client_max_window_bits` is never sent unless the client offered it (§7.1.2.2's MUST NOT), and the
 response's parameter names are lower case, which the BCL client compares ordinally.
