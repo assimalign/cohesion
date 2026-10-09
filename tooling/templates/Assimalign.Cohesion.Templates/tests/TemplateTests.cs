@@ -11,6 +11,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
+using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Sql.Client;
+
 using Shouldly;
 using Xunit;
 
@@ -425,7 +429,9 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
     /// <summary>
     /// Starts the generated standalone database once. Its server listens only after application
     /// Build returns, and Build returns only after the SQL engine's build provisioned the declared
-    /// database, so an accepted connection proves the schema applied on first start.
+    /// database, so an accepted connection proves the schema applied on first start. A full
+    /// customer row is then written and read back over the wire, so a record member the schema
+    /// left out of its table fails here, not on a developer's first write.
     /// </summary>
     /// <returns>A task representing the build, the start and the stop of the generated program.</returns>
     [TemplateFeedFact("cohesion-database", DisplayName = "Cohesion Test [Templates] - Run: database provisions its schema and serves on first start")]
@@ -457,6 +463,7 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
         Task<string> stdout = process.StandardOutput.ReadToEndAsync();
         Task<string> stderr = process.StandardError.ReadToEndAsync();
         bool listening = false;
+        SqlResultSet? customers = null;
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -476,6 +483,27 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
                 {
                 }
             }
+
+            // A full row over the wire: every member of the template's record must be a column of
+            // its table, or the program's first ordinary write fails.
+            if (listening)
+            {
+                await using SqlClient sql = SqlClient.Create(new SqlClientOptions
+                {
+                    Settings = DatabaseConnectionSettings.For(
+                        new Uri($"cohesion-db://127.0.0.1:{port}"),
+                        database: "customers",
+                        principal: "template-test"),
+                    ConnectionFactory = new TcpConnectionFactory(),
+                });
+                await using SqlConnection connection = await sql.ConnectAsync(timeout.Token);
+                await connection.ExecuteAsync(
+                    "INSERT INTO Customers (Id, Name, Email) VALUES (1, 'Ada Lovelace', 'ada@example.com')",
+                    cancellationToken: timeout.Token);
+                customers = await connection.QueryAsync(
+                    "SELECT Id, Name, Email FROM Customers",
+                    cancellationToken: timeout.Token);
+            }
         }
         finally
         {
@@ -492,6 +520,9 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
         listening.ShouldBeTrue($"The generated database never accepted a connection on port {port}:\n{log}");
         Directory.Exists(Path.Combine(data, "customers")).ShouldBeTrue($"The engine's build did not create database 'customers' under '{data}':\n{log}");
         Directory.EnumerateFiles(Path.Combine(data, "customers")).ShouldNotBeEmpty();
+        customers.ShouldNotBeNull().Count.ShouldBe(1);
+        customers[0].GetString("Name").ShouldBe("Ada Lovelace");
+        customers[0].GetString("Email").ShouldBe("ada@example.com");
     }
 
     private static int FreeLoopbackPort()

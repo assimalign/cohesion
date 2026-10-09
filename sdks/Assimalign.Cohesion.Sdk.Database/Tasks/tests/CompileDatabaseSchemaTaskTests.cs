@@ -111,8 +111,6 @@ public class CompileDatabaseSchemaTaskTests
         SqlCompiledSchema runtimeSchema = SqlSchema.Compile("parity", database =>
         {
             database.AllowDestructiveChanges();
-            database.Type<ParityMoney>(type => type.Decimal(18, 2));
-            database.Type<ParityArrayHolder>(type => type.Decimal(9, 0));
             database.Table<ParityOrder>("Orders", table =>
             {
                 table.Key(order => order.Id);
@@ -120,7 +118,6 @@ public class CompileDatabaseSchemaTaskTests
                 table.Column(order => order.Total);
                 table.Index(order => order.Note);
             });
-            database.Principal("app", principal => principal.Grant(SqlPermission.Read, "Orders"));
         });
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("ParitySchema.cs");
@@ -162,7 +159,8 @@ public class CompileDatabaseSchemaTaskTests
         File.ReadAllText(SchemaPath(task, "reporting")).ShouldBe(runtimeReporting.CanonicalDocument);
         File.ReadAllText(HashPath(task, "reporting")).ShouldBe(runtimeReporting.Hash + "\n");
         Directory.GetFiles(task.OutputDirectory).Select(Path.GetFileName).Order(StringComparer.Ordinal).ShouldBe(
-            ["reporting.schema.json", "reporting.schema.sha256", "sales.schema.json", "sales.schema.sha256"]);
+            ["reporting.schema.json", "reporting.schema.sha256", "sales.schema.json", "sales.schema.sha256", "schemas.manifest"]);
+        File.ReadAllText(Path.Combine(task.OutputDirectory, "schemas.manifest")).ShouldBe("reporting\nsales\n");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a database no longer declared loses its artifacts")]
@@ -176,15 +174,87 @@ public class CompileDatabaseSchemaTaskTests
         task.Execute().ShouldBeTrue(Errors(engine));
         File.WriteAllText(directory.File("obj/cohesion/database/notes.txt"), "not an artifact");
 
+        // A consumer's own file that happens to look like an artifact, in an overridden directory.
+        File.WriteAllText(directory.File("obj/cohesion/database/appsettings.schema.json"), "{}");
+
         File.WriteAllText(sourcePath, EngineBuilderSource.Replace("\"sales\"", "\"ledger\"", StringComparison.Ordinal));
         task = CreateTask(directory, sourcePath, "Sql", engine);
         task.Execute().ShouldBeTrue(Errors(engine));
 
+        // Only the artifacts the previous manifest listed are the task's to delete.
         task.Schemas.Select(static item => item.ItemSpec).ShouldBe(["ledger", "reporting"]);
         File.Exists(SchemaPath(task, "sales")).ShouldBeFalse();
         File.Exists(HashPath(task, "sales")).ShouldBeFalse();
         File.Exists(SchemaPath(task, "ledger")).ShouldBeTrue();
         File.Exists(directory.File("obj/cohesion/database/notes.txt")).ShouldBeTrue();
+        File.Exists(directory.File("obj/cohesion/database/appsettings.schema.json")).ShouldBeTrue();
+        File.ReadAllText(Path.Combine(task.OutputDirectory, "schemas.manifest")).ShouldBe("ledger\nreporting\n");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a principal or a custom type, which every engine build refuses, fails the build")]
+    [InlineData("""database.Principal("app", principal => principal.Grant(SqlPermission.Read, "Orders"));""", "Principal")]
+    [InlineData("""database.Type<Money>(type => type.Decimal(18, 2));""", "Type")]
+    public void Execute_WithUnprovisionableDeclaration_ShouldFailWithoutArtifacts(string declaration, string method)
+    {
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Schema.cs");
+        File.WriteAllText(sourcePath, SchemaTypes + $$"""
+
+            public static class SchemaProgram
+            {
+                public static void Configure()
+                {
+                    SqlSchema.Create("orders", database =>
+                    {
+                        database.Table<Order>("Orders", table => table.Key(order => order.Id));
+                        {{declaration}}
+                    });
+                }
+            }
+            """);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        task.Execute().ShouldBeFalse();
+
+        engine.Errors.ShouldContain(error =>
+            error.Code == "COHDBSDK108" &&
+            error.Message != null &&
+            error.Message.StartsWith($"SqlSchemaBuilder.{method} declares what no SQL engine can provision yet", StringComparison.Ordinal) &&
+            error.Message.Contains("COHSQLP001", StringComparison.Ordinal));
+        Directory.Exists(task.OutputDirectory).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: a column of a type SQL cannot store names the supported types")]
+    public void Execute_WithColumnOfUnsupportedType_ShouldNameTheSupportedTypes()
+    {
+        using var directory = new TemporaryDirectory();
+        string sourcePath = directory.File("Schema.cs");
+        File.WriteAllText(sourcePath, SchemaTypes + """
+
+            public static class SchemaProgram
+            {
+                public static void Configure()
+                {
+                    SqlSchema.Create("billing", database =>
+                        database.Table<Invoice>("Invoices", table =>
+                        {
+                            table.Key(invoice => invoice.Id);
+                            table.Column(invoice => invoice.Total);
+                        }));
+                }
+            }
+            """);
+        var engine = new RecordingBuildEngine();
+        CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
+
+        task.Execute().ShouldBeFalse();
+
+        BuildErrorEventArgs error = engine.Errors.ShouldHaveSingleItem();
+        error.Code.ShouldBe("COHDBSDK106");
+        error.Message.ShouldNotBeNull().ShouldContain("Column 'Invoices.Total' has type '", Case.Sensitive);
+        error.Message.ShouldContain("which is not a SQL column type", Case.Sensitive);
+        error.Message.ShouldNotContain("Type<", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: the hosted AddSql shape declares its databases")]
@@ -297,8 +367,8 @@ public class CompileDatabaseSchemaTaskTests
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
         File.WriteAllText(sourcePath, SqlSchemaSource.Replace(
-            "record OrderLine(long Id, long OrderId, Money Total)",
-            "record OrderLine(long Id, string OrderId, Money Total)",
+            "record OrderLine(long Id, long OrderId, decimal Total)",
+            "record OrderLine(long Id, string OrderId, decimal Total)",
             StringComparison.Ordinal));
         var engine = new RecordingBuildEngine();
         CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
@@ -426,7 +496,6 @@ public class CompileDatabaseSchemaTaskTests
             {
                 SqlSchema.Compile("orders", database =>
                 {
-                    database.Type<Money>(type => type.Decimal(18, 2));
                     database.Table<Order>("Orders", table =>
                     {
                         table.Key(order => order.Id);
@@ -438,7 +507,6 @@ public class CompileDatabaseSchemaTaskTests
                         table.References<Order>(line => line.OrderId);
                         table.Column(line => line.Total);
                     });
-                    database.Principal("app", principal => principal.Grant(SqlPermission.ReadWrite, "Orders", "OrderLines"));
                 });
             }
         }
@@ -506,9 +574,7 @@ public class CompileDatabaseSchemaTaskTests
 
         namespace Assimalign.Cohesion.Sdk.Database.Tests
         {
-            public sealed record ParityOrder(long Id, string Note, ParityMoney Total);
-            public sealed record ParityArrayHolder(long[] Values);
-            public readonly record struct ParityMoney(decimal Amount);
+            public sealed record ParityOrder(long Id, string Note, decimal Total);
 
             public static class ParitySchemaProgram
             {
@@ -517,8 +583,6 @@ public class CompileDatabaseSchemaTaskTests
                     SqlSchema.Create("parity", database =>
                     {
                         database.AllowDestructiveChanges();
-                        database.Type<ParityMoney>(type => type.Decimal(18, 2));
-                        database.Type<ParityArrayHolder>(type => type.Decimal(9, 0));
                         database.Table<ParityOrder>("Orders", table =>
                         {
                             table.Key(order => order.Id);
@@ -526,7 +590,6 @@ public class CompileDatabaseSchemaTaskTests
                             table.Column(order => order.Total);
                             table.Index(order => order.Note);
                         });
-                        database.Principal("app", principal => principal.Grant(SqlPermission.Read, "Orders"));
                     });
                 }
             }
@@ -614,18 +677,15 @@ public class CompileDatabaseSchemaTaskTests
         using Assimalign.Cohesion.Database.Sql.Schema;
 
         public sealed record Order(long Id, long CustomerId);
-        public sealed record OrderLine(long Id, long OrderId, Money Total);
+        public sealed record OrderLine(long Id, long OrderId, decimal Total);
         public sealed record MissingOrder(long Id);
         public sealed record Session(string Id, string Value);
+        public sealed record Invoice(long Id, Money Total);
         public readonly record struct Money(decimal Amount);
         """;
 }
 
-public sealed record ParityOrder(long Id, string Note, ParityMoney Total);
-
-public sealed record ParityArrayHolder(long[] Values);
-
-public readonly record struct ParityMoney(decimal Amount);
+public sealed record ParityOrder(long Id, string Note, decimal Total);
 
 public sealed record SalesOrder(long Id, string Item);
 

@@ -116,8 +116,8 @@ builder.AddSql("orders-sql", sql =>                                             
     sql.AddServer(server => server.Listen(Resource.Endpoints.Db));                     // the model creates the server
     sql.AddDatabase("orders", database => database.Schema(schema =>                    // the schema is code; the engine's build provisions it
     {
-        schema.Table<Order>(table => { table.Key(o => o.Id); table.Index(o => o.CustomerId); });
-        schema.Table<OrderLine>(table => { table.Key(l => l.Id); table.References<Order>(l => l.OrderId); });
+        schema.Table<Order>(table => { table.Key(o => o.Id); table.Column(o => o.Total); table.Index(o => o.CustomerId); });   // every stored member is declared
+        schema.Table<OrderLine>(table => { table.Key(l => l.Id); table.Column(l => l.Quantity); table.Column(l => l.UnitPrice); table.References<Order>(l => l.OrderId); });
     }));
 });
 

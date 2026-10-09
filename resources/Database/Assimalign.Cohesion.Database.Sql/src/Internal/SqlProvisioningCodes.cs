@@ -30,4 +30,11 @@ internal static class SqlProvisioningCodes
     /// A step of a schema apply failed; the completed reversible steps were compensated.
     /// </summary>
     internal const string StepFailed = "COHSQLP004";
+
+    /// <summary>
+    /// An apply refused before any step runs: its plan needs a destructive step the schema does
+    /// not allow or a change the planner cannot make, or the schema would adopt a table or index it
+    /// did not create.
+    /// </summary>
+    internal const string PolicyRefused = "COHSQLP005";
 }

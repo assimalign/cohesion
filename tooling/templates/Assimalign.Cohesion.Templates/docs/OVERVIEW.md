@@ -54,4 +54,5 @@ and `COHESION_TEMPLATES_TEST_PACKAGE_VERSION` to exercise builds against a prepa
 Defaults are `_out/packages` and the canonical version with `.local` appended. Test discovery
 reports exact missing packages or an SDK pack without executable defaults as skips. With the feed
 present, one test also starts the generated `cohesion-database`: it builds it self-contained for
-the host RID, so that run restores the matching `Microsoft.NETCore.App` runtime pack from nuget.org.
+the host RID, so that run restores the matching `Microsoft.NETCore.App` runtime pack from nuget.org,
+then writes and reads one full customer row over the wire.

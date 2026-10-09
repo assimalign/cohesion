@@ -193,7 +193,10 @@ engine owns and its schema. The engine's build, inside application `Build()`, cr
 database on first start and applies the schema before any server accepts, so the program has no
 separate provisioning call. The programs declare no principals: the SQL engine refuses schema
 principals at build (`COHSQLP001`) until principal and grant DDL exists (decision 58), which is why
-the earlier templates failed on their first start. The standalone template reads
+the earlier templates failed on their first start. Every record member a table stores is
+declared: `Key`, `Column`, `Index` and `References` each add the member they select as a column and
+nothing else does, so a member left out of the declaration is no column, and the first write that
+names it fails. The standalone template reads
 `Database:DataPath` and `Database:Endpoint` from configuration, with its local data directory and
 `cohesion-db://localhost:5740` as defaults; the enabled programs read the mount and endpoint from
 their generated `Resource` accessors.
@@ -203,4 +206,7 @@ control planes. Template acceptance explicitly builds all five emitted Database 
 resources-only changes do not trigger the Templates workflow, and it starts the generated
 `cohesion-database` once: a self-contained build for the host RID runs with a free loopback
 endpoint, and the test waits for the server to accept a connection, which happens only after the
-engine's build has provisioned `customers`, then checks the database's files exist.
+engine's build has provisioned `customers`. It then writes a full `Customer` row and reads it back
+over the wire with the SQL client, and checks the database's files exist. The test project
+references the SQL client from source for that; the generated programs stay package-only
+consumers.

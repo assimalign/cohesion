@@ -532,16 +532,24 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <exception cref="ArgumentNullException"><paramref name="schema"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHSQLT004</c>, #1243).</exception>
+    /// <exception cref="DatabaseObjectLockedException">
+    /// The engine's builder declared the database with another schema: the declaration owns the
+    /// database (owner decision 56 of 2026-10-09), so its schema changes through the declaration.
+    /// </exception>
     /// <exception cref="SqlSchemaMigrationException">
     /// The schema targets another database, declares what the engine has no DDL for (custom types,
-    /// principals), would adopt an ad-hoc object, needs a destructive step it does not allow, or a
-    /// step failed (<c>COHSQLP004</c>, after the completed reversible steps were compensated).
+    /// principals), would adopt an ad-hoc object (<c>COHSQLP005</c>), needs a destructive step it
+    /// does not allow (<c>COHSQLP005</c>), or a step failed (<c>COHSQLP004</c>, after the completed
+    /// reversible steps were compensated).
     /// </exception>
     /// <remarks>
     /// Kept public on the sealed leaf for tools, Studio and tests (owner decision 53 of
     /// 2026-10-09). An engine's builder applies each declared database's schema through the same
-    /// provisioner while it builds. The checks run in the order the root base's members use:
-    /// disposal, the schema, the token, then the offline refusal.
+    /// provisioner while it builds. A database the builder declared with a schema accepts only that
+    /// schema here: another one would be planned away, or refused as destructive, by the engine's
+    /// next build. A database declared without a schema, and one the builder did not declare, accept
+    /// any schema. The checks run in the order the root base's members use: disposal, the schema,
+    /// the token, then the offline refusal, then the declaration.
     /// </remarks>
     public ValueTask<SqlSchemaMigrationResult> ApplySchemaAsync(SqlCompiledSchema schema, CancellationToken cancellationToken = default)
     {
@@ -549,6 +557,17 @@ public sealed class SqlDatabase : DatabaseInstance
         ArgumentNullException.ThrowIfNull(schema);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfOffline();
+        if (_engine.FindDeclaration(Name) is { Schema: { } declared } &&
+            !string.Equals(declared.Hash, schema.Hash, StringComparison.Ordinal))
+        {
+            throw new DatabaseObjectLockedException(
+                Name,
+                Name,
+                "APPLY SCHEMA",
+                $"SQL engine '{_engine.Name}' declares database '{Name}' with a schema (SqlDatabaseBuilder.Schema), so " +
+                "ApplySchemaAsync refuses another one: change the declaration and rebuild the engine instead.");
+        }
+
         return _schemaProvisioner.ApplyAsync(schema, cancellationToken);
     }
 

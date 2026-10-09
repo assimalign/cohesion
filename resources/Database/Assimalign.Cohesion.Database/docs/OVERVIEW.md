@@ -66,7 +66,8 @@ child-owned vocabulary the contracts speak (`TransactionId` and `TransactionStat
 - **Object ownership** — `DatabaseObjectOwner` distinguishes code-first provisioning from ad-hoc
   statements. Schema-owned objects require schema apply to change; ad-hoc objects remain mutable
   through session statements. `DatabaseObjectLockedException` identifies the refused object,
-  owning schema, and operation.
+  owning schema, and operation; a model whose owner is not a compiled schema (the SQL engine's
+  declared database) passes its own message.
 - **Session contracts** — query execution (typed `QueryRequest` and language-text overloads) and
   transaction management. Sessions are single-threaded by contract; disposing one rolls back its
   active transaction.

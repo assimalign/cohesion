@@ -100,6 +100,16 @@ public sealed class SqlDatabaseBuilder
     /// <exception cref="InvalidOperationException">
     /// The engine builder's build has begun, or the database already declares a schema.
     /// </exception>
+    /// <remarks>
+    /// With <c>CohesionDatabaseProject=true</c>, <c>Sdk.Database</c> reads this call only when it is
+    /// made directly on the <see cref="SqlDatabaseEngineBuilder.AddDatabase(string, Action{SqlDatabaseBuilder}?)"/>
+    /// callback's own parameter, with an inline lambda and a constant database name (otherwise the
+    /// build fails with <c>COHDBSDK102</c> or <c>COHDBSDK103</c>). Declare a reusable or
+    /// helper-built schema as a <see cref="SqlSchema.Create(string, Action{SqlSchemaBuilder})"/> value
+    /// instead. The SDK writes one artifact per database name, so with it a database name is
+    /// unique across every engine of the project (<c>COHDBSDK101</c>), and a principal or a custom
+    /// type, which every engine build refuses, fails the project's build (<c>COHDBSDK108</c>).
+    /// </remarks>
     public SqlDatabaseBuilder Schema(Action<SqlSchemaBuilder> declare)
     {
         _engine.EnsureMutable();

@@ -292,7 +292,7 @@ public sealed class BlobEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        failure.Message.ShouldBe(worker ? "A worker factory returned null." : "A server factory returned null.");
+        failure.Message.ShouldBe(worker ? "Engine 'blob-engine': a worker factory returned null." : "Engine 'blob-engine': a server factory returned null.");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 

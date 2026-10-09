@@ -80,8 +80,14 @@ steps are table, column, and secondary-index add/drop; alter/rebuild operations
 and advanced objects (custom types, principals/grants) fail before execution rather than
 recording a false applied hash. Foreign keys and checks now render into provisioning
 DDL and persist in the table catalog; unique declarations use unique indexes. Every message names
-the engine and the database; a failed step leads with `COHSQLP004` and names "step k of n" and its
-operation.
+the engine and the database. A plan the planner refuses (a destructive step the schema does not
+allow) and a schema that would adopt a table or index it did not create lead with `COHSQLP005`,
+before any step runs; a failed step leads with `COHSQLP004` and names "step k of n" and its
+operation. A failed apply whose token was canceled throws `OperationCanceledException` once its
+completed steps are compensated: a canceled commit surfaces as the aborted transaction of the step
+it interrupted, so the token decides, not the failure's type. The skip test and a `Verify` drift
+share one catalog comparison, which describes the first object that differs (a missing table,
+column, constraint or index, an undeclared one, or a column's type or nullability).
 
 ### Declared databases: the engine builder's build phases
 
@@ -131,9 +137,19 @@ stateDiagram-v2
 
 The engine keeps its declared databases: `DropDatabaseAsync` of one is refused with
 `DatabaseObjectLockedException` (operation `DROP DATABASE`, decision 56), because the declaration
-owns it. The provisioning codes are a new family, `COHSQLP001` to `COHSQLP004`, each a
-`SqlSchemaMigrationException` whose message leads with the code and names the engine and the
-database. The provisioning events are the SQL event source's, added by the EventSource track.
+owns it, and the message names the engine and says to remove the declaration first. For the same
+reason the imperative `SqlDatabase.ApplySchemaAsync` refuses (operation `APPLY SCHEMA`) another
+schema than the one a declared database is declared with: the engine's next build would plan it
+away, or refuse it as destructive. A database declared without a schema, and one the builder did
+not declare, accept any schema. A database declared twice is refused at the second `AddDatabase`,
+including one its own callback declares again. The provisioning codes are a new family,
+`COHSQLP001` to `COHSQLP005`, each a `SqlSchemaMigrationException` whose message leads with the
+code and names the engine and the database. The provisioning events are the SQL event source's,
+added by the EventSource track.
+
+`SqlDatabaseServer` keeps a copy of its `SqlDatabaseServerOptions`, checked when it is created, as
+the engine keeps a copy of its options: an `AddServer(configure)` callback that captured the options
+object cannot change a running server, or bypass the session-limit check, afterwards.
 
 Retained table, column, index and constraint names share the parser's delimited
 identifier contract. The renderer preserves bare ordinary names and double-quotes
@@ -2117,7 +2133,8 @@ and constraint or column; one whose call fails its signature carries the
 `SqlSchemaMigrationException` led by a `COHSQLP` code (`Internal/SqlProvisioningCodes`):
 `COHSQLP001` a declaration refused before any file is touched, `COHSQLP002` an existing database's
 collation that is not the declared one, `COHSQLP003` a `Verify` declaration that drifted or does not
-exist, `COHSQLP004` a failed schema step after compensation.
+exist, `COHSQLP004` a failed schema step after compensation, `COHSQLP005` an apply refused before
+any step runs (a destructive step not allowed, or a table or index the schema did not create).
 
 ## The MVCC integration (scoped under #862)
 

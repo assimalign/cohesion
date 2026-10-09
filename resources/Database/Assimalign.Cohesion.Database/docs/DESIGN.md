@@ -710,7 +710,10 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   ownership contract nor the exception requires a relational object shape, and four model
   catalogs (Blob, Documents, Graph, Sql) persist it, which is shared behavior the root keeps
   (owner decision 51): `DatabaseObjectOwner` sits in the `src` root (moved out of
-  `Provisioning/`, namespace unchanged) beside `DatabaseObjectLockedException`.
+  `Provisioning/`, namespace unchanged) beside `DatabaseObjectLockedException`. A second
+  constructor takes the message, for an owner that is not a compiled schema and a remedy the
+  standard "alter the schema" text would get wrong: the SQL engine's declared database, which its
+  builder's declaration owns (owner decision 56), uses it for `DROP DATABASE` and `APPLY SCHEMA`.
 - **`ProtocolVersion` lives in `Database.Protocol`, and the root consumes it.**
   The struct is wire vocabulary, so it lives with the wire implementation —
   `ProtocolVersion.Current` ("the version this assembly implements") is a plain

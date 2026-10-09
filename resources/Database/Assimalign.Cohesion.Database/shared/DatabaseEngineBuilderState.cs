@@ -115,34 +115,34 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     {
         if (Volatile.Read(ref _buildAttempted) != 0)
         {
-            throw new InvalidOperationException("Engine composition is frozen after a build attempt.");
+            throw new InvalidOperationException($"Engine '{_name}': composition is frozen after a build attempt.");
         }
     }
 
     /// <summary>
     /// Registers a worker factory, run against the engine when it is built.
     /// </summary>
-    /// <param name="configure">Creates the worker for the built engine.</param>
+    /// <param name="factory">Creates the worker for the built engine.</param>
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
-    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
-    public void AddWorker(Func<TEngine, DatabaseEngineWorker> configure)
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+    public void AddWorker(Func<TEngine, DatabaseEngineWorker> factory)
     {
         EnsureMutable();
-        ArgumentNullException.ThrowIfNull(configure);
-        _workers.Add(configure);
+        ArgumentNullException.ThrowIfNull(factory);
+        _workers.Add(factory);
     }
 
     /// <summary>
     /// Registers a server factory, run against the engine when it is built, after every worker.
     /// </summary>
-    /// <param name="configure">Creates the server for the built engine.</param>
+    /// <param name="factory">Creates the server for the built engine.</param>
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
-    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
-    public void AddServer(Func<TEngine, DatabaseServer> configure)
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+    public void AddServer(Func<TEngine, DatabaseServer> factory)
     {
         EnsureMutable();
-        ArgumentNullException.ThrowIfNull(configure);
-        _servers.Add(configure);
+        ArgumentNullException.ThrowIfNull(factory);
+        _servers.Add(factory);
     }
 
     /// <summary>
@@ -153,7 +153,7 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
     {
         if (Interlocked.Exchange(ref _buildAttempted, 1) != 0)
         {
-            throw new InvalidOperationException("An engine builder supports one build attempt.");
+            throw new InvalidOperationException($"The builder of engine '{_name}' supports one build attempt.");
         }
     }
 
@@ -190,8 +190,8 @@ internal sealed class DatabaseEngineBuilderState<TEngine>
             try
             {
                 compose(
-                    Produce(engine, _workers, servers: false, "A worker factory returned null."),
-                    Produce(engine, _servers, servers: true, "A server factory returned null."));
+                    Produce(engine, _workers, servers: false, $"Engine '{_name}': a worker factory returned null."),
+                    Produce(engine, _servers, servers: true, $"Engine '{_name}': a server factory returned null."));
 
                 // A sequence never read to the end dropped its remaining factories.
                 if (_progress != ComposeProgress.ServersAttached)

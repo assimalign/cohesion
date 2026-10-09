@@ -1251,6 +1251,15 @@ machine has no Linux leg.
   Q6 costs nothing per row.
 - B1: Q8 no slower than today's `ApplyAsync` no-op on the same schema. B2: Q8's provisioning phase
   under 1 ms.
+
+  *B1 as measured (JIT, Release, win-arm64, best of 5 after a warm-up, two alternating rounds on a
+  shared machine; E1's NativeAOT harness was not yet available).* Read literally the gate compares
+  a whole engine Build (compile, create, open with recovery, skip) with an apply that is only the
+  skip, so it can never hold; the owner decides which reading it means. Like for like, B1's engine
+  Build took 11.7 to 19.0 ms against 18.7 to 33.6 ms for the startup path at `27db14c7` (compile,
+  `Create`, `OpenDatabaseAsync`, `ApplySchemaAsync` no-op), and B1's no-op apply alone took
+  0.56 to 0.82 ms against 0.92 to 1.86 ms, because the canonical document and hash are computed
+  once. The NativeAOT run waits for E1's harness.
 - Row representation (`SqlValue[]` rows) is considered only if a NativeAOT profile of Q1 and Q3
   shows the result box among the top three costs.
 
@@ -1447,6 +1456,11 @@ Numbering continues the plan of record's table. Each line is the question, then 
     > Agree
 
     *Landed in B1 part 1* (`COHSQLP002` for the collation; an unset declaration means `Binary`).
+    The B1 review extended the ownership to the imperative path: `SqlDatabase.ApplySchemaAsync`
+    refuses another schema than the one a declared database is declared with
+    (`DatabaseObjectLockedException`, operation `APPLY SCHEMA`), because the engine's next build would
+    plan it away or refuse it as destructive; and the drop refusal names the engine and says to
+    remove the declaration first.
 57. **Schema lambdas.** Delete `SqlSchemaBuilder.Function<…>`, `Trigger<…>` and `Extension`, their
     compiled records, and the SDK canonicalizer? None has ever executed. *Recommend:* delete in B1.
     > Agree
@@ -1460,7 +1474,10 @@ Numbering continues the plan of record's table. Each line is the question, then 
 
     *Engine Build refusal landed in B1 part 1* (`COHSQLP001`, before any file is touched); part 2
     removed `Principal(...)` from the five templates and the seven cohesion-examples programs, and a
-    template test now starts the generated `cohesion-database` once.
+    template test now starts the generated `cohesion-database` once. The B1 review moved the
+    refusal to the build for SDK projects: `Sdk.Database` reports `COHDBSDK108` at a
+    `SqlSchemaBuilder.Principal` or `Type<T>` call, instead of writing an artifact the engine then
+    refuses on the first start.
 59. **SDK artifacts and format.** One schema artifact per declared database, the inline
     `database.Schema(...)` anchor, document format `v2`, and the one-time hash change?
     *Recommend:* yes.
@@ -1470,7 +1487,10 @@ Numbering continues the plan of record's table. Each line is the question, then 
     part 2: `cohesion/database/<database>.schema.json` and `.schema.sha256` per declared database,
     `COHDBSDK101` for a database declared twice, and `CohesionDatabaseName` selecting the database a
     migration is for, whose migrations live under `Migrations/<database>/` (that folder is part 2's
-    choice: §5.7 does not say where a second database's migrations go).
+    choice: §5.7 does not say where a second database's migrations go). The B1 review made a
+    `schemas.manifest` beside the artifacts the record of which files the SDK owns and the compile
+    target's incremental output (a deleted or foreign artifact no longer goes unnoticed or gets
+    deleted), and `CohesionDatabaseName` optional when a project declares exactly one database.
 60. **Function abstraction shape.** Abstract NVI bases plus static typed factories over `SqlValue`
     (recommended), typed generic bases over `object?`, or sealed delegate descriptors?
     *Recommend:* the first.

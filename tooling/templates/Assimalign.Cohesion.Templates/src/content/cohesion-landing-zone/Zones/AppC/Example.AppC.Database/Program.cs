@@ -16,17 +16,26 @@ builder.AddSql("appc-sql", sql =>
     sql.AddServer(server => server.Listen(Resource.Endpoints.Db));
 
     // The engine's build creates the database when it does not exist and applies this schema
-    // before the server accepts its first connection.
+    // before the server accepts its first connection. Every member a table stores is declared:
+    // Key, Column, Index and References each add the member they select as a column.
     sql.AddDatabase("inventory", database => database.Schema(schema =>
     {
         schema.Table<Item>("Items", table =>
         {
             table.Key(item => item.Sku);
+            table.Column(item => item.Name);
+            table.Column(item => item.OnHand);
+            table.Column(item => item.Reserved);
+            table.Column(item => item.UpdatedAt);
             table.Index(item => item.Name);
         });
         schema.Table<Movement>("Movements", table =>
         {
             table.Key(movement => movement.Id);
+            table.Column(movement => movement.Sku);
+            table.Column(movement => movement.Delta);
+            table.Column(movement => movement.Reason);
+            table.Column(movement => movement.MovedAt);
             table.References<Item>(movement => movement.Sku);
         });
     }));

@@ -28,11 +28,14 @@ shared storage, with DDL flowing through the relational catalog
   with its default collation and `SqlProvisioningMode` (`Apply` or `Verify`). `BuildAsync` (and
   `Build`, which bridges it) compiles every declaration before any file is touched, creates and
   composes the engine, then opens or creates and provisions each declared database before it
-  returns; a failure disposes the engine. The engine refuses to drop a declared database.
-  `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema)` applies a schema imperatively. Both diff the
-  validated `SqlCompiledSchema`, render deterministic table/column/index DDL into parsed
-  `SqlQueryRequest`s, compensate completed reversible steps on failure, and record the canonical
-  document/hash only after live-catalog convergence. Failures lead with `COHSQLP001` to `004`.
+  returns; a failure disposes the engine, and a canceled build throws `OperationCanceledException`.
+  The engine refuses to drop a declared database. `SqlDatabase.ApplySchemaAsync(SqlCompiledSchema)`
+  applies a schema imperatively, except another schema than its declaration's to a declared
+  database. Both diff the validated `SqlCompiledSchema`, render deterministic table/column/index DDL
+  into parsed `SqlQueryRequest`s, compensate completed reversible steps on failure, and record the
+  canonical document/hash only after live-catalog convergence. Failures lead with `COHSQLP001` to
+  `005`, and a `Verify` drift names the first object that differs. A server keeps a copy of its
+  options, as the engine does.
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned rule-based and executed against table scans: `SELECT` with `WHERE`,
   projection, `ORDER BY`, `LIMIT/OFFSET`, `DISTINCT`, lone `COUNT(*)`;

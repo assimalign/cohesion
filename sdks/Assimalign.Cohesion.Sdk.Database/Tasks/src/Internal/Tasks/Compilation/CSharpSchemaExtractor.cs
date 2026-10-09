@@ -313,7 +313,8 @@ internal sealed class CSharpSchemaExtractor
                 "COHDBSDK101",
                 $"Database '{name}' has more than one schema declaration; the first is at {span.Path}({span.StartLinePosition.Line + 1}). " +
                 "A database has exactly one: SqlSchema.Create(name, configure), SqlSchema.Compile(name, configure), or " +
-                "SqlDatabaseBuilder.Schema(declare); database names compare ignoring case.",
+                "SqlDatabaseBuilder.Schema(declare). The SDK writes one artifact per database name, so a name is unique " +
+                "across every engine of the project, and names compare ignoring case.",
                 location);
             return false;
         }
@@ -343,12 +344,14 @@ internal sealed class CSharpSchemaExtractor
                     allowsDestructiveChanges = true;
                     break;
                 case "Type":
+                    ReportUnprovisionable(method, invocation);
                     types.Add(ExtractType(model, invocation, method));
                     break;
                 case "Table":
                     tables.Add(ExtractTable(model, invocation, method));
                     break;
                 case "Principal":
+                    ReportUnprovisionable(method, invocation);
                     principals.Add(ExtractPrincipal(model, invocation, method));
                     break;
                 default:
@@ -370,6 +373,19 @@ internal sealed class CSharpSchemaExtractor
             types.OrderBy(static item => item.TypeName, StringComparer.Ordinal).ToArray(),
             tables.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray(),
             principals.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray());
+    }
+
+    // A declaration every SQL engine build refuses before it touches a file (COHSQLP001, owner
+    // decision 58 of 2026-10-09) fails the project's build instead of its first start. It is still
+    // extracted, so the other checks do not report what its absence would cause.
+    private void ReportUnprovisionable(IMethodSymbol method, InvocationExpressionSyntax invocation)
+    {
+        Error(
+            "COHDBSDK108",
+            $"SqlSchemaBuilder.{method.Name} declares what no SQL engine can provision yet: every engine build refuses it " +
+            "before touching any file (COHSQLP001, owner decision 58). Remove it; principals, grants and custom types " +
+            "wait for their DDL.",
+            invocation.GetLocation());
     }
 
     private SchemaTypeSource ExtractType(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
@@ -613,7 +629,11 @@ internal sealed class CSharpSchemaExtractor
             {
                 if (!IsBuiltInType(column.TypeName) && !declaredTypes.Contains(column.TypeName))
                 {
-                    Error("COHDBSDK106", $"Column '{table.Name}.{column.Name}' uses unknown schema type '{column.TypeName}'. Declare it with database.Type<T>(...).", location);
+                    Error(
+                        "COHDBSDK106",
+                        $"Column '{table.Name}.{column.Name}' has type '{column.TypeName}', which is not a SQL column type " +
+                        "(bool, an integer or floating-point type, decimal, string, Guid, a date or time type, TimeSpan or byte[]).",
+                        location);
                 }
             }
         }

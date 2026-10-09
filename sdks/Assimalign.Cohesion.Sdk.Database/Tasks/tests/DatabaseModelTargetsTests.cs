@@ -23,9 +23,30 @@ public class DatabaseModelTargetsTests
         project.GetPropertyValue("CohesionDatabaseSchemaOutputDirectory")
             .Replace('\\', '/')
             .ShouldBe("obj/Debug/net10.0/cohesion/database/");
-        project.GetPropertyValue("_CohesionDatabaseSchemaStamp")
+        project.GetPropertyValue("_CohesionDatabaseSchemaManifest")
             .Replace('\\', '/')
-            .ShouldBe("obj/Debug/net10.0/cohesion/database.schema.stamp");
+            .ShouldBe("obj/Debug/net10.0/cohesion/database/schemas.manifest");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Targets: the manifest in the artifact directory is the compile target's incremental output")]
+    [InlineData("Sql", "_CohesionCompileSqlDatabaseSchema")]
+    [InlineData("KeyValuePair", "_CohesionCompileKeyValuePairDatabaseSchema")]
+    public void Evaluate_ModelCompileTarget_ShouldUseTheManifestAsItsOutput(string model, string compileTarget)
+    {
+        using var directory = new TemporaryDirectory();
+        using var projects = new ProjectCollection();
+        Project project = LoadProject(directory, projects, model);
+
+        // A deleted directory, a deleted artifact (the check target deletes the manifest) or a new
+        // output directory each leave the target out of date, so the artifacts are written again.
+        project.Targets[compileTarget].Outputs.ShouldBe("$(_CohesionDatabaseSchemaManifest)");
+        project.Targets[compileTarget].Children.OfType<ProjectTaskInstance>().ShouldNotContain(task => task.Name == "Touch");
+        string[] dependencies = project.Targets["CohesionDatabaseCompileSchema"].DependsOnTargets
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        Array.IndexOf(dependencies, "_CohesionDatabaseCheckSchemaArtifacts")
+            .ShouldBeLessThan(Array.IndexOf(dependencies, "$(_CohesionDatabaseModelCompileTarget)"));
+        project.Targets["_CohesionDatabaseCheckSchemaArtifacts"].Children.OfType<ProjectTaskInstance>()
+            .ShouldContain(task => task.Name == "Delete" && task.Parameters["Files"] == "$(_CohesionDatabaseSchemaManifest)");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Targets: a migration names its database and reads the artifact directory")]

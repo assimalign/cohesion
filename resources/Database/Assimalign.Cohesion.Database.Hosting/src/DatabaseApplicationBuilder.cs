@@ -258,6 +258,14 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <returns>The application owning factory products and borrowing supplied instances.</returns>
     /// <exception cref="InvalidOperationException">Build was already attempted or composition is invalid.</exception>
     /// <exception cref="AggregateException">Construction and compensation both failed.</exception>
+    /// <remarks>
+    /// Build runs each owned engine factory synchronously, in registration order. A SQL engine's
+    /// factory provisions its declared databases here: open, recovery and schema migration run
+    /// inside Build with no timeout (<see cref="DatabaseApplicationOptions.StartupTimeout"/> bounds
+    /// service start only) and no cancellation (owner decision 49 of 2026-10-09). A factory's
+    /// exception, for example a SQL schema migration failure led by <c>COHSQLP001</c> to
+    /// <c>COHSQLP005</c>, propagates unchanged after the products built before it are disposed.
+    /// </remarks>
     public DatabaseApplication Build()
     {
         DatabaseApplicationComposition composition = BuildComposition();
@@ -346,10 +354,10 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 }
                 else
                 {
-                    engine = registration.Factory!(context) ?? throw new InvalidOperationException("An engine factory returned null.");
+                    engine = registration.Factory!(context) ?? throw new InvalidOperationException($"Engine factory '{registration.Name}' returned null.");
                     if (!products.Add(engine))
                     {
-                        throw new InvalidOperationException("An engine factory returned an already registered product.");
+                        throw new InvalidOperationException($"Engine factory '{registration.Name}' returned an already registered product.");
                     }
 
                     ownership.Engines.Add(engine);

@@ -455,7 +455,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             failure.Message.ShouldStartWith("ExpressionNestingLimit must be between 32 and 4096 levels.", Case.Sensitive);
         }
 
-        frozen.Message.ShouldBe("Engine composition is frozen after a build attempt.");
+        frozen.Message.ShouldBe("Engine 'nesting-range': composition is frozen after a build attempt.");
     }
 
     /// <summary>

@@ -127,9 +127,20 @@ public sealed class SqlDatabaseEngineBuilder
             }
         }
 
+        // Declared before the callback runs, so a callback that declares the same database again
+        // meets the duplicate check above instead of slipping past it.
         var database = new SqlDatabaseBuilder(this, databaseName);
-        configure?.Invoke(database);
         _databases.Add(database);
+        try
+        {
+            configure?.Invoke(database);
+        }
+        catch
+        {
+            _databases.Remove(database);
+            throw;
+        }
+
         return this;
     }
 
@@ -195,24 +206,24 @@ public sealed class SqlDatabaseEngineBuilder
     }
 
     /// <summary>Registers a factory for an engine-owned server.</summary>
-    /// <param name="configure">The factory, invoked once against the engine the server must front, after every worker.</param>
+    /// <param name="factory">The factory, invoked once against the engine the server must front, after every worker.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
-    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
-    public SqlDatabaseEngineBuilder AddServer(Func<SqlDatabaseEngine, DatabaseServer> configure)
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+    public SqlDatabaseEngineBuilder AddServer(Func<SqlDatabaseEngine, DatabaseServer> factory)
     {
-        _state.AddServer(configure);
+        _state.AddServer(factory);
         return this;
     }
 
     /// <summary>Registers a factory for an engine-owned background worker.</summary>
-    /// <param name="configure">The factory, invoked once against the constructed engine, after every worker registered before it.</param>
+    /// <param name="factory">The factory, invoked once against the constructed engine, after every worker registered before it.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="InvalidOperationException">A build was attempted.</exception>
-    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
-    public SqlDatabaseEngineBuilder AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker> configure)
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+    public SqlDatabaseEngineBuilder AddWorker(Func<SqlDatabaseEngine, DatabaseEngineWorker> factory)
     {
-        _state.AddWorker(configure);
+        _state.AddWorker(factory);
         return this;
     }
 
@@ -256,9 +267,10 @@ public sealed class SqlDatabaseEngineBuilder
     {
         _state.BeginBuild();
 
-        // Phase 1: the options, checked and copied before anything is compiled or created.
-        _state.ThrowIfRenamed(_options.EngineName);
+        // Phase 1: the options, copied, then the copy checked, before anything is compiled or
+        // created; a change racing the build cannot reach the engine unchecked.
         SqlDatabaseEngineOptions options = _options.Snapshot();
+        _state.ThrowIfRenamed(options.EngineName);
         SqlDatabaseEngine.ValidateOptions(options);
         cancellationToken.ThrowIfCancellationRequested();
 

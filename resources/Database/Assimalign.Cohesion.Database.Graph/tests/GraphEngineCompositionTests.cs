@@ -292,7 +292,7 @@ public sealed class GraphEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        failure.Message.ShouldBe(worker ? "A worker factory returned null." : "A server factory returned null.");
+        failure.Message.ShouldBe(worker ? "Engine 'graph-engine': a worker factory returned null." : "Engine 'graph-engine': a server factory returned null.");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 

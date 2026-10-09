@@ -16,17 +16,26 @@ builder.AddSql("appb-sql", sql =>
     sql.AddServer(server => server.Listen(Resource.Endpoints.Db));
 
     // The engine's build creates the database when it does not exist and applies this schema
-    // before the server accepts its first connection.
+    // before the server accepts its first connection. Every member a table stores is declared:
+    // Key, Column, Index and References each add the member they select as a column.
     sql.AddDatabase("billing", database => database.Schema(schema =>
     {
         schema.Table<Invoice>("Invoices", table =>
         {
             table.Key(invoice => invoice.Id);
+            table.Column(invoice => invoice.AccountId);
+            table.Column(invoice => invoice.IssuedAt);
+            table.Column(invoice => invoice.DueAt);
+            table.Column(invoice => invoice.Amount);
+            table.Column(invoice => invoice.Paid);
             table.Index(invoice => invoice.AccountId);
         });
         schema.Table<Payment>("Payments", table =>
         {
             table.Key(payment => payment.Id);
+            table.Column(payment => payment.InvoiceId);
+            table.Column(payment => payment.ReceivedAt);
+            table.Column(payment => payment.Amount);
             table.References<Invoice>(payment => payment.InvoiceId);
         });
     }));

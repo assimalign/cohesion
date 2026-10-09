@@ -246,7 +246,7 @@ public sealed class KeyValueEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        failure.Message.ShouldBe(worker ? "A worker factory returned null." : "A server factory returned null.");
+        failure.Message.ShouldBe(worker ? "Engine 'keyvalue-engine': a worker factory returned null." : "Engine 'keyvalue-engine': a server factory returned null.");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 

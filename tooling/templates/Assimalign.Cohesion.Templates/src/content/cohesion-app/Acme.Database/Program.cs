@@ -14,12 +14,15 @@ builder.AddSql("acme-sql", sql =>
     sql.AddServer(server => server.Listen(Resource.Endpoints.Db));
 
     // The engine's build creates the database when it does not exist and applies this schema
-    // before the server accepts its first connection.
+    // before the server accepts its first connection. Every member the table stores is declared:
+    // Key, Column, Index and References each add the member they select as a column.
     sql.AddDatabase("customers", database => database.Schema(schema =>
     {
         schema.Table<Customer>("Customers", table =>
         {
             table.Key(customer => customer.Id);
+            table.Column(customer => customer.Name);
+            table.Column(customer => customer.Email);
             table.Index(customer => customer.Email);
         });
     }));

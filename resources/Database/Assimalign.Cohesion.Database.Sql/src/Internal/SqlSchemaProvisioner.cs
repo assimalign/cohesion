@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -55,7 +56,9 @@ internal sealed class SqlSchemaProvisioner
             catch (SqlSchemaMigrationException refused)
             {
                 // The planner knows the schemas, not where they are applied.
-                throw new SqlSchemaMigrationException($"{Describe()}: {refused.Message}", refused);
+                throw new SqlSchemaMigrationException(
+                    $"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: {refused.Message} Nothing was changed.",
+                    refused);
             }
 
             SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(plan, current);
@@ -77,9 +80,23 @@ internal sealed class SqlSchemaProvisioner
             catch (Exception failure)
             {
                 CompensationResult compensation = await CompensateAsync(session, applied).ConfigureAwait(false);
-                if (failure is OperationCanceledException && compensation.IsComplete)
+
+                // A canceled token can also surface as the failure of the step it interrupted (a
+                // commit whose record could not be written is an aborted transaction), so the
+                // token decides, not only the failure's type: a compensated, canceled apply is a
+                // cancellation, as BuildAsync and this method document.
+                if (compensation.IsComplete &&
+                    (failure is OperationCanceledException || cancellationToken.IsCancellationRequested))
                 {
-                    throw;
+                    if (failure is OperationCanceledException)
+                    {
+                        throw;
+                    }
+
+                    throw new OperationCanceledException(
+                        $"{Describe()}: applying schema '{schema.Name}' was canceled; every completed step was compensated.",
+                        failure,
+                        cancellationToken);
                 }
 
                 string state = compensation.IsComplete
@@ -137,6 +154,13 @@ internal sealed class SqlSchemaProvisioner
                 : !string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal)
                     ? $"the database records schema hash {recorded.ContentHash}"
                     : "the live catalog no longer matches the recorded schema";
+
+            // Name the first object that differs, so the developer need not diff the catalog by hand.
+            if (FirstCatalogDifference(schema) is { } difference)
+            {
+                reason += $"; first difference from the declaration: {difference}";
+            }
+
             throw new SqlSchemaMigrationException(
                 $"{SqlProvisioningCodes.Drift}: {Describe()}: the declared schema (hash {schema.Hash}) is not the one " +
                 $"applied: {reason}. The database is declared in Verify mode, so nothing was changed; migrate it out of " +
@@ -188,7 +212,7 @@ internal sealed class SqlSchemaProvisioner
         => recorded is not null &&
             string.Equals(recorded.ContentHash, schema.Hash, StringComparison.Ordinal) &&
             string.Equals(recorded.CanonicalDocument, schema.CanonicalDocument, StringComparison.Ordinal) &&
-            CatalogMatches(schema);
+            FirstCatalogDifference(schema) is null;
 
     // Names where a provisioning message happened: the engine and the database.
     private string Describe() => $"SQL engine '{_database.Engine.Name}', database '{_database.Name}'";
@@ -208,7 +232,7 @@ internal sealed class SqlSchemaProvisioner
             {
                 SqlCompiledSchema persisted = SqlCompiledSchemaSerializer.Deserialize(recorded.CanonicalDocument);
                 if (string.Equals(recorded.ContentHash, persisted.Hash, StringComparison.Ordinal) &&
-                    CatalogMatches(persisted))
+                    FirstCatalogDifference(persisted) is null)
                 {
                     return persisted;
                 }
@@ -242,7 +266,7 @@ internal sealed class SqlSchemaProvisioner
             if (!string.Equals(catalogTable.Schema, "dbo", StringComparison.OrdinalIgnoreCase))
             {
                 throw new SqlSchemaMigrationException(
-                    $"The live SQL catalog contains table '{catalogTable.Schema}.{catalogTable.Name}', " +
+                    $"{Describe()}: the live SQL catalog contains table '{catalogTable.Schema}.{catalogTable.Name}', " +
                     "but compiled schemas currently address the 'dbo' schema only.");
             }
 
@@ -252,7 +276,7 @@ internal sealed class SqlSchemaProvisioner
                 if (column.DefaultLiteral is not null)
                 {
                     throw new SqlSchemaMigrationException(
-                        $"The live SQL catalog column '{catalogTable.Name}.{column.Name}' has a default literal, " +
+                        $"{Describe()}: the live SQL catalog column '{catalogTable.Name}.{column.Name}' has a default literal, " +
                         "which the compiled schema contract cannot represent yet.");
                 }
 
@@ -305,49 +329,51 @@ internal sealed class SqlSchemaProvisioner
             Array.Empty<CompiledSchemaPrincipal>());
     }
 
-    private bool CatalogMatches(SqlCompiledSchema schema)
+    /// <summary>
+    /// Compares the live schema-owned catalog with a schema and describes the first object that
+    /// differs, or returns null when the catalog matches it: the skip test of an apply and the
+    /// reason a Verify drift names, so the developer need not diff the catalog by hand.
+    /// </summary>
+    /// <param name="schema">The schema the catalog should hold.</param>
+    /// <returns>The first difference, described for a message, or null.</returns>
+    private string? FirstCatalogDifference(SqlCompiledSchema schema)
     {
-        if (_catalog.Tables.Count(table => IsOwnedBy(table.Owner, table.OwningSchema, schema.Name)) != schema.Tables.Count)
-        {
-            return false;
-        }
-
+        var ownedTables = _catalog.Tables
+            .Where(table => IsOwnedBy(table.Owner, table.OwningSchema, schema.Name))
+            .ToList();
         foreach (CompiledSchemaTable expected in schema.Tables)
         {
-            if (!_catalog.TryGetTable("dbo", expected.Name, out SqlCatalogTable actual) ||
-                !IsOwnedBy(actual.Owner, actual.OwningSchema, schema.Name) ||
-                actual.Columns.Count != expected.Columns.Count ||
-                actual.Constraints.Count != expected.Constraints.Count ||
-                !NamesEqual(expected.PrimaryKey?.Columns ?? Array.Empty<string>(), actual.PrimaryKeyColumns))
+            if (!_catalog.TryGetTable("dbo", expected.Name, out SqlCatalogTable actual))
             {
-                return false;
+                return $"table '{expected.Name}' is missing";
             }
 
-            for (int index = 0; index < expected.Columns.Count; index++)
+            if (!IsOwnedBy(actual.Owner, actual.OwningSchema, schema.Name))
             {
-                CompiledSchemaColumn expectedColumn = expected.Columns[index];
-                SqlCatalogColumn actualColumn = actual.Columns[index];
-                bool expectedIsNullable = expectedColumn.IsNullable &&
-                    !IsPrimaryKeyColumn(expected.PrimaryKey, expectedColumn.Name);
-                if (!string.Equals(expectedColumn.Name, actualColumn.Name, StringComparison.OrdinalIgnoreCase) ||
-                    expectedColumn.Type != actualColumn.Type.Type ||
-                    expectedIsNullable != actualColumn.IsNullable ||
-                    expectedColumn.MaxLength != actualColumn.Type.MaxLength ||
-                    expectedColumn.Precision != actualColumn.Type.Precision ||
-                    expectedColumn.Scale != actualColumn.Type.Scale ||
-                    expectedColumn.CustomType is not null ||
-                    actualColumn.DefaultLiteral is not null)
-                {
-                    return false;
-                }
+                return $"table '{expected.Name}' was not created by schema '{schema.Name}'";
+            }
+
+            if (DescribeColumnDifference(expected, actual) is { } column)
+            {
+                return column;
+            }
+
+            if (!NamesEqual(expected.PrimaryKey?.Columns ?? Array.Empty<string>(), actual.PrimaryKeyColumns))
+            {
+                return $"table '{expected.Name}': its primary key is ({string.Join(", ", actual.PrimaryKeyColumns)}), " +
+                    $"declared ({string.Join(", ", expected.PrimaryKey?.Columns ?? Array.Empty<string>())})";
             }
 
             foreach (CompiledSchemaConstraint constraint in expected.Constraints)
             {
                 SqlCatalogConstraint? persisted = actual.Constraints.FirstOrDefault(value =>
                     string.Equals(value.Name, constraint.Name, StringComparison.OrdinalIgnoreCase));
-                if (persisted is null ||
-                    (persisted.Kind == SqlCatalogConstraintKind.Reference) != (constraint.Kind == CompiledSchemaConstraintKind.Reference) ||
+                if (persisted is null)
+                {
+                    return $"table '{expected.Name}': constraint '{constraint.Name}' is missing";
+                }
+
+                if ((persisted.Kind == SqlCatalogConstraintKind.Reference) != (constraint.Kind == CompiledSchemaConstraintKind.Reference) ||
                     (constraint.Kind == CompiledSchemaConstraintKind.Reference && !NamesEqual(persisted.Columns, constraint.Columns)) ||
                     !NamesEqual(persisted.ReferencedColumns, constraint.ReferencedColumns) ||
                     !string.Equals(persisted.ReferencedTable, constraint.ReferencedObject, StringComparison.OrdinalIgnoreCase) ||
@@ -355,33 +381,127 @@ internal sealed class SqlSchemaProvisioner
                     (persisted.OnDelete == SqlCatalogReferentialAction.Cascade) != (constraint.OnDelete == CompiledSchemaReferentialAction.Cascade) ||
                     !string.Equals(persisted.CheckExpression, CanonicalCheck(constraint.Expression?.CanonicalText), StringComparison.Ordinal))
                 {
-                    return false;
+                    return $"table '{expected.Name}': constraint '{constraint.Name}' differs from its declaration";
                 }
+            }
+
+            if (actual.Constraints.Count != expected.Constraints.Count)
+            {
+                SqlCatalogConstraint? extra = actual.Constraints.FirstOrDefault(value => !expected.Constraints.Any(declared =>
+                    string.Equals(declared.Name, value.Name, StringComparison.OrdinalIgnoreCase)));
+                return extra is null
+                    ? $"table '{expected.Name}' has {actual.Constraints.Count} constraint(s), declared {expected.Constraints.Count}"
+                    : $"table '{expected.Name}': constraint '{extra.Name}' is not declared";
             }
 
             IReadOnlyList<SqlCatalogIndex> actualIndexes = _catalog.GetIndexes(actual.ObjectId)
                 .Where(index => !index.IsPrimaryKey && IsOwnedBy(index.Owner, index.OwningSchema, schema.Name))
                 .ToList();
-            if (actualIndexes.Count != expected.Indexes.Count)
-            {
-                return false;
-            }
-
             foreach (CompiledSchemaIndex expectedIndex in expected.Indexes)
             {
                 SqlCatalogIndex? actualIndex = actualIndexes.FirstOrDefault(
                     index => string.Equals(index.Name, expectedIndex.Name, StringComparison.OrdinalIgnoreCase));
-                if (actualIndex is null ||
-                    actualIndex.IsUnique != expectedIndex.IsUnique ||
+                if (actualIndex is null)
+                {
+                    return $"table '{expected.Name}': index '{expectedIndex.Name}' is missing";
+                }
+
+                if (actualIndex.IsUnique != expectedIndex.IsUnique ||
                     !NamesEqual(expectedIndex.Columns, actualIndex.ColumnNames))
                 {
-                    return false;
+                    return $"table '{expected.Name}': index '{expectedIndex.Name}' differs from its declaration (uniqueness or columns)";
                 }
+            }
+
+            if (actualIndexes.Count != expected.Indexes.Count)
+            {
+                SqlCatalogIndex? extra = actualIndexes.FirstOrDefault(index => !expected.Indexes.Any(declared =>
+                    string.Equals(declared.Name, index.Name, StringComparison.OrdinalIgnoreCase)));
+                return extra is null
+                    ? $"table '{expected.Name}' has {actualIndexes.Count} schema-owned index(es), declared {expected.Indexes.Count}"
+                    : $"table '{expected.Name}': index '{extra.Name}' is not declared";
             }
         }
 
-        return true;
+        if (ownedTables.Count != schema.Tables.Count)
+        {
+            SqlCatalogTable? extra = ownedTables.FirstOrDefault(table => !schema.Tables.Any(declared =>
+                string.Equals(declared.Name, table.Name, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(table.Schema, "dbo", StringComparison.OrdinalIgnoreCase)));
+            return extra is null
+                ? $"the database has {ownedTables.Count} table(s) created by schema '{schema.Name}', declared {schema.Tables.Count}"
+                : $"table '{extra.Schema}.{extra.Name}' was created by schema '{schema.Name}' but is not declared";
+        }
+
+        return null;
     }
+
+    // The first column of a table that differs from its declaration, described for a message.
+    private static string? DescribeColumnDifference(CompiledSchemaTable expected, SqlCatalogTable actual)
+    {
+        if (actual.Columns.Count != expected.Columns.Count)
+        {
+            CompiledSchemaColumn? missing = expected.Columns.FirstOrDefault(column => !actual.Columns.Any(live =>
+                string.Equals(live.Name, column.Name, StringComparison.OrdinalIgnoreCase)));
+            if (missing is not null)
+            {
+                return $"table '{expected.Name}': column '{missing.Name}' is missing";
+            }
+
+            SqlCatalogColumn? extra = actual.Columns.FirstOrDefault(column => !expected.Columns.Any(declared =>
+                string.Equals(declared.Name, column.Name, StringComparison.OrdinalIgnoreCase)));
+            return extra is null
+                ? $"table '{expected.Name}' has {actual.Columns.Count} column(s), declared {expected.Columns.Count}"
+                : $"table '{expected.Name}': column '{extra.Name}' is not declared";
+        }
+
+        for (int index = 0; index < expected.Columns.Count; index++)
+        {
+            CompiledSchemaColumn expectedColumn = expected.Columns[index];
+            SqlCatalogColumn actualColumn = actual.Columns[index];
+            bool expectedIsNullable = expectedColumn.IsNullable &&
+                !IsPrimaryKeyColumn(expected.PrimaryKey, expectedColumn.Name);
+            if (!string.Equals(expectedColumn.Name, actualColumn.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return $"table '{expected.Name}': column {index + 1} is '{actualColumn.Name}', declared '{expectedColumn.Name}'";
+            }
+
+            if (expectedColumn.Type != actualColumn.Type.Type ||
+                expectedColumn.MaxLength != actualColumn.Type.MaxLength ||
+                expectedColumn.Precision != actualColumn.Type.Precision ||
+                expectedColumn.Scale != actualColumn.Type.Scale)
+            {
+                return $"table '{expected.Name}': column '{expectedColumn.Name}' is " +
+                    $"{DescribeType(actualColumn.Type.Type, actualColumn.Type.MaxLength, actualColumn.Type.Precision, actualColumn.Type.Scale)}, " +
+                    $"declared {DescribeType(expectedColumn.Type, expectedColumn.MaxLength, expectedColumn.Precision, expectedColumn.Scale)}";
+            }
+
+            if (expectedIsNullable != actualColumn.IsNullable)
+            {
+                return $"table '{expected.Name}': column '{expectedColumn.Name}' is " +
+                    $"{(actualColumn.IsNullable ? "nullable" : "not nullable")}, declared {(expectedIsNullable ? "nullable" : "not nullable")}";
+            }
+
+            if (expectedColumn.CustomType is not null)
+            {
+                return $"table '{expected.Name}': column '{expectedColumn.Name}' is declared with custom type '{expectedColumn.CustomType}'";
+            }
+
+            if (actualColumn.DefaultLiteral is not null)
+            {
+                return $"table '{expected.Name}': column '{expectedColumn.Name}' has a default the declaration does not have";
+            }
+        }
+
+        return null;
+    }
+
+    private static string DescribeType(DatabaseType type, int? maxLength, int? precision, int? scale)
+        => maxLength is { } length
+            ? $"{type}({length})"
+            : precision is { } digits
+                ? $"{type}({digits},{scale ?? 0})"
+                : type.ToString();
 
     /// <summary>
     /// The catalog stores a CHECK as the canonical text of its parsed predicate, while a compiled
@@ -435,7 +555,8 @@ internal sealed class SqlSchemaProvisioner
             if (!IsOwnedBy(actual.Owner, actual.OwningSchema, schema.Name))
             {
                 throw new SqlSchemaMigrationException(
-                    $"{Describe()}: SQL schema '{schema.Name}' cannot adopt table '{table.Name}' because it was not created by this schema.");
+                    $"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: SQL schema '{schema.Name}' cannot adopt table '{table.Name}' " +
+                    "because it was not created by this schema. Nothing was changed.");
             }
 
             foreach (CompiledSchemaIndex index in table.Indexes)
@@ -444,7 +565,8 @@ internal sealed class SqlSchemaProvisioner
                     !IsOwnedBy(existing.Owner, existing.OwningSchema, schema.Name))
                 {
                     throw new SqlSchemaMigrationException(
-                        $"{Describe()}: SQL schema '{schema.Name}' cannot adopt index '{index.Name}' because it was not created by this schema.");
+                        $"{SqlProvisioningCodes.PolicyRefused}: {Describe()}: SQL schema '{schema.Name}' cannot adopt index '{index.Name}' " +
+                        "because it was not created by this schema. Nothing was changed.");
                 }
             }
         }

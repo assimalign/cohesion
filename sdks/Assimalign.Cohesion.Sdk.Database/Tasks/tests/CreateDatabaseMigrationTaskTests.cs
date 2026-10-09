@@ -81,6 +81,37 @@ public class CreateDatabaseMigrationTaskTests
         Directory.Exists(directory.File("Migrations")).ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: a project that declares one database needs no database name")]
+    public void Execute_WithOneDeclaredDatabaseAndNoName_ShouldUseIt()
+    {
+        using var directory = new TemporaryDirectory();
+        string schemaDirectory = directory.File("schemas");
+        WriteSchema(schemaDirectory, CreateSchema(includeDescription: false));
+        var engine = new RecordingBuildEngine();
+        CreateDatabaseMigrationTask task = CreateTask(directory, engine, "initial", databaseName: "");
+
+        task.Execute().ShouldBeTrue(string.Join(Environment.NewLine, engine.Errors.Select(static error => error.Message)));
+
+        Path.GetRelativePath(directory.Path, task.MigrationPath).Replace('\\', '/').ShouldBe("Migrations/orders/0001_initial.sql");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: a schema document the manifest does not list is not a declared database")]
+    public void Execute_WithForeignSchemaDocument_ShouldNotTreatItAsDeclared()
+    {
+        using var directory = new TemporaryDirectory();
+        string schemaDirectory = directory.File("schemas");
+        WriteSchema(schemaDirectory, CreateSchema(includeDescription: false));
+        File.WriteAllText(Path.Combine(schemaDirectory, "appsettings.schema.json"), "{}");
+        var engine = new RecordingBuildEngine();
+
+        CreateTask(directory, engine, "initial", databaseName: "appsettings").Execute().ShouldBeFalse();
+
+        engine.Errors.ShouldContain(error =>
+            error.Code == "COHDBSDK203" &&
+            error.Message != null &&
+            error.Message.Contains("database 'appsettings' does not exist (declared: orders)", StringComparison.Ordinal));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: key-value model fails explicitly")]
     public void Execute_WithKeyValuePairModel_ShouldFailExplicitly()
     {
@@ -143,11 +174,13 @@ public class CreateDatabaseMigrationTaskTests
             ProjectDirectory = directory.Path
         };
 
+    // Writes a schema artifact as the compile task does: the document, and its name in the manifest.
     private static string WriteSchema(string schemaDirectory, SqlCompiledSchema schema)
     {
         Directory.CreateDirectory(schemaDirectory);
         string path = Path.Combine(schemaDirectory, schema.Name + ".schema.json");
         SqlCompiledSchemaSerializer.Write(path, schema);
+        File.AppendAllText(Path.Combine(schemaDirectory, "schemas.manifest"), schema.Name + "\n");
         return path;
     }
 

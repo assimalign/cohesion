@@ -342,19 +342,24 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         }
     }
 
-    // A declared database: the declaration owns it at the database level, so dropping it is
-    // refused like an ad-hoc change to a schema-owned object (owner decision 56).
-    private bool IsDeclared(DatabaseName name)
+    /// <summary>
+    /// Finds the declaration of a database the engine's builder declared: the declaration owns it
+    /// at the database level, so dropping it, and applying another schema to it imperatively, are
+    /// refused like an ad-hoc change to a schema-owned object (owner decision 56 of 2026-10-09).
+    /// </summary>
+    /// <param name="name">The database name; database names compare ignoring case.</param>
+    /// <returns>The declaration, or null when the builder did not declare the database.</returns>
+    internal SqlDeclaredDatabase? FindDeclaration(DatabaseName name)
     {
         foreach (var declared in DeclaredDatabases)
         {
             if (declared.Name == name)
             {
-                return true;
+                return declared;
             }
         }
 
-        return false;
+        return null;
     }
 
     /// <summary>
@@ -673,9 +678,14 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// </exception>
     protected override ValueTask DropDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
-        if (IsDeclared(name))
+        if (FindDeclaration(name) is { } declared)
         {
-            throw new DatabaseObjectLockedException(name, name, "DROP DATABASE");
+            throw new DatabaseObjectLockedException(
+                declared.Name,
+                declared.Name,
+                "DROP DATABASE",
+                $"SQL engine '{Name}' declares database '{declared.Name}' (SqlDatabaseEngineBuilder.AddDatabase), so " +
+                "DROP DATABASE is refused. Remove the declaration from the engine builder and rebuild the engine before dropping it.");
         }
 
         lock (_syncRoot)

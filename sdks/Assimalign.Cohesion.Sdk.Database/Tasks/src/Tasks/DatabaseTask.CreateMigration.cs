@@ -19,14 +19,14 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
 {
     /// <summary>
     /// The directory <see cref="CompileDatabaseSchemaTask"/> wrote each declared database's desired
-    /// schema to, as <c>&lt;database&gt;.schema.json</c>.
+    /// schema to, as <c>&lt;database&gt;.schema.json</c>, with the manifest that lists them.
     /// </summary>
     [Required]
     public string SchemaDirectory { get; set; } = string.Empty;
 
     /// <summary>
     /// The declared database the migration is for (<c>CohesionDatabaseName</c>); it compares ignoring
-    /// case, as database names do.
+    /// case, as database names do. Optional when the project declares exactly one database.
     /// </summary>
     public string DatabaseName { get; set; } = string.Empty;
 
@@ -109,14 +109,18 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
         {
             string projectDirectory = Path.GetFullPath(ProjectDirectory);
             string schemaDirectory = ResolvePath(SchemaDirectory, projectDirectory);
-            string[] declared = Directory.Exists(schemaDirectory)
-                ? Directory.EnumerateFiles(schemaDirectory, "*" + CompileDatabaseSchemaTask.SchemaFileSuffix, SearchOption.TopDirectoryOnly)
-                    .Select(static path => Path.GetFileName(path)[..^CompileDatabaseSchemaTask.SchemaFileSuffix.Length])
-                    .Order(StringComparer.Ordinal)
-                    .ToArray()
-                : [];
+            // The databases the compile task wrote artifacts for, from its manifest: a foreign
+            // *.schema.json in an overridden output directory is not a declared database.
+            string[] declared = CompileDatabaseSchemaTask.ReadManifest(schemaDirectory)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
             string databaseName = DatabaseName.Trim();
-            if (databaseName.Length == 0)
+            if (databaseName.Length == 0 && declared.Length == 1)
+            {
+                // A project that declares one database needs no CohesionDatabaseName.
+                databaseName = declared[0];
+            }
+            else if (databaseName.Length == 0 && declared.Length > 1)
             {
                 Log.LogError(
                     null,
@@ -127,8 +131,8 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     0,
                     0,
                     0,
-                    "CohesionDatabaseName is required: it names the declared database the migration is for" +
-                    (declared.Length == 0 ? "." : $" (declared: {string.Join(", ", declared)})."));
+                    "CohesionDatabaseName is required when the project declares more than one database: it names the " +
+                    $"declared database the migration is for (declared: {string.Join(", ", declared)}).");
                 return false;
             }
 
@@ -144,7 +148,9 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     0,
                     0,
                     0,
-                    $"The compiled schema of database '{databaseName}' does not exist" +
+                    (databaseName.Length == 0
+                        ? "No database's compiled schema exists"
+                        : $"The compiled schema of database '{databaseName}' does not exist") +
                     (declared.Length == 0 ? "" : $" (declared: {string.Join(", ", declared)})") +
                     ". Build the project before creating a migration.");
                 return false;

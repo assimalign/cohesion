@@ -45,5 +45,11 @@ public interface IDatabaseApplicationBuilder
     /// <summary>Consumes this builder and publishes a complete, disposable application.</summary>
     /// <returns>The application with live engines and listeners awaiting Start.</returns>
     /// <exception cref="InvalidOperationException">Build was already attempted or composition is invalid.</exception>
+    /// <remarks>
+    /// Build runs each owned engine factory synchronously, in registration order. A model's factory
+    /// can do I/O here: a SQL engine's opens, recovers and provisions the databases its builder
+    /// declares, with no timeout and no cancellation (owner decision 49 of 2026-10-09). A factory's
+    /// exception propagates after the products built before it are disposed.
+    /// </remarks>
     IDatabaseApplication Build();
 }

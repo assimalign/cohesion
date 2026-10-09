@@ -218,7 +218,7 @@ public sealed class DatabaseCompositionTests
         collision.AddEngine("other", _ => borrowed);
 
         Should.Throw<InvalidOperationException>(() => collision.Build())
-            .Message.ShouldBe("An engine factory returned an already registered product.");
+            .Message.ShouldBe("Engine factory 'other' returned an already registered product.");
         borrowed.DisposeCount.ShouldBe(0);
     }
 

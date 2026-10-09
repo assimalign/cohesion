@@ -294,7 +294,7 @@ public sealed class SqlEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        failure.Message.ShouldBe(worker ? "A worker factory returned null." : "A server factory returned null.");
+        failure.Message.ShouldBe(worker ? "Engine 'sql-engine': a worker factory returned null." : "Engine 'sql-engine': a server factory returned null.");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 
@@ -440,7 +440,7 @@ public sealed class SqlEngineCompositionTests
         // Assert
         failure.Message.ShouldBe("factory");
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
-        retry.Message.ShouldBe("An engine builder supports one build attempt.");
+        retry.Message.ShouldBe("The builder of engine 'sql-engine' supports one build attempt.");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Composition: AddSql disposes an engine its configuration built and abandoned")]
@@ -455,7 +455,7 @@ public sealed class SqlEngineCompositionTests
         var failure = Should.Throw<InvalidOperationException>(() => application.MaterializeEngine());
 
         // Assert
-        failure.Message.ShouldBe("An engine builder supports one build attempt.");
+        failure.Message.ShouldBe("The builder of engine 'premature' supports one build attempt.");
         early.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 

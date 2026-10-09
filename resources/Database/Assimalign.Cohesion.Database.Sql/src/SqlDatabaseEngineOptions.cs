@@ -15,6 +15,15 @@ public sealed class SqlDatabaseEngineOptions
     /// <summary>
     /// Gets or sets the logical engine name.
     /// </summary>
+    /// <remarks>
+    /// Read by <see cref="SqlDatabaseEngine.Create(SqlDatabaseEngineOptions)"/>, which names the
+    /// engine <c>sql-engine</c> when it is null. On an engine builder's
+    /// <see cref="SqlDatabaseEngineBuilder.Options"/> it starts as the builder's
+    /// <see cref="SqlDatabaseEngineBuilder.Name"/>, and the build refuses any other value, null
+    /// included: name the engine with <c>AddSql(name, …)</c> or
+    /// <see cref="SqlDatabaseEngine.CreateBuilder(string)"/> instead (owner decision 52 of
+    /// 2026-10-09). The engine extensibility design's B3 removes this property.
+    /// </remarks>
     public string? EngineName { get; set; }
 
     /// <summary>

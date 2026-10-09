@@ -304,11 +304,219 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         var refusal = await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await engine.DropDatabaseAsync("SALES"));
         await engine.DropDatabaseAsync("adhoc");
 
-        // Assert: the declaration owns the database (owner decision 56), and it stays open.
-        refusal.ObjectName.ShouldBe("SALES");
+        // Assert: the declaration owns the database (owner decision 56), the refusal names it as
+        // declared and says how to drop it, and the database stays open.
+        refusal.ObjectName.ShouldBe("sales");
+        refusal.OwningSchema.ShouldBe("sales");
         refusal.Operation.ShouldBe("DROP DATABASE");
+        refusal.Message.ShouldBe(
+            "SQL engine 'owner' declares database 'sales' (SqlDatabaseEngineBuilder.AddDatabase), so DROP DATABASE is " +
+            "refused. Remove the declaration from the engine builder and rebuild the engine before dropping it.");
         engine.TryGetDatabase("sales", out SqlDatabase? _).ShouldBeTrue();
         engine.TryGetDatabase("adhoc", out SqlDatabase? _).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: an imperative apply of another schema to a declared database is refused")]
+    public async Task ApplySchemaAsync_DeclaredDatabase_ShouldAcceptOnlyItsDeclaredSchema()
+    {
+        // Arrange
+        await using var engine = await CreateBuilder("imperative")
+            .AddDatabase(Sales)
+            .AddDatabase("scratch")
+            .BuildAsync();
+        engine.TryGetDatabase("sales", out SqlDatabase? sales).ShouldBeTrue();
+        engine.TryGetDatabase("scratch", out SqlDatabase? scratch).ShouldBeTrue();
+        SqlDatabase adhoc = await engine.CreateDatabaseAsync("adhoc");
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseObjectLockedException>(async () =>
+            await sales!.ApplySchemaAsync(SalesWithIndex.Compile()));
+        var same = await sales!.ApplySchemaAsync(Sales.Compile());
+        var ensured = await scratch!.ApplySchemaAsync(SqlSchema.Compile("scratch", schema =>
+            schema.Table<Order>("orders", table => table.Key(order => order.Id))));
+        var free = await adhoc.ApplySchemaAsync(SqlSchema.Compile("adhoc", schema =>
+            schema.Table<Order>("orders", table => table.Key(order => order.Id))));
+
+        // Assert: the declared schema stays the only one applied; a database declared without a
+        // schema, and one the builder did not declare, accept any.
+        refusal.Operation.ShouldBe("APPLY SCHEMA");
+        refusal.Message.ShouldBe(
+            "SQL engine 'imperative' declares database 'sales' with a schema (SqlDatabaseBuilder.Schema), so " +
+            "ApplySchemaAsync refuses another one: change the declaration and rebuild the engine instead.");
+        same.WasAlreadyApplied.ShouldBeTrue();
+        sales.Catalog.TryGetTable("dbo", "orders", out var orders).ShouldBeTrue();
+        sales.Catalog.GetIndexes(orders.ObjectId).ShouldHaveSingleItem().IsPrimaryKey.ShouldBeTrue();
+        ensured.WasAlreadyApplied.ShouldBeFalse();
+        free.WasAlreadyApplied.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a destructive step and an adopted table are refused with a code before any step runs")]
+    public async Task BuildAsync_PolicyRefusals_ShouldBeCodedAndChangeNothing()
+    {
+        // Arrange: a provisioned database with a second table, and an ad-hoc table in another.
+        SqlSchema salesWithArchive = SqlSchema.Create("sales", schema =>
+        {
+            schema.Table<Order>("orders", table =>
+            {
+                table.Key(order => order.Id);
+                table.Column(order => order.Item);
+            });
+            schema.Table<Missing>("archive", table => table.Key(missing => missing.Id));
+        });
+        await using (var first = await CreateBuilder("policy").AddDatabase(salesWithArchive).BuildAsync())
+        {
+            SqlDatabase shop = await first.CreateDatabaseAsync("shop");
+            await using var session = await shop.CreateSessionAsync();
+            await session.ExecuteAsync("CREATE TABLE parents (Id INT PRIMARY KEY)");
+        }
+
+        // Act: dropping the archive table is destructive, and the shop schema would adopt the table.
+        var destructive = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
+            await CreateBuilder("policy").AddDatabase(Sales).BuildAsync());
+        var adopt = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
+            await CreateBuilder("policy").AddDatabase(Unreferenced).BuildAsync());
+
+        // Assert
+        destructive.Message.ShouldStartWith(
+            "COHSQLP005: SQL engine 'policy', database 'sales': Destructive migration step 'DropTable' for 'archive' was refused.",
+            Case.Sensitive);
+        destructive.Message.ShouldEndWith("Nothing was changed.", Case.Sensitive);
+        adopt.Message.ShouldBe(
+            "COHSQLP005: SQL engine 'policy', database 'shop': SQL schema 'shop' cannot adopt table 'parents' because it " +
+            "was not created by this schema. Nothing was changed.");
+        await using var reopened = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "policy", RootPath = _rootPath });
+        var sales = await reopened.OpenDatabaseAsync("sales");
+        sales.Catalog.TryGetTable("dbo", "archive", out _).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a Verify drift names the first object that differs")]
+    public async Task BuildAsync_VerifyDrift_ShouldNameTheFirstDifference()
+    {
+        // Arrange: the database holds the schema without the index.
+        await using (var applied = await CreateBuilder("drift").AddDatabase(Sales).BuildAsync())
+        {
+        }
+
+        // Act
+        var drift = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await CreateBuilder("drift")
+            .AddDatabase("sales", database =>
+            {
+                database.Schema(SalesWithIndex);
+                database.Provisioning = SqlProvisioningMode.Verify;
+            })
+            .BuildAsync());
+
+        // Assert
+        drift.Message.ShouldContain(
+            $"the database records schema hash {Sales.Compile().Hash}; first difference from the declaration: table 'orders': index '",
+            Case.Sensitive);
+        drift.Message.ShouldContain("' is missing.", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a build canceled while it applies a schema throws OperationCanceledException and converges on the next build")]
+    public async Task BuildAsync_CanceledWhileApplying_ShouldThrowCanceledAndConverge()
+    {
+        // Arrange: a ten-table schema, so a cancellation can land inside the apply, between or in
+        // the steps (a commit interrupted by the token surfaces as an aborted transaction).
+        SqlSchema wide = SqlSchema.Create("wide", schema =>
+        {
+            schema.Table<W0>("t0", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Index(row => row.Name); });
+            schema.Table<W1>("t1", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Index(row => row.Name); });
+            schema.Table<W2>("t2", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Index(row => row.Name); });
+            schema.Table<W3>("t3", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Index(row => row.Name); });
+            schema.Table<W4>("t4", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Index(row => row.Name); });
+            schema.Table<W5>("t5", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Index(row => row.Name); });
+            schema.Table<W6>("t6", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Index(row => row.Name); });
+            schema.Table<W7>("t7", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Index(row => row.Name); });
+            schema.Table<W8>("t8", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Index(row => row.Name); });
+            schema.Table<W9>("t9", table => { table.Key(row => row.Id); table.Column(row => row.Name); table.Index(row => row.Name); });
+        });
+
+        for (int attempt = 0; attempt < 24; attempt++)
+        {
+            string root = Path.Combine(_rootPath, $"attempt-{attempt}");
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(1 + (2 * attempt)));
+            SqlDatabaseEngine? product = null;
+            var builder = SqlDatabaseEngine.CreateBuilder("cancel");
+            builder.Options.RootPath = root;
+            builder.AddWorker(engine => new RecordingWorker(product = engine));
+            builder.AddDatabase(wide);
+
+            // Act
+            Exception? failure = null;
+            try
+            {
+                await using SqlDatabaseEngine built = await builder.BuildAsync(cancellation.Token);
+            }
+            catch (Exception caught)
+            {
+                failure = caught;
+            }
+
+            // Assert: every failure is the cancellation, never a step failure, and leaves no engine;
+            // the next build converges on the declared schema.
+            if (failure is not null)
+            {
+                failure.ShouldBeAssignableTo<OperationCanceledException>($"attempt {attempt}: {failure}");
+                if (product is not null)
+                {
+                    product.State.ShouldBe(EngineState.Disposed);
+                }
+            }
+
+            var retry = SqlDatabaseEngine.CreateBuilder("cancel");
+            retry.Options.RootPath = root;
+            retry.AddDatabase(wide);
+            await using SqlDatabaseEngine converged = await retry.BuildAsync(TestTimeout.Token());
+            converged.TryGetDatabase("wide", out SqlDatabase? database).ShouldBeTrue();
+            database!.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(wide.Compile().Hash);
+            database.Catalog.Tables.Count.ShouldBe(10);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a database declared again from its own callback is refused")]
+    public void AddDatabase_ReenteredFromItsCallback_ShouldRefuseTheDuplicate()
+    {
+        // Arrange
+        var builder = SqlDatabaseEngine.CreateBuilder("reentrant");
+
+        // Act
+        var duplicate = Should.Throw<InvalidOperationException>(() =>
+            builder.AddDatabase("sales", _ => builder.AddDatabase("SALES")));
+        builder.AddDatabase("sales");
+
+        // Assert: the inner declaration met the outer one, and the failed outer one was withdrawn.
+        duplicate.Message.ShouldBe("SQL engine 'reentrant' already declares database 'sales'.");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a change to the server options after Build does not reach the server")]
+    public async Task ServerOptions_ChangedAfterBuild_ShouldNotReachTheServer()
+    {
+        // Arrange
+        SqlDatabaseServerOptions? captured = null;
+        var builder = SqlDatabaseEngine.CreateBuilder("served-options");
+        builder.AddServer(server =>
+        {
+            server.Listener = new InMemoryConnectionListener();
+            server.MaxSessions = 8;
+            captured = server;
+        });
+        var direct = new SqlDatabaseServerOptions { Listener = new InMemoryConnectionListener(), MaxSessions = 3 };
+
+        // Act
+        await using var engine = await builder.BuildAsync();
+        await using var other = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "direct" });
+        var created = SqlDatabaseServer.Create(other, direct);
+        captured!.MaxSessions = 0;
+        direct.MaxSessions = 0;
+
+        // Assert: each server keeps its own checked copy.
+        var server = engine.Servers.ShouldHaveSingleItem().ShouldBeOfType<SqlDatabaseServer>();
+        server.ServerOptions.ShouldNotBeSameAs(captured);
+        server.ServerOptions.MaxSessions.ShouldBe(8);
+        created.ServerOptions.ShouldNotBeSameAs(direct);
+        created.ServerOptions.MaxSessions.ShouldBe(3);
+        await created.DisposeAsync();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a change to the options after Build, or after Create, does not reach the engine")]
@@ -339,11 +547,16 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: the options copy keeps every option")]
     public async Task Options_Snapshot_ShouldCopyEveryOption()
     {
-        // Arrange: every option away from its default.
+        // Arrange: every option away from its default. The strategy is the one the engine uses, so
+        // the root path is set beside it only to show the copy keeps it.
         var clock = new Assimalign.Cohesion.Database.Tests.ManualTimeProvider();
+        var strategy = new TestObjects.CrashCaptureSqlStorageStrategy();
+        string rootPath = Path.Combine(_rootPath, "unused-root");
         var options = new SqlDatabaseEngineOptions
         {
             EngineName = "every-option",
+            RootPath = rootPath,
+            StorageStrategy = strategy,
             Durability = Assimalign.Cohesion.Database.Storage.StorageCommitDurability.None,
             GroupCommitWindow = TimeSpan.FromMilliseconds(7),
             CheckpointInterval = TimeSpan.FromMinutes(9),
@@ -380,8 +593,9 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         copy.DeferredUndoRetryDelay.ShouldBe(options.DeferredUndoRetryDelay);
         copy.TimeProvider.ShouldBeSameAs(clock);
         copy.ExpressionNestingLimit.ShouldBe(options.ExpressionNestingLimit);
+        copy.RootPath.ShouldNotBeNull();
         copy.RootPath.ShouldBe(options.RootPath);
-        copy.StorageStrategy.ShouldBe(options.StorageStrategy);
+        copy.StorageStrategy.ShouldBeSameAs(strategy);
         typeof(SqlDatabaseEngineOptions).GetProperties().Length.ShouldBe(14);
     }
 
@@ -530,4 +744,24 @@ public sealed class SqlEngineProvisioningTests : IDisposable
     private sealed record Parent(long Id);
 
     private sealed record Child(long Id, long ParentId);
+
+    private sealed record W0(long Id, string Name);
+
+    private sealed record W1(long Id, string Name);
+
+    private sealed record W2(long Id, string Name);
+
+    private sealed record W3(long Id, string Name);
+
+    private sealed record W4(long Id, string Name);
+
+    private sealed record W5(long Id, string Name);
+
+    private sealed record W6(long Id, string Name);
+
+    private sealed record W7(long Id, string Name);
+
+    private sealed record W8(long Id, string Name);
+
+    private sealed record W9(long Id, string Name);
 }
