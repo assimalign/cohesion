@@ -147,6 +147,7 @@ public sealed class BTreeIndex
             }
         }
 
+        IndexEventSource.Log.IndexFormatRefused(storage, registration, found);
         throw new IndexFormatException(registration.Definition.Name, registration.ObjectId, registration.RootPageId, found);
     }
 
@@ -860,18 +861,19 @@ public sealed class BTreeIndex
     {
         Separator separator;
         long siblingId;
+        int count;
 
         using (var leafHandle = _storage.OpenPageForWrite(transaction, (PageId)leafId))
         using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index))
         {
             var leaf = OpenNode(leafHandle.Page.AsBodySpan(), leafId);
-            int count = leaf.EntryCount;
+            count = leaf.EntryCount;
 
             if (count < 2)
             {
                 // Unreachable while inserts compact orphaned bytes first: a compacted
                 // leaf with fewer than two entries always has room for one more.
-                throw new IndexException($"Index '{Name}' cannot split leaf page {leafId} holding {count} entries.");
+                throw InvariantViolated(leafId, $"Index '{Name}' cannot split leaf page {leafId} holding {count} entries.");
             }
 
             int mid = ChooseLeafSplit(leaf);
@@ -907,6 +909,8 @@ public sealed class BTreeIndex
             leafHandle.MarkDirty();
             siblingHandle.MarkDirty();
         }
+
+        IndexEventSource.Log.PageSplit(_storage, Name, leafId, leaf: true, count);
 
         // The caller re-descends, so where a root leaf's lower half lands is moot here.
         InsertIntoParent(transaction, parentPath, leafId, separator, siblingId);
@@ -1053,6 +1057,7 @@ public sealed class BTreeIndex
             rootHandle.MarkDirty();
         }
 
+        IndexEventSource.Log.RootGrown(_storage, Name, RootPageId);
         return leftId;
     }
 
@@ -1075,17 +1080,18 @@ public sealed class BTreeIndex
         Separator promoted;
         int mid;
         long siblingId;
+        int count;
 
         using (var nodeHandle = _storage.OpenPageForWrite(transaction, (PageId)nodeId))
         using (var siblingHandle = _storage.AllocatePageForWrite(transaction, PageType.Index))
         {
             var node = OpenNode(nodeHandle.Page.AsBodySpan(), nodeId);
-            int count = node.EntryCount;
+            count = node.EntryCount;
 
             if (count < 2)
             {
                 // Unreachable: a full internal node holds several maximum-size separators.
-                throw new IndexException($"Index '{Name}' cannot split internal page {nodeId} holding {count} entries.");
+                throw InvariantViolated(nodeId, $"Index '{Name}' cannot split internal page {nodeId} holding {count} entries.");
             }
 
             var sibling = BTreeNode.Initialize(siblingHandle.Page.AsBodySpan(), BTreeNode.InternalKind);
@@ -1107,6 +1113,8 @@ public sealed class BTreeIndex
             nodeHandle.MarkDirty();
             siblingHandle.MarkDirty();
         }
+
+        IndexEventSource.Log.PageSplit(_storage, Name, nodeId, leaf: false, count);
 
         long leftId = InsertIntoParent(transaction, path.GetRange(0, path.Count - 1), nodeId, promoted, siblingId);
         return (mid, leftId, siblingId);
@@ -1161,8 +1169,8 @@ public sealed class BTreeIndex
 
         if (leaf.CompareToEntry(bound, mid - 1) <= 0 || leaf.CompareToEntry(bound, mid) > 0)
         {
-            throw new IndexException(
-                $"Index '{Name}' cannot split leaf page {leafId}: its entries {mid - 1} and {mid} are out of order.");
+            throw InvariantViolated(
+                leafId, $"Index '{Name}' cannot split leaf page {leafId}: its entries {mid - 1} and {mid} are out of order.");
         }
     }
 
@@ -1181,8 +1189,8 @@ public sealed class BTreeIndex
     {
         if (position < 0 || position > node.EntryCount)
         {
-            throw new IndexException(
-                $"Index '{Name}' split would insert a separator at position {position} of the {node.EntryCount}-entry directory on page {pageId}.");
+            throw InvariantViolated(
+                pageId, $"Index '{Name}' split would insert a separator at position {position} of the {node.EntryCount}-entry directory on page {pageId}.");
         }
 
         var bound = separator.AsSearchKey();
@@ -1190,8 +1198,19 @@ public sealed class BTreeIndex
         if ((position > 0 && node.CompareToSeparator(bound, position - 1) <= 0)
             || (position < node.EntryCount && node.CompareToSeparator(bound, position) >= 0))
         {
-            throw new IndexException($"Index '{Name}' split would misorder separators on page {pageId}.");
+            throw InvariantViolated(pageId, $"Index '{Name}' split would misorder separators on page {pageId}.");
         }
+    }
+
+    /// <summary>
+    /// Reports a split invariant the tree failed and returns the <see cref="IndexException"/> the
+    /// insert fails with, for the caller to throw. The message names pages and positions, never a
+    /// key, so the event carries it as is.
+    /// </summary>
+    private IndexException InvariantViolated(long pageId, string message)
+    {
+        IndexEventSource.Log.IndexInvariantViolated(_storage, Name, pageId, message);
+        return new IndexException(message);
     }
 
     private static void RebuildInternal(ref BTreeNode node, int keepCount)
@@ -1228,7 +1247,9 @@ public sealed class BTreeIndex
     {
         if (!BTreeNode.IsCurrentFormat(body))
         {
-            throw new IndexCorruptionException(Name, pageId, BTreeNode.ReadFormatVersion(body));
+            int found = BTreeNode.ReadFormatVersion(body);
+            IndexEventSource.Log.IndexCorruptionDetected(_storage, Name, pageId, found);
+            throw new IndexCorruptionException(Name, pageId, found);
         }
 
         return new BTreeNode(body);

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -134,6 +136,7 @@ public sealed class BTreeIndexManager
         }
 
         var storageTransaction = _options.TransactionSource(transaction);
+        BTreeIndex index;
 
         lock (_sync)
         {
@@ -145,12 +148,13 @@ public sealed class BTreeIndexManager
             }
 
             long rootPageId = BTreeIndex.CreateRoot(_options.Storage, storageTransaction);
-            var index = new BTreeIndex(
+            index = new BTreeIndex(
                 _options.Storage, _options.TransactionSource, _options.LockManager, objectId, definition, rootPageId);
             _indexes[key] = index;
-
-            return new ValueTask<BTreeIndex>(index);
         }
+
+        IndexEventSource.Log.IndexCreated(_options.Storage, objectId, definition);
+        return new ValueTask<BTreeIndex>(index);
     }
 
     /// <summary>
@@ -174,6 +178,8 @@ public sealed class BTreeIndexManager
                 throw new IndexException($"No index named '{name}' exists on object {objectId}.");
             }
         }
+
+        IndexEventSource.Log.IndexDropped(_options.Storage, objectId, name);
 
         // The tree's pages are left for the vacuum feature to reclaim — dropping is
         // a directory operation, not a physical walk.
@@ -238,6 +244,10 @@ public sealed class BTreeIndexManager
             return new ValueTask<long>(0L);
         }
 
+        // Timed only while a listener takes the purge event (event-source.md, rule 9).
+        bool timed = IndexEventSource.Log.IsEnabled(EventLevel.Verbose, EventKeywords.None);
+        long started = timed ? Stopwatch.GetTimestamp() : 0;
+
         List<BTreeIndex> indexes;
         lock (_sync)
         {
@@ -250,6 +260,11 @@ public sealed class BTreeIndexManager
         {
             cancellationToken.ThrowIfCancellationRequested();
             purged += index.PurgeWriters(transaction, writers);
+        }
+
+        if (timed)
+        {
+            IndexEventSource.Log.WritersPurged(_options.Storage, writers.Count, purged, started);
         }
 
         return new ValueTask<long>(purged);
