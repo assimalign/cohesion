@@ -26,9 +26,11 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <para>
 /// <b>Then by type.</b> Each candidate costs the sum of its arguments' costs: nothing for an exact
 /// type, the number of steps for an implicit widening along INT8 → INT16 → INT32 → INT64 → DECIMAL →
-/// FLOAT64 (nothing to or from text), and more than any widening for a pseudo-type, so a concrete
+/// FLOAT64, or one step for FLOAT32 → FLOAT64 (nothing widens to FLOAT32, and nothing to or from
+/// text), and more than any widening for a pseudo-type, so a concrete
 /// overload is preferred to a polymorphic one. An argument whose type the plan cannot tell — a NULL
-/// literal, a NULL parameter, a grouping slot — matches any parameter for nothing. Every
+/// literal, a NULL parameter — matches any parameter for nothing; a grouping key or aggregate
+/// result has its type over the input row. Every
 /// <see cref="SqlType.AnyElement"/> argument of one candidate must have one type. The unique
 /// cheapest candidate wins; none is <c>COHSQLE006</c>, several are <c>COHSQLE008</c> (SQLSTATE
 /// 42725). When the candidates by count are a single overload over <see cref="SqlType.Any"/> and at
@@ -191,11 +193,13 @@ internal static class SqlFunctionResolver
             }
         }
 
+        // ABS widens an exact integer to BIGINT and keeps any other type, a non-number included, as
+        // it did before typed signatures (owner decision 67): ABS('x') is still typed TEXT, so a CASE
+        // or SUM over it is refused while planning, and the call itself fails only when it runs.
         return function.ResultRule != SqlResultRule.NumericElement ? element : element switch
         {
             DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64 => DatabaseType.Int64,
-            DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal => element,
-            _ => DatabaseType.Null,
+            _ => element,
         };
     }
 
@@ -207,6 +211,22 @@ internal static class SqlFunctionResolver
     /// takes the value as it is; null when every parameter is a pseudo-type.
     /// </returns>
     internal static DatabaseType[]? CoercionTargets(SqlFunction function, int count)
+    {
+        if (function.VariadicParameter is null)
+        {
+            // Fixed by the signature, so computed once with the function and shared by every call;
+            // the array is never written after that.
+            return function.FixedCoercionTargets;
+        }
+
+        return ComputeCoercionTargets(function, count);
+    }
+
+    /// <summary>The storage type each of a number of arguments converts to; see <see cref="CoercionTargets"/>.</summary>
+    /// <param name="function">The function.</param>
+    /// <param name="count">The number of arguments.</param>
+    /// <returns>The targets, or null when every parameter is a pseudo-type.</returns>
+    internal static DatabaseType[]? ComputeCoercionTargets(SqlFunction function, int count)
     {
         DatabaseType[]? targets = null;
         for (int index = 0; index < count; index++)
@@ -276,9 +296,34 @@ internal static class SqlFunctionResolver
         {
             return SqlValue.FromDouble((double)value.AsDecimal());
         }
+        else if (value.Type == DatabaseType.Float32 && target == DatabaseType.Float64)
+        {
+            return SqlValue.FromDouble(value.AsSingle());
+        }
 
         throw new DatabaseException(
             $"Function '{function.Name}' takes {function.ParameterAt(index).Name} for argument {index + 1}, but the value is {SqlType.NameOf(value.Type)}.");
+    }
+
+    /// <summary>
+    /// Converts a function's result of another type to its declared type along an implicit
+    /// widening (INTEGER to BIGINT, REAL to DOUBLE, ...), which loses nothing.
+    /// </summary>
+    /// <param name="value">The result, not NULL.</param>
+    /// <param name="target">The declared storage type.</param>
+    /// <param name="function">The function.</param>
+    /// <param name="widened">The converted result.</param>
+    /// <returns><see langword="false"/> when the result's type does not widen to the declared one.</returns>
+    internal static bool TryWiden(in SqlValue value, DatabaseType target, SqlFunction function, out SqlValue widened)
+    {
+        if (Distance(value.Type, target) <= 0)
+        {
+            widened = default;
+            return false;
+        }
+
+        widened = Coerce(value, target, function, 0); // a widening never overflows
+        return true;
     }
 
     /// <summary>Whether an argument position has a parameter: always for a variadic function; the <c>*</c> of <c>name(*)</c> has none.</summary>
@@ -292,7 +337,10 @@ internal static class SqlFunctionResolver
         => arguments.Count == 1 && arguments[0] is SqlStarExpression;
 
     /// <summary>Whether an overload accepts the call's number of arguments and its <c>*</c>.</summary>
-    private static bool AcceptsShape(SqlFunction overload, IReadOnlyList<SqlExpression> arguments)
+    /// <param name="overload">The overload.</param>
+    /// <param name="arguments">The call's arguments.</param>
+    /// <returns><see langword="true"/> when the overload is a candidate for the call by its shape.</returns>
+    internal static bool AcceptsShape(SqlFunction overload, IReadOnlyList<SqlExpression> arguments)
     {
         bool parameterless = overload.ParameterTypes.Length == 0 && overload.VariadicParameter is null;
         if (IsStarCall(arguments))
@@ -366,6 +414,12 @@ internal static class SqlFunctionResolver
         if (from == to)
         {
             return 0;
+        }
+        if (from == DatabaseType.Float32)
+        {
+            // REAL widens to DOUBLE, losslessly, and to nothing else (PostgreSQL's implicit
+            // float4 → float8). Nothing widens to REAL: every other conversion to it loses digits.
+            return to == DatabaseType.Float64 ? 1 : -1;
         }
 
         int source = Array.IndexOf(_lattice, from);

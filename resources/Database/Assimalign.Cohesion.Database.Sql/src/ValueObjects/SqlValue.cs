@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
@@ -32,6 +33,9 @@ namespace Assimalign.Cohesion.Database.Sql;
 [StructLayout(LayoutKind.Auto)]
 public readonly struct SqlValue : IEquatable<SqlValue>
 {
+    private static readonly object BoxedTrue = true;
+    private static readonly object BoxedFalse = false;
+
     // The text or binary value; for a value the engine read from a row, the boxed value it read,
     // so handing it back to the row allocates nothing.
     private readonly object? _reference;
@@ -191,10 +195,14 @@ public readonly struct SqlValue : IEquatable<SqlValue>
         return Unsafe.As<string>(_reference!);
     }
 
-    /// <summary>Reads a binary value. The array is the engine's: the function must not change it.</summary>
+    /// <summary>
+    /// Reads a binary value, read-only: the bytes are the engine's (a row's stored value, or a
+    /// caller's parameter), so a function cannot change them. <see cref="ReadOnlyMemory{T}.ToArray"/>
+    /// copies them when the function needs an array of its own.
+    /// </summary>
     /// <returns>The value.</returns>
     /// <exception cref="InvalidCastException">The value is NULL or of another type.</exception>
-    public byte[] AsBinary()
+    public ReadOnlyMemory<byte> AsBinary()
     {
         if (_type != DatabaseType.Binary)
         {
@@ -298,6 +306,28 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     public static bool operator !=(SqlValue left, SqlValue right) => !left.Equals(right);
 
     /// <summary>
+    /// Compares two values in the order the engine sorts and groups by and takes <c>MIN</c> and
+    /// <c>MAX</c> in, which <see cref="Equals(SqlValue)"/> is not: numbers by value across the
+    /// numeric types, text under a collation, binary by content, a <c>TIMESTAMP</c> by its
+    /// wall-clock ticks and a <c>TIMESTAMPTZ</c> by its instant.
+    /// </summary>
+    /// <param name="left">The first value; not NULL.</param>
+    /// <param name="right">The second value; not NULL.</param>
+    /// <param name="collation">The collation text compares under; the binary collation when null.</param>
+    /// <returns>Negative when <paramref name="left"/> sorts first, zero when they are equal, positive otherwise.</returns>
+    /// <exception cref="ArgumentException">A value is NULL, which has no place in the order.</exception>
+    /// <exception cref="DatabaseException">The values' types do not compare, such as TEXT and BIGINT.</exception>
+    public static int Compare(in SqlValue left, in SqlValue right, Collation? collation = null)
+    {
+        if (left.IsNull || right.IsNull)
+        {
+            throw new ArgumentException("NULL has no place in the order; test IsNull first.", left.IsNull ? nameof(left) : nameof(right));
+        }
+
+        return SqlValueComparer.Compare(left.ToObject()!, right.ToObject()!, collation);
+    }
+
+    /// <summary>
     /// Converts a value of the engine's row representation: <see langword="null"/> or a boxed value
     /// of a storage CLR type. The box is kept, so <see cref="ToObject"/> hands the same object back
     /// without boxing again. A parameter of a CLR type the codec does not store widens losslessly:
@@ -348,7 +378,9 @@ public readonly struct SqlValue : IEquatable<SqlValue>
 
         return _type switch
         {
-            DatabaseType.Boolean => Read<bool>(),
+            // Shared boxes, as the evaluator's predicates return: a function returning BOOLEAN
+            // allocates nothing per row.
+            DatabaseType.Boolean => Read<bool>() ? BoxedTrue : BoxedFalse,
             DatabaseType.Int8 => Read<sbyte>(),
             DatabaseType.Int16 => Read<short>(),
             DatabaseType.Int32 => Read<int>(),
@@ -398,6 +430,6 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     private void ThrowMismatch(DatabaseType requested) => throw Mismatch(requested);
 
     private InvalidCastException Mismatch(DatabaseType requested) => _type == DatabaseType.Null
-        ? new InvalidCastException($"The value is NULL, not {requested}.")
-        : new InvalidCastException($"The value is {_type}, not {requested}.");
+        ? new InvalidCastException($"The value is NULL, not {SqlType.NameOf(requested)}.")
+        : new InvalidCastException($"The value is {SqlType.NameOf(_type)}, not {SqlType.NameOf(requested)}; read it with the accessor of its type.");
 }

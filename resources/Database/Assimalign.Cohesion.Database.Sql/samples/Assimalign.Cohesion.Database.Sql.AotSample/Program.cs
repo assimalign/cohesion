@@ -31,7 +31,7 @@ internal static class Program
     private const string Projection =
         "SELECT Id, slugify(Name) AS slug, scaled(Score, 1.5) AS scaled, in_range(Score, 50, 150) AS ranged, " +
         "describe(Name, Score, Active, Token) AS described, clamp(Score, 0, 150) AS clamped, is_missing(Note) AS missing, " +
-        "slugify(Note) AS note_slug FROM customers ORDER BY Id";
+        "slugify(Note) AS note_slug, or_none(Note) AS note_or FROM customers ORDER BY Id";
 
     private const string Aggregates = "SELECT product(Score) AS p, median(Score) AS m, join_names(Name) AS names, COUNT(*) AS c FROM customers";
 
@@ -39,14 +39,14 @@ internal static class Program
 
     private static readonly object?[][] _projection =
     [
-        [1L, "ada-lovelace", 150.0m, true, "Ada Lovelace:100:on:00000001000000000000000000000000", 100L, true, null],
-        [2L, "grace-hopper", 300.0m, false, "Grace Hopper:200:off:00000002000000000000000000000000", 150L, false, "admiral"],
+        [1L, "ada-lovelace", 150.0m, true, "Ada Lovelace:100:on:00000001000000000000000000000000", 100L, true, null, "none"],
+        [2L, "grace-hopper", 300.0m, false, "Grace Hopper:200:off:00000002000000000000000000000000", 150L, false, "admiral", "admiral"],
     ];
 
     private static readonly object?[][] _aggregates = [[20000L, 150.0, "Ada Lovelace,Grace Hopper", 2L]];
 
     private static readonly object?[][] _registered =
-        [["clamp"], ["describe"], ["in_range"], ["is_missing"], ["join_names"], ["median"], ["product"], ["scaled"], ["slugify"]];
+        [["clamp"], ["describe"], ["in_range"], ["is_missing"], ["join_names"], ["median"], ["or_none"], ["product"], ["scaled"], ["slugify"]];
 
     private static int _passed;
     private static int _failed;
@@ -90,6 +90,9 @@ internal static class Program
             .Add(SqlAggregateFunction.Create<List<string>, string, string>("join_names",
                 static () => [], static (List<string> names, string name) => { names.Add(name); return names; },
                 static (List<string> names) => string.Join(',', names.Order(StringComparer.Ordinal))))
+            // Typed and called on NULL input: the delegate receives null for a NULL argument.
+            .Add(SqlScalarFunction.Create("or_none", static (string? note) => note ?? "none", SqlFunctionVolatility.Immutable,
+                SqlNullBehavior.CalledOnNullInput))
             .Add(new ClampFunction())
             .Add(new IsMissingFunction())
             .Add(new MedianFunction());

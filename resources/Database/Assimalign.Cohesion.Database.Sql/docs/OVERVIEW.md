@@ -53,14 +53,19 @@ shared storage, with DDL flowing through the relational catalog
   shorthands `SqlScalarFunction.Create<T1, TResult>(...)` (up to four arguments) and
   `SqlAggregateFunction.Create<TState, T1, TResult>(...)`, over the allocation-free value ABI
   (`SqlValue`, `SqlArguments`, `SqlFunctionContext`). The build freezes them into
-  `SqlDatabaseEngine.Functions`, visible in every database of the engine. Calls resolve by name,
+  `SqlDatabaseEngine.Functions`, visible in every database of the engine. A built-in cannot be
+  replaced or shadowed (an overload of its name must take another number of arguments), and a
+  reserved, type or quantifier name cannot be registered. Calls resolve by name,
   argument count and type once per statement (an ambiguous call is `COHSQLE008`); an `Immutable`
-  call over constants is folded; a strict function is not called over NULL; a CHECK admits only
-  `Immutable` functions; and what a function throws fails the statement as `COHSQLE007`. One
-  function instance serves every session, so it must be thread-safe. A compiled schema's
+  call over constants is folded; a strict function (the default; a typed one can be created
+  `CalledOnNullInput`) is not called over NULL; a CHECK admits only `Immutable` functions; and
+  what a function throws, or a result of another type than it declares, fails the statement as
+  `COHSQLE007`. One function instance serves every session, so it must be thread-safe. A
+  `SELECT` needs a `FROM` in this dialect, so try a function as `SELECT f(x) FROM t`. A compiled schema's
   `table.Check(name, sql)` binds to the frozen catalog before the build touches any file
   (`COHSQLP001` when it does not). A stored CHECK whose function a later build no longer
-  registers does not stop its database from opening: its reads proceed, each write that would
+  registers, or registers with a result that no longer fits, does not stop its database from
+  opening: its reads proceed, each write that would
   evaluate it fails with `COHSQLE009`, and an engine that declares the database fails its build
   with that code. `COHESION_SCHEMA.FUNCTIONS` lists the catalog and the special forms.
   `samples/Assimalign.Cohesion.Database.Sql.AotSample` is the NativeAOT guard for all of it, in

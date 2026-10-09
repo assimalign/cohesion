@@ -281,28 +281,47 @@ flowchart LR
   `SqlAggregateAccumulator` are inverted seams the engine drives and applications
   implement, with `protected` constructors. Each public member is non-virtual and owns
   the count check, the strict short-circuit and exception coding before one call of its
-  `protected abstract …Core`. Metadata is field-backed and fixed at construction; the
-  standard library's diagnostic call forms (`ABS(numeric)`), its static result rule
-  (`ABS` widens integers) and `COUNT`'s non-null result are internal init-only members
-  of the base. The typed shorthands are static; their leaves override non-generic cores,
-  so no generic virtual method exists. The four abstract bases carry the deviation marker.
-  `SqlType`, the collections and the catalog are sealed; no interface is added.
+  `protected abstract …Core`. Metadata is field-backed and fixed at construction. What a
+  built-in needs, an application leaf has too: `IsNeverNull` (a projection of a bare call
+  is not nullable, as `COUNT`'s) is a public init-only member a leaf sets in its
+  constructor, `SqlType.AnyNumeric` is public, and `SqlValue.Compare` is the engine's value
+  order `MIN` and `MAX` use. Only the standard library's diagnostic call forms
+  (`ABS(numeric)`) and `ABS`'s static result rule stay internal init-only members of the
+  base, because they exist only while decision 67 keeps the built-ins permissive, and go when
+  they are tightened. The typed shorthands are static; their leaves override non-generic
+  cores, so no generic virtual method exists. The four abstract bases carry the deviation
+  marker. `SqlType`, the collections and the catalog are sealed; no interface is added.
+  `SqlFunctionVolatility.Volatile` is the enum's zero value, so `default` is the safe
+  category (decision 63).
 - **The value ABI.** `SqlValue` is 32 bytes: a reference (text, binary), a 16-byte inline
   payload (every other storage type, `decimal`, `Guid` and `DateTimeOffset` included)
   and its `DatabaseType`; `default` is NULL. Accessors are strict (`AsInt64` of an INTEGER
-  throws `InvalidCastException`), because the engine converts each argument to its
-  parameter's type first. A value the engine reads from a row keeps the box it came
-  from in the reference slot, so handing an argument back (`UPPER` of a number, `MIN`)
-  boxes nothing. `SqlArguments` is a ref struct over the call's values and its
+  throws `InvalidCastException`, `The value is INTEGER, not BIGINT; read it with the
+  accessor of its type.`), because the engine converts each argument to its parameter's
+  type first. A value the engine reads from a row keeps the box it came from in the
+  reference slot, so handing an argument back (`UPPER` of a number, `MIN`) boxes nothing,
+  and a BOOLEAN result becomes one of two shared boxes, as the evaluator's predicates do.
+  A binary value is read-only (`AsBinary` and `GetBinary` return `ReadOnlyMemory<byte>`):
+  its bytes are a stored row's or a caller's parameter, and a typed function over `byte[]`
+  receives a copy. `SqlArguments` is a ref struct over the call's values and its
   `SqlFunctionContext`: the database, the call's input collation (resolved when the
-  statement was bound) and the statement's cancellation token. The context has no
-  transaction timestamp yet: no transaction carries its start time.
+  statement was bound) and the statement's cancellation token. Both have public
+  constructors, so a test can call a function with a collation or a token. The context has
+  no transaction timestamp yet: no transaction carries its start time.
 - **Registration.** `SqlDatabaseEngineBuilder.Functions` starts with the standard library,
-  added through the same public `Add` (`SqlStandardLibrary.Register`). `Add` refuses a name
-  that is not an identifier, a special form or a keyword (`ArgumentException`); a name
-  and parameter-type list already registered, a built-in's included, and a scalar and an
-  aggregate under one name, which keeps aggregate recognition a name lookup
-  (`InvalidOperationException`); and any call once the build began. Parameter types
+  added through the same public `Add` (`SqlStandardLibrary.Register`). `Add` refuses
+  (`ArgumentException`) a name that is not an identifier, a special form, a keyword, a type
+  name (`INT`, `DATE`), a quantifier or date-time value word (`ANY`, `SOME`,
+  `LOCALTIMESTAMP`), or a name the dialect reserves for a built-in that does not execute
+  yet (`TRIM`, `NOW`, `ROUND`, ...), which would fail the application's build the day the
+  engine ships it; and (`InvalidOperationException`) a name and parameter-type list already
+  registered, a built-in's included; an overload of a standard-library name that takes a
+  number of arguments the built-in takes (decision 62: a built-in's parameters are
+  pseudo-types, so `upper(TEXT)` would outrank `UPPER(ANYELEMENT)` for text and replace it,
+  in stored CHECKs too, and `length(ANYELEMENT)` would tie with `LENGTH(ANY)` and make every
+  call ambiguous), while an overload of another arity, `upper(TEXT, BIGINT)`, is allowed;
+  a scalar and an aggregate under one name, which keeps aggregate recognition a name lookup;
+  and any call once the build began. Parameter types
   compare by storage type, as PostgreSQL ignores type modifiers in a signature. Build
   phase 2 freezes the collection into `SqlDatabaseEngine.Functions`, a case-insensitive
   `FrozenDictionary<string, SqlFunction[]>`; `SqlDatabaseEngine.Create(options)` runs the
@@ -319,31 +338,63 @@ flowchart LR
   (`takes exactly 1 argument or '*'`, `Accepted: COUNT(*) or COUNT(value)`). Then, in
   each expression's validation, the candidates by count are costed by their arguments'
   static types (`SqlExpressionEvaluator.StaticTypeOf`): nothing for an exact type or an
-  argument the plan cannot type (a NULL literal or parameter, a grouping slot), one step
-  per widening along INT8 → INT16 → INT32 → INT64 → DECIMAL → FLOAT64 (nothing to or
-  from text, and nothing from REAL), ten for a pseudo-type, one for a variadic overload.
+  argument the plan cannot type (a NULL literal or parameter), one step per widening along
+  INT8 → INT16 → INT32 → INT64 → DECIMAL → FLOAT64, one for REAL → FLOAT64 (PostgreSQL's
+  implicit float4 → float8; nothing widens to REAL, which would lose digits, and nothing
+  converts to or from text), ten for a pseudo-type, one for a variadic overload.
   The unique cheapest wins; none is `COHSQLE006` (`has no overload that accepts argument
   types (TEXT)`), a tie `COHSQLE008` (SQLSTATE 42725). An integer literal is typed by its
-  magnitude, INTEGER when it fits, as PostgreSQL types one. `ANYELEMENT` arguments of
+  magnitude, INTEGER when it fits, as PostgreSQL types one. Inside a grouping, a grouping
+  key or an aggregate result has the type it has over the input row (the group scope
+  types a slot through the source scope, only when asked), so `describe(COUNT(*))` calls
+  `describe(BIGINT)` as PostgreSQL's does. `ANYELEMENT` arguments of
   one call must agree; `name(*)` matches only a parameterless aggregate and `COUNT()` is
   not `COUNT(*)`. When the candidates by count are one overload over `ANY` and at most one
   `ANYELEMENT`, as every built-in scalar is, no type is computed, so resolving a deep
-  nest of built-in calls stays linear and costs the walks no stack.
+  nest of built-in calls stays linear and costs the walks no stack. A call whose choice or
+  polymorphic result needs its arguments' types types each argument once, for both
+  (`TypeCall`), and the scope remembers each call it typed as another call's argument,
+  forgetting them when the planner adds a subquery slot, so a nest of such calls also plans
+  in time linear in its depth: typing the arguments once to choose and again to type the
+  result had doubled the work per level (depth 20 took seconds, and planning does not
+  observe cancellation). A statement whose calls take only columns, constants and
+  parameters allocates nothing for the memory.
 - **Evaluation.** `SqlBoundCall` holds the overload, its bound arguments, each argument's
-  conversion target (null when every parameter is a pseudo-type), the call's collation
-  and the database. Per row the evaluator evaluates every argument (one stays in the
-  recursive frame; more go to a 4-slot inline buffer of objects), returns NULL without a
+  conversion target (null when every parameter is a pseudo-type; for a fixed signature the
+  array is computed once with the function and shared by every bound call), the call's
+  collation and the database. Per row the evaluator evaluates every argument (one stays in
+  the recursive frame; more go to a 4-slot inline buffer of objects), returns NULL without a
   call when the function is strict and a value is NULL, then a non-inlined helper converts
   the values (one into a single `SqlValue`, more into an `[InlineArray(4)]` buffer, a
   pooled array past four), widening each to its parameter's type, and makes one call of
   the core through the internal `InvokeResolved`, which codes failures as the public
   `Invoke` does but skips the count the planner matched. The result boxes once into the
-  row, as a built-in's always did.
+  row, as a built-in's always did. The executor's evaluator carries the statement's
+  cancellation token for the context only when the engine registers an application
+  function (`SqlFunctionCatalog.HasApplicationFunctions`), the only kind that reads it, so a
+  statement of an engine with the standard library alone shares the evaluator and
+  allocates none, as before E2.
+- **The result is checked** against the declaration, which plans, result metadata and outer
+  calls rely on (`SqlFunction.CheckResult`, after `InvokeCore` and `FinishCore`): one
+  comparison when it has the declared type; a value of a type that widens to it implicitly
+  (INTEGER for BIGINT) is converted; a JSON result may be text and a JSONB one bytes; an
+  `ANYELEMENT` result must have its call's `ANYELEMENT` arguments' type (an aggregate's is not
+  checked: it has no arguments at `Finish`; `ABS` keeps its own rule); and a function that
+  sets `IsNeverNull` may not return NULL. Anything else fails the statement as `COHSQLE007`
+  (`Function 'lying' failed: The function returned TEXT, but it declares BIGINT.`), where it
+  used to reach clients with metadata that contradicted the value, or fail later uncoded.
+- **The typed shorthands.** `Create<T1..T4, TResult>` and `Create<TState, T1, TResult>` map
+  CLR types to SQL types when they run and are strict by default; with
+  `SqlNullBehavior.CalledOnNullInput` every parameter must be a reference or nullable type
+  (refused at `Create` otherwise, `declare it 'Int64?'`), and receives `null` for NULL. A
+  typed aggregate called on NULL input folds its NULL rows too.
 - **Exceptions.** Whatever a core throws other than `OperationCanceledException`,
   `InsufficientExecutionStackException`, `OutOfMemoryException` or a `DatabaseException`
   becomes `COHSQLE007` (`Function 'clamp' failed: ...`, SQLSTATE 38000), the original as
   its inner exception; a `DatabaseException` passes unchanged, so a built-in's own
-  codes (`ABS` of the BIGINT minimum is `COHSQLE002`) are what they were. The statement
+  codes (`ABS` of the BIGINT minimum is `COHSQLE002`) are what they were, and an
+  application function raises an error of its own code the same way (a message that leads
+  with `APP001:` reaches the client unchanged). The statement
   fails like any coded failure: it writes nothing and an explicit transaction stays
   usable, the session's statement-atomic rule.
 - **Folding.** An `Immutable` call whose arguments are all constants or parameters is
@@ -356,8 +407,8 @@ flowchart LR
   `Volatile` calls run per row. An index seek is never bounded by a comparand that calls a
   `Volatile` function, whose value could change between the plan and a row.
 - **Aggregates.** The planner recognizes an aggregate call by its name in the catalog and
-  resolves its overload over the input row (`SUM` and `AVG` take the internal numeric
-  pseudo-type, so `SUM(text)` is `COHSQLE006` while planning). `SqlGroupAggregate` carries
+  resolves its overload over the input row (`SUM` and `AVG` take the numeric pseudo-type
+  `SqlType.AnyNumeric`, so `SUM(text)` is `COHSQLE006` while planning). `SqlGroupAggregate` carries
   the overload, its bound arguments (none for `name(*)`) and conversion targets; the
   grouping executor creates one accumulator per group per aggregate call through
   `CreateAccumulator`, adds each row (a strict aggregate skips a row with a NULL
@@ -369,7 +420,13 @@ flowchart LR
   aggregate or a name outside it is `Function '<name>' is not supported in CHECK.`, and DDL
   admits only an `Immutable` function (decision 64), naming its volatility otherwise; ad-hoc
   DDL and the schema session apply the same rule. A function declared to return BOOLEAN is
-  a predicate by itself (`CHECK (is_email(email))`). A stored CHECK binds against the
+  a predicate by itself (`CHECK (is_email(email))`). An application function's result must
+  also fit where the predicate uses it, which the evaluator would otherwise refuse on every
+  row: a comparison, `BETWEEN` or `IN` operand of a type its other operand (a literal, a
+  column or another call) compares with, and an arithmetic operand that is a number
+  (`Function 'is_email' returns BOOLEAN, where the CHECK needs a number.`,
+  `SqlFunctionResultMismatchException`); built-ins and operands the plan cannot type are not
+  checked, so no predicate DDL accepted before is refused. A stored CHECK binds against the
   catalog of the engine that opens the database and is not held to the volatility rule
   again.
 - **Declared CHECKs bind before any file** (part 2, design §5.2 phase 3). A compiled
@@ -377,25 +434,37 @@ flowchart LR
   engine builder's phase 3, after the catalog is frozen and before the engine exists, binds
   every declared CHECK as the DDL that applies it will (`SqlSchemaProvisioner.BindDeclaredChecks`):
   the text must parse, under the engine's nesting limit, as exactly one expression, so no
-  text can close the constraint's parentheses and declare more than the schema shows
+  text can close the constraint's parentheses and declare more than the schema shows, and
+  must parse as one inside the parentheses the DDL embeds it in, so a trailing `-- comment`
+  or an unterminated `/*` cannot swallow the closing one and fail after files exist
   (`SqlPersistedExpression.ParseDeclaration`); every name must resolve, every call's count
   and types must match an overload (`SqlPlanner.ValidateDeclaredCalls`, then
   `ValidateCheck` over a table shaped from the compiled columns); and every function must
   be `Immutable`. A refusal is `COHSQLP001` naming the engine, the database, the table and
   the constraint, with the binder's error as the reason and inner exception (`... CHECK
-  constraint 'ck' on table 'customers' does not bind: Unknown function 'slugify'. Nothing
-  was opened or written.`). An imperative `SqlDatabase.ApplySchemaAsync` binds the same way
-  before any step runs and refuses with `COHSQLP005`. The SDK reads the text without
+  constraint 'ck' on table 'customers' does not bind: Unknown function 'slugify'. Register
+  it on the engine's builder (SqlDatabaseEngineBuilder.Functions) before Build. Nothing was
+  opened or written.`). An imperative `SqlDatabase.ApplySchemaAsync` binds the same way
+  before any step runs and refuses with `COHSQLP005`; the apply or verify a build runs
+  skips that bind when the schema's hash is the one the engine declares for the database,
+  which phase 3 already bound against the same catalog and parser options. The SDK reads the text without
   parsing it (it references no SQL parser and never sees the engine's functions), so a
   CHECK that names a registered function compiles into the artifact and is validated here.
 - **A stored definition that names an unregistered function** (part 2, decision 65,
   design §4.10). A CHECK stores SQL, not a function's identity, so an application release
   that drops or renames a registered function leaves a definition its engine cannot
   evaluate. When binding a stored CHECK fails, `SqlBoundTableCache` looks for the call that
-  explains it: a name the catalog does not register, a name it registers as an aggregate, or
-  a registered name none of whose overloads, or more than one, accepts the call. A
-  standard-library name always resolves, so a call of one that does not is still #1189's
-  open failure. Found, the CHECK binds as *unresolved* (`SqlUnresolvedDefinition`): the
+  explains it: a name the catalog does not register, a name it registers as an aggregate, a
+  registered name none of whose overloads, or more than one, accepts the call, or an
+  application function whose registered result no longer fits where the predicate uses it
+  (a changed return type: `which this engine registers returning TEXT, where the CHECK
+  needs BOOLEAN`). A call a built-in takes by its shape (`UPPER(x)`) always resolves to the
+  built-in; a call of a standard-library name no built-in takes (`upper(x, 2)`) can only
+  have called an application's overload of the name, since DDL checks every call's
+  arguments (#1189) and no earlier catalog format opens, so it is unresolved like any
+  application function's; only `COALESCE`'s wrong arity stays #1189's open failure. No
+  failure that involves an application function reaches the damaged-catalog message.
+  Found, the CHECK binds as *unresolved* (`SqlUnresolvedDefinition`): the
   database opens and its reads proceed; its bound tree is a failure that raises
   `COHSQLE009` (SQLSTATE 42883) on every write that evaluates it, whatever the row,
   naming the constraint, the table and the call as the definition makes it (`CHECK
@@ -414,8 +483,10 @@ flowchart LR
   first), then the special forms: `FUNCTION_NAME`; `FUNCTION_KIND` (`SCALAR`, `AGGREGATE`,
   `SPECIAL FORM`); `PARAMETER_TYPES` (`BIGINT, BIGINT, BIGINT`; `TEXT ...` for a variadic
   tail; `*` for an aggregate called as `name(*)`; empty for none); `PARAMETER_COUNT`;
-  `RETURN_TYPE`; `VOLATILITY`; `NULL_BEHAVIOR` (`RETURNS NULL ON NULL INPUT` or `CALLED
-  ON NULL INPUT`, ISO's routine characteristics); and `IS_BUILT_IN`. A special form has
+  `RETURN_TYPE`; `VOLATILITY` (NULL for an aggregate, which is never folded or admitted in
+  a CHECK, so a tool does not read `SUM` as non-deterministic); `NULL_BEHAVIOR` (`RETURNS
+  NULL ON NULL INPUT` or `CALLED ON NULL INPUT`, ISO's routine characteristics); and
+  `IS_BUILT_IN`. A special form has
   no signature, so its type, volatility and NULL-behavior columns are NULL. The catalog is
   the engine's, so every database of the engine lists the same rows; the view reads the
   frozen catalog, not the statement's catalog snapshot. It is read-only like every system
@@ -431,12 +502,12 @@ What a stored CHECK becomes when its table version binds, at open or on first us
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Bound: every call resolves
-    [*] --> Unresolved: a call names a function the catalog does not resolve
+    [*] --> Bound: every call resolves and fits
+    [*] --> Unresolved: an application call does not resolve, or its result no longer fits
     [*] --> Refused: anything else does not bind
     Bound --> [*]: writes evaluate the bound tree
     Unresolved --> [*]: reads proceed, writes fail COHSQLE009, a declaring build fails
-    Refused --> [*]: the open fails, as damage or as the #1189 arity case
+    Refused --> [*]: the open fails, as damage or as the #1189 COALESCE arity case
 ```
 
 | Built-in | Leaf | Parameters → result | Kept behavior (decision 67) |
@@ -449,38 +520,59 @@ stateDiagram-v2
 | `MIN`, `MAX` | `SqlExtremumFunction` | `ANYELEMENT` → `ANYELEMENT` | compares under the context's collation |
 
 **Behavior that moved.** The static type of `UPPER` and `LOWER` follows their argument, so
-`-UPPER(5)` evaluates (to `-5`) where it used to fail planning with `COHSQLE003`; `SUM`
-and `AVG` over a non-numeric argument fail planning with `COHSQLE006` (`Accepted:
-SUM(numeric)`) instead of an uncoded message; the declared type of `ABS` over a
-non-number is unknown rather than the argument's (the call fails on any row); `DISTINCT`,
-`ALL` and `ORDER BY` inside any call report `COHDBL001` at parse time, since the parser no
-longer keeps a list of aggregate names; and a parameter of a CLR type the codec does not
-store widens losslessly (`byte` to SMALLINT) when a function receives it. Part 2: a
+`-UPPER(5)` evaluates (to `-5`) where it used to fail planning with `COHSQLE003`, and DDL
+accepts `CHECK (-UPPER(n) < 0)` over a number for the same reason; `SUM` and `AVG` over a
+non-numeric argument fail planning with `COHSQLE006` (`Accepted: SUM(numeric)`) instead of
+an uncoded message, a `char` parameter included, even over an empty table where they used
+to return NULL; `DISTINCT`, `ALL` and `ORDER BY` inside any call report `COHDBL001` at
+parse time, since the parser no longer keeps a list of aggregate names; a parameter of a
+CLR type the codec does not store widens losslessly when a function receives it (`byte` to
+SMALLINT, `char` to TEXT, so `UPPER(@p)` over a `char` returns the upper-cased string where
+it returned the `char` unchanged); and an unknown column under a sign reports `Unknown
+column` rather than `COHSQLE003`. `ABS` keeps its static type over a non-number (the
+argument's), so `SUM(ABS(text))` and a `CASE` that mixes it with a number are still refused
+while planning. Part 2: a
 database whose stored CHECK calls a function the opening engine does not register opens
 (its writes to that table fail with `COHSQLE009`) where its open used to fail as a damaged
 catalog; an engine build that declares such a database fails with `COHSQLE009`; a declared
 CHECK that does not bind fails the build with `COHSQLP001` before any file, where it used
 to fail the provisioning step that ran its DDL; and a sign over a constant binds as a
-constant.
+constant. The review of E2: an application overload that would shadow a built-in, and a
+reserved, type or quantifier name, are refused at registration; a call over a grouping key
+or an aggregate result resolves by its type (it was ambiguous, `COHSQLE008`, for an
+overloaded function); a REAL argument widens to a DOUBLE parameter; a result of another
+type than declared is `COHSQLE007` or widened; a stored CHECK whose application function
+changed its result, or that calls a standard-library name no built-in takes, opens and
+fails writes with `COHSQLE009` where the open failed; DDL refuses a CHECK in which an
+application function's result does not fit a comparison or an arithmetic operand; and an
+aggregate's `VOLATILITY` in `COHESION_SCHEMA.FUNCTIONS` is NULL.
 
 **The NativeAOT guard** (`samples/Assimalign.Cohesion.Database.Sql.AotSample`, part 2). It
 registers a typed scalar of every `Create` arity over text, BIGINT, NUMERIC, BOOLEAN and UUID,
 a typed aggregate over a reference-type state, a hand-written scalar (`clamp`) and aggregate
-(`median`), and a strict and a non-strict (`CalledOnNullInput`) function; declares a schema
+(`median`), and strict and non-strict (`CalledOnNullInput`) functions, hand-written
+(`is_missing`) and typed (`or_none`); declares a schema
 whose `table.Check` calls one; runs the same statements in process and over the wire through
 `Sql.Client` on the in-memory driver (results compared value and CLR type, the CHECK's
 refusal, `COHSQLE007`, `COHESION_SCHEMA.FUNCTIONS` and a folded parameterized call); and
-exits 1 when a check fails. It promotes the trim and AOT analyzer diagnostics to errors, is
-published for win-arm64 by hand and for linux-x64 in CI (`resource-database.yml`), which runs
-the binary, as it does a small-table smoke of the statement benchmark.
+exits 1 when a check fails. It promotes the trim and AOT analyzer diagnostics to errors and
+has ILC treat every warning of its whole-program analysis as an error, reported at its
+source (`IlcTreatWarningsAsErrors`, `TrimmerSingleWarn=false`); it is published for
+win-arm64 by hand and for linux-x64 in CI (`resource-database.yml`), which runs the binary,
+as it does a small-table smoke of the statement benchmark, and fails either publish on any
+`warning IL2xxx`/`IL3xxx` in its output.
 
 **Not yet.** The context's transaction timestamp (no transaction carries its start time; the
 statement-context track owns that change); the `FunctionCatalogFrozen`,
 `PersistedDefinitionUnresolved` and `FunctionFailed` events (§8 of the design, the
-EventSource track's); and an application's overload of a standard-library name that a stored
-CHECK called and a later release removed, which still fails the open as #1189's arity case,
-because the engine cannot tell it from a call an older build stored unchecked. Domains and
-casts are E3, SQL-defined functions E4.
+EventSource track's); a string literal for a DATE, TIME, TIMESTAMP, INTERVAL or UUID
+parameter (nothing converts from text, and `CAST` to those types is not supported, so such
+a parameter takes a column or a parameter of its type; the cast registry is E3); a widening
+to REAL (a decimal or integer argument for a REAL parameter loses digits, so it stays an
+owner decision); a typed shorthand of no or two arguments for an aggregate, and an empty
+group that runs `finish`, which a hand-written leaf covers; and `SELECT f(1)` without
+`FROM`, which this dialect does not parse yet. Domains and casts are E3, SQL-defined
+functions E4.
 
 **Measurement (E2, the design's §10).** The E1 harness, extended with E2's cases, published
 NativeAOT for win-arm64 from `ff07eb5a` (with `-p:SqlBenchmarkBaseline=true`, which compiles
@@ -2469,19 +2561,24 @@ and add it again" as the only remedy.
   when the construct is a function an application registered: the application, not the
   engine build, decides which functions exist, and the failure is coded and scoped to the
   table. A stored CHECK whose call no longer resolves (a name the engine does not register,
-  one it registers as an aggregate, or a registered name none of whose overloads, or more
-  than one, accepts the call) binds as unresolved: the database opens, reads proceed, and
+  one it registers as an aggregate, a registered name none of whose overloads, or more than
+  one, accepts the call, or an application function whose registered result no longer fits
+  where the predicate uses it) binds as unresolved: the database opens, reads proceed, and
   each write that evaluates the CHECK fails with `COHSQLE009` naming the function, the table
   and the constraint; an engine that declares the database fails its build with the same
-  code. A built-in's call is outside the amendment: the standard library always resolves its
-  names, so one that does not is the #1189 case below and still fails the open. Details in
-  [Functions (E2)](#functions-e2).
+  code. A call a built-in takes by its shape is outside the amendment: it always resolves to
+  the built-in. A call of a standard-library name that no built-in takes (`upper(x, 2)`) is
+  inside it: DDL checks every call's arguments and no earlier format opens, so only an
+  application's overload of the name, which E2 allows for another arity, can have stored it.
+  Details in [Functions (E2)](#functions-e2).
 - **Argument counts are binding, not a declaration rule (#1189).** A call whose
   argument count no signature of its function accepts has no value on any row: the
   evaluator used to evaluate no argument for it and return NULL, so `CHECK (ABS(c, 1)
   > 0)` admitted every row. Binding therefore resolves every call against the
   function catalog (`SqlPersistedExpression.Bind`, after the call's arguments), and a
-  stored CHECK holding such a call fails the open with `COHSQLE006`. By the rule
+  stored CHECK holding such a call fails the open with `COHSQLE006`; since E2 lets an
+  application overload a standard-library name for another arity, that holds for the
+  special form `COALESCE`, and a function name's wrong arity is the amendment above. By the rule
   above that is a catalog-format change, and it takes no version bump only because
   format 4 is unreleased and has no upgrade path (#1152, owner decision of
   2026-10-01): engine builds before #1189 wrote format-4 catalogs that can hold such a

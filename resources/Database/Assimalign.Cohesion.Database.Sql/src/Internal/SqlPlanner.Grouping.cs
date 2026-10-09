@@ -65,8 +65,10 @@ internal sealed partial class SqlPlanner
         // resolve columns through the join bindings alone, as grouped execution always has.
         var sourceScope = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation,
             subquerySlots: _subquerySlots, functions: _functions);
+        // A call over a key or an aggregate result resolves by the slot's type over the input row,
+        // as the same call does outside a grouping: describe(COUNT(*)) is describe(BIGINT).
         var groupScope = new SqlExpressionEvaluator(columns, _parameters, bindings, slots, _catalog.DefaultCollation,
-            subquerySlots: _subquerySlots, functions: _functions);
+            subquerySlots: _subquerySlots, functions: _functions, slotScope: sourceScope);
 
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
         var where = select.Where is null ? null : evaluator.Bind(select.Where);

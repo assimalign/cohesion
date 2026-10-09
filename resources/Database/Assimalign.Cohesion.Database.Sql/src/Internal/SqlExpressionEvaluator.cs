@@ -71,6 +71,13 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>The executing statement's cancellation token, which a called function's context carries.</summary>
     private readonly CancellationToken _cancellationToken;
 
+    /// <summary>
+    /// What this scope's static typing keeps beyond its binding inputs, created only when a scope
+    /// needs it: a grouping's slot scope, and the calls it typed. One field, so a scope that needs
+    /// neither, as most do, is no larger for them.
+    /// </summary>
+    private SqlTypingMemory? _typing;
+
     internal SqlExpressionEvaluator(IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyDictionary<string, object?>? parameters,
         IReadOnlyList<SqlTableBinding>? bindings = null,
         IReadOnlyDictionary<SqlExpression, int>? valueOrdinals = null,
@@ -79,7 +86,8 @@ internal sealed partial class SqlExpressionEvaluator
         IReadOnlyDictionary<SqlExpression, SqlSubquerySlot>? subquerySlots = null,
         SqlSubqueryValues? subqueryValues = null,
         SqlFunctionEnvironment? functions = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SqlExpressionEvaluator? slotScope = null)
     {
         _columns = columns;
         _parameters = parameters;
@@ -91,6 +99,7 @@ internal sealed partial class SqlExpressionEvaluator
         _subqueryValues = subqueryValues;
         _functions = functions ?? SqlFunctionEnvironment.Standard;
         _cancellationToken = cancellationToken;
+        _typing = slotScope is null ? null : new SqlTypingMemory(slotScope);
     }
 
     /// <summary>
@@ -141,7 +150,7 @@ internal sealed partial class SqlExpressionEvaluator
             sources[expression] = projections[index];
         }
         return new SqlExpressionEvaluator(_columns, _parameters, _bindings, ordinals,
-            _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken);
+            _defaultCollation, sources, _subquerySlots, _subqueryValues, _functions, _cancellationToken, _typing?.SlotScope);
     }
 
     /// <summary>

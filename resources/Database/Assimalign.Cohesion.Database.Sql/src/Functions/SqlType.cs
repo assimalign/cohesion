@@ -24,9 +24,10 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// <para>
 /// Pseudo-types never describe a stored value. <see cref="Any"/> accepts an argument of any type,
-/// each independently. <see cref="AnyElement"/> accepts any type too, but every
-/// <see cref="AnyElement"/> argument of one call must have the same type, and a result declared
-/// <see cref="AnyElement"/> has that type (PostgreSQL's <c>anyelement</c>).
+/// each independently, and <see cref="AnyNumeric"/> an argument of any numeric type.
+/// <see cref="AnyElement"/> accepts any type too, but every <see cref="AnyElement"/> argument of one
+/// call must have the same type, and a result declared <see cref="AnyElement"/> has that type
+/// (PostgreSQL's <c>anyelement</c>).
 /// </para>
 /// </remarks>
 public sealed class SqlType : IEquatable<SqlType>
@@ -98,10 +99,17 @@ public sealed class SqlType : IEquatable<SqlType>
     /// <summary>Gets <c>UUID</c>.</summary>
     public static SqlType Uuid { get; } = Create("UUID", DatabaseType.Guid);
 
-    /// <summary>Gets <c>JSON</c>, JSON text.</summary>
+    /// <summary>
+    /// Gets <c>JSON</c>, JSON text. No CLR type of the typed shorthands maps to it, so a function over
+    /// a JSON column is a leaf that declares a <see cref="Json"/> parameter and reads the argument with
+    /// <see cref="SqlArguments.GetString(int)"/>; a <see cref="Text"/> parameter does not take a JSON value.
+    /// </summary>
     public static SqlType Json { get; } = Create("JSON", DatabaseType.Json);
 
-    /// <summary>Gets <c>JSONB</c>, binary JSON.</summary>
+    /// <summary>
+    /// Gets <c>JSONB</c>, binary JSON. As for <see cref="Json"/>, a function over it is a leaf that
+    /// declares a <see cref="Jsonb"/> parameter and reads the argument with <see cref="SqlArguments.GetBinary(int)"/>.
+    /// </summary>
     public static SqlType Jsonb { get; } = Create("JSONB", DatabaseType.JsonBinary);
 
     /// <summary>Gets the pseudo-type that accepts an argument of any type, each argument independently.</summary>
@@ -114,10 +122,14 @@ public sealed class SqlType : IEquatable<SqlType>
     public static SqlType AnyElement { get; } = new("ANYELEMENT", new DatabaseTypeInfo(DatabaseType.Null), isPseudo: true);
 
     /// <summary>
-    /// The pseudo-type of the standard library's numeric aggregates (<c>SUM</c>, <c>AVG</c>): any
-    /// numeric storage type, each argument independently. Internal until an application needs it.
+    /// Gets the numeric pseudo-type: an argument of any numeric storage type (the integers,
+    /// <see cref="Real"/>, <see cref="Double"/> and <see cref="Numeric"/>), each argument
+    /// independently, as the standard library's <c>SUM</c> and <c>AVG</c> take it. A call over any
+    /// other type is refused while planning. The value reaches the function as it is, so the function
+    /// reads it with the accessor of its <see cref="SqlValue.Type"/>; a result cannot be declared
+    /// <see cref="AnyNumeric"/>.
     /// </summary>
-    internal static SqlType AnyNumeric { get; } = new("ANYNUMERIC", new DatabaseTypeInfo(DatabaseType.Null), isPseudo: true);
+    public static SqlType AnyNumeric { get; } = new("ANYNUMERIC", new DatabaseTypeInfo(DatabaseType.Null), isPseudo: true);
 
     /// <summary>Gets the built-in storage types, in declaration order; the pseudo-types are not among them.</summary>
     internal static SqlType[] BuiltIn { get; } =

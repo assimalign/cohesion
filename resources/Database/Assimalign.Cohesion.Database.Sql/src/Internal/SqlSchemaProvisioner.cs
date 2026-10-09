@@ -657,7 +657,16 @@ internal sealed class SqlSchemaProvisioner
         }
 
         // The checks the engine's build makes before any file is touched, for an apply that did not
-        // come through a build: a declared CHECK must bind before any step runs.
+        // come through a build: a declared CHECK must bind before any step runs. The schema the
+        // engine declares for this database was bound by the build's phase 3, against the same
+        // frozen catalog and parser options, and the build refused a database whose collation
+        // differs from the declared one, so an equal hash has nothing left to bind.
+        if (_database.Engine.FindDeclaration(_database.Name) is { Schema: { } declared } &&
+            string.Equals(declared.Hash, schema.Hash, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         try
         {
             BindDeclaredChecks(schema, _catalog.DefaultCollation, _database.Definitions.Functions, _database.Engine.ParserOptions);

@@ -387,7 +387,7 @@ internal sealed partial class SqlPlanExecutor
         // loaded or the DDL that produced this version ran; a write only evaluates the bound
         // trees, which carry their column ordinals, functions and collations.
         var bound = _definitions.Get(table);
-        var evaluator = SqlExpressionEvaluator.ForExecution(null, cancellationToken);
+        var evaluator = ExecutionEvaluator(null, cancellationToken);
         foreach (var constraint in table.Constraints)
         {
             if (constraint.Kind == SqlCatalogConstraintKind.Check)
@@ -951,6 +951,7 @@ internal sealed partial class SqlPlanExecutor
                     break;
             }
 
+            CheckApplicationResults(expression);
             if (!requireBoolean)
             {
                 return;
@@ -970,9 +971,111 @@ internal sealed partial class SqlPlanExecutor
             };
             if (!boolean)
             {
+                if (expression is SqlFunctionCallExpression call && called is not null && !SqlStandardLibrary.Contains(called))
+                {
+                    throw new SqlFunctionResultMismatchException(call, ResultName(call, called), "BOOLEAN");
+                }
+
                 throw new DatabaseException("CHECK requires a BOOLEAN predicate.");
             }
         }
+
+        /// <summary>
+        /// Checks that an application function's result fits where the predicate uses it: an
+        /// operand of a comparison, <c>BETWEEN</c> or <c>IN</c> list of a type its other operand
+        /// compares with, and an arithmetic operand that is a number. The evaluator would refuse
+        /// either on every row the call returns a value for. Calls of the standard library, and
+        /// operands whose type the plan cannot tell, are not checked, so no predicate DDL accepted
+        /// before is refused.
+        /// </summary>
+        /// <exception cref="SqlFunctionResultMismatchException">An application function's result does not fit.</exception>
+        private void CheckApplicationResults(SqlExpression expression)
+        {
+            switch (expression)
+            {
+                case SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual
+                    or SqlBinaryOperator.LessThan or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual:
+                    CheckComparable(binary.Left, binary.Right);
+                    break;
+                case SqlBinaryExpression binary when binary.Operator is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract
+                    or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo:
+                    CheckNumber(binary.Left);
+                    CheckNumber(binary.Right);
+                    break;
+                case SqlBetweenExpression between:
+                    CheckComparable(between.Operand, between.Low);
+                    CheckComparable(between.Operand, between.High);
+                    break;
+                case SqlInExpression { Values: { } values } list:
+                    foreach (var value in values)
+                    {
+                        CheckComparable(list.Operand, value);
+                    }
+                    break;
+            }
+        }
+
+        private void CheckComparable(SqlExpression left, SqlExpression right)
+        {
+            var (leftCall, leftType) = Operand(left);
+            var (rightCall, rightType) = Operand(right);
+            if (leftCall is null && rightCall is null || leftType == DatabaseType.Null || rightType == DatabaseType.Null ||
+                Comparable(leftType, rightType))
+            {
+                return;
+            }
+
+            var (call, type, other) = leftCall is not null ? (leftCall, leftType, rightType) : (rightCall!, rightType, leftType);
+            throw new SqlFunctionResultMismatchException(call, SqlType.NameOf(type), $"a value that compares with {SqlType.NameOf(other)}");
+
+            // The value order's own rule (SqlValueComparer): the same type, or two numbers. JSON is read as text and JSONB as bytes.
+            static bool Comparable(DatabaseType first, DatabaseType second)
+            {
+                first = first switch { DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => first };
+                second = second switch { DatabaseType.Json => DatabaseType.String, DatabaseType.JsonBinary => DatabaseType.Binary, _ => second };
+                return first == second || IsNumber(first) && IsNumber(second);
+            }
+        }
+
+        private void CheckNumber(SqlExpression operand)
+        {
+            var (call, type) = Operand(operand);
+            if (call is not null && type != DatabaseType.Null && !IsNumber(type))
+            {
+                throw new SqlFunctionResultMismatchException(call, SqlType.NameOf(type), "a number");
+            }
+        }
+
+        /// <summary>
+        /// An operand's static type, and the call when the operand is a call of an application
+        /// function. Only a call, a literal or a column is typed; anything else is not checked.
+        /// </summary>
+        private (SqlFunctionCallExpression? Call, DatabaseType Type) Operand(SqlExpression expression)
+        {
+            while (expression is SqlCollateExpression collate)
+            {
+                expression = collate.Operand;
+            }
+
+            switch (expression)
+            {
+                case SqlFunctionCallExpression call when !SqlStandardLibrary.IsCoalesce(call.FunctionName):
+                    return _scope.ResolveFunction(call) is SqlScalarFunction function && !SqlStandardLibrary.Contains(function)
+                        ? (call, _scope.StaticCallType(call))
+                        : (null, DatabaseType.Null);
+                case SqlLiteralExpression or SqlColumnReferenceExpression:
+                    return (null, _scope.StaticTypeOf(expression));
+                default:
+                    return (null, DatabaseType.Null);
+            }
+        }
+
+        private static bool IsNumber(DatabaseType type) => type is DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
+            or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal;
+
+        /// <summary>A call's result type as a message names it: its static type, else its declared type.</summary>
+        private string ResultName(SqlFunctionCallExpression call, SqlScalarFunction function)
+            => _scope.StaticCallType(call) is var type && type != DatabaseType.Null ? SqlType.NameOf(type) : function.ReturnType.Name;
 
         /// <summary>
         /// Checks that a call may appear in a CHECK, and returns the scalar function it resolves to;

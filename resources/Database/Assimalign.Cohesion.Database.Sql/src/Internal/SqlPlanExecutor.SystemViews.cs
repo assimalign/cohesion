@@ -16,7 +16,7 @@ internal sealed partial class SqlPlanExecutor
 {
     private QueryResult ExecuteSystemView(SqlSystemViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues, cancellationToken);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var matches = new List<object?[]>();
         statement.Metrics.AccessPath = "system-view";
 
@@ -201,7 +201,8 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>
     /// The rows of <c>COHESION_SCHEMA.FUNCTIONS</c>: every function of the engine's catalog, one row
     /// per overload in registration order (the standard library first), then the special forms,
-    /// which are grammar and have no signature (owner decision 66 of 2026-10-09).
+    /// which are grammar and have no signature (owner decision 66 of 2026-10-09). An aggregate's
+    /// VOLATILITY is NULL: it is never folded or admitted in a CHECK.
     /// </summary>
     private static IEnumerable<object?[]> EnumerateFunctionRows(SqlFunctionCatalog catalog)
     {
@@ -229,7 +230,9 @@ internal sealed partial class SqlPlanExecutor
                 types.ToString(),
                 (long)parameters.Count,
                 function.ReturnType.Name,
-                function.Volatility switch
+                // An aggregate is never folded and never admitted in a CHECK, so volatility does not
+                // apply to it: NULL, rather than a VOLATILE that would call SUM non-deterministic.
+                function.Kind == SqlFunctionKind.Aggregate ? null : function.Volatility switch
                 {
                     SqlFunctionVolatility.Immutable => "IMMUTABLE",
                     SqlFunctionVolatility.Stable => "STABLE",

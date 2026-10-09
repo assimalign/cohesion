@@ -20,7 +20,16 @@ internal sealed partial class SqlExpressionEvaluator
     /// No overload accepts the call (<c>COHSQLE006</c>), or several accept it equally well (<c>COHSQLE008</c>).
     /// </exception>
     internal SqlFunction? ResolveFunction(SqlFunctionCallExpression call)
-        => _functions.Catalog.TryGetOverloads(call.FunctionName, out var overloads) ? Resolve(call, overloads) : null;
+    {
+        if (!_functions.Catalog.TryGetOverloads(call.FunctionName, out var overloads))
+        {
+            return null;
+        }
+
+        // A call typed earlier as another call's argument resolved the same way; one that failed
+        // there resolves again, so the failure is raised here.
+        return TryGetTypedCall(call, out var typed) && typed.Function is { } function ? function : Resolve(call, overloads);
+    }
 
     /// <summary>
     /// Checks a <c>COALESCE</c>'s operands: one or more, none of them <c>*</c>, as PostgreSQL's
@@ -77,8 +86,9 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>
     /// The type an expression's values have whatever row it is evaluated over, when the plan can
     /// tell: what overload resolution compares a call's arguments by. <see cref="DatabaseType.Null"/>
-    /// when the plan cannot tell — a NULL literal or parameter, a grouping slot, an operand that does
-    /// not resolve — which matches any parameter. An integer literal is typed by its magnitude
+    /// when the plan cannot tell — a NULL literal or parameter, an operand that does not resolve —
+    /// which matches any parameter. A grouping key or aggregate result has the type the grouping
+    /// plan computed for its slot over the input row. An integer literal is typed by its magnitude
     /// (INTEGER when it fits, else BIGINT), as PostgreSQL types an integer constant, so <c>f(5)</c>
     /// calls an overload over INTEGER.
     /// </summary>
@@ -90,9 +100,7 @@ internal sealed partial class SqlExpressionEvaluator
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (_valueOrdinals is not null && _valueOrdinals.ContainsKey(expression))
         {
-            return _projectionSources is not null && _projectionSources.TryGetValue(expression, out var output)
-                ? output.Type
-                : DatabaseType.Null;
+            return SlotType(expression);
         }
 
         switch (expression)
@@ -184,41 +192,88 @@ internal sealed partial class SqlExpressionEvaluator
             return DatabaseType.Null;
         }
 
-        SqlFunction? function;
-        try
-        {
-            function = ResolveFunction(call);
-        }
-        catch (SqlEvaluationException)
-        {
-            return DatabaseType.Null;
-        }
-
-        if (function is null || (scalarOnly && function.Kind != SqlFunctionKind.Scalar))
-        {
-            return DatabaseType.Null;
-        }
-        if (!function.ReturnType.IsPseudo)
-        {
-            return function.ReturnType.Storage.Type;
-        }
-
-        return ResultTypeOf(function, call.Arguments);
+        return ResolvedCallType(call, scalarOnly);
     }
 
-    /// <summary>A resolved call's result type, its arguments typed statically (<see cref="SqlFunctionResolver.ResultType"/>).</summary>
-    /// <param name="function">The overload.</param>
-    /// <param name="arguments">The call's arguments.</param>
-    /// <returns>The result type, or <see cref="DatabaseType.Null"/>.</returns>
-    internal DatabaseType ResultTypeOf(SqlFunction function, IReadOnlyList<SqlExpression> arguments)
+    /// <summary>
+    /// The type of a slot's value: an ordering output's projection type, or a grouping key's or
+    /// aggregate result's type over the input row. Out of <see cref="StaticTypeOf"/>'s frame, which
+    /// every level of a nest repeats.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private DatabaseType SlotType(SqlExpression expression)
     {
-        Span<DatabaseType> types = arguments.Count <= 16 ? stackalloc DatabaseType[arguments.Count] : new DatabaseType[arguments.Count];
-        for (int index = 0; index < types.Length; index++)
+        if (_projectionSources is not null && _projectionSources.TryGetValue(expression, out var output))
         {
-            types[index] = StaticTypeOf(arguments[index]);
+            return output.Type;
         }
 
-        return SqlFunctionResolver.ResultType(function, types);
+        return _typing?.SlotScope is { } slotScope ? slotScope.StaticTypeOf(expression) : DatabaseType.Null;
+    }
+
+    /// <summary>A call's static type through <see cref="TypeCall"/>; out of <see cref="StaticCallType"/>'s frame, which a nest of COALESCE repeats.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private DatabaseType ResolvedCallType(SqlFunctionCallExpression call, bool scalarOnly)
+    {
+        var typed = TypeCall(call);
+        return typed.Function is null || (scalarOnly && typed.Function.Kind != SqlFunctionKind.Scalar) ? DatabaseType.Null : typed.Type;
+    }
+
+    /// <summary>
+    /// Resolves a call and types its result in one pass over its arguments: each argument is typed
+    /// at most once, whether the overload's choice, its polymorphic result, or both need the types.
+    /// (Typing them once to choose and again to type the result doubled the work at every level of
+    /// a nest, so planning time grew exponentially with depth.) A call typed as another call's
+    /// argument is remembered for this scope, so a nest of calls that need their arguments' types
+    /// plans in time linear in its size, however often the planner asks about each level.
+    /// </summary>
+    /// <param name="call">The call; not <c>COALESCE</c>.</param>
+    /// <returns>The overload and its result type; a null overload and <see cref="DatabaseType.Null"/> when the call does not resolve.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private (SqlFunction? Function, DatabaseType Type) TypeCall(SqlFunctionCallExpression call)
+    {
+        if (TryGetTypedCall(call, out var typed))
+        {
+            return typed;
+        }
+
+        typed = default;
+        if (_functions.Catalog.TryGetOverloads(call.FunctionName, out var overloads))
+        {
+            var arguments = call.Arguments;
+            Span<DatabaseType> types = arguments.Count <= 16 ? stackalloc DatabaseType[arguments.Count] : new DatabaseType[arguments.Count];
+            try
+            {
+                SqlFunctionResolver.CheckArity(call.FunctionName, overloads, arguments);
+                bool needed = SqlFunctionResolver.NeedsArgumentTypes(overloads, arguments);
+                if (needed)
+                {
+                    TypeArguments(arguments, types);
+                }
+
+                var function = SqlFunctionResolver.Choose(call.FunctionName, overloads, arguments, needed ? types : default);
+                if (!function.ReturnType.IsPseudo)
+                {
+                    typed = (function, function.ReturnType.Storage.Type);
+                }
+                else
+                {
+                    if (!needed)
+                    {
+                        TypeArguments(arguments, types);
+                    }
+
+                    typed = (function, SqlFunctionResolver.ResultType(function, types));
+                }
+            }
+            catch (SqlEvaluationException)
+            {
+                typed = default;
+            }
+        }
+
+        RememberTypedCall(call, typed);
+        return typed;
     }
 
     /// <summary>Resolves a call against its name's overloads: by count, then, when they matter, by static type.</summary>
@@ -233,12 +288,98 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         Span<DatabaseType> types = arguments.Count <= 16 ? stackalloc DatabaseType[arguments.Count] : new DatabaseType[arguments.Count];
+        TypeArguments(arguments, types);
+        return SqlFunctionResolver.Choose(call.FunctionName, overloads, arguments, types);
+    }
+
+    /// <summary>Types a call's arguments, each once.</summary>
+    private void TypeArguments(IReadOnlyList<SqlExpression> arguments, Span<DatabaseType> types)
+    {
         for (int index = 0; index < types.Length; index++)
         {
             types[index] = StaticTypeOf(arguments[index]);
         }
+    }
 
-        return SqlFunctionResolver.Choose(call.FunctionName, overloads, arguments, types);
+    /// <summary>
+    /// Reads what this scope remembered about a call. The memory is cleared when the planner adds a
+    /// subquery slot, the one input of a static type that changes while a scope plans.
+    /// </summary>
+    private bool TryGetTypedCall(SqlFunctionCallExpression call, out (SqlFunction? Function, DatabaseType Type) typed)
+    {
+        if (_typing?.Calls is { } calls && _typing.IsCurrent(_subquerySlots?.Count ?? 0))
+        {
+            return calls.TryGetValue(call, out typed);
+        }
+
+        typed = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Remembers a typed call. Only a call's static type is asked for (another call's argument, a
+    /// sign's operand), never a call the planner merely resolves, so a statement whose calls take
+    /// only columns, constants and parameters allocates nothing for it; the shared execution scope
+    /// remembers nothing.
+    /// </summary>
+    private void RememberTypedCall(SqlFunctionCallExpression call, (SqlFunction? Function, DatabaseType Type) typed)
+    {
+        if (ReferenceEquals(this, RowEvaluator))
+        {
+            return;
+        }
+
+        var typing = _typing ??= new SqlTypingMemory(null);
+        typing.Remember(call, typed, _subquerySlots?.Count ?? 0);
+    }
+
+    /// <summary>
+    /// What a scope's static typing keeps: the scope a grouping's slots are typed in, and the calls
+    /// it typed with what each resolved to and its result type. The calls are forgotten when the
+    /// planner adds a subquery slot, the one input of a static type that changes while a scope plans.
+    /// </summary>
+    private sealed class SqlTypingMemory
+    {
+        private int _subquerySlots;
+
+        internal SqlTypingMemory(SqlExpressionEvaluator? slotScope) => SlotScope = slotScope;
+
+        /// <summary>Gets the scope a grouping's slot expressions are typed in; null outside a grouping.</summary>
+        internal SqlExpressionEvaluator? SlotScope { get; }
+
+        /// <summary>Gets the typed calls; null until one is remembered.</summary>
+        internal Dictionary<SqlFunctionCallExpression, (SqlFunction? Function, DatabaseType Type)>? Calls { get; private set; }
+
+        /// <summary>Whether the remembered calls were typed with the scope's current subquery slots; forgets them otherwise.</summary>
+        /// <param name="subquerySlots">The scope's number of subquery slots now.</param>
+        /// <returns><see langword="true"/> when the remembered calls still hold.</returns>
+        internal bool IsCurrent(int subquerySlots)
+        {
+            if (subquerySlots == _subquerySlots)
+            {
+                return true;
+            }
+
+            Calls?.Clear();
+            _subquerySlots = subquerySlots;
+            return false;
+        }
+
+        /// <summary>Remembers one typed call.</summary>
+        internal void Remember(SqlFunctionCallExpression call, (SqlFunction? Function, DatabaseType Type) typed, int subquerySlots)
+        {
+            if (Calls is null)
+            {
+                Calls = new Dictionary<SqlFunctionCallExpression, (SqlFunction?, DatabaseType)>(ReferenceEqualityComparer.Instance);
+                _subquerySlots = subquerySlots;
+            }
+            else
+            {
+                IsCurrent(subquerySlots);
+            }
+
+            Calls[call] = typed;
+        }
     }
 
     /// <summary>The arithmetic result type the evaluator computes: DECIMAL over any decimal or approximate operand, BIGINT over integers.</summary>

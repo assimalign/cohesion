@@ -60,7 +60,7 @@ internal sealed class SqlExtremumFunction : SqlAggregateFunction
 
             // A value the engine read from a row keeps the box it was read from, so comparing and
             // keeping it allocates nothing.
-            if (_extreme.IsNull || Math.Sign(SqlValueComparer.Compare(value.ToObject()!, _extreme.ToObject()!, _collation)) == _direction)
+            if (_extreme.IsNull || Math.Sign(SqlValue.Compare(value, _extreme, _collation)) == _direction)
             {
                 _extreme = value;
             }

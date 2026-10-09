@@ -81,12 +81,13 @@ public abstract class SqlAggregateFunction : SqlFunction
     protected abstract SqlAggregateAccumulator CreateAccumulatorCore(scoped in SqlFunctionContext context);
 
     /// <summary>
-    /// Creates a strict aggregate of one argument from three delegates: <paramref name="seed"/>
-    /// starts a group's state, <paramref name="step"/> folds each non-NULL argument into it, and
-    /// <paramref name="finish"/> turns it into the result. A group that saw no non-NULL argument
-    /// returns NULL without calling <paramref name="finish"/>. The CLR types map to SQL types when
-    /// this method runs, as for <see cref="SqlScalarFunction.Create{T1, TResult}"/>; the state is any
-    /// CLR type and never leaves the accumulator.
+    /// Creates an aggregate of one argument from three delegates: <paramref name="seed"/> starts a
+    /// group's state, <paramref name="step"/> folds each row's argument into it, and
+    /// <paramref name="finish"/> turns it into the result. By default the aggregate is strict: a row
+    /// whose argument is NULL is skipped, and a group that saw no non-NULL argument returns NULL
+    /// without calling <paramref name="finish"/>. The CLR types map to SQL types when this method
+    /// runs, as for <see cref="SqlScalarFunction.Create{T1, TResult}"/>; the state is any CLR type
+    /// and never leaves the accumulator.
     /// </summary>
     /// <typeparam name="TState">The state's CLR type.</typeparam>
     /// <typeparam name="T1">The argument's CLR type.</typeparam>
@@ -95,11 +96,20 @@ public abstract class SqlAggregateFunction : SqlFunction
     /// <param name="seed">Creates a group's initial state.</param>
     /// <param name="step">Combines the state with one argument.</param>
     /// <param name="finish">Computes the result from the state.</param>
+    /// <param name="nullBehavior">
+    /// What a row with a NULL argument does: skipped by default; with
+    /// <see cref="SqlNullBehavior.CalledOnNullInput"/> <paramref name="step"/> receives it as
+    /// <see langword="null"/>, so <typeparamref name="T1"/> must be a reference or nullable type, and
+    /// only a group without rows returns NULL without calling <paramref name="finish"/>.
+    /// </param>
     /// <returns>The function, to register with <see cref="SqlFunctionCollection.Add"/>.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is blank.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is blank, or the aggregate is called on NULL input and <typeparamref name="T1"/> cannot hold NULL.
+    /// </exception>
     /// <exception cref="NotSupportedException"><typeparamref name="T1"/> or <typeparamref name="TResult"/> has no SQL type.</exception>
     public static SqlAggregateFunction Create<TState, T1, TResult>(string name, Func<TState> seed,
-        Func<TState, T1, TState> step, Func<TState, TResult> finish)
-        => new SqlTypedAggregateFunction<TState, T1, TResult>(name, seed, step, finish);
+        Func<TState, T1, TState> step, Func<TState, TResult> finish,
+        SqlNullBehavior nullBehavior = SqlNullBehavior.ReturnsNullOnNullInput)
+        => new SqlTypedAggregateFunction<TState, T1, TResult>(name, seed, step, finish, nullBehavior);
 }

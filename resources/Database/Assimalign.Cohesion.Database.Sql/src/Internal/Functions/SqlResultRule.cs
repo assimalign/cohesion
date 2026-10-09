@@ -11,8 +11,8 @@ internal enum SqlResultRule : byte
     Declared,
 
     /// <summary>
-    /// <c>ABS</c>: an exact integer argument widens to BIGINT, an approximate or decimal one keeps
-    /// its type, and any other argument has no static result type (the call fails when it runs).
+    /// <c>ABS</c>: an exact integer argument widens to BIGINT, and any other argument keeps its type,
+    /// a non-number included, as before typed signatures (the call itself fails when it runs).
     /// </summary>
     NumericElement,
 }

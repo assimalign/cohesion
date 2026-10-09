@@ -16,11 +16,18 @@ internal sealed class SqlTypedScalarFunction<T1, TResult> : SqlScalarFunction
     /// <param name="name">The name calls use.</param>
     /// <param name="body">The function body.</param>
     /// <param name="volatility">How stable the result is.</param>
+    /// <param name="nullBehavior">What a NULL argument does.</param>
     /// <exception cref="NotSupportedException">A type argument has no SQL type.</exception>
-    internal SqlTypedScalarFunction(string name, Func<T1, TResult> body, SqlFunctionVolatility volatility)
-        : base(name, [SqlValueConverter<T1>.Type], SqlValueConverter<TResult>.Type, volatility)
+    /// <exception cref="ArgumentException">The function is called on NULL input and an argument's type cannot hold NULL.</exception>
+    internal SqlTypedScalarFunction(string name, Func<T1, TResult> body, SqlFunctionVolatility volatility, SqlNullBehavior nullBehavior)
+        : base(name, [SqlValueConverter<T1>.Type], SqlValueConverter<TResult>.Type, volatility, nullBehavior)
     {
         ArgumentNullException.ThrowIfNull(body);
+        if (nullBehavior == SqlNullBehavior.CalledOnNullInput)
+        {
+            SqlValueConverter<T1>.RequireNullable(name, 1);
+        }
+
         _body = body;
     }
 
@@ -41,11 +48,19 @@ internal sealed class SqlTypedScalarFunction<T1, T2, TResult> : SqlScalarFunctio
     /// <param name="name">The name calls use.</param>
     /// <param name="body">The function body.</param>
     /// <param name="volatility">How stable the result is.</param>
+    /// <param name="nullBehavior">What a NULL argument does.</param>
     /// <exception cref="NotSupportedException">A type argument has no SQL type.</exception>
-    internal SqlTypedScalarFunction(string name, Func<T1, T2, TResult> body, SqlFunctionVolatility volatility)
-        : base(name, [SqlValueConverter<T1>.Type, SqlValueConverter<T2>.Type], SqlValueConverter<TResult>.Type, volatility)
+    /// <exception cref="ArgumentException">The function is called on NULL input and an argument's type cannot hold NULL.</exception>
+    internal SqlTypedScalarFunction(string name, Func<T1, T2, TResult> body, SqlFunctionVolatility volatility, SqlNullBehavior nullBehavior)
+        : base(name, [SqlValueConverter<T1>.Type, SqlValueConverter<T2>.Type], SqlValueConverter<TResult>.Type, volatility, nullBehavior)
     {
         ArgumentNullException.ThrowIfNull(body);
+        if (nullBehavior == SqlNullBehavior.CalledOnNullInput)
+        {
+            SqlValueConverter<T1>.RequireNullable(name, 1);
+            SqlValueConverter<T2>.RequireNullable(name, 2);
+        }
+
         _body = body;
     }
 
@@ -69,12 +84,21 @@ internal sealed class SqlTypedScalarFunction<T1, T2, T3, TResult> : SqlScalarFun
     /// <param name="name">The name calls use.</param>
     /// <param name="body">The function body.</param>
     /// <param name="volatility">How stable the result is.</param>
+    /// <param name="nullBehavior">What a NULL argument does.</param>
     /// <exception cref="NotSupportedException">A type argument has no SQL type.</exception>
-    internal SqlTypedScalarFunction(string name, Func<T1, T2, T3, TResult> body, SqlFunctionVolatility volatility)
+    /// <exception cref="ArgumentException">The function is called on NULL input and an argument's type cannot hold NULL.</exception>
+    internal SqlTypedScalarFunction(string name, Func<T1, T2, T3, TResult> body, SqlFunctionVolatility volatility, SqlNullBehavior nullBehavior)
         : base(name, [SqlValueConverter<T1>.Type, SqlValueConverter<T2>.Type, SqlValueConverter<T3>.Type],
-            SqlValueConverter<TResult>.Type, volatility)
+            SqlValueConverter<TResult>.Type, volatility, nullBehavior)
     {
         ArgumentNullException.ThrowIfNull(body);
+        if (nullBehavior == SqlNullBehavior.CalledOnNullInput)
+        {
+            SqlValueConverter<T1>.RequireNullable(name, 1);
+            SqlValueConverter<T2>.RequireNullable(name, 2);
+            SqlValueConverter<T3>.RequireNullable(name, 3);
+        }
+
         _body = body;
     }
 
@@ -100,12 +124,22 @@ internal sealed class SqlTypedScalarFunction<T1, T2, T3, T4, TResult> : SqlScala
     /// <param name="name">The name calls use.</param>
     /// <param name="body">The function body.</param>
     /// <param name="volatility">How stable the result is.</param>
+    /// <param name="nullBehavior">What a NULL argument does.</param>
     /// <exception cref="NotSupportedException">A type argument has no SQL type.</exception>
-    internal SqlTypedScalarFunction(string name, Func<T1, T2, T3, T4, TResult> body, SqlFunctionVolatility volatility)
+    /// <exception cref="ArgumentException">The function is called on NULL input and an argument's type cannot hold NULL.</exception>
+    internal SqlTypedScalarFunction(string name, Func<T1, T2, T3, T4, TResult> body, SqlFunctionVolatility volatility, SqlNullBehavior nullBehavior)
         : base(name, [SqlValueConverter<T1>.Type, SqlValueConverter<T2>.Type, SqlValueConverter<T3>.Type, SqlValueConverter<T4>.Type],
-            SqlValueConverter<TResult>.Type, volatility)
+            SqlValueConverter<TResult>.Type, volatility, nullBehavior)
     {
         ArgumentNullException.ThrowIfNull(body);
+        if (nullBehavior == SqlNullBehavior.CalledOnNullInput)
+        {
+            SqlValueConverter<T1>.RequireNullable(name, 1);
+            SqlValueConverter<T2>.RequireNullable(name, 2);
+            SqlValueConverter<T3>.RequireNullable(name, 3);
+            SqlValueConverter<T4>.RequireNullable(name, 4);
+        }
+
         _body = body;
     }
 

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Schema;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -82,7 +83,12 @@ public sealed partial class SqlFunctionExtensibilityTests
     /// <param name="predicate">The declared predicate.</param>
     /// <param name="reason">The start of the reason the refusal gives.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a declared CHECK that does not bind is refused in phase 3, before any file")]
-    [InlineData("slugify(Email) <> ''", "Unknown function 'slugify'.")]
+    [InlineData("slugify(Email) <> ''",
+        "Unknown function 'slugify'. Register it on the engine's builder (SqlDatabaseEngineBuilder.Functions) before Build.")]
+    [InlineData("Email <> '' -- not empty", "its SQL text 'Email <> '' -- not empty' is not exactly one SQL expression (")]
+    [InlineData("Email <> '' /* not empty", "its SQL text 'Email <> '' /* not empty' is not exactly one SQL expression (")]
+    [InlineData("is_email(Email) + 1 > 0", "Function 'is_email' returns BOOLEAN, where the CHECK needs a number.")]
+    [InlineData("is_email(Email) = 1", "Function 'is_email' returns BOOLEAN, where the CHECK needs a value that compares with INTEGER.")]
     [InlineData("is_email_volatile(Email)",
         "Function 'is_email_volatile' is VOLATILE, and a CHECK admits only IMMUTABLE functions. Register the function as " +
         "SqlFunctionVolatility.Immutable if its result depends on nothing but its arguments.")]
@@ -189,6 +195,186 @@ public sealed partial class SqlFunctionExtensibilityTests
     }
 
     /// <summary>
+    /// An application that keeps a registered function's name and parameters but changes its result
+    /// type changed its code, not the catalog (owner decision 65): a stored CHECK whose call no longer
+    /// fits (a BOOLEAN predicate, a comparison) opens and serves reads, each write that would evaluate
+    /// it fails with <c>COHSQLE009</c> naming the call and what it now returns, dropping the CHECK
+    /// restores writes, and an engine that declares the database fails its build with the same code.
+    /// </summary>
+    /// <param name="change">How the reopening engine registers the function.</param>
+    /// <param name="check">The stored predicate.</param>
+    /// <param name="signature">The call as the failure names it.</param>
+    /// <param name="reason">The reason the failure gives.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored CHECK over a function whose result type changed opens and refuses writes with COHSQLE009")]
+    [InlineData("text", "is_email(email)", "is_email(TEXT)", "which this engine registers returning TEXT, where the CHECK needs BOOLEAN")]
+    [InlineData("anyelement", "is_email(email)", "is_email(TEXT)", "which this engine registers returning TEXT, where the CHECK needs BOOLEAN")]
+    [InlineData("score-text", "score(email) < 100", "score(TEXT)",
+        "which this engine registers returning TEXT, where the CHECK needs a value that compares with INTEGER")]
+    public async Task Open_StoredCheckWhoseFunctionChangedItsResult_ShouldOpenAndRefuseWrites(string change, string check, string signature, string reason)
+    {
+        string root = NewRoot();
+        try
+        {
+            // Arrange: written by an engine whose is_email returns BOOLEAN and whose score returns BIGINT.
+            await SeedAsync(root, functions => functions
+                .Add(SqlScalarFunction.Create("is_email", static (string value) => value.Contains('@'), SqlFunctionVolatility.Immutable))
+                .Add(SqlScalarFunction.Create("score", static (string value) => (long)value.Length, SqlFunctionVolatility.Immutable)),
+                $"CREATE TABLE customers (id BIGINT, email TEXT, CONSTRAINT ck_email CHECK ({check}))");
+            Action<SqlFunctionCollection> changed = change switch
+            {
+                "text" => static functions => functions.Add(SqlScalarFunction.Create("is_email", static (string value) => value, SqlFunctionVolatility.Immutable)),
+                "anyelement" => static functions => functions.Add(new ElementIsEmailFunction()),
+                _ => static functions => functions.Add(SqlScalarFunction.Create("score", static (string value) => value, SqlFunctionVolatility.Immutable)),
+            };
+            await using var reopened = await BuildAsync(changed, root);
+
+            // Act
+            var shop = await reopened.OpenDatabaseAsync("shop");
+            await using var session = await shop.CreateSessionAsync(CancellationToken.None);
+            var rows = await RowsAsync(session, "SELECT id, email FROM customers");
+            var insert = await Should.ThrowAsync<DatabaseException>(() =>
+                ExecuteAsync(session, "INSERT INTO customers (id, email) VALUES (2, 'bob@example.com')"));
+            await ExecuteAsync(session, "ALTER TABLE customers DROP CONSTRAINT ck_email");
+            await ExecuteAsync(session, "INSERT INTO customers (id, email) VALUES (3, 'nobody')");
+
+            // Assert
+            rows.ShouldBe([[1L, "ann@example.com"]]);
+            insert.Message.ShouldBe(
+                $"{UnregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', {reason}, so the " +
+                "constraint cannot be evaluated and the write is refused. Register the function on the engine's builder " +
+                "(SqlDatabaseEngineBuilder.Functions), or drop the constraint.");
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    /// <summary>
+    /// A declaring build verifies stored definitions whose function changed its result as it verifies
+    /// missing ones (step 6, owner decision 65): the build fails with <c>COHSQLE009</c> and the engine
+    /// is disposed.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a declaring build fails with COHSQLE009 when a stored CHECK's function changed its result")]
+    public async Task Build_DeclaredDatabaseWhoseCheckFunctionChangedItsResult_ShouldFailWithCohsqle009()
+    {
+        string root = NewRoot();
+        try
+        {
+            // Arrange
+            await SeedCustomersAsync(root);
+            var builder = SqlDatabaseEngine.CreateBuilder("sql-functions");
+            builder.Options.RootPath = root;
+            builder.Functions.Add(SqlScalarFunction.Create("is_email", static (string value) => value, SqlFunctionVolatility.Immutable));
+            builder.AddDatabase("shop");
+
+            // Act
+            var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await builder.BuildAsync());
+
+            // Assert
+            failure.Message.ShouldStartWith(
+                $"{UnregisteredFunction}: SQL engine 'sql-functions', database 'shop': CHECK constraint 'ck_email' on table 'dbo.customers' " +
+                "calls function 'is_email(TEXT)', which this engine registers returning TEXT, where the CHECK needs BOOLEAN.", Case.Sensitive);
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    /// <summary>
+    /// A stored call of a standard-library name that no built-in takes, <c>upper(email, 2)</c>, can only
+    /// have called an application's overload of that name (DDL checks every call's arguments, #1189,
+    /// and no format before the current one opens): once the next engine no longer registers the
+    /// overload, the database opens and each write that would evaluate the CHECK fails with
+    /// <c>COHSQLE009</c>, as for any application function (owner decision 65).
+    /// </summary>
+    /// <param name="stored">How the CHECK was stored: by DDL over the overload, or straight into the catalog.</param>
+    /// <param name="predicate">The stored predicate.</param>
+    /// <param name="signature">The call as the failure names it.</param>
+    /// <param name="mismatch">The arity failure the reason quotes.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored call of a standard-library name no built-in takes opens and refuses writes with COHSQLE009")]
+    [InlineData("ddl", "upper(email, 2) <> ''", "upper(TEXT, INTEGER)",
+        "COHSQLE006: Function 'upper' takes exactly 1 argument but was called with 2. Accepted: UPPER(value).")]
+    [InlineData("catalog", "ABS(id, 1) > 0", "ABS(BIGINT, INTEGER)",
+        "COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
+    [InlineData("catalog", "id > 0 AND UPPER(email, email) IS NOT NULL", "UPPER(TEXT, TEXT)",
+        "COHSQLE006: Function 'UPPER' takes exactly 1 argument but was called with 2. Accepted: UPPER(value).")]
+    public async Task Open_StoredStandardNameCallNoBuiltInTakes_ShouldOpenAndRefuseWrites(string stored, string predicate, string signature, string mismatch)
+    {
+        string root = NewRoot();
+        try
+        {
+            // Arrange
+            await using (var engine = await BuildAsync(static functions => functions.Add(
+                SqlScalarFunction.Create("upper", static (string text, long times) => string.Concat(Enumerable.Repeat(text, (int)times)),
+                    SqlFunctionVolatility.Immutable)), root))
+            {
+                var shop = await engine.CreateDatabaseAsync("shop");
+                await using var session = await shop.CreateSessionAsync(CancellationToken.None);
+                string constraint = stored == "ddl" ? predicate : "id > 0";
+                await ExecuteAsync(session, $"CREATE TABLE customers (id BIGINT, email TEXT, CONSTRAINT ck_email CHECK ({constraint}))");
+                await ExecuteAsync(session, "INSERT INTO customers (id, email) VALUES (1, 'ann@example.com')");
+                if (stored == "catalog")
+                {
+                    shop.Catalog.TryGetTable("dbo", "customers", out var table).ShouldBeTrue();
+                    var replaced = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, table.Columns.ToArray(), table.PrimaryKeyColumns,
+                        table.Owner, table.OwningSchema,
+                        [new SqlCatalogConstraint("ck_email", SqlCatalogConstraintKind.Check, [], checkExpression: predicate)]);
+                    await shop.Catalog.PublishTableAsync(replaced, [], shop.Catalog.GetIndexRegistrations(), replaceExisting: true);
+                }
+            }
+
+            await using var reopened = await BuildAsync(static _ => { }, root);
+
+            // Act
+            var reopenedShop = await reopened.OpenDatabaseAsync("shop");
+            await using var reader = await reopenedShop.CreateSessionAsync(CancellationToken.None);
+            var rows = await RowsAsync(reader, "SELECT id FROM customers");
+            var insert = await Should.ThrowAsync<DatabaseException>(() =>
+                ExecuteAsync(reader, "INSERT INTO customers (id, email) VALUES (2, 'bob@example.com')"));
+
+            // Assert
+            rows.ShouldBe([[1L]]);
+            insert.Message.ShouldBe(
+                $"{UnregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', which no overload " +
+                $"this engine registers accepts ({mismatch}), so the constraint cannot be evaluated and the write is refused. Register the " +
+                "function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.");
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    /// <summary>
+    /// DDL refuses a CHECK in which an application function's result cannot be used where the
+    /// predicate uses it, which the evaluator would refuse on every row: compared with a value of a
+    /// type it does not compare with, or used as a number.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: DDL refuses a CHECK whose application function result does not fit its position")]
+    public async Task CreateTable_CheckWhoseFunctionResultDoesNotFit_ShouldBeRefused()
+    {
+        // Arrange
+        await using var engine = await BuildAsync(RegisterIsEmail);
+        await using var session = await SessionAsync(engine);
+
+        // Act
+        var compared = await Should.ThrowAsync<DatabaseException>(() =>
+            ExecuteAsync(session, "CREATE TABLE c (email TEXT, CONSTRAINT ck CHECK (is_email(email) = 'yes'))"));
+        var arithmetic = await Should.ThrowAsync<DatabaseException>(() =>
+            ExecuteAsync(session, "CREATE TABLE c (email TEXT, n BIGINT, CONSTRAINT ck CHECK (n - is_email(email) > 0))"));
+        var between = await Should.ThrowAsync<DatabaseException>(() =>
+            ExecuteAsync(session, "CREATE TABLE c (email TEXT, CONSTRAINT ck CHECK (is_email(email) BETWEEN 1 AND 2))"));
+        await ExecuteAsync(session, "CREATE TABLE c (email TEXT, CONSTRAINT ck CHECK (is_email(email) = TRUE AND UPPER(email) <> ''))");
+
+        // Assert
+        compared.Message.ShouldBe("Function 'is_email' returns BOOLEAN, where the CHECK needs a value that compares with TEXT.");
+        arithmetic.Message.ShouldBe("Function 'is_email' returns BOOLEAN, where the CHECK needs a number.");
+        between.Message.ShouldBe("Function 'is_email' returns BOOLEAN, where the CHECK needs a value that compares with INTEGER.");
+    }
+
+    /// <summary>
     /// An engine that declares the database verifies its stored definitions after provisioning
     /// (step 6, owner decision 65): one that calls a function the engine does not register fails the
     /// build with <c>COHSQLE009</c>, naming the engine, the database, the table, the constraint and
@@ -262,8 +448,9 @@ public sealed partial class SqlFunctionExtensibilityTests
 
     /// <summary>
     /// <c>COHESION_SCHEMA.FUNCTIONS</c> lists every function of the engine's catalog, one row per
-    /// overload in registration order with its kind, parameter and return types, volatility, NULL
-    /// behavior and origin, then the special forms (owner decision 66); it is read-only.
+    /// overload in registration order with its kind, parameter and return types, volatility (NULL for
+    /// an aggregate, which is never folded or admitted in a CHECK), NULL behavior and origin, then the
+    /// special forms (owner decision 66); it is read-only.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: COHESION_SCHEMA.FUNCTIONS lists the catalog and the special forms")]
     public async Task Query_FunctionsView_ShouldListTheCatalogAndTheSpecialForms()
@@ -289,11 +476,13 @@ public sealed partial class SqlFunctionExtensibilityTests
             "clamp", "is_missing", "median",
             "COALESCE", "NULLIF", "CASE", "CAST", "EXTRACT",
         ]);
-        rows[4].ShouldBe(["COUNT", "AGGREGATE", "*", 0L, "BIGINT", "VOLATILE", "RETURNS NULL ON NULL INPUT", "YES"]);
-        rows[5].ShouldBe(["COUNT", "AGGREGATE", "ANY", 1L, "BIGINT", "VOLATILE", "RETURNS NULL ON NULL INPUT", "YES"]);
+        rows[0].ShouldBe(["UPPER", "SCALAR", "ANYELEMENT", 1L, "ANYELEMENT", "IMMUTABLE", "RETURNS NULL ON NULL INPUT", "YES"]);
+        rows[4].ShouldBe(["COUNT", "AGGREGATE", "*", 0L, "BIGINT", null, "RETURNS NULL ON NULL INPUT", "YES"]);
+        rows[5].ShouldBe(["COUNT", "AGGREGATE", "ANY", 1L, "BIGINT", null, "RETURNS NULL ON NULL INPUT", "YES"]);
+        rows[6].ShouldBe(["SUM", "AGGREGATE", "ANYNUMERIC", 1L, "NUMERIC", null, "RETURNS NULL ON NULL INPUT", "YES"]);
         rows[10].ShouldBe(["clamp", "SCALAR", "BIGINT, BIGINT, BIGINT", 3L, "BIGINT", "IMMUTABLE", "RETURNS NULL ON NULL INPUT", "NO"]);
         rows[11].ShouldBe(["is_missing", "SCALAR", "ANY", 1L, "BOOLEAN", "IMMUTABLE", "CALLED ON NULL INPUT", "NO"]);
-        rows[12].ShouldBe(["median", "AGGREGATE", "DOUBLE", 1L, "DOUBLE", "VOLATILE", "RETURNS NULL ON NULL INPUT", "NO"]);
+        rows[12].ShouldBe(["median", "AGGREGATE", "DOUBLE", 1L, "DOUBLE", null, "RETURNS NULL ON NULL INPUT", "NO"]);
         rows[13].ShouldBe(["COALESCE", "SPECIAL FORM", null, null, null, null, null, "YES"]);
         registered.ShouldBe([["clamp"], ["is_missing"], ["median"]]);
         readOnly.Message.ShouldBe("System view 'COHESION_SCHEMA.FUNCTIONS' is read-only.");
@@ -329,13 +518,30 @@ public sealed partial class SqlFunctionExtensibilityTests
 
     // A database 'shop' whose ad-hoc CHECK calls is_email, holding one row, written by an engine that
     // registers is_email and then closed.
-    private static async Task SeedCustomersAsync(string root)
+    private static Task SeedCustomersAsync(string root)
+        => SeedAsync(root, RegisterIsEmail,
+            "CREATE TABLE customers (id BIGINT, email TEXT, note TEXT, CONSTRAINT ck_email CHECK (is_email(email)))");
+
+    // A database 'shop' with one table created by the DDL, holding one customer, written by an engine
+    // with the registrations and then closed.
+    private static async Task SeedAsync(string root, Action<SqlFunctionCollection> register, string createTable)
     {
-        await using var engine = await BuildAsync(RegisterIsEmail, root);
+        await using var engine = await BuildAsync(register, root);
         var shop = await engine.CreateDatabaseAsync("shop");
         await using var session = await shop.CreateSessionAsync(CancellationToken.None);
-        await ExecuteAsync(session, "CREATE TABLE customers (id BIGINT, email TEXT, note TEXT, CONSTRAINT ck_email CHECK (is_email(email)))");
+        await ExecuteAsync(session, createTable);
         await ExecuteAsync(session, "INSERT INTO customers (id, email) VALUES (1, 'ann@example.com')");
+    }
+
+    /// <summary><c>is_email(ANYELEMENT)</c> returning its argument: a polymorphic result where a BOOLEAN was stored.</summary>
+    private sealed class ElementIsEmailFunction : SqlScalarFunction
+    {
+        public ElementIsEmailFunction()
+            : base("is_email", [SqlType.AnyElement], SqlType.AnyElement, SqlFunctionVolatility.Immutable)
+        {
+        }
+
+        protected override SqlValue InvokeCore(scoped in SqlArguments arguments) => arguments[0];
     }
 
     private static SqlDatabaseEngineBuilder DeclaringBuilder(string root, string predicate)

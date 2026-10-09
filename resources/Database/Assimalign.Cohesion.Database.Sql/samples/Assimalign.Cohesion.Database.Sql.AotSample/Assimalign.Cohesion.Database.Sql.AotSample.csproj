@@ -18,11 +18,17 @@
 		    a global -p:PublishAot=true reaches the netstandard2.0 analyzers in the reference graph and
 		    fails them with NETSDK1207. A harness, not a library: never packed, and outside the resource
 		    guards by its samples/ path.
+
+		    The gate is no IL2xxx or IL3xxx warning at all, so beyond the analyzer codes promoted
+		    below, ILC treats every warning of its whole-program analysis as an error, and reports
+		    each one at its source instead of one roll-up per referenced assembly.
 		-->
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
 		<PublishAot>true</PublishAot>
 		<WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL2087;IL3050;IL3051</WarningsAsErrors>
+		<IlcTreatWarningsAsErrors>true</IlcTreatWarningsAsErrors>
+		<TrimmerSingleWarn>false</TrimmerSingleWarn>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />

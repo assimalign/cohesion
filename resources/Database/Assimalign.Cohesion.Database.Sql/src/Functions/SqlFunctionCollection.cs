@@ -21,9 +21,12 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <para>
 /// <b>What <see cref="Add"/> refuses</b> (owner decision 62): a name that is not an identifier, a
 /// special form (<c>COALESCE</c>, <c>NULLIF</c>, <c>CASE</c>, <c>CAST</c>, <c>EXTRACT</c>, which
-/// stay grammar) or a SQL keyword; a name and parameter-type list already registered, a built-in's
-/// included, so a standard-library function cannot be replaced; a scalar and an aggregate under one
-/// name; and any call once the engine's build began. There is no removal.
+/// stay grammar), a SQL keyword, a type name, or a name the dialect reserves for a built-in that does
+/// not execute yet (<c>TRIM</c>, <c>NOW</c>, ...); a name and parameter-type list already registered;
+/// an overload of a standard-library name that takes a number of arguments the built-in takes, so a
+/// standard-library function can never be replaced or made ambiguous (an overload of another arity,
+/// <c>upper(TEXT, BIGINT)</c>, is allowed); a scalar and an aggregate under one name; and any call
+/// once the engine's build began. There is no removal.
 /// </para>
 /// <para>
 /// The engine's build freezes the collection into the engine's <see cref="SqlFunctionCatalog"/>
@@ -52,11 +55,13 @@ public sealed class SqlFunctionCollection : IReadOnlyCollection<SqlFunction>
     /// <returns>This collection.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="function"/> is null.</exception>
     /// <exception cref="ArgumentException">
-    /// The function's name is not an identifier, is a special form, or is a SQL keyword.
+    /// The function's name is not an identifier, or is a special form, a SQL keyword, a type name or
+    /// a name the dialect reserves.
     /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// The engine's build began; a function of the same name and parameter types is registered; or
-    /// the name is registered for the other kind (scalar or aggregate).
+    /// The engine's build began; a function of the same name and parameter types is registered; the
+    /// name is registered for the other kind (scalar or aggregate); or the function overloads a
+    /// standard-library function for a number of arguments the built-in takes.
     /// </exception>
     public SqlFunctionCollection Add(SqlFunction function)
     {
@@ -84,6 +89,14 @@ public sealed class SqlFunctionCollection : IReadOnlyCollection<SqlFunction>
                     $"Function {function} is already registered{(SqlStandardLibrary.Contains(registered) ? " by the standard library" : string.Empty)}; " +
                     "a function cannot be replaced, only overloaded with other parameter types.");
             }
+        }
+
+        if (!SqlStandardLibrary.Contains(function) && SqlStandardLibrary.FindOverlap(function) is { } builtin)
+        {
+            throw new InvalidOperationException(
+                $"Function {function} takes calls the standard library's {builtin.Usage} takes, so it would replace the built-in for them " +
+                "or make them ambiguous, in stored CHECK constraints too; a standard-library function cannot be replaced. " +
+                $"Register the function under another name, or with a number of parameters {builtin.Name} does not take.");
         }
 
         _functions.Add(function);

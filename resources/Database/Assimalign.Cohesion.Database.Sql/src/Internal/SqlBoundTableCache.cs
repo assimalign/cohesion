@@ -216,9 +216,11 @@ internal sealed class SqlBoundTableCache
     }
 
     /// <summary>
-    /// Binds one persisted CHECK: its tree when every call resolves, or, when a call names a function
-    /// the engine's catalog does not resolve, an unresolved binding that fails each write with
-    /// <c>COHSQLE009</c> (owner decision 65). Anything else that does not bind is a damaged catalog.
+    /// Binds one persisted CHECK: its tree when every call resolves, or an unresolved binding that
+    /// fails each write with <c>COHSQLE009</c> (owner decision 65) when a call names a function the
+    /// engine's catalog does not resolve, or an application function whose registered result no
+    /// longer fits where the predicate uses it (a BOOLEAN predicate, a comparison, an arithmetic
+    /// operand). Anything else that does not bind is a damaged catalog.
     /// </summary>
     /// <exception cref="DatabaseException">The predicate does not bind and no call explains it.</exception>
     /// <exception cref="InsufficientExecutionStackException">The thread has too little stack left to walk the predicate.</exception>
@@ -242,7 +244,16 @@ internal sealed class SqlBoundTableCache
         // predicate binds as unresolved, the table opens and its reads proceed, and each write that
         // would evaluate the predicate fails with COHSQLE009. Looked for only once binding failed, so
         // a predicate that binds costs nothing more.
-        if (FindUnresolvedCall(table, predicate, subject) is { } unresolved)
+        var unresolved = FindUnresolvedCall(table, predicate, subject);
+        if (unresolved is null && failure is SqlFunctionResultMismatchException mismatch)
+        {
+            // An application function the engine registers, with a result that no longer fits where
+            // the stored predicate uses it: its registration changed after the predicate was stored.
+            unresolved = new SqlUnresolvedDefinition(subject, Signature(table, mismatch.Call),
+                $"which this engine registers returning {mismatch.Returned}, where the CHECK needs {mismatch.Needed}");
+        }
+
+        if (unresolved is not null)
         {
             return new SqlBoundCheck(constraint, predicate, ColumnOrdinals(table, predicate),
                 new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(unresolved)), unresolved);
@@ -269,8 +280,10 @@ internal sealed class SqlBoundTableCache
     /// Finds the first call of a persisted predicate, its arguments before itself, that names a
     /// function the engine's catalog does not resolve: a name it does not register, a name it
     /// registers as an aggregate, or a registered name none of whose overloads, or more than one,
-    /// accepts the call. A standard-library name always resolves to a built-in, so a call of one that
-    /// does not resolve is left to the binder's own error (#1189).
+    /// accepts the call. A call a built-in takes by its shape (<c>UPPER(x)</c>) always resolves to the
+    /// built-in, so one that does not bind is left to the binder's own error (#1189); a call of a
+    /// standard-library name no built-in takes (<c>upper(x, 2)</c>) can only have called an
+    /// application's overload, so it is unresolved like any application function's.
     /// </summary>
     /// <returns>The unresolved call, or null when every call resolves.</returns>
     /// <exception cref="InsufficientExecutionStackException">The thread has too little stack left to walk the predicate.</exception>
@@ -296,15 +309,7 @@ internal sealed class SqlBoundTableCache
                 return null;
             }
 
-            var signature = new StringBuilder(call.FunctionName).Append('(');
-            for (int index = 0; index < call.Arguments.Count; index++)
-            {
-                signature.Append(index == 0 ? string.Empty : ", ").Append(call.Arguments[index] is SqlStarExpression
-                    ? "*"
-                    : SqlType.NameOf(scope.StaticTypeOf(call.Arguments[index])));
-            }
-
-            return new SqlUnresolvedDefinition(subject, signature.Append(')').ToString(), reason);
+            return new SqlUnresolvedDefinition(subject, Signature(scope, call), reason);
         }
 
         string? Unresolved(SqlFunctionCallExpression call)
@@ -313,7 +318,7 @@ internal sealed class SqlBoundTableCache
             {
                 return "which this engine does not register";
             }
-            if (SqlStandardLibrary.IsStandardName(call.FunctionName))
+            if (SqlStandardLibrary.AcceptsShape(call.FunctionName, call.Arguments))
             {
                 return null;
             }
@@ -336,6 +341,23 @@ internal sealed class SqlBoundTableCache
                 return $"which no overload this engine registers accepts ({exception.Message})";
             }
         }
+    }
+
+    /// <summary>A call as a persisted definition makes it, its arguments typed over the table: <c>slugify(TEXT)</c>.</summary>
+    private string Signature(SqlCatalogTable table, SqlFunctionCallExpression call)
+        => Signature(new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: Functions), call);
+
+    private static string Signature(SqlExpressionEvaluator scope, SqlFunctionCallExpression call)
+    {
+        var signature = new StringBuilder(call.FunctionName).Append('(');
+        for (int index = 0; index < call.Arguments.Count; index++)
+        {
+            signature.Append(index == 0 ? string.Empty : ", ").Append(call.Arguments[index] is SqlStarExpression
+                ? "*"
+                : SqlType.NameOf(scope.StaticTypeOf(call.Arguments[index])));
+        }
+
+        return signature.Append(')').ToString();
     }
 
     /// <summary>

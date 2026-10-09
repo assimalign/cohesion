@@ -301,14 +301,17 @@ public sealed class SqlFunctionArityTests : IDisposable
     /// arguments, which never had a value. Format 4 is unreleased and has no upgrade path (#1152),
     /// so such a definition is not carried: the open fails with the coded error, naming the
     /// constraint, and points at the build that stored it rather than at a backup holding the
-    /// same definition.
+    /// same definition. That holds for the special form <c>COALESCE</c>; a call of a function name
+    /// no built-in takes, such as <c>ABS(qty, 1)</c>, can only have called an application's overload
+    /// since phase E2 lets an application overload a standard-library name, so it is a function the
+    /// engine no longer registers (owner decision 65; <c>SqlFunctionExtensibilityTests</c>,
+    /// <c>Open_StoredStandardNameCallNoBuiltInTakes_ShouldOpenAndRefuseWrites</c>).
     /// </summary>
     /// <param name="predicate">The persisted predicate.</param>
     /// <param name="call">The start of the coded error the open reports.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored wrong-arity CHECK fails the open with the coded error and the constraint's name")]
-    [InlineData("ABS(qty, 1) > 0", "COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2.")]
     [InlineData("COALESCE() IS NULL", "COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with none.")]
-    [InlineData("qty > 0 AND UPPER(note, note) IS NOT NULL", "COHSQLE006: Function 'UPPER' takes exactly 1 argument but was called with 2.")]
+    [InlineData("qty > 0 AND COALESCE() IS NOT NULL", "COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with none.")]
     public async Task Open_StoredWrongArityCheck_ShouldFailWithTheCodedErrorNamingTheConstraint(string predicate, string call)
     {
         // Arrange: a healthy format-4 database, then the predicate written straight to its catalog,

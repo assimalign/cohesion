@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <para>
 /// <b>An inverted seam:</b> the engine drives it and the standard library and applications
 /// implement it, by deriving and overriding <see cref="InvokeCore"/>, or through the typed
-/// shorthands (<see cref="Create{T1, TResult}(string, Func{T1, TResult}, SqlFunctionVolatility)"/>
+/// shorthands (<see cref="Create{T1, TResult}"/>
 /// and its arities), which create an internal sealed leaf.
 /// </para>
 /// <para>
@@ -22,7 +22,10 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <see cref="OperationCanceledException"/>, <see cref="InsufficientExecutionStackException"/>,
 /// <see cref="OutOfMemoryException"/> or a <see cref="DatabaseException"/> fails the statement as
 /// <c>COHSQLE007</c>, naming the function, with the original as the inner exception; a
-/// <see cref="DatabaseException"/> the core throws reaches the statement unchanged.
+/// <see cref="DatabaseException"/> the core throws reaches the statement and the client unchanged,
+/// which is how a function raises an error of its own: a message that leads with its own code
+/// (<c>APP001: ...</c>) keeps it. The result is checked against <see cref="SqlFunction.ReturnType"/>
+/// (<see cref="InvokeCore"/>).
 /// </para>
 /// <para>
 /// <b>Thread safety.</b> One instance serves every session at once: the core must be stateless or
@@ -81,14 +84,17 @@ public abstract class SqlScalarFunction : SqlFunction
     /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
     internal SqlValue InvokeResolved(scoped in SqlArguments arguments)
     {
+        SqlValue result;
         try
         {
-            return InvokeCore(in arguments);
+            result = InvokeCore(in arguments);
         }
         catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
         {
             throw SqlEvaluationException.FunctionFailed(Name, exception);
         }
+
+        return CheckResult(result, in arguments);
     }
 
     /// <summary>Computes the function's value; the engine calls it through <see cref="Invoke"/>.</summary>
@@ -96,7 +102,12 @@ public abstract class SqlScalarFunction : SqlFunction
     /// The arguments: as many as the function declares, each of its parameter's type, and none NULL
     /// when the function is strict.
     /// </param>
-    /// <returns>The result, of the declared type, or <see cref="SqlValue.Null"/>.</returns>
+    /// <returns>
+    /// The result, of the declared type, or <see cref="SqlValue.Null"/>. A value of a type that widens
+    /// to the declared one implicitly (INTEGER for BIGINT) is converted; any other type fails the
+    /// statement as <c>COHSQLE007</c>, as a NULL does from a function that is
+    /// <see cref="SqlFunction.IsNeverNull"/>.
+    /// </returns>
     protected abstract SqlValue InvokeCore(scoped in SqlArguments arguments);
 
     /// <summary>
@@ -104,21 +115,36 @@ public abstract class SqlScalarFunction : SqlFunction
     /// when this method runs (<see cref="long"/> to <see cref="SqlType.BigInt"/>, <see cref="string"/>
     /// to <see cref="SqlType.Text"/>, and so on for every storage type, a nullable value type
     /// mapping as its underlying type), so an unsupported type fails here, not at the first call.
-    /// The function is strict: the delegate never receives a NULL argument, and a
-    /// <see langword="null"/> result is SQL NULL.
+    /// By default the function is strict: the delegate never receives a NULL argument, so a nullable
+    /// parameter type changes nothing until <paramref name="nullBehavior"/> says
+    /// <see cref="SqlNullBehavior.CalledOnNullInput"/>. A <see langword="null"/> result is SQL NULL.
     /// </summary>
+    /// <remarks>
+    /// An argument converts to its parameter's type the way overload resolution chose it: an exact
+    /// type, or an implicit widening along INT8 → INT16 → INT32 → INT64 → NUMERIC → DOUBLE (REAL
+    /// widens to DOUBLE), so a <see cref="long"/> parameter takes an INTEGER column. Nothing converts
+    /// from text: a string literal does not reach a <see cref="DateOnly"/> or <see cref="Guid"/>
+    /// parameter, which takes a column or parameter of its type. A function that needs the call's
+    /// context (its collation or cancellation token) derives a leaf instead.
+    /// </remarks>
     /// <typeparam name="T1">The argument's CLR type.</typeparam>
     /// <typeparam name="TResult">The result's CLR type.</typeparam>
     /// <param name="name">The name calls use.</param>
     /// <param name="body">The function body; it must be thread-safe.</param>
     /// <param name="volatility">How stable the result is; <see cref="SqlFunctionVolatility.Volatile"/> by default.</param>
+    /// <param name="nullBehavior">
+    /// What a NULL argument does: strict by default, so the body never receives NULL; with
+    /// <see cref="SqlNullBehavior.CalledOnNullInput"/> every parameter must be a reference or nullable
+    /// type, and receives <see langword="null"/> for NULL.
+    /// </param>
     /// <returns>The function, to register with <see cref="SqlFunctionCollection.Add"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="body"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is blank.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is blank, or the function is called on NULL input and a parameter type cannot hold NULL.</exception>
     /// <exception cref="NotSupportedException">A type argument has no SQL type.</exception>
     public static SqlScalarFunction Create<T1, TResult>(string name, Func<T1, TResult> body,
-        SqlFunctionVolatility volatility = SqlFunctionVolatility.Volatile)
-        => new SqlTypedScalarFunction<T1, TResult>(name, body, volatility);
+        SqlFunctionVolatility volatility = SqlFunctionVolatility.Volatile,
+        SqlNullBehavior nullBehavior = SqlNullBehavior.ReturnsNullOnNullInput)
+        => new SqlTypedScalarFunction<T1, TResult>(name, body, volatility, nullBehavior);
 
     /// <summary>Creates a scalar function of two arguments from a delegate; see <see cref="Create{T1, TResult}"/>.</summary>
     /// <typeparam name="T1">The first argument's CLR type.</typeparam>
@@ -127,13 +153,19 @@ public abstract class SqlScalarFunction : SqlFunction
     /// <param name="name">The name calls use.</param>
     /// <param name="body">The function body; it must be thread-safe.</param>
     /// <param name="volatility">How stable the result is; <see cref="SqlFunctionVolatility.Volatile"/> by default.</param>
+    /// <param name="nullBehavior">
+    /// What a NULL argument does: strict by default, so the body never receives NULL; with
+    /// <see cref="SqlNullBehavior.CalledOnNullInput"/> every parameter must be a reference or nullable
+    /// type, and receives <see langword="null"/> for NULL.
+    /// </param>
     /// <returns>The function.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="body"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is blank.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is blank, or the function is called on NULL input and a parameter type cannot hold NULL.</exception>
     /// <exception cref="NotSupportedException">A type argument has no SQL type.</exception>
     public static SqlScalarFunction Create<T1, T2, TResult>(string name, Func<T1, T2, TResult> body,
-        SqlFunctionVolatility volatility = SqlFunctionVolatility.Volatile)
-        => new SqlTypedScalarFunction<T1, T2, TResult>(name, body, volatility);
+        SqlFunctionVolatility volatility = SqlFunctionVolatility.Volatile,
+        SqlNullBehavior nullBehavior = SqlNullBehavior.ReturnsNullOnNullInput)
+        => new SqlTypedScalarFunction<T1, T2, TResult>(name, body, volatility, nullBehavior);
 
     /// <summary>Creates a scalar function of three arguments from a delegate; see <see cref="Create{T1, TResult}"/>.</summary>
     /// <typeparam name="T1">The first argument's CLR type.</typeparam>
@@ -143,13 +175,19 @@ public abstract class SqlScalarFunction : SqlFunction
     /// <param name="name">The name calls use.</param>
     /// <param name="body">The function body; it must be thread-safe.</param>
     /// <param name="volatility">How stable the result is; <see cref="SqlFunctionVolatility.Volatile"/> by default.</param>
+    /// <param name="nullBehavior">
+    /// What a NULL argument does: strict by default, so the body never receives NULL; with
+    /// <see cref="SqlNullBehavior.CalledOnNullInput"/> every parameter must be a reference or nullable
+    /// type, and receives <see langword="null"/> for NULL.
+    /// </param>
     /// <returns>The function.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="body"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is blank.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is blank, or the function is called on NULL input and a parameter type cannot hold NULL.</exception>
     /// <exception cref="NotSupportedException">A type argument has no SQL type.</exception>
     public static SqlScalarFunction Create<T1, T2, T3, TResult>(string name, Func<T1, T2, T3, TResult> body,
-        SqlFunctionVolatility volatility = SqlFunctionVolatility.Volatile)
-        => new SqlTypedScalarFunction<T1, T2, T3, TResult>(name, body, volatility);
+        SqlFunctionVolatility volatility = SqlFunctionVolatility.Volatile,
+        SqlNullBehavior nullBehavior = SqlNullBehavior.ReturnsNullOnNullInput)
+        => new SqlTypedScalarFunction<T1, T2, T3, TResult>(name, body, volatility, nullBehavior);
 
     /// <summary>Creates a scalar function of four arguments from a delegate; see <see cref="Create{T1, TResult}"/>.</summary>
     /// <typeparam name="T1">The first argument's CLR type.</typeparam>
@@ -160,11 +198,17 @@ public abstract class SqlScalarFunction : SqlFunction
     /// <param name="name">The name calls use.</param>
     /// <param name="body">The function body; it must be thread-safe.</param>
     /// <param name="volatility">How stable the result is; <see cref="SqlFunctionVolatility.Volatile"/> by default.</param>
+    /// <param name="nullBehavior">
+    /// What a NULL argument does: strict by default, so the body never receives NULL; with
+    /// <see cref="SqlNullBehavior.CalledOnNullInput"/> every parameter must be a reference or nullable
+    /// type, and receives <see langword="null"/> for NULL.
+    /// </param>
     /// <returns>The function.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="body"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is blank.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is blank, or the function is called on NULL input and a parameter type cannot hold NULL.</exception>
     /// <exception cref="NotSupportedException">A type argument has no SQL type.</exception>
     public static SqlScalarFunction Create<T1, T2, T3, T4, TResult>(string name, Func<T1, T2, T3, T4, TResult> body,
-        SqlFunctionVolatility volatility = SqlFunctionVolatility.Volatile)
-        => new SqlTypedScalarFunction<T1, T2, T3, T4, TResult>(name, body, volatility);
+        SqlFunctionVolatility volatility = SqlFunctionVolatility.Volatile,
+        SqlNullBehavior nullBehavior = SqlNullBehavior.ReturnsNullOnNullInput)
+        => new SqlTypedScalarFunction<T1, T2, T3, T4, TResult>(name, body, volatility, nullBehavior);
 }

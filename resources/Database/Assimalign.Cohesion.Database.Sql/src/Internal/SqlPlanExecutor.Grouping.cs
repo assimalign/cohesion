@@ -21,7 +21,7 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken)
     {
         await using var input = (QueryResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
-        var evaluator = SqlExpressionEvaluator.ForExecution(_subqueryValues, cancellationToken);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var keys = plan.Keys;
         var aggregates = plan.Aggregates;
         var keyCollations = new Collation[keys.Count];

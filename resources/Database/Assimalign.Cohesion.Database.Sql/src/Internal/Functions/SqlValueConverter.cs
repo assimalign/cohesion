@@ -18,7 +18,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </para>
 /// <para>
 /// A nullable value type maps as its underlying type. A strict function never receives NULL, so a
-/// non-nullable parameter is safe; a <see langword="null"/> result is SQL NULL.
+/// non-nullable parameter is safe; a function called on NULL input must declare every parameter
+/// nullable (<see cref="RequireNullable"/>), and receives <see langword="null"/> for NULL. A
+/// <see langword="null"/> result is SQL NULL.
 /// </para>
 /// </remarks>
 /// <typeparam name="T">The CLR type.</typeparam>
@@ -31,6 +33,24 @@ internal static class SqlValueConverter<T>
     internal static SqlType Type => _type ?? throw new NotSupportedException(
         $"The CLR type '{typeof(T).Name}' has no SQL type. A typed function takes and returns bool, sbyte, short, int, long, float, " +
         "double, decimal, string, byte[], DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan or Guid, or a nullable of a value type.");
+
+    /// <summary>
+    /// Checks that an argument of <typeparamref name="T"/> can receive NULL, as one of a function
+    /// called on NULL input does: a reference type or a nullable value type. A non-nullable value
+    /// type would turn NULL into an exception on the first NULL row.
+    /// </summary>
+    /// <param name="function">The function's name, for the message.</param>
+    /// <param name="position">The argument's position, from one.</param>
+    /// <exception cref="ArgumentException"><typeparamref name="T"/> cannot hold NULL.</exception>
+    internal static void RequireNullable(string function, int position)
+    {
+        if (default(T) is not null)
+        {
+            throw new ArgumentException(
+                $"Function '{function}' is called on NULL input, but argument {position} is '{typeof(T).Name}', which cannot receive NULL; " +
+                $"declare it '{typeof(T).Name}?'.", "nullBehavior");
+        }
+    }
 
     /// <summary>Reads an argument as <typeparamref name="T"/>.</summary>
     /// <param name="value">The argument, already of <see cref="Type"/>'s storage type, or NULL.</param>
@@ -45,7 +65,9 @@ internal static class SqlValueConverter<T>
         }
         if (typeof(T) == typeof(byte[]))
         {
-            byte[]? bytes = value.IsNull ? null : value.AsBinary();
+            // A copy: the bytes are a stored row's or a caller's parameter, and a delegate given the
+            // array itself could change them.
+            byte[]? bytes = value.IsNull ? null : value.AsBinary().ToArray();
             return Unsafe.As<byte[]?, T>(ref bytes);
         }
         if (typeof(T) == typeof(bool)) { bool v = value.AsBoolean(); return Unsafe.As<bool, T>(ref v); }

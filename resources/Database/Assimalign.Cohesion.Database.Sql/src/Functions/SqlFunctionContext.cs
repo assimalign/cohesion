@@ -19,11 +19,14 @@ public readonly ref struct SqlFunctionContext
 {
     private readonly Collation? _collation;
 
-    /// <summary>Initializes the context of one call.</summary>
+    /// <summary>
+    /// Initializes the context of one call: the engine's, or a test's that calls a function directly
+    /// through <see cref="SqlArguments"/> or <see cref="SqlAggregateFunction.CreateAccumulator"/>.
+    /// </summary>
     /// <param name="database">The database whose statement makes the call.</param>
-    /// <param name="collation">The collation the call's input compares under.</param>
+    /// <param name="collation">The collation the call's input compares under; the binary collation when null.</param>
     /// <param name="cancellationToken">The statement's cancellation token.</param>
-    internal SqlFunctionContext(DatabaseName database, Collation collation, CancellationToken cancellationToken)
+    public SqlFunctionContext(DatabaseName database, Collation? collation, CancellationToken cancellationToken)
     {
         Database = database;
         _collation = collation;

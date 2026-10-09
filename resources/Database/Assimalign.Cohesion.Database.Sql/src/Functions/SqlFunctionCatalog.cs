@@ -4,6 +4,8 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 
+using Assimalign.Cohesion.Database.Sql.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
@@ -28,7 +30,14 @@ public sealed class SqlFunctionCatalog : IReadOnlyCollection<SqlFunction>
         _overloads = _functions
             .GroupBy(function => function.Name, StringComparer.OrdinalIgnoreCase)
             .ToFrozenDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+        HasApplicationFunctions = _functions.Any(function => !SqlStandardLibrary.Contains(function));
     }
+
+    /// <summary>
+    /// Gets whether an application registered a function: only such a function can read a call's
+    /// cancellation token, so a statement of a catalog without one needs no evaluator to carry it.
+    /// </summary>
+    internal bool HasApplicationFunctions { get; }
 
     /// <summary>
     /// Gets the standard library alone: the catalog of an engine created by

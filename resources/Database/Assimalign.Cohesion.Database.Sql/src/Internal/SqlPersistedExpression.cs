@@ -242,7 +242,9 @@ internal static class SqlPersistedExpression
     /// Parses the SQL text of a declared, not yet stored, definition (a compiled schema's
     /// <c>table.Check(name, sql)</c>) under the engine's own nesting limit, as the DDL that applies it
     /// will: it must be exactly one scalar expression, so no text can close the constraint's
-    /// parentheses and declare more than the schema shows.
+    /// parentheses and declare more than the schema shows, and it must also be one inside the
+    /// parentheses the DDL embeds it in, so no text can swallow the closing one either (a trailing
+    /// <c>-- comment</c>, or an unterminated <c>/*</c>).
     /// </summary>
     /// <param name="text">The declared text, as its author wrote it.</param>
     /// <param name="parserOptions">The engine's parser options.</param>
@@ -252,7 +254,8 @@ internal static class SqlPersistedExpression
     internal static SqlExpression ParseDeclaration(string text, SqlQueryParserOptions parserOptions)
     {
         ArgumentNullException.ThrowIfNull(text);
-        if (!TryParse(text, out var expression, out string? problem, out bool outOfStack, parserOptions))
+        if (!TryParse(text, out var expression, out string? problem, out bool outOfStack, parserOptions) ||
+            !TryParse($"({text})", out _, out problem, out outOfStack)) // the parentheses add no nesting the DDL counts
         {
             if (outOfStack)
             {

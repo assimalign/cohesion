@@ -109,14 +109,17 @@ public abstract class SqlAggregateAccumulator
         }
 
         _finished = true;
+        SqlValue result;
         try
         {
-            return FinishCore();
+            result = FinishCore();
         }
         catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception))
         {
             throw SqlEvaluationException.FunctionFailed(function.Name, exception);
         }
+
+        return function.CheckResult(result, default);
     }
 
     /// <summary>Adds one row; the engine calls it through <see cref="Add"/>.</summary>
@@ -124,7 +127,11 @@ public abstract class SqlAggregateAccumulator
     protected abstract void AddCore(scoped in SqlArguments arguments);
 
     /// <summary>Computes the result; the engine calls it through <see cref="Finish"/>, once.</summary>
-    /// <returns>The result, of the function's declared type, or <see cref="SqlValue.Null"/>.</returns>
+    /// <returns>
+    /// The result, of the function's declared type, or <see cref="SqlValue.Null"/>. A value of a type
+    /// that widens to the declared one implicitly is converted; any other type fails the statement as
+    /// <c>COHSQLE007</c>, as a NULL does from a function that is <see cref="SqlFunction.IsNeverNull"/>.
+    /// </returns>
     protected abstract SqlValue FinishCore();
 
     /// <summary>Attaches the function that created the accumulator; refused once one is attached.</summary>

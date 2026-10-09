@@ -67,6 +67,8 @@ public sealed class SqlFunctionExtensibilityWireTests
         "COHSQLE008: Function call 'pick(unknown)' is ambiguous: pick(BIGINT) and pick(TEXT) accept it equally well. Cast an argument to choose one.")]
     [InlineData("SELECT pick(TRUE) FROM users",
         "COHSQLE006: Function 'pick' has no overload that accepts argument types (BOOLEAN). Accepted: pick(BIGINT) or pick(TEXT).")]
+    [InlineData("SELECT lying(score) FROM users",
+        "COHSQLE007: Function 'lying' failed: The function returned TEXT, but it declares BIGINT.")]
     public async Task QueryAsync_FunctionFailure_ShouldBeCodedOnAUsableConnection(string statement, string message)
     {
         // Arrange
@@ -84,6 +86,30 @@ public sealed class SqlFunctionExtensibilityWireTests
         failure.Message.ShouldBe(message);
         (await connection.QueryAsync("SELECT slugify(name) AS s FROM users WHERE id = 2", cancellationToken: Timeout()))
             .ShouldHaveSingleItem()["s"].ShouldBe("grace");
+    }
+
+    /// <summary>
+    /// Inside a grouping, an overloaded function over a grouping key or an aggregate result resolves
+    /// by the type the key or the aggregate has, as it does outside the grouping, and the client
+    /// decodes what the chosen overload returns.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Functions: an overloaded call over a grouping key or an aggregate result resolves over the wire")]
+    public async Task QueryAsync_OverloadsOverGroupingSlots_ShouldResolve()
+    {
+        // Arrange
+        await using var harness = await FunctionHarness.StartAsync(Register);
+        await using var connection = await harness.Client.ConnectAsync(Timeout());
+
+        // Act
+        SqlResultSet byKey = await connection.QueryAsync(
+            "SELECT pick(score) AS p, COUNT(*) AS c FROM users GROUP BY score ORDER BY score", cancellationToken: Timeout());
+        SqlResultSet overCount = await connection.QueryAsync("SELECT pick(COUNT(*)) AS p FROM users", cancellationToken: Timeout());
+        SqlResultSet overMax = await connection.QueryAsync("SELECT pick(MAX(name)) AS p FROM users", cancellationToken: Timeout());
+
+        // Assert
+        byKey.Select(row => (row["p"], row["c"])).ShouldBe([("number", 1L), ("number", 1L)]);
+        overCount.ShouldHaveSingleItem()["p"].ShouldBe("number");
+        overMax.ShouldHaveSingleItem()["p"].ShouldBe("text");
     }
 
     /// <summary>
@@ -209,7 +235,19 @@ public sealed class SqlFunctionExtensibilityWireTests
             .Add(SqlScalarFunction.Create("is_email_volatile", static (string value) => value.Contains('@')))
             .Add(SqlAggregateFunction.Create<long, long, long>("product",
                 static () => 1L, static (long state, long value) => checked(state * value), static (long state) => state))
-            .Add(new MedianFunction());
+            .Add(new MedianFunction())
+            .Add(new LyingFunction());
+
+    /// <summary><c>lying(BIGINT)</c> declared to return BIGINT, returning text: the engine refuses the result.</summary>
+    private sealed class LyingFunction : SqlScalarFunction
+    {
+        public LyingFunction()
+            : base("lying", [SqlType.BigInt], SqlType.BigInt)
+        {
+        }
+
+        protected override SqlValue InvokeCore(scoped in SqlArguments arguments) => SqlValue.FromString("not a number");
+    }
 
     /// <summary>
     /// A live SQL engine built with registered functions, a running server on the in-memory driver,

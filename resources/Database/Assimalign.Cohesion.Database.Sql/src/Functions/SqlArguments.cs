@@ -32,10 +32,13 @@ public readonly ref struct SqlArguments
         _context = default;
     }
 
-    /// <summary>Initializes the arguments of a call the engine makes.</summary>
+    /// <summary>
+    /// Initializes arguments with a context: the engine's call, or a test of a function that reads
+    /// its context's collation, database or cancellation token.
+    /// </summary>
     /// <param name="values">The argument values, in parameter order.</param>
     /// <param name="context">The call's context.</param>
-    internal SqlArguments(ReadOnlySpan<SqlValue> values, scoped in SqlFunctionContext context)
+    public SqlArguments(ReadOnlySpan<SqlValue> values, scoped in SqlFunctionContext context)
     {
         _values = values;
         _context = context;
@@ -112,11 +115,11 @@ public readonly ref struct SqlArguments
     /// <exception cref="InvalidCastException">The argument is NULL or of another type.</exception>
     public string GetString(int index) => _values[index].AsString();
 
-    /// <summary>Reads a binary argument. The array is the engine's: the function must not change it.</summary>
+    /// <summary>Reads a binary argument, read-only: the bytes are the engine's (see <see cref="SqlValue.AsBinary"/>).</summary>
     /// <param name="index">The argument's position, from zero.</param>
     /// <returns>The value.</returns>
     /// <exception cref="InvalidCastException">The argument is NULL or of another type.</exception>
-    public byte[] GetBinary(int index) => _values[index].AsBinary();
+    public ReadOnlyMemory<byte> GetBinary(int index) => _values[index].AsBinary();
 
     /// <summary>Reads a <c>DATE</c> argument.</summary>
     /// <param name="index">The argument's position, from zero.</param>

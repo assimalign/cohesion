@@ -160,6 +160,14 @@ internal sealed partial class SqlPlanner
 
         if (expression is SqlFunctionCallExpression call)
         {
+            if (!SqlStandardLibrary.IsCoalesce(call.FunctionName) && !catalog.TryGetOverloads(call.FunctionName, out _) &&
+                !SqlStandardLibrary.IsDeclaredName(call.FunctionName))
+            {
+                // The likeliest cause in a declared schema: the function was not registered on this engine.
+                throw new DatabaseException(
+                    $"Unknown function '{call.FunctionName}'. Register it on the engine's builder (SqlDatabaseEngineBuilder.Functions) before Build.");
+            }
+
             CheckCall(call, catalog);
         }
     }
